@@ -67,9 +67,9 @@ struct ReductionKernelConfigurator
         numWarpsPerBlock = blockSize / warpSize;
     };
 
-    int blockSize_;
-    int warpSize_;
-    int numWarpsPerBlock;
+    size_t blockSize_;
+    size_t warpSize_;
+    size_t numWarpsPerBlock;
 
     std::size_t GredDirectThreadWiseUpperReductionLen;
     std::size_t GredDirectWarpWiseUpperReductionLen;
@@ -378,10 +378,10 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
         dst_need_padding = (invariantLen < static_cast<size_t>(GridSize) * BlockSize);
         break;
     case Reduce_DirectWarpWise:
-        copySliceLen = warpSize * tunable->GredAccessesPerThreadInWarp;
-        src_need_padding =
-            (invariantLen < GridSize * BlockSize / warpSize || toReduceLen % copySliceLen > 0);
-        dst_need_padding = (invariantLen < GridSize * BlockSize / warpSize);
+        copySliceLen     = warpSize * tunable->GredAccessesPerThreadInWarp;
+        src_need_padding = (invariantLen < static_cast<size_t>(GridSize * BlockSize / warpSize) ||
+                            toReduceLen % copySliceLen > 0u);
+        dst_need_padding = (invariantLen < static_cast<size_t>(GridSize * BlockSize / warpSize));
         break;
     case Reduce_BlockWise:
         copySliceLen     = BlockSize * tunable->GredAccessesPerThreadInBlock;
@@ -453,7 +453,7 @@ std::size_t ReduceTensorDescriptor::GetWorkspaceSize(const Handle& handle,
     if(inDescLengths.size() != outDescLengths.size())
         MIOPEN_THROW("The number of dimensions of the input and output tensor should match.");
 
-    for(int i = 0; i < inDescLengths.size(); i++)
+    for(auto i = 0ULL; i < inDescLengths.size(); i++)
     {
         if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
         {
@@ -501,7 +501,7 @@ std::size_t ReduceTensorDescriptor::GetIndicesSize(const TensorDescriptor& inDes
     if(inDescLengths.size() != outDescLengths.size())
         MIOPEN_THROW("The number of dimensions of the input and output tensor should match.");
 
-    for(int i = 0; i < inDescLengths.size(); i++)
+    for(auto i = 0ULL; i < inDescLengths.size(); i++)
     {
         if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
         {
@@ -567,7 +567,7 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
     if(inDescLengths.size() != outDescLengths.size())
         MIOPEN_THROW("The number of dimensions of the input and output tensor should match.");
 
-    for(int i = 0; i < inDescLengths.size(); i++)
+    for(auto i = 0ULL; i < inDescLengths.size(); i++)
     {
         if(outDescLengths[i] != 1 && outDescLengths[i] != inDescLengths[i])
         {
@@ -610,7 +610,7 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
     std::vector<int> toReduceDims;
     std::vector<int> invariantDims;
 
-    for(int i = 0; i < inDescLengths.size(); i++)
+    for(auto i = 0ULL; i < inDescLengths.size(); i++)
     {
         if(outDescLengths[i] == 1)
             toReduceDims.push_back(i);
@@ -642,7 +642,7 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
         int p_outStrides[6] = {0};
 
         int pos = 0;
-        for(int i = 0; i < outDescLengths.size(); i++)
+        for(auto i = 0ULL; i < outDescLengths.size(); i++)
         {
             // invariant dimensions
             if(outDescLengths[i] > 1)
@@ -655,7 +655,7 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
             };
         };
 
-        for(int i = 0; i < outDescLengths.size(); i++)
+        for(auto i = 0ULL; i < outDescLengths.size(); i++)
         {
             // toReduce dimensions
             if(outDescLengths[i] == 1)

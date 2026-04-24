@@ -127,8 +127,9 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     auto spatial_dim = mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? 1 : lengths[2] * lengths[3];
     auto vector_size =
         mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[1] * lengths[2] * lengths[3] : lengths[1];
-    auto num_batch =
-        vector_size < config.local_size ? nextPow2(config.local_size / vector_size) : 1;
+    auto num_batch    = vector_size < static_cast<size_t>(config.local_size)
+                            ? nextPow2(config.local_size / vector_size)
+                            : 1;
     auto workgroups   = num_batch == 1 ? grid_size : (grid_size + num_batch - 1) / num_batch;
     auto batch_size   = config.local_size / num_batch;
     auto u_batch_size = vector_size > batch_size ? nextPow2(vector_size / batch_size) : 1;

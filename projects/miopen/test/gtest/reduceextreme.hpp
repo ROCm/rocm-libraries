@@ -201,9 +201,9 @@ protected:
 
         std::vector<size_t> out_dims;
 
-        for(int32_t i = 0; i < in_dims.size(); ++i)
+        for(auto i = 0ULL; i < in_dims.size(); ++i)
         {
-            if(i != dim)
+            if(i != static_cast<size_t>(dim))
             {
                 out_dims.push_back(in_dims[i]);
             }
@@ -305,7 +305,7 @@ protected:
         auto error_idx = miopen::mismatch_idx(ref_indice, indice, compare_equal<int32_t>);
 
         EXPECT_TRUE(miopen::range_distance(ref_indice) == miopen::range_distance(indice));
-        EXPECT_TRUE(error_idx >= miopen::range_distance(ref_indice))
+        EXPECT_TRUE(error_idx >= static_cast<size_t>(miopen::range_distance(ref_indice)))
             << "Error Indice does not equal at " << error_idx << std::endl;
     }
     ReduceExtremeTestCase reduceextreme_config;

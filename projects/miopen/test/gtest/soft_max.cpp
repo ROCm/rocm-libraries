@@ -35,7 +35,7 @@ std::string PrintToString(const TestCase& test_case)
 {
     std::stringstream ss;
     ss << "{in_dim = {";
-    for(auto i = 0; i + 1 < test_case.in_dim.size(); ++i)
+    for(auto i = 0ULL; i + 1 < test_case.in_dim.size(); ++i)
     {
         ss << test_case.in_dim[i] << ", ";
     }
@@ -44,7 +44,7 @@ std::string PrintToString(const TestCase& test_case)
         ss << test_case.in_dim[test_case.in_dim.size() - 1];
     }
     ss << "}, scale = {";
-    for(auto i = 0; i + 1 < test_case.scale.size(); ++i)
+    for(auto i = 0ULL; i + 1 < test_case.scale.size(); ++i)
     {
         ss << test_case.scale[i] << ", ";
     }

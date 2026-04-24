@@ -153,7 +153,7 @@ void ChangeDataPadding(const std::vector<Tgpu>& src_array,
     auto scr_ptr = &src_array[0];
     auto dst_ptr = &dst_array[0];
 
-    for(int seq_id = 0; seq_id < seq_len; seq_id++)
+    for(auto seq_id = 0ULL; seq_id < seq_len; seq_id++)
     {
         auto packed_size = batch_list[seq_id] * sample_size;
 

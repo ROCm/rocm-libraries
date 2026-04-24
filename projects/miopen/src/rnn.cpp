@@ -117,7 +117,7 @@ size_t RNNDescriptor::biasOffsetCalculation(const TensorDescriptor& /*xDesc*/,
     {
         layerJump += (hsize * 2) * nHiddenTensorsPerLayer * (layer / 2) * 2;
 
-        if(biasID >= nHiddenTensorsPerLayer)
+        if(static_cast<size_t>(biasID) >= nHiddenTensorsPerLayer)
         {
             layerJump += hsize * nHiddenTensorsPerLayer;
         }
@@ -155,7 +155,7 @@ size_t RNNDescriptor::paramsOffsetCalculation(const TensorDescriptor& xDesc,
             layerJump +=
                 (hsize * hsize * 2 + hsize * hsize) * nHiddenTensorsPerLayer * (layer / 2 - 1) * 2;
 
-            if(paramID >= nHiddenTensorsPerLayer)
+            if(static_cast<size_t>(paramID) >= nHiddenTensorsPerLayer)
             {
                 layerJump += hsize * hsize * 2 * nHiddenTensorsPerLayer * 2;
                 layerJump += (layer % 2 == 1) ? nHiddenTensorsPerLayer * (hsize * hsize) : 0;
@@ -169,7 +169,7 @@ size_t RNNDescriptor::paramsOffsetCalculation(const TensorDescriptor& xDesc,
         }
         else
         {
-            if(paramID >= nHiddenTensorsPerLayer)
+            if(static_cast<size_t>(paramID) >= nHiddenTensorsPerLayer)
             {
                 if(isNotRNNskip())
                 {
@@ -196,7 +196,7 @@ size_t RNNDescriptor::paramsOffsetCalculation(const TensorDescriptor& xDesc,
         }
         else
         {
-            if(paramID >= nHiddenTensorsPerLayer)
+            if(static_cast<size_t>(paramID) >= nHiddenTensorsPerLayer)
             {
                 if(isNotRNNskip())
                 {
@@ -229,7 +229,7 @@ std::vector<int> RNNDescriptor::pTensorLengthsCalculation(const TensorDescriptor
     {
         if(layer > 1) // NOT the input layer
         {
-            if(paramID >= nHiddenTensorsPerLayer)
+            if(static_cast<size_t>(paramID) >= nHiddenTensorsPerLayer)
             {
                 tdim[0] = tdim[1] = hsize;
             }
@@ -241,7 +241,7 @@ std::vector<int> RNNDescriptor::pTensorLengthsCalculation(const TensorDescriptor
         }
         else // IS the input layer
         {
-            if(paramID >= nHiddenTensorsPerLayer)
+            if(static_cast<size_t>(paramID) >= nHiddenTensorsPerLayer)
             {
                 tdim[0] = tdim[1] = hsize;
             }
@@ -260,7 +260,7 @@ std::vector<int> RNNDescriptor::pTensorLengthsCalculation(const TensorDescriptor
         }
         else
         {
-            if(paramID >= nHiddenTensorsPerLayer)
+            if(static_cast<size_t>(paramID) >= nHiddenTensorsPerLayer)
             {
                 tdim[0] = tdim[1] = hsize;
             }
@@ -752,14 +752,14 @@ std::size_t RNNDescriptor::GetLayerParamSize(const Handle& /*handle*/,
     // Assuming Djikstra counting
     if((((dirMode != 0u) && layer <= 1) || ((dirMode == 0u) && layer < 1)))
     {
-        if(paramID >= nHiddenTensorsPerLayer)
+        if(static_cast<size_t>(paramID) >= nHiddenTensorsPerLayer)
             return size_t(typeSize * hsize * hsize);
         else if(isNotRNNskip())
             return size_t(typeSize * inputVectorLen * hsize);
         else
             return 0;
     }
-    else if((dirMode != 0u) && paramID < nHiddenTensorsPerLayer)
+    else if((dirMode != 0u) && static_cast<size_t>(paramID) < nHiddenTensorsPerLayer)
     {
         return size_t(typeSize * hsize * hsize * 2);
     }
@@ -785,8 +785,9 @@ void RNNDescriptor::GetLayerParam(const Handle& handle,
                                   Data_t param) const
 {
 
-    if(!isNotRNNskip() && (((dirMode != 0u) && layer <= 1 && paramID < nHiddenTensorsPerLayer) ||
-                           ((dirMode == 0u) && layer < 1 && paramID < nHiddenTensorsPerLayer)))
+    if(!isNotRNNskip() &&
+       (((dirMode != 0u) && layer <= 1 && static_cast<size_t>(paramID) < nHiddenTensorsPerLayer) ||
+        ((dirMode == 0u) && layer < 1 && static_cast<size_t>(paramID) < nHiddenTensorsPerLayer)))
     {
         MIOPEN_THROW(miopenStatusBadParm, "Parameter of input layer is null in input skip mode");
     }
@@ -866,8 +867,9 @@ void RNNDescriptor::SetLayerParam(const Handle& handle,
                                   const TensorDescriptor& paramDesc,
                                   ConstData_t param) const
 {
-    if(!isNotRNNskip() && (((dirMode != 0u) && layer <= 1 && paramID < nHiddenTensorsPerLayer) ||
-                           ((dirMode == 0u) && layer < 1 && paramID < nHiddenTensorsPerLayer)))
+    if(!isNotRNNskip() &&
+       (((dirMode != 0u) && layer <= 1 && static_cast<size_t>(paramID) < nHiddenTensorsPerLayer) ||
+        ((dirMode == 0u) && layer < 1 && static_cast<size_t>(paramID) < nHiddenTensorsPerLayer)))
     {
         MIOPEN_THROW(miopenStatusBadParm, "Parameter of input layer is null in input skip mode");
     }
@@ -980,8 +982,9 @@ void RNNDescriptor::GetLayerParamOffset(const int layer,
                                         TensorDescriptor& paramDesc,
                                         size_t* paramOffset) const
 {
-    if(!isNotRNNskip() && (((dirMode != 0u) && layer <= 1 && paramID < nHiddenTensorsPerLayer) ||
-                           ((dirMode == 0u) && layer < 1 && paramID < nHiddenTensorsPerLayer)))
+    if(!isNotRNNskip() &&
+       (((dirMode != 0u) && layer <= 1 && static_cast<size_t>(paramID) < nHiddenTensorsPerLayer) ||
+        ((dirMode == 0u) && layer < 1 && static_cast<size_t>(paramID) < nHiddenTensorsPerLayer)))
     {
         MIOPEN_THROW(miopenStatusBadParm, "Parameter of input layer is null in input skip mode");
     }

@@ -203,7 +203,7 @@ int RNNDriver<Tgpu, Tref>::GetandSetData()
     std::vector<int> wei_len = GetWeightTensorLengthsFromCmdLine();
     std::vector<int> out_len = GetOutputTensorLengthsFromCmdLine();
 
-    for(int i = 0; i < in_len.size() - 1; i++)
+    for(auto i = 0ULL; i < in_len.size() - 1; i++)
     {
         std::array<int, 2> in_lens = {{in_len[i], in_len.back()}};
         miopenCreateTensorDescriptor(&inputTensor);
@@ -673,19 +673,19 @@ int RNNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         }
     */
 
-    for(int i = 0; i < in_sz; i++)
+    for(auto i = 0ULL; i < in_sz; i++)
     {
         in[i] = static_cast<Tgpu>(prng::gen_0_to_B(scale));
     }
 
-    for(int i = 0; i < hy_sz; i++)
+    for(auto i = 0ULL; i < hy_sz; i++)
     {
         hx[i] = static_cast<Tgpu>(prng::gen_0_to_B(scale));
     }
 
     if((inflags.GetValueStr("mode")) == "lstm")
     {
-        for(int i = 0; i < hy_sz; i++)
+        for(auto i = 0ULL; i < hy_sz; i++)
         {
             cx[i] = static_cast<Tgpu>(prng::gen_0_to_B(scale));
         }
@@ -693,19 +693,19 @@ int RNNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     if(inflags.GetValueInt("forw") != 1)
     {
-        for(int i = 0; i < out_sz; i++)
+        for(auto i = 0ULL; i < out_sz; i++)
         {
             dout[i] = static_cast<Tgpu>(prng::gen_0_to_B(scale));
         }
 
-        for(int i = 0; i < hy_sz; i++)
+        for(auto i = 0ULL; i < hy_sz; i++)
         {
             dhy[i] = static_cast<Tgpu>(prng::gen_0_to_B(scale));
         }
 
         if((inflags.GetValueStr("mode")) == "lstm")
         {
-            for(int i = 0; i < hy_sz; i++)
+            for(auto i = 0ULL; i < hy_sz; i++)
             {
                 dcy[i] = static_cast<Tgpu>(prng::gen_0_to_B(scale));
             }
@@ -722,7 +722,7 @@ int RNNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         }
     */
 
-    for(int i = 0; i < wei_sz; i++)
+    for(auto i = 0ULL; i < wei_sz; i++)
     {
         wei[i] = static_cast<Tgpu>(scale * prng::gen_A_to_B(-0.5, 0.5));
     }
@@ -896,7 +896,7 @@ void ChangeDataPadding(std::vector<Tgpu>& src_array,
 
     auto cur_padded_ptr = padded_array;
     auto cur_packed_ptr = packed_array;
-    for(int seq_id = 0; seq_id < seq_len; seq_id++)
+    for(auto seq_id = 0ULL; seq_id < seq_len; seq_id++)
     {
         auto packed_size = batch_list[seq_id] * sample_size;
 

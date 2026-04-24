@@ -316,12 +316,12 @@ int SoftMarginLossDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     target_dev       = std::make_unique<GPUMem>(ctx, target_sz, sizeof(Tgpu));
     in               = std::vector<Tgpu>(in_sz);
     target           = std::vector<Tgpu>(target_sz);
-    for(int i = 0; i < in_sz; i++)
+    for(auto i = 0ULL; i < in_sz; i++)
     {
         in[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1), static_cast<Tgpu>(1));
     }
     // -1 or 1
-    for(int i = 0; i < target_sz; i++)
+    for(auto i = 0ULL; i < target_sz; i++)
     {
         target[i] =
             (prng::gen_A_to_B<int32_t>(static_cast<int32_t>(0), static_cast<int32_t>(2)) == 0) ? -1

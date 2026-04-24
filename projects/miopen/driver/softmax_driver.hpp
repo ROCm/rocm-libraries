@@ -224,13 +224,13 @@ int SoftmaxDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     dout    = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
     dinhost = std::vector<Tref>(in_sz, static_cast<Tref>(0));
 
-    for(int i = 0; i < in_sz; i++)
+    for(auto i = 0ULL; i < in_sz; i++)
     {
         in[i] = prng::gen_canonical<Tgpu>();
     }
 
     const Tgpu Data_scale = static_cast<Tgpu>(0.001);
-    for(int i = 0; i < out_sz; i++)
+    for(auto i = 0ULL; i < out_sz; i++)
     {
         dout[i] = Data_scale * prng::gen_A_to_B(static_cast<Tgpu>(-0.5), static_cast<Tgpu>(0.5));
     }
@@ -238,7 +238,7 @@ int SoftmaxDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     // if bwd then initialize the y
     if(!isForward)
     {
-        for(int i = 0; i < out_sz; i++)
+        for(auto i = 0ULL; i < out_sz; i++)
         {
             out[i] = prng::gen_A_to_B(static_cast<Tgpu>(-0.6), static_cast<Tgpu>(0.6));
         }

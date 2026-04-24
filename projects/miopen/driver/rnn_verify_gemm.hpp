@@ -1028,7 +1028,7 @@ void RunRNNBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
     }
     if(use_dropout)
     {
-        for(int h = hy_d * batch_n * hy_h; h < rsvspace_host.size(); h++)
+        for(size_t h = hy_d * batch_n * hy_h; h < rsvspace_host.size(); h++)
         {
             rsvspace_state.at(h) = rsvspace_host.at(h);
         }

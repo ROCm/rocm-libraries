@@ -43,11 +43,11 @@ struct SoftMarginLossTestCase
     {
         os << "dims:";
         os << tc.dims[0];
-        for(int i = 1; i < tc.dims.size(); i++)
+        for(auto i = 1ULL; i < tc.dims.size(); i++)
             os << "x" << tc.dims[i];
         os << " strides:";
         os << tc.strides[0];
-        for(int i = 1; i < tc.strides.size(); i++)
+        for(auto i = 1ULL; i < tc.strides.size(); i++)
             os << "x" << tc.strides[i];
         os << " reduction_mode:" << tc.reduction_mode;
         return os;
@@ -65,15 +65,15 @@ inline std::vector<SoftMarginLossTestCase> SoftMarginLossTestConfigs(bool is_fwd
           {1632000, 544000, 6800, 85}, {408000, 136000, 3400, 85}, {85, 1}, {102000, 34000, 1700, 85}, {4, 1}, {4, 1}, {4, 1}, {1}, {50, 1}, {500, 10, 1}, {2500, 100, 25, 1},
           {360, 120, 30, 6, 1}, {3}, {1, 200}, {505, 1}, {1, 20, 1000}, {7575, 15, 1}, {1, 16, 4, 400}, {5859, 217, 31, 1}, {360, 120, 6, 24, 1}, {5760, 960, 120, 12, 1} };
     std::vector<SoftMarginLossTestCase> test_config;
-    for (int i = 0; i < dim_config.size(); i++) test_config.push_back({dim_config[i], stride_config[i], MIOPEN_LOSS_REDUCTION_NONE});
-    for (int i = 0; i < dim_config.size(); i++) {
+    for (auto i = 0ULL; i < dim_config.size(); i++) test_config.push_back({dim_config[i], stride_config[i], MIOPEN_LOSS_REDUCTION_NONE});
+    for (auto i = 0ULL; i < dim_config.size(); i++) {
         // Please note that with backward fp16 mean reduction, if input tensor is too big the result will be wrong because of fp16 underflow
         size_t input_numel = 1;
         for (auto x: dim_config[i]) input_numel *= x;
         if (!is_fwd && data_type == miopenHalf && input_numel >= 320000) continue;
         test_config.push_back({dim_config[i], stride_config[i], MIOPEN_LOSS_REDUCTION_MEAN});
     }
-    for (int i = 0; i < dim_config.size(); i++) {
+    for (auto i = 0ULL; i < dim_config.size(); i++) {
         // Please note that with forward fp16 sum reduction, if input tensor is too big the result will be wrong because of fp16 overflow
         size_t input_numel = 1;
         for (auto x: dim_config[i]) input_numel *= x;

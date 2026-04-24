@@ -79,7 +79,7 @@ void TransformIODefaultLayaoutToTarget(std::vector<Tgpu>& def_array,
     assert(target_layout == miopenRNNDataBatchMajorPadded ||
            target_layout == miopenRNNDataSeqMajorPadded);
 
-    assert(def_batch_sz_per_time[0] == target_batch_order.size());
+    assert(static_cast<size_t>(def_batch_sz_per_time[0]) == target_batch_order.size());
 
     size_t non_zero_seq_len = def_batch_sz_per_time.size();
     size_t batch_size       = def_batch_sz_per_time[0];
@@ -95,7 +95,7 @@ void TransformIODefaultLayaoutToTarget(std::vector<Tgpu>& def_array,
 
     for(size_t time_it = 0; time_it < non_zero_seq_len; time_it++)
     {
-        for(size_t batch_it = 0; batch_it < def_batch_sz_per_time[time_it]; batch_it++)
+        for(auto batch_it = 0; batch_it < def_batch_sz_per_time[time_it]; batch_it++)
         {
             const size_t def_time_offset = default_time_strides[time_it];
             const size_t target_time_off = time_it * target_time_stride;
@@ -132,14 +132,14 @@ void HiddenTensorReorder(std::vector<Tgpu>& src_array,
     const size_t batch_stride = hid_len[2];
     const size_t layer_stride = batch_stride * hid_len[1];
 
-    for(size_t batch_id = 0; batch_id < hid_len[1]; batch_id++)
+    for(auto batch_id = 0; batch_id < hid_len[1]; batch_id++)
     {
         const auto src_batch_off =
             batch_stride * (is_dst_direct_order ? batch_order[batch_id] : batch_id);
         const auto dst_batch_off =
             batch_stride * (is_dst_direct_order ? batch_id : batch_order[batch_id]);
 
-        for(size_t layer_id = 0; layer_id < hid_len[0]; layer_id++)
+        for(auto layer_id = 0; layer_id < hid_len[0]; layer_id++)
         {
             const auto dst_offset = dst_batch_off + layer_id * layer_stride;
             const auto src_offset = src_batch_off + layer_id * layer_stride;

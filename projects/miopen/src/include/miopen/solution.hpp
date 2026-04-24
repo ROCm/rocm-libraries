@@ -127,7 +127,7 @@ struct Solution : miopenSolution
 
         kernels.reserve(programs.size());
 
-        for(int i = 0; i < programs.size(); ++i)
+        for(size_t i = 0U; i < programs.size(); ++i)
         {
             auto kernel             = KernelInfo{};
             kernel.program          = programs[i];

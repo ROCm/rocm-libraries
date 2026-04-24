@@ -54,7 +54,7 @@ int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
 {
     auto x_dims   = miopen::deref(xDesc).GetLengths();
     auto cos_dims = miopen::deref(cosDesc).GetLengths();
-    auto input_numel =
+    size_t input_numel =
         std::accumulate(x_dims.begin(), x_dims.end(), 1LL, std::multiplies<int64_t>());
     auto rotary_numel =
         std::accumulate(cos_dims.begin(), cos_dims.end(), 1LL, std::multiplies<int64_t>());
@@ -90,10 +90,10 @@ int32_t mloRoPEBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                Tcheck* dxhost)
 {
     auto dy_dims = miopen::deref(dyDesc).GetLengths();
-    auto input_numel =
+    size_t input_numel =
         std::accumulate(dy_dims.begin(), dy_dims.end(), 1LL, std::multiplies<int64_t>());
     auto cos_dims = miopen::deref(cosDesc).GetLengths();
-    auto rotary_numel =
+    size_t rotary_numel =
         std::accumulate(cos_dims.begin(), cos_dims.end(), 1LL, std::multiplies<int64_t>());
 
     int32_t ret = 0;
@@ -254,7 +254,7 @@ int RoPEDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     y_dx     = std::vector<Tgpu>(y_dx_sz, Tgpu0val);
     y_dxhost = std::vector<Tref>(y_dx_sz, Tref0ref);
 
-    for(int i = 0; i < x_dy_sz; ++i)
+    for(auto i = 0ULL; i < x_dy_sz; ++i)
     {
         x_dy[i] = prng::gen_A_to_B<Tgpu>(Tgpuminus1val, Tgpu1val);
     }
@@ -262,7 +262,7 @@ int RoPEDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     if(x_dy_dev->ToGPU(GetStream(), x_dy.data()) != 0)
         std::cerr << "Error copying (x) to GPU, size: " << x_dy_dev->GetSize() << std::endl;
 
-    for(int i = 0; i < cos_sz; ++i)
+    for(auto i = 0ULL; i < cos_sz; ++i)
     {
         cos[i] = prng::gen_A_to_B<Tgpu>(Tgpuminus1val, Tgpu1val);
         sin[i] = prng::gen_A_to_B<Tgpu>(Tgpuminus1val, Tgpu1val);

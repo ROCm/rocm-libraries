@@ -1307,7 +1307,7 @@ protected:
             &handle, rnnDesc, &firstInputDesc, &wei_bytes, miopen::deref(rnnDesc).dataType);
         auto wei_sz = int(wei_bytes / sizeof(T));
         std::vector<T> weights(wei_sz);
-        for(std::size_t i = 0; i < wei_sz; i++)
+        for(auto i = 0; i < wei_sz; i++)
         {
             weights[i] = prng::gen_descreet_uniform_sign<T>(Data_scale / 10, 100);
         }
