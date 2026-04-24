@@ -158,7 +158,7 @@ public:
     rocfft_precision precision() const
     {
         if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            throw std::runtime_error("hipfftIOType not initialized");
 
         switch(inputType)
         {
@@ -179,7 +179,7 @@ public:
     bool is_real_to_complex() const
     {
         if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            throw std::runtime_error("hipfftIOType not initialized");
 
         switch(inputType)
         {
@@ -199,7 +199,7 @@ public:
     bool is_complex_to_real() const
     {
         if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            throw std::runtime_error("hipfftIOType not initialized");
 
         switch(outputType)
         {
@@ -219,7 +219,7 @@ public:
     bool is_complex_to_complex() const
     {
         if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            throw std::runtime_error("hipfftIOType not initialized");
 
         return !is_complex_to_real() && !is_real_to_complex();
     }
@@ -242,7 +242,7 @@ public:
     std::vector<rocfft_transform_type> transform_types() const
     {
         if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            throw std::runtime_error("hipfftIOType not initialized");
 
         std::vector<rocfft_transform_type> ret;
         if(is_real_to_complex())
@@ -261,7 +261,7 @@ public:
     rocfft_array_type array_type(fft_io io) const
     {
         if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            throw std::runtime_error("hipfftIOType not initialized");
 
         validate_or_throw(io, "hipfftIOType::array_type");
         if(is_real_to_complex())
@@ -283,7 +283,7 @@ public:
     hipDataType spaceType() const
     {
         if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            throw std::runtime_error("hipfftIOType not initialized");
 
         if(is_complex_to_complex())
         {
@@ -305,7 +305,7 @@ public:
     hipDataType freqType() const
     {
         if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not intialized");
+            throw std::runtime_error("hipfftIOType not initialized");
 
         if(is_complex_to_complex())
         {
