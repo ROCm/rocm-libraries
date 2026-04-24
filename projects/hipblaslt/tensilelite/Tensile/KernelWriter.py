@@ -2218,17 +2218,30 @@ class KernelWriter(metaclass=abc.ABCMeta):
               # when the number of inserted packs is >= the number of desired packs
               # check the last 2 inserted packs to see if we need to add extra instructions after the last inersted pack.
               remainLatency = len(instPackLast)
+              # Per-type pop counters: track how many packs of each type have been
+              # popped (= how many extras of that type have already been accounted for).
+              popCountA = popCountB = popCountM = 0
               while len(instPackLast):
                 instLast = instPackLast.pop()
+                # extraPackX <= popCountX means we've run out of the extras of type X
+                # and the current pack produces a register for the coming SMFMAC instruction.
+                # Hence, we need to insert an extra pack or s_nop between
+                # the current pack instruction and the coming SMFMAC instruction.
                 if instLast == "A":
-                  if numPackedA <= packAIdx:
+                  extraPackA = numPackedA - packAIdx
+                  if extraPackA <= popCountA:
                     break
+                  popCountA += 1
                 elif instLast == "M":
-                  if numPackedM <= packMIdx:
+                  extraPackM = numPackedM - packMIdx
+                  if extraPackM <= popCountM:
                     break
+                  popCountM += 1
                 elif instLast == "B":
-                  if numPackedB <= packBIdx:
+                  extraPackB = numPackedB - packBIdx
+                  if extraPackB <= popCountB:
                     break
+                  popCountB += 1
                 remainLatency -= 1
             instPackLast.clear()
 
