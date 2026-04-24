@@ -18,8 +18,10 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
+#endif
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -41,8 +43,10 @@ enum class OperationType
     LAYERNORM,
     RMSNORM,
     REDUCTION,
+#ifdef HIPDNN_ENABLE_SDPA
     SDPA_FORWARD,
     SDPA_BACKWARD,
+#endif
     POINTWISE_UNARY,
     POINTWISE_BINARY
 };
@@ -81,10 +85,12 @@ public:
             return createRmsnormGraph();
         case OperationType::REDUCTION:
             return createReductionGraph();
+#ifdef HIPDNN_ENABLE_SDPA
         case OperationType::SDPA_FORWARD:
             return createSdpaForwardGraph();
         case OperationType::SDPA_BACKWARD:
             return createSdpaBackwardGraph();
+#endif
         case OperationType::POINTWISE_UNARY:
             return createPointwiseUnaryGraph();
         case OperationType::POINTWISE_BINARY:
@@ -484,6 +490,7 @@ public:
         return graphObj;
     }
 
+#ifdef HIPDNN_ENABLE_SDPA
     /// SDPA Forward graph
     static Graph createSdpaForwardGraph()
     {
@@ -556,6 +563,7 @@ public:
 
         return graphObj;
     }
+#endif // HIPDNN_ENABLE_SDPA
 
     /// Pointwise Unary (RELU_FWD) graph
     static Graph createPointwiseUnaryGraph()
@@ -636,10 +644,12 @@ inline std::string operationTypeToString(OperationType op)
         return "RMSNorm";
     case OperationType::REDUCTION:
         return "Reduction";
+#ifdef HIPDNN_ENABLE_SDPA
     case OperationType::SDPA_FORWARD:
         return "SdpaForward";
     case OperationType::SDPA_BACKWARD:
         return "SdpaBackward";
+#endif
     case OperationType::POINTWISE_UNARY:
         return "PointwiseUnary";
     case OperationType::POINTWISE_BINARY:

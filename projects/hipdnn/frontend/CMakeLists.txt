@@ -40,6 +40,7 @@ set_target_properties(hipdnn_frontend PROPERTIES
 target_compile_definitions(
     hipdnn_frontend INTERFACE
     $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_FRONTEND_SKIP_JSON_LIB>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:HIPDNN_ENABLE_SDPA>
 )
 
 # Generate the config file from template
