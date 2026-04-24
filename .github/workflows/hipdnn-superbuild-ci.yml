@@ -9,6 +9,9 @@ name: hipDNN Superbuild CI
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+    paths:
+      - 'projects/hipdnn/**'
+      - 'dnn-providers/**'
 
 permissions:
   contents: read
