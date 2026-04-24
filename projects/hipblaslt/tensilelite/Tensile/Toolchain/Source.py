@@ -105,6 +105,8 @@ def buildSourceCodeObjectFiles(
         coPathsRaw = []
         coPaths= []
 
+    # Try to restore pre-built code objects from the helper-kernel cache.
+    # On a hit we skip compilation/unbundling entirely and return early.
     with timing_context("python_kernel_build_src_co.cache_check"):
         hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destDir)
     if hit:
@@ -133,6 +135,8 @@ def buildSourceCodeObjectFiles(
         for src, dst in zip(coPathsRaw, coPaths):
             shutil.move(src, dst)
 
+    # Save the freshly built code objects into the cache so subsequent
+    # builds with the same inputs can skip recompilation.
     with timing_context("python_kernel_build_src_co.cache_populate"):
         cache.store(coPaths)
 
