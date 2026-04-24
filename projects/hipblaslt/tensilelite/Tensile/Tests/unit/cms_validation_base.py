@@ -26,7 +26,7 @@ from collections.abc import Callable
 from typing import Any, Optional
 from test_CustomSchedule import create_base_kernel, update_kernel, ScheduleInfo
 from Tensile.Components.CMSValidator import (
-    create_unified_timeline, ValidatorPassContext, validate_timeline,
+    create_unified_timeline, ValidationContext, validate_timeline,
 )
 from cms_test_utils import make_mock_id_map, make_mock_mfma_code
 
@@ -37,7 +37,7 @@ class CMSValidationTestBase:
 
     Timeline-based tests set ``validator_passes`` to a list of constraint
     functions (e.g. ``[add_local_read_constraints]``).  The base
-    ``validation_function`` creates the ValidatorPassContext, calls each pass,
+    ``validation_function`` creates the ValidationContext, calls each pass,
     then runs ``validate_timeline``.
 
     Structural-only tests (no Timeline needed) override ``validation_function``
@@ -48,9 +48,9 @@ class CMSValidationTestBase:
     needs_timeline = True
 
     # Subclasses set this to the list of add_*_constraints functions to run.
-    validator_passes: list[Callable[['Timeline', 'ValidatorPassContext'], None]] = []
+    validator_passes: list[Callable[['Timeline', 'ValidationContext'], None]] = []
 
-    def validation_function(self, sched, kernel_dict, codePathIdx, timeline=None):
+    def validation_function(self, sched, ctx, codePathIdx, timeline=None):
         """
         Run each pass in ``self.validator_passes`` on the timeline, then validate.
 
@@ -58,7 +58,7 @@ class CMSValidationTestBase:
 
         Args:
             sched: ScheduleInfo object to validate
-            kernel_dict: Dictionary containing kernel configuration
+            ctx: ValidationContext object
             codePathIdx: Code path index to validate
             timeline: Timeline object for timeline-based validation (None for structural checks)
 
@@ -67,12 +67,6 @@ class CMSValidationTestBase:
         """
         if not self.validator_passes:
             raise NotImplementedError("Subclasses must set validator_passes or override validation_function")
-        kernel = kernel_dict["kernel"]
-        ctx = ValidatorPassContext(
-            kernel=kernel,
-            mfma_reorder=sched.mfmaReorder or [],
-            swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
-        )
         for pass_fn in self.validator_passes:
             pass_fn(timeline, ctx)
         message = validate_timeline(timeline)
@@ -136,10 +130,17 @@ class CMSValidationTestBase:
         mock_id_map = make_mock_id_map(sched, self.kernel)
         mock_mfma_code = make_mock_mfma_code(self.num_vmfma)
 
+        ctx = ValidationContext(
+            kernel=self.kernel,
+            id_map=mock_id_map,
+            mfma_code=mock_mfma_code,
+            mfma_reorder=mfmaReorder or [],
+        )
+
         timeline = None
         if self.needs_timeline:
             timeline = create_unified_timeline(sched, self.kernel, codePathIdx, id_map=mock_id_map, mfma_code=mock_mfma_code)
-        status, message = self.validation_function(sched, {"kernel": self.kernel, "idMap": mock_id_map, "mfmaCode": mock_mfma_code}, codePathIdx, timeline=timeline)
+        status, message = self.validation_function(sched, ctx, codePathIdx, timeline=timeline)
         
         if expected_message is None:
             assert status, f"Schedule should have passed validation but did not. {message}"

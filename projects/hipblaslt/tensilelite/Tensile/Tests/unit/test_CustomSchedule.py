@@ -24,18 +24,18 @@ import pytest
 from unittest.mock import MagicMock
 
 from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
-from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass
+from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass, ValidationContext
 from Tensile.Common import IsaVersion
 from cms_test_utils import make_mock_id_map, make_mock_mfma_code
 
 
 def _make_context(kernel, schedule_info):
-    """Build a validation context dict with mock idMap and mfmaCode."""
-    return {
-        "kernel": kernel,
-        "idMap": make_mock_id_map(schedule_info, kernel),
-        "mfmaCode": make_mock_mfma_code(schedule_info.numMfma),
-    }
+    """Build a ValidationContext with mock idMap and mfmaCode."""
+    return ValidationContext(
+        kernel=kernel,
+        id_map=make_mock_id_map(schedule_info, kernel),
+        mfma_code=make_mock_mfma_code(schedule_info.numMfma),
+    )
 
 # Helper to create a mock data type
 def _mock_dtype(is_16bit=False, is_8bit=False, num_bytes=4):

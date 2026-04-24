@@ -932,7 +932,7 @@ class Timeline:
         self._instructions_for_name_combined: dict[str, list[tuple[int, ValidatorInstruction]]] = defaultdict(list)
 
         # Track which validation passes have already been applied to this timeline to avoid applying them multiple times.
-        self._applied_passes: set[Callable[['Timeline', 'ValidatorPassContext'], None]] = set()
+        self._applied_passes: set[Callable[['Timeline', 'ValidationContext'], None]] = set()
 
         # Populate the timeline with instructions
         self._populate_instructions(instruction_names_to_add, code_path, schedule_info, kernel)
@@ -2757,7 +2757,7 @@ class GRIncData:
     intervals: list[tuple[int, int]]
     insts: list[int]
 
-def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[bool, str]:
+def verify_scc_overlap(scheduleInfo, context: 'ValidationContext', code_path: int) -> tuple[bool, str]:
     """
     Ensure we don't overlap scalar instructions modifying SCC for a single code path.
     This can happen:
@@ -2777,7 +2777,7 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
 
         This function checks no other scalar instructions is inside the above intervals.
     """
-    kernel = context["kernel"]
+    kernel = context.kernel
     DTL = kernel["DirectToLds"]
     ShadowLimit = kernel["Use64bShadowLimit"]
 
@@ -2860,21 +2860,70 @@ def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[boo
 
 
 @dataclass
-class ValidatorPassContext:
-    """Context object containing all values needed by validator passes."""
-    kernel: 'Solution'
-    mfma_reorder: list[int]
-    swap_global_read_order: bool
+class ValidationContext:
+    """Typed context for CMS validation — replaces the raw context dict and ValidatorPassContext."""
+    kernel: dict
+    id_map: dict
+    mfma_code: list
+    mfma_reorder: list[int] = field(default_factory=list)
+
+    @property
+    def swap_global_read_order(self) -> bool:
+        return self.kernel.get("SwapGlobalReadOrder", False)
+
+    @property
+    def direct_to_lds(self) -> bool:
+        return self.kernel.get("DirectToLds", False)
+
+    @property
+    def use_f32x_emulation(self) -> bool:
+        return self.kernel.get("UseF32XEmulation", False)
+
+    @property
+    def use_4x4mfma_tf32(self) -> bool:
+        return self.kernel.get("UseMFMAF32XEmulation", False)
+
+    @property
+    def use_direct_32x_emulation(self) -> bool:
+        return self.kernel.get("UseDirect32XEmulation", False)
+
+    @property
+    def use_plr_pack(self) -> bool:
+        return self.kernel.get("UsePLRPack", False)
+
+    @property
+    def force_unroll_sub_iter(self) -> bool:
+        return self.kernel.get("ForceUnrollSubIter", False)
+
+    @property
+    def n_tiles_a(self) -> int:
+        return self.kernel["MIWaveTileA"]
+
+    @property
+    def n_tiles_b(self) -> int:
+        return self.kernel["MIWaveTileB"]
+
+    @property
+    def dtl_plus_lds_buf(self) -> bool:
+        return self.kernel.get("DtlPlusLdsBuf", False)
+
+    @property
+    def use_shadow_limit(self) -> bool:
+        return self.kernel.get("Use64bShadowLimit", True)
 
 
-def add_local_read_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+# Keep backward-compatible alias during transition
+ValidatorPassContext = ValidationContext
+
+
+def add_local_read_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
     """Add LR.needed_by and LR.guaranteed_by constraints to the provided timeline."""
     set_lr_needed_by_for_VMFMA(timeline, ctx.kernel, ctx.mfma_reorder)
     apply_swaits(timeline)
     apply_barriers(timeline)
 
 
-def add_pack_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+def add_pack_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
     """
     Ensure that the Packs start and end at the correct indices.
     The pack commands take the data loaded into registers by LR commands and manipulate it in various ways to prepare it for the VMFMA instructions.
@@ -2893,7 +2942,7 @@ def add_pack_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
     estimate_quad_cycles(timeline, ctx.kernel)
 
 
-def add_gr_not_too_early_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+def add_gr_not_too_early_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
     """
     Ensure that GlobalReads are not issued before the corresponding LR0s are guaranteed complete.
 
@@ -2922,14 +2971,14 @@ def add_gr_not_too_early_constraints(timeline: Timeline, ctx: ValidatorPassConte
     apply_must_start_after_barriers(timeline)
 
 
-def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
     """Add GR.needed_by and GR.barriered_at constraints."""
     apply_swaits(timeline)
     set_gr_needed_by_from_lrs(timeline, ctx.swap_global_read_order)
     apply_barriers(timeline)
 
 
-TIMELINE_PASSES: dict[ValidatorPass, Callable[['Timeline', 'ValidatorPassContext'], None]] = {
+TIMELINE_PASSES: dict[ValidatorPass, Callable[['Timeline', 'ValidationContext'], None]] = {
     ValidatorPass.ADD_LOCAL_READ_CONSTRAINTS: add_local_read_constraints,
     ValidatorPass.ADD_PACK_CONSTRAINTS: add_pack_constraints,
     ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS: add_gr_not_too_early_constraints,
@@ -2983,7 +3032,7 @@ def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
     return block_idx * block_size + local_idx
 
 
-def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
+def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: 'ValidationContext', code_path: int) -> tuple[bool, str]:
     """
     Verify that the number of instructions in the schedule is correct for a single code path.
     """
@@ -2991,13 +3040,13 @@ def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context
         schedule = schedule_get(instruction_name, code_path, schedule_info)
 
         len_actual = len(schedule)
-        len_expected = len(context["idMap"][instruction_name])
+        len_expected = len(context.id_map[instruction_name])
         if len_actual != len_expected:
             return False, f"{instruction_name} has {len_actual} instructions, but {len_expected} instructions are required."
     return True, ""
 
 
-def verify_ascending_order(scheduleInfo, context: dict, code_path: int) -> tuple[bool, str]:
+def verify_ascending_order(scheduleInfo, context: 'ValidationContext', code_path: int) -> tuple[bool, str]:
     """
     Ensure that all sequences of scheduleInfo.optSchedule are non-decreasing for a single code path.
 
@@ -3051,7 +3100,7 @@ def format_kernel_string(kernel: 'Solution') -> str:
     return f"MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
 
 
-def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
+def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple[bool, str]:
     """
     Return True if all the validation rules pass, False otherwise.
     If validation fails, a string containing the reason is returned.
@@ -3062,7 +3111,10 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     Note 2: if False is returned, this is not proof that the schedule
     is invalid. It may be a false positive.
     """
-    kernel = context["kernel"]
+    kernel = context.kernel
+
+    # Set mfma_reorder from schedule info
+    context.mfma_reorder = scheduleInfo.mfmaReorder or []
 
     # Log disabled passes once, before iterating over code paths.
     kernel_desc = format_kernel_string(kernel)
@@ -3108,22 +3160,16 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
             continue
 
         # === Timeline-based checks ===
-        ctx = ValidatorPassContext(
-            kernel=kernel,
-            mfma_reorder=scheduleInfo.mfmaReorder or [],
-            swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
-        )
-
         timeline = create_unified_timeline(
             scheduleInfo, kernel, code_path,
-            id_map=context["idMap"],
-            mfma_code=context["mfmaCode"],
+            id_map=context.id_map,
+            mfma_code=context.mfma_code,
         )
 
         for pass_id, add_constraints in TIMELINE_PASSES.items():
             if pass_id in disabled_timeline:
                 continue
-            add_constraints(timeline, ctx)
+            add_constraints(timeline, context)
             if error := validate_timeline(timeline):
                 scheduleInfo.pretty_print()
                 return False, f"Code path {code_path}: {error}"
@@ -3134,7 +3180,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
 
 def findValidPositions(
     scheduleInfo: 'ScheduleInfo',
-    context: dict,
+    context: 'ValidationContext',
     inst_name: str,
     inst_issue_idx: int,
 ) -> list[tuple[int, int]]:

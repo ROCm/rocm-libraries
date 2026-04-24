@@ -28,7 +28,7 @@ import pytest
 from rocisa.instruction import SWaitCnt, SNop, SBarrier
 
 from Tensile.Components.CMSValidator import (
-    add_local_read_constraints, add_pack_constraints, isValid,
+    add_local_read_constraints, add_pack_constraints, isValid, ValidationContext,
 )
 from Tensile.Components.CustomSchedule import ScheduleInfo
 from cms_validation_base import CMSValidationTestBase
@@ -1410,7 +1410,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
                 92, 93, 94, 95],
         )
 
-        valid, message = isValid(schedule_info, {"kernel": kernel, "idMap": make_mock_id_map(schedule_info, kernel), "mfmaCode": make_mock_mfma_code(schedule_info.numMfma)})
+        valid, message = isValid(schedule_info, ValidationContext(kernel=kernel, id_map=make_mock_id_map(schedule_info, kernel), mfma_code=make_mock_mfma_code(schedule_info.numMfma)))
         assert valid  # Schedule previously failed, now passes.
 
         # Check it fails where it's expected to.
@@ -1422,7 +1422,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
             37, 37, 37, 37,
             40, 40,
             41, 41, 41, 41]]
-        valid, message = isValid(schedule_info, {"kernel": kernel, "idMap": make_mock_id_map(schedule_info, kernel), "mfmaCode": make_mock_mfma_code(schedule_info.numMfma)})
+        valid, message = isValid(schedule_info, ValidationContext(kernel=kernel, id_map=make_mock_id_map(schedule_info, kernel), mfma_code=make_mock_mfma_code(schedule_info.numMfma)))
         assert not valid
         assert message == "Code path 0: PackA0 @ idx=37 issued too late, must be issued before MFMA @ idx=36."
 
