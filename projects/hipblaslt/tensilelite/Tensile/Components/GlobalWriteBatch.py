@@ -1345,7 +1345,20 @@ class GlobalWriteBatchWriter:
               if skipLabel is not None:
                 storeCodeModule.add(skipLabel)
               self.storesIssued += 1
-            # else: no partner — the sba=0 orphan was handled as a scalar store below
+            else:
+              # sba=1 orphan (no sba=0 partner in this batch — split by batch boundary).
+              mBlockSize = self.parentWriter.states.subtileMBlockSize
+              blockIdxM = (tt0 * self.kernel["MatrixInstM"]) // mBlockSize
+              blockIdxN = element[0]
+              orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                          labelPrefix="subtile_skip_orphan")
+              sumIdx0 = self.ss.elementSumIdx[elementIdx]
+              prefixOffset = self.parentWriter.states.c.startVgprValu
+              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0)
+              storeCodeModule.add(tmpStoreCode)
+              if orphanSkipLabel is not None:
+                storeCodeModule.add(orphanSkipLabel)
+              self.storesIssued += 1
           else:
             # sba=0 element (even tt0): emit SRD row increment if needed; store deferred to sba=1.
             if self.ss.optSrdIncForRow and addrCalc.rowInc:
@@ -1727,10 +1740,10 @@ class GlobalWriteBatchWriter:
     return module
 
   def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0) -> Module:
-    """Emit a 16bit store for an orphan sba=0 subtile with no sba=1 partner.
+    """Emit a 16bit store for an orphan subtile element with no partner.
 
-    sba = subtile block index along A (M dimension).  Used when MIWaveTile[0] is
-    odd and the last sba=0 element has no sba=1 partner.
+    Used when MIWaveTile[0] is odd and the last sba=0 element has no sba=1
+    partner, or when batch boundaries split an (sba=0, sba=1) pair.
 
     The layout below is specific to the mfma instruction used here: lane l = LG*16 + r
     owns 4 output values at M-rows (LG*4 + 0..3) and a single N-column
