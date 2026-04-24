@@ -147,9 +147,7 @@ class TestValidatorValidate:
         class MockTensorInfo:
             pass
 
-        result = validator.validate(
-            output_data, MockTensorInfo(), reference_data
-        )
+        result = validator.validate(output_data, MockTensorInfo(), reference_data)
 
         assert result.passed is True
         assert result.max_abs_diff == 0.0
@@ -163,9 +161,7 @@ class TestValidatorValidate:
         class MockTensorInfo:
             pass
 
-        result = validator.validate(
-            output_data, MockTensorInfo(), reference_data
-        )
+        result = validator.validate(output_data, MockTensorInfo(), reference_data)
 
         assert result.passed is False
         assert result.max_abs_diff > 0

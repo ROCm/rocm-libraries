@@ -149,9 +149,7 @@ class Executor:
 
         result = self._graph.from_json(self._graph_json_str)
         if result.is_bad():
-            raise ExecutionError(
-                f"Failed to deserialize graph: {result.get_message()}"
-            )
+            raise ExecutionError(f"Failed to deserialize graph: {result.get_message()}")
 
         if engine_id is not None:
             self._graph.set_preferred_engine_id_ext(engine_id)

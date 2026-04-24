@@ -246,9 +246,7 @@ def _error_graph_result(graph_path: Path, error_message: str) -> GraphResult:
     )
 
 
-def _run_one_graph(
-    graph_path: Path, config: SuiteConfig, handle: Any
-) -> GraphResult:
+def _run_one_graph(graph_path: Path, config: SuiteConfig, handle: Any) -> GraphResult:
     """Load and run a single graph. Returns a GraphResult (errors included).
 
     Per-graph load/validate/execution failures are captured as error entries
