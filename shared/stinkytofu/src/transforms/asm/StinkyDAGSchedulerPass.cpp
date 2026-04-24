@@ -40,11 +40,10 @@
 namespace {
 using namespace stinkytofu;
 
-// Check if instruction is a movable side effect (like s_barrier or a scheduling fence)
+// Check if instruction is a movable side effect (like s_barrier)
 static bool isMovableSideEffect(const StinkyInstruction& inst) {
-    // Barriers with LDS pseudo-reg deps are movable — ordering enforced by the DAG.
-    if (isBarrier(inst) && !inst.getDestRegs().empty()) return true;
-    return false;
+    // This is a barrier and has manually defined dependencies.
+    return isBarrier(inst) && !inst.getDestRegs().empty();
 }
 
 // --- Region scheduler (does NOT move fences) ---
