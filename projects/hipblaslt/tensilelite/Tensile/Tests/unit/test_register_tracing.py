@@ -515,7 +515,6 @@ class TestTF32_4x4_SwapPackDeps:
 # Test: Real idMap from kernel writer — validates full pipeline
 # =============================================================================
 
-@pytest.mark.real_idmap
 class TestRealIdMapValidation:
     """Verify that using real kernel-writer-produced idMaps eliminates all
     dual-path mismatches between positional and register-based must_start_after.
@@ -523,13 +522,6 @@ class TestRealIdMapValidation:
     These tests use the isa_infrastructure fixture (session-scoped, ~3.8s init)
     and generate_real_idmap (~0.14s per kernel) to produce real rocisa instruction
     objects with correct register assignments.
-
-    NOTE: These tests require ISA infrastructure and a clean global state.
-    They may fail when run in the full test suite due to global state pollution
-    from earlier tests. Run in isolation with:
-        pytest test_register_tracing.py::TestRealIdMapValidation -v
-    Or with the marker:
-        pytest -m real_idmap -v
     """
 
     def test_tf32_4x4_tn_real_idmap_validates(self, isa_infrastructure):
