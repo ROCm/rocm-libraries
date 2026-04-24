@@ -40,7 +40,7 @@ foreach(target tensilelite-client cpu-gemm-driver)
     target_compile_definitions(${target} PRIVATE TENSILE_DEFAULT_SERIALIZATION)
 
     set_target_properties(${target} PROPERTIES
-        CXX_STANDARD 17
+        CXX_STANDARD 20
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
     )

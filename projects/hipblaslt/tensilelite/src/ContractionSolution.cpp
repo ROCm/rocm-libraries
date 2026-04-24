@@ -3549,26 +3549,29 @@ namespace TensileLite
         auto cInfo = DataTypeInfo::Get(problemType.cType);
         auto dInfo = DataTypeInfo::Get(problemType.dType);
 
-        spm.memReadBytesA = multiplyElementSize((NumBatches * M * N * K) / MT1, aInfo.elementSize);
-        spm.memReadBytesB = multiplyElementSize((NumBatches * M * N * K) / MT0, bInfo.elementSize);
-        spm.memReadBytesC = multiplyElementSize((NumBatches * M * N) * betaReads, cInfo.elementSize);
+        spm.memReadBytesA = (NumBatches * M * N * K) * aInfo.elementSize / aInfo.packing / MT1;
+        spm.memReadBytesB = (NumBatches * M * N * K) * bInfo.elementSize / bInfo.packing / MT0;
+        spm.memReadBytesC = (NumBatches * M * N) * betaReads * cInfo.elementSize / cInfo.packing;
 
         if(GlobalSplitU == 1)
-            spm.memWriteBytesD = multiplyElementSize((NumBatches * M * N) * (1 + betaWrites), dInfo.elementSize);
+        {
+            spm.memWriteBytesD = (NumBatches * M * N) * (1 + betaWrites) * dInfo.elementSize;
+        }
         else
         {
             bool   hardwareAtomic   = false; // TODO-model
             double atomicOperations = hardwareAtomic ? 2 : 3; // read-mod-write or cas  //TODO-model
             double atomicCollisions = 1.0; // TODO-could be based on K, GSU
-            spm.memWriteBytesD      = multiplyElementSize((NumBatches * M * N)
+            spm.memWriteBytesD      = (NumBatches * M * N)
                                  * (betaWrites + atomicOperations * atomicCollisions)
-                                 , dInfo.elementSize);
+                                 * dInfo.elementSize;
         }
         spm.memReadBytes   = spm.memReadBytesA + spm.memReadBytesB + spm.memReadBytesC;
-        spm.memGlobalReads = divideElementSize(spm.memReadBytesA, aInfo.elementSize)
-                             + divideElementSize(spm.memReadBytesB, bInfo.elementSize)
-                             + divideElementSize(spm.memReadBytesC, cInfo.elementSize);
-        spm.memGlobalWrites = divideElementSize(spm.memWriteBytesD, dInfo.elementSize);
+
+        spm.memGlobalReads = spm.memReadBytesA * aInfo.packing / aInfo.elementSize
+                             + spm.memReadBytesB * bInfo.packing / bInfo.elementSize
+                             + spm.memReadBytesC * cInfo.packing / cInfo.elementSize;
+        spm.memGlobalWrites = spm.memWriteBytesD / dInfo.elementSize;
 
         return spm;
     }

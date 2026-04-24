@@ -102,7 +102,7 @@ namespace rocisa
         case rocisa::DataType::E5M3:
             return "E5M3";
         case rocisa::DataType::Count:
-        ;
+            return "Invalid";
         }
         return "Invalid";
     }
@@ -178,7 +178,7 @@ namespace rocisa
         case rocisa::DataType::E5M3:
             return TensileLite::TypeInfo<TensileLite::E5M3>::ElementSize;
         case rocisa::DataType::Count:
-        ;
+            return 1;
         }
         return 1;
     }
