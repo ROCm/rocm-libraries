@@ -28,6 +28,7 @@ enum struct coord_transform_enum
     replicate,
     xor_t,
     cyclic_shift,
+    inverse_cyclic_shift,
     offset,
     indexing,
 };
@@ -1522,6 +1523,94 @@ struct cyclic_shift_t : public base_transform<2, 2>
     }
 };
 
+// 2D cyclic shift: idx_low(1) = (idx_up(1) - idx_up(0)) % up_lengths_(1)
+// This implements the SwizzleT pattern used for LDS bank conflict avoidance.
+template <typename LowLengths>
+struct inverse_cyclic_shift_t : public base_transform<2, 2>
+{
+    static constexpr auto type_enum = coord_transform_enum::inverse_cyclic_shift;
+
+    using LowerIndex = multi_index<2>;
+    using UpperIndex = multi_index<2>;
+
+    using UpLengths = LowLengths;
+
+    UpLengths up_lengths_;
+
+    CK_TILE_HOST_DEVICE constexpr inverse_cyclic_shift_t() : up_lengths_{} {}
+
+    CK_TILE_HOST_DEVICE constexpr inverse_cyclic_shift_t(const LowLengths& low_lengths)
+        : up_lengths_{low_lengths}
+    {
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto get_type_enum()
+    {
+        return coord_transform_enum::inverse_cyclic_shift;
+    }
+
+    CK_TILE_HOST_DEVICE constexpr const auto& get_upper_lengths() const { return up_lengths_; }
+
+    template <typename LowIdx, typename UpIdx>
+    CK_TILE_HOST_DEVICE constexpr void calculate_lower_index(LowIdx& idx_low,
+                                                             const UpIdx& idx_up) const
+    {
+        static_assert(LowIdx::size() == 2 && UpIdx::size() == 2,
+                      "wrong! inconsistent # of dimension");
+
+        idx_low(number<0>{}) = idx_up[number<0>{}];
+        idx_low(number<1>{}) =
+            (idx_up[number<1>{}] - idx_up[number<0>{}]) % up_lengths_[number<1>{}];
+    }
+
+    template <typename LowIdxDiff, typename UpIdxDiff, typename LowIdx, typename UpIdx>
+    CK_TILE_HOST_DEVICE void update_lower_index(LowIdxDiff& idx_diff_low,
+                                                const UpIdxDiff&,
+                                                LowIdx& idx_low,
+                                                const UpIdx& idx_up) const
+    {
+        static_assert(LowIdxDiff::size() == 2 && UpIdxDiff::size() == 2 && LowIdx::size() == 2 &&
+                          UpIdx::size() == 2,
+                      "wrong! inconsistent # of dimension");
+
+        const auto idx_low_old = idx_low;
+
+        calculate_lower_index(idx_low, idx_up);
+
+        idx_diff_low = idx_low - idx_low_old;
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr bool
+    is_valid_upper_index_always_mapped_to_valid_lower_index()
+    {
+        return true;
+    }
+
+    template <typename UpIdx>
+    CK_TILE_HOST_DEVICE static constexpr bool
+    is_valid_upper_index_mapped_to_valid_lower_index(const UpIdx& /* idx_up */)
+    {
+        return true;
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr bool is_known_at_compile_time()
+    {
+        return ck_tile::is_known_at_compile_time<UpLengths>::value;
+    }
+
+    // MUST be static function
+    template <typename LowVectorLengths, typename LowVectorStrides>
+    CK_TILE_HOST_DEVICE constexpr auto calculate_upper_dimension_safe_vector_length_strides(
+        const LowVectorLengths& low_vector_lengths,
+        const LowVectorStrides& low_vector_strides) const
+    {
+        array<index_t, 2> up_vector_lengths = low_vector_lengths;
+        array<index_t, 2> up_vector_strides = low_vector_strides;
+
+        return make_tuple(up_vector_lengths, up_vector_strides);
+    }
+};
+
 template <typename LowLengths>
 CK_TILE_HOST_DEVICE static void print(const cyclic_shift_t<LowLengths>& x)
 {
@@ -1887,6 +1976,12 @@ template <typename LowLengths>
 CK_TILE_HOST_DEVICE constexpr auto make_cyclic_shift_transform(const LowLengths& low_lengths)
 {
     return cyclic_shift_t<LowLengths>{low_lengths};
+}
+
+template <typename LowLengths>
+CK_TILE_HOST_DEVICE constexpr auto make_inverse_cyclic_shift_transform(const LowLengths& low_lengths)
+{
+    return inverse_cyclic_shift_t<LowLengths>{low_lengths};
 }
 
 template <typename LowLength, typename OffsetLength>
