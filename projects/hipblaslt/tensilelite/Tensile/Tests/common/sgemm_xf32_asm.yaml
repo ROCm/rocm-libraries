@@ -10,7 +10,7 @@ GlobalParameters:
   #ForceRedoLibraryLogic: True
   #ForceRedoLibraryClient: True
   EnqueuesPerSync: 1
-  SyncsPerBenchmark: 1
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   BoundsCheck: False
   ValidationMaxToPrint: 4

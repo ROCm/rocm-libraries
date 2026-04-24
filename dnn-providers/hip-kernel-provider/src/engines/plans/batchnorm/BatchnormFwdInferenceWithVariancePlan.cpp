@@ -3,21 +3,23 @@
 
 #include "BatchnormFwdInferenceWithVariancePlan.hpp"
 #include "engines/plans/PlanUtils.hpp"
+#include "hip/HipKernelCompileOptions.hpp"
 
 #include "hip/IKernelCompiler.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::batchnorm
 {
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(tensorMap.at(attributes.x_tensor_uid()))
     , _y(tensorMap.at(attributes.y_tensor_uid()))
@@ -29,15 +31,16 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        epsilonTensorAttr, "Epsilon");
 }
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
         inferenceAttributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(tensorMap.at(inferenceAttributes.x_tensor_uid()))
     , _y(tensorMap.at(inferenceAttributes.y_tensor_uid()))
@@ -50,41 +53,41 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(inferenceAttributes.epsilon_tensor_uid());
-    _epsilonValue
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        epsilonTensorAttr, "Epsilon");
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::x() const
 {
     return _x;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::y() const
 {
     return _y;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::scale() const
 {
     return _scale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::bias() const
 {
     return _bias;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::estMean() const
 {
     return _estMean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::estVariance() const
 {
     return _estVariance;
@@ -101,7 +104,7 @@ const std::optional<hip_kernel_utils::ActivationParams>&
     return _optActivation;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceWithVarianceParams::activationOut() const
 {
     return _activationOut;
@@ -127,11 +130,10 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     auto xDataType = _inferenceParams.x()->data_type();
     auto scaleDataType = _inferenceParams.scale()->data_type();
 
-    bool useFp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::HALF
-                       && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    bool useBfp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16
-                        && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    bool useFp32 = !useFp16Mix && !useBfp16Mix;
+    bool useFp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+                       && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    bool useBfp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+                        && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
     // Extract dimensions from x tensor
     const auto* xDims = _inferenceParams.x()->dims();
@@ -235,43 +237,25 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     bool isGfx115X = (archName.find("gfx115") == 0);
 
     // Get activation mode
-    int nrnOpId = 0;
+    auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
 
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
-        const auto& activation = *_inferenceParams.optActivation();
-        nrnOpId = static_cast<int>(activation.mode);
+        activationMode = (*_inferenceParams.optActivation()).mode;
     }
 
     // Prepare compilation options
-    std::vector<std::string> options;
-    auto rocmPath
-        = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
-    if(!rocmPath.empty())
-    {
-        auto rocmIncludeArg = "-I" + rocmPath + "/include";
-        options.emplace_back(rocmIncludeArg);
-        HIPDNN_PLUGIN_LOG_INFO(
-            "BatchnormFwdInferenceWithVariancePlan: HIPRTC compile ROCm include path: "
-            << rocmIncludeArg);
-    }
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16Mix ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFP16=") + (useBfp16Mix ? "1" : "0"));
-    options.emplace_back("-DHIP_PLUGIN_USE_RNE_BFLOAT16=1");
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FPMIX=") + (useFp16Mix ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFPMIX=") + (useBfp16Mix ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP0=") + std::to_string(xlocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP1=") + std::to_string(ylocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP2=") + std::to_string(zlocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_VEC_SIZE=") + std::to_string(vectorsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_LAYOUT_NHWC=") + (isLayoutNHWC ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX103X=") + (isGfx103X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX110X=") + (isGfx110X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
-    options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
+    HipKernelCompileOptions options(_inferenceParams.x(), deviceProperties, activationMode);
+    options.add("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
+    options.add("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
+    options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
+    options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
+    options.add("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
+    options.add("HIP_PLUGIN_BN_GFX103X", isGfx103X);
+    options.add("HIP_PLUGIN_BN_GFX110X", isGfx110X);
+    options.add("HIP_PLUGIN_BN_GFX120X", isGfx120X);
+    options.add("HIP_PLUGIN_BN_GFX115X", isGfx115X);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);

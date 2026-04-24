@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceReduction.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
@@ -13,7 +13,7 @@
 #include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
 using hipdnn_test_sdk::detail::safeTestTypeCast;

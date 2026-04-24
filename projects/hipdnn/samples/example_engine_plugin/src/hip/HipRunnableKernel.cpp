@@ -1,15 +1,17 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "HipRunnableKernel.hpp"
 
 #include "HipUtils.hpp"
 
+#include <utility>
+
 namespace example_provider
 {
 
-HipRunnableKernel::HipRunnableKernel(hipFunction_t function, const std::string& kernelName)
-    : _kernelName(kernelName)
+HipRunnableKernel::HipRunnableKernel(hipFunction_t function, std::string kernelName)
+    : _kernelName(std::move(kernelName))
     , _kernel(function)
 {
 }

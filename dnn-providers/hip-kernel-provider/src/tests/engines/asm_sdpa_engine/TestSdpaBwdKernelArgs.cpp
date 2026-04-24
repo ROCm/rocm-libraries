@@ -17,7 +17,7 @@ using asm_sdpa_engine::fmha_bwd_post_kernel_args;
 
 TEST(TestSdpaBwdOdoKernelArgs, TotalSizeMatches)
 {
-    EXPECT_EQ(sizeof(fmha_bwd_odo_args), 208u);
+    EXPECT_EQ(sizeof(fmha_bwd_odo_args), 256u);
 }
 
 TEST(TestSdpaBwdOdoKernelArgs, PointerFieldOffsets)
@@ -27,26 +27,37 @@ TEST(TestSdpaBwdOdoKernelArgs, PointerFieldOffsets)
     EXPECT_EQ(offsetof(fmha_bwd_odo_args, ptr_d), 32u);
 }
 
-TEST(TestSdpaBwdOdoKernelArgs, StrideFieldOffsets)
+TEST(TestSdpaBwdOdoKernelArgs, OStrideFieldOffsets)
 {
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Hs_odo), 48u);
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, BAs_odo), 64u);
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Seqs_odo), 80u);
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Hs_d), 96u);
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, BAs_d), 112u);
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Seqs_d), 128u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Hs_o), 48u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, BAs_o), 64u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Seqs_o), 80u);
+}
+
+TEST(TestSdpaBwdOdoKernelArgs, DOStrideFieldOffsets)
+{
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Hs_do), 96u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, BAs_do), 112u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Seqs_do), 128u);
+}
+
+TEST(TestSdpaBwdOdoKernelArgs, DBufferStrideFieldOffsets)
+{
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Hs_d), 144u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, BAs_d), 160u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, Seqs_d), 176u);
 }
 
 TEST(TestSdpaBwdOdoKernelArgs, DimensionFieldOffsets)
 {
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, seqlen_q), 144u);
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, head_dim), 160u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, seqlen_q), 192u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, head_dim), 208u);
 }
 
 TEST(TestSdpaBwdOdoKernelArgs, SequencePointerFieldOffsets)
 {
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, ptr_qseq), 176u);
-    EXPECT_EQ(offsetof(fmha_bwd_odo_args, ptr_qseq_padded), 192u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, ptr_qseq), 224u);
+    EXPECT_EQ(offsetof(fmha_bwd_odo_args, ptr_qseq_padded), 240u);
 }
 
 // =============================================================================

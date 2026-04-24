@@ -36,6 +36,7 @@
 #include <Tensile/hip/HipHardware.hpp>
 
 #include <Tensile/UtilsOrigami.hpp>
+#include <iostream>
 #include <origami/streamk.hpp>
 
 #include <algorithm>
@@ -738,6 +739,7 @@ namespace TensileLite
             // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
             auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
             auto     totalIters   = tiles * itersPerTile;
+
             uint32_t magicNumberItersPerTile;
             uint32_t magicShiftItersPerTile;
             magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
@@ -745,7 +747,12 @@ namespace TensileLite
             args.template append<uint32_t>("itersPerTile", itersPerTile);
             args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
             args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-            args.template append<uint32_t>("totalIters", totalIters);
+
+            // Custom kernels still use totalIters
+            if(!sizeMapping.customKernelName.empty())
+            {
+                args.template append<uint32_t>("totalIters", totalIters);
+            }
 
             if(sizeMapping.streamK == 1) // Basic SK
             {
@@ -1409,7 +1416,8 @@ namespace TensileLite
         ContractionSolution::generateSingleCall(ContractionSolution::Problem const& problem,
                                                 ContractionInputs const&            inputs,
                                                 Hardware const&                     hardware,
-                                                StreamKSettings const&              sk) const
+                                                StreamKSettings const&              sk,
+                                                GSUSettings const&                  gsuSettings) const
     {
         KernelInvocation rv;
 
@@ -1491,10 +1499,14 @@ namespace TensileLite
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
 
-        if(sizeMapping.globalAccumulation == 3)
+        if(gsuSettings.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
         {
             rv.args.append<void const*>("dstD", inputs.d);
-            rv.args.append<void const*>("Synchronizer", inputs.Synchronizer);
+            // MBSK: synchronizer address, MB: null address
+            rv.args.append<void const*>("Synchronizer",
+                                        gsuSettings.globalAccumulation == 3 
+                                        ? inputs.Synchronizer 
+                                        : NULL);
             rv.args.append<uint32_t>("GSUSync", 0);
         }
 
@@ -1636,11 +1648,14 @@ namespace TensileLite
                                                h_args,
                                                sk);
 
-                if(sizeMapping.globalAccumulation == 3)
+                if(sizeMapping.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
                 {
                     h_args.template append<void const*>("dstD", inputs.grouped[idx].d);
+                    // MBSK: synchronizer address, MB: null address
                     h_args.template append<void const*>("Synchronizer",
-                                                        inputs.grouped[idx].Synchronizer);
+                                                        sizeMapping.globalAccumulation == 3
+                                                        ? inputs.grouped[idx].Synchronizer
+                                                        : NULL);
                     h_args.template append<uint32_t>("GSUSync", 0);
                 }
 
@@ -2784,12 +2799,15 @@ namespace TensileLite
             }
         }
 
-        if(debug)
-            rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk));
-        else
-            rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk));
+        GSUSettings gsuSettings;
+        gsuSettings.globalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
-        if(((sizeMapping.globalAccumulation != 3) && gsu > 1 && sizeMapping.globalAccumulation)
+        if(debug)
+            rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk, gsuSettings));
+        else
+            rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk, gsuSettings));
+
+        if((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
            || sk.reduction == origami::reduction_t::parallel)
         {
             if(debug)
@@ -3346,6 +3364,9 @@ namespace TensileLite
                        static_cast<size_t>(sizeMapping.depthU)},
             };
 
+
+            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+
             reductionStrat = origami::streamk::select_reduction(
                 origami_problem,
                 *(hipAMDGPU->analyticalHardware),
@@ -3424,6 +3445,9 @@ namespace TensileLite
                 .workspace_size_per_elem_c = sizeMapping.workspaceSizePerElemC,
                 .reduction_strategy        = reductionStrat,
             };
+
+            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+
             skGrid = origami::streamk::select_grid_size(
                 origami_problem,
                 *(hipAMDGPU->analyticalHardware),

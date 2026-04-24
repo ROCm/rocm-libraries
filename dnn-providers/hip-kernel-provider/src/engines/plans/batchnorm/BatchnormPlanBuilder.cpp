@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "BatchnormPlanBuilder.hpp"
@@ -16,9 +16,10 @@ namespace hip_kernel_provider::batchnorm
 namespace
 {
 void batchnormFwdFusionCheckTensors(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     // in_0 must be the batchnorm inference output (forward path)
@@ -64,9 +65,10 @@ void batchnormFwdFusionCheckTensors(
     }
 }
 bool batchnormFwdFusionCheckTensorsLogErrors(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     try
@@ -82,9 +84,10 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
 }
 
 void batchnormFwdWithVarianceFusionCheckTensors(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     // in_0 must be the batchnorm inference output (forward path)
@@ -131,9 +134,10 @@ void batchnormFwdWithVarianceFusionCheckTensors(
 }
 
 bool batchnormFwdWithVarianceFusionCheckTensorsLogErrors(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     try
@@ -159,12 +163,13 @@ BatchnormPlanBuilder::BatchnormPlanBuilder(const IKernelCompiler& kernelCompiler
 
 bool BatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
-                return node->computeDataType() == hipdnn_data_sdk::data_objects::DataType::FLOAT;
+                return node->computeDataType()
+                       == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
             });
     };
 
@@ -180,10 +185,11 @@ bool BatchnormPlanBuilder::isApplicable(
         }
 
         if(!opGraph.hasOnlySupportedAttributes(
-               std::set<hipdnn_data_sdk::data_objects::NodeAttributes>{
-                   hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
-                   hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-                   hipdnn_data_sdk::data_objects::NodeAttributes::
+               std::set<hipdnn_flatbuffers_sdk::data_objects::NodeAttributes>{
+                   hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+                   hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
+                       BatchnormInferenceAttributes,
+                   hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
                        BatchnormInferenceAttributesVarianceExt}))
         {
             HIPDNN_PLUGIN_LOG_INFO("Batchnorm plan builder is not applicable for this graph");
@@ -194,21 +200,21 @@ bool BatchnormPlanBuilder::isApplicable(
 
         try
         {
+            BatchnormValidator validator(opGraph.getTensorMap());
             switch(node.attributes_type())
             {
-            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-                checkBatchnormFwdTrainingTensorConfigSupported(
-                    *node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
+            case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+                validator.checkFwdTrainingTensorConfigSupported(
+                    *node.attributes_as_BatchnormAttributes());
                 break;
-            case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-                checkBatchnormInferenceTensorConfigSupported(
-                    *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
+            case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+                validator.checkInferenceTensorConfigSupported(
+                    *node.attributes_as_BatchnormInferenceAttributes());
                 break;
-            case hipdnn_data_sdk::data_objects::NodeAttributes::
+            case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
                 BatchnormInferenceAttributesVarianceExt:
-                checkBatchnormInferenceVarianceExtTensorConfigSupported(
-                    *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
-                    opGraph.getTensorMap());
+                validator.checkInferenceVarianceExtTensorConfigSupported(
+                    *node.attributes_as_BatchnormInferenceAttributesVarianceExt());
                 break;
             default:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -237,13 +243,14 @@ bool BatchnormPlanBuilder::isApplicable(
 
         bool isFwdInferenceFirst
             = node0.attributesType()
-              == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
-        bool isFwdInferenceWithVarianceFirst = node0.attributesType()
-                                               == hipdnn_data_sdk::data_objects::NodeAttributes::
-                                                   BatchnormInferenceAttributesVarianceExt;
+              == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
+        bool isFwdInferenceWithVarianceFirst
+            = node0.attributesType()
+              == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
+                  BatchnormInferenceAttributesVarianceExt;
         bool isPointwiseSecond
             = node1.attributesType()
-              == hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes;
+              == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes;
 
         if(!((isFwdInferenceFirst || isFwdInferenceWithVarianceFirst) && isPointwiseSecond))
         {
@@ -252,12 +259,13 @@ bool BatchnormPlanBuilder::isApplicable(
             return false;
         }
 
+        BatchnormValidator validator(opGraph.getTensorMap());
         if(isFwdInferenceFirst)
         {
-            const auto& bnInfAttr
-                = node0.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
+            const auto& bnInfAttr = node0.attributesAs<
+                hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes>();
             const auto& actAttr
-                = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+                = node1.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
             if(!batchnormFwdFusionCheckTensorsLogErrors(bnInfAttr, actAttr, opGraph.getTensorMap()))
             {
                 return false;
@@ -265,8 +273,7 @@ bool BatchnormPlanBuilder::isApplicable(
 
             try
             {
-                checkBatchnormInferenceActivationTensorConfigSupported(
-                    bnInfAttr, actAttr, opGraph.getTensorMap());
+                validator.checkInferenceActivationTensorConfigSupported(bnInfAttr, actAttr);
             }
             catch(const std::exception& e)
             {
@@ -277,9 +284,9 @@ bool BatchnormPlanBuilder::isApplicable(
         else
         {
             const auto& bnInfAttr = node0.attributesAs<
-                hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+                hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
             const auto& actAttr
-                = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+                = node1.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
 
             if(!batchnormFwdWithVarianceFusionCheckTensorsLogErrors(
                    bnInfAttr, actAttr, opGraph.getTensorMap()))
@@ -289,8 +296,8 @@ bool BatchnormPlanBuilder::isApplicable(
 
             try
             {
-                checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
-                    bnInfAttr, actAttr, opGraph.getTensorMap());
+                validator.checkInferenceVarianceExtActivationTensorConfigSupported(bnInfAttr,
+                                                                                   actAttr);
             }
             catch(const std::exception& e)
             {
@@ -315,7 +322,7 @@ bool BatchnormPlanBuilder::isApplicable(
 
 size_t BatchnormPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipKernelHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const HipKernelSettings& executionSettings) const
 {
     //batchnorm plan builder does not require workspace size
@@ -327,14 +334,15 @@ namespace
 
 void buildPlanInferenceSingleNode(
     [[maybe_unused]] const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
     HipKernelContext& executionContext)
 {
     const auto& attr
-        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
+        = nodeWrapper
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes>();
 
     BatchnormFwdInferenceParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
@@ -344,14 +352,14 @@ void buildPlanInferenceSingleNode(
 
 void buildPlanInferenceWithVarianceSingleNode(
     [[maybe_unused]] const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
     HipKernelContext& executionContext)
 {
     const auto& attr = nodeWrapper.attributesAs<
-        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+        hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
 
     BatchnormFwdInferenceWithVarianceParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(std::move(params));
@@ -361,7 +369,7 @@ void buildPlanInferenceWithVarianceSingleNode(
 
 void buildPlanFusedFwdInferenceActivation(
     [[maybe_unused]] const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
     HipKernelContext& executionContext)
@@ -370,9 +378,9 @@ void buildPlanFusedFwdInferenceActivation(
     const auto& node1 = opGraph.getNodeWrapper(1);
 
     const auto& fwdInference
-        = node0.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
+        = node0.attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes>();
     const auto& activation
-        = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+        = node1.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
 
     BatchnormFwdInferenceParams params(fwdInference, activation, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
@@ -382,7 +390,7 @@ void buildPlanFusedFwdInferenceActivation(
 
 void buildPlanFusedFwdInferenceWithVarianceActivation(
     [[maybe_unused]] const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
     HipKernelContext& executionContext)
@@ -391,9 +399,9 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
     const auto& node1 = opGraph.getNodeWrapper(1);
 
     const auto& fwdInference = node0.attributesAs<
-        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+        hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
     const auto& activation
-        = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+        = node1.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
 
     BatchnormFwdInferenceWithVarianceParams params(
         fwdInference, activation, opGraph.getTensorMap());
@@ -404,14 +412,14 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
 
 void buildPlanFwdTrainingSingleNode(
     [[maybe_unused]] const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
     HipKernelContext& executionContext)
 {
     const auto& attr
-        = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
+        = nodeWrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes>();
 
     BatchnormFwdTrainingParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
@@ -423,30 +431,32 @@ void buildPlanFwdTrainingSingleNode(
 
 void BatchnormPlanBuilder::initializeExecutionSettings(
     [[maybe_unused]] const HipKernelHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+        engineConfig,
     [[maybe_unused]] HipKernelSettings& executionSettings) const
 {
 }
 
 void BatchnormPlanBuilder::buildPlan(
     const HipKernelHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+        engineConfig,
     HipKernelContext& executionContext) const
 {
     if(opGraph.nodeCount() == 2)
     {
         const auto& node0 = opGraph.getNodeWrapper(0);
         if(node0.attributesType()
-           == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
+           == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
         {
             HIPDNN_PLUGIN_LOG_INFO("Building batchnorm inference + activation fusion plan");
             buildPlanFusedFwdInferenceActivation(
                 handle, opGraph, _kernelCompiler, _devicePropertyProvider, executionContext);
         }
         else if(node0.attributesType()
-                == hipdnn_data_sdk::data_objects::NodeAttributes::
+                == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
                     BatchnormInferenceAttributesVarianceExt)
         {
             HIPDNN_PLUGIN_LOG_INFO(
@@ -462,7 +472,7 @@ void BatchnormPlanBuilder::buildPlan(
 
     switch(nodeWrapper.attributesType())
     {
-    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes:
         HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd training plan for node: " << nodeName);
         buildPlanFwdTrainingSingleNode(handle,
                                        opGraph,
@@ -471,7 +481,7 @@ void BatchnormPlanBuilder::buildPlan(
                                        _devicePropertyProvider,
                                        executionContext);
         break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
         HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference plan for node: " << nodeName);
         buildPlanInferenceSingleNode(handle,
                                      opGraph,
@@ -480,7 +490,8 @@ void BatchnormPlanBuilder::buildPlan(
                                      _devicePropertyProvider,
                                      executionContext);
         break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
+        BatchnormInferenceAttributesVarianceExt:
         HIPDNN_PLUGIN_LOG_INFO(
             "Building batchnorm fwd inference with variance plan for node: " << nodeName);
         buildPlanInferenceWithVarianceSingleNode(handle,
@@ -495,13 +506,13 @@ void BatchnormPlanBuilder::buildPlan(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported node type for batchnorm plan builder: "
                 + std::string(
-                    hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
+                    hipdnn_flatbuffers_sdk::data_objects::toString(nodeWrapper.attributesType())));
     }
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT> BatchnormPlanBuilder::getCustomKnobs(
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> BatchnormPlanBuilder::getCustomKnobs(
     [[maybe_unused]] const HipKernelHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};
 }

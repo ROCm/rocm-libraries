@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 // TEMPLATE REFERENCE: Second Plan example demonstrating the same compile/execute pattern as
@@ -30,7 +30,7 @@ class IKernelCompiler;
 class ConvFwdPlan : public hipdnn_plugin_sdk::IPlan<ExampleProviderHandle>
 {
 public:
-    explicit ConvFwdPlan(ConvFwdParams&& params);
+    explicit ConvFwdPlan(const ConvFwdParams& params);
 
     ~ConvFwdPlan() override = default;
 
