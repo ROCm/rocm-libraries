@@ -4856,6 +4856,7 @@ TEST_F(TestGraph, EngineOverrideConfigMatchesConvFpropTensors)
 // Test 3: loading a JSON config from an in-memory string and matching against
 // conv_fprop tensors.  This exercises the full loadFromContent() → matchOperation()
 // path with the same shapes that the graph presents during build_operation_graph().
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
 {
     using namespace hipdnn_frontend::engine_override;
@@ -4894,6 +4895,7 @@ TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
     x8->set_dim({8, 3, 32, 32}).set_data_type(DataType::FLOAT);
     EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
 }
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 #ifdef HIPDNN_ENABLE_SDPA
 TEST_F(TestGraph, SdpaFwdNodeCreation)
