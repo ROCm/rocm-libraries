@@ -12,6 +12,9 @@ project(hipdnn_test_sdk VERSION ${HIPDNN_TEST_SDK_VERSION} LANGUAGES CXX)
 # Read data_sdk version for minimum requirement
 hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_TEST_SDK_DATA_SDK_MIN_VERSION)
 
+# Read plugin_sdk version for minimum requirement
+hipdnn_get_component_version(hipdnn_plugin_sdk HIPDNN_TEST_SDK_PLUGIN_SDK_MIN_VERSION)
+
 set(HIP_DNN_TEST_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_library(hipdnn_test_sdk INTERFACE)
