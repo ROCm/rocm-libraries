@@ -115,6 +115,8 @@ namespace TensileLite
             else if(auto gemmProblem = dynamic_cast<const ContractionProblemGemm*>(problem))
             {
                 writeReport(*gemmProblem);
+                // Report the original (unpadded) problem sizes when macrotile padding
+                // was applied, also override LDD/LDC to keep strides consistent.
                 if(m_currentProblemIdx < m_originalProblemSizes.size())
                 {
                     auto const& origSizes = m_originalProblemSizes[m_currentProblemIdx];

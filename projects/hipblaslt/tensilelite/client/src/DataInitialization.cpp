@@ -2125,6 +2125,10 @@ namespace TensileLite
                     auto unrolledSize = desc.sizes()[0];
                     auto tiledSize    = desc.sizes()[1];
 
+                    // Sub-byte types (e.g. FP4 = 0.5 bytes/elem) need special handling:
+                    // The swizzle reshape/permute operates on byte-granularity tensors, so
+                    // we convert element counts to byte counts and treat each byte as one
+                    // "element" for the reshape dimensions.
                     bool  isSubByte     = (desc.elementBytes() < 1.0f);
                     float effectiveElem = isSubByte ? 1.0f : desc.elementBytes();
                     size_t effUnrolled  = isSubByte
@@ -2142,6 +2146,8 @@ namespace TensileLite
                     auto swizzleKey
                         = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
 
+                    // Convert byte-granularity flat size back to native element count
+                    // for the GPU copy (e.g. FP4: 2 elements per byte)
                     auto flatToNativeElems = [&](size_t flatSize) -> size_t {
                         return isSubByte
                             ? size_t(flatSize / desc.elementBytes())

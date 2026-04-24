@@ -493,6 +493,9 @@ namespace TensileLite
                     throw std::runtime_error("Unrecognized output tensor.");
                 }
 
+                // When macrotile padding was applied, the actual GPU tensor D is larger
+                // than the user-requested problem.  Validate only the original (unpadded)
+                // region so that padding artefacts don't cause false mismatches.
                 TensorDescriptor const* validationTensor = &tensor;
                 TensorDescriptor        slicedTensor;
 
@@ -505,15 +508,15 @@ namespace TensileLite
                        && (origSizes[0] != tensor.sizes()[0]
                            || origSizes[1] != tensor.sizes()[1]))
                     {
-                    auto newSizes = tensor.sizes();
-                    newSizes[0]   = origSizes[0];
-                    newSizes[1]   = origSizes[1];
-                        slicedTensor = TensorDescriptor(tensor.getName().c_str(),
-                                                        tensor.dataType(),
-                                                        newSizes.begin(),
-                                                        newSizes.end(),
-                                                        tensor.strides().begin(),
-                                                        tensor.strides().end());
+                        auto newSizes = tensor.sizes();
+                        newSizes[0]   = origSizes[0];
+                        newSizes[1]   = origSizes[1];
+                        slicedTensor  = TensorDescriptor(tensor.getName().c_str(),
+                                                         tensor.dataType(),
+                                                         newSizes.begin(),
+                                                         newSizes.end(),
+                                                         tensor.strides().begin(),
+                                                         tensor.strides().end());
                         slicedTensor.setAsOutput(tensor.isOutput());
                         validationTensor = &slicedTensor;
 

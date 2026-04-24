@@ -1741,6 +1741,7 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::SplitK:
                 {
+                    // AITER kernel expects log2(GSU) rather than the raw GSU value
                     uint32_t gsu = sizeMapping.globalSplitU;
                     uint32_t splitK = 0;
                     if(gsu > 1)
