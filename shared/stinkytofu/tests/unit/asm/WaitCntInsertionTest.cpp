@@ -25,6 +25,7 @@
 
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
@@ -54,8 +55,10 @@ class WaitCntInsertionTest : public ::testing::Test {
     void runInsertionPass(Function& func) {
         PassContext passCtx;
         passCtx.setGemmTileConfig(gemmConfig);
+        AnalysisManager am;
+        registerAllAnalyses(am);
         auto pass = stinkytofu::createStinkyWaitCntInsertionPass();
-        pass->run(func, passCtx);
+        pass->run(func, passCtx, am);
     }
 
     struct WaitCntInfo {

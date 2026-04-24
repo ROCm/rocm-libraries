@@ -42,30 +42,15 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
-#include <miopen/solver/implicitgemm_util.hpp>
 
 namespace miopen {
 namespace solver {
 namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
-
-namespace {
-
-bool IsArgsSupportedForMode(const CkImplLibLoader& loader,
-                            const ProblemDescription& problem,
-                            const std::string& kernel_id,
-                            miopenDataType_t data_type,
-                            bool use_tf32)
-{
-    return loader.IsArgsSupported(
-        CKSolverType::GrpConv3dWrw, problem, kernel_id, data_type, use_tf32);
-}
-
-} // namespace
 
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
     const ::miopen::conv::ProblemDescription& problem)
@@ -86,6 +71,27 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
         kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
     }
 }
+
+namespace {
+
+// ============================================================================
+// Solver Configuration for WRW 3D Grouped Convolution
+// ============================================================================
+
+// clang-format off
+constexpr SolverHeuristicConfig k3DWrwSolverConfig = {
+    /* solver_name                 */ "ConvHipImplicitGemm3DGroupWrwXdlops",
+    /* solver_name_ktn             */ "ConvHipImplicitGemm3DGroupWrwXdlops", // No KTN for 3D
+    /* spatial_dims                */ 3,
+    /* uses_split_k                */ true,
+    /* split_k_min                 */ 1,
+    /* split_k_max                 */ 128,
+    /* supports_split_k_autodeduce */ false,
+    /* supports_ktn                */ false,
+};
+// clang-format on
+
+} // namespace
 
 // clang-format off
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
@@ -166,133 +172,53 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::DefaultKernelFromList(
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     const miopen::ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
 {
-    index     = 0;
-    kernel_id = "None";
-    split_k   = 1;
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.Reset(k3DWrwSolverConfig.uses_split_k);
+
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
+    if(!loader.IsLoaded())
+        return;
 
     const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
+    // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR))
     {
-        MIOPEN_LOG_I2(
-            "Step 1: Attempting AI heuristics for data type: " << problem.GetInDataType());
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
-
-        bool ai_success = false;
-        miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
-        const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
-        if(!loader.IsLoaded())
-            return;
-        auto run_ai_heuristics = [&](auto CKDataType, auto CKComputeType) {
-            using T        = decltype(CKDataType);
-            using TCompute = decltype(CKComputeType);
-            constexpr bool mode_use_tf32 =
-                std::is_same_v<T, float> && std::is_same_v<TCompute, TF32Tag>;
-            auto fill_valid_kernels =
-                [&loader](const ::miopen::conv::ProblemDescription& p) -> std::vector<std::string> {
-                return loader.FillValidKernels(
-                    CKSolverType::GrpConv3dWrw, p, p.GetInDataType(), mode_use_tf32);
-            };
-
-            // Validation lambda for AI-predicted kernel + split_k combinations
-            auto is_kernel_split_k_valid = [&](int kernel_index, int split_k_value) -> bool {
-                if(kernel_index < 0 || kernel_index >= static_cast<int>(valid_kernels.size()))
-                    return false;
-
-                std::string test_kernel_id =
-                    valid_kernels[kernel_index] + "+" + std::to_string(split_k_value);
-                return IsArgsSupportedForMode(
-                    loader, problem, test_kernel_id, problem.GetInDataType(), mode_use_tf32);
-            };
-            auto ai_result =
-                miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
-                                                                     problem,
-                                                                     valid_kernels,
-                                                                     index,
-                                                                     split_k,
-                                                                     kernel_id,
-                                                                     fill_valid_kernels,
-                                                                     solver_name,
-                                                                     is_kernel_split_k_valid);
-            if(ai_result.first && !ai_result.second.IsEmpty())
-                use_tf32 = mode_use_tf32;
-            return std::move(ai_result);
+        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
+            return loader.FillValidKernels(
+                CKSolverType::GrpConv3dWrw, p, p.GetInDataType(), try_tf32);
         };
-        switch(problem.GetInDataType())
-        {
-        case miopenHalf:
-            std::tie(ai_success, result) = run_ai_heuristics(HalfTag{}, HalfTag{});
-            break;
-        case miopenFloat:
-            if(problem.UseTF32())
-            {
-                std::tie(ai_success, result) = run_ai_heuristics(float{}, TF32Tag{});
-                if(!ai_success || result.IsEmpty())
-                {
-                    MIOPEN_LOG_I2("Step 3: AI heuristics with TF32 failed, retrying with FP32");
-                    std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
-                }
-            }
-            else
-            {
-                std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
-            }
-            break;
-        case miopenBFloat16:
-            std::tie(ai_success, result) = run_ai_heuristics(BFloat16Tag{}, BFloat16Tag{});
-            break;
-        default: break;
-        }
 
-        if(ai_success && !result.IsEmpty())
+        auto ck_val_creator = MakeCKValidatorCreator(
+            loader, CKSolverType::GrpConv3dWrw, problem.GetInDataType(), mode_use_tf32);
+
+        // Note: No KTN runner needed for 3D (supports_ktn = false)
+        if(RunAIHeuristics(k3DWrwSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           is_deterministic,
+                           fill_valid_kernels,
+                           nullptr,
+                           ck_val_creator,
+                           mode_use_tf32))
         {
-            MIOPEN_LOG_I("Step 1: AI heuristics selected kernel: " << kernel_id);
-            if(is_deterministic && split_k != 1)
-            {
-                MIOPEN_LOG_I("Deterministic mode: Overriding AI-predicted split_k="
-                             << split_k << " to split_k=1");
-                split_k = 1;
-                if(!valid_kernels.empty())
-                    kernel_id = valid_kernels[index] + "+1";
-            }
             return;
         }
-        else
-        {
-            MIOPEN_LOG_I2("Step 1: AI heuristics failed, proceeding to default initialization");
-            // print results to log to help debugging
-            if(!ai_success)
-                MIOPEN_LOG_I2("Step 1: AI heuristics internal failure");
-            else if(result.IsEmpty())
-                MIOPEN_LOG_I2("Step 1: AI heuristics returned empty result");
-        }
     }
-    else
-    {
-        MIOPEN_LOG_I2("Step 1: AI heuristics skipped (disabled or dummy context)");
-    }
-#else
-    MIOPEN_LOG_I2("Step 1: AI heuristics not available (MIOPEN_ENABLE_AI_KERNEL_TUNING disabled)");
 #endif
 
+    // Fallback to default initialization
     InitValidKernels(problem);
     if(!valid_kernels.empty())
     {
-        index     = 0;
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
         if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
             DefaultKernelFromList(ctx);
-
-        MIOPEN_LOG_I("Step 2: Default initialization selected kernel: " << kernel_id
-                                                                        << " at index: " << index);
-    }
-    else
-    {
-        MIOPEN_LOG_W("Step 2: Default initialization failed - no valid kernels found");
+        state.SetResult(index, split_k, k3DWrwSolverConfig.uses_split_k);
     }
 
     // Invariant: split_k must always be 1 in deterministic mode
