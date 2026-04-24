@@ -39,7 +39,10 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 )
 
 option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
-option(ENABLE_CLANG_FORMAT "Enable clang-format targets" ON)
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+if(NOT ENABLE_CLANG_FORMAT)
+    message(WARNING "Clang-Format checks are disabled. CI requires passing clang-format checks.")
+endif()
 
 list(
     PREPEND
@@ -91,9 +94,7 @@ if (NOT HIPDNN_SKIP_TESTS)
     set(SKIP_TEST_NAME_VALIDATION ON)
     include(Tests)
 endif()
-if (ENABLE_CLANG_FORMAT)
-    include(ClangCheck)
-endif()
+include(ClangCheck)
 
 if(WIN32)
     set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "bin")
