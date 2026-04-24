@@ -40,10 +40,10 @@ function(_build_test_environment_list_internal OUT_VAR COVERAGE)
 endfunction()
 
 # Creates a custom target to validate test names using a Python script.
-# Validation runs when the script exists at the common cmake/scripts/ location; otherwise a dummy
-# target is created.
+# Validation runs when the script exists at the common cmake/scripts/ location and
+# SKIP_TEST_NAME_VALIDATION is not set; otherwise a dummy target is created.
 function(_create_test_name_validation_target_internal prefix_name)
-    if(Python3_FOUND AND EXISTS "${_TEST_NAME_VALIDATOR_SCRIPT}")
+    if(Python3_FOUND AND EXISTS "${_TEST_NAME_VALIDATOR_SCRIPT}" AND NOT SKIP_TEST_NAME_VALIDATION)
         set(TEST_EXECUTABLES_FILE ${CMAKE_BINARY_DIR}/${prefix_name}_test_executables.txt)
         list(REMOVE_DUPLICATES CHECK_EXECUTABLE_PATHS_GLOBAL)
         file(WRITE ${TEST_EXECUTABLES_FILE} "")

@@ -98,6 +98,7 @@ include(Dependencies)
 if(HIPKERNELPROVIDER_ENABLE_TESTS)
     fetch_gtest_dependency()
 endif()
+set(SKIP_TEST_NAME_VALIDATION ON)
 include(Tests)
 
 if(WIN32)
