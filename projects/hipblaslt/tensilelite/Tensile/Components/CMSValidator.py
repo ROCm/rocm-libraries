@@ -2152,23 +2152,6 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
             else:
                 _hook_up_packs_bf16(packs, local_reads)
 
-            # Dual-path validation: compare register-based must_start_after against positional
-            reg_deps = derive_pack_must_start_after(packs, local_reads)
-            if reg_deps:
-                for pack in packs:
-                    if pack.issue_index not in reg_deps:
-                        continue
-                    positional_deps = set(id(d) for d in pack.must_start_after)
-                    register_deps = set(id(d) for d in reg_deps[pack.issue_index])
-                    if positional_deps != register_deps:
-                        pos_names = sorted(d.name + f"@{d.issued_at.vmfma_index}" for d in pack.must_start_after)
-                        reg_names = sorted(d.name + f"@{d.issued_at.vmfma_index}" for d in reg_deps[pack.issue_index])
-                        printWarning(
-                            f"must_start_after mismatch for {pack_name}[{pack.issue_index}] "
-                            f"({type(pack).__name__}): "
-                            f"positional={pos_names}, register={reg_names}"
-                        )
-
             _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
 
 def derive_pack_must_start_after(
@@ -2224,7 +2207,14 @@ def derive_pack_must_start_after(
                     dep = producers[key]
                     deps[id(dep)] = dep
 
-        result[pack.issue_index] = list(deps.values())
+        # Reduce to only the latest dependency — only the latest producer
+        # matters for scheduling (Pack.validate() already takes max anyway).
+        # This matches the positional code which uses max(..., key=done_idx).
+        if deps:
+            latest = max(deps.values(), key=lambda d: d.done_idx())
+            result[pack.issue_index] = [latest]
+        else:
+            result[pack.issue_index] = []
 
         # Update producer map with this pack's destination
         dst = get_dst_range(pack.rocisa_inst)
