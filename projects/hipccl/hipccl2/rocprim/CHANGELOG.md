@@ -32,6 +32,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
   * rocPRIM now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
   * See `shared/primbench/README.md` for primbench its documentation.
+* Uses mold linker for compilation if availible.
 
 ### Removed
 

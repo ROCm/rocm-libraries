@@ -26,6 +26,8 @@ Optional:
   * This is automatically downloaded and built by the CMake script.
 * [AMD SMI](https://github.com/ROCm/amdsmi)
   * Required only for benchmarks. Building benchmarks is off by default.
+* [Mold](https://github.com/rui314/mold)
+  * Optional for building. Used if installed to speed up building.
 
 ## Build and install
 
