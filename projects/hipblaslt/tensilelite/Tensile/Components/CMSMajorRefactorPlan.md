@@ -45,28 +45,28 @@ Meanwhile, the `idMap` — built in `CustomSchedule.py` — already contains the
 
 ## Implementation Status
 
-| Stage | Description | Status | Notes |
-|-------|-------------|--------|-------|
-| **00a** | Eliminate TimedPack | **Done** | Moved timing fields into Pack, deleted TimedPack class |
-| **00b** | Unify `needed_by` type | **Already done** | GlobalRead.needed_by was already `ValidatorInstruction` |
-| **00c** | Typed context (`ValidationContext` dataclass) | **Deferred** | Can be done as standalone cleanup anytime |
-| **00d** | Document limitations | **Done** | Created `CMSValidator_LIMITATIONS.md` |
-| **01** | Thread idMap/mfmaCode, add `rocisa_inst` | **Done** | Bug found and fixed by review: mfma_code indexing with mfmaReorder |
-| **02** | Type resolution (PACK_TYPE_MAP, resolve_pack_type) | **Done** | Bug found and fixed by review: detect_pack_groups CVT1→CVT0 boundary |
-| **03** | Register utilities | **Done** | `_parse_reg_name`, `get_reg_range`, `reg_ranges_overlap`, `get_dst_range`, `get_src_ranges` |
-| **04** | Register-based pack dependency derivation | **Done** | Dual-path validation with warnings; 4x4 MFMA mismatch noted (see Known Issues) |
-| **05** | Switch `_populate_instructions` to idMap-driven | **Done** | Removed positional fallback, kept it as else branch (removed fully in 07) |
-| **06** | Register-based LR→MFMA needed_by | **Done** | `set_lr_needed_by_from_mfma_operands` implemented, not yet wired into validation loop |
-| **07** | Make idMap/mfmaCode mandatory, delete dead code | **Done** | All fallbacks removed, mock test infrastructure built, all 421 tests pass |
-| **08** | Register-based Pack→MFMA needed_by | **Done** | `set_pack_needed_by_from_mfma_operands` implemented, not yet wired into validation loop |
-| **09** | Tile-math function deletion | **Not started** | Blocked: dual-path 4x4 MFMA mismatch must be resolved first |
-| **10** | SWaitCnt counter verification | **Done** | `verify_swaitcnt_counters` implemented, not yet wired as ValidatorPass |
-| **11** | Multi-ISA framework (ValidationConcern, ISA catalog) | **Done** | `ValidationConcern` enum, `ISA_CONCERN_CATALOG`, `active_concerns()` — not yet wired into isValid |
-| **12** | gfx1151 rules | **Not started** | Blocked: needs full ValidationRule conversion in isValid |
-| **13** | findValidPositions query | **Done** | Brute-force query wrapping isValid |
-| **14** | PipelineStage model for PGR | **Done** | `PipelineStage` dataclass and `build_pipeline_stages()` — not yet wired into Timeline |
-| **15** | Split into modules | **Not started** | Deferred: do after functional changes stabilize |
-| **16** | Separate Timeline | **Not started** | No dependency on 15 |
+| Stage    | Description                                        | Status          | Notes                                                                          |
+|----------|----------------------------------------------------|-----------------|--------------------------------------------------------------------------------|
+| **00a**  | Eliminate TimedPack                                | **Done**        | Moved timing fields into Pack, deleted TimedPack class                         |
+| **00b**  | Unify `needed_by` type                             | **Already done** | GlobalRead.needed_by was already `ValidatorInstruction`                        |
+| **00c**  | Typed context (`ValidationContext` dataclass)      | **Deferred**    | Can be done as standalone cleanup anytime                                      |
+| **00d**  | Document limitations                               | **Done**        | Created `CMSValidator_LIMITATIONS.md`                                          |
+| **01**   | Thread idMap/mfmaCode, add `rocisa_inst`           | **Done**        | Bug fixed by review: mfma_code indexing with mfmaReorder                       |
+| **02**   | Type resolution (PACK_TYPE_MAP, resolve_pack_type) | **Done**        | Bug fixed by review: detect_pack_groups CVT1→CVT0 boundary                    |
+| **03**   | Register utilities                                 | **Done**        | `get_reg_range`, `reg_ranges_overlap`, `get_dst_range`, `get_src_ranges`       |
+| **04**   | Register-based pack dependency derivation          | **Done**        | Dual-path with warnings; 4x4 MFMA mismatch noted (see Known Issues)           |
+| **05**   | Switch `_populate_instructions` to idMap-driven    | **Done**        | Positional fallback kept as else branch (removed fully in 07)                  |
+| **06**   | Register-based LR→MFMA needed_by                   | **Done**        | `set_lr_needed_by_from_mfma_operands` — not yet wired into validation loop     |
+| **07**   | Make idMap/mfmaCode mandatory, delete dead code    | **Done**        | All fallbacks removed, mock test infra built, all 421 tests pass               |
+| **08**   | Register-based Pack→MFMA needed_by                 | **Done**        | `set_pack_needed_by_from_mfma_operands` — not yet wired into validation loop   |
+| **09**   | Tile-math function deletion                        | **Not started** | Blocked: dual-path 4x4 MFMA mismatch must be resolved first                   |
+| **10**   | SWaitCnt counter verification                      | **Done**        | `verify_swaitcnt_counters` — not yet wired as ValidatorPass                    |
+| **11**   | Multi-ISA framework (ValidationConcern, catalog)   | **Done**        | `ValidationConcern`, `ISA_CONCERN_CATALOG`, `active_concerns()` — not wired    |
+| **12**   | gfx1151 rules                                      | **Not started** | Blocked: needs full ValidationRule conversion in isValid                        |
+| **13**   | findValidPositions query                           | **Done**        | Brute-force query wrapping isValid                                             |
+| **14**   | PipelineStage model for PGR                        | **Done**        | `PipelineStage`, `build_pipeline_stages()` — not yet wired into Timeline       |
+| **15**   | Split into modules                                 | **Not started** | Deferred: do after functional changes stabilize                                |
+| **16**   | Separate Timeline                                  | **Not started** | No dependency on 15                                                            |
 
 ### Known Issues
 
