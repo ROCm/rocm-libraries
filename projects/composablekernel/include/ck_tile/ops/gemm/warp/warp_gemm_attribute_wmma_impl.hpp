@@ -108,6 +108,28 @@ struct WarpGemmAttributeWmmaImpl
         return bit_cast<CVecType>(Traits::template wmma_intrinsic<Params...>(
             a_vec, a_scale, b_vec, b_scale, CVecType{0.f}));
     }
+
+    // scale16 overloads (int64_t scales)
+    template <typename... Params>
+    CK_TILE_DEVICE void operator()(CVecType& c_vec,
+                                   const AVecType& a_vec,
+                                   const int64_t& a_scale,
+                                   const BVecType& b_vec,
+                                   const int64_t& b_scale) const
+    {
+        c_vec = Traits::template wmma_intrinsic<Params...>(a_vec, a_scale, b_vec, b_scale, c_vec);
+    }
+
+    // c_vec = a_vec * b_vec
+    template <typename... Params>
+    CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec,
+                                       const int64_t& a_scale,
+                                       const BVecType& b_vec,
+                                       const int64_t& b_scale) const
+    {
+        return bit_cast<CVecType>(Traits::template wmma_intrinsic<Params...>(
+            a_vec, a_scale, b_vec, b_scale, CVecType{0.f}));
+    }
 };
 
 using DeviceIp = remove_cvref_t<decltype(ck_tile::get_device_arch())>;
