@@ -153,10 +153,15 @@ def _make_mock_grinc(count: int) -> list:
     return items
 
 
-def _make_mock_swap_packs(count: int) -> list:
-    """Create mock VSwapB32 instructions for swap packs at the start of TF32 pack sequences."""
+def _make_mock_swap_packs(count: int, lr_base: int = LRA_BASE) -> list:
+    """Create mock VSwapB32 instructions for swap packs.
+
+    In real code, v_swap_b32 transposes register pairs within the LR
+    destination space. Each swap reads and writes two different VGPRs
+    in the LR space.
+    """
     from rocisa.instruction import VSwapB32
-    return [VSwapB32(dst=vgpr(SWAP_BASE + i, 1), src=vgpr(SWAP_BASE + i + 1, 1))
+    return [VSwapB32(dst=vgpr(lr_base + i * 2, 1), src=vgpr(lr_base + i * 2 + 1, 1))
             for i in range(count)]
 
 
@@ -285,36 +290,52 @@ def _make_mock_packs_tf32(count: int, pack_dst_base: int = PACK_A_DST_BASE,
                 src1=vgpr(lr_base + group * 8 + j * 2 + 1, 1),
             ))
         elif idx_in_group < 20:
-            # Middle-16[k]: pairs sharing tmp register
+            # Middle-16[k]: pairs sharing tmp register.
+            # Real code: v_cvt_f32_bf16 (even) writes to tmp from CVT0 output,
+            #            v_sub_f32 (odd) reads tmp and the T-reg, writes to output.
+            # Both read from CVT0 output space, NOT directly from LR space.
             k = idx_in_group - 4  # 0..15
             tmp_reg = TF32_INTERMEDIATE_BASE + group
             mid_out_base = TF32_INTERMEDIATE_BASE + 100 + group * 16
+            cvt0_idx = k // 4  # which CVT0 this pair depends on
             if k % 2 == 0:
-                # Even: writes to tmp, reads from CVT0 output
-                cvt0_idx = k // 4  # which CVT0 this pair depends on
+                # Even (v_cvt_f32_bf16): reads from CVT0 output, writes to tmp
                 items.append(_VSubF32(
                     dst=vgpr(tmp_reg, 1),
                     src0=vgpr(CVT0_BASE + group * 4 + cvt0_idx, 1),
-                    src1=vgpr(lr_base + group * 8 + k % 8, 1),
+                    src1=vgpr(CVT0_BASE + group * 4 + cvt0_idx, 1),
                 ))
             else:
-                # Odd: reads from tmp, writes to middle output space
+                # Odd (v_sub_f32): reads from CVT0 output and tmp, writes to middle output
                 items.append(_VSubF32(
                     dst=vgpr(mid_out_base + k, 1),
-                    src0=vgpr(lr_base + group * 8 + k % 8, 1),
+                    src0=vgpr(CVT0_BASE + group * 4 + cvt0_idx, 1),
                     src1=vgpr(tmp_reg, 1),
                 ))
         else:
-            # CVT1[j]: reverse order writes into pack output space
+            # CVT1[j]: reverse order writes into pack output space.
+            # In real code, v4..v7 (src, dst=False) and v4d..v7d (dst, dst=True) are
+            # the SAME X registers. CVT1 reads and writes within the pack output block,
+            # creating the WAR hazard chain (each CVT1 overwrites a register the
+            # previous CVT1 read).
+            #   CVT1[0]: reads pack_dst+2, pack_dst+3, writes pack_dst+3
+            #   CVT1[1]: reads pack_dst+0, pack_dst+1, writes pack_dst+2 (WAR on CVT1[0])
+            #   CVT1[2]: reads from middle/LR space, writes pack_dst+1 (WAR on CVT1[1])
+            #   CVT1[3]: reads from middle/LR space, writes pack_dst+0 (WAR on CVT1[1])
             j = idx_in_group - 20  # 0, 1, 2, 3
             dst_offset = 3 - j  # reverse: 3, 2, 1, 0
-            mid_out_base = TF32_INTERMEDIATE_BASE + 100 + group * 16
-            # CVT1 sources from middle-16 output space
-            # Use the odd-indexed middle outputs (those are the v_sub results)
-            src0_reg = mid_out_base + (3 - j) * 4 + 3  # odd middle output
-            src1_reg = mid_out_base + (3 - j) * 4 + 1  # odd middle output
+            pack_base = pack_dst_base + group * 4
+            if j < 2:
+                # CVT1[0,1]: source from pack output space (same as dst space)
+                src0_reg = pack_base + (1 - j) * 2
+                src1_reg = pack_base + (1 - j) * 2 + 1
+            else:
+                # CVT1[2,3]: source from middle-16 output space
+                mid_out_base = TF32_INTERMEDIATE_BASE + 100 + group * 16
+                src0_reg = mid_out_base + (3 - j) * 4 + 3
+                src1_reg = mid_out_base + (3 - j) * 4 + 1
             items.append(VCvtPkF32toBF16(
-                dst=vgpr(pack_dst_base + group * 4 + dst_offset, 1),
+                dst=vgpr(pack_base + dst_offset, 1),
                 src0=vgpr(src0_reg, 1),
                 src1=vgpr(src1_reg, 1),
             ))
@@ -378,7 +399,7 @@ def make_mock_id_map(schedule_info, kernel=None) -> dict:
                         vw = kernel.get("VectorWidthA" if is_a else "VectorWidthB", 1)
                         if vw > 1:
                             n_swaps = 4 * (vw - 1)
-                swap_items = _make_mock_swap_packs(n_swaps)
+                swap_items = _make_mock_swap_packs(n_swaps, lr_base=lr_base)
                 remaining = count - n_swaps
                 if is_4x4_tf32:
                     pack_items = _make_mock_packs_tf32_4x4(remaining,

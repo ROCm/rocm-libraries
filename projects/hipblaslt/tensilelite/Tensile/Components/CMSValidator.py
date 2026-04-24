@@ -2211,12 +2211,13 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
                     if pos_latest is None or reg_latest is None:
                         continue
                     if pos_latest.done_idx() != reg_latest.done_idx():
-                        pos_desc = f"{pos_latest.name}@{pos_latest.issued_at.vmfma_index}"
-                        reg_desc = f"{reg_latest.name}@{reg_latest.issued_at.vmfma_index}"
+                        pos_done = pos_latest.done_idx()
+                        reg_done = reg_latest.done_idx()
                         printWarning(
                             f"must_start_after mismatch for {pack_name}[{pack.issue_index}] "
                             f"({type(pack).__name__}): "
-                            f"positional={pos_desc}, register={reg_desc}"
+                            f"positional={pos_latest.name} done=({pos_done.loop_index},{pos_done.vmfma_index},{pos_done.sub_index}), "
+                            f"register={reg_latest.name} done=({reg_done.loop_index},{reg_done.vmfma_index},{reg_done.sub_index})"
                         )
 
             _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
