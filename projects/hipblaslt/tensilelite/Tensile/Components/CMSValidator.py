@@ -2129,6 +2129,31 @@ def _get_lrs_for_pack(timeline: Timeline, use_plr_pack: bool, pack_name: str, lo
     local_reads = timeline.get_instructions(lr_names, loop_to_use)
     return [lr for _,lr in local_reads]
 
+def _hook_up_middle_16_pairs(packs: list[Pack], all_middle_16_packs: list['MiddlePack']) -> None:
+    """Set pair_consumer and next_scheduled_middle_16 for middle-16 packs.
+
+    Middle-16 packs (v_cvt_f32_bf16 + v_sub_f32 pairs) share a temporary register.
+    Each pair must be scheduled adjacently — no other middle-16 pack (even from
+    other groups) may be scheduled between a pair's producer and consumer.
+    """
+    pack_groups: dict[int, list[Pack]] = defaultdict(list)
+    for pack in packs:
+        if isinstance(pack, MiddlePack):
+            pack_groups[pack.group_index].append(pack)
+
+    for group_idx in sorted(pack_groups.keys()):
+        middle_packs = pack_groups[group_idx]
+        for i in range(0, len(middle_packs), 2):
+            middle_packs[i].pair_consumer = middle_packs[i + 1]
+
+    for pack in packs:
+        if not isinstance(pack, MiddlePack):
+            continue
+        if pack.pair_consumer is None:
+            continue
+        pack.next_scheduled_middle_16 = all_middle_16_packs[all_middle_16_packs.index(pack) + 1]
+
+
 @applies_only_once
 def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
     """
@@ -2182,49 +2207,17 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
             if not local_reads:
                 continue
 
-            if is_tf32_emulation:
-                if is_4x4mfma_tf32:
-                    is_a = pack_name.startswith("PackA")
-                    vw = kernel["VectorWidthA" if is_a else "VectorWidthB"]
-                    _hook_up_packs_f32_mfma(packs, local_reads, vw)
-                else:
-                    _hook_up_packs_f32(packs, all_middle_16_packs, local_reads)
-                _handle_min_pack_quad_cycles(packs)
-            else:
-                _hook_up_packs_bf16(packs, local_reads)
+            # Set must_start_after from register operand tracing (RAW + WAR).
+            reg_deps = derive_pack_must_start_after(packs, local_reads)
+            for pack in packs:
+                if pack.issue_index in reg_deps and reg_deps[pack.issue_index]:
+                    pack.must_start_after = reg_deps[pack.issue_index]
 
-            # Dual-path validation: compare register-based (RAW+WAR) must_start_after
-            # against positional. Only run when the idMap contains real (named) registers
-            # from the kernel writer — mock registers (base name 'v') can't model VW>1
-            # swap pack interleaving, so mismatches are expected with mocks.
-            has_named_regs = any(
-                lr.rocisa_inst is not None and
-                get_dst_range(lr.rocisa_inst) is not None and
-                get_dst_range(lr.rocisa_inst)[0] != 'v'
-                for lr in local_reads
-            )
-            if has_named_regs:
-                reg_deps = derive_pack_must_start_after(packs, local_reads)
-                if reg_deps:
-                    for pack in packs:
-                        if pack.issue_index not in reg_deps:
-                            continue
-                        reg_list = reg_deps[pack.issue_index]
-                        if not reg_list:
-                            continue
-                        pos_latest = max(pack.must_start_after, key=lambda d: d.done_idx()) if pack.must_start_after else None
-                        reg_latest = reg_list[0]
-                        if pos_latest is None or reg_latest is None:
-                            continue
-                        if pos_latest.done_idx() != reg_latest.done_idx():
-                            pos_done = pos_latest.done_idx()
-                            reg_done = reg_latest.done_idx()
-                            printWarning(
-                                f"must_start_after mismatch for {pack_name}[{pack.issue_index}] "
-                                f"({type(pack).__name__}): "
-                                f"positional={pos_latest.name} done=({pos_done.loop_index},{pos_done.vmfma_index},{pos_done.sub_index}), "
-                                f"register={reg_latest.name} done=({reg_done.loop_index},{reg_done.vmfma_index},{reg_done.sub_index})"
-                            )
+            # TF32-specific constraints
+            if is_tf32_emulation:
+                _handle_min_pack_quad_cycles(packs)
+                if not is_4x4mfma_tf32:
+                    _hook_up_middle_16_pairs(packs, all_middle_16_packs)
 
             _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
 
@@ -2253,11 +2246,19 @@ def derive_pack_must_start_after(
         (reduced to the single latest dependency).
         Empty dict if any instruction lacks rocisa_inst.
     """
-    # Check that all instructions have rocisa_inst
-    if not all(p.rocisa_inst is not None for p in packs):
-        return {}
-    if not all(lr.rocisa_inst is not None for lr in local_reads):
-        return {}
+    # All instructions must have rocisa_inst (id_map is mandatory since stage 07)
+    missing_packs = [p for p in packs if p.rocisa_inst is None]
+    if missing_packs:
+        raise ValueError(
+            f"Pack(s) missing rocisa_inst: {[f'{p.name}[{p.issue_index}]' for p in missing_packs]}. "
+            f"id_map is mandatory — all instructions must have rocisa_inst."
+        )
+    missing_lrs = [lr for lr in local_reads if lr.rocisa_inst is None]
+    if missing_lrs:
+        raise ValueError(
+            f"LocalRead(s) missing rocisa_inst: {[f'{lr.name}[{lr.issue_index}]' for lr in missing_lrs]}. "
+            f"id_map is mandatory — all instructions must have rocisa_inst."
+        )
 
     # Producer map: register -> instruction that last WROTE this register
     producers: dict[tuple[str, int], ValidatorInstruction] = {}
