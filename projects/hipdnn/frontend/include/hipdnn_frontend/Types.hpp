@@ -78,7 +78,7 @@ enum class PointwiseMode
     NOT_SET = 0, ///< Mode not specified
     ABS = 1, ///< Absolute value: |x|
     ADD = 2, ///< Addition: x + y
-    ADD_SQUARE = 3, ///< Add and square: (x + y)²
+    ADD_SQUARE = 3, ///< Add x to y squared: x + y²
     BINARY_SELECT = 4, ///< Ternary select based on condition
     CEIL = 5, ///< Ceiling function
     CMP_EQ = 6, ///< Compare equal: x == y

@@ -58,7 +58,7 @@ class StinkyIRVerifierPass : public Pass {
     const char* getName() const override {
         return "StinkyIRVerifier";
     }
-    void run(Function& func, PassContext& ctx) override;
+    PreservedAnalyses run(Function& func, PassContext& ctx, AnalysisManager& /*AM*/) override;
 
    private:
     AsmVerifierConfig config_;

@@ -75,6 +75,7 @@ class DeadCodeEliminationPassTest : public ::testing::Test {
     }
 
     GemmTileConfig gemmConfig;
+    AnalysisManager am;
 };
 
 // Test 1: Remove dead store (register overwritten before use)
@@ -96,7 +97,7 @@ v[6] = "st.v_sub_f32"(v[0], v[3])
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -129,7 +130,7 @@ v[0] = "st.v_sub_f32"(v[10], v[11])
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -161,7 +162,7 @@ v[5] = "st.v_fma_f32"(v[3], v[0], 1.0)
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -191,7 +192,7 @@ v[7] = "st.v_fma_f32"(v[3], v[1], 1.0)
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -221,7 +222,7 @@ v[4] = "st.v_mul_f32"(v[1], v[2])
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -246,7 +247,7 @@ TEST_F(DeadCodeEliminationPassTest, EmptyIR) {
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
     // Empty IR should not cause any errors
 }
 
@@ -267,7 +268,7 @@ TEST_F(DeadCodeEliminationPassTest, AllDeadCode) {
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -300,7 +301,7 @@ v[10] = "st.v_add_f32"(v[6], v[7])
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -337,7 +338,7 @@ v[6] = "st.v_fma_f32"(v[0], v[3], 3.0)
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 
@@ -365,7 +366,7 @@ v[4] = "st.v_sub_f32"(v[0], v[5])
     passCtx.setGemmTileConfig(gemmConfig);
 
     auto dcePass = createDeadCodeEliminationPass();
-    dcePass->run(*func, passCtx);
+    dcePass->run(*func, passCtx, am);
 
     std::string result = getFunctionIR(*func);
 

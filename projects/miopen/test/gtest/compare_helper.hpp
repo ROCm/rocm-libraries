@@ -38,13 +38,13 @@ std::vector<T> const& GetResultData(tensor<T> const& result)
 }
 
 template <class T>
-constexpr double GetResultDataErrorMargin(std::vector<T> const& result, double tolerance)
+constexpr double GetResultDataErrorMargin(std::vector<T> const& /*result*/, double tolerance)
 {
     return (std::numeric_limits<T>::epsilon() * tolerance);
 }
 
 template <class T>
-constexpr double GetResultDataErrorMargin(tensor<T> const& result, double tolerance)
+constexpr double GetResultDataErrorMargin(tensor<T> const& /*result*/, double tolerance)
 {
     return (std::numeric_limits<T>::epsilon() * tolerance);
 }
