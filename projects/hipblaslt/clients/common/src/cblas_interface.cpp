@@ -526,7 +526,7 @@ void cast_mul(customVector<TcCast>& dst,
                             else
                             {
                                 auto scaled_A = safe_multiply(static_cast<TcCast>(get_cast_val(A_val)), scaleA);
-                                auto result   = safe_multiply(scaled_A, AlphaVec[i % m]);
+                                auto result   = safe_multiply(scaled_A, AlphaVec[i / m]);
 
                                 if constexpr(destination_is_real)
                                 {
