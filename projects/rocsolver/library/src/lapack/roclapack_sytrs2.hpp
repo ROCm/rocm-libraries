@@ -39,6 +39,14 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/*
+
+===============================================================
+sytrs2 is not intended for inclusion in the public API.
+It exists to provide an alternative, sometimes faster, implementation of sytrs.
+==============================================================
+*/
+
 #ifndef SYTRS1_MAX_THDS
 #define SYTRS1_MAX_THDS 256
 #endif

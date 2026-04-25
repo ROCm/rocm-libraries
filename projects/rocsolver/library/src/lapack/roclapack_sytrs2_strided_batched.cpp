@@ -29,6 +29,14 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/*
+
+===============================================================
+sytrs2 is not intended for inclusion in the public API.
+It exists to provide an alternative, sometimes faster, implementation of sytrs.
+==============================================================
+*/
+
 template <typename T, typename I>
 rocblas_status rocsolver_sytrs2_strided_batched_impl(rocblas_handle handle,
                                                      const rocblas_fill uplo,
