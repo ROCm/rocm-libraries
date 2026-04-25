@@ -1060,34 +1060,19 @@ pipeline {
                          description: 'Some checks have failed'
             script {
                 if (params.BUILD_THEROCK_DOCKER) {
-                    withCredentials([string(credentialsId: 'TEAMS_WEBHOOK_URL', variable: 'TEAMS_WEBHOOK_URL')]) {
-                        def shortHash = env.THEROCK_SHORT_HASH ?: 'unknown'
-                        def payload = """
-                            {
-                                "@type": "MessageCard",
-                                "@context": "https://schema.org/extensions",
-                                "summary": "TheRock promotion failed",
-                                "themeColor": "FF0000",
-                                "title": "TheRock Docker Promotion Failed",
-                                "sections": [{
-                                    "facts": [
-                                        { "name": "Job", "value": "${env.JOB_NAME}" },
-                                        { "name": "Build", "value": "#${env.BUILD_NUMBER}" },
-                                        { "name": "TheRock hash", "value": "${shortHash}" }
-                                    ]
-                                }],
-                                "potentialAction": [{
-                                    "@type": "OpenUri",
-                                    "name": "View Build",
-                                    "targets": [{ "os": "default", "uri": "${env.BUILD_URL}" }]
-                                }]
-                            }
-                        """.stripIndent().trim()
-                        sh """curl -s -o /dev/null -w '%{http_code}' \
-                            -H 'Content-Type: application/json' \
-                            -d '${payload}' \
-                            "\${TEAMS_WEBHOOK_URL}" """
-                    }
+                    def shortHash = env.THEROCK_SHORT_HASH ?: 'unknown'
+                    office365ConnectorSend(
+                        webhookUrl: credentials('TEAMS_WEBHOOK_URL'),
+                        message: 'TheRock Docker Promotion Failed',
+                        status: 'Failure',
+                        color: '#FF0000',
+                        factDefinitions: [
+                            [name: 'Job',          template: "${env.JOB_NAME}"],
+                            [name: 'Build',        template: "#${env.BUILD_NUMBER}"],
+                            [name: 'TheRock hash', template: shortHash],
+                            [name: 'Build URL',    template: "${env.BUILD_URL}"]
+                        ]
+                    )
                 }
             }
         }
