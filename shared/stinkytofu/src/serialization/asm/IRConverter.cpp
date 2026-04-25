@@ -43,6 +43,13 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
         return;
     }
 
+    // "FENCE" is the mnemonic printed by AsmPrinter; "scheduling_fence" is the
+    // rocisa instruction string. Both round-trip to a scheduling fence.
+    // Fences carry no modifiers — they are hard region boundaries with no tokens.
+    if (inst->opcodeStr == "FENCE" || inst->opcodeStr == "scheduling_fence") {
+        irBuilder.createFence();
+    }
+
     // AsmDirective (TEXTBLOCK / .set / etc.) — produced by RawAsmParser for unknown mnemonics,
     // directives, and symbolic-register lines it cannot fully parse.
     if (inst->opcodeStr == "asm_directive") {
