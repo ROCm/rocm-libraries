@@ -2899,7 +2899,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 set_computeInterface(
                     h_alpha[i],
                     1.0,
-                    Tc); // use dScaleAlphaVec instead, original alpha = 1.0 for verify
+                    Tc, 
+                    TiA); // use dScaleAlphaVec instead, original alpha = 1.0 for verify
             }
             else
                 alpha_in[i] = &(h_alpha[i]);
