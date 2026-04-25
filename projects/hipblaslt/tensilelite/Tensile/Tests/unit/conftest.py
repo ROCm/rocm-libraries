@@ -26,19 +26,19 @@ def isa_infrastructure():
     from Tensile.Common.Capabilities import makeIsaInfoMap
     from Tensile.Toolchain.Component import Assembler
 
-    isa = IsaVersion(9, 5, 0)
     compiler = shutil.which('amdclang++') or shutil.which('clang++')
     assembler_bin = shutil.which('amdclang') or shutil.which('clang')
     assert compiler, "No C++ compiler found for ISA capability probing"
     assert assembler_bin, "No assembler binary found"
 
-    isaInfoMap = makeIsaInfoMap([isa], compiler)
+    # Probe both gfx950 and gfx1151 so all CMS test classes can use real idMaps.
+    isaInfoMap = makeIsaInfoMap([IsaVersion(9, 5, 0), IsaVersion(11, 5, 1)], compiler)
     # Note: do NOT call assignGlobalParameters here — it mutates global state
     # and breaks test_validateParameterTypes. The Solution and KernelWriter
     # work without it as long as isaInfoMap is passed explicitly.
     asm = Assembler(assembler_bin, 'V5')
 
-    return isa, isaInfoMap, asm
+    return None, isaInfoMap, asm
 
 
 def pytest_addoption(parser):
