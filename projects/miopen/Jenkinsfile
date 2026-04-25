@@ -1081,7 +1081,6 @@ pipeline {
                         [name: 'Build',           template: "#${env.BUILD_NUMBER}"],
                         [name: 'Commit',          template: "${env.GIT_COMMIT?.take(7) ?: 'unknown'}"],
                         [name: 'TheRock hash',    template: "${env.THEROCK_PROMOTED_HASH ?: 'unknown'}"],
-                        [name: 'CK hash',         template: "${env.CK_GIT_HASH ?: 'unknown'}"],
                         [name: 'Duration',        template: "${currentBuild.durationString}"],
                         [name: 'Previous result', template: "${currentBuild.previousBuild?.result ?: 'N/A'}"],
                         [name: 'Build URL',       template: "${env.BUILD_URL}"]
