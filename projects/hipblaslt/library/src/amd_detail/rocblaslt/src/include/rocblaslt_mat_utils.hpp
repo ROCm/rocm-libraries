@@ -88,6 +88,43 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
 }
 
 /*******************************************************************************
+ * Validate the Matmul Arguments for General Batched GEMM Case
+ * In General Batched GEMM case:
+ * 1. Only Tensorwide scaling is supported.
+ * 2. Only HIPBLASLT_EPILOGUE_DEFAULT is supported.
+ ******************************************************************************/
+ inline rocblaslt_status validateMatmulArgsForGeneralBatchedGemm(RocblasltContractionProblem::ScalingFormat scaleAType,
+                                                                 RocblasltContractionProblem::ScalingFormat scaleBType,
+                                                                 const rocblaslt_epilogue& epilogue)
+{
+    rocblaslt_status status = rocblaslt_status_continue;
+    
+    if((scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleAType == RocblasltContractionProblem::ScalingFormat::None) &&
+       (scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleBType == RocblasltContractionProblem::ScalingFormat::None))
+        status = rocblaslt_status_continue;
+    else
+        status = rocblaslt_status_invalid_value;
+
+    if(epilogue != ROCBLASLT_EPILOGUE_DEFAULT)
+        status = rocblaslt_status_invalid_value;
+    
+    if(status != rocblaslt_status_continue)
+    {
+        log_error(__func__,
+                  "invalid args for General Batched GEMM",
+                  "scaleAType",
+                  rocblaslt_scaling_format_to_string(scaleAType),
+                  "scaleBtype",
+                  rocblaslt_scaling_format_to_string(scaleBType),
+                  "epilogue",
+                  rocblaslt_epilogue_to_string(epilogue));
+    }   
+    return status;
+}
+
+/*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulArgs(int64_t                       m,

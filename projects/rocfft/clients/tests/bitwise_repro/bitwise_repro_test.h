@@ -126,7 +126,7 @@ void compute_fft_data(Tparams&              params,
     {
         ++n_hip_failures;
         std::stringstream msg;
-        msg << "Work buffer allocation failed with size: " << params.workbuffersize;
+        msg << "Work buffer allocation failed with size: " << e.attempted_size;
         if(skip_runtime_fails)
             throw ROCFFT_SKIP{msg.str()};
         else

@@ -29,6 +29,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -70,6 +71,19 @@ static std::string byte_size_to_str(size_t byte_sz)
                 ret += " ";
             ret += std::to_string(tmp) + " " + u.second;
         }
+    }
+    return ret;
+}
+
+// return a string reporting a vec of byte sizes in a readable format.
+static std::string byte_sizes_to_str(const std::vector<size_t>& byte_sizes)
+{
+    std::string ret;
+    for(auto i : byte_sizes)
+    {
+        if(!ret.empty())
+            ret.push_back(',');
+        ret += byte_size_to_str(i);
     }
     return ret;
 }

@@ -271,7 +271,7 @@ class SignatureDefault(Signature):
             signature.addArg(    "AmaxWS",      SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(    "AmaxSync",    SVK.SIG_GLOBALBUFFER, "u32",        "generic")
 
-        if (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel'):
+        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
             signature.addArg(    "dstD", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
             signature.addArg(               "Synchronizer", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(               "GSUSync", SVK.SIG_VALUE,              "u32")

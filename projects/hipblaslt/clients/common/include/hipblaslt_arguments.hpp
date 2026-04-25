@@ -110,6 +110,7 @@ struct Arguments
     int64_t lde[MAX_SUPPORTED_NUM_PROBLEMS];
 
     int32_t batch_count;
+    int32_t batch_mode;
 
     int32_t iters;
     int32_t cold_iters;
@@ -234,6 +235,7 @@ struct Arguments
     OPER(ldd) SEP                    \
     OPER(lde) SEP                    \
     OPER(batch_count) SEP            \
+    OPER(batch_mode) SEP             \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
     OPER(algo) SEP                   \

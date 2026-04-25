@@ -3,6 +3,12 @@
 Documentation for hipRAND is available at
 [https://rocm.docs.amd.com/projects/hipRAND/en/latest/](https://rocm.docs.amd.com/projects/hipRAND/en/latest/).
 
+## hipRAND 3.3.0 for ROCM 7.13
+
+### Added
+
+* hiprand.dll now contains embedded file version metadata.
+
 ## hipRAND 3.2.0 for ROCM 7.12
 
 ### Added

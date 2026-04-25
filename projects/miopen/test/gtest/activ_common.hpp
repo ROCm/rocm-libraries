@@ -58,12 +58,20 @@ public:
     template <class T, class Tparam>
     static T Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return x;
     }
 
     template <class T, class Tparam>
     static T Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)x;
+        (void)y;
         return dy;
     }
 };
@@ -74,12 +82,19 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return 1 / (1 + std::exp(-x));
     }
 
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)x;
         return static_cast<Tparam>(dy) * y * (static_cast<Tparam>(1) - y);
     }
 };
@@ -90,12 +105,15 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)gamma;
         return beta * std::tanh(alpha * x);
     }
 
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)gamma;
+        (void)x;
         return dy * alpha * (beta - static_cast<Tparam>(y) * y / beta);
     }
 };
@@ -106,12 +124,19 @@ public:
     template <class T, class Tparam>
     static T Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return (x > static_cast<Tparam>(0)) ? x : static_cast<T>(0);
     }
 
     template <class T, class Tparam>
     static T Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)y;
         return (x > static_cast<Tparam>(0)) ? dy : static_cast<T>(0);
     }
 };
@@ -122,12 +147,19 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return std::log1p(std::exp(x));
     }
 
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)y;
         const Tparam threshold = 50.0;
         const Tparam expval    = std::exp(std::min(static_cast<Tparam>(x), threshold));
         return dy * expval / (expval + 1);
@@ -140,12 +172,19 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
         return std::abs(x);
     }
 
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)alpha;
+        (void)beta;
+        (void)gamma;
+        (void)y;
         return dy * static_cast<Tparam>((x > static_cast<Tparam>(0)) ? 1 : -1);
     }
 };
@@ -163,6 +202,8 @@ public:
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)gamma;
+        (void)dy;
         const auto v = alpha + beta * x;
         return v <= std::numeric_limits<decltype(v)>::epsilon() ? 0 : gamma * beta * y / v;
     }
@@ -174,12 +215,17 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)beta;
+        (void)gamma;
         return std::clamp(static_cast<Tparam>(x), static_cast<Tparam>(0), alpha);
     }
 
     template <class T, class Tparam>
     static T Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)beta;
+        (void)gamma;
+        (void)y;
         Tparam x_native = x;
         return (x_native > 0 && x_native <= alpha) ? dy : static_cast<T>(0);
     }
@@ -191,6 +237,8 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)beta;
+        (void)gamma;
         Tparam x_native = x;
         return (x_native > 0) ? x_native : x_native * alpha;
     }
@@ -198,6 +246,9 @@ public:
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)beta;
+        (void)gamma;
+        (void)y;
         return dy * ((x > static_cast<Tparam>(0)) ? 1 : alpha);
     }
 };
@@ -208,6 +259,8 @@ public:
     template <class T, class Tparam>
     static Tparam Forward(Tparam alpha, Tparam beta, Tparam gamma, T x)
     {
+        (void)beta;
+        (void)gamma;
         Tparam x_native = x;
         return (x_native > 0) ? x_native : alpha * std::expm1(x_native);
     }
@@ -215,6 +268,8 @@ public:
     template <class T, class Tparam>
     static Tparam Backward(Tparam alpha, Tparam beta, Tparam gamma, T dy, T x, T y)
     {
+        (void)beta;
+        (void)gamma;
         return dy * ((x > static_cast<Tparam>(0)) ? 1 : y + alpha);
     }
 };
@@ -356,7 +411,7 @@ void CpuActivationPacked(std::size_t num_items, Ts&&... xs)
 }
 
 template <Direction direction, class A, class... Ts>
-[[noreturn]] void CpuActivationNonPacked(std::size_t num_items, Ts&&... xs)
+[[noreturn]] void CpuActivationNonPacked(std::size_t /*num_items*/, Ts&&... /*xs*/)
 {
     throw std::runtime_error("CpuActivationNonPacked is not implemented yet");
 }

@@ -185,20 +185,27 @@ add_fusilli_plugin_test(
     FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
 )
 
-add_fusilli_plugin_test(
-  NAME fusilli_plugin_simple_sdpa_test
-  SRCS sdpa/simple_sdpa.cpp
-  DEPS
-    GTest::gtest_main
-    hip::host
-    hipdnn_frontend
-    hipdnn_plugin_sdk
-    hipdnn_data_sdk
-    hipdnn_test_sdk
-    Threads::Threads
-  COMPILE_DEFS
-    FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
-)
+if(NOT HIPDNN_ENABLE_SDPA)
+  message(WARNING
+          "hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+          "Skipping Fusilli SDPA integration test. "
+          "Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable it.")
+else()
+  add_fusilli_plugin_test(
+    NAME fusilli_plugin_simple_sdpa_test
+    SRCS sdpa/simple_sdpa.cpp
+    DEPS
+      GTest::gtest_main
+      hip::host
+      hipdnn_frontend
+      hipdnn_plugin_sdk
+      hipdnn_data_sdk
+      hipdnn_test_sdk
+      Threads::Threads
+    COMPILE_DEFS
+      FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+  )
+endif()
 
 add_fusilli_plugin_test(
   NAME fusilli_plugin_simple_reduction_test

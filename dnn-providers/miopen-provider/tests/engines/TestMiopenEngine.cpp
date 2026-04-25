@@ -11,6 +11,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "engines/MiopenEngine.hpp"
 #include "mocks/MockHipdnnMiopenContext.hpp"
@@ -23,12 +24,16 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
 TEST(TestMiopenEngine, ConstructorAndId)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(42);
     EXPECT_EQ(engine.id(), 42);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(1);
 
     HipdnnMiopenHandle dummyHandle;
@@ -41,6 +46,8 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
@@ -63,6 +70,8 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
@@ -96,6 +105,8 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
@@ -113,6 +124,8 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
 
 TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
 
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
@@ -130,6 +143,8 @@ TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
 
 TEST(TestMiopenEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
@@ -150,6 +165,8 @@ TEST(TestMiopenEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
 
 TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(0);
 
     MockGraph mockGraph;
@@ -161,6 +178,8 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
 
 TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
@@ -177,6 +196,8 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 
 TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(1);
     HipdnnMiopenHandle dummyHandle;
     MockGraph mockGraph;
@@ -191,6 +212,8 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 
 TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(1);
     HipdnnMiopenHandle dummyHandle;
     MockGraph mockGraph;
@@ -224,6 +247,8 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
 
 TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
@@ -286,6 +311,8 @@ TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
 
 TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuilder)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
@@ -319,6 +346,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
 
 TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnInvalidBenchmarkingKnobType)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(1);
     MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle;
@@ -352,6 +381,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnInvalidBenchmarkingKnob
 
 TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(1);
     MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle;
@@ -384,6 +415,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 
 TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(1);
     MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle;
@@ -417,6 +450,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
 
 TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenConfigInvalid)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(1);
     MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle;
@@ -432,6 +467,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
 
 TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenNoKnobs)
 {
+    SKIP_IF_NO_DEVICES();
+
     MiopenEngine engine(1);
     MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle;
@@ -452,6 +489,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
 
 TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
@@ -487,6 +526,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
 
 TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplicableBuilders)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
