@@ -500,6 +500,17 @@ def getDockerImage(Map conf=[:])
         }
     }
 
+    // Embed the CK commit hash built into this image.
+    def ckHash = sh(
+        script: "git -C ${env.WORKSPACE}/${env.CK_DIR} rev-parse HEAD",
+        returnStdout: true
+    ).trim()
+    if (ckHash) {
+        echo "Embedding CK hash into CI image metadata: ${ckHash}"
+        dockerArgs = dockerArgs + "--label ck.git.hash=${ckHash} "
+        env.CK_GIT_HASH = ckHash
+    }
+
     echo "Docker Args: ${dockerArgs}"
 
     def dockerImage
@@ -509,11 +520,15 @@ def getDockerImage(Map conf=[:])
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
             dockerImage.pull()
         }
-        def embeddedHash = sh(
+        def embeddedTheRockHash = sh(
             script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
             returnStdout: true
         ).trim()
-        echo "CI image TheRock hash: ${embeddedHash ?: 'not set'}"
+        def embeddedCkHash = sh(
+            script: "docker inspect --format '{{ index .Config.Labels \"ck.git.hash\" }}' ${image} 2>/dev/null || true",
+            returnStdout: true
+        ).trim()
+        echo "CI image TheRock hash: ${embeddedTheRockHash ?: 'not set'} | CK hash: ${embeddedCkHash ?: 'not set'}"
     }
     catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
         echo "The job was cancelled or aborted"
