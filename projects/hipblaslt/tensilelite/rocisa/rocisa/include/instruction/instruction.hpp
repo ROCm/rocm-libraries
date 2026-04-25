@@ -194,6 +194,56 @@ namespace rocisa
             return "";
         }
 
+        void setMsb(std::string& kStr, const std::vector<InstructionInput>& srcs, const std::shared_ptr<Container>& dst) const
+        {
+            if(!getAsmCaps()["HasVgprMSB"])
+                return;
+
+            int msbSrc[3] = {0, 0, 0};
+            int msbDst = 0;
+            bool hasVgpr = false;
+            assert(srcs.size() <= 3);
+            for(int i=0; i<srcs.size(); i++){
+                if(std::holds_alternative<std::shared_ptr<Container>>(srcs[i]) && std::get<std::shared_ptr<Container>>(srcs[i]) != nullptr){
+                    auto gpr = dynamic_cast<RegisterContainer*>(std::get<std::shared_ptr<Container>>(srcs[i]).get());
+                    if(gpr && gpr->regType == "v"){
+                        msbSrc[i] = gpr->msb;
+                        hasVgpr = true;
+                    }
+                }
+            }
+            // dst
+            if(dst){
+                std::string s = dst->toString();
+                auto gpr = dynamic_cast<RegisterContainer*>(dst.get());
+                if(gpr && gpr->regType == "v"){
+                    msbDst = gpr->msb;
+                    hasVgpr = true;
+                }
+            }
+            if(!hasVgpr){
+                if(getVgprMsb() == -1)
+                    // Base layer WA: -2 means no-vgpr inst
+                    rocIsa::getInstance().setVgprMsb(-2);
+                return;
+            }
+            int newVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
+            int oriVal = getVgprMsb();
+            if(newVal != oriVal && !outputInlineAsm){
+                // Base layer WA: need to store previous msb value in [15:8] bits.
+                int setVal = oriVal < 0? newVal : newVal + (oriVal << 8);
+                std::string msbStr = "s_set_vgpr_msb " + std::to_string(setVal);
+                std::string msbComment = std::string("src0: " + std::to_string(msbSrc[0]) + ", src1: " + std::to_string(msbSrc[1]) + \
+                    ", src2: " + std::to_string(msbSrc[2]) + ", dst: " + std::to_string(msbDst));
+                msbStr = formatStr(false, msbStr, msbComment, false);
+                // Base layer WA: add a no-vgpr inst if oriVal is non-determined and right after label
+                if(oriVal == -1)
+                    msbStr = "s_nop 0\n" + msbStr;
+                kStr = msbStr + kStr;
+                rocIsa::getInstance().setVgprMsb(newVal);
+            }
+        }
+
         virtual std::vector<InstructionInput> getParams() const = 0;
 
         virtual int getIssueLatency() const
@@ -407,7 +457,9 @@ namespace rocisa
             {
                 kStr += vop3->toString();
             }
-            return formatWithComment(kStr);
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, srcs, dst);
+            return kStr;
         }
     };
 

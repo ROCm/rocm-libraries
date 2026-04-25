@@ -135,7 +135,7 @@ namespace TensileLite
 
             size_t maxStride
                 = *std::max_element(strides.begin(), strides.begin() + contiguousDimensions);
-            size_t copyBytes = maxStride * sizes.at(contiguousDimensions - 1) * desc.elementBytes();
+            size_t copyBytes = multiplyElementSize(maxStride * sizes.at(contiguousDimensions - 1), desc.elementBytes());
 
             for(size_t idx = 0; idx < copyCount; idx++)
             {
@@ -146,7 +146,7 @@ namespace TensileLite
                               sizes.end());
 
                 auto     beginOffset = desc.index(coord);
-                auto     bytesOffset = desc.elementBytes() * beginOffset;
+                size_t   bytesOffset = multiplyElementSize(beginOffset, desc.elementBytes());
                 uint8_t* dstBytes    = (uint8_t*)dst + bytesOffset;
                 uint8_t* srcBytes    = (uint8_t*)dst + bytesOffset;
 

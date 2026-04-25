@@ -507,11 +507,11 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
-         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
+         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -794,8 +794,8 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
-    auto perf_monitor = EfficiencyMonitor::create();
-    perf_monitor->setDeviceId(device_id);
+    // auto perf_monitor = EfficiencyMonitor::create();
+    // perf_monitor->setDeviceId(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);
@@ -916,6 +916,16 @@ try
             return hipblaslt_scaling_format::Vector;
         if(s == 3)
             return hipblaslt_scaling_format::Block_32_UE8M0;
+        if(s == 4)
+            return hipblaslt_scaling_format::Block_16_UE8M0;
+        if(s == 5)
+            return hipblaslt_scaling_format::Block_32_UE4M3;
+        if(s == 6)
+            return hipblaslt_scaling_format::Block_16_UE4M3;
+        if(s == 7)
+            return hipblaslt_scaling_format::Block_32_UE5M3;
+        if(s == 8)
+            return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
         return hipblaslt_scaling_format::none;
@@ -924,20 +934,6 @@ try
     arg.scaleB = scaleInt2Enum(scaleBFormat);
     arg.scaleC = scaleCFormat;
     arg.scaleD = scaleDFormat;
-
-    // Validation for F4 and F6
-    if(arg.a_type == HIP_R_4F_E2M1_EXT || arg.a_type == HIP_R_6F_E2M3_EXT
-       || arg.a_type == HIP_R_6F_E3M2_EXT)
-    {
-        if(!isBlockScaling(arg.scaleA))
-            throw std::invalid_argument("scaleA must be block format for F4 and F6 types");
-    }
-    if(arg.b_type == HIP_R_4F_E2M1_EXT || arg.b_type == HIP_R_6F_E2M3_EXT
-       || arg.b_type == HIP_R_6F_E3M2_EXT)
-    {
-        if(!isBlockScaling(arg.scaleB))
-            throw std::invalid_argument("scaleB must be block format for F4 and F6 types");
-    }
 
     // Block scaling only allows F8/F6/F4
     if(isBlockScaling(arg.scaleA))
@@ -963,10 +959,10 @@ try
                                         + compute_type);
 
         // For C and D, only F32/BF16/F16 allowed when A or B is block scaling format
-        if(arg.c_type != HIP_R_32F && arg.c_type != HIP_R_16F && arg.c_type != HIP_R_16BF)
+        if(arg.c_type != HIP_R_32F && arg.c_type != HIP_R_16F && arg.c_type != HIP_R_16BF && arg.c_type != HIP_R_8F_E4M3 && arg.c_type != HIP_R_8F_E5M2)
             throw std::invalid_argument("Invalid c_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.c_type));
-        if(arg.d_type != HIP_R_32F && arg.d_type != HIP_R_16F && arg.d_type != HIP_R_16BF)
+        if(arg.d_type != HIP_R_32F && arg.d_type != HIP_R_16F && arg.d_type != HIP_R_16BF && arg.c_type != HIP_R_8F_E4M3 && arg.c_type != HIP_R_8F_E5M2)
             throw std::invalid_argument("Invalid d_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.d_type));
     }
