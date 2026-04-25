@@ -3257,7 +3257,7 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     bool                   gradient = false;
     rocblaslt_compute_type compute_type;
     rocblaslt_handle       roc_handle = (rocblaslt_handle)handle;
-
+    hipblasLtBatchMode_t batchMode = HIPBLASLT_BATCH_MODE_STRIDED;
     rocblaslt_status isValid = rocblaslt_matmul_valid_args(matmul_descr,
                                                            A,
                                                            B,
@@ -3355,7 +3355,8 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         stream, // stream
                                         roc_handle->Synchronizer,
                                         arg.swizzle_a, // swizzleA
-                                        arg.swizzle_b}; // swizzleB
+                                        arg.swizzle_b,
+                                        batchMode}; // swizzleB
 
     const hipblasLtMatmulAlgo_t* hip_algo = &heuristicResult[0].algo;
     const rocblaslt_matmul_algo* roc_algo = (const rocblaslt_matmul_algo*)hip_algo;

@@ -7,10 +7,19 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Added
 
 * Added type trait definitions for `__hip_bfloat16`. This should resolve issues where this type did not work with radix-based algorithms.
+* Unit tests for config_types
+
+### Optimized
+
+* Reduced build times for unit tests.
+* Memory usage in unit tests.
 
 ### Resolved issues
 
 * Fixed a silent overflow in `rocprim::device_segmented_reduce` where it could exceed the maximum number of HIP threads, resulting in missing output.
+* Certain large unit tests now properly detect if insufficient system memory is present and skip the test case accordingly.
+* Fixed out-of-bounds memory access in block run length decode.
+* Fixed memory leak in unit tests.
 
 ## rocPRIM 4.3.0 for ROCm 7.12
 
