@@ -221,7 +221,7 @@ immediately:
 6. **Positive dim values.** Each override dim must be `> 0`.
 7. **Positive stride values.** Each override stride must be `> 0`.
 8. **Stride ordering preserved.** Overrides that reorder the layout
-   are rejected at build time; see
+   are rejected at execution time; see
    [§6.3](#63-dynamic-tensor-semantics) for the canonical static /
    dynamic stride distinction.
 
