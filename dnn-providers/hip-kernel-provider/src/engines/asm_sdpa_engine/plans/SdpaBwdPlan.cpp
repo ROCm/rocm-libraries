@@ -9,29 +9,26 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <unordered_map>
+#include <utility>
 
 namespace
 {
 
-constexpr size_t K_WORKSPACE_ALIGNMENT_BYTES = 64;
-
-constexpr size_t alignUp(size_t size, size_t alignment)
-{
-    return (size + alignment - 1) & ~(alignment - 1);
-}
+using asm_sdpa_engine::alignUp;
+using asm_sdpa_engine::K_WORKSPACE_ALIGNMENT_BYTES;
 
 // =============================================================================
 // MhaBwdArgs — convenience struct mirroring AITER's mha_bwd_args
 // =============================================================================
 // This intermediate struct holds all high-level parameters (tensor pointers,
-// element strides, dimensions, scale) so the populate* helpers below can mirror
-// AITER's mha_bwd.cu (lines 430-597) line-for-line, making future AITER
+// element strides, dimensions, scale) so the build* helpers below can mirror
+// AITER's mha_bwd.cu line-for-line, making future AITER
 // updates a textual diff.
 //
-// AITER provenance: csrc/include/mha_bwd.h (struct mha_bwd_args, lines 15-149)
+// AITER provenance: csrc/include/mha_bwd.h::mha_bwd_args (commit 9522048)
 //
 // Naming convention: field names match AITER where possible.  Strides are in
-// *elements* here; they are converted to bytes in the populate helpers.
+// *elements* here; they are converted to bytes in the build helpers.
 
 // NOLINTBEGIN(readability-identifier-naming)
 struct MhaBwdArgs
@@ -105,14 +102,14 @@ struct MhaBwdArgs
 // NOLINTEND(readability-identifier-naming)
 
 // =============================================================================
-// Populate helpers — mirror AITER mha_bwd.cu lines 430-597
+// Build helpers — mirror AITER mha_bwd.cu (commit 9522048)
 // =============================================================================
 
 constexpr unsigned int K_BF16_SIZE = 2;
 constexpr unsigned int K_FP32_SIZE = 4;
 
-// AITER reference: mha_bwd.cu lines 430-448
-asm_sdpa_engine::fmha_bwd_odo_args populateOdoArgs(const MhaBwdArgs& a)
+// AITER reference: mha_bwd.cu::run_fmha_bwd_odo() (commit 9522048)
+asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
 {
     asm_sdpa_engine::fmha_bwd_odo_args odo{};
     odo.ptr_o = a.o_ptr;
@@ -134,8 +131,8 @@ asm_sdpa_engine::fmha_bwd_odo_args populateOdoArgs(const MhaBwdArgs& a)
     return odo;
 }
 
-// AITER reference: mha_bwd.cu lines 460-561
-asm_sdpa_engine::fmha_bwd_dqdkdv_args populateDqdkdvArgs(const MhaBwdArgs& a)
+// AITER reference: mha_bwd.cu::run_fmha_bwd_dqdkdv() (commit 9522048)
+asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a)
 {
     asm_sdpa_engine::fmha_bwd_dqdkdv_args dqdkdv{};
 
@@ -217,8 +214,8 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args populateDqdkdvArgs(const MhaBwdArgs& a)
     return dqdkdv;
 }
 
-// AITER reference: mha_bwd.cu lines 571-597
-asm_sdpa_engine::fmha_bwd_post_kernel_args populatePostArgs(const MhaBwdArgs& a)
+// AITER reference: mha_bwd.cu::run_fmha_bwd_convert_dq() (commit 9522048)
+asm_sdpa_engine::fmha_bwd_post_kernel_args buildPostArgs(const MhaBwdArgs& a)
 {
     asm_sdpa_engine::fmha_bwd_post_kernel_args post{};
 
@@ -331,47 +328,9 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     return a;
 }
 
-// Helper to launch a single kernel via HIP_LAUNCH_PARAM
-hipError_t launchKernel(hipFunction_t func,
-                        void* args,
-                        size_t argSize,
-                        unsigned int gridX,
-                        unsigned int gridY,
-                        unsigned int gridZ)
-{
-    constexpr unsigned int K_BLOCK_DIM = 256;
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays) - HIP API requires C-style array
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      args,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    return hipModuleLaunchKernel(func,
-                                 gridX,
-                                 gridY,
-                                 gridZ,
-                                 K_BLOCK_DIM,
-                                 1,
-                                 1,
-                                 0, // shared memory (kernel uses LDS internally)
-                                 nullptr, // stream (use default)
-                                 nullptr, // kernel args (not used with config)
-                                 config);
-}
-
-void unloadModuleSafe(hipModule_t module, const char* name)
-{
-    if(module != nullptr)
-    {
-        hipError_t err = hipModuleUnload(module);
-        if(err != hipSuccess)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR("Failed to unload "
-                                    << name << " module, error: " << hipGetErrorString(err));
-        }
-    }
-}
+// TODO(Task I8.3): Block size is hardcoded to 256 for all backward kernels.
+// Production should read block size from AITER CSV metadata per kernel config.
+constexpr unsigned int K_BWD_BLOCK_DIM = 256;
 
 } // anonymous namespace
 
@@ -379,74 +338,29 @@ namespace asm_sdpa_engine
 {
 
 // =============================================================================
-// Constructor / Destructor / Move
+// Constructor
 // =============================================================================
 
-SdpaBwdPlan::SdpaBwdPlan(hipModule_t odoModule,
-                         hipFunction_t odoFunc,
-                         hipModule_t dqdkdvModule,
-                         hipFunction_t dqdkdvFunc,
-                         hipModule_t postModule,
-                         hipFunction_t postFunc,
+SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
+                         HipModuleGuard dqdkdvKernel,
+                         HipModuleGuard postKernel,
                          SdpaBwdParams params)
-    : _odoModule(odoModule)
-    , _dqdkdvModule(dqdkdvModule)
-    , _postModule(postModule)
-    , _odoFunc(odoFunc)
-    , _dqdkdvFunc(dqdkdvFunc)
-    , _postFunc(postFunc)
+    : _odoKernel(std::move(odoKernel))
+    , _dqdkdvKernel(std::move(dqdkdvKernel))
+    , _postKernel(std::move(postKernel))
     , _params(params)
 {
 }
 
-SdpaBwdPlan::~SdpaBwdPlan()
+// =============================================================================
+// getDBufferSize — shared by getWorkspaceSize and execute
+// =============================================================================
+
+size_t SdpaBwdPlan::getDBufferSize() const
 {
-    unloadModuleSafe(_odoModule, "ODO");
-    unloadModuleSafe(_dqdkdvModule, "DQDKDV");
-    unloadModuleSafe(_postModule, "DQ_CONVERT");
-}
-
-SdpaBwdPlan::SdpaBwdPlan(SdpaBwdPlan&& other) noexcept
-    : _odoModule(other._odoModule)
-    , _dqdkdvModule(other._dqdkdvModule)
-    , _postModule(other._postModule)
-    , _odoFunc(other._odoFunc)
-    , _dqdkdvFunc(other._dqdkdvFunc)
-    , _postFunc(other._postFunc)
-    , _params(other._params)
-{
-    other._odoModule = nullptr;
-    other._dqdkdvModule = nullptr;
-    other._postModule = nullptr;
-    other._odoFunc = nullptr;
-    other._dqdkdvFunc = nullptr;
-    other._postFunc = nullptr;
-}
-
-SdpaBwdPlan& SdpaBwdPlan::operator=(SdpaBwdPlan&& other) noexcept
-{
-    if(this != &other)
-    {
-        unloadModuleSafe(_odoModule, "ODO");
-        unloadModuleSafe(_dqdkdvModule, "DQDKDV");
-        unloadModuleSafe(_postModule, "DQ_CONVERT");
-
-        _odoModule = other._odoModule;
-        _dqdkdvModule = other._dqdkdvModule;
-        _postModule = other._postModule;
-        _odoFunc = other._odoFunc;
-        _dqdkdvFunc = other._dqdkdvFunc;
-        _postFunc = other._postFunc;
-        _params = other._params;
-
-        other._odoModule = nullptr;
-        other._dqdkdvModule = nullptr;
-        other._postModule = nullptr;
-        other._odoFunc = nullptr;
-        other._dqdkdvFunc = nullptr;
-        other._postFunc = nullptr;
-    }
-    return *this;
+    size_t dSize = static_cast<size_t>(_params.batchSize) * _params.numHeadsQ * _params.seqLenQ
+                   * sizeof(float);
+    return alignUp(dSize, K_WORKSPACE_ALIGNMENT_BYTES);
 }
 
 // =============================================================================
@@ -456,9 +370,7 @@ SdpaBwdPlan& SdpaBwdPlan::operator=(SdpaBwdPlan&& other) noexcept
 size_t SdpaBwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
 {
     // D buffer: [B, H_q, S_q] in FP32
-    size_t dSize = static_cast<size_t>(_params.batchSize) * _params.numHeadsQ * _params.seqLenQ
-                   * sizeof(float);
-    dSize = alignUp(dSize, K_WORKSPACE_ALIGNMENT_BYTES);
+    size_t dSize = getDBufferSize();
 
     // dq_acc buffer: [B, H_q, S_q, D_qk] in FP32 (a32 accumulator)
     size_t dqAccSize = static_cast<size_t>(_params.batchSize) * _params.numHeadsQ * _params.seqLenQ
@@ -496,39 +408,45 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
     void* dvPtr = uidToPtrMap.at(_params.dvUid);
 
     // 3. Carve workspace into sub-buffers
-    size_t dBufSize = static_cast<size_t>(_params.batchSize) * _params.numHeadsQ * _params.seqLenQ
-                      * sizeof(float);
-    dBufSize = alignUp(dBufSize, K_WORKSPACE_ALIGNMENT_BYTES);
-
     auto* dBufPtr = workspace;
-    auto* dqAccPtr = static_cast<char*>(workspace) + dBufSize;
+    auto* dqAccPtr = static_cast<char*>(workspace) + getDBufferSize();
 
     // 4. Build convenience args struct (mirrors AITER mha_bwd_args)
     MhaBwdArgs mhaArgs = buildMhaBwdArgs(
         _params, qPtr, kPtr, vPtr, oPtr, doPtr, lsePtr, dqPtr, dkPtr, dvPtr, dBufPtr, dqAccPtr);
 
-    // 5. Populate and launch kernel 1: ODO
-    auto odoArgs = populateOdoArgs(mhaArgs);
+    // 5. Build args and launch kernel 1: ODO
+    auto odoArgs = buildOdoArgs(mhaArgs);
 
     constexpr unsigned int K_TS_ODO = 128; // from CSV: fmha_bwd_odo.csv
     unsigned int gdxOdo = (mhaArgs.seqlen_q + K_TS_ODO - 1) / K_TS_ODO;
 
-    hipError_t err
-        = launchKernel(_odoFunc, &odoArgs, sizeof(odoArgs), gdxOdo, mhaArgs.nhead_q, mhaArgs.batch);
+    hipError_t err = launchKernel(_odoKernel.function(),
+                                  &odoArgs,
+                                  sizeof(odoArgs),
+                                  gdxOdo,
+                                  mhaArgs.nhead_q,
+                                  mhaArgs.batch,
+                                  K_BWD_BLOCK_DIM);
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to launch ODO kernel, error: " << hipGetErrorString(err));
         return;
     }
 
-    // 6. Populate and launch kernel 2: DQDKDV
-    auto dqdkdvArgs = populateDqdkdvArgs(mhaArgs);
+    // 6. Build args and launch kernel 2: DQDKDV
+    auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs);
 
     constexpr unsigned int K_TS_KV = 192; // from CSV: fmha_bwd_dqdkdv.csv
     unsigned int gdxDqdkdv = (mhaArgs.seqlen_k + K_TS_KV - 1) / K_TS_KV;
 
-    err = launchKernel(
-        _dqdkdvFunc, &dqdkdvArgs, sizeof(dqdkdvArgs), gdxDqdkdv, mhaArgs.nhead_q, mhaArgs.batch);
+    err = launchKernel(_dqdkdvKernel.function(),
+                       &dqdkdvArgs,
+                       sizeof(dqdkdvArgs),
+                       gdxDqdkdv,
+                       mhaArgs.nhead_q,
+                       mhaArgs.batch,
+                       K_BWD_BLOCK_DIM);
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR(
@@ -536,14 +454,19 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
         return;
     }
 
-    // 7. Populate and launch kernel 3: DQ_CONVERT (FP32 → BF16)
-    auto postArgs = populatePostArgs(mhaArgs);
+    // 7. Build args and launch kernel 3: DQ_CONVERT (FP32 → BF16)
+    auto postArgs = buildPostArgs(mhaArgs);
 
     constexpr unsigned int K_TS_DQ = 64; // from CSV: fmha_bwd_dq_convert.csv (hd128, rtne)
     unsigned int gdxPost = (mhaArgs.seqlen_q + K_TS_DQ - 1) / K_TS_DQ;
 
-    err = launchKernel(
-        _postFunc, &postArgs, sizeof(postArgs), gdxPost, mhaArgs.nhead_q, mhaArgs.batch);
+    err = launchKernel(_postKernel.function(),
+                       &postArgs,
+                       sizeof(postArgs),
+                       gdxPost,
+                       mhaArgs.nhead_q,
+                       mhaArgs.batch,
+                       K_BWD_BLOCK_DIM);
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR(

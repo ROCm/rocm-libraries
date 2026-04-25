@@ -10,30 +10,7 @@
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-
-namespace
-{
-// In AITER (upstream), each workspace buffer (D buffer, dq_acc) is a separate PyTorch tensor
-// allocation. Each torch::empty() call invokes hipMalloc(), which guarantees 256-byte alignment
-// per allocation. So AITER never explicitly aligns — every buffer pointer is automatically aligned.
-//
-// In hip-kernel-provider, hipDNN provides a single contiguous workspace buffer (one hipMalloc).
-// The execute() method must carve this into sub-buffers using pointer arithmetic:
-//   D buffer    starts at: workspace + 0                     (aligned by hipMalloc)
-//   dq_acc      starts at: workspace + sizeof(D buffer)      (NOT automatically aligned)
-//
-// We round each sub-buffer size up to a 64-byte boundary (MI300X L2 cache line size) so the
-// next sub-buffer starts cache-line-aligned. This prevents false sharing between buffers and
-// ensures vector memory instructions (e.g. global_load_b128) don't span cache line boundaries.
-//
-// TODO(Task I8.9): POC hardcodes 64 bytes; production should query hipGetDeviceProperties()
-constexpr size_t K_WORKSPACE_ALIGNMENT_BYTES = 64;
-
-constexpr size_t alignUp(size_t size, size_t alignment)
-{
-    return (size + alignment - 1) & ~(alignment - 1);
-}
-} // namespace
+#include <utility>
 
 namespace asm_sdpa_engine
 {
@@ -224,74 +201,68 @@ void SdpaBwdPlanBuilder::buildPlan(
     std::string postCoPath = asm_kernels::getAsmKernelPath(
         "gfx942/fmha_v3_bwd/MI300/bwd_hd128_dq_convert_bf16_rtne.co");
 
-    hipModule_t odoModule = nullptr;
-    hipError_t err = hipModuleLoad(&odoModule, odoCoPath.c_str());
+    hipModule_t rawOdoModule = nullptr;
+    hipError_t err = hipModuleLoad(&rawOdoModule, odoCoPath.c_str());
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to load ODO kernel module: " << odoCoPath << " error: "
                                                                      << hipGetErrorString(err));
         return;
     }
+    HipModuleGuard odoKernel(rawOdoModule);
 
-    hipModule_t dqdkdvModule = nullptr;
-    err = hipModuleLoad(&dqdkdvModule, dqdkdvCoPath.c_str());
+    hipModule_t rawDqdkdvModule = nullptr;
+    err = hipModuleLoad(&rawDqdkdvModule, dqdkdvCoPath.c_str());
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to load DQDKDV kernel module: "
                                 << dqdkdvCoPath << " error: " << hipGetErrorString(err));
-        (void)hipModuleUnload(odoModule);
         return;
     }
+    HipModuleGuard dqdkdvKernel(rawDqdkdvModule);
 
-    hipModule_t postModule = nullptr;
-    err = hipModuleLoad(&postModule, postCoPath.c_str());
+    hipModule_t rawPostModule = nullptr;
+    err = hipModuleLoad(&rawPostModule, postCoPath.c_str());
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to load DQ_CONVERT kernel module: "
                                 << postCoPath << " error: " << hipGetErrorString(err));
-        (void)hipModuleUnload(odoModule);
-        (void)hipModuleUnload(dqdkdvModule);
         return;
     }
+    HipModuleGuard postKernel(rawPostModule);
 
     // -------------------------------------------------------------------------
     // 2. Get kernel functions from modules
     // -------------------------------------------------------------------------
     hipFunction_t odoFunc = nullptr;
-    err = hipModuleGetFunction(&odoFunc, odoModule, "_ZN5aiter23fmha_bwd_hd128_odo_bf16E");
+    err = hipModuleGetFunction(&odoFunc, odoKernel.module(), "_ZN5aiter23fmha_bwd_hd128_odo_bf16E");
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to get ODO function, error: " << hipGetErrorString(err));
-        (void)hipModuleUnload(odoModule);
-        (void)hipModuleUnload(dqdkdvModule);
-        (void)hipModuleUnload(postModule);
         return;
     }
+    odoKernel.setFunction(odoFunc);
 
     hipFunction_t dqdkdvFunc = nullptr;
     err = hipModuleGetFunction(
-        &dqdkdvFunc, dqdkdvModule, "_ZN5aiter36fmha_bwd_hd128_bf16_a32_rtne_psskddvE");
+        &dqdkdvFunc, dqdkdvKernel.module(), "_ZN5aiter36fmha_bwd_hd128_bf16_a32_rtne_psskddvE");
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Failed to get DQDKDV function, error: " << hipGetErrorString(err));
-        (void)hipModuleUnload(odoModule);
-        (void)hipModuleUnload(dqdkdvModule);
-        (void)hipModuleUnload(postModule);
         return;
     }
+    dqdkdvKernel.setFunction(dqdkdvFunc);
 
     hipFunction_t postFunc = nullptr;
     err = hipModuleGetFunction(
-        &postFunc, postModule, "_ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtneE");
+        &postFunc, postKernel.module(), "_ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtneE");
     if(err != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR(
             "Failed to get DQ_CONVERT function, error: " << hipGetErrorString(err));
-        (void)hipModuleUnload(odoModule);
-        (void)hipModuleUnload(dqdkdvModule);
-        (void)hipModuleUnload(postModule);
         return;
     }
+    postKernel.setFunction(postFunc);
 
     // -------------------------------------------------------------------------
     // 3. Extract SDPA backward attributes and tensor metadata from graph
@@ -454,7 +425,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.attnScale = attnScale;
 
     executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-        odoModule, odoFunc, dqdkdvModule, dqdkdvFunc, postModule, postFunc, params));
+        std::move(odoKernel), std::move(dqdkdvKernel), std::move(postKernel), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(

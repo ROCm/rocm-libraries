@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
 #include "SdpaBwdParams.hpp"
+#include "SdpaKernelUtils.hpp"
 
 namespace asm_sdpa_engine
 {
@@ -24,23 +24,17 @@ namespace asm_sdpa_engine
 class SdpaBwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
 {
 public:
-    SdpaBwdPlan(hipModule_t odoModule,
-                hipFunction_t odoFunc,
-                hipModule_t dqdkdvModule,
-                hipFunction_t dqdkdvFunc,
-                hipModule_t postModule,
-                hipFunction_t postFunc,
+    SdpaBwdPlan(HipModuleGuard odoKernel,
+                HipModuleGuard dqdkdvKernel,
+                HipModuleGuard postKernel,
                 SdpaBwdParams params);
 
-    ~SdpaBwdPlan() override;
+    ~SdpaBwdPlan() override = default;
 
-    // Delete copy operations (resource ownership)
     SdpaBwdPlan(const SdpaBwdPlan&) = delete;
     SdpaBwdPlan& operator=(const SdpaBwdPlan&) = delete;
-
-    // Move operations
-    SdpaBwdPlan(SdpaBwdPlan&& other) noexcept;
-    SdpaBwdPlan& operator=(SdpaBwdPlan&& other) noexcept;
+    SdpaBwdPlan(SdpaBwdPlan&&) noexcept = default;
+    SdpaBwdPlan& operator=(SdpaBwdPlan&&) noexcept = default;
 
     size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
 
@@ -50,12 +44,11 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    hipModule_t _odoModule;
-    hipModule_t _dqdkdvModule;
-    hipModule_t _postModule;
-    hipFunction_t _odoFunc;
-    hipFunction_t _dqdkdvFunc;
-    hipFunction_t _postFunc;
+    size_t getDBufferSize() const;
+
+    HipModuleGuard _odoKernel;
+    HipModuleGuard _dqdkdvKernel;
+    HipModuleGuard _postKernel;
     SdpaBwdParams _params;
 };
 
