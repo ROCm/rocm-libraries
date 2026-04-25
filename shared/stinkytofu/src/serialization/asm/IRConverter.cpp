@@ -58,6 +58,11 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
     }
 
     auto opcode = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
+    if (opcode == GFX::INVALID) {
+        std::cerr << "Error: No ISA opcode found for mnemonic " << inst->opcodeStr << " in arch gfx"
+                  << static_cast<int>(arch) << "\n";
+        return;
+    }
     const HwInstDesc* hwInstDesc = getMCIDByIsaOp(static_cast<IsaOpcode>(opcode), arch);
 
     if (hwInstDesc == nullptr) {

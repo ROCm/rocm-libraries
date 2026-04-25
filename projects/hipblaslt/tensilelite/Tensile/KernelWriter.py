@@ -7474,8 +7474,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # SGPR above are user SGPR which are set by GPU hardware when the kernel is launched
     self.states.firstInitSgpr = self.sgprPool.size()
 
-    if kernel["ProblemType"]["SupportUserArgs"]:
-      self.defineSgpr("ArgType", 1)  # 0: normal, 1: hbm, 2: user args
+    # Commenting the conditional assignment of SGPR for ArgType
+    # since the General Batched GEMM will also use this value like
+    # Grouped GEMM but has to piggy back on Strided Batched GEMM logic.
+    #if kernel["ProblemType"]["SupportUserArgs"]:
+    self.defineSgpr("ArgType", 1)  # 0: normal, 1: hbm, 2: user args
 
     # To avoid corrupting tmp sgprs that may be used around the assert,
     # reserve some sgprs to save/restore the execmask
