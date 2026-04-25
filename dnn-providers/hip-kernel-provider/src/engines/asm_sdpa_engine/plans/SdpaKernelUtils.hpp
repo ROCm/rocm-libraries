@@ -42,15 +42,17 @@ constexpr size_t alignUp(size_t size, size_t alignment)
 // =============================================================================
 //
 // Wraps hipModuleLaunchKernel with HIP_LAUNCH_PARAM config for ASM kernels.
-// Used by both forward and backward plans.
+// Logs error on failure, logs grid/block info on success.
+// Returns true on success, false on failure.
 
-inline hipError_t launchKernel(hipFunction_t func,
-                               void* args,
-                               size_t argSize,
-                               unsigned int gridX,
-                               unsigned int gridY,
-                               unsigned int gridZ,
-                               unsigned int blockDim)
+inline bool launchKernel(const char* kernelName,
+                         hipFunction_t func,
+                         void* args,
+                         size_t argSize,
+                         unsigned int gridX,
+                         unsigned int gridY,
+                         unsigned int gridZ,
+                         unsigned int blockDim)
 {
     // NOLINTNEXTLINE(modernize-avoid-c-arrays) - HIP API requires C-style array
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
@@ -59,17 +61,27 @@ inline hipError_t launchKernel(hipFunction_t func,
                       &argSize,
                       HIP_LAUNCH_PARAM_END};
 
-    return hipModuleLaunchKernel(func,
-                                 gridX,
-                                 gridY,
-                                 gridZ,
-                                 blockDim,
-                                 1,
-                                 1,
-                                 0, // shared memory (kernel uses LDS internally)
-                                 nullptr, // stream (use default)
-                                 nullptr, // kernel args (not used with config)
-                                 config);
+    hipError_t err = hipModuleLaunchKernel(func,
+                                           gridX,
+                                           gridY,
+                                           gridZ,
+                                           blockDim,
+                                           1,
+                                           1,
+                                           0, // shared memory (kernel uses LDS internally)
+                                           nullptr, // stream (use default)
+                                           nullptr, // kernel args (not used with config)
+                                           config);
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to launch "
+                                << kernelName << " kernel, error: " << hipGetErrorString(err));
+        return false;
+    }
+
+    HIPDNN_PLUGIN_LOG_INFO(kernelName << " kernel launched: grid=[" << gridX << "," << gridY << ","
+                                      << gridZ << "] block=[" << blockDim << ",1,1]");
+    return true;
 }
 
 // =============================================================================

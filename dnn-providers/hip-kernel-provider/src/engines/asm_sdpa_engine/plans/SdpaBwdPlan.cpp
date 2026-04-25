@@ -421,16 +421,15 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
     constexpr unsigned int K_TS_ODO = 128; // from CSV: fmha_bwd_odo.csv
     unsigned int gdxOdo = (mhaArgs.seqlen_q + K_TS_ODO - 1) / K_TS_ODO;
 
-    hipError_t err = launchKernel(_odoKernel.function(),
-                                  &odoArgs,
-                                  sizeof(odoArgs),
-                                  gdxOdo,
-                                  mhaArgs.nhead_q,
-                                  mhaArgs.batch,
-                                  K_BWD_BLOCK_DIM);
-    if(err != hipSuccess)
+    if(!launchKernel("SDPA backward ODO",
+                     _odoKernel.function(),
+                     &odoArgs,
+                     sizeof(odoArgs),
+                     gdxOdo,
+                     mhaArgs.nhead_q,
+                     mhaArgs.batch,
+                     K_BWD_BLOCK_DIM))
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to launch ODO kernel, error: " << hipGetErrorString(err));
         return;
     }
 
@@ -440,17 +439,15 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
     constexpr unsigned int K_TS_KV = 192; // from CSV: fmha_bwd_dqdkdv.csv
     unsigned int gdxDqdkdv = (mhaArgs.seqlen_k + K_TS_KV - 1) / K_TS_KV;
 
-    err = launchKernel(_dqdkdvKernel.function(),
-                       &dqdkdvArgs,
-                       sizeof(dqdkdvArgs),
-                       gdxDqdkdv,
-                       mhaArgs.nhead_q,
-                       mhaArgs.batch,
-                       K_BWD_BLOCK_DIM);
-    if(err != hipSuccess)
+    if(!launchKernel("SDPA backward DQDKDV",
+                     _dqdkdvKernel.function(),
+                     &dqdkdvArgs,
+                     sizeof(dqdkdvArgs),
+                     gdxDqdkdv,
+                     mhaArgs.nhead_q,
+                     mhaArgs.batch,
+                     K_BWD_BLOCK_DIM))
     {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "Failed to launch DQDKDV kernel, error: " << hipGetErrorString(err));
         return;
     }
 
@@ -460,25 +457,17 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
     constexpr unsigned int K_TS_DQ = 64; // from CSV: fmha_bwd_dq_convert.csv (hd128, rtne)
     unsigned int gdxPost = (mhaArgs.seqlen_q + K_TS_DQ - 1) / K_TS_DQ;
 
-    err = launchKernel(_postKernel.function(),
-                       &postArgs,
-                       sizeof(postArgs),
-                       gdxPost,
-                       mhaArgs.nhead_q,
-                       mhaArgs.batch,
-                       K_BWD_BLOCK_DIM);
-    if(err != hipSuccess)
+    if(!launchKernel("SDPA backward DQ_CONVERT",
+                     _postKernel.function(),
+                     &postArgs,
+                     sizeof(postArgs),
+                     gdxPost,
+                     mhaArgs.nhead_q,
+                     mhaArgs.batch,
+                     K_BWD_BLOCK_DIM))
     {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "Failed to launch DQ_CONVERT kernel, error: " << hipGetErrorString(err));
         return;
     }
-
-    HIPDNN_PLUGIN_LOG_INFO("SDPA backward kernels launched: ODO grid=["
-                           << gdxOdo << "," << mhaArgs.nhead_q << "," << mhaArgs.batch
-                           << "] DQDKDV grid=[" << gdxDqdkdv << "," << mhaArgs.nhead_q << ","
-                           << mhaArgs.batch << "] POST grid=[" << gdxPost << "," << mhaArgs.nhead_q
-                           << "," << mhaArgs.batch << "]");
 }
 
 } // namespace asm_sdpa_engine
