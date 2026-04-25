@@ -1066,12 +1066,30 @@ pipeline {
                             webhookUrl: TEAMS_WEBHOOK_URL,
                             message: 'TheRock Docker Promotion Failed',
                             status: 'Failure',
+                            color: '#FF6600',
+                            factDefinitions: [
+                                [name: 'Job',             template: "${env.JOB_NAME}"],
+                                [name: 'Build',           template: "#${env.BUILD_NUMBER}"],
+                                [name: 'TheRock hash',    template: shortHash],
+                                [name: 'Duration',        template: "${currentBuild.durationString}"],
+                                [name: 'Previous result', template: "${currentBuild.previousBuild?.result ?: 'N/A'}"],
+                                [name: 'Build URL',       template: "${env.BUILD_URL}"]
+                            ]
+                        )
+                    }
+                } else if (env.BRANCH_NAME == 'develop') {
+                    withCredentials([string(credentialsId: 'TEAMS_WEBHOOK_URL', variable: 'TEAMS_WEBHOOK_URL')]) {
+                        office365ConnectorSend(
+                            webhookUrl: TEAMS_WEBHOOK_URL,
+                            message: 'MIOpen develop branch CI failed',
+                            status: 'Failure',
                             color: '#FF0000',
                             factDefinitions: [
-                                [name: 'Job',          template: "${env.JOB_NAME}"],
-                                [name: 'Build',        template: "#${env.BUILD_NUMBER}"],
-                                [name: 'TheRock hash', template: shortHash],
-                                [name: 'Build URL',    template: "${env.BUILD_URL}"]
+                                [name: 'Build',           template: "#${env.BUILD_NUMBER}"],
+                                [name: 'Commit',          template: "${env.GIT_COMMIT?.take(7) ?: 'unknown'}"],
+                                [name: 'Duration',        template: "${currentBuild.durationString}"],
+                                [name: 'Previous result', template: "${currentBuild.previousBuild?.result ?: 'N/A'}"],
+                                [name: 'Build URL',       template: "${env.BUILD_URL}"]
                             ]
                         )
                     }
