@@ -778,4 +778,46 @@ def RunPerfTest(Map conf=[:]){
     }
 }
 
+def sendTeamsFailureNotification(Map conf=[:]) {
+    def teamsMessage = null
+    def teamsColor = null
+    def teamsFacts = null
+
+    if (conf.get("buildTheRock", false)) {
+        teamsMessage = 'TheRock Docker Promotion Failed'
+        teamsColor = '#FF6600'
+        teamsFacts = [
+            [name: 'Build',           template: "#${env.BUILD_NUMBER}"],
+            [name: 'TheRock hash',    template: "${env.THEROCK_FULL_HASH ?: 'unknown'}"],
+            [name: 'CK hash',         template: "${env.CK_GIT_HASH ?: 'unknown'}"],
+            [name: 'Duration',        template: "${currentBuild.durationString}"],
+            [name: 'Previous result', template: "${currentBuild.previousBuild?.result ?: 'N/A'}"],
+            [name: 'Build URL',       template: "${env.BUILD_URL}"]
+        ]
+    } else if (env.BRANCH_NAME == 'develop') {
+        teamsMessage = 'MIOpen develop branch CI failed'
+        teamsColor = '#FF0000'
+        teamsFacts = [
+            [name: 'Build',           template: "#${env.BUILD_NUMBER}"],
+            [name: 'Commit',          template: "${env.GIT_COMMIT?.take(7) ?: 'unknown'}"],
+            [name: 'TheRock hash',    template: "${env.THEROCK_PROMOTED_HASH ?: 'unknown'}"],
+            [name: 'Duration',        template: "${currentBuild.durationString}"],
+            [name: 'Previous result', template: "${currentBuild.previousBuild?.result ?: 'N/A'}"],
+            [name: 'Build URL',       template: "${env.BUILD_URL}"]
+        ]
+    }
+
+    if (teamsMessage) {
+        withCredentials([string(credentialsId: 'TEAMS_WEBHOOK_URL', variable: 'TEAMS_WEBHOOK_URL')]) {
+            office365ConnectorSend(
+                webhookUrl: TEAMS_WEBHOOK_URL,
+                message: teamsMessage,
+                status: 'Failure',
+                color: teamsColor,
+                factDefinitions: teamsFacts
+            )
+        }
+    }
+}
+
 return this
