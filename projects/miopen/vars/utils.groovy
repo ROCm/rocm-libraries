@@ -484,20 +484,24 @@ def getDockerImage(Map conf=[:])
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
     // Carry the promoted TheRock hash forward into the CI image metadata.
-    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-        sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
-        def promotedHash = sh(
-            script: """
-                docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
-                    ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
-            """.stripIndent(),
-            returnStdout: true
-        ).trim()
-        if (promotedHash) {
-            echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
-            dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
-            env.THEROCK_PROMOTED_HASH = promotedHash
+    try {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
+            def promotedHash = sh(
+                script: """
+                    docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
+                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
+                """.stripIndent(),
+                returnStdout: true
+            ).trim()
+            if (promotedHash) {
+                echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
+                dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
+                env.THEROCK_PROMOTED_HASH = promotedHash
+            }
         }
+    } catch (Exception e) {
+        echo "Could not read TheRock label from :therock image, skipping metadata embedding: ${e.message}"
     }
 
     // Embed the CK commit hash built into this image.
