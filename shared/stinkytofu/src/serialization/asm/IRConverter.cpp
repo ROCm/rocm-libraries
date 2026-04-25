@@ -68,6 +68,7 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
                 if (inst->srcRegs.size() > 1) directive->value = inst->srcRegs[1].literalValue;
             }
         }
+        return;
     }
 
     auto opcode = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
