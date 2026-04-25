@@ -88,6 +88,7 @@
 #include "common/lapack/testing_getri_npvt_outofplace.hpp"
 #include "common/lapack/testing_getri_outofplace.hpp"
 #include "common/lapack/testing_getrs.hpp"
+#include "common/lapack/testing_getrs_npvt.hpp"
 #include "common/lapack/testing_posv.hpp"
 #include "common/lapack/testing_potf2_potrf.hpp"
 #include "common/lapack/testing_potri.hpp"
@@ -254,6 +255,13 @@ class rocsolver_dispatcher
             {"getrs_64", testing_getrs<false, false, T, int64_t>},
             {"getrs_batched_64", testing_getrs<true, true, T, int64_t>},
             {"getrs_strided_batched_64", testing_getrs<false, true, T, int64_t>},
+            // getrs_npvt
+            {"getrs_npvt", testing_getrs_npvt<false, false, T, rocblas_int>},
+            {"getrs_npvt_batched", testing_getrs_npvt<true, true, T, rocblas_int>},
+            {"getrs_npvt_strided_batched", testing_getrs_npvt<false, true, T, rocblas_int>},
+            {"getrs_npvt_64", testing_getrs_npvt<false, false, T, int64_t>},
+            {"getrs_npvt_batched_64", testing_getrs_npvt<true, true, T, int64_t>},
+            {"getrs_npvt_strided_batched_64", testing_getrs_npvt<false, true, T, int64_t>},
             // gesv
             {"gesv", testing_gesv<false, false, T>},
             {"gesv_batched", testing_gesv<true, true, T>},
