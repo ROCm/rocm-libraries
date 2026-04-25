@@ -75,6 +75,18 @@ public:
         if(dev_account.is_integrated_device)
             system_memory::singleton().release_used_bytes(allocation_size);
     }
+
+    std::vector<size_t> get_usable_bytes_all_devices()
+    {
+        auto                ndevices = num_devices();
+        std::vector<size_t> ret(ndevices);
+        for(size_t dev_id = 0; dev_id < ndevices; ++dev_id)
+        {
+            ret[dev_id] = get_usable_bytes(dev_id);
+        }
+        return ret;
+    }
+
     size_t get_usable_bytes(int dev_id)
     {
         if(dev_id < 0 || static_cast<size_t>(dev_id) >= num_devices())

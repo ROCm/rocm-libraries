@@ -2,6 +2,7 @@ TestParameters:
   marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
   NumWarmups: 0
   SleepPercent: 50
@@ -46,7 +47,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16,16,16,1,  1,   2,2,2,2 ]
+          - [16, 16, 16, 1, 1, 2, 2, 2, 2]
         - AssertFree0ElementMultiple: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
@@ -72,6 +73,9 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
 
+  ########################################
+  # NN - Activation
+  ########################################
   -
     - # ProblemType
       OperationType: GEMM
@@ -97,7 +101,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16,16,16,1,  1,   2,2,2,2 ]
+          - [16, 16, 16, 1, 1, 2, 2, 2, 2]
         - AssertFree0ElementMultiple: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
@@ -119,6 +123,64 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [ 2048, 128, 1, 1024 ]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # NN - AdaptiveGemmGSUA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      # DataTypeA: f8
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      BiasDataTypeList: [s]
+      UseBias:       1
+      UseE:          False
+      Activation:    True
+      ActivationHPA: True
+      UseScaleAB: "Scalar"
+      # SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 2, 2, 2]
+        - AssertFree0ElementMultiple: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - InnerUnroll: [1]
+        - ExpandPointerSwap: [1]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [4]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [-1]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - AdaptiveGemmGSUA: [1]
+        - GlobalSplitU: [1, 2, 4, 8, 16]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 127, 127, 1, 2047 ]
+          - Exact: [ 128, 128, 1, 2048 ]
+          - Exact: [ 255, 255, 1, 4095 ]
+          - Exact: [ 256, 256, 1, 4096 ]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]

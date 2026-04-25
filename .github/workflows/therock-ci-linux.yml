@@ -24,7 +24,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:d6ae5712a9c7e8b88281d021e907b312cd8a26295b95690baef3e8dde4805858
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
@@ -43,7 +43,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 2d9260c2b1c87175539a9fc45a2e9513ed36aff6 # 2026-04-16
+          ref: dc88ae1f34e0ac09d46f0147df82c1184abd6ae4 # 2026-04-22
 
       - name: Install python deps
         run: |

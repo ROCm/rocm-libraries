@@ -10399,6 +10399,405 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgesv_strided_batched(rocblas_handle h
 //! @}
 
 /*! @{
+    \brief The GETRS_NPVT functions solve a system of n linear equations on ``n`` variables in its factorized form.
+
+    \details
+    It solves one of the following systems, depending on the value of ``trans``:
+
+    \f[
+        \begin{array}{cl}
+        A X = B & \: \text{not transposed,}\\
+        A^T X = B & \: \text{transposed, or}\\
+        A^H X = B & \: \text{conjugate transposed.}
+        \end{array}
+    \f]
+
+    Matrix ``A`` is defined by its triangular factors, as returned by \ref rocsolver_sgetrf_npvt "GETRF_NPVT".
+
+    @param[in]
+    handle      rocblas_handle.
+
+    @param[in]
+    trans       rocblas_operation.
+                Specifies the form of the system of equations.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the system, that is, the number of columns and rows of A.
+    @param[in]
+    nrhs        rocblas_int. nrhs >= 0.
+                The number of right hand sides, that is, the number of columns
+                of the matrix B.
+    @param[in]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                The factors L and U of the factorization A = L*U returned by \ref rocsolver_sgetrf_npvt "GETRF_NPVT".
+    @param[in]
+    lda         rocblas_int. lda >= n.
+                The leading dimension of A.
+    @param[inout]
+    B           pointer to type. Array on the GPU of dimension ldb*nrhs.
+                On entry, the right hand side matrix B.
+                On exit, the solution matrix X.
+    @param[in]
+    ldb         rocblas_int. ldb >= n.
+                The leading dimension of B.
+   ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgetrs_npvt(rocblas_handle handle,
+                                                      const rocblas_operation trans,
+                                                      const rocblas_int n,
+                                                      const rocblas_int nrhs,
+                                                      float* A,
+                                                      const rocblas_int lda,
+                                                      float* B,
+                                                      const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgetrs_npvt(rocblas_handle handle,
+                                                      const rocblas_operation trans,
+                                                      const rocblas_int n,
+                                                      const rocblas_int nrhs,
+                                                      double* A,
+                                                      const rocblas_int lda,
+                                                      double* B,
+                                                      const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgetrs_npvt(rocblas_handle handle,
+                                                      const rocblas_operation trans,
+                                                      const rocblas_int n,
+                                                      const rocblas_int nrhs,
+                                                      rocblas_float_complex* A,
+                                                      const rocblas_int lda,
+                                                      rocblas_float_complex* B,
+                                                      const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_npvt(rocblas_handle handle,
+                                                      const rocblas_operation trans,
+                                                      const rocblas_int n,
+                                                      const rocblas_int nrhs,
+                                                      rocblas_double_complex* A,
+                                                      const rocblas_int lda,
+                                                      rocblas_double_complex* B,
+                                                      const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgetrs_npvt_64(rocblas_handle handle,
+                                                         const rocblas_operation trans,
+                                                         const int64_t n,
+                                                         const int64_t nrhs,
+                                                         float* A,
+                                                         const int64_t lda,
+                                                         float* B,
+                                                         const int64_t ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgetrs_npvt_64(rocblas_handle handle,
+                                                         const rocblas_operation trans,
+                                                         const int64_t n,
+                                                         const int64_t nrhs,
+                                                         double* A,
+                                                         const int64_t lda,
+                                                         double* B,
+                                                         const int64_t ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgetrs_npvt_64(rocblas_handle handle,
+                                                         const rocblas_operation trans,
+                                                         const int64_t n,
+                                                         const int64_t nrhs,
+                                                         rocblas_float_complex* A,
+                                                         const int64_t lda,
+                                                         rocblas_float_complex* B,
+                                                         const int64_t ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_npvt_64(rocblas_handle handle,
+                                                         const rocblas_operation trans,
+                                                         const int64_t n,
+                                                         const int64_t nrhs,
+                                                         rocblas_double_complex* A,
+                                                         const int64_t lda,
+                                                         rocblas_double_complex* B,
+                                                         const int64_t ldb);
+//! @}
+
+/*! @{
+    \brief The GETRS_NPVT_BATCHED functions solve a batch of systems of ``n`` linear equations on ``n``
+    variables in its factorized forms.
+
+    \details
+    For each instance l in the batch, it solves one of the following systems, depending on the value of ``trans``:
+
+    \f[
+        \begin{array}{cl}
+        A_l X_l = B_l & \: \text{not transposed,}\\
+        A_l^T X_l^{} = B_l^{} & \: \text{transposed, or}\\
+        A_l^H X_l^{} = B_l^{} & \: \text{conjugate transposed.}
+        \end{array}
+    \f]
+
+    Matrix \f$A_l\f$ is defined by its triangular factors as returned by \ref rocsolver_sgetrf_npvt_batched "GETRF_NPVT_BATCHED".
+
+    @param[in]
+    handle      rocblas_handle.
+
+    @param[in]
+    trans       rocblas_operation.
+                Specifies the form of the system of equations of each instance in the batch.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the system, that is, the number of columns and rows of all A_l matrices.
+    @param[in]
+    nrhs        rocblas_int. nrhs >= 0.
+                The number of right hand sides, that is, the number of columns
+                of all the matrices B_l.
+    @param[in]
+    A           Array of pointers to type. Each pointer points to an array on the GPU of dimension lda*n.
+                The factors L_l and U_l of the factorization A_l = L_l*U_l returned by \ref rocsolver_sgetrf_npvt_batched "GETRF_NPVT_BATCHED".
+    @param[in]
+    lda         rocblas_int. lda >= n.
+                The leading dimension of matrices A_l.
+    @param[inout]
+    B           Array of pointers to type. Each pointer points to an array on the GPU of dimension ldb*nrhs.
+                On entry, the right hand side matrices B_l.
+                On exit, the solution matrix X_l of each system in the batch.
+    @param[in]
+    ldb         rocblas_int. ldb >= n.
+                The leading dimension of matrices B_l.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of instances (systems) in the batch.
+   ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgetrs_npvt_batched(rocblas_handle handle,
+                                                              const rocblas_operation trans,
+                                                              const rocblas_int n,
+                                                              const rocblas_int nrhs,
+                                                              float* const A[],
+                                                              const rocblas_int lda,
+                                                              float* const B[],
+                                                              const rocblas_int ldb,
+                                                              const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgetrs_npvt_batched(rocblas_handle handle,
+                                                              const rocblas_operation trans,
+                                                              const rocblas_int n,
+                                                              const rocblas_int nrhs,
+                                                              double* const A[],
+                                                              const rocblas_int lda,
+                                                              double* const B[],
+                                                              const rocblas_int ldb,
+                                                              const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgetrs_npvt_batched(rocblas_handle handle,
+                                                              const rocblas_operation trans,
+                                                              const rocblas_int n,
+                                                              const rocblas_int nrhs,
+                                                              rocblas_float_complex* const A[],
+                                                              const rocblas_int lda,
+                                                              rocblas_float_complex* const B[],
+                                                              const rocblas_int ldb,
+                                                              const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_npvt_batched(rocblas_handle handle,
+                                                              const rocblas_operation trans,
+                                                              const rocblas_int n,
+                                                              const rocblas_int nrhs,
+                                                              rocblas_double_complex* const A[],
+                                                              const rocblas_int lda,
+                                                              rocblas_double_complex* const B[],
+                                                              const rocblas_int ldb,
+                                                              const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgetrs_npvt_batched_64(rocblas_handle handle,
+                                                                 const rocblas_operation trans,
+                                                                 const int64_t n,
+                                                                 const int64_t nrhs,
+                                                                 float* const A[],
+                                                                 const int64_t lda,
+                                                                 float* const B[],
+                                                                 const int64_t ldb,
+                                                                 const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgetrs_npvt_batched_64(rocblas_handle handle,
+                                                                 const rocblas_operation trans,
+                                                                 const int64_t n,
+                                                                 const int64_t nrhs,
+                                                                 double* const A[],
+                                                                 const int64_t lda,
+                                                                 double* const B[],
+                                                                 const int64_t ldb,
+                                                                 const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgetrs_npvt_batched_64(rocblas_handle handle,
+                                                                 const rocblas_operation trans,
+                                                                 const int64_t n,
+                                                                 const int64_t nrhs,
+                                                                 rocblas_float_complex* const A[],
+                                                                 const int64_t lda,
+                                                                 rocblas_float_complex* const B[],
+                                                                 const int64_t ldb,
+                                                                 const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_npvt_batched_64(rocblas_handle handle,
+                                                                 const rocblas_operation trans,
+                                                                 const int64_t n,
+                                                                 const int64_t nrhs,
+                                                                 rocblas_double_complex* const A[],
+                                                                 const int64_t lda,
+                                                                 rocblas_double_complex* const B[],
+                                                                 const int64_t ldb,
+                                                                 const int64_t batch_count);
+//! @}
+
+/*! @{
+    \brief The GETRS_NPVT_STRIDED_BATCHED functions solve a batch of systems of ``n`` linear equations
+    on ``n`` variables in its factorized forms.
+
+    \details
+    For each instance l in the batch, it solves one of the following systems, depending on the value of ``trans``:
+
+    \f[
+        \begin{array}{cl}
+        A_l X_l = B_l & \: \text{not transposed,}\\
+        A_l^T X_l^{} = B_l^{} & \: \text{transposed, or}\\
+        A_l^H X_l^{} = B_l^{} & \: \text{conjugate transposed.}
+        \end{array}
+    \f]
+
+    Matrix \f$A_l\f$ is defined by its triangular factors, as returned by \ref rocsolver_sgetrf_npvt_strided_batched "GETRF_NPVT_STRIDED_BATCHED".
+
+    @param[in]
+    handle      rocblas_handle.
+
+    @param[in]
+    trans       rocblas_operation.
+                Specifies the form of the system of equations of each instance in the batch.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the system, that is, the number of columns and rows of all A_l matrices.
+    @param[in]
+    nrhs        rocblas_int. nrhs >= 0.
+                The number of right hand sides, that is, the number of columns
+                of all the matrices B_l.
+    @param[in]
+    A           pointer to type. Array on the GPU (the size depends on the value of strideA).
+                The factors L_l and U_l of the factorization A_l = L_l*U_l returned by \ref rocsolver_sgetrf_npvt_strided_batched "GETRF_NPVT_STRIDED_BATCHED".
+    @param[in]
+    lda         rocblas_int. lda >= n.
+                The leading dimension of matrices A_l.
+    @param[in]
+    strideA     rocblas_stride.
+                Stride from the start of one matrix A_l to the next one A_(l+1).
+                There is no restriction for the value of strideA. The normal use case is strideA >= lda*n.
+    @param[inout]
+    B           pointer to type. Array on the GPU (size depends on the value of strideB).
+                On entry, the right hand side matrices B_l.
+                On exit, the solution matrix X_l of each system in the batch.
+    @param[in]
+    ldb         rocblas_int. ldb >= n.
+                The leading dimension of matrices B_l.
+    @param[in]
+    strideB     rocblas_stride.
+                Stride from the start of one matrix B_l to the next one B_(l+1).
+                There is no restriction for the value of strideB. The normal use case is strideB >= ldb*nrhs.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of instances (systems) in the batch.
+   ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgetrs_npvt_strided_batched(rocblas_handle handle,
+                                                                      const rocblas_operation trans,
+                                                                      const rocblas_int n,
+                                                                      const rocblas_int nrhs,
+                                                                      float* A,
+                                                                      const rocblas_int lda,
+                                                                      const rocblas_stride strideA,
+                                                                      float* B,
+                                                                      const rocblas_int ldb,
+                                                                      const rocblas_stride strideB,
+                                                                      const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgetrs_npvt_strided_batched(rocblas_handle handle,
+                                                                      const rocblas_operation trans,
+                                                                      const rocblas_int n,
+                                                                      const rocblas_int nrhs,
+                                                                      double* A,
+                                                                      const rocblas_int lda,
+                                                                      const rocblas_stride strideA,
+                                                                      double* B,
+                                                                      const rocblas_int ldb,
+                                                                      const rocblas_stride strideB,
+                                                                      const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgetrs_npvt_strided_batched(rocblas_handle handle,
+                                                                      const rocblas_operation trans,
+                                                                      const rocblas_int n,
+                                                                      const rocblas_int nrhs,
+                                                                      rocblas_float_complex* A,
+                                                                      const rocblas_int lda,
+                                                                      const rocblas_stride strideA,
+                                                                      rocblas_float_complex* B,
+                                                                      const rocblas_int ldb,
+                                                                      const rocblas_stride strideB,
+                                                                      const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_npvt_strided_batched(rocblas_handle handle,
+                                                                      const rocblas_operation trans,
+                                                                      const rocblas_int n,
+                                                                      const rocblas_int nrhs,
+                                                                      rocblas_double_complex* A,
+                                                                      const rocblas_int lda,
+                                                                      const rocblas_stride strideA,
+                                                                      rocblas_double_complex* B,
+                                                                      const rocblas_int ldb,
+                                                                      const rocblas_stride strideB,
+                                                                      const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgetrs_npvt_strided_batched_64(rocblas_handle handle,
+                                                                         const rocblas_operation trans,
+                                                                         const int64_t n,
+                                                                         const int64_t nrhs,
+                                                                         float* A,
+                                                                         const int64_t lda,
+                                                                         const rocblas_stride strideA,
+                                                                         float* B,
+                                                                         const int64_t ldb,
+                                                                         const rocblas_stride strideB,
+                                                                         const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgetrs_npvt_strided_batched_64(rocblas_handle handle,
+                                                                         const rocblas_operation trans,
+                                                                         const int64_t n,
+                                                                         const int64_t nrhs,
+                                                                         double* A,
+                                                                         const int64_t lda,
+                                                                         const rocblas_stride strideA,
+                                                                         double* B,
+                                                                         const int64_t ldb,
+                                                                         const rocblas_stride strideB,
+                                                                         const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgetrs_npvt_strided_batched_64(rocblas_handle handle,
+                                                                         const rocblas_operation trans,
+                                                                         const int64_t n,
+                                                                         const int64_t nrhs,
+                                                                         rocblas_float_complex* A,
+                                                                         const int64_t lda,
+                                                                         const rocblas_stride strideA,
+                                                                         rocblas_float_complex* B,
+                                                                         const int64_t ldb,
+                                                                         const rocblas_stride strideB,
+                                                                         const int64_t batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_npvt_strided_batched_64(rocblas_handle handle,
+                                                                         const rocblas_operation trans,
+                                                                         const int64_t n,
+                                                                         const int64_t nrhs,
+                                                                         rocblas_double_complex* A,
+                                                                         const int64_t lda,
+                                                                         const rocblas_stride strideA,
+                                                                         rocblas_double_complex* B,
+                                                                         const int64_t ldb,
+                                                                         const rocblas_stride strideB,
+                                                                         const int64_t batch_count);
+//! @}
+
+/*! @{
     \brief The GETRI functions invert a general ``n``-by-``n`` matrix ``A`` using the LU factorization
     computed by \ref rocsolver_sgetrf "GETRF".
 

@@ -808,6 +808,29 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_EQ(numEngines, 1);
 
+  // SDPA with independent K/V head counts (GQA) should be supported.
+  // Mirrors test_cudnn_attention_gqa: Q=32 heads, K=8 heads, V=4 heads.
+  {
+    const std::vector<int64_t> qDims = {4, 32, 512, 128};
+    const std::vector<int64_t> qStrides = {32 * 512 * 128, 512 * 128, 128, 1};
+    const std::vector<int64_t> kDims = {4, 8, 1024, 128};
+    const std::vector<int64_t> kStrides = {8 * 1024 * 128, 1024 * 128, 128, 1};
+    const std::vector<int64_t> vDims = {4, 4, 1024, 128};
+    const std::vector<int64_t> vStrides = {4 * 1024 * 128, 1024 * 128, 128, 1};
+    const std::vector<int64_t> oDims = {4, 32, 512, 128};
+    const std::vector<int64_t> oStrides = {32 * 512 * 128, 512 * 128, 128, 1};
+    builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims, qStrides, kDims, kStrides, vDims, vStrides, oDims, oStrides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    opGraph.ptr = builder.GetBufferPointer();
+    opGraph.size = builder.GetSize();
+
+    ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                  handle, &opGraph, engineIDs.data(), 5, &numEngines),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    ASSERT_EQ(numEngines, 1);
+  }
+
   // SDPA with stats output is NOT supported (yet).
   builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
       qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims,

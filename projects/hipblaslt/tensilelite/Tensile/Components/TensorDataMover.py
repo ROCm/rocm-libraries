@@ -4,7 +4,7 @@ from typing import Mapping, Optional
 from rocisa.code import Module
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32, SMulLOU32
-from rocisa.container import sgpr, vgpr, RegisterContainer
+from rocisa.container import sgpr, vgpr, RegisterContainer, MemTokenData
 from math import log2, ceil, prod
 # from ..KernelWriterAssembly import KernelWriterAssembly
 
@@ -15,6 +15,10 @@ class TensorDataMoverLoad(TensorDataMover):
     GROUP1_NUM_SGPR = 8
     GROUP2_NUM_SGPR = 4
     GROUP3_NUM_SGPR = 4
+    mem_token = None
+
+    def setMemToken(self, mem_token: list[int]):
+        self.mem_token = mem_token
 
     def __call__(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping):
         pass
@@ -55,7 +59,7 @@ class TensorDataMoverLoad(TensorDataMover):
             #TODO: support stagger U
         return mod
 
-    def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str) -> Module:
+    def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str, dstGroup0: str = None) -> Module:
         #TODO here we assume TN
         mod = Module()
         tc: str = tp["tensorChar"]
@@ -88,8 +92,12 @@ class TensorDataMoverLoad(TensorDataMover):
             mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * bpe), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe})"))
             mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(sgprStrideName), f"woffset *= stride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
-            mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
-            mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
+            if dstGroup0 is not None:
+                mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(f"{dstGroup0}+2"), sgpr(tmpSgprIdx), "+= tileOffset(lo)"))
+                mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{dstGroup0}+3"), sgpr(tmpSgprIdx+1), "+= tileOffset(hi)"))
+            else:
+                mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
+                mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
             #TODO: support strided batch
             #TODO: support GSU
             #TODO: support stagger U
@@ -97,12 +105,23 @@ class TensorDataMoverLoad(TensorDataMover):
 
     def issueLoad(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:
         mod = Module("tensor load")
-        if all(g is not None for g in [group2, group3]):
-            mod.add(TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                    sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR)))
+        if len(self.mem_token) > 1:
+            comment = f"sync LDS {self.mem_token}"
+        elif len(self.mem_token) == 1:
+            comment = f"sync LDS%u"%(self.mem_token[0])
         else:
-            mod.add(TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                    None, None))
+            comment = "No MemToken for TDM load"
+        if all(g is not None for g in [group2, group3]):
+            tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
+                                              sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR), comment=comment)
+        else:
+            tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
+                                              None, None, comment=comment)
+
+        if self.mem_token is not None:
+            tensorLoadToLds.setMemToken(MemTokenData(self.mem_token))
+
+        mod.add(tensorLoadToLds)
         return mod
 
     def initOperands(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:

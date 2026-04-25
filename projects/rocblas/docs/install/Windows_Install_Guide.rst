@@ -133,6 +133,14 @@ Use the following commands for a sparse checkout:
    git sparse-checkout set projects/rocblas shared/tensile
    git checkout develop # or use the branch you want to work with
 
+The checkout above omits other top-level trees (for example ``shared/ctest``). If you build the test
+client (``BUILD_CLIENTS_TESTS=ON``) and want YAML-based CTest labels and the installed
+``CTestTestfile.cmake`` from the shared categorization helpers, add ``shared/ctest`` to the
+``git sparse-checkout set`` list (or use a full clone). Without ``shared/ctest`` present under
+``ROCM_LIBRARIES_ROOT``, ``ROCBLAS_ENABLE_CTEST`` defaults to OFF. If you turn
+``ROCBLAS_ENABLE_CTEST`` ON explicitly, configuration requires both ``clients/gtest/test_categories.yaml``
+and ``shared/ctest/TestCategories.cmake`` to exist.
+
 .. note::
 
    To build ROCm 6.4 and older, use the rocBLAS repository at `<https://github.com/ROCm/rocBLAS>`_.

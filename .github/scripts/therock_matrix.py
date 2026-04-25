@@ -6,6 +6,7 @@ import os
 
 subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
+    "dnn-providers/hip-kernel-provider": "hip-kernel-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
     "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
@@ -58,6 +59,13 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "projects_to_test": ["hipfft", "rocfft"],
     },
+    "hip-kernel-provider": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
+            "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
+        ],
+        "projects_to_test": ["hipkernelprovider"],
+    },
 }
 
 # For certain math components, they are optional during building and testing.
@@ -83,6 +91,8 @@ additional_options = {
     "hipdnn": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
+            "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
+            "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
@@ -93,6 +103,7 @@ additional_options = {
             "hipdnn-samples",
             "miopenprovider",
             "hipblasltprovider",
+            "hipkernelprovider",
         ],
         "project_to_add": "miopen",
     },
