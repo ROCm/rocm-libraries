@@ -61,7 +61,9 @@ static void seedWmmaDsLatencyFromPrefix(IRList::iterator blockBegin, IRList::ite
     std::map<int, int> pending(crossBBResiduals);
 
     for (IRList::iterator it = blockBegin; it != regionStart; ++it) {
-        StinkyInstruction& inst = getStinkyInst(it);
+        auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!instPtr) continue;
+        StinkyInstruction& inst = *instPtr;
         const int iss = inst.issueCycles;
 
         for (auto pit = pending.begin(); pit != pending.end();) {
@@ -94,9 +96,10 @@ static bool latchBBTailIsWmma(BasicBlock& latchBB) {
     // Walk from tail toward head. Do not use std::prev(end()) on IRList::iterator:
     // end() is nullptr and IntrusiveListIterator::operator-- does not step to tail_.
     for (auto it = latchBB.rbegin(); it != latchBB.rend(); ++it) {
-        StinkyInstruction& inst = getStinkyInst(it);
-        if (isLabel(inst) || isBranch(inst)) continue;
-        return isMatrixInstruction(inst);
+        auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!instPtr) continue;
+        if (isLabel(*instPtr) || isBranch(*instPtr)) continue;
+        return isMatrixInstruction(*instPtr);
     }
     return false;
 }
@@ -738,7 +741,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
 
-    currentBB_ = (regionStart != regionEnd) ? getStinkyInst(regionStart).getParent() : nullptr;
+    currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
 
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 
@@ -752,9 +755,10 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
 
     wmmaIssueConfig.latency = 0;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
-        StinkyInstruction& inst = getStinkyInst(it);
-        if (isMatrixInstruction(inst)) {
-            wmmaIssueConfig.latency = inst.latencyCycles;
+        auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!instPtr) continue;
+        if (isMatrixInstruction(*instPtr)) {
+            wmmaIssueConfig.latency = instPtr->latencyCycles;
             break;
         }
     }
@@ -801,7 +805,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // where the first region's empty prefix meant no deferral).
     const Loop* loop = getLoop();
     deferHeadBalanceThisRegion_ = deferFirstHeadWmmaActive_ && loop &&
-                                  loop->headerBB == getStinkyInst(blockBegin).getParent() &&
+                                  loop->headerBB == blockBegin->getParent() &&
                                   regionStart != blockBegin;
 
     seedWmmaDsLatencyFromPrefix(blockBegin, regionStart, wmmaRegisterLatencyCounters,
@@ -813,7 +817,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     int totalDSLatency = 0;
     hasWMMAInRegion_ = false;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
-        StinkyInstruction& inst = getStinkyInst(it);
+        auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!instPtr) continue;
+        StinkyInstruction& inst = *instPtr;
 
         wmmaIssueConfig.totalIssuedCycles += inst.issueCycles;
 

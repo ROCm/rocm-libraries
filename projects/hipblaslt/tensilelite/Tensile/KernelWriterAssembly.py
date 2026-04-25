@@ -11570,6 +11570,7 @@ class KernelWriterAssembly(KernelWriter):
             else:
               ds        = DSModifiers(na=2, offset0=paramList[2], offset1=paramList[3])
               writeInst = LocalWriteX(dstAddr=vgpr(lwa), src0=paramList[0], src1=paramList[1], ds=ds, comment=comment)
+            writeInst.setMemToken(MemTokenData([self.states.ldsWriteTokenIdx]))              
             if self.do["LocalWriteCVT"]:
               localWriteCode.add(localWriteCVTCode)
             if self.do["LocalWrite%s"%tc]:
