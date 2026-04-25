@@ -581,6 +581,8 @@ namespace TensileLite
            && (problemType.computeType != problemType.dType
                || problemType.activationType != ActivationType::None))
             singleWSD = true;
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(gsu > 1 && sizeMapping.streamK == 0
            && ((singleWSD || sizeMapping.globalAccumulation == 2)
                || (sizeMapping.globalAccumulation == 3)))
@@ -637,6 +639,8 @@ namespace TensileLite
         if(problemType.sparse)
             args.template append<unsigned char const*>("metadata", inputs.metadata);
 
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
         {
             // Assert hardware is not null
@@ -658,6 +662,8 @@ namespace TensileLite
         bool gsuWSStride
             = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
         bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(gsuWSStride || skWSStride)
         {
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
@@ -722,7 +728,8 @@ namespace TensileLite
             if(problem.betaType() == rocisa::DataType::Half)
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
-
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(sizeMapping.streamK != 0)
         {
             // SK doesn't care gsu
@@ -1188,6 +1195,7 @@ namespace TensileLite
         // if original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
         {
+            // std::cout<<"Returning the sizeMapping.globalsplitU value as autoGSU: "<<sizeMapping.globalSplitU<<"\n";
             return sizeMapping.globalSplitU;
         }
 
@@ -1482,19 +1490,38 @@ namespace TensileLite
                           << ", StaggerU: " << autoStaggerU
                           << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
             }
-            kernelArgs<T_Debug, false>(1,
-                                       0,
-                                       rv.args,
-                                       getNumWorkGroups(rv),
-                                       &hardware,
-                                       problem.getParams(),
-                                       autoWGM,
-                                       autoWGMXCC,
-                                       autoWGMXCCCHUNK,
-                                       autoStaggerUMapping,
-                                       autoStaggerU,
-                                       autoStaggerUStrideShift,
-                                       autoGsuVal);
+            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
+            {           
+                kernelArgs<T_Debug, false>( 1,
+                                            3,
+                                            rv.args,
+                                            getNumWorkGroups(rv),
+                                            &hardware,
+                                            problem.getParams(),
+                                            autoWGM,
+                                            autoWGMXCC,
+                                            autoWGMXCCCHUNK,
+                                            autoStaggerUMapping,
+                                            autoStaggerU,
+                                            autoStaggerUStrideShift,
+                                            autoGsuVal);                                           
+            }
+            else
+            {   
+                kernelArgs<T_Debug, false>( 1,
+                                            0,
+                                            rv.args,
+                                            getNumWorkGroups(rv),
+                                            &hardware,
+                                            problem.getParams(),
+                                            autoWGM,
+                                            autoWGMXCC,
+                                            autoWGMXCCCHUNK,
+                                            autoStaggerUMapping,
+                                            autoStaggerU,
+                                            autoStaggerUStrideShift,
+                                            autoGsuVal);
+            }            
         }
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
@@ -1928,7 +1955,8 @@ namespace TensileLite
                                                        uint32_t const&        workspaceOffsetInByte,
                                                        KA&                    args,
                                                        StreamKSettings const& sk,
-                                                       uint32_t               autoGsuVal) const
+                                                       uint32_t               autoGsuVal,
+                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const                                                       
     {
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
@@ -2097,6 +2125,14 @@ namespace TensileLite
         {
             args.template append<uint32_t>("factorDim", (uint32_t)problem.getParams().factorDim());
         }
+        // Adding the batchmode kernel argument for post GSU kernel to determine 
+        // how to index the batch dimension in Strided Batch versus General Batched.
+        if(problemType.groupedGemm == false)
+        {
+            ContractionProblemGemm::BATCHMODE batchMode = problem.batchMode();
+            args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
+            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);        
+        }
     }
 
     template <bool T_Debug>
@@ -2153,8 +2189,15 @@ namespace TensileLite
             gsu        = sk.grid / tiles;
         }
         rv.kernelName = outputConversionKernelName(problem, inputs, vw, gsu);
-
-        rv.numWorkGroups.x = CeilDivide(wiX * wiY * wiZ, rv.workGroupSize.x * vw);
+        int additionalPaddingPerBatchGeneralBatch = 0;
+        if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::STRIDED)
+            rv.numWorkGroups.x = CeilDivide(wiX * wiY * wiZ, rv.workGroupSize.x * vw);
+        else
+        {
+            rv.numWorkGroups.x = CeilDivide(wiX * wiY, rv.workGroupSize.x * vw) * wiZ;
+            int extra_work_items = (wiX * wiY) % (rv.workGroupSize.x * vw);
+            additionalPaddingPerBatchGeneralBatch = extra_work_items > 0 ? (rv.workGroupSize.x * vw) - extra_work_items : 0;
+        }
         rv.numWorkGroups.y = 1;
         rv.numWorkGroups.z = 1;
 
@@ -2162,7 +2205,7 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
-        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal);
+        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal, additionalPaddingPerBatchGeneralBatch);
 
         //@TODO determine if this is needed, may not end up in the same code object file
         rv.codeObjectFile = codeObjectFilename.load();

@@ -51,7 +51,7 @@ To use the `tensile_config_generator.py` script, follow these steps:
 
 3. Install hipBLASLt and Tensile (change the path to the hipBLASLt repo):
    ```
-   bash ./install.sh -idc -a $(/opt/rocm/llvm/bin/offload-arch) --cpu_ref_lib=lapack
+   inv build --install-deps --clients --install-pkg --architecture $(/opt/rocm/llvm/bin/offload-arch) --cpu-ref-lib=lapack
    ```
 
 4. Tune GEMM kernels using the generated YAML files:
@@ -74,7 +74,7 @@ To use the `tensile_config_generator.py` script, follow these steps:
 
 6. Rebuild hipBLASLt with the merged results:
    ```
-   bash ./install.sh -idc -a $(/opt/rocm/llvm/bin/offload-arch) --cpu_ref_lib=lapack
+   inv build --install-deps --clients --install-pkg --architecture $(/opt/rocm/llvm/bin/offload-arch) --cpu-ref-lib=lapack
    ```
 
 For more detailed information on the script's functionality and advanced usage, please refer to the comments within the `tensile_config_generator.py` file.
