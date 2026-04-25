@@ -1060,19 +1060,21 @@ pipeline {
                          description: 'Some checks have failed'
             script {
                 if (params.BUILD_THEROCK_DOCKER) {
-                    def shortHash = env.THEROCK_SHORT_HASH ?: 'unknown'
-                    office365ConnectorSend(
-                        webhookUrl: credentials('TEAMS_WEBHOOK_URL'),
-                        message: 'TheRock Docker Promotion Failed',
-                        status: 'Failure',
-                        color: '#FF0000',
-                        factDefinitions: [
-                            [name: 'Job',          template: "${env.JOB_NAME}"],
-                            [name: 'Build',        template: "#${env.BUILD_NUMBER}"],
-                            [name: 'TheRock hash', template: shortHash],
-                            [name: 'Build URL',    template: "${env.BUILD_URL}"]
-                        ]
-                    )
+                    withCredentials([string(credentialsId: 'TEAMS_WEBHOOK_URL', variable: 'TEAMS_WEBHOOK_URL')]) {
+                        def shortHash = env.THEROCK_SHORT_HASH ?: 'unknown'
+                        office365ConnectorSend(
+                            webhookUrl: TEAMS_WEBHOOK_URL,
+                            message: 'TheRock Docker Promotion Failed',
+                            status: 'Failure',
+                            color: '#FF0000',
+                            factDefinitions: [
+                                [name: 'Job',          template: "${env.JOB_NAME}"],
+                                [name: 'Build',        template: "#${env.BUILD_NUMBER}"],
+                                [name: 'TheRock hash', template: shortHash],
+                                [name: 'Build URL',    template: "${env.BUILD_URL}"]
+                            ]
+                        )
+                    }
                 }
             }
         }
