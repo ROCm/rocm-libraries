@@ -5484,11 +5484,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.scheduleLocalWrite = kernel["ScheduleLocalWrite"] \
           and kernel["PrefetchGlobalRead"] \
           and kernel["BufferLoad"]  # flat updates lgkmcnt counts = hard to schedule writes and loads?
-      # Temp hack for experimental scheduling config
-      if kernel["ScheduleIterAlg"] == 1:
-        self.states.stinkyOpt = True
-      else:
-        self.states.stinkyOpt = False
       self.states.scheduleIterAlg = kernel["ScheduleIterAlg"]
     else:
       self.states.scheduleGlobalRead = 0
