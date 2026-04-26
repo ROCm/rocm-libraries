@@ -892,8 +892,21 @@ def run():
         lib.applyNaming(splitGSU)
         LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
 
-    filename = os.path.join(newLibraryDir, "TensileLiteLibrary_lazy_Mapping")
-    LibraryIO.write(filename, libraryMapping, "msgpack")
+    # Split libraryMapping per arch and write one mapping file per arch.
+    # Each value is a kernel filename ending in "_<arch>"; routing entries to
+    # an arch-scoped file lets single-arch builds produce non-colliding
+    # mapping artifacts that survive overlay-style installs (kpack shards).
+    for archName in archs:
+        archMapping = {
+            idx: name
+            for idx, name in libraryMapping.items()
+            if name.endswith("_" + archName)
+        }
+        if archMapping:
+            archMappingFile = os.path.join(
+                newLibraryDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
+            )
+            LibraryIO.write(archMappingFile, archMapping, "msgpack")
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
