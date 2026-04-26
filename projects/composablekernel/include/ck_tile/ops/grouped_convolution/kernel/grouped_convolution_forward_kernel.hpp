@@ -683,7 +683,23 @@ struct GroupedConvolutionForwardKernel
     {
         if constexpr(IsDepthwise)
         {
-            return "grouped_convolution_forward_depthwise";
+            // clang-format off
+            return concat('_', "grouped_convolution_forward_depthwise",
+                gemm_prec_str<InDataType, WeiDataType>(),
+                "bs", Pipeline::BlockSize,
+                "th", Pipeline::TileOutH,
+                "tw", Pipeline::TileOutW,
+                "fh", Pipeline::FilterH,
+                "fw", Pipeline::FilterW,
+                "sh", Pipeline::StrideH,
+                "sw", Pipeline::StrideW,
+                "nb", Pipeline::NBatch,
+                "sbh", Pipeline::SubTileH,
+                "sbw", Pipeline::SubTileW,
+                "iv", Pipeline::InVectorSize,
+                "ov", Pipeline::OutVectorSize
+            );
+            // clang-format on
         }
         else
         {

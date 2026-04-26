@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "grouped_convolution_forward_depthwise_dispatch.hpp"
 #include "ck_tile/ref/naive_grouped_conv_fwd_gpu.hpp"
 
 template <ck_tile::index_t NDimSpatial,
@@ -132,84 +131,33 @@ int run_grouped_conv_fwd_example_with_layouts(
     weight_dev_buf.ToDevice(weight.data());
     output_dev_buf.SetZero();
 
-    ck_tile::GroupedConvFwdHostArgs<> host_args(conv_param,
-                                                input_dev_buf.GetDeviceBuffer(),
-                                                weight_dev_buf.GetDeviceBuffer(),
-                                                {},
-                                                output_dev_buf.GetDeviceBuffer(),
-                                                kbatch);
+    ck_tile::GroupedConvFwdHostArgs<> args(conv_param,
+                                           input_dev_buf.GetDeviceBuffer(),
+                                           weight_dev_buf.GetDeviceBuffer(),
+                                           {},
+                                           output_dev_buf.GetDeviceBuffer(),
+                                           kbatch);
 
     std::cout << "Run Grouped Conv Fwd kernel" << std::endl;
     std::cout << "input: " << input.mDesc << std::endl;
     std::cout << "weight: " << weight.mDesc << std::endl;
     std::cout << "output: " << output.mDesc << std::endl;
 
-    // Depthwise requires NGCHW layout; only attempt when layout matches
-    constexpr bool kIsNgcLayout =
-        std::is_same_v<InLayout, ck_tile::tensor_layout::convolution::NGCHW>;
-
-    ck_tile::GroupedConvFwdDepthwiseResult dw_result;
-    if constexpr(kIsNgcLayout)
-    {
-        ck_tile::stream_config s{
-            nullptr, true, (arg_parser.get_int("v") >= 2) ? 1 : 0, n_warmup, n_repeat, true};
-        dw_result = ck_tile::
-            grouped_conv_fwd_depthwise_dispatch<InDataType, WeiDataType, AccDataType, OutDataType>(
-                host_args,
-                s,
-                conv_param.GetFlops(),
-                conv_param.GetByte<InDataType, WeiDataType, OutDataType>());
-    }
-
-    float ave_time = 0.0f;
-
-    // GEMM pipeline: NHWGC-family layouts, fp16/bf16 only
-    constexpr bool kGemmLayoutOk =
-        std::is_same_v<InLayout, ck_tile::tensor_layout::convolution::NWGC> ||
-        std::is_same_v<InLayout, ck_tile::tensor_layout::convolution::NHWGC> ||
-        std::is_same_v<InLayout, ck_tile::tensor_layout::convolution::NDHWGC>;
-    constexpr bool kGemmTypeOk =
-        std::is_same_v<InDataType, ck_tile::half_t> || std::is_same_v<InDataType, ck_tile::bf16_t>;
-
-    if(dw_result.valid_count > 0)
-    {
-        ave_time = dw_result.best_time;
-        std::cout << "\n=== Depthwise Best ===" << std::endl;
-        std::cout << ave_time << " ms, " << dw_result.best_tflops << " TFlops, "
-                  << dw_result.best_gb_per_sec << " GB/s, " << dw_result.best_config << std::endl;
-    }
-    else if constexpr(kGemmLayoutOk && kGemmTypeOk)
-    {
-        ave_time = invoke_grouped_conv_fwd<NDimSpatial,
-                                           ConvConfig,
-                                           Invoker,
-                                           InDataType,
-                                           WeiDataType,
-                                           AccDataType,
-                                           OutDataType,
-                                           InLayout,
-                                           WeiLayout,
-                                           OutLayout>(host_args, n_warmup, n_repeat);
-    }
-    else
-    {
-        throw std::runtime_error("Wrong! No supported kernel for this layout/dtype combination!\n");
-    }
+    invoke_grouped_conv_fwd<NDimSpatial,
+                            ConvConfig,
+                            Invoker,
+                            InDataType,
+                            WeiDataType,
+                            AccDataType,
+                            OutDataType,
+                            InLayout,
+                            WeiLayout,
+                            OutLayout>(args, n_warmup, n_repeat);
 
     output_dev_buf.FromDevice(output.data());
     bool pass = true;
 
-    int verify_mode = arg_parser.get_int("v");
-    // GPU reference hardcodes NHWGC; incompatible with NGCHW layout
-    if constexpr(kIsNgcLayout)
-    {
-        if(verify_mode == 2)
-        {
-            verify_mode = 1;
-        }
-    }
-
-    if(verify_mode == 1)
+    if(arg_parser.get_int("v") == 1)
     {
         ck_tile::HostTensor<OutDataType> output_host_ref(out_g_n_k_wos_desc);
         output_host_ref.SetZero();
@@ -239,7 +187,7 @@ int run_grouped_conv_fwd_example_with_layouts(
                   << std::endl;
         std::cout << "The CPU verification result is:" << (pass ? "correct" : "fail") << std::endl;
     }
-    else if(verify_mode == 2)
+    else if(arg_parser.get_int("v") == 2)
     {
         // GPU reference verification
         ck_tile::DeviceMem output_ref_dev_buf(output.get_element_space_size_in_bytes());
@@ -309,10 +257,6 @@ int run_grouped_conv_fwd_example_prec_type(
     using NHWGK  = ck_tile::tensor_layout::convolution::NHWGK;
     using NDHWGK = ck_tile::tensor_layout::convolution::NDHWGK;
 
-    using NGCHW = ck_tile::tensor_layout::convolution::NGCHW;
-    using GKCYX = ck_tile::tensor_layout::convolution::GKCYX;
-    using NGKHW = ck_tile::tensor_layout::convolution::NGKHW;
-
     if(in_layout == "NWGC" && wei_layout == "GKXC" && out_layout == "NWGK")
     {
         return run_grouped_conv_fwd_example_with_layouts<ck_tile::number<1>{},
@@ -332,16 +276,6 @@ int run_grouped_conv_fwd_example_prec_type(
                                                          WeiPrecType,
                                                          OutPrecType>(
             argc, argv, NHWGC{}, GKYXC{}, NHWGK{});
-    }
-    else if(in_layout == "NGCHW" && wei_layout == "GKCYX" && out_layout == "NGKHW")
-    {
-        return run_grouped_conv_fwd_example_with_layouts<ck_tile::number<2>{},
-                                                         ConvConfig,
-                                                         Invoker,
-                                                         InPrecType,
-                                                         WeiPrecType,
-                                                         OutPrecType>(
-            argc, argv, NGCHW{}, GKCYX{}, NGKHW{});
     }
     else if(in_layout == "NDHWGC" && wei_layout == "GKZYXC" && out_layout == "NDHWGK")
     {

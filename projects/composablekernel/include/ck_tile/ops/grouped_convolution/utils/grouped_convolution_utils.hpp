@@ -275,8 +275,9 @@ struct DepthwiseConvFwdTraits
     using OutVectorInternal = ext_vector_t<OutDataType, OutVectorSizeInternal>;
     using AccVectorInternal = ext_vector_t<AccDataType, OutVectorSizeInternal>;
 
-    static_assert(std::is_same_v<InDataType, fp16_t> || std::is_same_v<InDataType, float>,
-                  "Only fp16 and float are supported currently");
+    static_assert(std::is_same_v<InDataType, fp16_t> || std::is_same_v<InDataType, bf16_t> ||
+                      std::is_same_v<InDataType, float>,
+                  "Only fp16, bf16 and float are supported currently");
     static_assert(BlockSize == 64 || BlockSize == 128 || BlockSize == 256,
                   "BlockSize must be 64, 128, or 256");
     static_assert(TotalSubTiles <= WaveSize, "TotalSubTiles must not exceed WaveSize");

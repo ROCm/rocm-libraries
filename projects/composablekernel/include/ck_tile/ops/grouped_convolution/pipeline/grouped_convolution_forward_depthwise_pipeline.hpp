@@ -22,6 +22,11 @@ CK_TILE_DEVICE void depthwise_inner_product(const T& a, const T& b, float& c)
         c += static_cast<float>(a[1]) * static_cast<float>(b[1]);
 #endif
     }
+    else if constexpr(std::is_same_v<T, bf16x2_t>)
+    {
+        c += static_cast<float>(a[0]) * static_cast<float>(b[0]);
+        c += static_cast<float>(a[1]) * static_cast<float>(b[1]);
+    }
     else if constexpr(std::is_same_v<T, float>)
     {
         c += a * b;

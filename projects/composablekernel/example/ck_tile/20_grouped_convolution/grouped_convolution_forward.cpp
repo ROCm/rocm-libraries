@@ -23,9 +23,7 @@ int run_grouped_conv_fwd_example(int argc, char* argv[])
     if(!result)
         return -1;
 
-    std::string data_type = arg_parser.get_str("prec");
-
-    // Grouped convolution path (implicit GEMM)
+    std::string data_type  = arg_parser.get_str("prec");
     std::string in_layout  = arg_parser.get_str("in_layout");
     std::string wei_layout = arg_parser.get_str("wei_layout");
     std::string out_layout = arg_parser.get_str("out_layout");
@@ -42,11 +40,6 @@ int run_grouped_conv_fwd_example(int argc, char* argv[])
         return run_grouped_conv_fwd_example_prec_type<Invoker,
                                                       ConvConfig<ck_tile::bf16_t>,
                                                       ck_tile::bf16_t>(
-            in_layout, wei_layout, out_layout, argc, argv);
-    }
-    else if(data_type == "fp32")
-    {
-        return run_grouped_conv_fwd_example_prec_type<Invoker, ConvConfig<float>, float>(
             in_layout, wei_layout, out_layout, argc, argv);
     }
     else
