@@ -844,215 +844,109 @@ struct GroupedConvolutionForwardKernel
         {
             return IsDepthwiseArgumentSupported(kargs);
         }
-        else // GEMM path
+
+        if constexpr(Pipeline_::Async)
         {
-
-            if constexpr(Pipeline_::Async)
+            if(get_device_name() != "gfx950")
             {
-                if(get_device_name() != "gfx950")
-                {
-                    return false;
-                }
+                return false;
             }
+        }
 
-            if constexpr((GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                          is_any_of<OutDataType, fp16_t, bf16_t>::value) ||
-                         !IsSplitKSupported)
-            {
-                if(kargs.k_batch != 1)
-                {
-                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                    {
-                        CK_TILE_ERROR("Conditions not met for Kbatch >1 !");
-                    }
-                    return false;
-                }
-            }
-
-            const index_t ConvK = kargs.wei_g_k_c_xs_lengths[number<1>{}];
-            const index_t ConvC = kargs.wei_g_k_c_xs_lengths[number<2>{}];
-
-            // check ConvolutionSpecialization
-            if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Stride1Pad0)
-            {
-                // check if it's 1x1, stride=1 conv
-                for(index_t i = 0; i < NDimSpatial; ++i)
-                {
-                    const index_t SpatialDim = kargs.wei_g_k_c_xs_lengths[i + 3];
-                    const index_t ConvStride = kargs.conv_filter_strides[i];
-                    const index_t LeftPad    = kargs.input_left_pads[i];
-                    const index_t RightPad   = kargs.input_right_pads[i];
-
-                    if(!(SpatialDim == 1 && ConvStride == 1 && LeftPad == 0 && RightPad == 0))
-                    {
-                        return false;
-                    }
-                }
-            }
-            else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Pad0)
-            {
-                // check if it's 1x1 conv
-                for(index_t i = 0; i < NDimSpatial; ++i)
-                {
-                    const index_t SpatialDim = kargs.wei_g_k_c_xs_lengths[i + 3];
-                    const index_t LeftPad    = kargs.input_left_pads[i];
-                    const index_t RightPad   = kargs.input_right_pads[i];
-
-                    if(!(SpatialDim == 1 && LeftPad == 0 && RightPad == 0))
-                    {
-                        return false;
-                    }
-                }
-            }
-            else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter3x3)
-            {
-                if(ConvC != 1)
-                {
-                    return false;
-                }
-                for(index_t i = 0; i < NDimSpatial; ++i)
-                {
-                    const index_t filter_spatial_dim = kargs.wei_g_k_c_xs_lengths[i + I3];
-
-                    if(filter_spatial_dim != I3)
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            if constexpr(GroupedConvTraitsType_::ExplicitGemm &&
-                         ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
+        if constexpr((GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                      is_any_of<OutDataType, fp16_t, bf16_t>::value) ||
+                     !IsSplitKSupported)
+        {
+            if(kargs.k_batch != 1)
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
-                    CK_TILE_ERROR(
-                        "Explicit Gemm is supported only for Filter1x1Stride1Pad0 specialization!");
+                    CK_TILE_ERROR("Conditions not met for Kbatch >1 !");
                 }
                 return false;
             }
+        }
 
-            namespace ctc = tensor_layout::convolution;
+        const index_t ConvK = kargs.wei_g_k_c_xs_lengths[number<1>{}];
+        const index_t ConvC = kargs.wei_g_k_c_xs_lengths[number<2>{}];
 
-            if constexpr(std::is_same_v<InLayout, ctc::NWGC> ||
-                         std::is_same_v<InLayout, ctc::NHWGC> ||
-                         std::is_same_v<InLayout, ctc::NDHWGC>)
+        // check ConvolutionSpecialization
+        if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Stride1Pad0)
+        {
+            // check if it's 1x1, stride=1 conv
+            for(index_t i = 0; i < NDimSpatial; ++i)
             {
-                // Check access for A tensor
-                if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 &&
-                   GroupedConvTraitsType_::NumGroupsToMerge == 1)
-                {
-                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                    {
-                        CK_TILE_ERROR(
-                            "Conv C is not a multiple of vector load size for input image!");
-                    }
-                    return false;
-                }
-                else if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
-                {
-                    if(ConvC != 1)
-                    {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR(
-                                "ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow "
-                                "vector reads on group dimension!");
-                        }
-                        return false;
-                    }
+                const index_t SpatialDim = kargs.wei_g_k_c_xs_lengths[i + 3];
+                const index_t ConvStride = kargs.conv_filter_strides[i];
+                const index_t LeftPad    = kargs.input_left_pads[i];
+                const index_t RightPad   = kargs.input_right_pads[i];
 
-                    const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
-                    if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
-                    {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge!");
-                        }
-                        return false;
-                    }
-                }
-            }
-            else
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                if(!(SpatialDim == 1 && ConvStride == 1 && LeftPad == 0 && RightPad == 0))
                 {
-                    CK_TILE_ERROR("Not supported input layout!");
-                }
-                return false;
-            }
-
-            // check vector access of B
-            // FIXME: layout
-            if constexpr(std::is_same_v<WeiLayout, ctc::GKXC> ||
-                         std::is_same_v<WeiLayout, ctc::GKYXC> ||
-                         std::is_same_v<WeiLayout, ctc::GKZYXC>)
-            {
-                if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
-                {
-                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                    {
-                        CK_TILE_ERROR("Conv C is not a multiple of vector load size for weight!");
-                    }
                     return false;
                 }
             }
-            else
+        }
+        else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter1x1Pad0)
+        {
+            // check if it's 1x1 conv
+            for(index_t i = 0; i < NDimSpatial; ++i)
+            {
+                const index_t SpatialDim = kargs.wei_g_k_c_xs_lengths[i + 3];
+                const index_t LeftPad    = kargs.input_left_pads[i];
+                const index_t RightPad   = kargs.input_right_pads[i];
+
+                if(!(SpatialDim == 1 && LeftPad == 0 && RightPad == 0))
+                {
+                    return false;
+                }
+            }
+        }
+        else if constexpr(ConvSpecialization == ConvolutionSpecialization::Filter3x3)
+        {
+            if(ConvC != 1)
+            {
+                return false;
+            }
+            for(index_t i = 0; i < NDimSpatial; ++i)
+            {
+                const index_t filter_spatial_dim = kargs.wei_g_k_c_xs_lengths[i + I3];
+
+                if(filter_spatial_dim != I3)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if constexpr(GroupedConvTraitsType_::ExplicitGemm &&
+                     ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
+        {
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR(
+                    "Explicit Gemm is supported only for Filter1x1Stride1Pad0 specialization!");
+            }
+            return false;
+        }
+
+        namespace ctc = tensor_layout::convolution;
+
+        if constexpr(std::is_same_v<InLayout, ctc::NWGC> || std::is_same_v<InLayout, ctc::NHWGC> ||
+                     std::is_same_v<InLayout, ctc::NDHWGC>)
+        {
+            // Check access for A tensor
+            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 &&
+               GroupedConvTraitsType_::NumGroupsToMerge == 1)
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
-                    CK_TILE_ERROR("Not supported weight layout!");
+                    CK_TILE_ERROR("Conv C is not a multiple of vector load size for input image!");
                 }
                 return false;
             }
-
-            // check vector access of E
-            if constexpr(std::is_same_v<OutLayout, ctc::NWGK> ||
-                         std::is_same_v<OutLayout, ctc::NHWGK> ||
-                         std::is_same_v<OutLayout, ctc::NDHWGK>)
+            else if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
             {
-                if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0)
-                {
-                    // Try to read over G
-                    if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
-                    {
-                        const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
-                        if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0 ||
-                           ConvG % GroupedConvTraitsType_::VectorSizeC != 0)
-                        {
-                            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                            {
-                                CK_TILE_ERROR(
-                                    "ConvG must be a multiple of NumGroupsToMerge to allow "
-                                    "writing over G dimension");
-                            }
-                            return false;
-                        }
-                    }
-                    else
-                    {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR(
-                                "ConvK is not a multiple of vector store size for output image!");
-                        }
-                        return false;
-                    }
-                }
-            }
-            else
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("Not supported output layout!");
-                }
-                return false;
-            }
-
-            if constexpr(GroupedConvTraitsType_::NumGroupsToMerge > 1)
-            {
-                // currently group merging works only for C == 1 due to tensor transformation
-                // limitations
                 if(ConvC != 1)
                 {
                     if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
@@ -1073,10 +967,108 @@ struct GroupedConvolutionForwardKernel
                     return false;
                 }
             }
+        }
+        else
+        {
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("Not supported input layout!");
+            }
+            return false;
+        }
 
-            return true;
+        // check vector access of B
+        // FIXME: layout
+        if constexpr(std::is_same_v<WeiLayout, ctc::GKXC> ||
+                     std::is_same_v<WeiLayout, ctc::GKYXC> ||
+                     std::is_same_v<WeiLayout, ctc::GKZYXC>)
+        {
+            if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Conv C is not a multiple of vector load size for weight!");
+                }
+                return false;
+            }
+        }
+        else
+        {
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("Not supported weight layout!");
+            }
+            return false;
+        }
 
-        } // else (GEMM path)
+        // check vector access of E
+        if constexpr(std::is_same_v<OutLayout, ctc::NWGK> ||
+                     std::is_same_v<OutLayout, ctc::NHWGK> ||
+                     std::is_same_v<OutLayout, ctc::NDHWGK>)
+        {
+            if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0)
+            {
+                // Try to read over G
+                if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
+                {
+                    const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
+                    if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0 ||
+                       ConvG % GroupedConvTraitsType_::VectorSizeC != 0)
+                    {
+                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                        {
+                            CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge to allow "
+                                          "writing over G dimension");
+                        }
+                        return false;
+                    }
+                }
+                else
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR(
+                            "ConvK is not a multiple of vector store size for output image!");
+                    }
+                    return false;
+                }
+            }
+        }
+        else
+        {
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("Not supported output layout!");
+            }
+            return false;
+        }
+
+        if constexpr(GroupedConvTraitsType_::NumGroupsToMerge > 1)
+        {
+            // currently group merging works only for C == 1 due to tensor transformation
+            // limitations
+            if(ConvC != 1)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow "
+                                  "vector reads on group dimension!");
+                }
+                return false;
+            }
+
+            const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
+            if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge!");
+                }
+                return false;
+            }
+        }
+
+        return true;
     }
 
     template <typename ADescType>
