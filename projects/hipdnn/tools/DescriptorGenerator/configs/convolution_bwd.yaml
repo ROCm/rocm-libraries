@@ -102,7 +102,7 @@ operation:
       fbs_field: "conv_mode"
       attr_name: "HIPDNN_ATTR_CONVOLUTION_CONV_MODE"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::ConvMode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::ConvMode"
       required: false
       frontend_getter: "get_convolution_mode()"
       backend_setter: "setConvMode"

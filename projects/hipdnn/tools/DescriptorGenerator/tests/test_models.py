@@ -514,7 +514,7 @@ class TestDataField:
     # --- enum_short_type ---
 
     def test_enum_short_type_with_namespace(self):
-        df = make_data_field(cpp_enum="hipdnn_data_sdk::data_objects::ConvMode")
+        df = make_data_field(cpp_enum="hipdnn_flatbuffers_sdk::data_objects::ConvMode")
         assert df.enum_short_type == "ConvMode"
 
     def test_enum_short_type_without_namespace(self):
@@ -534,14 +534,14 @@ class TestDataField:
     def test_effective_frontend_type_uses_frontend_type(self):
         df = make_data_field(
             frontend_type="ConvolutionMode",
-            cpp_enum="hipdnn_data_sdk::data_objects::ConvMode",
+            cpp_enum="hipdnn_flatbuffers_sdk::data_objects::ConvMode",
         )
         assert df.effective_frontend_type == "ConvolutionMode"
 
     def test_effective_frontend_type_falls_back_to_cpp_enum_short(self):
         df = make_data_field(
             frontend_type="",
-            cpp_enum="hipdnn_data_sdk::data_objects::ConvMode",
+            cpp_enum="hipdnn_flatbuffers_sdk::data_objects::ConvMode",
         )
         assert df.effective_frontend_type == "ConvMode"
 
@@ -842,7 +842,7 @@ class TestOperationConfigLabels:
 
     def test_fbs_namespace(self):
         cfg = make_minimal_config()
-        assert cfg.fbs_namespace == "hipdnn_data_sdk::data_objects"
+        assert cfg.fbs_namespace == "hipdnn_flatbuffers_sdk::data_objects"
 
     def test_fbs_t_type(self):
         cfg = make_minimal_config(fbs_table="ConvolutionFwdAttributes")
