@@ -5693,6 +5693,105 @@ void cpu_getrs<rocblas_double_complex>(rocblas_operation trans,
     zgetrs_(&transC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
 }
 
+// -----------------------------------------------------------------------
+// getrs_npvt
+//
+// The LAPACK routine GETRF computes the LU factorization with row pivoting
+// P * A = L * U, where the row permutation matrix P is encoded in the pivot vector
+// The LAPACK routine GETRS uses this decomposition for solving linear equations.
+//
+// The GETRS_NPVT routine is not available in LAPACK for using
+// the decomposition A = L * U.
+//
+// However, this capability can be emulated by treating
+// the permutation matrix P as the identity permutation.
+//
+// This requires setting the pivot vector  to match the identity permutation.
+// -----------------------------------------------------------------------
+template <>
+void cpu_getrs_npvt<float>(rocblas_operation trans,
+                           rocblas_int n,
+                           rocblas_int nrhs,
+                           float* A,
+                           rocblas_int lda,
+                           float* B,
+                           rocblas_int ldb)
+{
+    rocblas_int info;
+
+    std::vector<rocblas_int> ipiv(n);
+    for(rocblas_int i = 0; i < n; i++)
+    {
+        ipiv[i] = i + 1;
+    }
+
+    char transC = rocblas2char_operation(trans);
+    sgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
+}
+
+template <>
+void cpu_getrs_npvt<double>(rocblas_operation trans,
+                            rocblas_int n,
+                            rocblas_int nrhs,
+                            double* A,
+                            rocblas_int lda,
+                            double* B,
+                            rocblas_int ldb)
+{
+    rocblas_int info;
+
+    std::vector<rocblas_int> ipiv(n);
+    for(rocblas_int i = 0; i < n; i++)
+    {
+        ipiv[i] = i + 1;
+    }
+
+    char transC = rocblas2char_operation(trans);
+    dgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
+}
+
+template <>
+void cpu_getrs_npvt<rocblas_float_complex>(rocblas_operation trans,
+                                           rocblas_int n,
+                                           rocblas_int nrhs,
+                                           rocblas_float_complex* A,
+                                           rocblas_int lda,
+                                           rocblas_float_complex* B,
+                                           rocblas_int ldb)
+{
+    rocblas_int info;
+
+    std::vector<rocblas_int> ipiv(n);
+    for(rocblas_int i = 0; i < n; i++)
+    {
+        ipiv[i] = i + 1;
+    }
+
+    char transC = rocblas2char_operation(trans);
+    cgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
+}
+
+template <>
+void cpu_getrs_npvt<rocblas_double_complex>(rocblas_operation trans,
+                                            rocblas_int n,
+                                            rocblas_int nrhs,
+                                            rocblas_double_complex* A,
+                                            rocblas_int lda,
+                                            rocblas_double_complex* B,
+                                            rocblas_int ldb)
+{
+    rocblas_int info;
+
+    std::vector<rocblas_int> ipiv(n);
+    for(rocblas_int i = 0; i < n; i++)
+    {
+        ipiv[i] = i + 1;
+    }
+
+    char transC = rocblas2char_operation(trans);
+    zgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
+}
+
 // gesv
 template <>
 void cpu_gesv<float>(rocblas_int n,

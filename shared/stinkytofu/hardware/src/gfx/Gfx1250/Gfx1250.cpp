@@ -314,6 +314,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
 
 void setGfx1250ConversionMap(GpuArch& registry) {
     std::unordered_map<std::string, std::string> conversion = {
+        {"SSchedulingFence", "lowerRocisaSchedulingFence"},
         {"_SWaitCnt", "lowerRocisaWaitCnt"},
         {"_SWaitCntVscnt", "lowerRocisaWaitCnt"},
         {"_SWaitStorecnt", "lowerRocisaStoreWaitCnt"},

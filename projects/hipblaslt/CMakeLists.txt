@@ -26,7 +26,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.2.2" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.3.0" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -233,7 +233,7 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         message(STATUS "Found msgpack-cxx (>=6.x)")
         set(hipblaslt_msgpack_target "msgpack-cxx")
     else()
-        # TODO: set minimum version requied for *-cxx library
+        # TODO: set minimum version required for *-cxx library
         find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
         set(hipblaslt_msgpack_target "msgpackc-cxx")
         message(STATUS "Found msgpack (<=5.x)")

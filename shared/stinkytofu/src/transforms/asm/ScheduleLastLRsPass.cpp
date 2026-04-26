@@ -28,6 +28,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace {
@@ -260,10 +261,11 @@ class ScheduleLastLRsPass : public StinkyInstPass {
         scheduleFinalLocalReadWithLatency(bb, passCtx);
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) runOnBasicBlock(bb, passCtx);
         }
+        return preserveCFGAnalyses();
     }
 };
 
