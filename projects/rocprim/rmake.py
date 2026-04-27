@@ -176,8 +176,7 @@ def config_cmd():
         cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_DIR={build_dir}" )
 
     if args.build_clients:
-        build_benchmarks = ("OFF" if OS_info["ID"] == "windows" else "ON")
-        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_BENCHMARK={build_benchmarks} -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir}" )
+        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_BENCHMARK=ON -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir}" )
 
     if args.no_offload_compress:
         cmake_options.append( f"-DBUILD_OFFLOAD_COMPRESS=OFF" )

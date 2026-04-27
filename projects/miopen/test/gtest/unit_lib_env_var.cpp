@@ -60,7 +60,7 @@ private:
 
 struct TestParams
 {
-    friend std::ostream& operator<<(std::ostream& os, const TestParams& tp)
+    friend std::ostream& operator<<(std::ostream& os, const TestParams& /*tp*/)
     {
         os << "none";
         return os;

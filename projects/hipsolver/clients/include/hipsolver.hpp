@@ -10065,3 +10065,328 @@ inline hipsolverStatus_t hipsolver_sytrf(testAPI_t               API,
     }
 }
 /********************************************************/
+
+/******************** SYEV/HEEV ********************/
+// normal and strided_batched
+// bufferSize
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        bool                STRIDED,
+                                                        hipsolverHandle_t   handle,
+                                                        hipsolverDnParams_t params,
+                                                        hipsolverEigMode_t  jobz,
+                                                        hipsolverFillMode_t uplo,
+                                                        int64_t             n,
+                                                        float*              A,
+                                                        int64_t             lda,
+                                                        float*              W,
+                                                        size_t*             lworkOnDevice,
+                                                        size_t*             lworkOnHost,
+                                                        int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched_bufferSize(handle,
+                                                  params,
+                                                  jobz,
+                                                  uplo,
+                                                  n,
+                                                  HIP_R_32F,
+                                                  A,
+                                                  lda,
+                                                  HIP_R_32F,
+                                                  W,
+                                                  HIP_R_32F,
+                                                  lworkOnDevice,
+                                                  lworkOnHost,
+                                                  batchSize);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        bool                STRIDED,
+                                                        hipsolverHandle_t   handle,
+                                                        hipsolverDnParams_t params,
+                                                        hipsolverEigMode_t  jobz,
+                                                        hipsolverFillMode_t uplo,
+                                                        int64_t             n,
+                                                        double*             A,
+                                                        int64_t             lda,
+                                                        double*             W,
+                                                        size_t*             lworkOnDevice,
+                                                        size_t*             lworkOnHost,
+                                                        int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched_bufferSize(handle,
+                                                  params,
+                                                  jobz,
+                                                  uplo,
+                                                  n,
+                                                  HIP_R_64F,
+                                                  A,
+                                                  lda,
+                                                  HIP_R_64F,
+                                                  W,
+                                                  HIP_R_64F,
+                                                  lworkOnDevice,
+                                                  lworkOnHost,
+                                                  batchSize);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t           API,
+                                                        bool                STRIDED,
+                                                        hipsolverHandle_t   handle,
+                                                        hipsolverDnParams_t params,
+                                                        hipsolverEigMode_t  jobz,
+                                                        hipsolverFillMode_t uplo,
+                                                        int64_t             n,
+                                                        hipsolverComplex*   A,
+                                                        int64_t             lda,
+                                                        float*              W,
+                                                        size_t*             lworkOnDevice,
+                                                        size_t*             lworkOnHost,
+                                                        int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched_bufferSize(handle,
+                                                  params,
+                                                  jobz,
+                                                  uplo,
+                                                  n,
+                                                  HIP_C_32F,
+                                                  A,
+                                                  lda,
+                                                  HIP_R_32F,
+                                                  W,
+                                                  HIP_C_32F,
+                                                  lworkOnDevice,
+                                                  lworkOnHost,
+                                                  batchSize);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev_bufferSize(testAPI_t               API,
+                                                        bool                    STRIDED,
+                                                        hipsolverHandle_t       handle,
+                                                        hipsolverDnParams_t     params,
+                                                        hipsolverEigMode_t      jobz,
+                                                        hipsolverFillMode_t     uplo,
+                                                        int64_t                 n,
+                                                        hipsolverDoubleComplex* A,
+                                                        int64_t                 lda,
+                                                        double*                 W,
+                                                        size_t*                 lworkOnDevice,
+                                                        size_t*                 lworkOnHost,
+                                                        int64_t                 batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched_bufferSize(handle,
+                                                  params,
+                                                  jobz,
+                                                  uplo,
+                                                  n,
+                                                  HIP_C_64F,
+                                                  A,
+                                                  lda,
+                                                  HIP_R_64F,
+                                                  W,
+                                                  HIP_C_64F,
+                                                  lworkOnDevice,
+                                                  lworkOnHost,
+                                                  batchSize);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+// solve
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             bool                STRIDED,
+                                             hipsolverHandle_t   handle,
+                                             hipsolverDnParams_t params,
+                                             hipsolverEigMode_t  jobz,
+                                             hipsolverFillMode_t uplo,
+                                             int64_t             n,
+                                             float*              A,
+                                             int64_t             lda,
+                                             float*              W,
+                                             float*              workOnDevice,
+                                             size_t              lworkOnDevice,
+                                             float*              workOnHost,
+                                             size_t              lworkOnHost,
+                                             int*                devInfo,
+                                             int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched(handle,
+                                       params,
+                                       jobz,
+                                       uplo,
+                                       n,
+                                       HIP_R_32F,
+                                       A,
+                                       lda,
+                                       HIP_R_32F,
+                                       W,
+                                       HIP_R_32F,
+                                       workOnDevice,
+                                       lworkOnDevice,
+                                       workOnHost,
+                                       lworkOnHost,
+                                       devInfo,
+                                       batchSize);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             bool                STRIDED,
+                                             hipsolverHandle_t   handle,
+                                             hipsolverDnParams_t params,
+                                             hipsolverEigMode_t  jobz,
+                                             hipsolverFillMode_t uplo,
+                                             int64_t             n,
+                                             double*             A,
+                                             int64_t             lda,
+                                             double*             W,
+                                             double*             workOnDevice,
+                                             size_t              lworkOnDevice,
+                                             double*             workOnHost,
+                                             size_t              lworkOnHost,
+                                             int*                devInfo,
+                                             int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched(handle,
+                                       params,
+                                       jobz,
+                                       uplo,
+                                       n,
+                                       HIP_R_64F,
+                                       A,
+                                       lda,
+                                       HIP_R_64F,
+                                       W,
+                                       HIP_R_64F,
+                                       workOnDevice,
+                                       lworkOnDevice,
+                                       workOnHost,
+                                       lworkOnHost,
+                                       devInfo,
+                                       batchSize);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t           API,
+                                             bool                STRIDED,
+                                             hipsolverHandle_t   handle,
+                                             hipsolverDnParams_t params,
+                                             hipsolverEigMode_t  jobz,
+                                             hipsolverFillMode_t uplo,
+                                             int64_t             n,
+                                             hipsolverComplex*   A,
+                                             int64_t             lda,
+                                             float*              W,
+                                             hipsolverComplex*   workOnDevice,
+                                             size_t              lworkOnDevice,
+                                             hipsolverComplex*   workOnHost,
+                                             size_t              lworkOnHost,
+                                             int*                devInfo,
+                                             int64_t             batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched(handle,
+                                       params,
+                                       jobz,
+                                       uplo,
+                                       n,
+                                       HIP_C_32F,
+                                       A,
+                                       lda,
+                                       HIP_R_32F,
+                                       W,
+                                       HIP_C_32F,
+                                       workOnDevice,
+                                       lworkOnDevice,
+                                       workOnHost,
+                                       lworkOnHost,
+                                       devInfo,
+                                       batchSize);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_syev_heev(testAPI_t               API,
+                                             bool                    STRIDED,
+                                             hipsolverHandle_t       handle,
+                                             hipsolverDnParams_t     params,
+                                             hipsolverEigMode_t      jobz,
+                                             hipsolverFillMode_t     uplo,
+                                             int64_t                 n,
+                                             hipsolverDoubleComplex* A,
+                                             int64_t                 lda,
+                                             double*                 W,
+                                             hipsolverDoubleComplex* workOnDevice,
+                                             size_t                  lworkOnDevice,
+                                             hipsolverDoubleComplex* workOnHost,
+                                             size_t                  lworkOnHost,
+                                             int*                    devInfo,
+                                             int64_t                 batchSize)
+{
+    switch(api2marshal(API, STRIDED))
+    {
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXsyevBatched(handle,
+                                       params,
+                                       jobz,
+                                       uplo,
+                                       n,
+                                       HIP_C_64F,
+                                       A,
+                                       lda,
+                                       HIP_R_64F,
+                                       W,
+                                       HIP_C_64F,
+                                       workOnDevice,
+                                       lworkOnDevice,
+                                       workOnHost,
+                                       lworkOnHost,
+                                       devInfo,
+                                       batchSize);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+/********************************************************/

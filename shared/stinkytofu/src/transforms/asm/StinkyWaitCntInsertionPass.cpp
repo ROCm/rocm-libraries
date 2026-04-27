@@ -28,6 +28,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/BBIndexAnalysis.hpp"
+#include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -206,29 +209,32 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         return &StinkyWaitCntInsertionPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
 
-        buildUseDefChain(func, true);
+        const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
+        buildUseDefChain(func, domInfo, true);
+        const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
         rebuildExitMemoryStateForProcessedBlocks(func, passCtx);
 
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
+        for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) {
-                return;
+                continue;
             }
             WaitInsertionList waits = collectWaitsForBlock(*bb);
             insertWaitsForBlock(*bb, arch, waits);
-        });
+        }
 
         // Handle tensor waits for DS reads.
         if (insertTensorWaitCnt) {
-            // handleTensorWaits(func, arch, passCtx);
-            reinsertTensorWaitsHeuristic(func, arch, passCtx);
+            // handleTensorWaits(func, arch, passCtx, rpo);
+            reinsertTensorWaitsHeuristic(func, arch, passCtx, rpo);
         }
 
-        removePHIs(func, passCtx);
+        removePHIs(func, passCtx, rpo);
+        return preserveCFGAnalyses();
     }
 
    private:
@@ -455,17 +461,18 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     /// heuristic reinsert tensor waitcnts
     /// 1. remove tensor waitcnts in LoopBeginL and LoopEndL basic blocks
     /// 2. insert tensor waitcnts for tensor_load that has memTokens in barrier
-    void reinsertTensorWaitsHeuristic(Function& func, GfxArchID arch, PassContext& passCtx) {
+    void reinsertTensorWaitsHeuristic(Function& func, GfxArchID arch, PassContext& passCtx,
+                                      const std::vector<BasicBlock*>& rpo) {
         // handle only for label_LoopBeginL and label_LoopEndL basic block
         std::unordered_set<std::string> processedLabels = {"label_LoopBeginL", "label_LoopEndL"};
 
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
+        for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) {
-                return;
+                continue;
             }
 
             if (processedLabels.find(bb->getLabel()) == processedLabels.end()) {
-                return;
+                continue;
             }
 
             for (auto it = bb->begin(); it != bb->end();) {
@@ -476,12 +483,12 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                     ++it;
                 }
             }
-        });
+        }
 
         std::deque<StinkyInstruction*> tensorLoads;
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
+        for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) {
-                return;
+                continue;
             }
 
             WaitInsertionList tensorWaits;
@@ -519,11 +526,12 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             }
 
             insertWaitsForBlock(*bb, arch, tensorWaits);
-        });
+        }
     }
 
     /// Handle tensor waits for DS reads.
-    void handleTensorWaits(Function& func, GfxArchID arch, PassContext& passCtx) {
+    void handleTensorWaits(Function& func, GfxArchID arch, PassContext& passCtx,
+                           const std::vector<BasicBlock*>& rpo) {
         struct TensorLoadBlockState {
             std::unordered_map<StinkyInstruction*, int> dsReadSources;
             std::deque<StinkyInstruction*> tensorLoadQueue;
@@ -531,9 +539,9 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
 
         std::unordered_map<BasicBlock*, TensorLoadBlockState> tensorLoadStates;
 
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
+        for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) {
-                return;
+                continue;
             }
 
             if (tensorLoadStates.find(bb) == tensorLoadStates.end()) {
@@ -570,11 +578,11 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                     tensorLoadState.dsReadSources[inst] = count;
                 }
             }
-        });
+        }
 
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
+        for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) {
-                return;
+                continue;
             }
 
             auto& currentTensorLoadState = tensorLoadStates[bb];
@@ -651,14 +659,14 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             }
 
             insertWaitsForBlock(*bb, arch, tensorWaits);
-        });
+        }
     }
 
     /// Remove consecutive PHIs at block entry.
-    void removePHIs(Function& func, PassContext& passCtx) {
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
+    void removePHIs(Function& func, PassContext& passCtx, const std::vector<BasicBlock*>& rpo) {
+        for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) {
-                return;
+                continue;
             }
 
             for (auto it = bb->begin(); it != bb->end();) {
@@ -669,7 +677,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                     ++it;
                 }
             }
-        });
+        }
     }
 };
 
