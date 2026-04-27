@@ -65,7 +65,7 @@ TEST(TestFillTensorFromFile, Valid)
     }
 }
 
-#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 TEST(TestLoadGraphAndTensors, Valid)
 {
@@ -165,6 +165,6 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
     }
 }
 
-#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
+#endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 }

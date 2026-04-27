@@ -216,7 +216,10 @@ endif()
 ##===----------------------------------------------------------------------===##
 # FileCheck tests (LLVM-style .stir pattern tests)
 ##===----------------------------------------------------------------------===##
-file(GLOB FILECHECK_TESTS "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.stir")
+file(GLOB FILECHECK_TESTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.stir"
+    "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.s"
+)
 foreach(test_file ${FILECHECK_TESTS})
     get_filename_component(test_name ${test_file} NAME_WE)
     add_test(
