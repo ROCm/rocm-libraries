@@ -96,14 +96,24 @@ public:
             {graphName, graphDescription, testName, std::move(engineNames), note, layout});
     }
 
-    // Not thread-safe: call only after parallel test execution completes.
-    const std::vector<GraphSupportRecord>& getRecords() const
+    // Thread-safe: returns a copy of the records under mutex protection.
+    std::vector<GraphSupportRecord> getRecords() const
     {
+        std::lock_guard<std::mutex> lock(_mutex);
         return _records;
     }
 
+    // Reset collector to initial state.
+    // Not thread-safe: call only when no parallel recording is in progress.
+    void reset()
+    {
+        _records.clear();
+        _enabled = false;
+        _outputPath = "support_matrix.md";
+    }
+
     // Generate the markdown output and write to file.
-    // Not thread-safe: call only after parallel test execution completes.
+    // Thread-safe: takes a snapshot of records under mutex before writing.
     //
     // allEngineNames: the engine columns to include in the table.
     //
@@ -119,6 +129,13 @@ public:
     //   | Convolution:BWD fp16 | unstable | checkmark NHWC, NCHW | checkmark NHWC |
     void writeMarkdown(const std::vector<std::string>& allEngineNames) const
     {
+        // Snapshot records under lock, then release before doing file I/O.
+        std::vector<GraphSupportRecord> records;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            records = _records;
+        }
+
         // Group records by (graphDescription, note), union the engine support sets.
         // Use ordered map so output is deterministic.
         using GroupKey = std::pair<std::string, std::string>;
@@ -130,7 +147,7 @@ public:
         };
         std::map<GroupKey, AggregatedEntry> grouped;
 
-        for(const auto& record : _records)
+        for(const auto& record : records)
         {
             GroupKey key{record.graphDescription, record.note};
             auto& entry = grouped[key];

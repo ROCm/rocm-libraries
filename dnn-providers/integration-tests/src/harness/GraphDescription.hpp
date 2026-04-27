@@ -3,13 +3,15 @@
 
 #pragma once
 
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/Types.hpp>
-#include <hipdnn_frontend/node/NodeType.hpp>
-#include <hipdnn_frontend/node/PointwiseNode.hpp>
-#include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <sstream>
 #include <string>
+
+#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
+
+#include "NodeTypeNames.hpp"
 
 namespace hipdnn_integration_tests
 {
