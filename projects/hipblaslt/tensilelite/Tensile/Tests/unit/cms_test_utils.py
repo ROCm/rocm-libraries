@@ -548,6 +548,9 @@ def kernel_to_solution_config(kernel):
         "ExpandPointerSwap": kernel.get("ExpandPointerSwap", 0),
     }
 
+    if "ISA" in kernel:
+        config["ISA"] = kernel["ISA"]
+
     # Copy additional parameters that affect schedule generation
     for key in ["LDSTrInst", "StaggerU", "1LDSBuffer", "VectorWidthA", "VectorWidthB",
                 "ForceUnrollSubIter", "ClusterLocalRead", "LdsPadA", "LdsPadB",
@@ -559,7 +562,8 @@ def kernel_to_solution_config(kernel):
     return config
 
 
-def subset_id_map(real_id_map, optSchedule, syncCode=None, snopCode=None):
+def subset_id_map(real_id_map, optSchedule, syncCode=None, snopCode=None,
+                  fallback_id_map=None):
     """Subset a real idMap to match a custom schedule's instruction counts.
 
     For each key in optSchedule, truncates the idMap entry to the number
@@ -570,6 +574,13 @@ def subset_id_map(real_id_map, optSchedule, syncCode=None, snopCode=None):
     SWaitCnt objects with different dscnt values).
 
     Keys in real_id_map not in optSchedule are kept as-is.
+
+    If fallback_id_map is provided, any optSchedule key missing from
+    real_id_map is sourced from fallback_id_map (typically the mock id_map).
+    This is the escape hatch for tests whose schedules reference
+    sub-iteration keys (e.g. PackA3/PackB3 from ForceUnrollSubIter) that no
+    registered CMS solution produces — the swap-pack registers in the keys
+    that DO match are real, while auxiliary keys fall back to mocks.
     """
     id_map = dict(real_id_map)
 
@@ -591,8 +602,9 @@ def subset_id_map(real_id_map, optSchedule, syncCode=None, snopCode=None):
 
         if key in id_map:
             id_map[key] = id_map[key][:count]
-        # If key is missing from real_id_map, skip — the validator will
-        # handle missing keys via its own error reporting.
+        elif fallback_id_map is not None and key in fallback_id_map:
+            id_map[key] = fallback_id_map[key][:count]
+        # else: leave the key absent; validator will error if it needs it.
 
     return id_map
 
@@ -633,7 +645,17 @@ def _make_solution(kernel_config, asm, isaInfoMap):
     from Tensile.SolutionStructs.Problem import ProblemType
     from Tensile.TensileLogic.HandleCustomKernel import matrixInstructionToMIParameters
 
-    isa = next(iter(isaInfoMap.keys()))
+    requested_isa = kernel_config.get('ISA')
+    if requested_isa is not None:
+        if requested_isa not in isaInfoMap:
+            raise ValueError(
+                f"Requested ISA {requested_isa} not present in isaInfoMap "
+                f"(have {list(isaInfoMap.keys())}). Update conftest.py "
+                f"isa_infrastructure to probe this ISA."
+            )
+        isa = requested_isa
+    else:
+        isa = next(iter(isaInfoMap.keys()))
 
     # Build ProblemType if given as a dict
     pt_config = kernel_config.get('ProblemType', {})
@@ -644,7 +666,7 @@ def _make_solution(kernel_config, asm, isaInfoMap):
     else:
         config = dict(kernel_config)
 
-    config.setdefault('ISA', isa)
+    config['ISA'] = isa
     config.setdefault('KernelLanguage', 'Assembly')
     config.setdefault('WavefrontSize', 64)
     config.setdefault('WorkGroup', [32, 8, 1])

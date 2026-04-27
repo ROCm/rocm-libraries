@@ -26,11 +26,30 @@ from unittest.mock import MagicMock
 from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
 from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidationContext, ValidationConcern, active_concerns
 from Tensile.Common import IsaVersion
-from cms_test_utils import make_mock_id_map, make_mock_mfma_code
+from cms_test_utils import (
+    make_mock_id_map, make_mock_mfma_code,
+    kernel_to_solution_config, generate_real_idmap, subset_id_map,
+)
 
 
-def _make_context(kernel, schedule_info):
-    """Build a ValidationContext with mock idMap and mfmaCode."""
+def _make_context(kernel, schedule_info, asm=None, isaInfoMap=None):
+    """Build a ValidationContext.
+
+    Default path uses mock idMap (preserves existing behavior for ~30 callers).
+    When asm + isaInfoMap are passed, uses the real kernel-writer-produced
+    idMap. Required for the 128x128x64 vwa=4 parametrizations whose mock
+    idMap can't model VW>1 swap-pack interleaving.
+    """
+    if asm is not None and isaInfoMap is not None:
+        config = kernel_to_solution_config(kernel)
+        real_id_map, real_mfma_code, _ = generate_real_idmap(config, asm, isaInfoMap)
+        mock_fb = make_mock_id_map(schedule_info, kernel)
+        id_map = subset_id_map(real_id_map, schedule_info.optSchedule,
+                               syncCode=schedule_info.syncCode,
+                               snopCode=schedule_info.snopCode,
+                               fallback_id_map=mock_fb)
+        mfma_code = real_mfma_code[:int(schedule_info.numMfma)]
+        return ValidationContext(kernel=kernel, id_map=id_map, mfma_code=mfma_code)
     return ValidationContext(
         kernel=kernel,
         id_map=make_mock_id_map(schedule_info, kernel),
@@ -822,6 +841,14 @@ class TestCustomScheduleBF16:
         assert valid, message
 
 class TestCustomScheduleTF32:
+    @pytest.fixture(autouse=True)
+    def _inject_isa(self, isa_infrastructure):
+        """Stash assembler + isaInfoMap so test_schedule_128x128x64 vwa=4
+        cases can opt into real idMap. Other tests in this class are
+        unaffected — _make_context defaults to the mock path."""
+        self._isaInfoMap = isa_infrastructure[1]
+        self._asm = isa_infrastructure[2]
+
     @staticmethod
     def get_num_mfma(kernel):
         numMfma = (kernel["MIWaveTileA"] * kernel["MIWaveTileB"] *
@@ -1096,7 +1123,11 @@ class TestCustomScheduleTF32:
                     2   # two sub-iterations due to DepthU=64
         )
         assert schedule_info.numMfma == numMfma
-        valid, message = isValid(schedule_info, _make_context(kernel, schedule_info))
+        # vwa=4 cases need real idMap because mock register layout doesn't
+        # model VW>1 swap-pack interleaving (see CMSValidator_TODO.md).
+        ctx_args = (self._asm, self._isaInfoMap) if vwa == 4 else (None, None)
+        valid, message = isValid(schedule_info,
+                                 _make_context(kernel, schedule_info, *ctx_args))
         assert valid, message
 
     @pytest.mark.parametrize(

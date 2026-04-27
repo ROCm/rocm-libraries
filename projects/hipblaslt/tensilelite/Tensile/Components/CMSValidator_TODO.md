@@ -1,186 +1,131 @@
-# CMS Validator — Remaining Test Failures
+# CMS Validator — Stage 09 Remaining Work
 
-After wiring `derive_pack_must_start_after` as the primary `must_start_after` path
-(commit `23d8627a22`), 6 tests fail because mock idMap registers don't model VW>1
-swap pack interleaving or multi-group pack interactions.
+## Failing tests still on the table
 
-The infrastructure for transitioning to real idMaps exists (`generate_real_idmap`,
-`kernel_to_solution_config`, `subset_id_map`, `isa_infrastructure` fixture) but
-the per-test transition has unresolved complexity around mapping arbitrary test
-kernel configs to valid CMS-registered Solution configs.
+### `test_swap_depends_on_specific_lrs_vw4` (3 parametrizations) — XFAIL
 
-## Failing tests
+These probe register-specific swap-pack ↔ LR dependencies under VW=4. The
+real twin's register layout uses two namespaces (`ValuA_T1_I0` and
+`ValuA_X1_I0`), and `derive_pack_must_start_after` finds an LR dependency
+for swap @ idx=2 that requires the full-guarantee SYNC at idx=6, while the
+test claims the swap should only depend on T-namespace LRs guaranteed by the
+partial-guarantee SYNC at idx=1.
 
-### Category A: VW>1 swap pack interleaving (4 tests)
+**Open question:** Either the test's T0/X0 register-to-LR mapping
+(`idx % 8 < 4`) is incorrect for the real kernel writer's layout, or
+`derive_pack_must_start_after` is over-approximating LR dependencies. The
+real LRA0 register destinations from the twin are:
 
-These tests use `VectorWidthA=2 or 4` which triggers `VSwapB32` swap packs that
-transpose registers across the T0/X0 register arrays. The mock register layout
-in `_make_mock_swap_packs` doesn't model this interleaving, so
-`derive_pack_must_start_after` finds incorrect LR dependencies for CVT0 packs
-that should depend on swap-touched registers.
+```
+LRA0[0]: ('ValuA_T1_I0', 0,  4)   ← T1
+LRA0[1]: ('ValuA_T1_I0', 4,  8)
+LRA0[2]: ('ValuA_T1_I0', 8, 12)
+LRA0[3]: ('ValuA_T1_I0', 12, 16)
+LRA0[4]: ('ValuA_X1_I0', 4,  8)   ← X1 (note: skips X1[0..4])
+LRA0[5]: ('ValuA_X1_I0', 12, 16)
+LRA0[6]: ('ValuA_X1_I0', 20, 24)
+LRA0[7]: ('ValuA_X1_I0', 28, 32)
+```
 
-- `test_ValidatePack.py::TestValidatePackTF32MultipleGroups::test_failing_two_groups_fully_interleaved`
-- `test_ValidatePack.py::TestValidatePackTF32MFMA4x4x4SwapPacks::test_swap_depends_on_specific_lrs_vw4[DU64]`
-- `test_ValidatePack.py::TestValidatePackTF32MFMA4x4x4SwapPacks::test_swap_depends_on_specific_lrs_vw4[DU32_ForceUnroll]`
-- `test_ValidatePack.py::TestValidatePackTF32MFMA4x4x4SwapPacks::test_swap_depends_on_specific_lrs_vw4[DU32_NoForceUnroll]`
+Swap 0: `src=('ValuA_T1_I0', 1, 2), dst=('ValuA_T1_I0', 4, 5)` — should
+depend only on LRA0[0] (T1[0..4] RAW) and LRA0[1] (T1[4..8] WAR), both T1
+LRs. Validator nonetheless reports an X1 LR as the latest dep.
 
-**Fix paths:**
-1. **Transition these tests to real idMaps** (preferred). Each test class needs
-   a class-scoped real idMap (via `_get_real_idmap` lazy helper using the
-   already-implemented `generate_real_idmap`). Tests subset the real idMap to
-   match their custom optSchedule via `subset_id_map`.
-2. **Implement VW>1 mock register interleaving** — re-implements the kernel
-   writer's `dsReadConvTable` and T/X array logic in the mocks. Brittle.
+**Investigation steps:**
+1. Manually trace `derive_pack_must_start_after`'s producers/consumers
+   dictionaries for this exact scenario.
+2. Verify `done_idx()` for LRA0[0..3] vs LRA0[4..7] under the test's
+   `dscnt=4` SYNC configuration — there may be a SYNC-counting bug.
+3. Check whether `subset_id_map`'s mock fallback is overwriting
+   `PackA1`/`LRA1` keys with mock entries that the validator then walks.
 
-### Category B: TF32 128x128x64 with VW=4 (2 tests)
+## Wholesale `make_mock_id_map` deletion
 
-- `test_CustomSchedule.py::TestCustomScheduleTF32::test_schedule_128x128x64[False-False-True-1-4]`
-- `test_CustomSchedule.py::TestCustomScheduleTF32::test_schedule_128x128x64[False-False-False-1-4]`
+Phase 1 leaves `make_mock_id_map` in place. The wholesale migration
+requires:
 
-These call the real `_get_schedule_128x128x64_TF32` which produces a real CMS
-schedule, but the test calls `isValid` with mock idMap. The mock can't model
-the VW=4 swap interleaving used by this 128x128x64 schedule.
+- Per-class kernel rewrite (~15 `setup_method` methods affected)
+- Registered-schedule audit: every test class's tile shape must map to a
+  registered CMS schedule. Some don't (e.g. there is no 128×64×32 TF32 TN
+  schedule for `TestValidatePackTF32MultipleGroups`'s native MT0×MT1).
+- 27 `_mock_dtype` call sites in `test_CustomSchedule.py` that swap to real
+  `DataType` objects, which may change schedule predicate dispatch
+- All `assert self.num_vmfma == N` test assertions audited if
+  `create_base_kernel` baseline changes
+- `hasCustomSchedule` mutates the kernel dict (e.g.
+  `kernel["UseMFMAF32XEmulation"] = True`); `kernel_to_solution_config`
+  must thread these mutations through, or validator and kernel writer
+  disagree on what the kernel says
 
-Sample failure: `Code path 0: PackA0 @ idx=8 issued too early, must be issued
-after idx=9 (because of LRA0 issued @ idx=4)`.
+## `create_base_kernel` valid-Solution baseline
 
-**Fix path:** Transition `_make_context` in `test_CustomSchedule.py` to use
-`generate_real_idmap` instead of `make_mock_id_map`.
+Same dependency chain as wholesale deletion. Must coordinate with that
+migration.
 
-## Transition complexity (why this is unresolved)
+## `_frozen_config_key` cache key collisions
 
-The straightforward transition path was attempted (see git history) but
-revealed:
+The lazy-caching approach uses `_frozen_config_key(config)` to key
+`_idmap_cache`. Verified to produce distinct keys for Phase 1's twin
+configs, but the JSON serialization with `sort_keys=True` is not stress-
+tested across all dict variations:
 
-1. **Test kernel configs don't directly produce valid Solutions.** The base
-   kernel from `create_base_kernel()` has `MIWaveTileA=2, MIWaveTileB=2,
-   GlobalReadVectorWidthA=0, MacroTile0=0` — a minimal config designed for
-   mock-based validation, not for kernel writer use. `kernel_to_solution_config`
-   needs to derive sensible defaults that produce a CMS-registered kernel.
-
-2. **Layout mismatch.** Most CMS schedules are registered for TN layout, but
-   the base kernel defaults to NN. Forcing TN works for `test_ValidatePack`
-   tests (they don't depend on the layout) but `test_CustomSchedule` tests
-   verify specific layout behaviors.
-
-3. **Many TF32 datatype tests use FP32 DataType + UseF32XEmulation.** The
-   base test kernel for "TF32" tests has FP32 DataType with TF32 emulation
-   flags. `kernel_to_solution_config` needs to preserve this combination.
-
-4. **Test schedule subsetting needs to handle SYNC/SNOP carefully.** The real
-   idMap's SYNC/SNOP entries are the production schedule's SWaitCnt objects
-   with specific `dscnt` values. Tests use their own `syncCode` with
-   different `dscnt`. `subset_id_map` already replaces SYNC/SNOP from the
-   test's syncCode/snopCode arguments — but tests calling `isValid` directly
-   (not via `validate()`) need to pass these explicitly.
-
-5. **Test classes vary in setup pattern.** Most use `setup_method` (auto-called
-   by pytest), but some use parametrized `_config` fixtures that re-trigger
-   setup. The lazy `_get_real_idmap` approach handles both, but the
-   `cms_validation_base.py` changes need to be carefully designed to not break
-   the `_inject_isa` fixture ordering.
-
-## What was implemented (and committed)
-
-- `kernel_to_solution_config` helper in `cms_test_utils.py`
-- `subset_id_map` helper in `cms_test_utils.py`
-- `_frozen_config_key` helper in `cms_test_utils.py`
-- `isa_infrastructure` fixture probes both gfx950 and gfx1151
-- `generate_real_idmap` in `cms_test_utils.py`
-- `writer._last_id_map` side-channel in `customMainLoopSchedule`
-- `derive_pack_must_start_after` wired as primary path (RAW + WAR)
-- `_hook_up_middle_16_pairs` extracted for TF32 24-group pair constraint
-- 21 register-tracing unit tests in `test_register_tracing.py`
-- `TestValidatePackTF32MFMA4x4x4SwapPacks` converted from `setUp` → `setup_method`
-
-## What remains for stage 09 completion
-
-1. **Resolve the 6 failing tests** (this TODO).
-2. **Delete dead positional code** once tests pass:
-   - `_hook_up_packs_bf16`
-   - `_hook_up_packs_f32` (keep `_hook_up_middle_16_pairs`)
-   - `_hook_up_packs_f32_mfma`
-   - Hardcoded `pack_dependencies` dicts
-3. **Fix Known Issues 4 & 5** before deleting `set_lr_needed_by_for_VMFMA`
-   and `_set_pack_needed_by`:
-   - `set_lr_needed_by_from_mfma_operands` doesn't propagate through pack
-     chains (LR→Pack→MFMA)
-   - `set_pack_needed_by_from_mfma_operands` doesn't trace through
-     intermediate packs (CVT0→MFMAPack→CVT1→MFMA)
-
-## Other issues encountered during the transition
-
-These are smaller items that came up while attempting the test transition.
-Listed here so they're not lost.
-
-### `subset_id_map` SYNC/SNOP for direct `isValid` calls
-
-`cms_validation_base.py`'s `validate()` would pass `syncCode`/`snopCode` to
-`subset_id_map`. But two test methods in `TestValidatePackTF32MFMA4x4x4MultipleTiles`
-(lines 1413, 1425 of `test_ValidatePack.py`) call `isValid` directly with mocks,
-bypassing `validate()`. When transitioned, the SYNC/SNOP handling needs to be
-threaded through manually at those call sites.
-
-### `_make_solution` ISA selection ambiguity
-
-`isa_infrastructure` now returns `isaInfoMap` containing both `IsaVersion(9,5,0)`
-and `IsaVersion(11,5,1)`. But `_make_solution` does `next(iter(isaInfoMap.keys()))`
-which picks whichever ISA the dict iterates first — not necessarily the one
-matching the kernel. For gfx1151 tests, this picks the wrong ISA.
-
-**Fix:** Have `_make_solution` accept an explicit ISA parameter, or pull `ISA`
-from the kernel config and look it up in `isaInfoMap`.
-
-### `@applies_only_once` partial state on error
-
-`hook_up_packs` is decorated with `@applies_only_once`. With the register-based
-path now primary, if `derive_pack_must_start_after` raises (e.g., missing
-`rocisa_inst`), the decorator may still mark the function as "applied",
-preventing retry. Verify error handling — the decorator should not record the
-function as applied if it raised.
-
-### Dual-path comparison no longer present
-
-When the primary path was wired (commit `23d8627a22`), the dual-path comparison
-block (`derive_pack_must_start_after` vs positional `_hook_up_packs_*`) was
-removed from `hook_up_packs`. We now have no way to detect subtle bugs in
-`derive_pack_must_start_after` — if it produces wrong dependencies, validation
-results are silently wrong.
-
-**Fix:** Re-add the comparison as a debug-only mode (e.g., gated by env var
-`CMS_VALIDATE_DUAL_PATH=1`) before deleting the positional functions.
-
-### `_set_pack_needed_by` is still positional code
-
-The current `hook_up_packs` uses `derive_pack_must_start_after` for
-`must_start_after`, but `_set_pack_needed_by` (which sets `needed_by`) is still
-the positional tile-math code. Deleting `_set_pack_needed_by` requires fixing
-Known Issue #5 first (`set_pack_needed_by_from_mfma_operands` doesn't trace
-through intermediate packs).
-
-### `_get_lrs_for_pack` still required
-
-The plan for stage 09 was to delete `_get_lrs_for_pack`, but it's still needed
-to tell `derive_pack_must_start_after` WHICH local reads to consider for a
-given pack (the function inspects pack source registers but needs to know the
-relevant LR scope). Either keep it or replace it with a register-based helper
-that walks the timeline.
-
-### `_frozen_config_key` cache key stability untested
-
-The lazy-caching approach for `cms_validation_base.py` uses
-`_frozen_config_key(config)` to key the cache. The implementation handles
-`IsaVersion` namedtuples specially via tuple conversion, but the JSON
-serialization with `sort_keys=True` hasn't been tested across all dict
-variations. Edge cases:
 - Nested dicts with non-deterministic key insertion order
 - `IsaVersion` inside list values (not just top-level)
 - Mock objects that don't serialize cleanly
 
-### `MIArchVgpr` test specifically affected
+## Delete dead positional code
 
-`MIArchVgpr` is copied through `kernel_to_solution_config` but the test that
-exercises it (`test_schedule_128x128x32_TF32_MIArchVgpr`) calls `_make_context`.
-`MIArchVgpr` affects register allocation, so the real idMap may differ in
-subtle ways from what the test's hardcoded schedule expects. May need
-verification once the transition is attempted.
+Once Known Issues 4 & 5 (below) are fixed:
+- `_hook_up_packs_bf16`
+- `_hook_up_packs_f32` (keep `_hook_up_middle_16_pairs`)
+- `_hook_up_packs_f32_mfma`
+- Hardcoded `pack_dependencies` dicts
+
+## Known Issues 4 & 5
+
+- `set_lr_needed_by_from_mfma_operands` doesn't propagate through pack
+  chains (LR→Pack→MFMA)
+- `set_pack_needed_by_from_mfma_operands` doesn't trace through
+  intermediate packs (CVT0→MFMAPack→CVT1→MFMA)
+
+Required before deleting `set_lr_needed_by_for_VMFMA` and
+`_set_pack_needed_by`.
+
+## `@applies_only_once` partial state on error
+
+`hook_up_packs` is decorated with `@applies_only_once`. If
+`derive_pack_must_start_after` raises (e.g., missing `rocisa_inst`), the
+decorator may still mark the function as applied, preventing retry. Verify
+the decorator does not record the function as applied on raise.
+
+## Dual-path comparison re-add
+
+When the primary path was wired (commit `23d8627a22`), the dual-path
+comparison block (`derive_pack_must_start_after` vs positional
+`_hook_up_packs_*`) was removed from `hook_up_packs`. We now have no way to
+detect subtle bugs in the new path. Re-add as a debug-only mode (e.g.
+`CMS_VALIDATE_DUAL_PATH=1` env var) before deleting the positional
+functions.
+
+## `_set_pack_needed_by` still positional
+
+The current `hook_up_packs` uses `derive_pack_must_start_after` for
+`must_start_after`, but `_set_pack_needed_by` (which sets `needed_by`) is
+still the positional tile-math code. Deletion requires fixing Known
+Issue #5 first.
+
+## `_get_lrs_for_pack` still required
+
+The original stage-09 plan was to delete `_get_lrs_for_pack`, but it's
+still needed to tell `derive_pack_must_start_after` WHICH local reads to
+consider for a given pack (the function inspects pack source registers but
+needs to know the relevant LR scope). Either keep it or replace with a
+register-based helper that walks the timeline.
+
+## `MIArchVgpr` test verification
+
+`MIArchVgpr` is copied through `kernel_to_solution_config` but the test
+that exercises it (`test_schedule_128x128x32_TF32_MIArchVgpr`) calls the
+mock-path `_make_context`. `MIArchVgpr` affects register allocation, so
+the real idMap may differ in subtle ways from the test's hardcoded
+schedule. Verify if/when that test is migrated to the real path.

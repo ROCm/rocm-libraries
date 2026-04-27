@@ -24,11 +24,15 @@
 ################################################################################
 from collections.abc import Callable
 from typing import Any, Optional
+import pytest
 from test_CustomSchedule import create_base_kernel, update_kernel, ScheduleInfo
 from Tensile.Components.CMSValidator import (
     create_unified_timeline, ValidationContext, validate_timeline,
 )
-from cms_test_utils import make_mock_id_map, make_mock_mfma_code
+from cms_test_utils import (
+    make_mock_id_map, make_mock_mfma_code,
+    generate_real_idmap, subset_id_map, _frozen_config_key,
+)
 
 
 class CMSValidationTestBase:
@@ -49,6 +53,47 @@ class CMSValidationTestBase:
 
     # Subclasses set this to the list of add_*_constraints functions to run.
     validator_passes: list[Callable[['Timeline', 'ValidationContext'], None]] = []
+
+    # Subclasses opt in to real (kernel-writer-produced) idMaps by setting this
+    # to a Solution config dict. When None, validate() uses make_mock_id_map.
+    # Parametrized classes can override _resolve_real_id_map_config() to return
+    # different configs per parametrization.
+    real_id_map_config: Optional[dict] = None
+
+    @pytest.fixture(autouse=True)
+    def _inject_isa(self, isa_infrastructure):
+        """Stash assembler + isaInfoMap so _get_real_idmap can use them.
+
+        isa_infrastructure returns (None, isaInfoMap, asm) per conftest.py:54.
+        Always present at autouse scope; only consumed lazily by validate()
+        when real_id_map_config is set, so it costs nothing for mock-path tests
+        beyond the one-time fixture init.
+        """
+        self._isaInfoMap = isa_infrastructure[1]
+        self._asm = isa_infrastructure[2]
+
+    def _resolve_real_id_map_config(self):
+        """Override in parametrized subclasses to return a per-param config."""
+        return self.real_id_map_config
+
+    def _get_real_idmap(self):
+        """Lazy generate + class-level cache keyed by config key.
+
+        Cached on the concrete subclass so parametrized variants reuse a
+        single kernel-writer run (~140 ms each) when their config is identical.
+        """
+        config = self._resolve_real_id_map_config()
+        if config is None:
+            raise RuntimeError(
+                "_get_real_idmap called but real_id_map_config is None"
+            )
+        key = _frozen_config_key(config)
+        if not hasattr(self.__class__, '_idmap_cache'):
+            self.__class__._idmap_cache = {}
+        cache = self.__class__._idmap_cache
+        if key not in cache:
+            cache[key] = generate_real_idmap(config, self._asm, self._isaInfoMap)
+        return cache[key]
 
     def validation_function(self, sched, ctx, codePathIdx, timeline=None):
         """
@@ -127,19 +172,31 @@ class CMSValidationTestBase:
         
         sched = ScheduleInfo(numCodePaths, self.num_vmfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt, mfmaReorder, snopCode)
 
-        mock_id_map = make_mock_id_map(sched, self.kernel)
-        mock_mfma_code = make_mock_mfma_code(self.num_vmfma)
+        if self._resolve_real_id_map_config() is not None:
+            real_id_map, real_mfma_code, _ = self._get_real_idmap()
+            # Mock fallback supplies entries for optSchedule keys absent from
+            # the registered twin (e.g. PackA3/PackB3 for ForceUnrollSubIter
+            # tests). Real entries — including the swap-pack registers we
+            # actually need — take precedence.
+            mock_fallback = make_mock_id_map(sched, self.kernel)
+            id_map = subset_id_map(real_id_map, optSchedule,
+                                   syncCode=syncCode, snopCode=snopCode,
+                                   fallback_id_map=mock_fallback)
+            mfma_code = real_mfma_code[:int(self.num_vmfma)]
+        else:
+            id_map = make_mock_id_map(sched, self.kernel)
+            mfma_code = make_mock_mfma_code(self.num_vmfma)
 
         ctx = ValidationContext(
             kernel=self.kernel,
-            id_map=mock_id_map,
-            mfma_code=mock_mfma_code,
+            id_map=id_map,
+            mfma_code=mfma_code,
             mfma_reorder=mfmaReorder or [],
         )
 
         timeline = None
         if self.needs_timeline:
-            timeline = create_unified_timeline(sched, self.kernel, codePathIdx, id_map=mock_id_map, mfma_code=mock_mfma_code)
+            timeline = create_unified_timeline(sched, self.kernel, codePathIdx, id_map=id_map, mfma_code=mfma_code)
         status, message = self.validation_function(sched, ctx, codePathIdx, timeline=timeline)
         
         if expected_message is None:
