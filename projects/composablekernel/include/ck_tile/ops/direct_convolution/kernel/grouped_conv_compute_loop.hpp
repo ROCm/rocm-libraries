@@ -98,31 +98,57 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     MfmaFn mfma_fn{};
 
     // --- Main loop: iterate over input rows ---
+    // Each input row constributes up to cfg.kh output rows.
+    // The acc[kh] array has one slot per output row (each slot holds the partial sum over input channels for that output row)
     for(int y_base = 0; y_base + cfg.kh <= hi; y_base += cfg.kh)
     {
+        // The main loop iterates in steps over cfg.kh input rows.
+        // This static loop unrolls the cfg.kh loops over the input rows.
         static_for<cfg.kh>(
             [&]<int Y_LOCAL>()
             {
                 wait_vmcnt<0>();
                 __syncthreads();
 
+                // Input row index that maps to cfg.kh output rows, for this iteration of the main loop.
+                // acc[p_idx] holds the partials sums for the output rows.
                 int y = y_base + Y_LOCAL;
+
+                // Fetch the next input slice into LDS while computing on the current slice.
+                // The first slice has been pre-fetch already.
                 if((y + 1) < hi)
                 {
                     il.fetch_tile_to_lds(tic);
                 }
 
-                // Accumulate MFMA products over filter width.
+                // Loop over the filter width dimension (S) and 
+                // accumulate MFMA products for this input row with the corresponding filter weights.
                 static_for<cfg.kw>(
                     [&]<int S>()
                     {
+                        // Read one input column strip from LDS into registers.
+                        // Each thread reads input[n, y, q+S, :] into input_reg, where q is the horizontal offset of the tile.
+                        // All input channes are read and distributed accross the threads in the block.
+                        // Each thread handles 4 channels, so the register is fp16x4_t.
                         ck_tile::fp16x4_t input_reg;
                         il.read_from_lds(input_reg, S, toc);
 
+                        // Accumulate the MFMA products for this input column strip 
+                        // with the corresponding filter weights.
                         static_for<cfg.kh>(
                             [&]<int R>()
                             {
+                                // Which output row (p) this (y,R) pair contributes to.
+                                // Recall that this input row contributes to cfg.kh output rows, depending on the filter row (R) being applied.
+                                // p + R = y --> p = y - R = (y_local + y_base) - R
+                                // Since the acc array is circular, we wrap p_idx around cfg.kh
+                                // Because y_base = iy * cfg.kh, the y_local is the only thing that affects the p_idx, 
+                                // so we can express it purely in terms of y_local and R.
+                                // Normalizing the index on interval 0,...,cfg.kh-1 range:, we get:
                                 constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
+
+                                // The final sum over the input channels for this (y,R,S) position is computed 
+                                // by MFMAing the input_reg with the corresponding filter weights, and accumulating into acc[p_idx].
                                 if constexpr(cfg.direction == Direction::Dgrad)
                                     acc[p_idx] = mfma_fn(
                                         weights_reg[(cfg.kh - 1 - R) * cfg.kw + (cfg.kw - 1 - S)],
@@ -139,13 +165,20 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                 tic ^= 1;
                 toc ^= 1;
 
-                // Flush completed output row.
-                constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
+                // Flush completed output row to global memory. 
+                // After processing input row y = y_base + Y_LOCAL, 
+                // the output row p_out = y - (kh-1) + py  (py is padding in y-direction) has received contributions from all R values 
+                // (since the earliest contributor to p_out was input row p_out - py, processed kh-1 steps ago). 
+                // That slot is done and can be flushed to global memory.
+                // The slot index is a compile-time const that is computed from the accumulator index definition 
+                // p_idx = (y_local - R + kh) % kh, with R = kh-1 (the last contributor to p_out).
+                constexpr int P_IDX_FLUSH = (Y_LOCAL + 1) % cfg.kh; 
                 int p_out             = y + py - (cfg.kh - 1);
                 if(p_out >= 0 && p_out < ho)
-                    ow.flush(acc[P_FLUSH], p_out);
-                acc[P_FLUSH] = Zero;
-            });
+                    ow.flush(acc[P_IDX_FLUSH], p_out);
+                acc[P_IDX_FLUSH] = Zero;
+
+            }); // end of loop over Y_LOCAL (contributions from one input row to multiple output rows)
     } // end of the main loop
 
     // --- Remainder loop: hi % kh leftover rows ---
