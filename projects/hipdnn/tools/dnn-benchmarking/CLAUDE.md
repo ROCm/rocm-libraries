@@ -20,7 +20,7 @@ pip install -r requirements-rocm.txt   # torch from ROCm nightly index
 pip install -e .                        # package + PyPI deps (numpy, pytest)
 
 # hipDNN bindings must be installed separately from your hipDNN build
-cd /path/to/hipdnn/python && pip install -e .
+cd /path/to/hipdnn/python && pip install -e . --no-deps
 ```
 
 `--force-build` installs hipDNN and the MIOpen plugin to `/opt/rocm` (prompts for confirmation).
@@ -59,12 +59,43 @@ Test markers: `gpu` (requires GPU), `slow` (slow integration tests).
 
 ## Running the Tool
 
+Single-graph and multi-graph runs share one execution path. Default output is a
+summary table; `-v` switches to a rich per-engine block per graph (matches the
+legacy single-graph format).
+
 ```bash
-# Basic benchmark
+# Single graph (default summary table, all discovered engines)
 python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --warmup 10 --iters 100
 
-# A/B testing (compare two engine configurations)
+# Single graph, verbose per-engine block
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json -v
+
+# Filter to one or more engine IDs (comma-separated)
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1,2
+
+# Multiple graphs via glob — same path, more rows
+python -m dnn_benchmarking --graph 'graphs/*.json' --warmup 10 --iters 100
+
+# Multi-graph with JSON output (full SuiteResult, independent of -v)
+python -m dnn_benchmarking --graph 'graphs/*.json' --output results.json
+
+# Reference validation against a PyTorch reference implementation
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --validate pytorch
+
+# Reference validation with custom tolerances
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
+  --validate pytorch --rtol 1e-3 --atol 1e-6
+
+# Point at a directory of plugin .so files for engine discovery
+python -m dnn_benchmarking --graph 'graphs/*.json' \
+  --plugin-path /path/to/hipdnn/plugins --output results.json
+
+# A/B testing (separate path, kept for now)
 python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
+
+# PyTorch backend (separate executor; single graph only)
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --backend pytorch
 ```
 
 ## Architecture
@@ -72,19 +103,25 @@ python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
 ```
 src/dnn_benchmarking/
 ├── cli/              # Entry point (main.py, parser.py)
-├── config/           # BenchmarkConfig, ABTestConfig dataclasses
-├── execution/        # executor.py (graph building), buffer_manager.py, ab_runner.py, timing.py
+├── common/           # Shared utilities (exceptions.py)
+├── config/           # BenchmarkConfig, ABTestConfig, SuiteConfig dataclasses
+├── execution/        # executor.py, buffer_manager.py, ab_runner.py,
+│                     # suite_runner.py, timing.py,
+│                     # pytorch_executor.py, pytorch_buffer_manager.py, pytorch_ops.py
 ├── graph/            # loader.py (JSON loading), validator.py, tensor_info.py
-├── reporting/        # reporter.py (console output), statistics.py
-└── validation/       # validator.py (stubbed - CPU reference not available)
+├── reporting/        # reporter.py (console output), statistics.py, suite_results.py
+└── validation/       # validator.py, comparison.py, reference_provider.py
+    └── providers/    # cpu_plugin_provider.py, pytorch_provider.py
 ```
 
-**Data flow:** CLI → Config → GraphLoader → Executor → BufferManager → Timing → BenchmarkStats → Reporter
+**Data flow (single graph):** CLI → Config → GraphLoader → Executor → BufferManager → Timing → BenchmarkStats → Reporter
+
+**Data flow (suite mode):** CLI → SuiteConfig → GraphLoader (per graph) → suite_runner.run_graph_all_providers → Executor (per provider/engine) → BufferManager → Timing + Correctness → SuiteResult → JSON/Reporter
 
 **Key external dependency:** `hipdnn_frontend` - AMD's hipDNN Python bindings (requires AMD GPU + ROCm).
 
 ## Exit Codes
 
-- 0: Success
+- 0: Success (all pass)
 - 1: Error (graph load, execution, configuration)
-- 2: A/B comparison failed (accuracy mismatch)
+- 2: Correctness failure (A/B comparison mismatch or suite tolerance_match failure)
