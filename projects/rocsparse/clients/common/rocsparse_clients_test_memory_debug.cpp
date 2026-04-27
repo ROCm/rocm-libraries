@@ -25,711 +25,731 @@
 
 #include "rocsparse_clients_test_memory_debug.hpp"
 #include <fstream>
+#include <gtest/gtest.h>
 #include <iostream>
 #include <map>
 #include <stdexcept>
 #include <string>
-
 namespace rocsparse_clients_test
 {
 
+#define HOST rocsparse_memory_debug_synchronicity_host
+#define SYNC rocsparse_memory_debug_synchronicity_sync
+#define PSYNC rocsparse_memory_debug_synchronicity_psync
+#define ASYNC rocsparse_memory_debug_synchronicity_async
+
+#define HOST_ONLY HOST
+#define SYNC_ONLY SYNC
+#define PSYNC_ONLY PSYNC
+#define ASYNC_ONLY ASYNC
+#define SYNC_OR_ASYNC SYNC | ASYNC
+#define HOST_OR_SYNC HOST | SYNC
+#define HOST_OR_SYNC_OR_ASYNC HOST | SYNC | ASYNC
+#define HOST_OR_SYNC_OR_PSYNC HOST | SYNC | PSYNC
+#define HOST_OR_SYNC_OR_PSYNC_OR_ASYNC HOST | SYNC | PSYNC | ASYNC
+#define HOST_OR_PSYNC HOST | PSYNC
+#define HOST_OR_PSYNC_OR_ASYNC HOST | PSYNC | ASYNC
+#define HOST_OR_ASYNC HOST | ASYNC
+#define SYNC_OR_PSYNC SYNC | PSYNC
+#define SYNC_OR_PSYNC_OR_ASYNC SYNC | PSYNC | ASYNC
+#define PSYNC_OR_ASYNC PSYNC | ASYNC
+
     static std::map<std::string, memory_debug_synchronicity_info_t> s_map{
-        {"axpby", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"bsrgeam_nnzb", {memory_debug_synchronicity_t::depends}},
-        {"bsrgemm_nnzb", {memory_debug_synchronicity_t::depends}},
-        {"bsric0_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"bsric0_zero_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"bsrilu0_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"bsrilu0_zero_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"bsrmv_clear", {memory_debug_synchronicity_t::asynchronous}},
-        {"bsrsm_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"bsrsm_zero_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"bsrsv_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"bsrsv_zero_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"caxpyi", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsr2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrgeam", {memory_debug_synchronicity_t::synchronous}},
-        {"cbsrgemm", {memory_debug_synchronicity_t::synchronous}},
-        {"cbsrgemm_buffer_size", {memory_debug_synchronicity_t::synchronous}},
-        {"cbsric0", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsric0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"cbsric0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrilu0", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrilu0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"cbsrilu0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrmv_analysis", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrpad_value", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrsm_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"cbsrsm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrsm_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"cbsrsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"cbsrxmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_coo", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_coo_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_csc", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_csc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_csr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_ell", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_ell_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_gebsc", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_gebsc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_gebsr", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccheck_matrix_gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccoo2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccoomv", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsc2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsr2bsr", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsr2csc", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsr2csr_compress", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsr2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsr2ell", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsr2gebsr", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsr2gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsr2hyb", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsrcolor", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsrgeam", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsrgemm", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrgemm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrgemm_numeric", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsric0", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsric0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsric0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrilu0", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrilu0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsrilu0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsritilu0_compute", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsritilu0_compute_ex", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsritilu0_history", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsritsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsritsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsritsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsritsv_solve_ex", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrmv", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"ccsrmv_analysis", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"ccsrsm_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsrsm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrsm_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"ccsrsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"ccsrsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"cdense2coo", {memory_debug_synchronicity_t::synchronous}},
-        {"cdense2csc", {memory_debug_synchronicity_t::synchronous}},
-        {"cdense2csr", {memory_debug_synchronicity_t::synchronous}},
-        {"cdotci", {memory_debug_synchronicity_t::asynchronous}},
-        {"cdoti", {memory_debug_synchronicity_t::asynchronous}},
-        {"cell2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"cellmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgebsr2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgebsr2gebsc", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgebsr2gebsc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgebsr2gebsr", {memory_debug_synchronicity_t::synchronous}},
-        {"cgebsr2gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgebsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgebsrmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgemmi", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgemvi", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgemvi_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgpsv_interleaved_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgpsv_interleaved_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgthr", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgthrz", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgtsv", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgtsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgtsv_interleaved_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgtsv_interleaved_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgtsv_no_pivot", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgtsv_no_pivot_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgtsv_no_pivot_strided_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"cgtsv_no_pivot_strided_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"check_matrix_hyb", {memory_debug_synchronicity_t::synchronous}},
-        {"check_matrix_hyb_buffer_size", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"check_spmat", {memory_debug_synchronicity_t::depends}},
-        {"chyb2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"chybmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"cnnz", {memory_debug_synchronicity_t::asynchronous}},
-        {"cnnz_compress", {memory_debug_synchronicity_t::synchronous}},
-        {"coo2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"coosort_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"coosort_by_column", {memory_debug_synchronicity_t::depends}},
-        {"coosort_by_row", {memory_debug_synchronicity_t::depends}},
-        {"create_identity_permutation", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"cscsort", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"cscsort_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"csctr", {memory_debug_synchronicity_t::asynchronous}},
-        {"csr2bsr_nnz", {memory_debug_synchronicity_t::depends}},
-        {"csr2coo", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"csr2csc_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"csr2ell_width", {memory_debug_synchronicity_t::asynchronous}},
-        {"csr2gebsr_nnz", {memory_debug_synchronicity_t::depends}},
-        {"csrgeam_nnz", {memory_debug_synchronicity_t::depends}},
-        {"csrgemm_nnz", {memory_debug_synchronicity_t::depends}},
-        {"csrgemm_symbolic", {memory_debug_synchronicity_t::depends}},
-        {"csric0_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"csric0_get_tolerance", {memory_debug_synchronicity_t::host}},
-        {"csric0_set_tolerance", {memory_debug_synchronicity_t::host}},
-        {"csric0_singular_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"csric0_zero_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"csrilu0_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"csrilu0_get_tolerance", {memory_debug_synchronicity_t::host}},
-        {"csrilu0_set_tolerance", {memory_debug_synchronicity_t::host}},
-        {"csrilu0_singular_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"csrilu0_zero_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"csritilu0_buffer_size", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"csritilu0_preprocess", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"csritsv_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"csritsv_zero_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"csrmv_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"csrsm_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"csrsm_zero_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"csrsort", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"csrsort_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"csrsv_clear", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"csrsv_zero_pivot", {memory_debug_synchronicity_t::synchronous}},
-        {"daxpyi", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsr2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrgeam", {memory_debug_synchronicity_t::synchronous}},
-        {"dbsrgemm", {memory_debug_synchronicity_t::synchronous}},
-        {"dbsrgemm_buffer_size", {memory_debug_synchronicity_t::synchronous}},
-        {"dbsric0", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsric0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"dbsric0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrilu0", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrilu0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"dbsrilu0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrmv_analysis", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrpad_value", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrsm_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"dbsrsm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrsm_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"dbsrsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"dbsrxmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcbsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"dccsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_coo", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_coo_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_csc", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_csc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_csr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_ell", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_ell_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_gebsc", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_gebsc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_gebsr", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcheck_matrix_gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcoo2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcoomv", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsc2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsr2bsr", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsr2csc", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsr2csr_compress", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsr2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsr2ell", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsr2gebsr", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsr2gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsr2hyb", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsrcolor", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsrgeam", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsrgemm", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrgemm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrgemm_numeric", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsric0", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsric0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsric0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrilu0", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrilu0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsrilu0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsritilu0_compute", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsritilu0_compute_ex", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsritilu0_history", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsritsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsritsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsritsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsritsv_solve_ex", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrmv", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"dcsrmv_analysis", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"dcsrsm_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsrsm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrsm_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"dcsrsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dcsrsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"ddense2coo", {memory_debug_synchronicity_t::synchronous}},
-        {"ddense2csc", {memory_debug_synchronicity_t::synchronous}},
-        {"ddense2csr", {memory_debug_synchronicity_t::synchronous}},
-        {"ddoti", {memory_debug_synchronicity_t::asynchronous}},
-        {"dell2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"dellmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"dense_to_sparse", {memory_debug_synchronicity_t::depends}},
-        {"dgebsr2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgebsr2gebsc", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgebsr2gebsc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgebsr2gebsr", {memory_debug_synchronicity_t::synchronous}},
-        {"dgebsr2gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgebsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgebsrmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgemmi", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgemvi", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgemvi_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgpsv_interleaved_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgpsv_interleaved_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgthr", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgthrz", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgtsv", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgtsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgtsv_interleaved_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgtsv_interleaved_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgtsv_no_pivot", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgtsv_no_pivot_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgtsv_no_pivot_strided_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"dgtsv_no_pivot_strided_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dhyb2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"dhybmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"dnnz", {memory_debug_synchronicity_t::asynchronous}},
-        {"dnnz_compress", {memory_debug_synchronicity_t::synchronous}},
-        {"dprune_csr2csr", {memory_debug_synchronicity_t::synchronous}},
-        {"dprune_csr2csr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dprune_csr2csr_by_percentage", {memory_debug_synchronicity_t::synchronous}},
-        {"dprune_csr2csr_by_percentage_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dprune_csr2csr_nnz", {memory_debug_synchronicity_t::asynchronous}},
-        {"dprune_csr2csr_nnz_by_percentage", {memory_debug_synchronicity_t::asynchronous}},
-        {"dprune_dense2csr", {memory_debug_synchronicity_t::synchronous}},
-        {"dprune_dense2csr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"dprune_dense2csr_by_percentage", {memory_debug_synchronicity_t::synchronous}},
-        {"dprune_dense2csr_by_percentage_buffer_size",
-         {memory_debug_synchronicity_t::asynchronous}},
-        {"dprune_dense2csr_nnz", {memory_debug_synchronicity_t::asynchronous}},
-        {"dprune_dense2csr_nnz_by_percentage", {memory_debug_synchronicity_t::synchronous}},
-        {"droti", {memory_debug_synchronicity_t::asynchronous}},
-        {"dsbsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"dscsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"dsctr", {memory_debug_synchronicity_t::asynchronous}},
-        {"ell2csr_nnz", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"extract", {memory_debug_synchronicity_t::asynchronous}},
-        {"extract_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"extract_nnz", {memory_debug_synchronicity_t::host}},
-        {"gather", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"gebsr2gebsr_nnz", {memory_debug_synchronicity_t::depends}},
-        {"get_git_rev", {memory_debug_synchronicity_t::host}},
-        {"get_pointer_mode", {memory_debug_synchronicity_t::asynchronous}},
-        {"get_stream", {memory_debug_synchronicity_t::host}},
-        {"get_version", {memory_debug_synchronicity_t::host}},
-        {"hyb2csr_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"inverse_permutation", {memory_debug_synchronicity_t::asynchronous}},
-        {"isctr", {memory_debug_synchronicity_t::asynchronous}},
-        {"rot", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"saxpyi", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsr2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrgeam", {memory_debug_synchronicity_t::synchronous}},
-        {"sbsrgemm", {memory_debug_synchronicity_t::synchronous}},
-        {"sbsrgemm_buffer_size", {memory_debug_synchronicity_t::synchronous}},
-        {"sbsric0", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsric0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"sbsric0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrilu0", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrilu0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"sbsrilu0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrmv_analysis", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrpad_value", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrsm_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"sbsrsm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrsm_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"sbsrsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"sbsrxmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"scatter", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"scheck_matrix_coo", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_coo_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_csc", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_csc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_csr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_ell", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_ell_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_gebsc", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_gebsc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_gebsr", {memory_debug_synchronicity_t::asynchronous}},
-        {"scheck_matrix_gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scoo2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"scoomv", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsc2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsr2bsr", {memory_debug_synchronicity_t::synchronous}},
-        {"scsr2csc", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsr2csr_compress", {memory_debug_synchronicity_t::synchronous}},
-        {"scsr2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsr2ell", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsr2gebsr", {memory_debug_synchronicity_t::synchronous}},
-        {"scsr2gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsr2hyb", {memory_debug_synchronicity_t::synchronous}},
-        {"scsrcolor", {memory_debug_synchronicity_t::synchronous}},
-        {"scsrgeam", {memory_debug_synchronicity_t::synchronous}},
-        {"scsrgemm", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrgemm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrgemm_numeric", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsric0", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsric0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"scsric0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrilu0", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrilu0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"scsrilu0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsritilu0_compute", {memory_debug_synchronicity_t::synchronous}},
-        {"scsritilu0_compute_ex", {memory_debug_synchronicity_t::synchronous}},
-        {"scsritilu0_history", {memory_debug_synchronicity_t::synchronous}},
-        {"scsritsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"scsritsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsritsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsritsv_solve_ex", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrmv", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"scsrmv_analysis", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"scsrsm_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"scsrsm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrsm_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"scsrsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"scsrsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"sddmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"sddmm_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"sddmm_preprocess", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"sdense2coo", {memory_debug_synchronicity_t::synchronous}},
-        {"sdense2csc", {memory_debug_synchronicity_t::synchronous}},
-        {"sdense2csr", {memory_debug_synchronicity_t::synchronous}},
-        {"sdoti", {memory_debug_synchronicity_t::asynchronous}},
-        {"sell2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"sellmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"set_identity_permutation", {memory_debug_synchronicity_t::asynchronous}},
-        {"set_pointer_mode", {memory_debug_synchronicity_t::host}},
-        {"set_stream", {memory_debug_synchronicity_t::host}},
-        {"sgebsr2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgebsr2gebsc", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgebsr2gebsc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgebsr2gebsr", {memory_debug_synchronicity_t::synchronous}},
-        {"sgebsr2gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgebsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgebsrmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgemmi", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgemvi", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgemvi_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgpsv_interleaved_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgpsv_interleaved_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgthr", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgthrz", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgtsv", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgtsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgtsv_interleaved_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgtsv_interleaved_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgtsv_no_pivot", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgtsv_no_pivot_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgtsv_no_pivot_strided_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"sgtsv_no_pivot_strided_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"shyb2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"shybmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"snnz", {memory_debug_synchronicity_t::asynchronous}},
-        {"snnz_compress", {memory_debug_synchronicity_t::synchronous}},
-        {"sparse_to_dense", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"sparse_to_sparse", {memory_debug_synchronicity_t::depends}},
-        {"sparse_to_sparse_buffer_size", {memory_debug_synchronicity_t::depends}},
-        {"spgeam", {memory_debug_synchronicity_t::depends}},
-        {"spgeam_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"spgeam_get_output", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"spgeam_set_input", {memory_debug_synchronicity_t::host}},
-        {"spgemm", {memory_debug_synchronicity_t::depends}},
-        {"spic0", {memory_debug_synchronicity_t::depends}},
-        {"spic0_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"spic0_descr_create", {memory_debug_synchronicity_t::host}},
-        {"spic0_descr_destroy", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"spic0_get_output", {memory_debug_synchronicity_t::asynchronous}},
-        {"spic0_set_input", {memory_debug_synchronicity_t::host}},
-        {"spilu0", {memory_debug_synchronicity_t::depends}},
-        {"spilu0_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"spilu0_descr_create", {memory_debug_synchronicity_t::host}},
-        {"spilu0_descr_destroy", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"spilu0_get_output", {memory_debug_synchronicity_t::asynchronous}},
-        {"spilu0_set_input", {memory_debug_synchronicity_t::host}},
-        {"spitsv", {memory_debug_synchronicity_t::depends}},
-        {"spmm", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"spmv", {memory_debug_synchronicity_t::depends}},
-        {"spmv_clear_extra", {memory_debug_synchronicity_t::synchronous}},
-        {"spmv_set_extra", {memory_debug_synchronicity_t::partially_synchronous}},
-        {"spmv_set_input", {memory_debug_synchronicity_t::host}},
-        {"sprune_csr2csr", {memory_debug_synchronicity_t::synchronous}},
-        {"sprune_csr2csr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sprune_csr2csr_by_percentage", {memory_debug_synchronicity_t::synchronous}},
-        {"sprune_csr2csr_by_percentage_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sprune_csr2csr_nnz", {memory_debug_synchronicity_t::asynchronous}},
-        {"sprune_csr2csr_nnz_by_percentage", {memory_debug_synchronicity_t::asynchronous}},
-        {"sprune_dense2csr", {memory_debug_synchronicity_t::synchronous}},
-        {"sprune_dense2csr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"sprune_dense2csr_by_percentage", {memory_debug_synchronicity_t::synchronous}},
-        {"sprune_dense2csr_by_percentage_buffer_size",
-         {memory_debug_synchronicity_t::asynchronous}},
-        {"sprune_dense2csr_nnz", {memory_debug_synchronicity_t::asynchronous}},
-        {"sprune_dense2csr_nnz_by_percentage", {memory_debug_synchronicity_t::synchronous}},
-        {"spsm", {memory_debug_synchronicity_t::depends}},
-        {"spsv", {memory_debug_synchronicity_t::depends}},
-        {"sptrsm", {memory_debug_synchronicity_t::depends}},
-        {"sptrsm_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"sptrsm_get_output", {memory_debug_synchronicity_t::asynchronous}},
-        {"sptrsm_set_input", {memory_debug_synchronicity_t::host}},
-        {"sptrsv", {memory_debug_synchronicity_t::depends}},
-        {"sptrsv_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"sptrsv_descr_create", {memory_debug_synchronicity_t::host}},
-        {"sptrsv_descr_destroy", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"sptrsv_get_output", {memory_debug_synchronicity_t::depends}},
-        {"sptrsv_set_input", {memory_debug_synchronicity_t::host}},
-        {"spvv", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"sroti", {memory_debug_synchronicity_t::asynchronous}},
-        {"ssctr", {memory_debug_synchronicity_t::asynchronous}},
-        {"v2_spmv", {memory_debug_synchronicity_t::depends}},
-        {"v2_spmv_buffer_size", {memory_debug_synchronicity_t::host}},
-        {"zaxpyi", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsr2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrgeam", {memory_debug_synchronicity_t::synchronous}},
-        {"zbsrgemm", {memory_debug_synchronicity_t::synchronous}},
-        {"zbsrgemm_buffer_size", {memory_debug_synchronicity_t::synchronous}},
-        {"zbsric0", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsric0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"zbsric0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrilu0", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrilu0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"zbsrilu0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrmv_analysis", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrpad_value", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrsm_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"zbsrsm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrsm_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"zbsrsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"zbsrxmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_coo", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_coo_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_csc", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_csc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_csr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_ell", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_ell_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_gebsc", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_gebsc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_gebsr", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcheck_matrix_gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcoo2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcoomv", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsc2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsr2bsr", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsr2csc", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsr2csr_compress", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsr2dense", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsr2ell", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsr2gebsr", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsr2gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsr2hyb", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsrcolor", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsrgeam", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsrgemm", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrgemm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrgemm_numeric", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsric0", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsric0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsric0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrilu0", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrilu0_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsrilu0_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrilu0_numeric_boost", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsritilu0_compute", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsritilu0_compute_ex", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsritilu0_history", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsritsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsritsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsritsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsritsv_solve_ex", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrmv", {memory_debug_synchronicity_t::host_or_asynchronous}},
-        {"zcsrmv_analysis", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"zcsrsm_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsrsm_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrsm_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrsv_analysis", {memory_debug_synchronicity_t::synchronous}},
-        {"zcsrsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zcsrsv_solve", {memory_debug_synchronicity_t::asynchronous}},
-        {"zdense2coo", {memory_debug_synchronicity_t::synchronous}},
-        {"zdense2csc", {memory_debug_synchronicity_t::synchronous}},
-        {"zdense2csr", {memory_debug_synchronicity_t::synchronous}},
-        {"zdotci", {memory_debug_synchronicity_t::asynchronous}},
-        {"zdoti", {memory_debug_synchronicity_t::asynchronous}},
-        {"zell2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"zellmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgebsr2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgebsr2gebsc", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgebsr2gebsc_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgebsr2gebsr", {memory_debug_synchronicity_t::synchronous}},
-        {"zgebsr2gebsr_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgebsrmm", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgebsrmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgemmi", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgemvi", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgemvi_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgpsv_interleaved_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgpsv_interleaved_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgthr", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgthrz", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgtsv", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgtsv_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgtsv_interleaved_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgtsv_interleaved_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgtsv_no_pivot", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgtsv_no_pivot_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgtsv_no_pivot_strided_batch", {memory_debug_synchronicity_t::asynchronous}},
-        {"zgtsv_no_pivot_strided_batch_buffer_size", {memory_debug_synchronicity_t::asynchronous}},
-        {"zhyb2csr", {memory_debug_synchronicity_t::asynchronous}},
-        {"zhybmv", {memory_debug_synchronicity_t::asynchronous}},
-        {"znnz", {memory_debug_synchronicity_t::asynchronous}},
-        {"znnz_compress", {memory_debug_synchronicity_t::synchronous}},
-        {"zsctr", {memory_debug_synchronicity_t::asynchronous}},
-        {"bell_get", {memory_debug_synchronicity_t::host}},
-        {"bsr_get", {memory_debug_synchronicity_t::host}},
-        {"bsr_set_pointers", {memory_debug_synchronicity_t::host}},
-        {"const_bell_get", {memory_debug_synchronicity_t::host}},
-        {"const_bsr_get", {memory_debug_synchronicity_t::host}},
-        {"const_coo_aos_get", {memory_debug_synchronicity_t::host}},
-        {"const_coo_get", {memory_debug_synchronicity_t::host}},
-        {"const_csc_get", {memory_debug_synchronicity_t::host}},
-        {"const_csr_get", {memory_debug_synchronicity_t::host}},
-        {"const_dnmat_get", {memory_debug_synchronicity_t::host}},
-        {"const_dnmat_get_values", {memory_debug_synchronicity_t::host}},
-        {"const_dnvec_get", {memory_debug_synchronicity_t::host}},
-        {"const_dnvec_get_values", {memory_debug_synchronicity_t::host}},
-        {"const_ell_get", {memory_debug_synchronicity_t::host}},
-        {"const_sell_get", {memory_debug_synchronicity_t::host}},
-        {"const_spmat_get_values", {memory_debug_synchronicity_t::host}},
-        {"const_spvec_get", {memory_debug_synchronicity_t::host}},
-        {"const_spvec_get_values", {memory_debug_synchronicity_t::host}},
-        {"coo_aos_get", {memory_debug_synchronicity_t::host}},
-        {"coo_aos_set_pointers", {memory_debug_synchronicity_t::host}},
-        {"coo_get", {memory_debug_synchronicity_t::host}},
-        {"coo_set_pointers", {memory_debug_synchronicity_t::host}},
-        {"coo_set_strided_batch", {memory_debug_synchronicity_t::host}},
-        {"copy_color_info", {memory_debug_synchronicity_t::host}},
-        {"copy_hyb_mat", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"copy_mat_descr", {memory_debug_synchronicity_t::host}},
-        {"copy_mat_info", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"create_bell_descr", {memory_debug_synchronicity_t::host}},
-        {"create_bsr_descr", {memory_debug_synchronicity_t::host}},
-        {"create_color_info", {memory_debug_synchronicity_t::host}},
-        {"create_const_bell_descr", {memory_debug_synchronicity_t::host}},
-        {"create_const_coo_descr", {memory_debug_synchronicity_t::host}},
-        {"create_const_csc_descr", {memory_debug_synchronicity_t::host}},
-        {"create_const_csr_descr", {memory_debug_synchronicity_t::host}},
-        {"create_const_dnmat_descr", {memory_debug_synchronicity_t::host}},
-        {"create_const_dnvec_descr", {memory_debug_synchronicity_t::host}},
-        {"create_const_sell_descr", {memory_debug_synchronicity_t::host}},
-        {"create_const_spvec_descr", {memory_debug_synchronicity_t::host}},
-        {"create_coo_aos_descr", {memory_debug_synchronicity_t::host}},
-        {"create_coo_descr", {memory_debug_synchronicity_t::host}},
-        {"create_csc_descr", {memory_debug_synchronicity_t::host}},
-        {"create_csr_descr", {memory_debug_synchronicity_t::host}},
-        {"create_dnmat_descr", {memory_debug_synchronicity_t::host}},
-        {"create_dnvec_descr", {memory_debug_synchronicity_t::host}},
-        {"create_ell_descr", {memory_debug_synchronicity_t::host}},
-        {"create_extract_descr", {memory_debug_synchronicity_t::synchronous}},
-        {"create_handle", {memory_debug_synchronicity_t::synchronous}},
-        {"create_hyb_mat", {memory_debug_synchronicity_t::host}},
-        {"create_mat_descr", {memory_debug_synchronicity_t::host}},
-        {"create_mat_info", {memory_debug_synchronicity_t::host}},
-        {"create_sell_descr", {memory_debug_synchronicity_t::host}},
-        {"create_sparse_to_sparse_descr", {memory_debug_synchronicity_t::host}},
-        {"create_spgeam_descr", {memory_debug_synchronicity_t::host}},
-        {"create_spmv_descr", {memory_debug_synchronicity_t::host}},
-        {"create_sptrsm_descr", {memory_debug_synchronicity_t::host}},
-        {"create_sptrsv_descr", {memory_debug_synchronicity_t::host}},
-        {"create_spvec_descr", {memory_debug_synchronicity_t::host}},
-        {"csc_get", {memory_debug_synchronicity_t::host}},
-        {"csc_set_pointers", {memory_debug_synchronicity_t::host}},
-        {"csc_set_strided_batch", {memory_debug_synchronicity_t::host}},
-        {"csr_get", {memory_debug_synchronicity_t::host}},
-        {"csr_set_pointers", {memory_debug_synchronicity_t::host}},
-        {"csr_set_strided_batch", {memory_debug_synchronicity_t::host}},
-        {"destroy_color_info", {memory_debug_synchronicity_t::host}},
-        {"destroy_dnmat_descr", {memory_debug_synchronicity_t::host}},
-        {"destroy_dnvec_descr", {memory_debug_synchronicity_t::host}},
-        {"destroy_error", {memory_debug_synchronicity_t::host}},
-        {"destroy_extract_descr", {memory_debug_synchronicity_t::synchronous}},
-        {"destroy_handle", {memory_debug_synchronicity_t::synchronous}},
-        {"destroy_hyb_mat", {memory_debug_synchronicity_t::synchronous}},
-        {"destroy_mat_descr", {memory_debug_synchronicity_t::host}},
-        {"destroy_mat_info", {memory_debug_synchronicity_t::synchronous}},
-        {"destroy_sparse_to_sparse_descr", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"destroy_spgeam_descr", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"destroy_spmat_descr", {memory_debug_synchronicity_t::depends}},
-        {"destroy_spmv_descr", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"destroy_sptrsm_descr", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"destroy_sptrsv_descr", {memory_debug_synchronicity_t::host_or_synchronous}},
-        {"destroy_spvec_descr", {memory_debug_synchronicity_t::host}},
-        {"dnmat_get", {memory_debug_synchronicity_t::host}},
-        {"dnmat_get_strided_batch", {memory_debug_synchronicity_t::host}},
-        {"dnmat_get_values", {memory_debug_synchronicity_t::host}},
-        {"dnmat_set_strided_batch", {memory_debug_synchronicity_t::host}},
-        {"dnmat_set_values", {memory_debug_synchronicity_t::host}},
-        {"dnvec_get", {memory_debug_synchronicity_t::host}},
-        {"dnvec_get_strided_batch", {memory_debug_synchronicity_t::host}},
-        {"dnvec_get_values", {memory_debug_synchronicity_t::host}},
-        {"dnvec_set_strided_batch", {memory_debug_synchronicity_t::host}},
-        {"dnvec_set_values", {memory_debug_synchronicity_t::host}},
-        {"ell_get", {memory_debug_synchronicity_t::host}},
-        {"ell_set_pointers", {memory_debug_synchronicity_t::host}},
-        {"sell_get", {memory_debug_synchronicity_t::host}},
-        {"set_mat_diag_type", {memory_debug_synchronicity_t::host}},
-        {"set_mat_fill_mode", {memory_debug_synchronicity_t::host}},
-        {"set_mat_index_base", {memory_debug_synchronicity_t::host}},
-        {"set_mat_storage_mode", {memory_debug_synchronicity_t::host}},
-        {"set_mat_type", {memory_debug_synchronicity_t::host}},
-        {"sparse_to_sparse_permissive", {memory_debug_synchronicity_t::host}},
-        {"spmat_get_attribute", {memory_debug_synchronicity_t::host}},
-        {"spmat_get_format", {memory_debug_synchronicity_t::host}},
-        {"spmat_get_index_base", {memory_debug_synchronicity_t::host}},
-        {"spmat_get_nnz", {memory_debug_synchronicity_t::host}},
-        {"spmat_get_size", {memory_debug_synchronicity_t::host}},
-        {"spmat_get_strided_batch", {memory_debug_synchronicity_t::host}},
-        {"spmat_get_values", {memory_debug_synchronicity_t::host}},
-        {"spmat_set_attribute", {memory_debug_synchronicity_t::host}},
-        {"spmat_set_nnz", {memory_debug_synchronicity_t::host}},
-        {"spmat_set_strided_batch", {memory_debug_synchronicity_t::host}},
-        {"spmat_set_values", {memory_debug_synchronicity_t::host}},
-        {"spvec_get", {memory_debug_synchronicity_t::host}},
-        {"spvec_get_index_base", {memory_debug_synchronicity_t::host}},
-        {"spvec_get_values", {memory_debug_synchronicity_t::host}},
-        {"spvec_set_values", {memory_debug_synchronicity_t::host}}};
+        {"axpby", {HOST_OR_ASYNC}},
+        {"bsrgeam_nnzb", {SYNC_OR_ASYNC}},
+        {"bsrgemm_nnzb", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"bsric0_clear", {HOST_OR_SYNC}},
+        {"bsric0_zero_pivot", {SYNC_ONLY}},
+        {"bsrilu0_clear", {HOST_OR_SYNC}},
+        {"bsrilu0_zero_pivot", {SYNC_ONLY}},
+        {"bsrmv_clear", {ASYNC_ONLY}},
+        {"bsrsm_clear", {HOST_OR_SYNC}},
+        {"bsrsm_zero_pivot", {SYNC_ONLY}},
+        {"bsrsv_clear", {HOST_OR_SYNC}},
+        {"bsrsv_zero_pivot", {SYNC_ONLY}},
+        {"caxpyi", {HOST_OR_ASYNC}},
+        {"cbsr2csr", {ASYNC_ONLY}},
+        {"cbsrgeam", {ASYNC_ONLY}},
+        {"cbsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"cbsrgemm_buffer_size", {HOST_ONLY}},
+        {"cbsric0", {HOST_OR_ASYNC}},
+        {"cbsric0_analysis", {HOST_OR_SYNC}},
+        {"cbsric0_buffer_size", {HOST_ONLY}},
+        {"cbsrilu0", {HOST_OR_ASYNC}},
+        {"cbsrilu0_analysis", {HOST_OR_SYNC}},
+        {"cbsrilu0_buffer_size", {HOST_ONLY}},
+        {"cbsrilu0_numeric_boost", {HOST_ONLY}},
+        {"cbsrmm", {ASYNC_ONLY}},
+        {"cbsrmv", {ASYNC_ONLY}},
+        {"cbsrmv_analysis", {HOST_OR_SYNC}},
+        {"cbsrpad_value", {HOST_OR_ASYNC}},
+        {"cbsrsm_analysis", {HOST_OR_SYNC}},
+        {"cbsrsm_buffer_size", {HOST_ONLY}},
+        {"cbsrsm_solve", {HOST_OR_ASYNC}},
+        {"cbsrsv_analysis", {HOST_OR_SYNC}},
+        {"cbsrsv_buffer_size", {HOST_ONLY}},
+        {"cbsrsv_solve", {HOST_OR_ASYNC}},
+        {"cbsrxmv", {ASYNC_ONLY}},
+        {"ccheck_matrix_coo", {HOST_OR_SYNC}},
+        {"ccheck_matrix_coo_buffer_size", {HOST_ONLY}},
+        {"ccheck_matrix_csc", {SYNC_ONLY}},
+        {"ccheck_matrix_csc_buffer_size", {HOST_ONLY}},
+        {"ccheck_matrix_csr", {SYNC_ONLY}},
+        {"ccheck_matrix_csr_buffer_size", {HOST_ONLY}},
+        {"ccheck_matrix_ell", {SYNC_ONLY}},
+        {"ccheck_matrix_ell_buffer_size", {HOST_ONLY}},
+        {"ccheck_matrix_gebsc", {SYNC_ONLY}},
+        {"ccheck_matrix_gebsc_buffer_size", {HOST_ONLY}},
+        {"ccheck_matrix_gebsr", {SYNC_ONLY}},
+        {"ccheck_matrix_gebsr_buffer_size", {HOST_ONLY}},
+        {"ccoo2dense", {HOST_OR_ASYNC}},
+        {"ccoomv", {ASYNC_ONLY}},
+        {"ccsc2dense", {HOST_OR_ASYNC}},
+        {"ccsr2bsr", {HOST_OR_SYNC_OR_PSYNC}},
+        {"ccsr2csc", {HOST_OR_ASYNC}},
+        {"ccsr2csr_compress", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"ccsr2dense", {HOST_OR_ASYNC}},
+        {"ccsr2ell", {ASYNC_ONLY}},
+        {"ccsr2gebsr", {HOST_OR_SYNC_OR_PSYNC}},
+        {"ccsr2gebsr_buffer_size", {HOST_OR_SYNC}},
+        {"ccsr2hyb", {HOST_OR_PSYNC}},
+        {"ccsrcolor", {PSYNC}},
+        {"ccsrgeam", {ASYNC_ONLY}},
+        {"ccsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"ccsrgemm_buffer_size", {HOST_ONLY}},
+        {"ccsrgemm_numeric", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"ccsric0", {ASYNC_ONLY}},
+        {"ccsric0_analysis", {HOST_OR_SYNC}},
+        {"ccsric0_buffer_size", {HOST_ONLY}},
+        {"ccsrilu0", {HOST_OR_ASYNC}},
+        {"ccsrilu0_analysis", {HOST_OR_SYNC}},
+        {"ccsrilu0_buffer_size", {HOST_ONLY}},
+        {"ccsrilu0_numeric_boost", {HOST_ONLY}},
+        {"ccsritilu0_compute", {HOST_OR_PSYNC}},
+        {"ccsritilu0_compute_ex", {HOST_OR_PSYNC}},
+        {"ccsritilu0_history", {SYNC_ONLY}},
+        {"ccsritsv_analysis", {SYNC_OR_PSYNC_OR_ASYNC}},
+        {"ccsritsv_buffer_size", {HOST_ONLY}},
+        {"ccsritsv_solve", {SYNC_ONLY}},
+        {"ccsritsv_solve_ex", {SYNC_ONLY}},
+        {"ccsrmm", {ASYNC_ONLY}},
+        {"ccsrmv", {HOST_OR_ASYNC}},
+        {"ccsrmv_analysis", {HOST_OR_SYNC}},
+        {"ccsrsm_analysis", {HOST_OR_SYNC}},
+        {"ccsrsm_buffer_size", {HOST_ONLY}},
+        {"ccsrsm_solve", {ASYNC_ONLY}},
+        {"ccsrsv_analysis", {HOST_OR_SYNC}},
+        {"ccsrsv_buffer_size", {HOST_ONLY}},
+        {"ccsrsv_solve", {ASYNC_ONLY}},
+        {"cdense2coo", {PSYNC}},
+        {"cdense2csc", {ASYNC}},
+        {"cdense2csr", {ASYNC}},
+        {"cdotci", {HOST_OR_ASYNC}},
+        {"cdoti", {HOST_OR_ASYNC}},
+        {"cell2csr", {HOST_OR_ASYNC}},
+        {"cellmv", {HOST_OR_ASYNC}},
+        {"cgebsr2csr", {PSYNC_OR_ASYNC}},
+        {"cgebsr2gebsc", {ASYNC_ONLY}},
+        {"cgebsr2gebsc_buffer_size", {HOST_ONLY}},
+        {"cgebsr2gebsr", {PSYNC}},
+        {"cgebsr2gebsr_buffer_size", {HOST_ONLY}},
+        {"cgebsrmm", {ASYNC_ONLY}},
+        {"cgebsrmv", {ASYNC_ONLY}},
+        {"cgemmi", {ASYNC_ONLY}},
+        {"cgemvi", {ASYNC_ONLY}},
+        {"cgemvi_buffer_size", {HOST_ONLY}},
+        {"cgpsv_interleaved_batch", {HOST_OR_ASYNC}},
+        {"cgpsv_interleaved_batch_buffer_size", {HOST_ONLY}},
+        {"cgthr", {HOST_OR_ASYNC}},
+        {"cgthrz", {HOST_OR_ASYNC}},
+        {"cgtsv", {ASYNC_ONLY}},
+        {"cgtsv_buffer_size", {HOST_ONLY}},
+        {"cgtsv_interleaved_batch", {HOST_OR_ASYNC}},
+        {"cgtsv_interleaved_batch_buffer_size", {HOST_ONLY}},
+        {"cgtsv_no_pivot", {ASYNC_ONLY}},
+        {"cgtsv_no_pivot_buffer_size", {HOST_ONLY}},
+        {"cgtsv_no_pivot_strided_batch", {ASYNC_ONLY}},
+        {"cgtsv_no_pivot_strided_batch_buffer_size", {HOST_ONLY}},
+        {"check_matrix_hyb", {SYNC_ONLY}},
+        {"check_matrix_hyb_buffer_size", {HOST}},
+        {"check_spmat", {HOST_OR_SYNC}},
+        {"chyb2csr", {ASYNC_ONLY}},
+        {"chybmv", {ASYNC_ONLY}},
+        {"cnnz", {HOST_OR_SYNC_OR_ASYNC}},
+        {"cnnz_compress", {HOST_OR_PSYNC}},
+        {"coo2csr", {ASYNC_ONLY}},
+        {"coosort_buffer_size", {HOST_ONLY}},
+        {"coosort_by_column", {HOST_OR_SYNC_OR_PSYNC}},
+        {"coosort_by_row", {HOST_OR_SYNC_OR_PSYNC}},
+        {"create_identity_permutation", {HOST_OR_ASYNC}},
+        {"cscsort", {HOST_OR_ASYNC}},
+        {"cscsort_buffer_size", {HOST_ONLY}},
+        {"csctr", {HOST_OR_ASYNC}},
+        {"csr2bsr_nnz", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"csr2coo", {HOST_OR_ASYNC}},
+        {"csr2csc_buffer_size", {HOST_ONLY}},
+        {"csr2ell_width", {ASYNC_ONLY}},
+        {"csr2gebsr_nnz", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"csrgeam_nnz", {SYNC_OR_ASYNC}},
+        {"csrgemm_nnz", {SYNC_OR_PSYNC_OR_ASYNC}},
+        {"csrgemm_symbolic", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"csric0_clear", {HOST_OR_SYNC}},
+        {"csric0_get_tolerance", {HOST_ONLY}},
+        {"csric0_set_tolerance", {HOST_ONLY}},
+        {"csric0_singular_pivot", {SYNC_ONLY}},
+        {"csric0_zero_pivot", {SYNC_ONLY}},
+        {"csrilu0_clear", {HOST_OR_SYNC}},
+        {"csrilu0_get_tolerance", {HOST_ONLY}},
+        {"csrilu0_set_tolerance", {HOST_ONLY}},
+        {"csrilu0_singular_pivot", {SYNC_ONLY}},
+        {"csrilu0_zero_pivot", {SYNC_ONLY}},
+        {"csritilu0_buffer_size", {HOST_OR_SYNC}},
+        {"csritilu0_preprocess", {HOST_OR_SYNC}},
+        {"csritsv_clear", {HOST_OR_SYNC}},
+        {"csritsv_zero_pivot", {SYNC_ONLY}},
+        {"csrmv_clear", {HOST_OR_SYNC}},
+        {"csrsm_clear", {HOST_OR_SYNC}},
+        {"csrsm_zero_pivot", {SYNC_ONLY}},
+        {"csrsort", {HOST_OR_ASYNC}},
+        {"csrsort_buffer_size", {HOST_ONLY}},
+        {"csrsv_clear", {HOST_OR_SYNC}},
+        {"csrsv_zero_pivot", {SYNC_ONLY}},
+        {"daxpyi", {HOST_OR_ASYNC}},
+        {"dbsr2csr", {ASYNC_ONLY}},
+        {"dbsrgeam", {ASYNC_ONLY}},
+        {"dbsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"dbsrgemm_buffer_size", {HOST_ONLY}},
+        {"dbsric0", {HOST_OR_ASYNC}},
+        {"dbsric0_analysis", {HOST_OR_SYNC}},
+        {"dbsric0_buffer_size", {HOST_ONLY}},
+        {"dbsrilu0", {HOST_OR_ASYNC}},
+        {"dbsrilu0_analysis", {HOST_OR_SYNC}},
+        {"dbsrilu0_buffer_size", {HOST_ONLY}},
+        {"dbsrilu0_numeric_boost", {HOST_ONLY}},
+        {"dbsrmm", {ASYNC_ONLY}},
+        {"dbsrmv", {ASYNC_ONLY}},
+        {"dbsrmv_analysis", {HOST_OR_SYNC}},
+        {"dbsrpad_value", {HOST_OR_ASYNC}},
+        {"dbsrsm_analysis", {HOST_OR_SYNC}},
+        {"dbsrsm_buffer_size", {HOST_ONLY}},
+        {"dbsrsm_solve", {HOST_OR_ASYNC}},
+        {"dbsrsv_analysis", {HOST_OR_SYNC}},
+        {"dbsrsv_buffer_size", {HOST_ONLY}},
+        {"dbsrsv_solve", {HOST_OR_ASYNC}},
+        {"dbsrxmv", {HOST_OR_ASYNC}},
+        {"dcbsrilu0_numeric_boost", {ASYNC_ONLY}},
+        {"dccsrilu0_numeric_boost", {ASYNC_ONLY}},
+        {"dcheck_matrix_coo", {HOST_OR_SYNC}},
+        {"dcheck_matrix_coo_buffer_size", {HOST_ONLY}},
+        {"dcheck_matrix_csc", {SYNC_ONLY}},
+        {"dcheck_matrix_csc_buffer_size", {HOST_ONLY}},
+        {"dcheck_matrix_csr", {SYNC_ONLY}},
+        {"dcheck_matrix_csr_buffer_size", {HOST_ONLY}},
+        {"dcheck_matrix_ell", {SYNC_ONLY}},
+        {"dcheck_matrix_ell_buffer_size", {HOST_ONLY}},
+        {"dcheck_matrix_gebsc", {SYNC_ONLY}},
+        {"dcheck_matrix_gebsc_buffer_size", {HOST_ONLY}},
+        {"dcheck_matrix_gebsr", {SYNC_ONLY}},
+        {"dcheck_matrix_gebsr_buffer_size", {HOST_ONLY}},
+        {"dcoo2dense", {HOST_OR_ASYNC}},
+        {"dcoomv", {ASYNC_ONLY}},
+        {"dcsc2dense", {HOST_OR_ASYNC}},
+        {"dcsr2bsr", {HOST_OR_SYNC_OR_PSYNC}},
+        {"dcsr2csc", {HOST_OR_ASYNC}},
+        {"dcsr2csr_compress", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"dcsr2dense", {HOST_OR_ASYNC}},
+        {"dcsr2ell", {ASYNC_ONLY}},
+        {"dcsr2gebsr", {HOST_OR_SYNC_OR_PSYNC}},
+        {"dcsr2gebsr_buffer_size", {HOST_OR_SYNC}},
+        {"dcsr2hyb", {HOST_OR_PSYNC}},
+        {"dcsrcolor", {PSYNC}},
+        {"dcsrgeam", {ASYNC_ONLY}},
+        {"dcsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"dcsrgemm_buffer_size", {HOST_ONLY}},
+        {"dcsrgemm_numeric", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"dcsric0", {ASYNC_ONLY}},
+        {"dcsric0_analysis", {HOST_OR_SYNC}},
+        {"dcsric0_buffer_size", {HOST_ONLY}},
+        {"dcsrilu0", {HOST_OR_ASYNC}},
+        {"dcsrilu0_analysis", {HOST_OR_SYNC}},
+        {"dcsrilu0_buffer_size", {HOST_ONLY}},
+        {"dcsrilu0_numeric_boost", {HOST_ONLY}},
+        {"dcsritilu0_compute", {HOST_OR_PSYNC}},
+        {"dcsritilu0_compute_ex", {HOST_OR_PSYNC}},
+        {"dcsritilu0_history", {SYNC_ONLY}},
+        {"dcsritsv_analysis", {HOST_OR_SYNC_OR_ASYNC}},
+        {"dcsritsv_buffer_size", {HOST_ONLY}},
+        {"dcsritsv_solve", {HOST_OR_SYNC_OR_ASYNC}},
+        {"dcsritsv_solve_ex", {HOST_OR_SYNC_OR_ASYNC}},
+        {"dcsrmm", {ASYNC_ONLY}},
+        {"dcsrmv", {HOST_OR_ASYNC}},
+        {"dcsrmv_analysis", {HOST_OR_SYNC}},
+        {"dcsrsm_analysis", {HOST_OR_SYNC}},
+        {"dcsrsm_buffer_size", {HOST_ONLY}},
+        {"dcsrsm_solve", {HOST_OR_ASYNC}},
+        {"dcsrsv_analysis", {HOST_OR_SYNC}},
+        {"dcsrsv_buffer_size", {HOST_ONLY}},
+        {"dcsrsv_solve", {ASYNC_ONLY}},
+        {"ddense2coo", {PSYNC}},
+        {"ddense2csc", {ASYNC}},
+        {"ddense2csr", {ASYNC}},
+        {"ddoti", {HOST_OR_ASYNC}},
+        {"dell2csr", {HOST_OR_ASYNC}},
+        {"dellmv", {HOST_OR_ASYNC}},
+        {"dense_to_sparse", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"dgebsr2csr", {PSYNC_OR_ASYNC}},
+        {"dgebsr2gebsc", {ASYNC_ONLY}},
+        {"dgebsr2gebsc_buffer_size", {HOST_ONLY}},
+        {"dgebsr2gebsr", {PSYNC}},
+        {"dgebsr2gebsr_buffer_size", {HOST_ONLY}},
+        {"dgebsrmm", {ASYNC_ONLY}},
+        {"dgebsrmv", {ASYNC_ONLY}},
+        {"dgemmi", {ASYNC_ONLY}},
+        {"dgemvi", {HOST_OR_ASYNC}},
+        {"dgemvi_buffer_size", {HOST_ONLY}},
+        {"dgpsv_interleaved_batch", {HOST_OR_ASYNC}},
+        {"dgpsv_interleaved_batch_buffer_size", {HOST_ONLY}},
+        {"dgthr", {HOST_OR_ASYNC}},
+        {"dgthrz", {HOST_OR_ASYNC}},
+        {"dgtsv", {ASYNC_ONLY}},
+        {"dgtsv_buffer_size", {HOST_ONLY}},
+        {"dgtsv_interleaved_batch", {HOST_OR_ASYNC}},
+        {"dgtsv_interleaved_batch_buffer_size", {HOST_ONLY}},
+        {"dgtsv_no_pivot", {ASYNC_ONLY}},
+        {"dgtsv_no_pivot_buffer_size", {HOST_ONLY}},
+        {"dgtsv_no_pivot_strided_batch", {ASYNC_ONLY}},
+        {"dgtsv_no_pivot_strided_batch_buffer_size", {HOST_ONLY}},
+        {"dhyb2csr", {ASYNC_ONLY}},
+        {"dhybmv", {HOST_OR_ASYNC}},
+        {"dnnz", {HOST_OR_SYNC_OR_ASYNC}},
+        {"dnnz_compress", {HOST_OR_PSYNC}},
+        {"dprune_csr2csr", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"dprune_csr2csr_buffer_size", {HOST_ONLY}},
+        {"dprune_csr2csr_by_percentage", {HOST_OR_PSYNC}},
+        {"dprune_csr2csr_by_percentage_buffer_size", {HOST_ONLY}},
+        {"dprune_csr2csr_nnz", {PSYNC_OR_ASYNC}},
+        {"dprune_csr2csr_nnz_by_percentage", {PSYNC_OR_ASYNC}},
+        {"dprune_dense2csr", {ASYNC}},
+        {"dprune_dense2csr_buffer_size", {HOST_ONLY}},
+        {"dprune_dense2csr_by_percentage", {PSYNC_OR_ASYNC}},
+        {"dprune_dense2csr_by_percentage_buffer_size", {HOST_ONLY}},
+        {"dprune_dense2csr_nnz", {SYNC_OR_PSYNC}},
+        {"dprune_dense2csr_nnz_by_percentage", {SYNC_OR_PSYNC}},
+        {"droti", {HOST_OR_ASYNC}},
+        {"dsbsrilu0_numeric_boost", {ASYNC_ONLY}},
+        {"dscsrilu0_numeric_boost", {ASYNC_ONLY}},
+        {"dsctr", {HOST_OR_ASYNC}},
+        {"ell2csr_nnz", {HOST_OR_SYNC}},
+        {"extract", {ASYNC_ONLY}},
+        {"extract_buffer_size", {HOST_ONLY}},
+        {"extract_nnz", {ASYNC}},
+        {"gather", {HOST_OR_ASYNC}},
+        {"gebsr2gebsr_nnz", {SYNC_OR_ASYNC}},
+        {"get_git_rev", {HOST_ONLY}},
+        {"get_pointer_mode", {ASYNC_ONLY}},
+        {"get_stream", {HOST_ONLY}},
+        {"get_version", {HOST_ONLY}},
+        {"hyb2csr_buffer_size", {HOST_ONLY}},
+        {"inverse_permutation", {ASYNC_ONLY}},
+        {"isctr", {HOST_OR_ASYNC}},
+        {"rot", {HOST_OR_ASYNC}},
+        {"saxpyi", {HOST_OR_ASYNC}},
+        {"sbsr2csr", {ASYNC_ONLY}},
+        {"sbsrgeam", {ASYNC_ONLY}},
+        {"sbsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"sbsrgemm_buffer_size", {HOST_ONLY}},
+        {"sbsric0", {HOST_OR_ASYNC}},
+        {"sbsric0_analysis", {HOST_OR_SYNC}},
+        {"sbsric0_buffer_size", {HOST_ONLY}},
+        {"sbsrilu0", {HOST_OR_ASYNC}},
+        {"sbsrilu0_analysis", {HOST_OR_SYNC}},
+        {"sbsrilu0_buffer_size", {HOST_ONLY}},
+        {"sbsrilu0_numeric_boost", {HOST_ONLY}},
+        {"sbsrmm", {ASYNC_ONLY}},
+        {"sbsrmv", {ASYNC_ONLY}},
+        {"sbsrmv_analysis", {HOST_OR_SYNC}},
+        {"sbsrpad_value", {HOST_OR_ASYNC}},
+        {"sbsrsm_analysis", {HOST_OR_SYNC}},
+        {"sbsrsm_buffer_size", {HOST_ONLY}},
+        {"sbsrsm_solve", {HOST_OR_ASYNC}},
+        {"sbsrsv_analysis", {HOST_OR_SYNC}},
+        {"sbsrsv_buffer_size", {HOST_ONLY}},
+        {"sbsrsv_solve", {HOST_OR_ASYNC}},
+        {"sbsrxmv", {HOST_OR_ASYNC}},
+        {"scatter", {HOST_OR_ASYNC}},
+        {"scheck_matrix_coo", {HOST_OR_SYNC}},
+        {"scheck_matrix_coo_buffer_size", {HOST_ONLY}},
+        {"scheck_matrix_csc", {SYNC_ONLY}},
+        {"scheck_matrix_csc_buffer_size", {HOST_ONLY}},
+        {"scheck_matrix_csr", {SYNC_ONLY}},
+        {"scheck_matrix_csr_buffer_size", {HOST_ONLY}},
+        {"scheck_matrix_ell", {SYNC_ONLY}},
+        {"scheck_matrix_ell_buffer_size", {HOST_ONLY}},
+        {"scheck_matrix_gebsc", {SYNC_ONLY}},
+        {"scheck_matrix_gebsc_buffer_size", {HOST_ONLY}},
+        {"scheck_matrix_gebsr", {SYNC_ONLY}},
+        {"scheck_matrix_gebsr_buffer_size", {HOST_ONLY}},
+        {"scoo2dense", {HOST_OR_ASYNC}},
+        {"scoomv", {ASYNC_ONLY}},
+        {"scsc2dense", {HOST_OR_ASYNC}},
+        {"scsr2bsr", {HOST_OR_SYNC_OR_PSYNC}},
+        {"scsr2csc", {HOST_OR_ASYNC}},
+        {"scsr2csr_compress", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"scsr2dense", {HOST_OR_ASYNC}},
+        {"scsr2ell", {ASYNC_ONLY}},
+        {"scsr2gebsr", {HOST_OR_SYNC_OR_PSYNC}},
+        {"scsr2gebsr_buffer_size", {HOST_OR_SYNC}},
+        {"scsr2hyb", {HOST_OR_PSYNC}},
+        {"scsrcolor", {PSYNC}},
+        {"scsrgeam", {ASYNC_ONLY}},
+        {"scsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"scsrgemm_buffer_size", {HOST_ONLY}},
+        {"scsrgemm_numeric", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"scsric0", {ASYNC_ONLY}},
+        {"scsric0_analysis", {HOST_OR_SYNC}},
+        {"scsric0_buffer_size", {HOST_ONLY}},
+        {"scsrilu0", {HOST_OR_ASYNC}},
+        {"scsrilu0_analysis", {HOST_OR_SYNC}},
+        {"scsrilu0_buffer_size", {HOST_ONLY}},
+        {"scsrilu0_numeric_boost", {HOST_ONLY}},
+        {"scsritilu0_compute", {HOST_OR_PSYNC}},
+        {"scsritilu0_compute_ex", {HOST_OR_PSYNC}},
+        {"scsritilu0_history", {SYNC_ONLY}},
+        {"scsritsv_analysis", {HOST_OR_SYNC_OR_ASYNC}},
+        {"scsritsv_buffer_size", {HOST_ONLY}},
+        {"scsritsv_solve", {HOST_OR_SYNC_OR_ASYNC}},
+        {"scsritsv_solve_ex", {HOST_OR_SYNC_OR_ASYNC}},
+        {"scsrmm", {ASYNC_ONLY}},
+        {"scsrmv", {HOST_OR_ASYNC}},
+        {"scsrmv_analysis", {HOST_OR_SYNC}},
+        {"scsrsm_analysis", {HOST_OR_SYNC}},
+        {"scsrsm_buffer_size", {HOST_ONLY}},
+        {"scsrsm_solve", {HOST_OR_ASYNC}},
+        {"scsrsv_analysis", {HOST_OR_SYNC}},
+        {"scsrsv_buffer_size", {HOST_ONLY}},
+        {"scsrsv_solve", {ASYNC_ONLY}},
+        {"sddmm", {ASYNC_ONLY}},
+        {"sddmm_buffer_size", {HOST_ONLY}},
+        {"sddmm_preprocess", {HOST}},
+        {"sdense2coo", {PSYNC}},
+        {"sdense2csc", {ASYNC}},
+        {"sdense2csr", {ASYNC}},
+        {"sdoti", {HOST_OR_ASYNC}},
+        {"sell2csr", {HOST_OR_ASYNC}},
+        {"sellmv", {HOST_OR_ASYNC}},
+        {"set_identity_permutation", {ASYNC_ONLY}},
+        {"set_pointer_mode", {HOST_ONLY}},
+        {"set_stream", {HOST_ONLY}},
+        {"sgebsr2csr", {PSYNC_OR_ASYNC}},
+        {"sgebsr2gebsc", {ASYNC_ONLY}},
+        {"sgebsr2gebsc_buffer_size", {HOST_ONLY}},
+        {"sgebsr2gebsr", {PSYNC}},
+        {"sgebsr2gebsr_buffer_size", {HOST_ONLY}},
+        {"sgebsrmm", {ASYNC_ONLY}},
+        {"sgebsrmv", {ASYNC_ONLY}},
+        {"sgemmi", {ASYNC_ONLY}},
+        {"sgemvi", {HOST_OR_ASYNC}},
+        {"sgemvi_buffer_size", {HOST_ONLY}},
+        {"sgpsv_interleaved_batch", {HOST_OR_ASYNC}},
+        {"sgpsv_interleaved_batch_buffer_size", {HOST_ONLY}},
+        {"sgthr", {HOST_OR_ASYNC}},
+        {"sgthrz", {HOST_OR_ASYNC}},
+        {"sgtsv", {ASYNC_ONLY}},
+        {"sgtsv_buffer_size", {HOST_ONLY}},
+        {"sgtsv_interleaved_batch", {HOST_OR_ASYNC}},
+        {"sgtsv_interleaved_batch_buffer_size", {HOST_ONLY}},
+        {"sgtsv_no_pivot", {ASYNC_ONLY}},
+        {"sgtsv_no_pivot_buffer_size", {HOST_ONLY}},
+        {"sgtsv_no_pivot_strided_batch", {ASYNC_ONLY}},
+        {"sgtsv_no_pivot_strided_batch_buffer_size", {HOST_ONLY}},
+        {"shyb2csr", {ASYNC_ONLY}},
+        {"shybmv", {HOST_OR_ASYNC}},
+        {"snnz", {HOST_OR_SYNC_OR_ASYNC}},
+        {"snnz_compress", {HOST_OR_PSYNC}},
+        {"sparse_to_dense", {HOST_OR_ASYNC}},
+        {"sparse_to_sparse", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"sparse_to_sparse_buffer_size", {HOST_OR_SYNC_OR_PSYNC}},
+        {"spgeam", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"spgeam_buffer_size", {HOST_ONLY}},
+        {"spgeam_get_output", {HOST}},
+        {"spgeam_set_input", {HOST_ONLY}},
+        {"spgemm", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"spic0", {HOST_OR_SYNC_OR_ASYNC}},
+        {"spic0_buffer_size", {HOST_ONLY}},
+        {"spic0_descr_create", {HOST_ONLY}},
+        {"spic0_descr_destroy", {HOST_OR_SYNC}},
+        {"spic0_get_output", {ASYNC_ONLY}},
+        {"spic0_set_input", {HOST_ONLY}},
+        {"spilu0", {HOST_OR_SYNC_OR_ASYNC}},
+        {"spilu0_buffer_size", {HOST_ONLY}},
+        {"spilu0_descr_create", {HOST_ONLY}},
+        {"spilu0_descr_destroy", {HOST_OR_SYNC}},
+        {"spilu0_get_output", {ASYNC_ONLY}},
+        {"spilu0_set_input", {HOST_ONLY}},
+        {"spitsv", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"spmm", {HOST_OR_ASYNC}},
+        {"spmv", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"spmv_clear_extra", {SYNC_ONLY}},
+        {"spmv_set_extra", {PSYNC_ONLY}},
+        {"spmv_set_input", {HOST_ONLY}},
+        {"sprune_csr2csr", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"sprune_csr2csr_buffer_size", {HOST_ONLY}},
+        {"sprune_csr2csr_by_percentage", {HOST_OR_PSYNC}},
+        {"sprune_csr2csr_by_percentage_buffer_size", {HOST_ONLY}},
+        {"sprune_csr2csr_nnz", {PSYNC_OR_ASYNC}},
+        {"sprune_csr2csr_nnz_by_percentage", {PSYNC_OR_ASYNC}},
+        {"sprune_dense2csr", {ASYNC}},
+        {"sprune_dense2csr_buffer_size", {HOST_ONLY}},
+        {"sprune_dense2csr_by_percentage", {PSYNC_OR_ASYNC}},
+        {"sprune_dense2csr_by_percentage_buffer_size", {HOST_ONLY}},
+        {"sprune_dense2csr_nnz", {SYNC_OR_PSYNC}},
+        {"sprune_dense2csr_nnz_by_percentage", {SYNC_OR_PSYNC}},
+        {"spsm", {HOST_OR_SYNC_OR_ASYNC}},
+        {"spsv", {HOST_OR_SYNC_OR_ASYNC}},
+        {"sptrsm", {HOST_OR_SYNC_OR_ASYNC}},
+        {"sptrsm_buffer_size", {HOST_ONLY}},
+        {"sptrsm_get_output", {ASYNC_ONLY}},
+        {"sptrsm_set_input", {HOST_ONLY}},
+        {"sptrsv", {SYNC_OR_ASYNC}},
+        {"sptrsv_buffer_size", {HOST_ONLY}},
+        {"sptrsv_descr_create", {HOST_ONLY}},
+        {"sptrsv_descr_destroy", {HOST_OR_SYNC}},
+        {"sptrsv_get_output", {SYNC_OR_ASYNC}},
+        {"sptrsv_set_input", {HOST_ONLY}},
+        {"spvv", {HOST_OR_ASYNC}},
+        {"sroti", {HOST_OR_ASYNC}},
+        {"ssctr", {HOST_OR_ASYNC}},
+        {"v2_spmv", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
+        {"v2_spmv_buffer_size", {HOST_ONLY}},
+        {"zaxpyi", {HOST_OR_ASYNC}},
+        {"zbsr2csr", {ASYNC_ONLY}},
+        {"zbsrgeam", {ASYNC_ONLY}},
+        {"zbsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"zbsrgemm_buffer_size", {HOST_ONLY}},
+        {"zbsric0", {HOST_OR_ASYNC}},
+        {"zbsric0_analysis", {HOST_OR_SYNC}},
+        {"zbsric0_buffer_size", {HOST_ONLY}},
+        {"zbsrilu0", {HOST_OR_ASYNC}},
+        {"zbsrilu0_analysis", {HOST_OR_SYNC}},
+        {"zbsrilu0_buffer_size", {HOST_ONLY}},
+        {"zbsrilu0_numeric_boost", {HOST_ONLY}},
+        {"zbsrmm", {ASYNC_ONLY}},
+        {"zbsrmv", {ASYNC_ONLY}},
+        {"zbsrmv_analysis", {HOST_OR_SYNC}},
+        {"zbsrpad_value", {HOST_OR_ASYNC}},
+        {"zbsrsm_analysis", {HOST_OR_SYNC}},
+        {"zbsrsm_buffer_size", {HOST_ONLY}},
+        {"zbsrsm_solve", {HOST_OR_ASYNC}},
+        {"zbsrsv_analysis", {HOST_OR_SYNC}},
+        {"zbsrsv_buffer_size", {HOST_ONLY}},
+        {"zbsrsv_solve", {HOST_OR_ASYNC}},
+        {"zbsrxmv", {ASYNC_ONLY}},
+        {"zcheck_matrix_coo", {HOST_OR_SYNC}},
+        {"zcheck_matrix_coo_buffer_size", {HOST_ONLY}},
+        {"zcheck_matrix_csc", {SYNC_ONLY}},
+        {"zcheck_matrix_csc_buffer_size", {HOST_ONLY}},
+        {"zcheck_matrix_csr", {SYNC_ONLY}},
+        {"zcheck_matrix_csr_buffer_size", {HOST_ONLY}},
+        {"zcheck_matrix_ell", {SYNC_ONLY}},
+        {"zcheck_matrix_ell_buffer_size", {HOST_ONLY}},
+        {"zcheck_matrix_gebsc", {SYNC_ONLY}},
+        {"zcheck_matrix_gebsc_buffer_size", {HOST_ONLY}},
+        {"zcheck_matrix_gebsr", {SYNC_ONLY}},
+        {"zcheck_matrix_gebsr_buffer_size", {HOST_ONLY}},
+        {"zcoo2dense", {HOST_OR_ASYNC}},
+        {"zcoomv", {ASYNC_ONLY}},
+        {"zcsc2dense", {HOST_OR_ASYNC}},
+        {"zcsr2bsr", {HOST_OR_SYNC_OR_PSYNC}},
+        {"zcsr2csc", {HOST_OR_ASYNC}},
+        {"zcsr2csr_compress", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"zcsr2dense", {HOST_OR_ASYNC}},
+        {"zcsr2ell", {ASYNC_ONLY}},
+        {"zcsr2gebsr", {HOST_OR_SYNC_OR_PSYNC}},
+        {"zcsr2gebsr_buffer_size", {HOST_OR_SYNC}},
+        {"zcsr2hyb", {HOST_OR_PSYNC}},
+        {"zcsrcolor", {PSYNC}},
+        {"zcsrgeam", {ASYNC_ONLY}},
+        {"zcsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"zcsrgemm_buffer_size", {HOST_ONLY}},
+        {"zcsrgemm_numeric", {HOST_OR_PSYNC_OR_ASYNC}},
+        {"zcsric0", {HOST_OR_ASYNC}},
+        {"zcsric0_analysis", {HOST_OR_SYNC}},
+        {"zcsric0_buffer_size", {HOST_ONLY}},
+        {"zcsrilu0", {HOST_OR_ASYNC}},
+        {"zcsrilu0_analysis", {HOST_OR_SYNC}},
+        {"zcsrilu0_buffer_size", {HOST_ONLY}},
+        {"zcsrilu0_numeric_boost", {HOST_ONLY}},
+        {"zcsritilu0_compute", {HOST_OR_PSYNC}},
+        {"zcsritilu0_compute_ex", {HOST_OR_PSYNC}},
+        {"zcsritilu0_history", {SYNC_ONLY}},
+        {"zcsritsv_analysis", {SYNC_OR_PSYNC_OR_ASYNC}},
+        {"zcsritsv_buffer_size", {HOST_ONLY}},
+        {"zcsritsv_solve", {SYNC_OR_PSYNC}},
+        {"zcsritsv_solve_ex", {SYNC_OR_PSYNC}},
+        {"zcsrmm", {ASYNC_ONLY}},
+        {"zcsrmv", {HOST_OR_ASYNC}},
+        {"zcsrmv_analysis", {HOST_OR_SYNC}},
+        {"zcsrsm_analysis", {HOST_OR_SYNC}},
+        {"zcsrsm_buffer_size", {HOST_ONLY}},
+        {"zcsrsm_solve", {ASYNC_ONLY}},
+        {"zcsrsv_analysis", {HOST_OR_SYNC}},
+        {"zcsrsv_buffer_size", {HOST_ONLY}},
+        {"zcsrsv_solve", {ASYNC_ONLY}},
+        {"zdense2coo", {PSYNC}},
+        {"zdense2csc", {ASYNC}},
+        {"zdense2csr", {ASYNC}},
+        {"zdotci", {HOST_OR_ASYNC}},
+        {"zdoti", {HOST_OR_ASYNC}},
+        {"zell2csr", {HOST_OR_ASYNC}},
+        {"zellmv", {HOST_OR_ASYNC}},
+        {"zgebsr2csr", {PSYNC_OR_ASYNC}},
+        {"zgebsr2gebsc", {ASYNC_ONLY}},
+        {"zgebsr2gebsc_buffer_size", {HOST_ONLY}},
+        {"zgebsr2gebsr", {PSYNC}},
+        {"zgebsr2gebsr_buffer_size", {HOST_ONLY}},
+        {"zgebsrmm", {ASYNC_ONLY}},
+        {"zgebsrmv", {ASYNC_ONLY}},
+        {"zgemmi", {ASYNC_ONLY}},
+        {"zgemvi", {ASYNC_ONLY}},
+        {"zgemvi_buffer_size", {HOST_ONLY}},
+        {"zgpsv_interleaved_batch", {HOST_OR_ASYNC}},
+        {"zgpsv_interleaved_batch_buffer_size", {HOST_ONLY}},
+        {"zgthr", {HOST_OR_ASYNC}},
+        {"zgthrz", {HOST_OR_ASYNC}},
+        {"zgtsv", {ASYNC_ONLY}},
+        {"zgtsv_buffer_size", {HOST_ONLY}},
+        {"zgtsv_interleaved_batch", {HOST_OR_ASYNC}},
+        {"zgtsv_interleaved_batch_buffer_size", {HOST_ONLY}},
+        {"zgtsv_no_pivot", {ASYNC_ONLY}},
+        {"zgtsv_no_pivot_buffer_size", {HOST_ONLY}},
+        {"zgtsv_no_pivot_strided_batch", {ASYNC_ONLY}},
+        {"zgtsv_no_pivot_strided_batch_buffer_size", {HOST_ONLY}},
+        {"zhyb2csr", {ASYNC_ONLY}},
+        {"zhybmv", {ASYNC_ONLY}},
+        {"znnz", {HOST_OR_SYNC_OR_ASYNC}},
+        {"znnz_compress", {HOST_OR_PSYNC}},
+        {"zsctr", {HOST_OR_ASYNC}},
+        {"bell_get", {HOST_ONLY}},
+        {"bsr_get", {HOST_ONLY}},
+        {"bsr_set_pointers", {HOST_ONLY}},
+        {"const_bell_get", {HOST_ONLY}},
+        {"const_bsr_get", {HOST_ONLY}},
+        {"const_coo_aos_get", {HOST_ONLY}},
+        {"const_coo_get", {HOST_ONLY}},
+        {"const_csc_get", {HOST_ONLY}},
+        {"const_csr_get", {HOST_ONLY}},
+        {"const_dnmat_get", {HOST_ONLY}},
+        {"const_dnmat_get_values", {HOST_ONLY}},
+        {"const_dnvec_get", {HOST_ONLY}},
+        {"const_dnvec_get_values", {HOST_ONLY}},
+        {"const_ell_get", {HOST_ONLY}},
+        {"const_sell_get", {HOST_ONLY}},
+        {"const_spmat_get_values", {HOST_ONLY}},
+        {"const_spvec_get", {HOST_ONLY}},
+        {"const_spvec_get_values", {HOST_ONLY}},
+        {"coo_aos_get", {HOST_ONLY}},
+        {"coo_aos_set_pointers", {HOST_ONLY}},
+        {"coo_get", {HOST_ONLY}},
+        {"coo_set_pointers", {HOST_ONLY}},
+        {"coo_set_strided_batch", {HOST_ONLY}},
+        {"copy_color_info", {HOST_ONLY}},
+        {"copy_hyb_mat", {SYNC}},
+        {"copy_mat_descr", {HOST_ONLY}},
+        {"copy_mat_info", {HOST_OR_SYNC}},
+        {"create_bell_descr", {HOST_ONLY}},
+        {"create_bsr_descr", {HOST_ONLY}},
+        {"create_color_info", {HOST_ONLY}},
+        {"create_const_bell_descr", {HOST_ONLY}},
+        {"create_const_coo_descr", {HOST_ONLY}},
+        {"create_const_csc_descr", {HOST_ONLY}},
+        {"create_const_csr_descr", {HOST_ONLY}},
+        {"create_const_dnmat_descr", {HOST_ONLY}},
+        {"create_const_dnvec_descr", {HOST_ONLY}},
+        {"create_const_sell_descr", {HOST_ONLY}},
+        {"create_const_spvec_descr", {HOST_ONLY}},
+        {"create_coo_aos_descr", {HOST_ONLY}},
+        {"create_coo_descr", {HOST_ONLY}},
+        {"create_csc_descr", {HOST_ONLY}},
+        {"create_csr_descr", {HOST_ONLY}},
+        {"create_dnmat_descr", {HOST_ONLY}},
+        {"create_dnvec_descr", {HOST_ONLY}},
+        {"create_ell_descr", {HOST_ONLY}},
+        {"create_extract_descr", {SYNC_ONLY}},
+        {"create_handle", {SYNC_ONLY}},
+        {"create_hyb_mat", {HOST_ONLY}},
+        {"create_mat_descr", {HOST_ONLY}},
+        {"create_mat_info", {HOST_ONLY}},
+        {"create_sell_descr", {HOST_ONLY}},
+        {"create_sparse_to_sparse_descr", {HOST_ONLY}},
+        {"create_spgeam_descr", {HOST_ONLY}},
+        {"create_spmv_descr", {HOST_ONLY}},
+        {"create_sptrsm_descr", {HOST_ONLY}},
+        {"create_sptrsv_descr", {HOST_ONLY}},
+        {"create_spvec_descr", {HOST_ONLY}},
+        {"csc_get", {HOST_ONLY}},
+        {"csc_set_pointers", {HOST_ONLY}},
+        {"csc_set_strided_batch", {HOST_ONLY}},
+        {"csr_get", {HOST_ONLY}},
+        {"csr_set_pointers", {HOST_ONLY}},
+        {"csr_set_strided_batch", {HOST_ONLY}},
+        {"destroy_color_info", {HOST_ONLY}},
+        {"destroy_dnmat_descr", {HOST_ONLY}},
+        {"destroy_dnvec_descr", {HOST_ONLY}},
+        {"destroy_error", {HOST_ONLY}},
+        {"destroy_extract_descr", {SYNC_ONLY}},
+        {"destroy_handle", {SYNC_ONLY}},
+        {"destroy_hyb_mat", {SYNC_ONLY}},
+        {"destroy_mat_descr", {HOST_ONLY}},
+        {"destroy_mat_info", {SYNC_ONLY}},
+        {"destroy_sparse_to_sparse_descr", {HOST_OR_SYNC}},
+        {"destroy_spgeam_descr", {SYNC}},
+        {"destroy_spmat_descr", {SYNC_OR_PSYNC}},
+        {"destroy_spmv_descr", {HOST_OR_SYNC}},
+        {"destroy_sptrsm_descr", {HOST}},
+        {"destroy_sptrsv_descr", {HOST_OR_SYNC}},
+        {"destroy_spvec_descr", {HOST_ONLY}},
+        {"dnmat_get", {HOST_ONLY}},
+        {"dnmat_get_strided_batch", {HOST_ONLY}},
+        {"dnmat_get_values", {HOST_ONLY}},
+        {"dnmat_set_strided_batch", {HOST_ONLY}},
+        {"dnmat_set_values", {HOST_ONLY}},
+        {"dnvec_get", {HOST_ONLY}},
+        {"dnvec_get_strided_batch", {HOST_ONLY}},
+        {"dnvec_get_values", {HOST_ONLY}},
+        {"dnvec_set_strided_batch", {HOST_ONLY}},
+        {"dnvec_set_values", {HOST_ONLY}},
+        {"ell_get", {HOST_ONLY}},
+        {"ell_set_pointers", {HOST_ONLY}},
+        {"sell_get", {HOST_ONLY}},
+        {"set_mat_diag_type", {HOST_ONLY}},
+        {"set_mat_fill_mode", {HOST_ONLY}},
+        {"set_mat_index_base", {HOST_ONLY}},
+        {"set_mat_storage_mode", {HOST_ONLY}},
+        {"set_mat_type", {HOST_ONLY}},
+        {"sparse_to_sparse_permissive", {HOST_ONLY}},
+        {"spmat_get_attribute", {HOST_ONLY}},
+        {"spmat_get_format", {HOST_ONLY}},
+        {"spmat_get_index_base", {HOST_ONLY}},
+        {"spmat_get_nnz", {HOST_ONLY}},
+        {"spmat_get_size", {HOST_ONLY}},
+        {"spmat_get_strided_batch", {HOST_ONLY}},
+        {"spmat_get_values", {HOST_ONLY}},
+        {"spmat_set_attribute", {HOST_ONLY}},
+        {"spmat_set_nnz", {HOST_ONLY}},
+        {"spmat_set_strided_batch", {HOST_ONLY}},
+        {"spmat_set_values", {HOST_ONLY}},
+        {"spvec_get", {HOST_ONLY}},
+        {"spvec_get_index_base", {HOST_ONLY}},
+        {"spvec_get_values", {HOST_ONLY}},
+        {"spvec_set_values", {HOST_ONLY}}};
 
     void memory_debug_check_synchronicity(rocsparse_handle handle, const char* name)
     {
+
         if(memory_debug_t::instance().enabled())
         {
-            auto&      info = memory_debug_t::instance().get_memory_debug_synchronicity_info(name);
-            const auto sync = info.get_sync();
+            auto& info = memory_debug_t::instance().get_memory_debug_synchronicity_info(name);
+            const int32_t sync_value = info.get_synchronicity_value();
 
             rocsparse_memory_debug_synchronicity synchronicity;
             const rocsparse_memory_debug_info    memory_debug_info
@@ -738,71 +758,52 @@ namespace rocsparse_clients_test
                 handle, memory_debug_info, &synchronicity, sizeof(synchronicity));
             if(status != rocsparse_status_success)
             {
-                throw std::runtime_error(std::string("rocsparse_memory_debug_info_get failed"));
+                FAIL() << "rocsparse_memory_debug_info_get failed";
             }
             switch(synchronicity)
             {
             case rocsparse_memory_debug_synchronicity_async:
             {
-                info.add_call(memory_debug_synchronicity_t::asynchronous);
-                if((sync != memory_debug_synchronicity_t::asynchronous)
-                   && (sync != memory_debug_synchronicity_t::host_or_asynchronous)
-                   && (sync != memory_debug_synchronicity_t::depends))
+                info.add_call(ASYNC);
+                if((sync_value & rocsparse_memory_debug_synchronicity_async) == 0)
                 {
-                    std::cerr << "Error: rocsparse_" << name << " is declared '"
-                              << memory_debug_synchronicity_t2string(sync)
-                              << "' but production code returns 'asynchronous'" << std::endl;
-                    throw std::runtime_error(std::string("rocsparse_") + name
-                                             + ": sync property mismatch (asynchronous)");
+                    FAIL() << "Error: rocsparse_" << name << " is declared '"
+                           << memory_debug_synchronicity_t2string(sync_value)
+                           << "' but production code returns 'asynchronous'";
                 }
                 return;
             }
             case rocsparse_memory_debug_synchronicity_sync:
             {
-                info.add_call(memory_debug_synchronicity_t::synchronous);
-                if((sync != memory_debug_synchronicity_t::synchronous)
-                   && (sync != memory_debug_synchronicity_t::host_or_synchronous)
-                   && (sync != memory_debug_synchronicity_t::depends))
+                info.add_call(SYNC);
+                if((sync_value & rocsparse_memory_debug_synchronicity_sync) == 0)
                 {
-                    std::cerr << "Error: rocsparse_" << name << " is declared '"
-                              << memory_debug_synchronicity_t2string(sync)
-                              << "' but production code returns 'synchronous'" << std::endl;
-                    throw std::runtime_error(std::string("rocsparse_") + name
-                                             + ": sync property mismatch (synchronous)");
+                    FAIL() << "Error: rocsparse_" << name << " is declared '"
+                           << memory_debug_synchronicity_t2string(sync_value)
+                           << "' but production code returns 'synchronous'";
                 }
                 return;
             }
 
             case rocsparse_memory_debug_synchronicity_psync:
             {
-                info.add_call(memory_debug_synchronicity_t::partially_synchronous);
-                if((sync != memory_debug_synchronicity_t::partially_synchronous)
-                   && (sync != memory_debug_synchronicity_t::host_or_partially_synchronous)
-                   && (sync != memory_debug_synchronicity_t::depends))
+                info.add_call(PSYNC);
+                if((sync_value & rocsparse_memory_debug_synchronicity_psync) == 0)
                 {
-                    std::cerr << "Error: rocsparse_" << name << " is declared '"
-                              << memory_debug_synchronicity_t2string(sync)
-                              << "' but production code returns 'partially_synchronous'"
-                              << std::endl;
-                    throw std::runtime_error(std::string("rocsparse_") + name
-                                             + ": sync property mismatch (partially_synchronous)");
+                    FAIL() << "Error: rocsparse_" << name << " is declared '"
+                           << memory_debug_synchronicity_t2string(sync_value)
+                           << "' but production code returns 'partially_synchronous'";
                 }
                 return;
             }
             case rocsparse_memory_debug_synchronicity_host:
             {
-
-                info.add_call(memory_debug_synchronicity_t::host);
-                if((sync != memory_debug_synchronicity_t::host)
-                   && (sync != memory_debug_synchronicity_t::host_or_asynchronous)
-                   && (sync != memory_debug_synchronicity_t::host_or_synchronous)
-                   && (sync != memory_debug_synchronicity_t::depends))
+                info.add_call(HOST);
+                if((sync_value & rocsparse_memory_debug_synchronicity_host) == 0)
                 {
-                    std::cerr << "Error: rocsparse_" << name << " is declared '"
-                              << memory_debug_synchronicity_t2string(sync)
-                              << "' but production code returns 'host'" << std::endl;
-                    throw std::runtime_error(std::string("rocsparse_") + name
-                                             + ": sync property mismatch (host)");
+                    FAIL() << "Error: rocsparse_" << name << " is declared '"
+                           << memory_debug_synchronicity_t2string(sync_value)
+                           << "' but production code returns 'host'";
                 }
                 return;
             }
@@ -854,15 +855,12 @@ namespace rocsparse_clients_test
             {
                 continue;
             }
-            const std::string& name = p.first;
-            const auto         sync = info.get_sync();
-            const uint64_t     ncalls_synchronous
-                = info.get_calls(memory_debug_synchronicity_t::synchronous);
-            const uint64_t ncalls_asynchronous
-                = info.get_calls(memory_debug_synchronicity_t::asynchronous);
-            const uint64_t ncalls_partially_synchronous
-                = info.get_calls(memory_debug_synchronicity_t::partially_synchronous);
-            const uint64_t ncalls_host = info.get_calls(memory_debug_synchronicity_t::host);
+            const std::string& name                         = p.first;
+            const int32_t      sync_value                   = info.get_synchronicity_value();
+            const uint64_t     ncalls_synchronous           = info.get_calls(SYNC);
+            const uint64_t     ncalls_asynchronous          = info.get_calls(ASYNC);
+            const uint64_t     ncalls_partially_synchronous = info.get_calls(PSYNC);
+            const uint64_t     ncalls_host                  = info.get_calls(HOST);
 
             if(count > 0)
             {
@@ -870,13 +868,16 @@ namespace rocsparse_clients_test
             }
 
             out << "{\"name\": \"rocsparse_" << name << "\"," << std::endl;
-            out << " \"sync\": \"" << memory_debug_synchronicity_t2string(sync) << "\","
-                << std::endl;
-            out << " \"calls\": {\"sync\": " << ncalls_synchronous << "," << std::endl;
-            out << "            \"async\": " << ncalls_asynchronous << "," << std::endl;
-            out << "            \"partialsync\": " << ncalls_partially_synchronous << ","
-                << std::endl;
-            out << "            \"host\": " << ncalls_host << "}}";
+
+            out << " \"synchronicity\": \"" << memory_debug_synchronicity_t2string(sync_value)
+                << "\"," << std::endl;
+
+            out << " \"calls\": { \"host\": " << ncalls_host << "," << std::endl;
+
+            out << "              \"sync\": " << ncalls_synchronous << "," << std::endl;
+
+            out << "              \"psync\": " << ncalls_partially_synchronous << "," << std::endl;
+            out << "              \"async\": " << ncalls_asynchronous << "}}";
             ++count;
         }
 
@@ -890,6 +891,7 @@ namespace rocsparse_clients_test
 
     rocsparse_status memory_debug_t::check(rocsparse_handle handle) const
     {
+        bool all    = false;
         bool failed = false;
         for(const auto& p : s_map)
         {
@@ -898,110 +900,89 @@ namespace rocsparse_clients_test
             {
                 continue;
             }
-            const std::string& name = p.first;
-            const auto         sync = info.get_sync();
-            const uint64_t     ncalls_synchronous
-                = info.get_calls(memory_debug_synchronicity_t::synchronous);
-            const uint64_t ncalls_asynchronous
-                = info.get_calls(memory_debug_synchronicity_t::asynchronous);
-            const uint64_t ncalls_partially_synchronous
-                = info.get_calls(memory_debug_synchronicity_t::partially_synchronous);
-            const uint64_t ncalls_host = info.get_calls(memory_debug_synchronicity_t::host);
 
-            switch(sync)
+            const std::string& name       = p.first;
+            const int32_t      sync_value = info.get_synchronicity_value();
+
+            const uint64_t ncalls_sync  = info.get_calls(SYNC);
+            const uint64_t ncalls_async = info.get_calls(ASYNC);
+            const uint64_t ncalls_psync = info.get_calls(PSYNC);
+            const uint64_t ncalls_host  = info.get_calls(HOST);
+
+            if(all)
             {
-            case memory_debug_synchronicity_t::synchronous:
-            {
-                if((ncalls_asynchronous > 0) || //
-                   (ncalls_partially_synchronous > 0) || //
-                   (ncalls_host > 0))
+                bool inconsistent = (sync_value == 0);
+                inconsistent |= ((((sync_value & rocsparse_memory_debug_synchronicity_host) != 0)
+                                  && (ncalls_host == 0))
+                                 || (((sync_value & rocsparse_memory_debug_synchronicity_host) == 0)
+                                     && (ncalls_host > 0)));
+
+                inconsistent |= ((((sync_value & rocsparse_memory_debug_synchronicity_sync) != 0)
+                                  && (ncalls_sync == 0))
+                                 || (((sync_value & rocsparse_memory_debug_synchronicity_sync) == 0)
+                                     && (ncalls_sync > 0)));
+
+                inconsistent
+                    |= ((((sync_value & rocsparse_memory_debug_synchronicity_psync) != 0)
+                         && (ncalls_psync == 0))
+                        || (((sync_value & rocsparse_memory_debug_synchronicity_psync) == 0)
+                            && (ncalls_psync > 0)));
+
+                inconsistent
+                    |= ((((sync_value & rocsparse_memory_debug_synchronicity_async) != 0)
+                         && (ncalls_async == 0))
+                        || (((sync_value & rocsparse_memory_debug_synchronicity_async) == 0)
+                            && (ncalls_async > 0)));
+                if(inconsistent)
                 {
-                    break;
+                    std::cerr << "Error: rocsparse_" << name << " is declared '"
+                              << memory_debug_synchronicity_t2string(sync_value)
+                              << "' but production code returns:" << std::endl;
+                    std::cerr << "   ncalls_synchronous           : " << ncalls_sync << std::endl;
+                    std::cerr << "   ncalls_asynchronous          : " << ncalls_async << std::endl;
+                    std::cerr << "   ncalls_partially_synchronous : " << ncalls_psync << std::endl;
+                    std::cerr << "   ncalls_host                  : " << ncalls_host << std::endl;
                 }
-                continue;
-            }
 
-            case memory_debug_synchronicity_t::host_or_synchronous:
+                failed |= inconsistent;
+            }
+            else
             {
-                if((ncalls_asynchronous > 0) || //
-                   (ncalls_partially_synchronous > 0))
+                bool inconsistent = (sync_value == 0);
+                if(ncalls_host > 0)
                 {
-                    break;
+                    inconsistent |= !(sync_value & rocsparse_memory_debug_synchronicity_host);
                 }
-                continue;
-            }
 
-            case memory_debug_synchronicity_t::asynchronous:
-            {
-                if((ncalls_synchronous > 0) || //
-                   (ncalls_partially_synchronous > 0) || //
-                   (ncalls_host > 0))
+                if(ncalls_sync > 0)
                 {
-                    break;
+                    inconsistent |= !(sync_value & rocsparse_memory_debug_synchronicity_sync);
                 }
-                continue;
-            }
 
-            case memory_debug_synchronicity_t::host_or_asynchronous:
-            {
-                if((ncalls_synchronous > 0) || //
-                   (ncalls_partially_synchronous > 0))
+                if(ncalls_psync > 0)
                 {
-                    break;
+                    inconsistent |= !(sync_value & rocsparse_memory_debug_synchronicity_psync);
                 }
-                continue;
-            }
 
-            case memory_debug_synchronicity_t::partially_synchronous:
-            {
-                if((ncalls_synchronous > 0) || //
-                   (ncalls_asynchronous > 0) || //
-                   (ncalls_host > 0))
+                if(ncalls_async > 0)
                 {
-                    break;
+                    inconsistent |= !(sync_value & rocsparse_memory_debug_synchronicity_async);
                 }
-                continue;
-            }
 
-            case memory_debug_synchronicity_t::host_or_partially_synchronous:
-            {
-                if((ncalls_synchronous > 0) || //
-                   (ncalls_asynchronous > 0))
+                if(inconsistent)
                 {
-                    break;
+                    std::cerr << "Error: rocsparse_" << name << " is declared '"
+                              << memory_debug_synchronicity_t2string(sync_value)
+                              << "' but production code returns:" << std::endl;
+                    std::cerr << "   ncalls_synchronous           : " << ncalls_sync << std::endl;
+                    std::cerr << "   ncalls_asynchronous          : " << ncalls_async << std::endl;
+                    std::cerr << "   ncalls_partially_synchronous : " << ncalls_psync << std::endl;
+                    std::cerr << "   ncalls_host                  : " << ncalls_host << std::endl;
                 }
-                continue;
-            }
 
-            case memory_debug_synchronicity_t::host:
-            {
-                if((ncalls_synchronous > 0) || //
-                   (ncalls_asynchronous > 0) || //
-                   (ncalls_partially_synchronous > 0))
-                {
-                    break;
-                }
-                continue;
+                failed |= inconsistent;
             }
-
-            case memory_debug_synchronicity_t::unknown:
-            case memory_debug_synchronicity_t::depends:
-            {
-                continue;
-            }
-            }
-
-            std::cerr << "Error: rocsparse_" << name << " is declared '"
-                      << memory_debug_synchronicity_t2string(sync)
-                      << "' but production code returns:" << std::endl;
-            std::cerr << "   ncalls_synchronous           : " << ncalls_synchronous << std::endl;
-            std::cerr << "   ncalls_asynchronous          : " << ncalls_asynchronous << std::endl;
-            std::cerr << "   ncalls_partially_synchronous : " << ncalls_partially_synchronous
-                      << std::endl;
-            std::cerr << "   ncalls_host                  : " << ncalls_host << std::endl;
-            failed = true;
         }
-
         return (failed) ? rocsparse_status_internal_error : rocsparse_status_success;
     }
 

@@ -34,62 +34,48 @@
 
 namespace rocsparse_clients_test
 {
-
-    const char* memory_debug_synchronicity_t2string(memory_debug_synchronicity_t sync)
+    std::string memory_debug_synchronicity_t2string(int32_t value)
     {
-        switch(sync)
+        if(value & rocsparse_memory_debug_synchronicity_host)
         {
-
-        case memory_debug_synchronicity_t::unknown:
+            std::string name("host");
+            if(value & rocsparse_memory_debug_synchronicity_sync)
+                name += "_or_synchronous";
+            if(value & rocsparse_memory_debug_synchronicity_async)
+                name += "_or_asynchronous";
+            if(value & rocsparse_memory_debug_synchronicity_psync)
+                name += "_or_partially_synchronous";
+            return name;
+        }
+        else if(value & rocsparse_memory_debug_synchronicity_sync)
         {
-            return "unknown";
+            std::string name("synchronous");
+            if(value & rocsparse_memory_debug_synchronicity_async)
+                name += "_or_asynchronous";
+            if(value & rocsparse_memory_debug_synchronicity_psync)
+                name += "_or_partially_synchronous";
+            return name;
         }
-
-        case memory_debug_synchronicity_t::synchronous:
+        else if(value & rocsparse_memory_debug_synchronicity_psync)
         {
-            return "synchronous";
+            std::string name("partially_synchronous");
+            if(value & rocsparse_memory_debug_synchronicity_async)
+                name += "_or_asynchronous";
+            return name;
         }
-
-        case memory_debug_synchronicity_t::host_or_synchronous:
+        else if(value & rocsparse_memory_debug_synchronicity_async)
         {
-            return "host_or_synchronous";
+            return std::string("asynchronous");
         }
-
-        case memory_debug_synchronicity_t::host_or_asynchronous:
+        else
         {
-            return "host_or_asynchronous";
+            return std::string("unknown");
         }
-
-        case memory_debug_synchronicity_t::host_or_partially_synchronous:
-        {
-            return "host_or_partially_synchronous";
-        }
-
-        case memory_debug_synchronicity_t::partially_synchronous:
-        {
-            return "partially_synchronous";
-        }
-
-        case memory_debug_synchronicity_t::asynchronous:
-        {
-            return "asynchronous";
-        }
-
-        case memory_debug_synchronicity_t::host:
-        {
-            return "host";
-        }
-        case memory_debug_synchronicity_t::depends:
-        {
-            return "depends";
-        }
-        }
-        return "internal_error";
     }
 
-    memory_debug_synchronicity_t memory_debug_synchronicity_info_t::get_sync() const
+    int32_t memory_debug_synchronicity_info_t::get_synchronicity_value() const
     {
-        return this->m_kind;
+        return this->m_synchronicity_value;
     }
 
     uint64_t memory_debug_synchronicity_info_t::get_ncalls() const
@@ -97,8 +83,7 @@ namespace rocsparse_clients_test
         return this->m_ncalls;
     }
 
-    uint64_t
-        memory_debug_synchronicity_info_t::get_calls(const memory_debug_synchronicity_t value) const
+    uint64_t memory_debug_synchronicity_info_t::get_calls(const int32_t value) const
     {
         if(auto search = this->m_histo_calls.find(value); search != this->m_histo_calls.end())
             return search->second;
@@ -106,15 +91,14 @@ namespace rocsparse_clients_test
             return 0;
     }
 
-    void memory_debug_synchronicity_info_t::add_call(const memory_debug_synchronicity_t value)
+    void memory_debug_synchronicity_info_t::add_call(const int32_t value)
     {
         this->m_histo_calls[value] += 1;
         ++this->m_ncalls;
     }
 
-    memory_debug_synchronicity_info_t::memory_debug_synchronicity_info_t(
-        memory_debug_synchronicity_t s)
-        : m_kind(s)
+    memory_debug_synchronicity_info_t::memory_debug_synchronicity_info_t(int32_t s)
+        : m_synchronicity_value(s)
     {
     }
 }

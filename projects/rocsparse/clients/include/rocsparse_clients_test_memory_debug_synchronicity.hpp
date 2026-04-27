@@ -30,43 +30,23 @@
 
 namespace rocsparse_clients_test
 {
-    enum class memory_debug_synchronicity_t
-    {
-        unknown = 0, // It corresponds to unknown, or error depending on the context.
-        synchronous
-        = rocsparse_memory_debug_synchronicity_sync, // After the function returns, the queue of the stream is empty.
-        asynchronous
-        = rocsparse_memory_debug_synchronicity_async, // After the function queues non-blocking only operation on the stream, there is no guarantee that the stream is empty.
-        partially_synchronous
-        = rocsparse_memory_debug_synchronicity_psync, // The function has a stream synchronization point, but as opposed to a synchronous function, the last operation queued on the stream is a non-blocking function. There is no guarantee that the stream is empty.
-        depends
-        = rocsparse_memory_debug_synchronicity_sync | rocsparse_memory_debug_synchronicity_host
-          | rocsparse_memory_debug_synchronicity_async
-          | rocsparse_memory_debug_synchronicity_psync, // It depends on the input configuration of the routine.
-        host = rocsparse_memory_debug_synchronicity_host, // No operation on the stream is queued.
-        host_or_synchronous
-        = rocsparse_memory_debug_synchronicity_sync | rocsparse_memory_debug_synchronicity_host,
-        host_or_asynchronous
-        = rocsparse_memory_debug_synchronicity_async | rocsparse_memory_debug_synchronicity_host,
-        host_or_partially_synchronous
-        = rocsparse_memory_debug_synchronicity_psync | rocsparse_memory_debug_synchronicity_host
-    };
 
-    const char* memory_debug_synchronicity_t2string(memory_debug_synchronicity_t sync);
+    std::string memory_debug_synchronicity_t2string(int32_t value);
 
     struct memory_debug_synchronicity_info_t
     {
     protected:
-        memory_debug_synchronicity_t                     m_kind{};
-        uint64_t                                         m_ncalls{};
-        std::map<memory_debug_synchronicity_t, uint64_t> m_histo_calls{};
+        int32_t                     m_synchronicity_value{};
+        uint64_t                    m_ncalls{};
+        std::map<int32_t, uint64_t> m_histo_calls{};
 
     public:
-        memory_debug_synchronicity_t get_sync() const;
-        uint64_t                     get_ncalls() const;
-        uint64_t                     get_calls(memory_debug_synchronicity_t) const;
-        void                         add_call(memory_debug_synchronicity_t);
-        memory_debug_synchronicity_info_t(memory_debug_synchronicity_t);
+        int32_t  get_synchronicity_value() const;
+        uint64_t get_ncalls() const;
+
+        uint64_t get_calls(int32_t) const;
+        void     add_call(int32_t);
+        memory_debug_synchronicity_info_t(int32_t);
         memory_debug_synchronicity_info_t() = default;
     };
 }
