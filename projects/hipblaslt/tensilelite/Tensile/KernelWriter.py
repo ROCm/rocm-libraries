@@ -8484,9 +8484,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # reads Per Iteration
     ########################################
     if kernel["EnableMatrixInstruction"]:
-
       factorSubIterA = kernel["numSubTiles"]
-
       if kernel["UnrollMajorLDSA"] or kernel["enableLDSTrA"]:
         self.states.numReadsPerUnrollA = ceil(tensorParametersA["bpe"] * kernel["MIInputPerThreadA"] / int(tensorParametersA["localReadInstruction"].blockWidth * 4))
       else:
