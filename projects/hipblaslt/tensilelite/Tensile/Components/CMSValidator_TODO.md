@@ -90,3 +90,7 @@ that exercises it (`test_schedule_128x128x32_TF32_MIArchVgpr`) calls the
 mock-path `_make_context`. `MIArchVgpr` affects register allocation, so
 the real idMap may differ in subtle ways from the test's hardcoded
 schedule. Verify if/when that test is migrated to the real path.
+
+
+## Investigate if build a full register chain is a good idea
+Instead of having diferent functions recreating a traversal fo the registers, build the chain onces, and then have the different functions simply walk the already build graph.
