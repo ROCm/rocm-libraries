@@ -174,6 +174,7 @@ namespace rocisa
     {
         return createGPR("m", name, regNum);
     }
+
 } // namespace rocisa
 
 void init_containers(nb::module_ m)
@@ -632,6 +633,20 @@ void init_containers(nb::module_ m)
                  self.regIdx     = std::get<5>(t);
                  self.regNum     = std::get<6>(t);
              });
+
+    nb::class_<rocisa::MemTokenData, rocisa::Container>(m_con, "MemTokenData")
+        .def(nb::init<const std::vector<int>&>(), nb::arg("tokens") = std::vector<int>{})
+        .def_rw("tokens", &rocisa::MemTokenData::tokens)
+        .def("__str__", &rocisa::MemTokenData::toString)
+        .def("__deepcopy__",
+             [](const rocisa::MemTokenData& self, nb::dict) {
+                 return rocisa::MemTokenData(self);
+             })
+        .def("__getstate__",
+             [](const rocisa::MemTokenData& self) { return self.tokens; })
+        .def("__setstate__", [](rocisa::MemTokenData& self, std::vector<int> t) {
+            new(&self) rocisa::MemTokenData(t);
+        });
 
     nb::class_<rocisa::ContinuousRegister>(m_con, "ContinuousRegister")
         .def(

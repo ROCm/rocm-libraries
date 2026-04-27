@@ -26,7 +26,7 @@ from rocisa.base import Item
 from rocisa.code import Module, TextBlock
 from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 
-from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32
+from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
 
 from ..Common import roundUp, print2
 from ..Component import SIA
@@ -293,12 +293,8 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
         # move syncPlrMfmaIndex one iteration ahead for doFullPackCodePrefetch and subIter
         writer.states.syncPlrMfmaIndex = max(0, writer.states.syncPlrMfmaIndex - numMfmaPerIter)
     elif writer.states.doPackPreSchedulingNextLoop:
-        # doPackPreSchedulingNextLoop only case (not doFullPackCodePrefetch), move syncPlrMfmaIndex to the top of 
+        # doPackPreSchedulingNextLoop only case (not doFullPackCodePrefetch), move syncPlrMfmaIndex to the top of
         writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR)
-
-    if kernel["ForceUnrollSubIter"]:
-        if ( kernel["ProblemType"]["DataType"].isComplex()):
-            writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
 
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
     if kernel["NoLdsWriteCode"]:
@@ -504,18 +500,77 @@ def fixLocalWriteEndMfmaIndex(writer, kernel, tPA, tPB, globalReadIncACode, glob
 ################################################################################
 ################################################################################
 
+def _splitTdmLoad(grACode):
+    """Split globalReadA into (non-TDM items module, TDM-load-only module)."""
+    tdmLoadMod = Module("deferredTdmLoad")
+    nonTdmMod = Module()
+    grAItems = grACode.items() if hasattr(grACode, 'items') else []
+    for item in grAItems:
+        hasTdm = isinstance(item, TensorLoadToLds) or \
+                 (hasattr(item, 'flatitems') and any(isinstance(f, TensorLoadToLds) for f in item.flatitems()))
+        if hasTdm:
+            tdmLoadMod.add(item)
+        else:
+            nonTdmMod.add(item)
+    return nonTdmMod, tdmLoadMod
+
+
 def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
-    # put everything in the header:
-    writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadA)
-    writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSA)
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA)
-    writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSB)
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
-    writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
-    writer.codes.unrollLoopHeader.add(globalReadIncACode)
-    writer.codes.unrollLoopHeader.add(globalReadIncBCode)
+    # For TDM+SIA0: defer tensor_load_to_lds to after the LDS swap to avoid writing
+    # into the LDS buffer still being read by ds_loads
+    tdmDeferLoad = kernel["enableTDMA"] and kernel["enableTDMB"]
+    localWriteEndIter = kernel["LoopIters"] - writer.states.numItersPLR - 1
+    tdmLoadIter = min(localWriteEndIter + 1, kernel["LoopIters"] - 1)
+
+    if kernel["PrefetchGlobalRead"] == 2:
+        imod = writer.codes.perIterGlobalRead[0].add(Module())
+        imod.addComment1("Global Read IncA")
+        imod.add(globalReadIncACode)
+        imod.addComment1("Global Read IncB")
+        imod.add(globalReadIncBCode)
+        if tdmDeferLoad:
+            imod.addComment1("Global Read A")
+            imod.add(writer.codes.dtlsM0UpdateA)
+            nonTdmMod, tdmLoadMod = _splitTdmLoad(writer.codes.globalReadA)
+            imod.add(nonTdmMod)
+            imod.addComment1("Global Read MXSA")
+            imod.add(writer.codes.dtlsM0UpdateMXSA)
+            imod.add(writer.codes.globalReadMXSA)
+            imod.addComment1("Global Read MXSB")
+            imod.add(writer.codes.dtlsM0UpdateMXSB)
+            imod.add(writer.codes.globalReadMXSB)
+            imod.addComment1("Global Read B")
+            imod.add(writer.codes.dtlsM0UpdateB)
+            imod.add(writer.codes.globalReadB)
+            if tdmLoadMod.itemsSize() > 0:
+                deferMod = writer.codes.perIterGlobalRead[tdmLoadIter].add(Module())
+                deferMod.addComment1("Global Read A (TDM deferred after LDS swap)")
+                deferMod.add(tdmLoadMod)
+        else:
+            imod.addComment1("Global Read A")
+            imod.add(writer.codes.dtlsM0UpdateA)
+            imod.add(writer.codes.globalReadA)
+            imod.addComment1("Global Read MXSA")
+            imod.add(writer.codes.dtlsM0UpdateMXSA)
+            imod.add(writer.codes.globalReadMXSA)
+            imod.addComment1("Global Read MXSB")
+            imod.add(writer.codes.dtlsM0UpdateMXSB)
+            imod.add(writer.codes.globalReadMXSB)
+            imod.addComment1("Global Read B")
+            imod.add(writer.codes.dtlsM0UpdateB)
+            imod.add(writer.codes.globalReadB)
+    else:
+        # put everything in the header (original behavior for PGR=0/1):
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadA)
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSA)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA)
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSB)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
+        writer.codes.unrollLoopHeader.add(globalReadIncACode)
+        writer.codes.unrollLoopHeader.add(globalReadIncBCode)
     # Dummy
     itemsGRToSchedLater = []
     lastLoadIter = 0
@@ -728,6 +783,21 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
         imod.add(writer.codes.localWriteMXSB)
         imod.addComment1("local write B")
         imod.add(writer.codes.localWriteB)
+
+        if kernel["PrefetchGlobalRead"] == 2 and writer.codes.perIterLocalWriteCodeNGLL is not None: # TODO: check condition
+            # do we need a module here? That would prevent these from being scheduled
+            imod = writer.codes.perIterLocalWriteCodeNGLL[localWriteEndIter][1].add(Module())
+            imod.add(
+                writer._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, \
+                "1wait for global read"))
+            imod.addComment1("local write A")
+            imod.add(writer.codes.localWriteA)
+            imod.addComment1("local write MXSA")
+            imod.add(writer.codes.localWriteMXSA)
+            imod.addComment1("local write MXSB")
+            imod.add(writer.codes.localWriteMXSB)
+            imod.addComment1("local write B")
+            imod.add(writer.codes.localWriteB)
 
 def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
     #################

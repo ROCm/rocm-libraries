@@ -537,7 +537,8 @@ namespace rocRoller
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
                                 ContextPtr                       context,
-                                bool                             isGlobalToLDS = false);
+                                bool                             isGlobalToLDS = false,
+                                bool                             ldsSwizzle    = false);
 
         /**
          * @brief Store version of addLoadThreadTileCT.
@@ -659,7 +660,9 @@ namespace rocRoller
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
                                  bool                               rightmostFastest,
-                                 bool                               isGlobalToLDS = false);
+                                 bool                               isGlobalToLDS     = false,
+                                 bool                               ldsSwizzle        = false,
+                                 unsigned int                       columnsPerBankRow = 0u);
 
         /**
          * @brief Create an internal tile backed by a ThreadTile.

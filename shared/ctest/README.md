@@ -344,15 +344,16 @@ When tests are installed (e.g. into `/opt/rocm/bin/`), the **build-tree** test d
 
 **How it works:**
 
-1. **Project enables it** by passing an optional **4th argument** to `apply_test_category_labels()`: a path to a file (e.g. `install_CTestTestfile.cmake`) that the parser will create or append to. The parser writes `add_test(...)` and `set_tests_properties(...)` lines into that file, using a **relative** command (e.g. `"../rocblas-test"`) so the test binary is found relative to the directory where the file will live after install.
+1. **Project enables it** by passing an optional **4th argument** to `apply_test_category_labels()`: a path to a file (e.g. `install_CTestTestfile.cmake`) that the parser will create or append to. The parser writes `add_test(...)` and `set_tests_properties(...)` lines into that file using a **relative** command (e.g. `"../rocblas-test"`), so the test binary is found relative to the directory where the file will live after install.
 
-2. **Project installs that file** to a fixed location under the install prefix, typically a **project-specific subdirectory** of the bin dir (e.g. `bin/rocblas/` or `bin/MIOpen/`), and renames it to `CTestTestfile.cmake`. The test executable is installed in the parent `bin/` directory, so from `bin/rocblas/` the path `../rocblas-test` correctly points at the installed binary.
+2. **Project installs that file** to a fixed location under the install prefix, typically a **project-specific subdirectory** of the bin dir (e.g. `bin/rocblas/` or `bin/MIOpen/`) and renames it to `CTestTestfile.cmake`. The test executable is installed in the parent `bin/` directory, so from `bin/rocblas/` the path `../rocblas-test` correctly points at the installed binary.
 
 3. **TheRock (or any consumer)** runs CTest **from that installed directory** (e.g. `cd /opt/rocm/bin/rocblas && ctest -L quick`). CTest reads the local `CTestTestfile.cmake`, runs the tests with the same labels and timeouts as in the build tree, and no build tree is required.
 
 **Example (rocBLAS):**
 
 - Build: parser writes tests into `install_CTestTestfile.cmake`; CMake installs it as `CTestTestfile.cmake` to `bin/rocblas/`.
+- CMake: `ROCBLAS_ENABLE_CTEST` (in `projects/rocblas/cmake/build-options.cmake`) defaults to **ON** when `${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake` exists; if **ON**, a missing YAML or shared module is a **configure error** (set to **OFF** to skip categorization).
 - Install layout: `bin/rocblas-test` (executable) and `bin/rocblas/CTestTestfile.cmake` (test definitions).
 - Run from install: `cd /opt/rocm/bin/rocblas && ctest -L quick -N` (list) or `ctest -L quick` (run).
 

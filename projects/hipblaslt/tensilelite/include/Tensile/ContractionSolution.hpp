@@ -144,6 +144,7 @@ namespace TensileLite
         bool sourceKernel = false;
 
         int    globalAccumulation       = 0;
+        int    adaptiveGemmGSUA         = 0;
         size_t workspaceSizePerElemC    = 0;
         size_t workspaceSizePerElemBias = 0;
 
@@ -190,6 +191,10 @@ namespace TensileLite
         size_t               grid      = 0;
     };
 
+    struct GSUSettings
+    {
+        size_t globalAccumulation = 0;
+    };
     /**
      * Represents a single kernel or set of kernels that can perform a single
      * tensor contraction.
@@ -448,13 +453,14 @@ namespace TensileLite
                                                       TensileLite::dim3&          numWorkGroups,
                                                       TensileLite::dim3&          numWorkItems,
                                                       KA&                         h_args,
-                                                      uint32_t                    autoGsuVal) const;
+                                                      uint32_t                    gsu) const;
 
         template <bool T_Debug>
         KernelInvocation generateSingleCall(Problem const&           problem,
                                             ContractionInputs const& inputs,
                                             Hardware const&          hardware,
-                                            StreamKSettings const&   sk) const;
+                                            StreamKSettings const&   sk,
+                                            GSUSettings const&       gsuSettings) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation generateSingleCallGroupedGemm(std::vector<Problem> const& problems,
@@ -479,7 +485,8 @@ namespace TensileLite
                                       uint32_t const&          workspaceOffsetInByte,
                                       KA&                      args,
                                       StreamKSettings const&   sk,
-                                      uint32_t                 autoGsuVal) const;
+                                      uint32_t                 autoGsuVal,
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;                                      
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(

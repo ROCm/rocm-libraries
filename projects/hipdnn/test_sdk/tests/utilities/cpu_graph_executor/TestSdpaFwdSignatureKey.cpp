@@ -7,12 +7,12 @@
 
 #include "SdpaGraphUtils.hpp"
 #include "SdpaTensorBundles.hpp"
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_sdk_test_utils;
 
@@ -100,8 +100,8 @@ TEST(TestSdpaFwdSignatureKey, CreateFromNodeAndTensorMap)
     auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
-                                                                         serializedGraph.size());
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const SdpaFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 

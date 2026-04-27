@@ -5,6 +5,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Computation of solution for LU factorization without pivoting
+    * GETRS_NPVT (with batched and strided\_batched versions)
+    * GETRS_NPVT_64 (with batched and strided\_batched versions)
+
 * Support added for the gfx1150, gfx1152, and gfx1153 architectures
 * Computation of different matrix norms
     * LANGE

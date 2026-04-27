@@ -4,11 +4,11 @@
 #pragma once
 
 #include <functional>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
-#include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
 #include <ostream>
 
@@ -17,22 +17,22 @@ namespace hipdnn_test_sdk::detail
 
 struct PointwiseSignatureKey
 {
-    const hipdnn_data_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes;
-    hipdnn_data_sdk::data_objects::PointwiseMode operation;
-    hipdnn_data_sdk::data_objects::DataType inputDataType;
-    hipdnn_data_sdk::data_objects::DataType computeDataType;
-    hipdnn_data_sdk::data_objects::DataType outputDataType;
-    hipdnn_data_sdk::data_objects::DataType input1DataType
-        = hipdnn_data_sdk::data_objects::DataType::UNSET; // For binary ops
+    const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
+        = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes;
+    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation;
+    hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType input1DataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET; // For binary ops
 
     PointwiseSignatureKey() = default;
-    constexpr PointwiseSignatureKey(hipdnn_data_sdk::data_objects::PointwiseMode op,
-                                    hipdnn_data_sdk::data_objects::DataType input,
-                                    hipdnn_data_sdk::data_objects::DataType compute,
-                                    hipdnn_data_sdk::data_objects::DataType output,
-                                    hipdnn_data_sdk::data_objects::DataType input1
-                                    = hipdnn_data_sdk::data_objects::DataType::UNSET)
+    constexpr PointwiseSignatureKey(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode op,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType input,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType compute,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType output,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType input1
+                                    = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
         : operation(op)
         , inputDataType(input)
         , computeDataType(compute)
@@ -42,8 +42,9 @@ struct PointwiseSignatureKey
     }
 
     PointwiseSignatureKey(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
         const auto* nodeAttributes = node.attributes_as_PointwiseAttributes();
@@ -74,7 +75,7 @@ struct PointwiseSignatureKey
         outputDataType = outputTensorAttr->data_type();
 
         // Get second input tensor if this is a binary operation
-        if(hipdnn_data_sdk::utilities::isBinaryPointwiseMode(operation))
+        if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(operation))
         {
             if(nodeAttributes->in_1_tensor_uid().has_value())
             {
@@ -125,163 +126,164 @@ struct PointwiseSignatureKey
                            PointwiseSignatureKey>
             map;
         // Add plan builders for implemented unary operations (input/compute/output)
-        addUnaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addUnaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::HALF,
-                             hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_data_sdk::data_objects::DataType::HALF>(map);
-        addUnaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                             hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_data_sdk::data_objects::DataType::BFLOAT16>(map);
-        addUnaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_data_sdk::data_objects::DataType::HALF>(map);
-        addUnaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_data_sdk::data_objects::DataType::BFLOAT16>(map);
+        addUnaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addUnaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addUnaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addUnaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addUnaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
 
         // Add plan builders for implemented binary operations (input0/input1/compute/output)
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::HALF>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::BFLOAT16>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::HALF>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::BFLOAT16>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_data_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::HALF,
-                              hipdnn_data_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
         return map;
     }
 
 private:
-    template <hipdnn_data_sdk::data_objects::DataType InputDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum>
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType InputDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum>
     static void addUnaryPlanBuilders(std::unordered_map<PointwiseSignatureKey,
                                                         std::unique_ptr<IGraphNodePlanBuilder>,
                                                         PointwiseSignatureKey>& map)
     {
         // Add all implemented unary operations
-        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::TANH_FWD,
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_FWD,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::ABS,
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ABS,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::NEG,
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::NEG,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD,
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_FWD,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD,
-                            InputDataTypeEnum,
-                            ComputeDataTypeEnum,
-                            OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD,
+        addUnaryPlanBuilder<
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD,
+            InputDataTypeEnum,
+            ComputeDataTypeEnum,
+            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
     }
 
-    template <hipdnn_data_sdk::data_objects::DataType Input0DataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType Input1DataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum>
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum>
     static void addBinaryPlanBuilders(std::unordered_map<PointwiseSignatureKey,
                                                          std::unique_ptr<IGraphNodePlanBuilder>,
                                                          PointwiseSignatureKey>& map)
     {
         // Add all implemented binary operations
-        addBinaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::ADD,
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
                              Input0DataTypeEnum,
                              Input1DataTypeEnum,
                              ComputeDataTypeEnum,
                              OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::SUB,
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB,
                              Input0DataTypeEnum,
                              Input1DataTypeEnum,
                              ComputeDataTypeEnum,
                              OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::MUL,
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL,
                              Input0DataTypeEnum,
                              Input1DataTypeEnum,
                              ComputeDataTypeEnum,
                              OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD,
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
                              Input0DataTypeEnum,
                              Input1DataTypeEnum,
                              ComputeDataTypeEnum,
                              OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_BWD,
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_BWD,
                              Input0DataTypeEnum,
                              Input1DataTypeEnum,
                              ComputeDataTypeEnum,
                              OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_data_sdk::data_objects::PointwiseMode::TANH_BWD,
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_BWD,
                              Input0DataTypeEnum,
                              Input1DataTypeEnum,
                              ComputeDataTypeEnum,
                              OutputDataTypeEnum>(map);
     }
 
-    template <hipdnn_data_sdk::data_objects::PointwiseMode ModeEnum,
-              hipdnn_data_sdk::data_objects::DataType InputDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum>
+    template <hipdnn_flatbuffers_sdk::data_objects::PointwiseMode ModeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType InputDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum>
     static void addUnaryPlanBuilder(std::unordered_map<PointwiseSignatureKey,
                                                        std::unique_ptr<IGraphNodePlanBuilder>,
                                                        PointwiseSignatureKey>& map)
@@ -294,11 +296,11 @@ private:
                                                     OutputDataTypeEnum>>();
     }
 
-    template <hipdnn_data_sdk::data_objects::PointwiseMode ModeEnum,
-              hipdnn_data_sdk::data_objects::DataType Input0DataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType Input1DataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum>
+    template <hipdnn_flatbuffers_sdk::data_objects::PointwiseMode ModeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum>
     static void addBinaryPlanBuilder(std::unordered_map<PointwiseSignatureKey,
                                                         std::unique_ptr<IGraphNodePlanBuilder>,
                                                         PointwiseSignatureKey>& map)
@@ -317,7 +319,7 @@ private:
 
 inline std::ostream& operator<<(std::ostream& os, const PointwiseSignatureKey& key)
 {
-    if(key.input1DataType != hipdnn_data_sdk::data_objects::DataType::UNSET)
+    if(key.input1DataType != hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
     {
         // Binary operation
         os << "Pointwise(op=" << key.operation << ", in0=" << key.inputDataType

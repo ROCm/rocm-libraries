@@ -1178,6 +1178,10 @@ class Solution(collections.abc.Mapping):
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
     state["_GlobalAccumulation"] = None
     computeName  = state["ProblemType"]["ComputeDataType"].toName()
+    if state["UseDotInstruction"] and state["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel':
+      # dot2 kernel does not support MBSK
+      state["GlobalSplitUAlgorithm"] = 'MultipleBuffer'
+      state["MbskPrefetchMethod"] = 0
     if state["StreamK"] > 0 and state["StreamKAtomic"] == 0:
       # StreamK Workspace size
       state["_GlobalAccumulation"] = 'PartialsBuffer'
@@ -1206,6 +1210,7 @@ class Solution(collections.abc.Mapping):
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
+      state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
       # if state["PersistentKernel"]:
@@ -1864,9 +1869,10 @@ class Solution(collections.abc.Mapping):
       return
 
     if tdmInst > 0:
-      if state["PrefetchGlobalRead"] > 1:
-        reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
-        return
+      # TODO: remove this restriction when PGR=2 is fully supported
+      # if state["PrefetchGlobalRead"] > 1:
+      #   reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
+      #   return
 
       if (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
         reject(state, printRejectionReason, "Currently TDM only supports TN")
@@ -1914,7 +1920,7 @@ class Solution(collections.abc.Mapping):
         state["UseDirect32XEmulation"] = False
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
-    backup_UsePLRPack = state["UsePLRPack"] 
+    backup_UsePLRPack = state["UsePLRPack"]
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       # initialize CMS related config parameters (for CMS only)
@@ -2040,7 +2046,7 @@ class Solution(collections.abc.Mapping):
         if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
           return
-        
+
         # Currently we only support fp4 edge with AssertFree0(1)ElementMultiple = 2.
         # TODO: Enalbe edge with arbitrary number
         state["AssertFree0ElementMultiple"] = 2
@@ -2302,7 +2308,7 @@ class Solution(collections.abc.Mapping):
           vw = state["VectorWidthA"] if "A" in tc else state["VectorWidthB"]
           LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * bpe * vw), multiple)
         return LdsBlockSizePerPad
-      
+
       def getLdsBpe(tc: str) -> float:
         return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
 
@@ -3037,8 +3043,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "LSU and non-SourceSwap doesn't support StoreVectorWidth(%u)>VWA(%u)." \
             % (state["StoreVectorWidth"], state["VectorWidthA"]))
         return
-      if not (state["ProblemType"]["ComputeDataType"].isSingle() or state["ProblemType"]["ComputeDataType"].isInt32()):
-        reject(state, printRejectionReason, "TODO: LSU doesn't support ComputeDataType!=(single or Int32).")
+      if not (state["ProblemType"]["ComputeDataType"].isSingle() or state["ProblemType"]["ComputeDataType"].isInt32() or state["ProblemType"]["ComputeDataType"].isComplex()):
+        reject(state, printRejectionReason, "TODO: LSU doesn't support ComputeDataType!=(single, Int32 or complex).")
         return
       if state["StoreRemapVectorWidth"] > 0:
         reject(state, printRejectionReason, "TODO: LSU doesn't support StoreRemapVectorWidth>0.")
@@ -3806,7 +3812,7 @@ class Solution(collections.abc.Mapping):
         state["NumElementsPerBatchStore"] = 16 if not state["ProblemType"]["DataType"].numBytes() == 8 else 1
 
     # Mbsk prefetch optimization
-    if state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
+    if state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel' and state["AdaptiveGemmGSUA"] == 0:
         state["MbskPrefetchMethod"] = 0
     elif state["MbskPrefetchMethod"] == -1:
       numStoreElements = state["NumElementsPerThread"] // state["StoreVectorWidth"]
@@ -4218,7 +4224,7 @@ class Solution(collections.abc.Mapping):
               not state["ClusterLocalRead"] and \
               not state["InnerUnroll"] >= state["LocalReadVectorWidth"] // state["MIInputPerThread"]:
             reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
-                    
+
 
     if state["GlobalReadPerMfma"] > 1 and state["PrefetchGlobalRead"] >= 2:
       reject(state, printRejectionReason, "GlobalReadPerMfma need to be 1 if PGR>=2")

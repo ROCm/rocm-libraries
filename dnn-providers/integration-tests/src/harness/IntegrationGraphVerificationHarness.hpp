@@ -6,8 +6,8 @@
 #include <gtest/gtest.h>
 
 #include <functional>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -129,6 +129,12 @@ protected:
             }
         }
 
+        // --skip-graph-validation: graph is confirmed supported, exit early with PASS
+        if(TestConfig::get().skipGraphValidation())
+        {
+            return;
+        }
+
         // Build execution plans, engine preference set above should ensure that
         // correct engine is selected.
         auto result = graph.create_execution_plans();
@@ -192,15 +198,35 @@ protected:
                            float absoluteTolerance,
                            float relativeTolerance)
     {
+        // Check for per-test tolerance override from TOML config
+        float finalAtol = absoluteTolerance;
+        float finalRtol = relativeTolerance;
+
+        auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+        if(testInfo != nullptr)
+        {
+            std::string testName
+                = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
+            auto override = TestConfig::get().findToleranceOverride(testName);
+            if(override.has_value())
+            {
+                finalAtol = override->atol;
+                finalRtol = override->rtol;
+                HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for " << testName
+                                                                         << ": atol=" << finalAtol
+                                                                         << " rtol=" << finalRtol);
+            }
+        }
+
         // Since the graph can infer properties + Ids, we defer validator registration until right
         // before validation in verifyGraph
-        _deferredValidators.emplace_back([this, attr, absoluteTolerance, relativeTolerance]() {
+        _deferredValidators.emplace_back([this, attr, finalAtol, finalRtol]() {
             _tensorIdToValidatorMap.insert(
                 {attr->get_uid(),
                  hipdnn_test_sdk::utilities::createAllCloseValidator(
                      hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type()),
-                     absoluteTolerance,
-                     relativeTolerance)});
+                     finalAtol,
+                     finalRtol)});
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
     }

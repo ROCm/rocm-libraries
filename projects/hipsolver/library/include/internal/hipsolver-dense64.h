@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #ifndef HIPSOLVER_DENSE64_H
@@ -144,6 +144,72 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXpotrs(hipsolverDnHandle_t handle,
                                                      void*               B,
                                                      int64_t             ldb,
                                                      int*                info);
+
+// syevd
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsyevd_bufferSize(hipsolverDnHandle_t handle,
+                                                                hipsolverDnParams_t params,
+                                                                hipsolverEigMode_t  jobz,
+                                                                hipsolverFillMode_t uplo,
+                                                                int64_t             n,
+                                                                hipDataType         dataTypeA,
+                                                                const void*         A,
+                                                                int64_t             lda,
+                                                                hipDataType         dataTypeW,
+                                                                const void*         W,
+                                                                hipDataType         computeType,
+                                                                size_t*             lworkOnDevice,
+                                                                size_t*             lworkOnHost);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsyevd(hipsolverDnHandle_t handle,
+                                                     hipsolverDnParams_t params,
+                                                     hipsolverEigMode_t  jobz,
+                                                     hipsolverFillMode_t uplo,
+                                                     int64_t             n,
+                                                     hipDataType         dataTypeA,
+                                                     void*               A,
+                                                     int64_t             lda,
+                                                     hipDataType         dataTypeW,
+                                                     void*               W,
+                                                     hipDataType         computeType,
+                                                     void*               workOnDevice,
+                                                     size_t              lworkOnDevice,
+                                                     void*               workOnHost,
+                                                     size_t              lworkOnHost,
+                                                     int*                devInfo);
+
+// syevBatched
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsyevBatched_bufferSize(hipsolverDnHandle_t handle,
+                                                                      hipsolverDnParams_t params,
+                                                                      hipsolverEigMode_t  jobz,
+                                                                      hipsolverFillMode_t uplo,
+                                                                      int64_t             n,
+                                                                      hipDataType         dataTypeA,
+                                                                      const void*         A,
+                                                                      int64_t             lda,
+                                                                      hipDataType         dataTypeW,
+                                                                      const void*         W,
+                                                                      hipDataType computeType,
+                                                                      size_t*     lworkOnDevice,
+                                                                      size_t*     lworkOnHost,
+                                                                      int64_t     batchSize);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsyevBatched(hipsolverDnHandle_t handle,
+                                                           hipsolverDnParams_t params,
+                                                           hipsolverEigMode_t  jobz,
+                                                           hipsolverFillMode_t uplo,
+                                                           int64_t             n,
+                                                           hipDataType         dataTypeA,
+                                                           void*               A,
+                                                           int64_t             lda,
+                                                           hipDataType         dataTypeW,
+                                                           void*               W,
+                                                           hipDataType         computeType,
+                                                           void*               workOnDevice,
+                                                           size_t              lworkOnDevice,
+                                                           void*               workOnHost,
+                                                           size_t              lworkOnHost,
+                                                           int*                devInfo,
+                                                           int64_t             batchSize);
 
 #ifdef __cplusplus
 }

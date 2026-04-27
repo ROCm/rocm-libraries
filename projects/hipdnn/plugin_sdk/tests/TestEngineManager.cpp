@@ -4,7 +4,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
@@ -49,29 +49,30 @@ public:
 
     bool isApplicable(
         TestHandle& /*handle*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
     {
         return _applicable;
     }
 
     void getDetails(TestHandle& /*handle*/,
-                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
                     hipdnnPluginConstData_t& /*detailsOut*/) const override
     {
     }
 
     size_t getMaxWorkspaceSize(
         const TestHandle& /*handle*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const override
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/)
+        const override
     {
         return _workspaceSize;
     }
 
     void initializeExecutionContext(
         const TestHandle& /*handle*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
         TestContext& /*executionContext*/) const override
     {
     }

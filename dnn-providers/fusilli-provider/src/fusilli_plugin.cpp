@@ -15,14 +15,14 @@
 #include <flatbuffers/vector.h>
 #include <fusilli.h>
 #include <hip/hip_runtime.h>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -43,12 +43,12 @@
 #include "hipdnn_engine_plugin_execution_context.h"
 #include "hipdnn_engine_plugin_handle.h"
 #include "utils.h"
+#include "version.h"
 
 using namespace hipdnn_plugin_sdk;
 using namespace fusilli_plugin;
 
-// TODO(#2317): ensure single source of truth for plugin version
-static const char *fusilliPluginVersion = "0.0.1";
+static const char *fusilliPluginVersion = FUSILLI_PROVIDER_VERSION_STRING;
 
 // s_lastError is thread_local static so can't be initialized in the header file
 // as the header file is included in many context. Clear the string here.
@@ -305,7 +305,8 @@ hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
   // being.
   flatbuffers::FlatBufferBuilder builder;
   auto engineDetailsObj =
-      hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, engineId);
+      hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder,
+                                                                engineId);
   builder.Finish(engineDetailsObj);
 
   // Populate out parameter.
@@ -388,8 +389,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContext(
   FUSILLI_PLUGIN_CHECK_NULL(executionContext);
 
   // Ensure that config contains expected engine id.
-  hipdnn_plugin_sdk::EngineConfigWrapper engineConfigWrapper(
-      engineConfig->ptr, engineConfig->size);
+  hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
+      engineConfigWrapper(engineConfig->ptr, engineConfig->size);
   if (engineConfigWrapper.engineId() !=
       hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID) {
     return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(

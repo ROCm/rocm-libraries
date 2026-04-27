@@ -20,14 +20,15 @@ public:
     HipblasltMatmulPlanBuilder(const HipblasltMatmulPlanBuilder&) = delete;
     HipblasltMatmulPlanBuilder& operator=(const HipblasltMatmulPlanBuilder&) = delete;
 
-    bool isApplicable(const HipdnnEnginePluginHandle& handle,
-                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+    bool isApplicable(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
     size_t getWorkspaceSize(
         const HipdnnEnginePluginHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
     void buildPlan(const HipdnnEnginePluginHandle& handle,
-                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                   const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                    HipdnnEnginePluginExecutionContext& executionContext) const override;
 };
 

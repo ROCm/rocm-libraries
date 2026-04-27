@@ -213,4 +213,18 @@ ck_impl_status_t ck_impl_wrw_get_solution(const miopen::ExecutionContext* ctx,
     });
 }
 
+ck_impl_status_t ck_impl_wrw_get_all_kernel_type_strings(CKKernelListHandle** out_handle)
+{
+    return ck_impl_try_catch([&]() {
+        CK_IMPL_THROW_IF_NULL(out_handle, CK_IMPL_STATUS_BAD_PARAM, "Null out_handle");
+        auto result = std::make_unique<CKKernelListHandle>();
+
+        auto ptrs = DeviceOpGWrwPtrs<float>::GetInstances();
+        result->kernels.reserve(ptrs.size());
+        for(const auto& ptr : ptrs)
+            result->kernels.push_back(ptr->GetTypeString());
+
+        *out_handle = result.release();
+    });
+}
 } // extern "C"
