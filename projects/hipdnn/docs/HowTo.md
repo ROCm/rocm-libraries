@@ -49,7 +49,7 @@ The hipDNN backend is a shared library that provides the core C API for graph ex
 hipDNN provides three header-only C++ SDK libraries for plugin development and testing. For complete SDK functionality and roadmap, see the [SDKs section in the Design Guide](./Design.md#sdks).
 
 #### Key Components
-- **Data SDK**: Schema files and data structures: [`data_sdk/schemas/`](../data_sdk/schemas/)
+- **FlatBuffers SDK**: Schema files and generated data objects: [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
 - **Plugin SDK**: Plugin interface definitions: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
 - **Test SDK**: Test utilities and CPU reference implementations: [`test_sdk/include/hipdnn_test_sdk/`](../test_sdk/include/hipdnn_test_sdk/)
 - Logging: [`data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp`](../data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp)
@@ -112,7 +112,7 @@ hipDNN uses FlatBuffers for schema-based data objects to describe graphs and ope
 #### Key Concepts
 - Graphs and operations are defined using `.fbs` schema files
 - Attributes marked as `long` types in graphs are foreign keys to the `uid` in `tensor_attributes`
-- Schema files are located in [`data_sdk/schemas/`](../data_sdk/schemas/)
+- Schema files are located in [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
 
 ### Configuring Engine Knobs
 
@@ -162,12 +162,12 @@ The code generator (`tools/DescriptorGenerator/`) produces backend descriptors, 
 Start by defining the operation's data structures:
 
 1. **Create Attribute Schema**
-   - Add a new `.fbs` file in [`data_sdk/schemas/`](../data_sdk/schemas/)
+   - Add a new `.fbs` file in [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
    - Define the operation's attributes (parameters, configurations)
-   - Example: [`data_sdk/schemas/batchnorm_attributes.fbs`](../data_sdk/schemas/batchnorm_attributes.fbs)
+   - Example: [`flatbuffers_sdk/schemas/batchnorm_attributes.fbs`](../flatbuffers_sdk/schemas/batchnorm_attributes.fbs)
 
 2. **Update Graph Schema**
-   - Modify [`data_sdk/schemas/graph.fbs`](../data_sdk/schemas/graph.fbs)
+   - Modify [`flatbuffers_sdk/schemas/graph.fbs`](../flatbuffers_sdk/schemas/graph.fbs)
    - Add your new attributes to the `NodeAttributes` union
    - Include your schema file
 

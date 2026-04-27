@@ -10,13 +10,13 @@ set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json
 set(HIPDNN_FMTLIB_VERSION "11.1.3" CACHE STRING "Version of fmtlib to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 
-option(HIPDNN_FRONTEND_SKIP_JSON_LIB "Defines whether FE should not include nlohmann/json.hpp." OFF)
+option(HIPDNN_SKIP_JSON_LIB "Defines whether SDK public headers should not include nlohmann/json.hpp." OFF)
 
 # Status message
-if(HIPDNN_FRONTEND_SKIP_JSON_LIB)
-    message(STATUS "hipDNN: JSON serialization disabled")
+if(HIPDNN_SKIP_JSON_LIB)
+    message(STATUS "hipDNN: JSON serialization disabled in SDK public headers")
 else()
-    message(STATUS "hipDNN: JSON serialization enabled (requires nlohmann_json)")
+    message(STATUS "hipDNN: JSON serialization enabled in SDK public headers (requires nlohmann_json)")
 endif()
 
 option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
