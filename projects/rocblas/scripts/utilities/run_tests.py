@@ -20,6 +20,8 @@
    CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
+from __future__ import annotations
+
 """
 run_tests.py — Parallel rocBLAS test runner
 
@@ -63,8 +65,6 @@ Caveats
   if you suspect PID recycling.
 - Two concurrent script instances in the same output dir will corrupt state.
 """
-
-from __future__ import annotations
 
 import argparse
 import json
@@ -294,9 +294,7 @@ def _fmt_elapsed(seconds: float) -> str:
     s = int(seconds)
     h, rem = divmod(s, 3600)
     m, s = divmod(rem, 60)
-    if h:
-        return f"{h:02d}:{m:02d}:{s:02d}"
-    return f"{m:02d}:{s:02d}"
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 class LiveDisplay:
