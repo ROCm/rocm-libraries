@@ -389,14 +389,21 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
                           uint32_t numDeviceBuffers,
                           void* workspace) const
 {
-    // 1. Build UID->ptr map from device buffers
+    // 1. Validate workspace
+    if(workspace == nullptr)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Backward SDPA requires workspace but received nullptr");
+        return;
+    }
+
+    // 2. Build UID->ptr map from device buffers
     std::unordered_map<int64_t, void*> uidToPtrMap;
     for(uint32_t i = 0; i < numDeviceBuffers; ++i)
     {
         uidToPtrMap[deviceBuffers[i].uid] = deviceBuffers[i].ptr;
     }
 
-    // 2. Resolve tensor pointers
+    // 3. Resolve tensor pointers
     void* qPtr = uidToPtrMap.at(_params.qUid);
     void* kPtr = uidToPtrMap.at(_params.kUid);
     void* vPtr = uidToPtrMap.at(_params.vUid);
@@ -407,15 +414,15 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
     void* dkPtr = uidToPtrMap.at(_params.dkUid);
     void* dvPtr = uidToPtrMap.at(_params.dvUid);
 
-    // 3. Carve workspace into sub-buffers
+    // 4. Carve workspace into sub-buffers
     auto* dBufPtr = workspace;
     auto* dqAccPtr = static_cast<char*>(workspace) + getDBufferSize();
 
-    // 4. Build convenience args struct (mirrors AITER mha_bwd_args)
+    // 5. Build convenience args struct (mirrors AITER mha_bwd_args)
     MhaBwdArgs mhaArgs = buildMhaBwdArgs(
         _params, qPtr, kPtr, vPtr, oPtr, doPtr, lsePtr, dqPtr, dkPtr, dvPtr, dBufPtr, dqAccPtr);
 
-    // 5. Build args and launch kernel 1: ODO
+    // 6. Build args and launch kernel 1: ODO
     auto odoArgs = buildOdoArgs(mhaArgs);
 
     constexpr unsigned int K_TS_ODO = 128; // from CSV: fmha_bwd_odo.csv
@@ -433,7 +440,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
         return;
     }
 
-    // 6. Build args and launch kernel 2: DQDKDV
+    // 7. Build args and launch kernel 2: DQDKDV
     auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs);
 
     constexpr unsigned int K_TS_KV = 192; // from CSV: fmha_bwd_dqdkdv.csv
@@ -451,7 +458,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
         return;
     }
 
-    // 7. Build args and launch kernel 3: DQ_CONVERT (FP32 → BF16)
+    // 8. Build args and launch kernel 3: DQ_CONVERT (FP32 → BF16)
     auto postArgs = buildPostArgs(mhaArgs);
 
     constexpr unsigned int K_TS_DQ = 64; // from CSV: fmha_bwd_dq_convert.csv (hd128, rtne)
