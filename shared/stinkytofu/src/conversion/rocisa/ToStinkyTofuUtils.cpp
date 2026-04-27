@@ -431,7 +431,11 @@ void handleMFMAModifiers(StinkyInstruction* stinkyInst, const rocisa::MFMAInstru
     auto [negStr, hasNegLo, hasNegHi] = extractNegModifiers(instString);
 
     std::string scaleStr;
-    if (mfmaInst->forceScaledWMMA()) scaleStr = ", 0, 0";
+    if (mfmaInst->forceScaledWMMA()) {
+        // Prefer explicit scale operands from src params when present.
+        // Keep legacy fallback for callers that still provide only 3 sources.
+        if (mfmaInst->getSrcParams().size() <= 3) scaleStr = ", 0, 0";
+    }
 
     MFMAModifiers mfmaModifiers(inputPermuteStr, scaleStr, negStr, false, false, hasNegLo,
                                 hasNegHi);
