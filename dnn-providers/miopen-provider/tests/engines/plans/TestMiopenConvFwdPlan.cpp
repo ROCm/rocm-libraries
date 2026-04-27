@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <memory>
+
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -19,9 +21,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        _handle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    HipdnnMiopenHandle _handle;
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
 };
 
 TEST(TestConvFwdParams, InitializesAllTensorsFromValidGraph)
@@ -239,7 +242,7 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
 
     // Create plan
     HipdnnMiopenSettings executionSettings;
-    ConvFwdPlan(_handle, std::move(params), executionSettings);
+    ConvFwdPlan(*_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
@@ -278,7 +281,7 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
 
     // Create plan and expect exception
     HipdnnMiopenSettings executionSettings;
-    EXPECT_THROW(ConvFwdPlan(_handle, std::move(params), executionSettings),
+    EXPECT_THROW(ConvFwdPlan(*_handle, std::move(params), executionSettings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -298,8 +301,8 @@ TEST_F(TestGpuConvFwdPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
     HipdnnMiopenSettings settings;
     settings.setDefaultWorkspaceSize(defaultSize);
 
-    ConvFwdPlan plan(_handle, std::move(params), settings);
-    EXPECT_EQ(plan.getWorkspaceSize(_handle), defaultSize);
+    ConvFwdPlan plan(*_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(*_handle), defaultSize);
 }
 
 TEST_F(TestGpuConvFwdPlan, PlanUsesKnobLimitOverDefault)
@@ -320,8 +323,8 @@ TEST_F(TestGpuConvFwdPlan, PlanUsesKnobLimitOverDefault)
     settings.setDefaultWorkspaceSize(defaultSize);
     settings.setWorkspaceSizeLimit(knobLimit);
 
-    ConvFwdPlan plan(_handle, std::move(params), settings);
-    EXPECT_EQ(plan.getWorkspaceSize(_handle), knobLimit);
+    ConvFwdPlan plan(*_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(*_handle), knobLimit);
 }
 
 TEST(TestConvFwdParams, AcceptsDeterministicEnabledFlag)

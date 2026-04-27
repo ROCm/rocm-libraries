@@ -3,6 +3,16 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 4.4.0 for ROCm 7.13
+
+### Added
+
+* rocrand.dll now contains embedded file version metadata.
+
+### Resolved Issues
+
+* Fixed memory leak in unit tests.
+
 ## rocRAND 4.3.0 for ROCm 7.12
 
 ### Resolved issue

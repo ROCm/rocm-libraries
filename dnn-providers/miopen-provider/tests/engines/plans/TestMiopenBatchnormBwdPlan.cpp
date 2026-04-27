@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace miopen_plugin;
 
@@ -164,6 +165,8 @@ TEST(TestBatchnormBwdPlan, FusedModeHasActivationAndBias)
 
 TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZeroForFusedMode)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
@@ -191,6 +194,8 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZeroForFusedMode)
 
 TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());

@@ -59,8 +59,7 @@ private:
                 auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(*attr);
                 virtualTensors.push_back(std::move(tensor));
 
-                // TODO: Switch to rawDeviceData() when real GPU plans are added
-                updatedVariantPack[id] = virtualTensors.back()->rawHostData();
+                updatedVariantPack[id] = virtualTensors.back()->rawDeviceData();
             }
         }
         return updatedVariantPack;
@@ -97,12 +96,14 @@ private:
         case NodeAttrs::PointwiseAttributes:
             return detail::GpuPointwiseDummySignatureKey(node, tensorMap);
 
+        case NodeAttrs::ConvolutionFwdAttributes:
+            return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
+
         // Node types with no GPU plan yet - throw descriptive error
         case NodeAttrs::BatchnormInferenceAttributes:
         case NodeAttrs::BatchnormInferenceAttributesVarianceExt:
         case NodeAttrs::BatchnormBackwardAttributes:
         case NodeAttrs::BatchnormAttributes:
-        case NodeAttrs::ConvolutionFwdAttributes:
         case NodeAttrs::ConvolutionBwdAttributes:
         case NodeAttrs::ConvolutionWrwAttributes:
         case NodeAttrs::MatmulAttributes:

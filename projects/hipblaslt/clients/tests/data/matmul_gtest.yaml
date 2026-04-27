@@ -84,6 +84,8 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
   c_equal_d: [false, true]
+  batch_mode: [0, 1]
+  batch_count: [1, 3]
 
 # FP16 I/O + FP32 compute: full-matrix probe for internal FP32 accumulation (rocBLAS-style near-max A, ±2 pairs in B).
 # Mirrors matmul_integer_exact_* matrix_size / category / batch / gpu_arch; NN only (probe does not support transposes).
