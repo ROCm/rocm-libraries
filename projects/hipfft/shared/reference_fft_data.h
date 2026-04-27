@@ -332,7 +332,7 @@ struct reference_fft_data_t
             throw std::invalid_argument("Fewer device input buffers than expected ("
                                         + std::to_string(device_input_buffers.size()) + " < "
                                         + std::to_string(input_to_copy->size())
-                                        + ")for copying reference input data");
+                                        + ") for copying reference input data");
 
         // Copy input data to GPU
         for(unsigned int idx = 0; idx < input_to_copy->size(); ++idx)
@@ -588,7 +588,7 @@ private:
                                    "output data were not set prior.");
         // Avoid data corruption by concurrent threads
         input_is_set.wait();
-        if(!fftw_compare)
+        if(fftw_compare)
             output_is_set.wait();
         const auto invalid_ref_prec_excpt = std::logic_error(
             "Invalid precision encountered for reference results to be narrowed");
@@ -641,13 +641,13 @@ private:
     }
 
     // Note: batch size uses >= since existing reference results can just be
-    // cropped for smaller batch sizes, if needed. The check on precision depends
-    // can be strict or loose: Floating-point precision of reference results can
-    // never be narrower than what is being tested, but some public member functions
-    // do require *identical* precisions.
+    // cropped for smaller batch sizes, if needed. The check on precision  can be
+    // strict or loose: Floating-point precision of reference results can never be
+    // narrower than what is being tested, but some public member functions do
+    // require *identical* precisions.
     bool can_be_used_for(const fft_params& test_params, bool strict_precision_check = true) const
     {
-        auto ret = params.length == test_params.length && params.precision == test_params.precision
+        auto ret = params.length == test_params.length
                    && params.transform_type == test_params.transform_type
                    && params.nbatch >= test_params.nbatch
                    && params.run_callbacks == test_params.run_callbacks
