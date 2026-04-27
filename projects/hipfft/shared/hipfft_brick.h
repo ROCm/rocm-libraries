@@ -30,7 +30,7 @@
 
 #include "../library/include/hipfft/hipfft.h"
 #include "../library/include/hipfft/hipfftXt.h"
-#include "data_layout.h"
+#include "../../rocfft/library/src/include/data_layout.h"
 #include "fft_enums.h"
 
 struct hipfft_brick
