@@ -262,16 +262,19 @@ struct OutputWriterLds
         // 2. Store to LDS via precomputed offset (MFMA swizzled layout).
         __builtin_memcpy(lds_base + lds_write_offset, &out_reg, sizeof(out_reg));
 
-        // 3. Wait for LDS writes from all threads.
-        ck_tile::s_waitcnt_lgkm<0>();
-
-        // 4. Read from LDS at coalesced offset (DRAM distribution layout).
-        fp16x4_t lds_data;
-        __builtin_memcpy(&lds_data, lds_base + lds_read_offset, sizeof(lds_data));
-
-        // 5. Store to DRAM: base + row offset + per-thread offset.
+        // 3. Wait for ALL threads' LDS writes to complete.
+        // __syncthreads() is required here (not just s_waitcnt lgkmcnt(0)) because
+        // each thread reads from a coalesced offset that was written by a DIFFERENT
+        // thread. s_waitcnt only guarantees this thread's own writes are visible.
+        __syncthreads();
+        
         if(store_valid)
         {
+            // 4. Read from LDS at coalesced offset (DRAM distribution layout).
+            fp16x4_t lds_data;
+            __builtin_memcpy(&lds_data, lds_base + lds_read_offset, sizeof(lds_data));
+
+            // 5. Store to DRAM: base + row offset + per-thread offset.
             ck_tile::index_t store_offset = output_elem_offset
                 + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
             __builtin_memcpy(output_base + store_offset, &lds_data, sizeof(lds_data));
