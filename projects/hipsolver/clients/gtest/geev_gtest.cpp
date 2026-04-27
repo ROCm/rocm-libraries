@@ -91,17 +91,17 @@ protected:
         ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
-    template <bool BATCHED, bool STRIDED, typename T>
+    template <bool BATCHED, bool STRIDED, typename T, typename W>
     void run_tests()
     {
         Arguments arg = geev_setup_arguments(GetParam());
 
         if(arg.peek<rocblas_int>("n") == -1 && arg.peek<char>("jobvl") == 'N'
            && arg.peek<char>("jobvr") == 'N')
-            testing_geev_bad_arg<API, BATCHED, STRIDED, T, I, SIZE>();
+            testing_geev_bad_arg<API, BATCHED, STRIDED, T, W, I, SIZE>();
 
         arg.batch_count = 1;
-        testing_geev<API, BATCHED, STRIDED, T, I, SIZE>(arg);
+        testing_geev<API, BATCHED, STRIDED, T, W, I, SIZE>(arg);
     }
 };
 
@@ -113,22 +113,32 @@ class GEEV_COMPAT_64 : public GEEV_BASE<API_COMPAT, int64_t, size_t>
 
 TEST_P(GEEV_COMPAT_64, __float)
 {
-    run_tests<false, false, float>();
+    run_tests<false, false, float, float>();
+}
+
+TEST_P(GEEV_COMPAT_64, __float_alt)
+{
+    run_tests<false, false, float, hipsolverComplex>();
 }
 
 TEST_P(GEEV_COMPAT_64, __double)
 {
-    run_tests<false, false, double>();
+    run_tests<false, false, double, double>();
+}
+
+TEST_P(GEEV_COMPAT_64, __double_alt)
+{
+    run_tests<false, false, double, hipsolverDoubleComplex>();
 }
 
 TEST_P(GEEV_COMPAT_64, __float_complex)
 {
-    run_tests<false, false, hipsolverComplex>();
+    run_tests<false, false, hipsolverComplex, hipsolverComplex>();
 }
 
 TEST_P(GEEV_COMPAT_64, __double_complex)
 {
-    run_tests<false, false, hipsolverDoubleComplex>();
+    run_tests<false, false, hipsolverDoubleComplex, hipsolverDoubleComplex>();
 }
 
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,

@@ -56,7 +56,13 @@ static bool test_left_eigenvectors
     = false; // Computing left eigenvectors is not supported in cuSOLVER.
 static bool test_right_eigenvectors = true;
 
-template <testAPI_t API, typename I, typename SIZE, typename Td, typename INTd, typename Th>
+template <testAPI_t API,
+          typename I,
+          typename SIZE,
+          typename Td,
+          typename Wd,
+          typename INTd,
+          typename Th>
 void geev_checkBadArgs(const hipsolverHandle_t   handle,
                        const hipsolverDnParams_t params,
                        const hipsolverEigMode_t  jobvl,
@@ -64,7 +70,7 @@ void geev_checkBadArgs(const hipsolverHandle_t   handle,
                        const I                   n,
                        Td                        dA,
                        const I                   lda,
-                       Td                        dW,
+                       Wd                        dW,
                        Td                        dVL,
                        const I                   ldvl,
                        Td                        dVR,
@@ -146,7 +152,7 @@ void geev_checkBadArgs(const hipsolverHandle_t   handle,
                                          n,
                                          dA,
                                          lda,
-                                         (Td) nullptr,
+                                         (Wd) nullptr,
                                          dVL,
                                          ldvl,
                                          dVR,
@@ -373,7 +379,13 @@ void geev_checkBadArgs(const hipsolverHandle_t   handle,
 #endif
 }
 
-template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
+template <testAPI_t API,
+          bool      BATCHED,
+          bool      STRIDED,
+          typename T,
+          typename W,
+          typename I,
+          typename SIZE>
 void testing_geev_bad_arg()
 {
     // safe arguments
@@ -394,7 +406,7 @@ void testing_geev_bad_arg()
     {
         // memory allocations
         device_strided_batch_vector<T>   dA(1, 1, 1, 1);
-        device_strided_batch_vector<T>   dW(1, 1, 1, 1);
+        device_strided_batch_vector<W>   dW(1, 1, 1, 1);
         device_strided_batch_vector<T>   dVL(1, 1, 1, 1);
         device_strided_batch_vector<T>   dVR(1, 1, 1, 1);
         device_strided_batch_vector<int> dInfo(1, 1, 1, 1);
@@ -512,11 +524,14 @@ void geev_initData(const hipsolverHandle_t   handle,
 
 template <testAPI_t API,
           typename T,
+          typename W,
           typename I,
           typename SIZE,
           typename Td,
+          typename Wd,
           typename INTd,
           typename Th,
+          typename Wh,
           typename CTh,
           typename INTh>
 void geev_getError(const hipsolverHandle_t   handle,
@@ -526,7 +541,7 @@ void geev_getError(const hipsolverHandle_t   handle,
                    const I                   n,
                    Td&                       dA,
                    const I                   lda,
-                   Td&                       dW,
+                   Wd&                       dW,
                    Td&                       dVL,
                    const I                   ldvl,
                    Td&                       dVR,
@@ -539,8 +554,8 @@ void geev_getError(const hipsolverHandle_t   handle,
                    Th&                       hA,
                    CTh&                      hCA,
                    Th&                       hARes,
-                   Th&                       hW,
-                   Th&                       hWRes,
+                   Wh&                       hW,
+                   Wh&                       hWRes,
                    CTh&                      hVL,
                    Th&                       hVLRes,
                    CTh&                      hVR,
@@ -598,11 +613,6 @@ void geev_getError(const hipsolverHandle_t   handle,
                                        dInfo.data()));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hWRes.transfer_from(dW));
-    /* print_array(hWRes[0], n, 1, n, "Re(hWRes[0]) = "); */
-    /* if(!is_complex<T>) */
-    /* { */
-    /*     print_array(hWRes[0] + n, n, 1, n, "Im(hWRes[0]) = "); */
-    /* } */
     if(jobvl != HIPSOLVER_EIG_MODE_NOVECTOR)
     {
         CHECK_HIP_ERROR(hVLRes.transfer_from(dVL));
@@ -673,119 +683,84 @@ void geev_getError(const hipsolverHandle_t   handle,
 
     //
     // Compute error(s).
-    //
-
-    //
     // *** Note: FOR NOW, the tests' code require the spectrum of A to be real. ***
     //
     double err{};
     double normA = snorm('F', n, n, hA[0], lda);
     CT     alpha, beta;
 
-    T*  ReWRes = hWRes[0];
-    T*  ImWRes = hWRes[0] + n;
-    CT* A      = hCA[0];
-    CT* D      = hCD[0];
-    CT* VR     = hVR[0];
-    CT* VL     = hVL[0];
-    CT* Err    = hCErr[0];
-    if constexpr(!is_complex<T>)
+    CT* A   = hCA[0];
+    CT* D   = hCD[0];
+    CT* VR  = hVR[0];
+    CT* VL  = hVL[0];
+    CT* Err = hCErr[0];
+    if constexpr(!std::is_same<W, CT>())
     {
-        T* ReW = hWRes[0];
-        T* ImW = hWRes[0] + n;
-        T  imag_wij{}, real_wij{};
-        CT wij{}, vij{}, lij{};
-
         for(int j = 0; j < n; ++j)
         {
-            real_wij  = ReW[j];
-            imag_wij  = ImW[j];
+            for(int i = 0; i < n; ++i)
+            {
+                if(i == j)
+                    D[i + j * n] = {hWRes[0][j], hWRes[0][j + n]};
+                else
+                    D[i + j * n] = CT(0);
+            }
+        }
+    }
+    else // is_same<W, CT>
+    {
+        for(int j = 0; j < n; ++j)
+        {
+            for(int i = 0; i < n; ++i)
+            {
+                if(i == j)
+                    D[i + j * n] = hWRes[0][j];
+                else
+                    D[i + j * n] = CT(0);
+            }
+        }
+    }
+
+    if constexpr(!is_complex<T>)
+    {
+        for(int j = 0; j < n; ++j)
+        {
             auto VRij = [ld = ldvr_, V = hVRRes[0]](I i, I j) -> T { return V[i + j * ld]; };
             auto VLij = [ld = ldvl_, V = hVLRes[0]](I i, I j) -> T { return V[i + j * ld]; };
             for(int i = 0; i < n; ++i)
             {
                 A[i + j * lda] = {hA[0][i + j * lda], 0};
 
-                if(i == j)
-                {
-                    D[i + j * n] = {real_wij, imag_wij};
-                }
-                else
-                {
-                    D[i + j * n] = CT(0);
-                }
-
-                if(imag_wij > 0)
+                if(D[j + j * n].imag() > 0)
                 {
                     if(test_right_eigenvectors)
-                    {
-                        vij               = {VRij(i, j), VRij(i, j + 1)};
-                        VR[i + j * ldvr_] = vij;
-                        /* std::cout << "vij+ = " << vij << std::endl; */
-                    }
-
+                        VR[i + j * ldvr_] = {VRij(i, j), VRij(i, j + 1)};
                     if(test_left_eigenvectors)
-                    {
-                        lij               = {VLij(i, j), VLij(i, j + 1)};
-                        VL[i + j * ldvl_] = lij;
-                        /* std::cout << "lij+ = " << lij << std::endl; */
-                    }
+                        VL[i + j * ldvl_] = {VLij(i, j), VLij(i, j + 1)};
                 }
-                else if(imag_wij < 0)
+                else if(D[j + j * n].imag() < 0)
                 {
                     if(test_right_eigenvectors)
-                    {
-                        vij               = {VRij(i, j - 1), -VRij(i, j)};
-                        VR[i + j * ldvr_] = vij;
-                        /* std::cout << "vij- = " << vij << std::endl; */
-                    }
-
+                        VR[i + j * ldvr_] = {VRij(i, j - 1), -VRij(i, j)};
                     if(test_left_eigenvectors)
-                    {
-                        lij               = {VLij(i, j - 1), -VLij(i, j)};
-                        VL[i + j * ldvl_] = lij;
-                        /* std::cout << "lij- = " << lij << std::endl; */
-                    }
+                        VL[i + j * ldvl_] = {VLij(i, j - 1), -VLij(i, j)};
                 }
                 else
                 {
                     if(test_right_eigenvectors)
-                    {
-                        vij               = {VRij(i, j), 0};
-                        VR[i + j * ldvr_] = vij;
-                    }
-
+                        VR[i + j * ldvr_] = {VRij(i, j), 0};
                     if(test_left_eigenvectors)
-                    {
-                        lij               = {VLij(i, j), 0};
-                        VL[i + j * ldvl_] = lij;
-                    }
+                        VL[i + j * ldvl_] = {VLij(i, j), 0};
                 }
             }
         }
     }
     else // is_complex<T> == true
     {
-        for(int j = 0; j < n; ++j)
-        {
-            for(int i = 0; i < n; ++i)
-            {
-                if(i == j)
-                {
-                    D[i + j * n] = hWRes[0][j];
-                }
-                else
-                {
-                    D[i + j * n] = CT(0);
-                }
-            }
-        }
-        A  = hA[0];
         VR = hVRRes[0];
         VL = hVLRes[0];
+        A  = hA[0];
     }
-    /* print_array(D, n, n, n, "D = "); */
-    /* print_array(VL, n, n, ldvl_, "VL = "); */
 
     // [Not implemented:] 1. Check if eigenvalues computed with different parameters match.
 
@@ -889,9 +864,11 @@ void geev_getError(const hipsolverHandle_t   handle,
 
 template <testAPI_t API,
           typename T,
+          typename W,
           typename I,
           typename SIZE,
           typename Td,
+          typename Wd,
           typename INTd,
           typename Th>
 void geev_getPerfData(const hipsolverHandle_t   handle,
@@ -901,7 +878,7 @@ void geev_getPerfData(const hipsolverHandle_t   handle,
                       const I                   n,
                       Td&                       dA,
                       const I                   lda,
-                      Td&                       dW,
+                      Wd&                       dW,
                       Td&                       dVL,
                       const I                   ldvl,
                       Td&                       dVR,
@@ -982,7 +959,13 @@ void geev_getPerfData(const hipsolverHandle_t   handle,
     *gpu_time_used /= hot_calls;
 }
 
-template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
+template <testAPI_t API,
+          bool      BATCHED,
+          bool      STRIDED,
+          typename T,
+          typename W,
+          typename I,
+          typename SIZE>
 void testing_geev(Arguments& argus)
 {
     // Initialize extra type used to simplify testing when type `T` is real.
@@ -1011,7 +994,7 @@ void testing_geev(Arguments& argus)
 
     // determine sizes
     size_t size_A    = size_t(lda) * n;
-    size_t size_W    = is_complex<T> ? size_t(n) : size_t(2 * n);
+    size_t size_W    = is_complex<W> ? size_t(n) : size_t(2 * n);
     size_t size_VL   = jobvlC == 'N' ? size_t(n) * n : size_t(ldvl) * n;
     size_t size_VR   = jobvrC == 'N' ? size_t(n) * n : size_t(ldvr) * n;
     size_t size_D    = size_t(n) * n;
@@ -1044,7 +1027,7 @@ void testing_geev(Arguments& argus)
                                                  n,
                                                  (T*)nullptr,
                                                  lda,
-                                                 (T*)nullptr,
+                                                 (W*)nullptr,
                                                  (T*)nullptr,
                                                  ldvl,
                                                  (T*)nullptr,
@@ -1077,7 +1060,7 @@ void testing_geev(Arguments& argus)
                                   n,
                                   (T*)nullptr,
                                   lda,
-                                  (T*)nullptr,
+                                  (W*)nullptr,
                                   (T*)nullptr,
                                   std::max(ldvl, n),
                                   (T*)nullptr,
@@ -1102,8 +1085,8 @@ void testing_geev(Arguments& argus)
         host_strided_batch_vector<T>     hA(size_A, 1, size_A, bc);
         host_strided_batch_vector<CT>    hCA(size_A, 1, size_A, bc);
         host_strided_batch_vector<T>     hARes(size_ARes, 1, size_ARes, bc);
-        host_strided_batch_vector<T>     hW(size_W, 1, size_W, bc);
-        host_strided_batch_vector<T>     hWRes(size_WRes, 1, size_WRes, bc);
+        host_strided_batch_vector<W>     hW(size_W, 1, size_W, bc);
+        host_strided_batch_vector<W>     hWRes(size_WRes, 1, size_WRes, bc);
         host_strided_batch_vector<CT>    hVL(size_VL, 1, size_VL, bc);
         host_strided_batch_vector<T>     hVLRes(size_VLRes, 1, size_VLRes, bc);
         host_strided_batch_vector<CT>    hVR(size_VR, 1, size_VR, bc);
@@ -1116,7 +1099,7 @@ void testing_geev(Arguments& argus)
         host_strided_batch_vector<T>     hErr(size_Err, 1, size_Err, bc);
         host_strided_batch_vector<CT>    hCErr(size_Err, 1, size_Err, bc);
         device_strided_batch_vector<T>   dA(size_A, 1, size_A, bc);
-        device_strided_batch_vector<T>   dW(size_W, 1, size_W, bc);
+        device_strided_batch_vector<W>   dW(size_W, 1, size_W, bc);
         device_strided_batch_vector<T>   dVL(size_VL, 1, size_VL, bc);
         device_strided_batch_vector<T>   dVR(size_VR, 1, size_VR, bc);
         device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
@@ -1135,43 +1118,7 @@ void testing_geev(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geev_getError<API, T>(handle,
-                                  params,
-                                  jobvl,
-                                  jobvr,
-                                  n,
-                                  dA,
-                                  lda,
-                                  dW,
-                                  dVL,
-                                  ldvl,
-                                  dVR,
-                                  ldvr,
-                                  dWork,
-                                  size_dW,
-                                  hWork,
-                                  size_hW,
-                                  dInfo,
-                                  hA,
-                                  hCA,
-                                  hARes,
-                                  hW,
-                                  hWRes,
-                                  hVL,
-                                  hVLRes,
-                                  hVR,
-                                  hVRRes,
-                                  hInfo,
-                                  hInfoRes,
-                                  hD,
-                                  hCD,
-                                  hErr,
-                                  hCErr,
-                                  &max_error);
-
-        // collect performance data
-        if(argus.timing)
-            geev_getPerfData<API, T>(handle,
+            geev_getError<API, T, W>(handle,
                                      params,
                                      jobvl,
                                      jobvr,
@@ -1189,10 +1136,46 @@ void testing_geev(Arguments& argus)
                                      size_hW,
                                      dInfo,
                                      hA,
-                                     &gpu_time_used,
-                                     &cpu_time_used,
-                                     hot_calls,
-                                     argus.perf);
+                                     hCA,
+                                     hARes,
+                                     hW,
+                                     hWRes,
+                                     hVL,
+                                     hVLRes,
+                                     hVR,
+                                     hVRRes,
+                                     hInfo,
+                                     hInfoRes,
+                                     hD,
+                                     hCD,
+                                     hErr,
+                                     hCErr,
+                                     &max_error);
+
+        // collect performance data
+        if(argus.timing)
+            geev_getPerfData<API, T, W>(handle,
+                                        params,
+                                        jobvl,
+                                        jobvr,
+                                        n,
+                                        dA,
+                                        lda,
+                                        dW,
+                                        dVL,
+                                        ldvl,
+                                        dVR,
+                                        ldvr,
+                                        dWork,
+                                        size_dW,
+                                        hWork,
+                                        size_hW,
+                                        dInfo,
+                                        hA,
+                                        &gpu_time_used,
+                                        &cpu_time_used,
+                                        hot_calls,
+                                        argus.perf);
     }
 
     // validate results for hipsolver-test

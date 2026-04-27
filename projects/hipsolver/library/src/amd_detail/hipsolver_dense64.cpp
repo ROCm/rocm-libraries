@@ -243,44 +243,67 @@ try
     *lworkOnHost   = 0;
 
     // ----- GET WORKSPACE SIZES -----
-    size_t size_type  = 0;
-    size_t size_rtype = 0;
-    size_t size_hA, size_hW, size_hVL, size_hVR, size_work, size_rwork;
+    size_t size_type = 0;
+    size_t size_hA, size_hW, size_hWcopy, size_hVL, size_hVR, size_work, size_rwork;
+    // sgeev
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
        && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
     {
-        size_type  = sizeof(float);
-        size_rtype = sizeof(float);
-        size_hW    = size_type * 2 * n;
-        size_rwork = 0;
-        size_work  = size_type * (n == 0 ? 1 : 130 * n);
+        size_type   = sizeof(float);
+        size_hW     = size_type * 2 * n;
+        size_hWcopy = 0;
+        size_rwork  = 0;
+        size_work   = size_type * (n == 0 ? 1 : 130 * n);
     }
+    // sgeev with complex W
+    else if(dataTypeA == HIP_R_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_R_32F
+            && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
+    {
+        size_type   = sizeof(float);
+        size_hW     = sizeof(hipFloatComplex) * n;
+        size_hWcopy = size_type * 2 * n;
+        size_rwork  = 0;
+        size_work   = size_type * (n == 0 ? 1 : 130 * n);
+    }
+    // dgeev
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
             && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
-        size_type  = sizeof(double);
-        size_rtype = sizeof(double);
-        size_hW    = size_type * 2 * n;
-        size_rwork = 0;
-        size_work  = size_type * (n == 0 ? 1 : 130 * n);
+        size_type   = sizeof(double);
+        size_hW     = size_type * 2 * n;
+        size_hWcopy = 0;
+        size_rwork  = 0;
+        size_work   = size_type * (n == 0 ? 1 : 130 * n);
     }
+    // dgeev with complex W
+    else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_R_64F
+            && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
+    {
+        size_type   = sizeof(double);
+        size_hW     = sizeof(hipDoubleComplex) * n;
+        size_hWcopy = size_type * 2 * n;
+        size_rwork  = 0;
+        size_work   = size_type * (n == 0 ? 1 : 130 * n);
+    }
+    // cgeev
     else if(dataTypeA == HIP_C_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_C_32F
             && dataTypeVR == HIP_C_32F && computeType == HIP_C_32F)
     {
-        size_type  = sizeof(hipFloatComplex);
-        size_rtype = sizeof(float);
-        size_hW    = size_type * n;
-        size_rwork = size_rtype * (n == 0 ? 1 : 2 * n);
-        size_work  = size_type * (n == 0 ? 1 : 130 * n);
+        size_type   = sizeof(hipFloatComplex);
+        size_hW     = size_type * n;
+        size_hWcopy = 0;
+        size_rwork  = sizeof(float) * (n == 0 ? 1 : 2 * n);
+        size_work   = size_type * (n == 0 ? 1 : 130 * n);
     }
+    // zgeev
     else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_C_64F
             && dataTypeVR == HIP_C_64F && computeType == HIP_C_64F)
     {
-        size_type  = sizeof(hipDoubleComplex);
-        size_rtype = sizeof(double);
-        size_hW    = size_type * n;
-        size_rwork = size_rtype * (n == 0 ? 1 : 2 * n);
-        size_work  = size_type * (n == 0 ? 1 : 130 * n);
+        size_type   = sizeof(hipDoubleComplex);
+        size_hW     = size_type * n;
+        size_hWcopy = 0;
+        size_rwork  = sizeof(double) * (n == 0 ? 1 : 2 * n);
+        size_work   = size_type * (n == 0 ? 1 : 130 * n);
     }
     else
         return HIPSOLVER_STATUS_INVALID_ENUM;
@@ -290,14 +313,15 @@ try
     size_hVR = (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvr * n);
 
     // round up sizes to multiple of MIN_CHUNK_SIZE
-    size_hA    = ((size_hA + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
-    size_hW    = ((size_hW + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
-    size_hVL   = ((size_hVL + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
-    size_hVR   = ((size_hVR + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
-    size_work  = ((size_work + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
-    size_rwork = ((size_rwork + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_hA     = ((size_hA + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_hW     = ((size_hW + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_hWcopy = ((size_hWcopy + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_hVL    = ((size_hVL + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_hVR    = ((size_hVR + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_work   = ((size_work + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_rwork  = ((size_rwork + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
 
-    *lworkOnHost = size_hA + size_hW + size_hVL + size_hVR + size_work + size_rwork;
+    *lworkOnHost = size_hA + size_hW + size_hWcopy + size_hVL + size_hVR + size_work + size_rwork;
     return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
@@ -363,44 +387,67 @@ try
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     // ----- GET HOST ARRAY SIZES -----
-    size_t size_type  = 0;
-    size_t size_rtype = 0;
-    size_t size_hA, size_hW, size_hVL, size_hVR, size_rwork;
+    size_t size_type = 0;
+    size_t size_hA, size_hW, size_hWcopy, size_hVL, size_hVR, size_rwork;
     size_t required_bytes_work;
+    // sgeev
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
        && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
     {
         size_type           = sizeof(float);
-        size_rtype          = sizeof(float);
         size_hW             = size_type * 2 * n;
+        size_hWcopy         = 0;
         size_rwork          = 0;
         required_bytes_work = size_type * (n == 0 ? 1 : 4 * n);
     }
+    // sgeev with complex W
+    else if(dataTypeA == HIP_R_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_R_32F
+            && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
+    {
+        size_type           = sizeof(float);
+        size_hW             = sizeof(hipFloatComplex) * n;
+        size_hWcopy         = size_type * 2 * n;
+        size_rwork          = 0;
+        required_bytes_work = size_type * (n == 0 ? 1 : 4 * n);
+    }
+    // dgeev
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
             && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
         size_type           = sizeof(double);
-        size_rtype          = sizeof(double);
         size_hW             = size_type * 2 * n;
+        size_hWcopy         = 0;
         size_rwork          = 0;
         required_bytes_work = size_type * (n == 0 ? 1 : 4 * n);
     }
+    // dgeev with complex W
+    else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_R_64F
+            && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
+    {
+        size_type           = sizeof(double);
+        size_hW             = sizeof(hipDoubleComplex) * n;
+        size_hWcopy         = size_type * 2 * n;
+        size_rwork          = 0;
+        required_bytes_work = size_type * (n == 0 ? 1 : 4 * n);
+    }
+    // cgeev
     else if(dataTypeA == HIP_C_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_C_32F
             && dataTypeVR == HIP_C_32F && computeType == HIP_C_32F)
     {
         size_type           = sizeof(hipFloatComplex);
-        size_rtype          = sizeof(float);
         size_hW             = size_type * n;
-        size_rwork          = size_rtype * (n == 0 ? 1 : 2 * n);
+        size_hWcopy         = 0;
+        size_rwork          = sizeof(float) * (n == 0 ? 1 : 2 * n);
         required_bytes_work = size_type * (n == 0 ? 1 : 2 * n);
     }
+    // zgeev
     else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_C_64F
             && dataTypeVR == HIP_C_64F && computeType == HIP_C_64F)
     {
         size_type           = sizeof(hipDoubleComplex);
-        size_rtype          = sizeof(double);
         size_hW             = size_type * n;
-        size_rwork          = size_rtype * (n == 0 ? 1 : 2 * n);
+        size_hWcopy         = 0;
+        size_rwork          = sizeof(double) * (n == 0 ? 1 : 2 * n);
         required_bytes_work = size_type * (n == 0 ? 1 : 2 * n);
     }
     else
@@ -411,14 +458,16 @@ try
     size_hVR = (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvr * n);
 
     // round up sizes to multiple of MIN_CHUNK_SIZE
-    size_t rounded_size_hA  = ((size_hA + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
-    size_t rounded_size_hW  = ((size_hW + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_t rounded_size_hA = ((size_hA + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_t rounded_size_hW = ((size_hW + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_t rounded_size_hWcopy
+        = ((size_hWcopy + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_t rounded_size_hVL = ((size_hVL + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_t rounded_size_hVR = ((size_hVR + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_t rounded_size_rwork
         = ((size_rwork + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
-    size_t required_bytes = rounded_size_hA + rounded_size_hW + rounded_size_hVL + rounded_size_hVR
-                            + rounded_size_rwork;
+    size_t required_bytes = rounded_size_hA + rounded_size_hW + rounded_size_hWcopy
+                            + rounded_size_hVL + rounded_size_hVR + rounded_size_rwork;
 
     if(lworkOnHost < required_bytes + required_bytes_work)
         return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -427,12 +476,13 @@ try
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     // ----- GET HOST ARRAYS -----
-    std::byte* hA    = (std::byte*)workOnHost;
-    std::byte* hW    = hA + rounded_size_hA;
-    std::byte* hVL   = hW + rounded_size_hW;
-    std::byte* hVR   = hVL + rounded_size_hVL;
-    std::byte* rwork = hVR + rounded_size_hVR;
-    std::byte* work  = rwork + rounded_size_rwork;
+    std::byte* hA     = (std::byte*)workOnHost;
+    std::byte* hW     = hA + rounded_size_hA;
+    std::byte* hWcopy = hW + rounded_size_hW;
+    std::byte* hVL    = hWcopy + rounded_size_hWcopy;
+    std::byte* hVR    = hVL + rounded_size_hVL;
+    std::byte* rwork  = hVR + rounded_size_hVR;
+    std::byte* work   = rwork + rounded_size_rwork;
 
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream((rocblas_handle)handle, &stream));
@@ -445,6 +495,7 @@ try
     char jobvlC = (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 'N' : 'V');
     char jobvrC = (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 'N' : 'V');
 
+    // sgeev
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
        && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
     {
@@ -463,6 +514,31 @@ try
                             (float*)rwork,
                             &hInfo);
     }
+    // sgeev with complex W
+    else if(dataTypeA == HIP_R_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_R_32F
+            && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
+    {
+        hipsolver::cpu_geev(jobvlC,
+                            jobvrC,
+                            (int)n,
+                            (float*)hA,
+                            (int)lda,
+                            (float*)hWcopy,
+                            (float*)hVL,
+                            (int)ldvl,
+                            (float*)hVR,
+                            (int)ldvr,
+                            (float*)work,
+                            (int)lwork_computed,
+                            (float*)rwork,
+                            &hInfo);
+
+        hipFloatComplex* hW_f     = (hipFloatComplex*)hW;
+        float*           hWcopy_f = (float*)hWcopy;
+        for(int64_t i = 0; i < n; ++i)
+            hW_f[i] = hipFloatComplex(hWcopy_f[i], hWcopy_f[i + n]);
+    }
+    // dgeev
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
             && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
@@ -481,6 +557,31 @@ try
                             (double*)rwork,
                             &hInfo);
     }
+    // dgeev with complex W
+    else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_R_64F
+            && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
+    {
+        hipsolver::cpu_geev(jobvlC,
+                            jobvrC,
+                            (int)n,
+                            (double*)hA,
+                            (int)lda,
+                            (double*)hWcopy,
+                            (double*)hVL,
+                            (int)ldvl,
+                            (double*)hVR,
+                            (int)ldvr,
+                            (double*)work,
+                            (int)lwork_computed,
+                            (double*)rwork,
+                            &hInfo);
+
+        hipDoubleComplex* hW_f     = (hipDoubleComplex*)hW;
+        double*           hWcopy_f = (double*)hWcopy;
+        for(int64_t i = 0; i < n; ++i)
+            hW_f[i] = hipDoubleComplex(hWcopy_f[i], hWcopy_f[i + n]);
+    }
+    // cgeev
     else if(dataTypeA == HIP_C_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_C_32F
             && dataTypeVR == HIP_C_32F && computeType == HIP_C_32F)
     {
@@ -499,6 +600,7 @@ try
                             (float*)rwork,
                             &hInfo);
     }
+    // zgeev
     else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_C_64F
             && dataTypeVR == HIP_C_64F && computeType == HIP_C_64F)
     {
