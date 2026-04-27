@@ -131,7 +131,6 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
         imax = 0;
         _info = 0;
     }
-    __syncthreads();
 
     kw = nb + k - n;
     while(k >= 0 && (k > n - nb || nb == n))
@@ -380,7 +379,6 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
         imax = 0;
         _info = 0;
     }
-    __syncthreads();
 
     while(k < n && (k < nb - 1 || nb == n))
     {
