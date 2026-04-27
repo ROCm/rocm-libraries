@@ -411,7 +411,7 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedInputOutputShapes)
     EXPECT_TRUE(error.get_message().find("dimension mismatch") != std::string::npos);
 }
 
-TEST(TestRMSNormNode, PreValidateRejectsMismatchedChannelDimensions)
+TEST(TestRMSNormNode, PreValidateRejectsScaleWithoutTrailingMatch)
 {
     RMSNormAttributes rmsnormAttributes;
 
@@ -422,7 +422,7 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedChannelDimensions)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 128, 1, 1}); // Mismatched channel dimension
+    scaleTensor->set_dim({1, 64, 1, 1}); // scale[3]=1 vs input[3]=32 — no trailing match
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -434,11 +434,11 @@ TEST(TestRMSNormNode, PreValidateRejectsMismatchedChannelDimensions)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    const std::string expected = "index 1 must match input dimension at index 1";
+    const std::string expected = "no trailing dims matching input";
     EXPECT_TRUE(error.get_message().find(expected) != std::string::npos);
 }
 
-TEST(TestRMSNormNode, PreValidateRejectsInvalidScaleTensorShape)
+TEST(TestRMSNormNode, PreValidateRejectsScaleWithNonOneInLeadingRegion)
 {
     RMSNormAttributes rmsnormAttributes;
 
@@ -449,7 +449,7 @@ TEST(TestRMSNormNode, PreValidateRejectsInvalidScaleTensorShape)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 2, 2}); // Should be [1, 64, 32, 32]
+    scaleTensor->set_dim({1, 128, 32, 32}); // should be [1, 1, 32, 32] or [1, 64, 32, 32]
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -463,7 +463,8 @@ TEST(TestRMSNormNode, PreValidateRejectsInvalidScaleTensorShape)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    std::cerr << "Error message: " << error.get_message() << "\n";
+    EXPECT_TRUE(error.get_message().find("leading region before normalized shape")
+                != std::string::npos);
     EXPECT_TRUE(error.get_message().find("Scale tensor") != std::string::npos);
 }
 
@@ -482,7 +483,7 @@ TEST(TestRMSNormNode, PreValidateAcceptsValid5DSpatialDimensions)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1, 1}); // 5D spatial mode
+    scaleTensor->set_dim({1, 64, 8, 8, 8}); // 5D, full-shape
     rmsnormAttributes.set_scale(scaleTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -650,12 +651,13 @@ TEST(TestRMSNormNode, PreValidateAcceptsCorrectInvRmsShape)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32}); // Full-shape scale
     rmsnormAttributes.set_scale(scaleTensor);
 
-    // Correct inv_rms shape derived from scale: [N, 1, H, W]
+    // Correct inv_rms shape derived from scale: where scale is non-1 → 1,
+    // where scale is 1 (only batch here) → keep input dim. Yields [N, 1, 1, 1].
     auto invRmsTensor = std::make_shared<TensorAttributes>();
-    invRmsTensor->set_dim({2, 1, 32, 32});
+    invRmsTensor->set_dim({2, 1, 1, 1});
     rmsnormAttributes.set_inv_rms(invRmsTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -682,7 +684,7 @@ TEST(TestRMSNormNode, PreValidateRejectsInvRmsWithChannelOnlyShape)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32}); // Full-shape scale
     rmsnormAttributes.set_scale(scaleTensor);
 
     // Old incorrect shape [1, C, 1, 1] — should be rejected
@@ -715,12 +717,12 @@ TEST(TestRMSNormNode, PreValidateRejectsInvRmsWithMismatchedBatchDim)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32}); // Full-shape scale
     rmsnormAttributes.set_scale(scaleTensor);
 
     // Batch dim mismatch: input has N=2, inv_rms has N=4
     auto invRmsTensor = std::make_shared<TensorAttributes>();
-    invRmsTensor->set_dim({4, 1, 32, 32});
+    invRmsTensor->set_dim({4, 1, 1, 1});
     rmsnormAttributes.set_inv_rms(invRmsTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -748,12 +750,12 @@ TEST(TestRMSNormNode, PreValidateRejectsInvRmsWithWrongRank)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32}); // Full-shape scale
     rmsnormAttributes.set_scale(scaleTensor);
 
     // Wrong rank: 5D instead of 4D
     auto invRmsTensor = std::make_shared<TensorAttributes>();
-    invRmsTensor->set_dim({2, 1, 32, 32, 1});
+    invRmsTensor->set_dim({2, 1, 1, 1, 1});
     rmsnormAttributes.set_inv_rms(invRmsTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -781,7 +783,7 @@ TEST(TestRMSNormNode, PreValidateSkipsInvRmsValidationWhenDimsNotSet)
     rmsnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32}); // Full-shape scale
     rmsnormAttributes.set_scale(scaleTensor);
 
     // inv_rms with no dims set — validation should pass (dims will be inferred)
