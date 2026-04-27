@@ -1984,14 +1984,25 @@ class TestEmit_PGR0:
         assert len(sched._emitted) == 1
         assert len(sched._emitted[0]) == cfg.numSubIterK
 
-    def test_no_gr_inc_lr_inc(self):
+    def test_gr_lr_inc_as_postOps(self):
         cfg = make_cfg_bf16_pgr0()
         sched = LogicalScheduler(cfg)
         sched.emit()
-        for partition in sched._emitted:
-            for emitted in partition:
-                for em in emitted:
-                    assert em.opType not in ('gr_inc', 'lr_inc')
+        # Each tensor's INC should be on its own placement (not merged)
+        slot0 = sched._partitions[-1][0]  # subIterK=0
+        slot1 = sched._partitions[-1][-1]  # subIterK=1
+
+        # lr_inc(A) on LR A, lr_inc(B) on LR B
+        lr_a = [lr for lr in slot1.lrs if lr.tensor == 'A'][0]
+        lr_b = [lr for lr in slot1.lrs if lr.tensor == 'B'][0]
+        assert any(op.kind == 'lr_inc' and op.tensor == 'A' for op in lr_a.postOps)
+        assert any(op.kind == 'lr_inc' and op.tensor == 'B' for op in lr_b.postOps)
+
+        # gr_inc(A) on GR A, gr_inc(B) on GR B
+        gr_a = [gr for gr in slot0.grs if gr.tensor == 'A'][0]
+        gr_b = [gr for gr in slot0.grs if gr.tensor == 'B'][0]
+        assert any(op.kind == 'gr_inc' and op.tensor == 'A' for op in gr_a.postOps)
+        assert any(op.kind == 'gr_inc' and op.tensor == 'B' for op in gr_b.postOps)
 
 
 class TestBuildLoopVariants_PGR0:

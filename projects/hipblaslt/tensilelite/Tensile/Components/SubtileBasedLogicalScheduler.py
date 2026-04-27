@@ -199,6 +199,7 @@ class MFMAPlacement(Emittable):
     tileB: MFMATileRange       # B tiles consumed
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
+    postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
     vgpr_tile_maps: Dict[str, List[dict]] = field(default_factory=dict)  # {tensor: [{groupIdx: vgprTileId}]} per unroll iter
 
     def __post_init__(self):
@@ -219,6 +220,7 @@ class LRPlacement(Emittable):
     partition: int = 0         # which partition this LR belongs to
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
+    postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
     vgpr_tile_map: List[dict] = field(default_factory=list)  # [{tileId: vgprTileId}] per unroll iter
 
     def __post_init__(self):
@@ -239,6 +241,7 @@ class GRPlacement(Emittable):
     partition: int = 0         # which partition this GR belongs to
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
+    postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
 
     def __post_init__(self):
         self.kind = 'gr'
@@ -1494,6 +1497,21 @@ class LogicalScheduler:
                 if last is not None and last != lr.mtIteration:
                     lr.preOps.append(LRIncOp(tensor=tensor))
 
+        if self.config.pgr == 0:
+            last_lr_per_tensor = {}
+            last_gr_per_tensor = {}
+            for slots in self._partitions:
+                for slot in slots:
+                    for lr in slot.lrs:
+                        last_lr_per_tensor[lr.tensor] = lr
+                    for gr in slot.grs:
+                        last_gr_per_tensor[gr.tensor] = gr
+            for tensor in self._LR_GR_ORDER:
+                if tensor in last_lr_per_tensor and tensor in last_lr_mt:
+                    last_lr_per_tensor[tensor].postOps.append(LRIncOp(tensor=tensor))
+                if tensor in last_gr_per_tensor and tensor in last_gr_mt:
+                    last_gr_per_tensor[tensor].postOps.append(GRIncOp(tensor=tensor))
+
         self._completed.add(Pass.GR_INC)
 
     # ── Group LR/GR chains ─────────────────────────────────────
@@ -1788,9 +1806,24 @@ class LogicalScheduler:
                 for gr in slot.grs:
                     placements.append(gr)
 
+                placement_tail_id = {}
                 for placement in placements:
                     mid = add(placement)
                     placement_to_id[id(placement)] = mid
+                    placement_tail_id[id(placement)] = mid
+
+                # Step 1b: add postOps and update tail ids so that
+                # deps on a placement with postOps resolve to the last postOp.
+                for placement in placements:
+                    if not placement.postOps:
+                        continue
+                    curId = placement_to_id[id(placement)]
+                    postPrevId = curId
+                    for postOp in placement.postOps:
+                        postId = add(postOp)
+                        setBefore(postId, postPrevId)
+                        postPrevId = postId
+                    placement_tail_id[id(placement)] = postPrevId
 
                 # Step 2: wire before-chains from preOps + deps
                 for placement in placements:
@@ -1836,7 +1869,7 @@ class LogicalScheduler:
                     # Wire dep refs as roots of the preOp chain so the
                     # dependency is not lost when preOps are present.
                     for dep in placement.deps:
-                        ref_id = placement_to_id.get(id(dep.ref))
+                        ref_id = placement_tail_id.get(id(dep.ref))
                         if ref_id is not None:
                             if firstPreOpId is not None:
                                 setBefore(firstPreOpId, ref_id)
@@ -2491,7 +2524,7 @@ class LogicalScheduler:
         return buf.getvalue()
 
     def _print_placement_with_preops(self, buf, placement, slot: SubIterKSlot):
-        """Print a placement label followed by its preOps and remaining deps."""
+        """Print a placement label followed by its preOps, deps, and postOps."""
         buf.write(f"      {placement}\n")
         if placement.preOps:
             buf.write("        preOps:\n")
@@ -2502,6 +2535,10 @@ class LogicalScheduler:
             for dep in placement.deps:
                 dep_str = self._format_dep_ref(dep)
                 buf.write(f"            - {dep_str}\n")
+        if placement.postOps:
+            buf.write("        postOps:\n")
+            for op in placement.postOps:
+                buf.write(f"            - {op}\n")
     
 
     def _format_dep_ref(self, dep: Dep) -> str:
