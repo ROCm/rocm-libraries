@@ -1007,11 +1007,14 @@ class LogicalScheduler:
         if self.config.pgr == 0:
             return self._place_GRs_PGR0()
 
+        if self.config.pgr == 1:
+            return self._place_GRs_PGR1()
+
         part_ranges = [self._partition_tile_range(pi)
                        for pi in range(self.config.numPartitions)]
 
         offsetMT = 1
-        offsetPartition = 0 if self.config.pgr == 1 else 1
+        offsetPartition = 1
         # Build ordered list of GRs to place for the entire MT based on the partitioning ordering and the GR granularities.
         gr_list = self._build_gr_list(part_ranges, offsetMT, offsetPartition)
         # Map to keep track of LR(MT n) for each partiion and tensor, used for LDS double buffer conflict checking when placing GRs.
@@ -1053,6 +1056,46 @@ class LogicalScheduler:
                 slot0.grs.append(GRPlacement(
                     tensor=tensor,
                     mtIteration=0,
+                    tiles=MFMATileRange(gr_k_start, gr_k_end,
+                                        gr_tile_start, gr_tile_end),
+                    subIterK_slot=0,
+                    partition=0,
+                ))
+
+        self._completed.add(Pass.GR)
+        return self._partitions[0]
+
+    def _place_GRs_PGR1(self) -> List[SubIterKSlot]:
+        """Place GRs for PGR=1: load next MT data, all in subIterK=0.
+
+        All GRs must complete before lr_inc in subIterK=1 swaps the read
+        buffer, so they cannot be distributed across subIterKs.
+        """
+        cfg = self.config
+        cur = self._partition_tile_range(0)
+        slot0 = self._partitions[0][0]
+
+        items = [('A', cur['A'], cfg.grA),
+                 ('B', cur['B'], cfg.grB)]
+        if cfg.hasScale:
+            items.append(('SA', cur['A'], cfg.grSA))
+            items.append(('SB', cur['B'], cfg.grSB))
+
+        for tensor, (t_start, t_end), gr_gran in items:
+            mn = gr_gran.mn
+            k_gran = gr_gran.k
+
+            gr_tile_start = (t_start // mn) * mn
+            gr_tile_end = ((t_end + mn - 1) // mn) * mn
+
+            num_k_chunks = cfg.numSubIterK // k_gran
+            for chunk_idx in range(num_k_chunks):
+                gr_k_start = chunk_idx * k_gran
+                gr_k_end = gr_k_start + k_gran
+
+                slot0.grs.append(GRPlacement(
+                    tensor=tensor,
+                    mtIteration=1,
                     tiles=MFMATileRange(gr_k_start, gr_k_end,
                                         gr_tile_start, gr_tile_end),
                     subIterK_slot=0,
