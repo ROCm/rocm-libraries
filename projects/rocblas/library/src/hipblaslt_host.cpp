@@ -107,8 +107,8 @@ namespace
         if(status != expect)
         {
             rocblas_internal_ostream msg;
-            print_if_verbose(msg << "rocBLAS error received at " << __FILE__ << ":"
-                                 << __LINE__ << std::endl);
+            print_if_verbose(msg << "rocBLAS error received at " << __FILE__ << ":" << __LINE__
+                                 << std::endl);
             return rocblas_status_internal_error;
         }
         return rocblas_status_success;
@@ -146,7 +146,7 @@ namespace
         std::complex<float>,
         std::conditional_t<std::is_same_v<T, rocblas_double_complex>,
                            std::complex<double>,
-                           std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>;    
+                           std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>;
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
      ****************************************************************/
