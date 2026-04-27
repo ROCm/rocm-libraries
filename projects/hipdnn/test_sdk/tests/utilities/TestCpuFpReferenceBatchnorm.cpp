@@ -15,7 +15,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
-#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 #include "GoldenReferenceCpu.hpp"
 #endif
 
@@ -25,7 +25,7 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
 using hipdnn_test_sdk::detail::safeTestTypeCast;
 
-#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 template <class T>
 class TestCpuBatchnormFwdInferenceGoldenReference : public TestGoldenReferenceCpu
@@ -98,7 +98,7 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32,
                          getGoldenReferenceParams("BatchnormFwdInference/ncdhw/fp32"));
 
-#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
+#endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 //--------------------------
 

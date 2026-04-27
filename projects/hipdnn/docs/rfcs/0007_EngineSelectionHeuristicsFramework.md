@@ -82,7 +82,7 @@ This RFC preserves **equivalent deterministic ordering** as one **policy** (the 
 
 - Inner “stage chains” inside a single policy (for example PerEngine → Config → StaticOrdering as mandatory sub-steps). Policy composition is expressed by **ordering multiple policy plugins** in the outer list, not by nested pipelines inside one policy plugin implementation.
 - Mandating async selection in v1; the API is only **shaped** to allow it later (including **`Finalize`** + **`GetSortedEngineIds`** as a two-phase C selection API in [§8.9](#89-finalize-and-sorted-results)).
-- Tunning is not approached in this RFC. Including auto-tuning and exhaustive tuning (both of which will require device access). 
+- Tunning is not approached in this RFC. Including auto-tuning and exhaustive tuning (both of which will require device access).
 
 ---
 

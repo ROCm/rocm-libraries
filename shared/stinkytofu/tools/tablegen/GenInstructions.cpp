@@ -1872,6 +1872,7 @@ bool genAllInstructions(const std::string& inputDir, const std::string& outputDi
         for (const auto& inst : p.second) allMnemonics.insert(inst.mnemonic);
     std::vector<std::string> unifiedList(allMnemonics.begin(), allMnemonics.end());
     std::sort(unifiedList.begin(), unifiedList.end());
+    unifiedList.push_back("FENCE");
     unifiedList.push_back("LABEL");
     unifiedList.push_back("PHI");
     unifiedList.push_back("INVALID");

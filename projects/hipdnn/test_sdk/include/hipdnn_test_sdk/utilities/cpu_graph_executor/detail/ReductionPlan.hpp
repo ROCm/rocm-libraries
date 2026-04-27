@@ -109,12 +109,11 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        ReductionParams params(*tensorMap.at(nodeAttributes->in_tensor_uid()),
-                               *tensorMap.at(nodeAttributes->out_tensor_uid()),
-                               nodeAttributes->mode());
 
         return std::make_unique<ReductionPlan<XDataType, YDataType, ComputeDataType>>(
-            std::move(params));
+            ReductionParams(*tensorMap.at(nodeAttributes->in_tensor_uid()),
+                            *tensorMap.at(nodeAttributes->out_tensor_uid()),
+                            nodeAttributes->mode()));
     }
 };
 

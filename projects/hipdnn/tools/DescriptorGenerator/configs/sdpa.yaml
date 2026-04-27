@@ -459,7 +459,7 @@ operation:
       fbs_field: "diagonal_alignment"
       attr_name: "HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::DiagonalAlignment"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment"
       frontend_type: "DiagonalAlignment"
       required: false
       default_value: "DiagonalAlignment::TOP_LEFT"
@@ -486,7 +486,7 @@ operation:
       fbs_field: "implementation"
       attr_name: "HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::AttentionImplementation"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation"
       frontend_type: "AttentionImplementation"
       required: false
       default_value: "AttentionImplementation::AUTO"

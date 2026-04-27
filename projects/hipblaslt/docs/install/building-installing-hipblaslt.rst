@@ -28,42 +28,45 @@ For more information, see the :doc:`ROCm quick start installation guide <rocm-in
 
    sudo apt update && sudo apt install hipblaslt
 
-Building hipBLASLt using the install script
-===========================================
+Building hipBLASLt using invoke
+================================
 
-You can use ``install.sh`` script to build and install hipBLASLt and its dependencies.
-The following sections explain how to use the ``install.sh`` script, including the various script options.
-
-Building the library dependencies and library
----------------------------------------------
-
-The root of the `hipblaslt folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt>`_
-in the `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ GitHub repository contains the ``install.sh`` Bash script for building and installing hipBLASLt with a single command.
-It includes several options and hard-coded configuration items that can be specified through invoking CMake directly,
-but it's a great way to get started quickly and can serve as an example showing how to build and install hipBLASLt.
-A few commands in the script require ``sudo`` access, which might prompt you for a password.
+hipBLASLt provides an `invoke <https://www.pyinvoke.org/>`_-based task runner for building and
+installing hipBLASLt and its dependencies. This supports Linux and Windows (ROCm 7.0+).
 
 .. note::
 
    To build ROCm 6.4 and older, use the hipBLASLt repository at `<https://github.com/ROCm/hipBLASLt>`_.
    Select the documentation associated with the release you want to build.
 
-Some typical examples showing how to use ``install.sh`` to build the library dependencies and library are
-listed in the table below:
+Setting up the environment
+--------------------------
+
+Create a virtual environment and install the Python build dependencies:
+
+.. code-block:: bash
+
+   python3 -m venv .venv
+   source .venv/bin/activate   # Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+
+Building the library dependencies and library
+---------------------------------------------
+
+Here are some typical examples showing how to build the library:
 
 .. csv-table::
    :header: "Command","Description"
-   :widths: 30, 100
+   :widths: 40, 100
 
-   "``./install.sh -h``", "Help information."
-   "``./install.sh -d``", "Build the library and dependencies in your local directory. The ``-d`` flag only needs to be used once. For subsequent invocations of ``install.sh``, it's not necessary to rebuild the dependencies."
-   "``./install.sh``", "Build the library in your local directory. This assumes the dependencies are already built."
-   "``./install.sh -i``", "Build the library, then build and install the hipBLASLt package in  ``/opt/rocm/hipblaslt``. This prompts you for  ``sudo`` access and installs it for all users. To keep hipBLASLt in your local directory, don't use the flag."
+   "``inv --help build``", "Help information."
+   "``inv build --install-deps``", "Install system dependencies and build the library."
+   "``inv build``", "Build the library. Assumes dependencies are already installed."
+   "``inv build --install-pkg``", "Build the library and install the hipBLASLt package."
 
 Building the library, client, and all dependencies
--------------------------------------------------------------------
+---------------------------------------------------
 
-This section explains how to build the library, client, library dependencies, and client dependencies.
 The client contains the executables listed in the table below.
 
 ============================= ========================================================
@@ -73,34 +76,31 @@ Executable Name                Description
 ``hipblaslt-bench``            Executable to benchmark or test individual functions
 ============================= ========================================================
 
-Common ways to use ``install.sh`` to build the dependencies, library, and client are
-listed in the table below:
+Here are some common ways to build the dependencies, library, and client:
 
 .. csv-table::
    :header: "Command","Description"
-   :widths: 30, 100
+   :widths: 40, 100
 
-   "``./install.sh -h``", "Help information."
-   "``./install.sh -dc``", "Build the library dependencies, client dependencies, library, and client in your local directory. The ``-d`` flag only needs to be used once. For subsequent invocations of ``install.sh``, it's not necessary to rebuild the dependencies."
-   "``./install.sh -c``", "Build the library and client in your local directory. This assumes the dependencies are already built."
-   "``./install.sh -idc``", "Build the library dependencies, client dependencies, library, and client, then build and install the hipBLASLt package. This prompts you for  ``sudo`` access. To install it for all users,  use the ``-i`` flag. To keep hipBLASLt in your local directory, don't use the flag."
-   "``./install.sh -ic``", "Build and install the hipBLASLt package and build the client. This prompts you for ``sudo`` access and installs it for all users. To keep hipBLASLt in your local directory, don`t use the flag."
+   "``inv --help build``", "Help information."
+   "``inv build --install-deps --clients``", "Install system dependencies and build the library and client."
+   "``inv build --clients``", "Build the library and client. Assumes dependencies are already installed."
+   "``inv build --install-deps --clients --install-pkg``", "Build everything and install the hipBLASLt package."
 
 Static library
-----------------
+--------------
 
-To build static libraries with ``install.sh``, use the ``--static`` option.
+To build a static library, use the ``--static`` option.
 This produces a non-standard static library build. This means it has an additional runtime dependency
 consisting of the entire ``hipblaslt/`` subdirectory, which is located in the ``/opt/rocm/lib`` folder.
 You can move this folder, but you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH``
 to the new location.
 
 Dependencies
---------------
+------------
 
-Dependencies are listed in the ``install.sh`` script. Use ``install.sh`` with the ``-d`` option to install the dependencies.
-CMake has a minimum version requirement which is listed in ``install.sh``.
-See the ``--cmake_install`` flag in ``install.sh`` to upgrade automatically.
+Python dependencies are listed in ``requirements.txt`` and installed via ``pip install -r requirements.txt``.
+System dependencies (such as compilers and NUMA) can be installed by passing ``--install-deps`` to ``inv build``.
 
 Manual build for all supported platforms
 ========================================
