@@ -182,6 +182,11 @@ struct WarpDecodeGateUpKernel
 
         const int32_t e = kargs.p_router_ids[token_b * kargs.top_k + expert_k];
         const index_t w_row = e * kargs.inter + neuron_j;
+        constexpr index_t kMaxScaleBlocks = 128;
+
+        __shared__ ComputeDataType x_scale_lds[kMaxScaleBlocks];
+        __shared__ ComputeDataType w_gate_scale_lds[kMaxScaleBlocks];
+        __shared__ ComputeDataType w_up_scale_lds[kMaxScaleBlocks];
 
         // --- Loop-invariant scale values ---
         ComputeDataType x_scale_val = type_convert<ComputeDataType>(1.0f);
@@ -224,6 +229,53 @@ struct WarpDecodeGateUpKernel
             if(kargs.p_w_up_scale)
                 w_up_scale_val = type_convert<ComputeDataType>(
                     static_cast<const WScaleDataType*>(kargs.p_w_up_scale)[e * kargs.inter + neuron_j]);
+        }
+
+        bool use_x_scale_lds = false;
+        if constexpr(ScaleLayoutTraits<XScaleLayout>::is_block2d)
+        {
+            constexpr index_t Block_N = ScaleLayoutTraits<XScaleLayout>::block_n;
+            constexpr index_t Block_K = ScaleLayoutTraits<XScaleLayout>::block_k;
+            const index_t num_scale_blocks = kargs.hidden / Block_K;
+            use_x_scale_lds = kargs.p_x_scale != nullptr && num_scale_blocks <= kMaxScaleBlocks;
+            if(use_x_scale_lds)
+            {
+                const auto* ptr = static_cast<const XScaleDataType*>(kargs.p_x_scale);
+                const index_t scale_row = token_b / Block_N;
+                for(index_t c = get_thread_id(); c < num_scale_blocks; c += kBlockSize)
+                {
+                    x_scale_lds[c] = type_convert<ComputeDataType>(
+                        ptr[scale_row * num_scale_blocks + c]);
+                }
+            }
+        }
+
+        bool use_w_scale_lds = false;
+        if constexpr(ScaleLayoutTraits<WScaleLayout>::is_block2d)
+        {
+            constexpr index_t Block_N = ScaleLayoutTraits<WScaleLayout>::block_n;
+            constexpr index_t Block_K = ScaleLayoutTraits<WScaleLayout>::block_k;
+            const index_t num_scale_blocks = kargs.hidden / Block_K;
+            use_w_scale_lds = kargs.p_w_gate_scale != nullptr && kargs.p_w_up_scale != nullptr &&
+                              num_scale_blocks <= kMaxScaleBlocks;
+            if(use_w_scale_lds)
+            {
+                const auto* gate_ptr = static_cast<const WScaleDataType*>(kargs.p_w_gate_scale);
+                const auto* up_ptr   = static_cast<const WScaleDataType*>(kargs.p_w_up_scale);
+                const index_t scale_row = w_row / Block_N;
+                for(index_t c = get_thread_id(); c < num_scale_blocks; c += kBlockSize)
+                {
+                    w_gate_scale_lds[c] = type_convert<ComputeDataType>(
+                        gate_ptr[scale_row * num_scale_blocks + c]);
+                    w_up_scale_lds[c] = type_convert<ComputeDataType>(
+                        up_ptr[scale_row * num_scale_blocks + c]);
+                }
+            }
+        }
+
+        if(use_x_scale_lds || use_w_scale_lds)
+        {
+            block_sync_lds();
         }
 
         // --- Tensor views (kVector as guaranteed vector size for correct pk_fp4_t handling) ---
@@ -279,18 +331,30 @@ struct WarpDecodeGateUpKernel
 
             ComputeDataType xs = x_scale_val;
             if constexpr(ScaleLayoutTraits<XScaleLayout>::is_block2d)
-                xs = load_block2d_scale<XScaleLayout, XScaleDataType>(
-                    kargs.p_x_scale, token_b, k_base, kargs.hidden);
+            {
+                constexpr index_t Block_K = ScaleLayoutTraits<XScaleLayout>::block_k;
+                xs = use_x_scale_lds ? x_scale_lds[k_base / Block_K]
+                                      : load_block2d_scale<XScaleLayout, XScaleDataType>(
+                                            kargs.p_x_scale, token_b, k_base, kargs.hidden);
+            }
 
             ComputeDataType gs = w_gate_scale_val;
             if constexpr(ScaleLayoutTraits<WScaleLayout>::is_block2d)
-                gs = load_block2d_scale<WScaleLayout, WScaleDataType>(
-                    kargs.p_w_gate_scale, w_row, k_base, kargs.hidden);
+            {
+                constexpr index_t Block_K = ScaleLayoutTraits<WScaleLayout>::block_k;
+                gs = use_w_scale_lds ? w_gate_scale_lds[k_base / Block_K]
+                                      : load_block2d_scale<WScaleLayout, WScaleDataType>(
+                                            kargs.p_w_gate_scale, w_row, k_base, kargs.hidden);
+            }
 
             ComputeDataType us = w_up_scale_val;
             if constexpr(ScaleLayoutTraits<WScaleLayout>::is_block2d)
-                us = load_block2d_scale<WScaleLayout, WScaleDataType>(
-                    kargs.p_w_up_scale, w_row, k_base, kargs.hidden);
+            {
+                constexpr index_t Block_K = ScaleLayoutTraits<WScaleLayout>::block_k;
+                us = use_w_scale_lds ? w_up_scale_lds[k_base / Block_K]
+                                      : load_block2d_scale<WScaleLayout, WScaleDataType>(
+                                            kargs.p_w_up_scale, w_row, k_base, kargs.hidden);
+            }
 
             index_t sub = 0;
             constexpr auto spans = decltype(x_tile)::get_distributed_spans();
