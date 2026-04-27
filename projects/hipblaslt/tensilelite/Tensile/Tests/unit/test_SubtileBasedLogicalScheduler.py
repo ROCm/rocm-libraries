@@ -15,6 +15,7 @@ Organized by pass:
   12. Integration    — Full pipeline with real instructions
 """
 
+import pytest
 from Tensile.Components.SubtileBasedKernel import TileInfo
 from Tensile.Components.SubtileBasedLogicalScheduler import (
     LogicalScheduler,
@@ -121,6 +122,24 @@ def make_cfg_bf16(MT0=256, MT1=256, depthU=64, numPartM=1, numPartN=1):
         grB=ReadGranularity(mn=1, k=2),
         numPartitionsM=numPartM,
         numPartitionsN=numPartN,
+    )
+
+
+def make_cfg_bf16_pgr0(MT0=256, MT1=256, depthU=64):
+    """Build BF16 config with pgr=0, plr=0."""
+    kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
+    tiA = TileInfo('A', kernel)
+    tiB = TileInfo('B', kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        pgr=0,
+        plr=0,
     )
 
 
@@ -1520,6 +1539,32 @@ if __name__ == "__main__":
     import io
 
     use_bf16 = "--bf16" in sys.argv
+    use_pgr0 = "--pgr0" in sys.argv
+
+    if use_pgr0:
+        cfg = make_cfg_bf16_pgr0()
+
+        print(f"Config: numMFMATilesM={cfg.numMFMATilesM}, "
+              f"numMFMATilesN={cfg.numMFMATilesN}, "
+              f"numSubIterK={cfg.numSubIterK}, "
+              f"hasScale={cfg.hasScale}, pgr={cfg.pgr}, plr={cfg.plr}")
+        print()
+
+        sched = LogicalScheduler(cfg)
+
+        steps = [
+            ("Place LRs", lambda: (sched.place_LRs(), sched.print_lr())),
+            ("Place GRs", lambda: (sched.place_GRs(), sched.print_gr())),
+        ]
+
+        for title, run in steps:
+            _, output = run()
+            print(f"{'=' * 60}")
+            print(f"  {title}")
+            print(f"{'=' * 60}")
+            print(output)
+
+        sys.exit(0)
 
     if use_bf16:
         kernel = create_kernel(384, 256, fp4=False, depthU=64)
@@ -1736,3 +1781,110 @@ class TestBuildNll:
                             cnts = src.wait_gr_counts
                             assert cnts.A == 0 and cnts.B == 0 and cnts.SA == 0 and cnts.SB == 0, \
                                 f"NLL WaitGR should have zeroed counts, got {cnts}"
+
+
+# ══════════════════════════════════════════════════════════════
+# PGR=0 / PLR=0 tests
+# ══════════════════════════════════════════════════════════════
+
+class TestPGR0Config:
+
+    def test_pgr0_requires_plr0(self):
+        with pytest.raises(AssertionError, match="pgr=0 requires plr=0"):
+            SchedulerConfig(
+                numMFMATilesM=8, numMFMATilesN=8, numSubIterK=2,
+                lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
+                grA=ReadGranularity(mn=1, k=2), grB=ReadGranularity(mn=1, k=2),
+                pgr=0, plr=1,
+            )
+
+    def test_pgr0_requires_single_partition(self):
+        with pytest.raises(AssertionError, match="pgr=0 requires numPartitions=1"):
+            SchedulerConfig(
+                numMFMATilesM=8, numMFMATilesN=8, numSubIterK=2,
+                lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
+                grA=ReadGranularity(mn=1, k=2), grB=ReadGranularity(mn=1, k=2),
+                pgr=0, plr=0, numPartitionsN=2,
+            )
+
+
+class TestPlaceLRs_PLR0:
+
+    def test_bf16_plr0_structure(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        partitions = sched.place_LRs()
+
+        assert len(partitions) == 1
+        slots = partitions[0]
+        numK = cfg.numSubIterK
+
+        for k in range(numK):
+            slot = slots[k]
+            assert slot.mfma is not None
+            assert slot.mfma.subIterK == k
+            for lr in slot.lrs:
+                assert lr.mtIteration == 0
+                assert lr.tiles.subIterK_start == k
+                assert lr.tiles.subIterK_end == k + 1
+
+    def test_bf16_plr0_tensors(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        partitions = sched.place_LRs()
+        slots = partitions[0]
+
+        for k in range(cfg.numSubIterK):
+            _assert_slot_lrs(slots[k], ['A', 'B'])
+
+    def test_bf16_plr0_print_lr(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.place_LRs()
+        output = sched.print_lr()
+
+        assert "MT n," in output
+        assert "MT n+1" not in output
+
+
+class TestPlaceGRs_PGR0:
+
+    def test_bf16_pgr0_all_in_subIterK0(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.place_LRs()
+        sched.place_GRs()
+        slots = sched._partitions[0]
+
+        for gr in slots[0].grs:
+            assert gr.subIterK_slot == 0
+            assert gr.mtIteration == 0
+
+        for k in range(1, cfg.numSubIterK):
+            assert len(slots[k].grs) == 0
+
+    def test_bf16_pgr0_covers_full_k(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.place_LRs()
+        sched.place_GRs()
+        slots = sched._partitions[0]
+
+        gr_a = [gr for gr in slots[0].grs if gr.tensor == 'A']
+        all_k = set()
+        for gr in gr_a:
+            for k in range(gr.tiles.subIterK_start, gr.tiles.subIterK_end):
+                all_k.add(k)
+        assert all_k == set(range(cfg.numSubIterK))
+
+    def test_bf16_pgr0_print_gr(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.place_LRs()
+        sched.place_GRs()
+        output = sched.print_gr()
+
+        assert "GR A (MT n," in output
+        assert "GR B (MT n," in output
+        assert "MT n+1" not in output
+        assert "MT n+2" not in output

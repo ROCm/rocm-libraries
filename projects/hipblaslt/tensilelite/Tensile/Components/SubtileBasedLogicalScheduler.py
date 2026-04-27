@@ -130,6 +130,15 @@ class SchedulerConfig:
     grSB: Optional[ReadGranularity] = None
     numPartitionsM: int = 1   # partition grid in M dimension
     numPartitionsN: int = 1   # partition grid in N dimension
+    pgr: int = 1              # Prefetch Global Read: 0 = current MT, 1 = next MT
+    plr: int = 1              # Prefetch Local Read: 0 = current subIterK, 1 = next subIterK
+
+    def __post_init__(self):
+        assert self.pgr in (0, 1), f"pgr must be 0 or 1, got {self.pgr}"
+        assert self.plr in (0, 1), f"plr must be 0 or 1, got {self.plr}"
+        if self.pgr == 0:
+            assert self.plr == 0, "pgr=0 requires plr=0"
+            assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
 
     @property
     def hasScale(self) -> bool:
@@ -224,7 +233,7 @@ class LRPlacement(Emittable):
 class GRPlacement(Emittable):
     """Global Read placement for one tensor in one subIterK slot."""
     tensor: str                # 'A', 'B', 'SA', 'SB'
-    mtIteration: int           # 1 = next MT, 2 = two MTs ahead
+    mtIteration: int           # 0 = current MT, 1 = next MT, 2 = two MTs ahead
     tiles: MFMATileRange
     subIterK_slot: int         # which subIterK this GR is placed in
     partition: int = 0         # which partition this GR belongs to
@@ -434,6 +443,9 @@ class LogicalScheduler:
           placed so far across partitions. Skips redundant K-prefetch when
           the same data was already loaded by an earlier partition.
         """
+        if self.config.plr == 0:
+            return self._place_LRs_PLR0()
+
         cfg = self.config
         numP = cfg.numPartitions
         part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
@@ -468,6 +480,59 @@ class LogicalScheduler:
         self._completed.add(Pass.LR)
         return partitions
 
+    def _create_partition_slots(self, cur: dict) -> List[SubIterKSlot]:
+        """Create SubIterKSlots with MFMAs placed for one partition."""
+        numK = self.config.numSubIterK
+        slots = [SubIterKSlot(subIterK=k) for k in range(numK)]
+        for k in range(numK):
+            slots[k].mfma = MFMAPlacement(
+                subIterK=k,
+                tileA=MFMATileRange(k, k + 1, cur['A'][0], cur['A'][1]),
+                tileB=MFMATileRange(k, k + 1, cur['B'][0], cur['B'][1]),
+            )
+        return slots
+
+    def _lr_tensors(self) -> list:
+        """Return list of (tensor_name, ReadGranularity) for all LR tensors."""
+        cfg = self.config
+        tensors = [('A', cfg.lrA), ('B', cfg.lrB)]
+        if cfg.hasScale:
+            tensors.append(('SA', cfg.lrSA))
+            tensors.append(('SB', cfg.lrSB))
+        return tensors
+
+    def _place_LRs_PLR0(self) -> List[List[SubIterKSlot]]:
+        """Place MFMAs and LRs for PLR=0: no prefetching.
+
+        Each LR loads data for its own subIterK. All LRs have mtIteration=0.
+        Single partition only (enforced by config validation).
+        """
+        cfg = self.config
+        numK = cfg.numSubIterK
+        cur = self._partition_tile_range(0)
+        slots = self._create_partition_slots(cur)
+
+        for tensor, gran in self._lr_tensors():
+            side_key = 'A' if tensor in ('A', 'SA') else 'B'
+            ts, te = cur[side_key]
+            k_gran = gran.k
+            num_chunks = numK // k_gran
+            for chunk_idx in range(num_chunks):
+                lr_k_start = chunk_idx * k_gran
+                lr_k_end = lr_k_start + k_gran
+                slot_k = lr_k_start
+                lr = LRPlacement(
+                    tensor=tensor,
+                    mtIteration=0,
+                    tiles=MFMATileRange(lr_k_start, lr_k_end, ts, te),
+                    subIterK_slot=slot_k,
+                )
+                slots[slot_k].lrs.append(lr)
+
+        self._partitions = [slots]
+        self._completed.add(Pass.LR)
+        return self._partitions
+
     def _place_LRs_for_partition(self, cur: tuple, nxt: tuple,
                                   is_last: bool,
                                   load: dict,
@@ -477,22 +542,10 @@ class LogicalScheduler:
         numK = cfg.numSubIterK
         multi_part = cfg.numPartitions > 1
 
-        slots = [SubIterKSlot(subIterK=k) for k in range(numK)]
+        slots = self._create_partition_slots(cur)
         slot_mt = {}  # slot_k → lr_mt string, for MT-homogeneity enforcement
 
-        # MFMAs
-        for k in range(numK):
-            slots[k].mfma = MFMAPlacement(
-                subIterK=k,
-                tileA=MFMATileRange(k, k + 1, cur['A'][0], cur['A'][1]),
-                tileB=MFMATileRange(k, k + 1, cur['B'][0], cur['B'][1]),
-            )
-
-        # All tensors that can participate.
-        all_tensors = [('A', cfg.lrA), ('B', cfg.lrB)]
-        if cfg.hasScale:
-            all_tensors.append(('SA', cfg.lrSA))
-            all_tensors.append(('SB', cfg.lrSB))
+        all_tensors = self._lr_tensors()
 
         # Place LRs grouped by k_gran.
         # - Non-wrapping (K-prefetch): all tensors, deduped by placed set.
@@ -945,6 +998,9 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.LR)
 
+        if self.config.pgr == 0:
+            return self._place_GRs_PGR0()
+
         part_ranges = [self._partition_tile_range(pi)
                        for pi in range(self.config.numPartitions)]
 
@@ -957,6 +1013,46 @@ class LogicalScheduler:
         lr_mt_n_info = self._build_lr_conflict_map()
         # Distribute GRs accross partition.
         self._distribute_grs(gr_list, lr_mt_n_info)
+
+        self._completed.add(Pass.GR)
+        return self._partitions[0]
+
+    def _place_GRs_PGR0(self) -> List[SubIterKSlot]:
+        """Place GRs for PGR=0: load current MT data before any LR.
+
+        All GRs are placed in subIterK=0 with mtIteration=0.
+        Single partition only. No LDS conflict checking needed.
+        """
+        cfg = self.config
+        cur = self._partition_tile_range(0)
+        slot0 = self._partitions[0][0]
+
+        items = [('A', cur['A'], cfg.grA),
+                 ('B', cur['B'], cfg.grB)]
+        if cfg.hasScale:
+            items.append(('SA', cur['A'], cfg.grSA))
+            items.append(('SB', cur['B'], cfg.grSB))
+
+        for tensor, (t_start, t_end), gr_gran in items:
+            mn = gr_gran.mn
+            k_gran = gr_gran.k
+
+            gr_tile_start = (t_start // mn) * mn
+            gr_tile_end = ((t_end + mn - 1) // mn) * mn
+
+            num_k_chunks = cfg.numSubIterK // k_gran
+            for chunk_idx in range(num_k_chunks):
+                gr_k_start = chunk_idx * k_gran
+                gr_k_end = gr_k_start + k_gran
+
+                slot0.grs.append(GRPlacement(
+                    tensor=tensor,
+                    mtIteration=0,
+                    tiles=MFMATileRange(gr_k_start, gr_k_end,
+                                        gr_tile_start, gr_tile_end),
+                    subIterK_slot=0,
+                    partition=0,
+                ))
 
         self._completed.add(Pass.GR)
         return self._partitions[0]
