@@ -21,7 +21,7 @@ auto GenCases(bool smoke_test,
               std::vector<size_t> input_dims,
               std::vector<size_t> weight_tensor_dims,
               std::string output_type,
-              std::string layout,
+              std::string in_layout,
               std::string fil_layout,
               std::string out_layout,
               std::vector<int> pads_strides_dilations)
@@ -33,7 +33,7 @@ auto GenCases(bool smoke_test,
     baseParams.base_params.do_forward          = {enable_forward};
     baseParams.base_params.do_backward_data    = {enable_backward_data};
     baseParams.base_params.do_backward_weights = {enable_backward_weights};
-    baseParams.in_layout                       = {std::move(layout)};
+    baseParams.in_layout                       = {std::move(in_layout)};
     baseParams.fil_layout                      = {std::move(fil_layout)};
     baseParams.out_layout                      = {std::move(out_layout)};
 

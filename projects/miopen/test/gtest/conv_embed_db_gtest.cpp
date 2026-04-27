@@ -59,7 +59,7 @@ struct conv_embed_db_test : public conv2d_test_base<T, TestCase>
 using CPU_ConvEmbedConfig_BFP16 = conv_embed_db_test<bfloat16>;
 using CPU_ConvEmbedConfig_FP16  = conv_embed_db_test<half_float::half>;
 using CPU_ConvEmbedConfig_FP32  = conv_embed_db_test<float>;
-using CPU_ConvEmbedConfig_INT8  = conv_embed_db_test<int8_t>;
+using CPU_ConvEmbedConfig_I8  = conv_embed_db_test<int8_t>;
 
 TEST_P(CPU_ConvEmbedConfig_BFP16, TestBFloat16)
 {
@@ -123,7 +123,7 @@ TEST_P(CPU_ConvEmbedConfig_FP32, TestFloat32)
 #endif // MIOPEN_EMBED_DB
 }
 
-TEST_P(CPU_ConvEmbedConfig_INT8, TestInt8)
+TEST_P(CPU_ConvEmbedConfig_I8, TestInt8)
 {
 #if MIOPEN_EMBED_DB
     const auto& handle = get_handle();
@@ -147,7 +147,7 @@ TEST_P(CPU_ConvEmbedConfig_INT8, TestInt8)
     INSTANTIATE_TEST_SUITES(id, CPU_ConvEmbedConfig_BFP16, bfloat16, __VA_ARGS__);        \
     INSTANTIATE_TEST_SUITES(id, CPU_ConvEmbedConfig_FP16, half_float::half, __VA_ARGS__); \
     INSTANTIATE_TEST_SUITES(id, CPU_ConvEmbedConfig_FP32, float, __VA_ARGS__);            \
-    INSTANTIATE_TEST_SUITES(id, CPU_ConvEmbedConfig_INT8, int8_t, __VA_ARGS__)
+    INSTANTIATE_TEST_SUITES(id, CPU_ConvEmbedConfig_I8, int8_t, __VA_ARGS__)
 
 INSTANTIATE_ALL_TEST_SUITES(0, {128, 128, 28, 28}, {128, 128, 3, 3}, {1, 1, 1, 1, 1, 1});
 INSTANTIATE_ALL_TEST_SUITES(1, {128, 256, 56, 56}, {512, 256, 1, 1}, {0, 0, 2, 2, 1, 1});

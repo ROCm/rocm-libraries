@@ -56,7 +56,7 @@ struct conv_extra_test : public conv2d_test_base<T, TestCase>
 using GPU_conv_extra_BFP16 = conv_extra_test<bfloat16>;
 using GPU_conv_extra_FP16  = conv_extra_test<half_float::half>;
 using GPU_conv_extra_FP32  = conv_extra_test<float>;
-using GPU_conv_extra_INT8  = conv_extra_test<int8_t>;
+using GPU_conv_extra_I8  = conv_extra_test<int8_t>;
 
 TEST_P(GPU_conv_extra_BFP16, TestBFloat16)
 {
@@ -94,7 +94,7 @@ TEST_P(GPU_conv_extra_FP32, TestFloat32)
     }
 }
 
-TEST_P(GPU_conv_extra_INT8, TestInt8)
+TEST_P(GPU_conv_extra_I8, TestInt8)
 {
     if(IsTestSupportedForDevice())
     {
@@ -110,7 +110,7 @@ TEST_P(GPU_conv_extra_INT8, TestInt8)
     INSTANTIATE_TEST_SUITES(id, GPU_conv_extra_BFP16, bfloat16, __VA_ARGS__);        \
     INSTANTIATE_TEST_SUITES(id, GPU_conv_extra_FP16, half_float::half, __VA_ARGS__); \
     INSTANTIATE_TEST_SUITES(id, GPU_conv_extra_FP32, float, __VA_ARGS__);            \
-    INSTANTIATE_TEST_SUITES(id, GPU_conv_extra_INT8, int8_t, __VA_ARGS__)
+    INSTANTIATE_TEST_SUITES(id, GPU_conv_extra_I8, int8_t, __VA_ARGS__)
 
 #define INSTANTIATE_FLOAT_SPECIFIC_TEST_SUITES(id, ...) \
     INSTANTIATE_TEST_SUITES(id, GPU_conv_extra_FP32, float, __VA_ARGS__)
