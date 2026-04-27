@@ -92,7 +92,6 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     )
 
     set_target_properties(${lib_name} PROPERTIES
-        SOVERSION ${MIOpen_SOVERSION}
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN 1
     )
