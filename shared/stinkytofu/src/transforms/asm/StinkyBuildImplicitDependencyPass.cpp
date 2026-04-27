@@ -108,6 +108,50 @@ static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
     for (int tokenId : mt.tokens) addUniqueLdsSrc(inst, tokenId);
 }
 
+static bool isMemTokenCandidate(const StinkyInstruction& inst) {
+    return isTensorLoad(inst) || isDSWrite(inst) || isDSRead(inst);
+}
+
+static const char* memTokenCandidateKind(const StinkyInstruction& inst) {
+    if (isTensorLoad(inst)) return "tensor_load";
+    if (isDSWrite(inst)) return "ds_store";
+    if (isDSRead(inst)) return "ds_load";
+    return "unknown";
+}
+
+static void checkConsistentMemTokens(const BasicBlock& bb) {
+    bool hasWithToken = false;
+    bool hasWithoutToken = false;
+
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        const auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!inst || !isMemTokenCandidate(*inst)) continue;
+
+        if (inst->getModifier<MemTokenData>())
+            hasWithToken = true;
+        else
+            hasWithoutToken = true;
+    }
+
+    if (!hasWithToken || !hasWithoutToken) return;
+
+    std::cerr << "[BuildImplicitDep] ERROR: BB \"" << bb.getLabel()
+              << "\" has inconsistent memory tokens — some ds_load/ds_store/tensor_load"
+                 " instructions have MemTokenData while others do not:\n";
+
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        const auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!inst || !isMemTokenCandidate(*inst)) continue;
+
+        const bool hasToken = inst->getModifier<MemTokenData>() != nullptr;
+        std::cerr << "  " << (hasToken ? "[has token]   " : "[NO TOKEN]    ")
+                  << memTokenCandidateKind(*inst) << " (" << inst->getHwInstDesc()->mnemonic
+                  << ")\n";
+    }
+
+    assert(false && "inconsistent MemTokenData across ds_load/ds_store/tensor_load in basic block");
+}
+
 void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
     if (!passCtx.getPassFeatureConfig().barrierConfig.unrollMovableBarrier) {
         PASS_DEBUG(std::cerr << "[BuildImplicitDep] skip BB label=\"" << bb.getLabel()
@@ -115,16 +159,14 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
         return;
     }
 
+    checkConsistentMemTokens(bb);
+
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!inst) continue;
 
         const MemTokenData* mt = inst->getModifier<MemTokenData>();
-        if (!mt) {
-            assert(!isTensorLoad(*inst) && !isDSRead(*inst) && !isDSWrite(*inst) &&
-                   "tensor_load/ds_read/ds_write must have MemTokenData");
-            continue;
-        }
+        if (!mt) continue;
         assert(!mt->tokens.empty() && "MemTokenData with empty tokens");
 
         if (isBarrier(*inst))
@@ -135,7 +177,7 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
             processLdsReader(*inst, *mt, bb.getLabel());
         else
             assert(false &&
-                   "instruction has MemTokenData but is not a barrier, "
+                   "instruction has MemTokenData but is not a barrier, fence, "
                    "tensor_load, ds_write, or ds_read");
     }
 }

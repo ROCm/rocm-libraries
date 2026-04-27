@@ -435,7 +435,7 @@ Mode fields (data fields with `type: mode`) require additional properties to wir
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `cpp_enum` | string | Yes | Fully-qualified SDK enum type (e.g., `hipdnn_data_sdk::data_objects::ConvMode`) |
+| `cpp_enum` | string | Yes | Fully-qualified SDK enum type (e.g., `hipdnn_flatbuffers_sdk::data_objects::ConvMode`) |
 | `frontend_type` | string | No | Frontend enum name when different from SDK short name (e.g., `ConvolutionMode` for SDK `ConvMode`) |
 | `backend_type_name` | string | Yes | Backend type tag (e.g., `HIPDNN_TYPE_CONVOLUTION_MODE`) |
 | `backend_setter` | string | Yes | Setter helper name (e.g., `setConvMode`) |
@@ -474,7 +474,7 @@ tensor_array_fields:
 - **Use `convolution_fwd.yaml` as the reference** -- it's the most complete and validated config
 - **Shared attributes**: Convolution ops all share `HIPDNN_ATTR_CONVOLUTION_*` attributes. Matmul, pointwise, and batchnorm each have their own attribute namespaces. Use `shared: true` on data fields and `compute_data_type_shared: true` at operation level for operations that reuse another operation's attribute enums.
 - **Frontend naming**: The packer function, node class, and attributes class names must match the existing frontend code. Check `frontend/include/hipdnn_frontend/` for the actual class names
-- **Enum fields**: Set `cpp_enum` to the fully-qualified FBS enum type (e.g., `hipdnn_data_sdk::data_objects::ConvMode`). Set `required: false` if the FBS has a default value. Always set `test_enum_value` to a valid enum constant.
+- **Enum fields**: Set `cpp_enum` to the fully-qualified FBS enum type (e.g., `hipdnn_flatbuffers_sdk::data_objects::ConvMode`). Set `required: false` if the FBS has a default value. Always set `test_enum_value` to a valid enum constant.
 
 ---
 

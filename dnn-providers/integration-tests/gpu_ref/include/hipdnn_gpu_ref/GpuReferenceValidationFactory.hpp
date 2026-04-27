@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_gpu_ref/GpuFpReferenceValidation.hpp>
