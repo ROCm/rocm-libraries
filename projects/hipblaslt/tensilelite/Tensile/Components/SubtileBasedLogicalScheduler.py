@@ -291,6 +291,7 @@ class WaitGROp(BaseOp):
     """Wait for global reads to complete. Optionally includes a sync barrier."""
     wait_gr_counts: Optional[WaitGRCounts] = None
     has_sync: bool = False
+    adjustVmcnt: bool = True
 
     def __post_init__(self):
         self.kind = 'wait_gr'
@@ -1427,10 +1428,13 @@ class LogicalScheduler:
                     lr.preOps = []
                     if gr_deps:
                         dep = gr_deps[0]
+                        cross_set = set(id(d) for d in cross)
+                        is_cross = id(dep) in cross_set
                         counts = self._compute_inflight_loads(
                             pi, lr.subIterK_slot, dep.ref.tensor, dep)
                         lr.preOps.append(WaitGROp(wait_gr_counts=counts,
-                                                  has_sync=True))
+                                                  has_sync=True,
+                                                  adjustVmcnt=is_cross))
 
                 # ── GRs ──
                 for gr in slot.grs:
@@ -1503,7 +1507,7 @@ class LogicalScheduler:
         Combines wait_gr/wait_gr_sync counts into a single BaseOp, deduplicates barrier ops
         (wait_lr_sync, wait_lr), and collects the rest.
         """
-        wait_gr_ops = []
+        wait_gr_ops_full = []
         has_wait_gr_sync = False
         seen_wait_lr = False
         others = []
@@ -1512,7 +1516,7 @@ class LogicalScheduler:
                 if isinstance(op, WaitGROp) and op.wait_gr_counts:
                     if op.has_sync:
                         has_wait_gr_sync = True
-                    wait_gr_ops.append(op.wait_gr_counts)
+                    wait_gr_ops_full.append(op)
                 elif isinstance(op, WaitLROp):
                     if not seen_wait_lr:
                         seen_wait_lr = True
@@ -1520,12 +1524,15 @@ class LogicalScheduler:
                 else:
                     others.append(op)
         result = []
-        if wait_gr_ops:
+        if wait_gr_ops_full:
             merged_counts = WaitGRCounts()
             for t in ('A', 'B', 'SA', 'SB'):
-                setattr(merged_counts, t, min(getattr(c, t) for c in wait_gr_ops))
+                setattr(merged_counts, t,
+                        min(getattr(op.wait_gr_counts, t) for op in wait_gr_ops_full))
+            adjust = all(op.adjustVmcnt for op in wait_gr_ops_full)
             result.append(WaitGROp(wait_gr_counts=merged_counts,
-                                   has_sync=has_wait_gr_sync))
+                                   has_sync=has_wait_gr_sync,
+                                   adjustVmcnt=adjust))
         result.extend(others)
         return result
 
