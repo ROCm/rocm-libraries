@@ -23,17 +23,6 @@ requires:
 Same dependency chain as wholesale deletion. Must coordinate with that
 migration.
 
-## `_frozen_config_key` cache key collisions
-
-The lazy-caching approach uses `_frozen_config_key(config)` to key
-`_idmap_cache`. Verified to produce distinct keys for Phase 1's twin
-configs, but the JSON serialization with `sort_keys=True` is not stress-
-tested across all dict variations:
-
-- Nested dicts with non-deterministic key insertion order
-- `IsaVersion` inside list values (not just top-level)
-- Mock objects that don't serialize cleanly
-
 ## Delete dead positional code
 
 Blocked on wiring `set_lr_needed_by_from_mfma_operands` into
