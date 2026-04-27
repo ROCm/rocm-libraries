@@ -11,6 +11,8 @@
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_4c_fp16_tile_conv_impl_v3.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_16c_fp16_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/utils/swizzle.hpp"
+#include "ck_tile/ops/direct_convolution/utils/matrix_layout.hpp"
 #pragma clang diagnostic pop
 
 #include <hip/hip_runtime.h>
@@ -388,6 +390,189 @@ TEST_F(LdsBankConflictTest, AllLanesDistinct_16c)
         auto offsets = run_capture_kernel<TC>(cfg.block_size(), 0);
         EXPECT_TRUE(all_lanes_distinct(offsets, cfg.block_size()))
             << "16c None w1: lanes within a wave read aliased addresses";
+    }
+}
+
+// ============================================================================
+// GPU kernel: compute HIP conv SwizzleT LDS byte offsets for reference.
+//
+// This mirrors the HIP conv input read pattern:
+//   lane_q  = lane % 16
+//   lane_c4 = lane / 16
+//   offset  = SwizzleT::offset_uint2(lane_q + kw_slice, wave * GROUP_SIZE_4 + lane_c4) * sizeof(uint2)
+// ============================================================================
+
+template <int BLOCK_C, int GROUP_SIZE_4>
+__global__ void capture_hip_conv_offsets_kernel(int* offsets, int kw_slice)
+{
+    using Sw = ck_tile::direct_conv::SwizzleT<BLOCK_C>;
+
+    const int tid  = threadIdx.x;
+    const int wave = tid / 64;
+    const int lane = tid % 64;
+
+    const int lane_q  = lane % 16;
+    const int lane_c4 = lane / 16;
+
+    const int c4 = wave * GROUP_SIZE_4 + lane_c4;
+    const int w  = lane_q + kw_slice;
+
+    offsets[tid] = Sw::offset_uint2(w, c4) * static_cast<int>(sizeof(uint2));
+}
+
+template <int BLOCK_C, int GROUP_SIZE_4>
+std::vector<int> run_hip_conv_capture_kernel(int block_size, int kw_slice)
+{
+    int* d_offsets = nullptr;
+    ck_tile::hip_check_error(hipMalloc(&d_offsets, block_size * sizeof(int)));
+
+    capture_hip_conv_offsets_kernel<BLOCK_C, GROUP_SIZE_4>
+        <<<1, block_size>>>(d_offsets, kw_slice);
+    ck_tile::hip_check_error(hipDeviceSynchronize());
+
+    std::vector<int> h_offsets(block_size);
+    ck_tile::hip_check_error(
+        hipMemcpy(h_offsets.data(), d_offsets,
+                  block_size * sizeof(int), hipMemcpyDeviceToHost));
+
+    (void)hipFree(d_offsets);
+    return h_offsets;
+}
+
+// ============================================================================
+// Test: CK Tile cyclic-shift descriptor produces the same LDS read byte
+// offsets as the HIP conv SwizzleT reference.
+//
+// The cyclic-shift swizzle in the CK Tile descriptor chain (via
+// make_inverse_cyclic_shift_transform in MakeLdsReadDescriptor) should produce
+// the same physical LDS read addresses as SwizzleT::offset_uint2.
+// ============================================================================
+
+// The CK Tile cyclic shift uses inverse direction (c8 - w) % C8 vs HIP conv's
+// (c8 + w) % C8. Both are valid bijective swizzles with identical bank conflict
+// properties, but they produce different physical LDS offsets.
+//
+// This test verifies that despite different offsets, the bank conflict counts match.
+TEST_F(LdsBankConflictTest, CyclicShiftSameBankConflictsAsHipConv_16c)
+{
+    // Config 73: Fprop, waves_per_wg=8, CyclicShift, DRAM epilogue
+    constexpr auto cfg_cs = v2::configs[73];
+    static_assert(cfg_cs.swizzle_type == ck_tile::direct_conv::SwizzleType::CyclicShift,
+                  "Expected CyclicShift config");
+
+    using TC_cs = v2::TileConstants<cfg_cs>;
+    constexpr int BLOCK_C = TC_cs::BLOCK_C;
+    constexpr int GROUP_SIZE_4 = TC_cs::GROUP_SIZE_4;
+
+    const int block_size = cfg_cs.block_size();
+
+    for(int kw = 0; kw < cfg_cs.kw; kw++)
+    {
+        auto ck_offsets  = run_capture_kernel<TC_cs>(block_size, kw);
+        auto hip_offsets = run_hip_conv_capture_kernel<BLOCK_C, GROUP_SIZE_4>(block_size, kw);
+
+        int ck_conflicts  = count_bank_conflicts(ck_offsets, block_size);
+        int hip_conflicts = count_bank_conflicts(hip_offsets, block_size);
+
+        EXPECT_EQ(ck_conflicts, hip_conflicts)
+            << "16c w8 CyclicShift kw=" << kw
+            << ": CK=" << ck_conflicts << " HIP=" << hip_conflicts;
+
+        // Also verify all lanes read distinct addresses
+        EXPECT_TRUE(all_lanes_distinct(ck_offsets, block_size))
+            << "16c w8 CyclicShift CK kw=" << kw << ": lane aliasing detected";
+        EXPECT_TRUE(all_lanes_distinct(hip_offsets, block_size))
+            << "16c w8 CyclicShift HIP kw=" << kw << ": lane aliasing detected";
+    }
+}
+
+// ============================================================================
+// Test: CK Tile cyclic-shift has same bank conflicts as HIP conv SwizzleT
+// ============================================================================
+
+TEST_F(LdsBankConflictTest, CyclicShiftBankConflictsMatchHipConv_16c)
+{
+    constexpr auto cfg_cs = v2::configs[73];
+    using TC_cs = v2::TileConstants<cfg_cs>;
+    constexpr int BLOCK_C = TC_cs::BLOCK_C;
+    constexpr int GROUP_SIZE_4 = TC_cs::GROUP_SIZE_4;
+
+    const int block_size = cfg_cs.block_size();
+
+    printf("\nCyclicShift vs HIP conv bank conflict comparison (16c w8):\n");
+    printf("  %-10s  %-12s  %-12s\n", "kw_slice", "CK_conflicts", "HIP_conflicts");
+
+    for(int kw = 0; kw < cfg_cs.kw; kw++)
+    {
+        auto ck_offsets  = run_capture_kernel<TC_cs>(block_size, kw);
+        auto hip_offsets = run_hip_conv_capture_kernel<BLOCK_C, GROUP_SIZE_4>(block_size, kw);
+
+        int ck_conflicts  = count_bank_conflicts(ck_offsets, block_size);
+        int hip_conflicts = count_bank_conflicts(hip_offsets, block_size);
+
+        printf("  %-10d  %-12d  %-12d\n", kw, ck_conflicts, hip_conflicts);
+
+        EXPECT_EQ(ck_conflicts, hip_conflicts)
+            << "16c w8 kw=" << kw << ": CK=" << ck_conflicts << " HIP=" << hip_conflicts;
+    }
+}
+
+// ============================================================================
+// Diagnostic: Print bank conflicts for 16c w8 variants (None, XOR, CyclicShift)
+// ============================================================================
+
+TEST_F(LdsBankConflictTest, PrintConflictSummary_16c_w8)
+{
+    printf("\n16c w8 Bank conflict summary (all kw_slice):\n");
+    printf("  %-45s", "Config");
+    for(int kw = 0; kw < 3; kw++) printf("  kw=%d", kw);
+    printf("\n");
+
+    auto print_row = [](const char* name, auto& offsets_by_kw, int block_size) {
+        printf("  %-45s", name);
+        for(auto& off : offsets_by_kw)
+            printf("  %4d", count_bank_conflicts(off, block_size));
+        printf("\n");
+    };
+
+    // 16c w8 None (idx 10 = Fprop w8)
+    {
+        constexpr auto cfg = v2::configs[10];
+        using TC = v2::TileConstants<cfg>;
+        std::vector<std::vector<int>> offsets_by_kw;
+        for(int kw = 0; kw < cfg.kw; kw++)
+            offsets_by_kw.push_back(run_capture_kernel<TC>(cfg.block_size(), kw));
+        print_row("16c w8 None (idx 10)", offsets_by_kw, cfg.block_size());
+    }
+    // 16c w8 XOR (idx 46 = Fprop w8 XOR)
+    {
+        constexpr auto cfg = v2::configs[46];
+        using TC = v2::TileConstants<cfg>;
+        std::vector<std::vector<int>> offsets_by_kw;
+        for(int kw = 0; kw < cfg.kw; kw++)
+            offsets_by_kw.push_back(run_capture_kernel<TC>(cfg.block_size(), kw));
+        print_row("16c w8 XOR  (idx 46)", offsets_by_kw, cfg.block_size());
+    }
+    // 16c w8 CyclicShift CK Tile (idx 73)
+    {
+        constexpr auto cfg = v2::configs[73];
+        using TC = v2::TileConstants<cfg>;
+        std::vector<std::vector<int>> offsets_by_kw;
+        for(int kw = 0; kw < cfg.kw; kw++)
+            offsets_by_kw.push_back(run_capture_kernel<TC>(cfg.block_size(), kw));
+        print_row("16c w8 CyclicShift CK (idx 73)", offsets_by_kw, cfg.block_size());
+    }
+    // 16c w8 HIP conv SwizzleT reference
+    {
+        constexpr auto cfg = v2::configs[73]; // same wave config
+        using TC = v2::TileConstants<cfg>;
+        constexpr int BLOCK_C = TC::BLOCK_C;
+        constexpr int GROUP_SIZE_4 = TC::GROUP_SIZE_4;
+        std::vector<std::vector<int>> offsets_by_kw;
+        for(int kw = 0; kw < cfg.kw; kw++)
+            offsets_by_kw.push_back(
+                run_hip_conv_capture_kernel<BLOCK_C, GROUP_SIZE_4>(cfg.block_size(), kw));
+        print_row("16c w8 HIP SwizzleT (reference)", offsets_by_kw, cfg.block_size());
     }
 }
 
