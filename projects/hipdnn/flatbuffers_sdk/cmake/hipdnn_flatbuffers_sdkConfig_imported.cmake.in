@@ -18,12 +18,12 @@ if(flatbuffers_VERSION AND NOT flatbuffers_VERSION IN_LIST _hipdnn_supported_fla
     )
 endif()
 
-# Export HIPDNN_FRONTEND_SKIP_JSON_LIB setting for consumers
-set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@ CACHE BOOL
-    "Defines whether FE should not include nlohmann/json.hpp.")
+# Reflects how hipDNN was built; not consumer-overridable, since the imported
+# target's compile definitions are already baked in.
+set(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB @HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB@)
 
-# nlohmann_json is optional based on HIPDNN_FRONTEND_SKIP_JSON_LIB
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+# nlohmann_json is optional based on HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
     find_dependency(nlohmann_json REQUIRED)
 endif()
 
@@ -40,10 +40,34 @@ if(flatbuffers_VERSION)
     message(STATUS "hipDNN Flatbuffers SDK: Using imported FlatBuffers ${flatbuffers_VERSION} headers (v${_hipdnn_fb_version_tag})")
 endif()
 
-# hipdnn_add_dependency_includes() is defined by hipdnn_data_sdk's imported config (loaded via
-# find_dependency above). If data_sdk ever stops providing this function, this will need to be
-# duplicated here.
+function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
+    set(options "")
+    set(oneValueArgs "")
+    set(multiValueArgs COMPILE_DEFINITIONS)
+    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    if(NOT TARGET ${TARGET_NAME})
+        message(FATAL_ERROR "hipdnn_add_dependency_includes: Target '${TARGET_NAME}' does not exist")
+        return()
+    endif()
+
+    if(NOT TARGET ${HEADER_LIB_TARGET_NAME})
+        message(FATAL_ERROR "hipdnn_add_dependency_includes: Header library target '${HEADER_LIB_TARGET_NAME}' does not exist")
+        return()
+    endif()
+
+    get_target_property(_dep_includes ${HEADER_LIB_TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_dep_includes)
+        message(VERBOSE "${TARGET_NAME} adding includes from ${HEADER_LIB_TARGET_NAME}: ${_dep_includes}")
+        target_include_directories(${TARGET_NAME} SYSTEM INTERFACE ${_dep_includes})
+    endif()
+
+    if(ARG_COMPILE_DEFINITIONS)
+        target_compile_definitions(${TARGET_NAME} INTERFACE ${ARG_COMPILE_DEFINITIONS})
+    endif()
+endfunction()
+
 hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk flatbuffers::flatbuffers)
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
     hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk nlohmann_json::nlohmann_json)
 endif()

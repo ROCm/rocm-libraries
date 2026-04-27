@@ -1,0 +1,37 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyDAGSchedulerPass --print-output
+#
+# AsmDirective preservation: .set directives act as non-movable
+# side-effect boundaries in the DAG scheduler. Their relative order
+# among instructions must be strictly preserved.
+#
+# Input:  ds_load A, ds_load B, .set symA, ds_load C, ds_load D, .set symB, WMMA0, WMMA1
+# Expect: ds_loads may reorder within each region, but .set directives
+#         stay at their original boundary positions.
+#
+# Region 1 (before symA): two ds_loads
+# CHECK: ds_load_b128
+# CHECK: ds_load_b128
+# Directive boundary
+# CHECK: asm_directive{{.*}}symA
+# Region 2 (between symA and symB): two ds_loads
+# CHECK: ds_load_b128
+# CHECK: ds_load_b128
+# Directive boundary
+# CHECK: asm_directive{{.*}}symB
+# Region 3 (after symB): WMMAs
+# CHECK: v_wmma_f32_16x16x16_bf16
+# CHECK: v_wmma_f32_16x16x16_bf16
+# No directives should appear after the WMMAs
+# CHECK-NOT: asm_directive
+
+st.func @test() {
+^entry:
+  v[8:11] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[12:15] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.asm_directive"(".set", "symA")
+  v[16:19] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 8192, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[20:23] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 8224, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.asm_directive"(".set", "symB")
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[16:23], v[20:23], v[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+}

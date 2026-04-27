@@ -26,6 +26,10 @@
 #include "../../common/utils_custom_type.hpp"
 #include "../../common/utils_device_ptr.hpp"
 
+// including Windows.h from test_utils_memory_check.hpp includes
+// macro definitions max and min which conflict with rocPRIM code.
+#define NOMINMAX
+
 // required test headers
 #include "indirect_iterator.hpp"
 #include "test_seed.hpp"
@@ -35,6 +39,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_memory_check.hpp"
 
 // required rocprim headers
 #include <rocprim/detail/various.hpp>
@@ -309,11 +314,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
     hipStream_t stream = 0; // default
 
+    rocprim::detail::target_arch arch;
+    HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
+
     // This test currently fails on gfx950 with key types of custom_type when BUILD_CODE_COVERAGE=ON.
     // Temporarily skip these cases while we investigate.
 #if defined(CODE_COVERAGE)
-    rocprim::detail::target_arch arch;
-    rocprim::detail::host_target_arch(stream, arch);
     if (common::is_custom_type<key_type>::value && arch == rocprim::detail::target_arch::gfx950)
     {
         std::cout << "Temporarily skipping custom_type test on gfx950." << std::endl;
@@ -334,9 +340,19 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
+        auto sizes = test_utils::get_sizes(seed_value);
+
         for(size_t size : test_utils::get_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            bool is_apu = test_utils::is_apu(arch);
+            if (is_apu && test_utils::get_total_system_memory(true) <= test_utils::minimum_memory_required_bytes
+                && size >= (1 << 20))
+            {
+                std::cout << "Insufficient APU sytstem memory. Skipping test for size = " << size << std::endl;
+                GTEST_SKIP();
+            }
 
             in_place = !in_place;
 
@@ -387,6 +403,10 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                              [compare_op](const key_value& a, const key_value& b)
                              { return compare_op(a.first, b.first); });
 
+            // These buffers are not needed anymore and can be freed
+            keys_input = std::vector<key_type>();
+            values_input = std::vector<value_type>();
+
             auto input_keys_it
                 = test_utils::wrap_in_indirect_iterator<TestFixture::use_indirect_iterator>(
                     d_keys_input.get());
@@ -403,7 +423,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                                                   d_keys_output.get(),
                                                   d_values_input.get(),
                                                   input_values_it,
-                                                  keys_input.size(),
+                                                  size,
                                                   compare_op,
                                                   stream,
                                                   debug_synchronous));
@@ -433,7 +453,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                                                   d_keys_output.get(),
                                                   input_values_it,
                                                   d_values_output.get(),
-                                                  keys_input.size(),
+                                                  size,
                                                   compare_op,
                                                   stream,
                                                   debug_synchronous));
@@ -446,10 +466,6 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
-            // Copy output to host
-            const auto keys_output   = d_keys_output.load();
-            const auto values_output = d_values_output.load();
-
             // Check if output values are as expected
             std::vector<key_type> expected_key(expected.size());
             std::vector<value_type> expected_value(expected.size());
@@ -458,9 +474,19 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                 expected_key[i] = expected[i].first;
                 expected_value[i] = expected[i].second;
             }
+            // This buffer is not needed anymore and can be freed
+            expected = std::vector<key_value>();
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
+            {
+                // Copy output to host.  This is scoped so keys_output is freed immediately.
+                const auto keys_output   = d_keys_output.load();
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
+            }
+            {
+                // Copy output to host.  This is scoped so values_output is freed immediately.
+                const auto values_output = d_values_output.load();
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
+            }
         }
     }
 

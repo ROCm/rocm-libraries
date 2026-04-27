@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <memory>
+
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -19,9 +21,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        _handle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    HipdnnMiopenHandle _handle;
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
 };
 
 TEST(TestConvWrwParams, InitializesAllTensorsFromValidGraph)
@@ -239,7 +242,7 @@ TEST_F(TestGpuConvWrwPlan, CreatesPlanWithValidGraph)
 
     // Create plan
     HipdnnMiopenSettings executionSettings;
-    ConvWrwPlan(_handle, std::move(params), executionSettings);
+    ConvWrwPlan(*_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvWrwPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
@@ -258,8 +261,8 @@ TEST_F(TestGpuConvWrwPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
     HipdnnMiopenSettings settings;
     settings.setDefaultWorkspaceSize(defaultSize);
 
-    ConvWrwPlan plan(_handle, std::move(params), settings);
-    EXPECT_EQ(plan.getWorkspaceSize(_handle), defaultSize);
+    ConvWrwPlan plan(*_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(*_handle), defaultSize);
 }
 
 TEST_F(TestGpuConvWrwPlan, PlanUsesKnobLimitOverDefault)
@@ -280,8 +283,8 @@ TEST_F(TestGpuConvWrwPlan, PlanUsesKnobLimitOverDefault)
     settings.setDefaultWorkspaceSize(defaultSize);
     settings.setWorkspaceSizeLimit(knobLimit);
 
-    ConvWrwPlan plan(_handle, std::move(params), settings);
-    EXPECT_EQ(plan.getWorkspaceSize(_handle), knobLimit);
+    ConvWrwPlan plan(*_handle, std::move(params), settings);
+    EXPECT_EQ(plan.getWorkspaceSize(*_handle), knobLimit);
 }
 
 TEST_F(TestGpuConvWrwPlan, ThrowsOnInvalidDims)
@@ -320,6 +323,6 @@ TEST_F(TestGpuConvWrwPlan, ThrowsOnInvalidDims)
 
     // Create plan and expect exception
     HipdnnMiopenSettings executionSettings;
-    EXPECT_THROW(ConvWrwPlan(_handle, std::move(params), executionSettings),
+    EXPECT_THROW(ConvWrwPlan(*_handle, std::move(params), executionSettings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }

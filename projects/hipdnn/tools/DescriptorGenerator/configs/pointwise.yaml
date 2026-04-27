@@ -82,7 +82,7 @@ operation:
       fbs_field: "operation"
       attr_name: "HIPDNN_ATTR_POINTWISE_MODE"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::PointwiseMode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::PointwiseMode"
       frontend_type: "PointwiseMode"
       required: true
       default_value: "PointwiseMode::NOT_SET"
@@ -105,7 +105,7 @@ operation:
           - { name: "NOT_SET", value: 0, sentinel: true }
           - { name: "ABS", value: 1, description: "Absolute value: |x|" }
           - { name: "ADD", value: 2, description: "Addition: x + y" }
-          - { name: "ADD_SQUARE", value: 3, description: "Add and square: (x + y)^2" }
+          - { name: "ADD_SQUARE", value: 3, description: "Add x to y squared: x + y^2" }
           - { name: "BINARY_SELECT", value: 4, description: "Ternary select based on condition" }
           - { name: "CEIL", value: 5, description: "Ceiling function" }
           - { name: "CMP_EQ", value: 6, description: "Compare equal: x == y" }

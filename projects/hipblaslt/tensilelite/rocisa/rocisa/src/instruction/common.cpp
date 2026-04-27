@@ -630,6 +630,14 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SBarrier& self, nb::dict&) { return new rocisa::SBarrier(self); });
 
+    nb::class_<rocisa::SSchedulingFence, rocisa::Instruction>(m_common, "SSchedulingFence")
+        .def(nb::init<const std::string&>(), nb::arg("comment") = "")
+        .def("getParams", &rocisa::SSchedulingFence::getParams)
+        .def("__str__", &rocisa::SSchedulingFence::toString)
+        .def("__deepcopy__", [](const rocisa::SSchedulingFence& self, nb::dict&) {
+            return new rocisa::SSchedulingFence(self);
+        });
+
     nb::class_<rocisa::SDcacheWb, rocisa::Instruction>(m_common, "SDcacheWb")
         .def(nb::init<const std::string&>(), nb::arg("comment") = "")
         .def("getParams", &rocisa::SDcacheWb::getParams)
