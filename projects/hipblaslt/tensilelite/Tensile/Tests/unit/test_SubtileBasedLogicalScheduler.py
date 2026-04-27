@@ -143,6 +143,26 @@ def make_cfg_bf16_pgr0(MT0=256, MT1=256, depthU=64):
     )
 
 
+def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=64, numPartM=1, numPartN=1):
+    """Build BF16 config with pgr=1, plr=1."""
+    kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
+    tiA = TileInfo('A', kernel)
+    tiB = TileInfo('B', kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        numPartitionsM=numPartM,
+        numPartitionsN=numPartN,
+        pgr=1,
+        plr=1,
+    )
+
+
 def make_example_granularities_1():
     """Example Granularities 1 from the design doc: LR A,B=1x1, LR SA,SB=2x2."""
     return SchedulerConfig(
@@ -1540,9 +1560,13 @@ if __name__ == "__main__":
 
     use_bf16 = "--bf16" in sys.argv
     use_pgr0 = "--pgr0" in sys.argv
+    use_pgr1 = "--pgr1" in sys.argv
 
-    if use_pgr0:
-        cfg = make_cfg_bf16_pgr0()
+    if use_pgr0 or use_pgr1:
+        if use_pgr0:
+            cfg = make_cfg_bf16_pgr0()
+        else:
+            cfg = make_cfg_bf16_pgr1()
 
         print(f"Config: numMFMATilesM={cfg.numMFMATilesM}, "
               f"numMFMATilesN={cfg.numMFMATilesN}, "
@@ -1597,9 +1621,16 @@ if __name__ == "__main__":
                 buf.write(f"  {str(inst).rstrip()}\n")
             return buf.getvalue()
 
-        for label, emitted_3d in [
-            ("MAINLOOP", sched._emitted_per_unroll[0]),
-        ]:
+        loop_sections = [("MAINLOOP", sched._emitted_per_unroll[0])]
+        if use_pgr1:
+            loop_sections = [
+                ("PRELOOP",  sched._preloop_emitted),
+                ("MAINLOOP", sched._emitted_per_unroll[0]),
+                ("NGLL",     sched._ngll_per_unroll[0]),
+                ("NLL",      sched._nll_per_unroll[0]),
+            ]
+
+        for label, emitted_3d in loop_sections:
             print(f"{'=' * 60}")
             print(f"  {label} (emitLoop)")
             print(f"{'=' * 60}")

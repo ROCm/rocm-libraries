@@ -1780,7 +1780,7 @@ def preLoop(writer, kernel):
 def mainLoop(writer, kernel):
   module = Module()
   pgr = kernel["PrefetchGlobalRead"]
-  assert pgr in (0, 2), "SubtileBasedKernel only supports PGR=0 and PGR=2, got PGR=%d" % pgr
+  assert pgr in (0, 1, 2), "SubtileBasedKernel only supports PGR=0, PGR=1, and PGR=2, got PGR=%d" % pgr
 
   from Tensile.Components.SubtileBasedLogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
@@ -1828,9 +1828,11 @@ def mainLoop(writer, kernel):
       scheduler.build()
 
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+      print(f"[Partition Candidate] ({numPartM}, {numPartN}), vgprUsed={vgprUsed}, vgprNeeded={numVgpr}, total={vgprUsed + numVgpr}/{vgprBudget}")
       if vgprUsed + numVgpr <= vgprBudget:
           break
 
+  print(f"[Partition] selected ({numPartM}, {numPartN}), vgprUsed={vgprUsed}, vgprNeeded={numVgpr}, total={vgprUsed + numVgpr}/{vgprBudget}")
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo

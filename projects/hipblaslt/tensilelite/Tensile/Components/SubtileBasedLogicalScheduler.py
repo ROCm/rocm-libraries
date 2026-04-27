@@ -134,11 +134,13 @@ class SchedulerConfig:
     plr: int = 1              # Prefetch Local Read: 0 = current subIterK, 1 = next subIterK
 
     def __post_init__(self):
-        assert self.pgr in (0, 2), f"pgr must be 0 or 2, got {self.pgr}"
+        assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
         assert self.plr in (0, 1), f"plr must be 0 or 1, got {self.plr}"
         if self.pgr == 0:
             assert self.plr == 0, "pgr=0 requires plr=0"
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
+        if self.pgr == 1:
+            assert self.plr == 1, "pgr=1 requires plr=1"
 
     @property
     def hasScale(self) -> bool:
@@ -1008,9 +1010,8 @@ class LogicalScheduler:
         part_ranges = [self._partition_tile_range(pi)
                        for pi in range(self.config.numPartitions)]
 
-        # TODO: cover PGR3 (offsetMT and offsetPartition may differ)
         offsetMT = 1
-        offsetPartition = 1
+        offsetPartition = 0 if self.config.pgr == 1 else 1
         # Build ordered list of GRs to place for the entire MT based on the partitioning ordering and the GR granularities.
         gr_list = self._build_gr_list(part_ranges, offsetMT, offsetPartition)
         # Map to keep track of LR(MT n) for each partiion and tensor, used for LDS double buffer conflict checking when placing GRs.
@@ -1481,8 +1482,11 @@ class LogicalScheduler:
                 for gr in slot.grs:
                     tensor = gr.tensor
                     mt = gr.mtIteration
-                    prev_mt = last_gr_mt.get(tensor, last_lr_mt.get(tensor))
-                    if prev_mt is not None and prev_mt != mt:
+                    if tensor in last_gr_mt:
+                        prev_mt = last_gr_mt[tensor]
+                    else:
+                        prev_mt = 0
+                    if prev_mt != mt:
                         if gr.tiles.tileId_start == 0:
                             gr.preOps.append(GRIncOp(tensor=tensor))
                     last_gr_mt[tensor] = mt
@@ -1921,7 +1925,7 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.EMIT)
 
-        if self.config.pgr == 0:
+        if self.config.pgr in (0, 1):
             self._ngll_emitted = [[[]]]
             return self._ngll_emitted
 
@@ -2047,14 +2051,18 @@ class LogicalScheduler:
 
         PGR=0: no preloop (mainloop only).
 
-        High-level sequence (waits/syncs auto-inserted by _insert_preloop_waits):
+        PGR=1 sequence:
           GR(MT 0)  — all tensors, all tiles
           GR_INC
           LR        — first partition, subIterK=0
-          LR_INC
-          skip(LE 1, NLLEarly/NLL)
-          GR(MT 1)  — first partition tiles
+          skip(LE 1, NLL)
+
+        PGR=2 sequence:
+          GR(MT 0)  — all tensors, all tiles
           GR_INC
+          LR        — first partition, subIterK=0
+          skip(LE 1, NLL)
+          GR(MT 1)  — first partition tiles
           skip(LE 2, NGLL)
 
         Returns [1 partition][1 subIterK][EmittedModules] to match emit() shape.
@@ -2070,10 +2078,6 @@ class LogicalScheduler:
             'A': MFMATileRange(0, numK, 0, cfg.numMFMATilesM),
             'B': MFMATileRange(0, numK, 0, cfg.numMFMATilesN),
         }
-        part0_tiles = {
-            'A': MFMATileRange(0, numK, *part0['A']),
-            'B': MFMATileRange(0, numK, *part0['B']),
-        }
         lr_tiles = {
             'A':  MFMATileRange(0, cfg.lrA.k, *part0['A']),
             'B':  MFMATileRange(0, cfg.lrB.k, *part0['B']),
@@ -2082,18 +2086,32 @@ class LogicalScheduler:
             lr_tiles['SA'] = MFMATileRange(0, cfg.lrSA.k, *part0['A'])
             lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
 
-        emitted = self._to_emitted([
-            *self._preloop_make_gr(0, all_tiles),
-            *self._make_tensor_depops(GRIncOp),
-            WaitGROp(wait_gr_counts=WaitGRCounts()),
-            SyncOp(),
-            *self._preloop_make_lr(lr_tiles),
-            WaitLROp(),
-            SkipOp(compare='LE', value=1, target='NLL'),
-            *self._preloop_make_gr(1, part0_tiles),
-            # *self._make_tensor_depops(GRIncOp),
-            SkipOp(compare='LE', value=2, target='NGLL'),
-        ])
+        if cfg.pgr == 1:
+            emitted = self._to_emitted([
+                *self._preloop_make_gr(0, all_tiles),
+                WaitGROp(wait_gr_counts=WaitGRCounts()),
+                SyncOp(),
+                *self._preloop_make_lr(lr_tiles),
+                WaitLROp(),
+                SkipOp(compare='LE', value=1, target='NLL'),
+            ])
+        else:
+            part0_tiles = {
+                'A': MFMATileRange(0, numK, *part0['A']),
+                'B': MFMATileRange(0, numK, *part0['B']),
+            }
+            emitted = self._to_emitted([
+                *self._preloop_make_gr(0, all_tiles),
+                *self._make_tensor_depops(GRIncOp),
+                WaitGROp(wait_gr_counts=WaitGRCounts()),
+                SyncOp(),
+                *self._preloop_make_lr(lr_tiles),
+                WaitLROp(),
+                SkipOp(compare='LE', value=1, target='NLL'),
+                *self._preloop_make_gr(1, part0_tiles),
+                # *self._make_tensor_depops(GRIncOp),
+                SkipOp(compare='LE', value=2, target='NGLL'),
+            ])
 
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
@@ -2142,7 +2160,6 @@ class LogicalScheduler:
 
         module = Module("AllLoops")
         uf = self.unroll_factor
-        isPGR0 = self.config.pgr == 0
 
         # ── Preloop ──
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
@@ -2152,7 +2169,7 @@ class LogicalScheduler:
         module.addComment0("MAINLOOP")
         loopBegin = Label("LoopBeginL", "")
 
-        exitValue = 0 if isPGR0 else 2
+        exitValue = {0: 0, 1: 1, 2: 2}[self.config.pgr]
 
         if uf == 1:
             module.add(loopBegin)
@@ -2186,14 +2203,17 @@ class LogicalScheduler:
                         comment="restart mainloop"))
 
         # ── NGLL + NLL exit paths ──
+        hasNGLL = self.config.pgr >= 2
         endLabel = Label("SkipToEnd", "")
         module.add(Label("SkipMainloop", ""))
-        module.add(Label("SkipToNGLL", ""))
+        if hasNGLL:
+            module.add(Label("SkipToNGLL", ""))
 
         if uf == 1:
-            module.addComment0("NGLL")
-            module.add(self._emitLoop(writer, kernel, "NGLL",
-                                      self._ngll_per_unroll[0]))
+            if hasNGLL:
+                module.addComment0("NGLL")
+                module.add(self._emitLoop(writer, kernel, "NGLL",
+                                          self._ngll_per_unroll[0]))
             module.addComment0("NLL")
             module.add(Label("SkipToNLL", ""))
             module.add(self._emitLoop(writer, kernel, "NLL",
@@ -2201,9 +2221,10 @@ class LogicalScheduler:
         else:
             # Fall-through from last mainloop copy
             last = uf - 1
-            module.addComment0(f"NGLL_C{last}")
-            module.add(self._emitLoop(writer, kernel, f"NGLL_C{last}",
-                                      self._ngll_per_unroll[last]))
+            if hasNGLL:
+                module.addComment0(f"NGLL_C{last}")
+                module.add(self._emitLoop(writer, kernel, f"NGLL_C{last}",
+                                          self._ngll_per_unroll[last]))
             module.addComment0(f"NLL_C{last}")
             module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
                                       self._nll_per_unroll[last]))
@@ -2212,9 +2233,10 @@ class LogicalScheduler:
 
             for ui in range(uf - 1):
                 module.add(exitLabels[ui])
-                module.addComment0(f"NGLL_C{ui}")
-                module.add(self._emitLoop(writer, kernel, f"NGLL_C{ui}",
-                                          self._ngll_per_unroll[ui]))
+                if hasNGLL:
+                    module.addComment0(f"NGLL_C{ui}")
+                    module.add(self._emitLoop(writer, kernel, f"NGLL_C{ui}",
+                                              self._ngll_per_unroll[ui]))
                 module.addComment0(f"NLL_C{ui}")
                 module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
                                           self._nll_per_unroll[ui]))
