@@ -63,10 +63,10 @@ hipDNN is organized into several key components. For detailed architecture descr
 | Component | Description |
 |-----------|-------------|
 | **[Backend](./backend/)** | Core shared library providing C API for operation graphs and managing plugins |
+| **[Data SDK](./data_sdk/)** | Header-only library with shared types, tensor utilities, logging, and the engine name registry |
+| **[Flatbuffers SDK](./flatbuffers_sdk/)** | Header-only library with FlatBuffers schemas, generated headers, graph wrappers, and optional JSON helpers |
 | **[Frontend](./frontend/)** | Header-only C++ API wrapper around the backend |
-| **[Data SDK](./data_sdk/)** | Header-only library with data objects, utilities, and logging |
 | **[Plugin SDK](./plugin_sdk/)** | Header-only library for plugin development |
-| **[Flatbuffers SDK](./flatbuffers_sdk/)** | *(Stubbed — not yet usable)* Future home of FlatBuffers-generated headers and utilities, isolated from Data SDK |
 | **[Samples](./samples/)** | Example implementations demonstrating hipDNN usage |
 | **[Tests](./tests/)** | Tests for the public API (incl. frontend integration tests) |
 | **[Tools](./tools/)** | Experimental utilities (e.g., benchmarking, engine listing) — subject to change |
