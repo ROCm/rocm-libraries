@@ -27,6 +27,7 @@
 #include "rocsparse-debugging.h"
 
 #include <map>
+#include <mutex>
 
 namespace rocsparse_clients_test
 {
@@ -39,6 +40,7 @@ namespace rocsparse_clients_test
         int32_t                     m_synchronicity_value{};
         uint64_t                    m_ncalls{};
         std::map<int32_t, uint64_t> m_histo_calls{};
+        mutable std::mutex          m_mutex{};
 
     public:
         int32_t  get_synchronicity_value() const;
@@ -48,6 +50,16 @@ namespace rocsparse_clients_test
         void     add_call(int32_t);
         memory_debug_synchronicity_info_t(int32_t);
         memory_debug_synchronicity_info_t() = default;
+
+        // The mutex member is neither copyable nor movable. Provide explicit
+        // copy/move operations that synchronize access to the source object
+        // and leave the destination's mutex default-constructed.
+        memory_debug_synchronicity_info_t(const memory_debug_synchronicity_info_t& other);
+        memory_debug_synchronicity_info_t(memory_debug_synchronicity_info_t&& other) noexcept;
+        memory_debug_synchronicity_info_t&
+            operator=(const memory_debug_synchronicity_info_t& other);
+        memory_debug_synchronicity_info_t&
+            operator=(memory_debug_synchronicity_info_t&& other) noexcept;
     };
 }
 
