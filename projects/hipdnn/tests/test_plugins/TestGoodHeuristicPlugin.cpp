@@ -21,6 +21,8 @@ namespace
 const char* POLICY_NAME = "TestGoodHeuristicPolicy";
 const char* PLUGIN_VERSION = "1.0.0";
 
+hipdnnCallback_t g_loggingCallback = nullptr;
+hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO;
 // NOLINTEND(readability-identifier-naming)
 
 // Simple handle implementation
@@ -96,13 +98,13 @@ hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)
 
 hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
 {
-    (void)callback;
+    g_loggingCallback = callback;
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
 hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level)
 {
-    (void)level;
+    g_logLevel = level;
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -278,6 +280,12 @@ hipdnnPluginStatus_t hipdnnHeuristicPolicyFinalize(hipdnnHeuristicPolicyDescript
 
     impl->finalized = true;
     *applied = 1; // Policy applied
+
+    const hipdnnSeverity_t level = g_logLevel;
+    if(g_loggingCallback != nullptr)
+    {
+        g_loggingCallback(level, "TestGoodHeuristicPlugin: policy finalized");
+    }
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
