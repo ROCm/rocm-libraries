@@ -76,3 +76,33 @@ schedule. Verify if/when that test is migrated to the real path.
 
 ## Investigate if build a full register chain is a good idea
 Instead of having diferent functions recreating a traversal fo the registers, build the chain onces, and then have the different functions simply walk the already build graph.
+
+## NGL/NLL hard-coded to code-path 0 — `isValid` does not validate other codepaths' tail behavior
+
+`KernelWriter.py:2858-2866` (CMS branch of `noLoadLoopBody`) emits the NGL and NLL
+loop bodies as a single `MAINLOOP` macro invocation with `\ID = 0`:
+
+```python
+if isNGLL:
+    module.add(MacroInstruction(name="MAINLOOP", args=[0,0,1,1,0]))  # \ID=0
+else:
+    module.add(MacroInstruction(name="MAINLOOP", args=[0,0,0,0,0]))  # \ID=0
+```
+
+There is no `simdSpecDispatch` wrapper for the tail loops. So when a CMS schedule
+has `numCodePath > 1`, every SIMD runs **code-path 0's** schedule for NGL and NLL,
+including the SIMDs that ran code-path 1+ in the main loop. Code-paths only differ
+in scheduling order (slot assignment) — same instructions, same registers — so this
+is functionally correct, just suboptimal.
+
+`isValid` currently only inspects `optSchedule[key][cp]` slot lists in the abstract
+and does not verify NGL/NLL behavior under each codepath. It should:
+- Confirm that code-path 0 of the schedule is valid as an NGL body (after
+  `\useGR=0, \usePLR=1, \useGRInc=1, \useLoop=0` macro-guard stripping and
+  `nglshift` vmcnt adjustment).
+- Confirm that code-path 0 is also valid as an NLL body (after
+  `\useGR=0, \usePLR=0, \useGRInc=0, \useLoop=0` stripping, `nllshift`,
+  and `nllZeroDscnt`).
+- Optionally, flag schedules where code-path 1+ would produce a *different*
+  (and possibly better) NGL/NLL body if hardware were available to dispatch
+  them — these are missed-optimization opportunities, not correctness bugs.
