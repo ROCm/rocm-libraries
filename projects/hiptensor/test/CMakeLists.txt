@@ -68,10 +68,7 @@ add_custom_target(hiptensor_tests)
 # System32, which always wins over PATH. If the test binary is compiled with
 # a newer toolchain but an older runtime is loaded from System32, kernel launches
 # may crash (SEH 0xC0000005) if the code-object format is incompatible.
-# Staging the correct runtime DLLs into CMAKE_RUNTIME_OUTPUT_DIRECTORY (the application
-# directory) ensures Windows finds them before System32.
-# This runs at CMake configure time so it takes effect on every cmake invocation.
-if(WIN32)
+if(WIN32 AND CREATE_TEST_APP_LOCAL_DEPLOY)
     # hip_DIR is set by find_package(HIP) to <HIP_ROOT>/lib/cmake/hip.
     # Walk up three directory levels to reach <HIP_ROOT>, then append /bin.
     get_filename_component(_hip_cmake_dir  "${hip_DIR}"          DIRECTORY) # .../lib/cmake
@@ -84,10 +81,14 @@ if(WIN32)
 
     if(EXISTS "${_hip_bin_dir}")
         file(MAKE_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
-        file(GLOB _hip_dlls "${_hip_bin_dir}/amdhip64_7.dll")
+        file(GLOB _hip_dlls
+            "${_hip_bin_dir}/amd_comgr*.dll"   # code-object manager
+            "${_hip_bin_dir}/amdhip64*.dll"    # HIP runtime
+            "${_hip_bin_dir}/amdhiprtc*.dll"   # HIP RTC
+            "${_hip_bin_dir}/rocm_kpack*.dll"  # kernel packaging
+        )
         if(_hip_dlls)
             foreach(_dll ${_hip_dlls})
-                get_filename_component(_dll_name "${_dll}" NAME)
                 file(COPY "${_dll}" DESTINATION "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
             endforeach()
             list(LENGTH _hip_dlls _hip_dll_count)

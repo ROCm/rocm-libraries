@@ -3,6 +3,11 @@
 
 from invoke.tasks import task
 import os
+import shlex
+
+
+def _cmake_bool(value):
+    return "ON" if value else "OFF"
 
 def detect_gpu_arch():
     import subprocess
@@ -37,20 +42,39 @@ def get_gpu_arch(c):
         "build_dir": "Path to client build dir.",
         "build_type": "CMake build type (e.g. Release, Debug).",
         "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101).",
+        "rocm_path": "Path to a ROCm install whose amdclang/amdclang++ should be used.",
+        "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
+        "bundle_python_deps": "Enable HIPBLASLT_BUNDLE_PYTHON_DEPS.",
         "enable_rocprof": "Build tensilelite-client with rocprof.",
     }
 )
-def build_client(c, clean=False, configure=True, build=True, build_dir="build_tmp", build_type="Release", gpu_targets=None, enable_rocprof=False):
+def build_client(
+    c,
+    clean=False,
+    configure=True,
+    build=True,
+    build_dir="build_tmp",
+    build_type="Release",
+    gpu_targets=None,
+    rocm_path=None,
+    export_compile_commands=False,
+    bundle_python_deps=False,
+    enable_rocprof=False,
+):
 
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
-        if gpu_targets == "None":
+        if not gpu_targets:
             print("Error: No GPU detected and no gpu_targets provided. Skipping build.")
             return
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
 
+    if rocm_path:
+        cmake_c_compiler = os.path.join(rocm_path, "bin", "amdclang")
+        cmake_cxx_compiler = os.path.join(rocm_path, "bin", "amdclang++")
+
     if clean and os.path.exists(build_dir):
-        c.run(f"rm -rf {build_dir}")
+        c.run(f"rm -rf {shlex.quote(build_dir)}")
 
     if configure:
         os.makedirs(build_dir, exist_ok=True)
@@ -63,10 +87,18 @@ def build_client(c, clean=False, configure=True, build=True, build_dir="build_tm
             "-B", build_dir,
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DGPU_TARGETS={gpu_targets}",
-            f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={enable_rocprof}",
+            f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={_cmake_bool(enable_rocprof)}",
         ]
 
-        c.run(" ".join(cmake_cmd))
+        if rocm_path:
+            cmake_cmd.append(f"-DCMAKE_C_COMPILER={cmake_c_compiler}")
+            cmake_cmd.append(f"-DCMAKE_CXX_COMPILER={cmake_cxx_compiler}")
+        if export_compile_commands:
+            cmake_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+        if bundle_python_deps:
+            cmake_cmd.append("-DHIPBLASLT_BUNDLE_PYTHON_DEPS=ON")
+
+        c.run(shlex.join(cmake_cmd))
 
     if build:
-        c.run(f"cmake --build {build_dir} --parallel")
+        c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))

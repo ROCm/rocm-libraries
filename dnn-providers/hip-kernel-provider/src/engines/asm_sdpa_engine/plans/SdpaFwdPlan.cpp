@@ -13,7 +13,7 @@ namespace asm_sdpa_engine
 SdpaFwdPlan::SdpaFwdPlan(hipModule_t kernelModule, hipFunction_t function, SdpaFwdParams params)
     : _module(kernelModule)
     , _function(function)
-    , _params(params)
+    , _params(std::move(params))
 {
 }
 
@@ -33,7 +33,7 @@ SdpaFwdPlan::~SdpaFwdPlan()
 SdpaFwdPlan::SdpaFwdPlan(SdpaFwdPlan&& other) noexcept
     : _module(other._module)
     , _function(other._function)
-    , _params(other._params)
+    , _params(std::move(other._params))
 {
     // Transfer ownership - set source to nullptr to prevent double-free
     other._module = nullptr;
@@ -106,10 +106,11 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     args.scalar = _params.attnScale;
 
     // Q dimensions and strides (convert to bytes: stride * sizeof(bfloat16))
+    // TODO: When adding the fp8 kernels, modify this to check for the datatype
     constexpr unsigned int K_BF16_SIZE = 2;
     args.s_seq_len = _params.seqLenQ;
     args.s_Seqs = _params.qStrideSeq * K_BF16_SIZE;
-    args.s_Ts = _params.qStrideRow * K_BF16_SIZE;
+    args.s_Ts = _params.tileSizeQo * _params.qStrideRow * K_BF16_SIZE;
     args.s_Hs = _params.qStrideHead * K_BF16_SIZE;
     args.s_Bs = _params.qStrideBatch * K_BF16_SIZE;
 
@@ -122,7 +123,18 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     args.s_k_Bs = _params.kStrideBatch * K_BF16_SIZE;
 
     // Options
-    args.s_opt = 0; // Default: no special options (RTNE rounding)
+    uint32_t tuneOpt = 5;
+    // if num_head is not 8N, or seqlen is bigger than 16K, downgrade to 2and3
+    if(!_params.noMask && ((_params.numHeadsQ % 8 != 0) || (_params.seqLenQ > 16384)))
+    {
+        tuneOpt -= 2;
+    }
+    if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
+    {
+        tuneOpt = 0;
+    }
+
+    args.s_opt = tuneOpt;
     args.s_lse = 0; // POC: don't compute LSE
 
     // KV dimensions
@@ -167,13 +179,18 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
 
     // Compute grid dimensions
     // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
-    constexpr unsigned int K_TS_QO = 256;
-    unsigned int gridDimX = (_params.seqLenQ + K_TS_QO - 1) / K_TS_QO;
+    unsigned int gridDimX = (_params.seqLenQ + _params.tileSizeQo - 1) / _params.tileSizeQo;
     unsigned int gridDimY = _params.numHeadsQ;
     unsigned int gridDimZ = _params.batchSize;
 
+    if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
+    {
+        std::swap(gridDimX, gridDimY);
+    }
+
+    unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
+
     // Block dimensions (fixed for this kernel)
-    constexpr unsigned int K_BLOCK_DIM_X = 512;
     constexpr unsigned int K_BLOCK_DIM_Y = 1;
     constexpr unsigned int K_BLOCK_DIM_Z = 1;
 
@@ -191,7 +208,7 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
                                            gridDimX,
                                            gridDimY,
                                            gridDimZ, // grid dimensions
-                                           K_BLOCK_DIM_X,
+                                           blockDimX,
                                            K_BLOCK_DIM_Y,
                                            K_BLOCK_DIM_Z, // block dimensions
                                            0, // shared memory bytes (kernel uses LDS internally)
@@ -207,7 +224,7 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
 
     HIPDNN_PLUGIN_LOG_INFO("SDPA kernel launched: grid=["
                            << gridDimX << "," << gridDimY << "," << gridDimZ << "] block=["
-                           << K_BLOCK_DIM_X << "," << K_BLOCK_DIM_Y << "," << K_BLOCK_DIM_Z << "]");
+                           << blockDimX << "," << K_BLOCK_DIM_Y << "," << K_BLOCK_DIM_Z << "]");
 }
 
 } // namespace asm_sdpa_engine
