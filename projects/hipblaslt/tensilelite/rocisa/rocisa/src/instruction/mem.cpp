@@ -289,7 +289,7 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("base"),
              nb::arg("soffset"),
              nb::arg("smem")    = std::nullopt,
-             nb::arg("comment") = "")
+             nb::arg("comment") = "")                        
         .def("getParams", &rocisa::SMemLoadInstruction::getParams)
         .def("__str__", &rocisa::SMemLoadInstruction::toString);
 

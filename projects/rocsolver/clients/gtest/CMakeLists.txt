@@ -31,6 +31,7 @@ set(roclapack_test_source
   # linear systems solvers
   lapack/getri_gtest.cpp
   lapack/getrs_gtest.cpp
+  lapack/getrs_npvt_gtest.cpp
   lapack/gesv_gtest.cpp
   lapack/potrs_gtest.cpp
   lapack/posv_gtest.cpp

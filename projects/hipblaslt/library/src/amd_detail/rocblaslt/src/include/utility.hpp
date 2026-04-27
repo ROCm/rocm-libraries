@@ -120,6 +120,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
 
 const char* hipblasOperation_to_string(hipblasOperation_t op);
 
+const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::ScalingFormat type);
+
 const char* rocblaslt_layer_mode2string(rocblaslt_layer_mode layer_mode);
 
 const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue);

@@ -16,6 +16,42 @@ from dnn_benchmarking.graph import GraphLoader
 from dnn_benchmarking.validation import ArrayComparator, ReferenceProviderRegistry
 
 
+def _setup_hipdnn():
+    """Import hipdnn_frontend with plugin path configured, or skip."""
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            pytest.skip("PyTorch GPU not available")
+    except ImportError as e:
+        pytest.skip(f"PyTorch not available: {e}")
+
+    try:
+        import hipdnn_frontend
+
+        # Auto-discover and set plugin path
+        project_root = Path(__file__).parent.parent.parent
+        candidates = [
+            project_root.parent.parent.parent.parent
+            / "dnn-providers"
+            / "miopen-provider"
+            / "build"
+            / "lib"
+            / "hipdnn_plugins"
+            / "engines",
+            Path("/opt/rocm/lib/hipdnn_plugins/engines"),
+        ]
+        for p in candidates:
+            if p.is_dir() and any(p.glob("*.so")):
+                hipdnn_frontend.set_engine_plugin_paths([str(p)])
+                break
+
+        hipdnn_frontend.Handle()
+        return hipdnn_frontend
+    except Exception as e:
+        pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
+
+
 @pytest.mark.gpu
 class TestExecution:
     """Integration tests for graph execution requiring GPU."""
@@ -23,22 +59,7 @@ class TestExecution:
     @pytest.fixture
     def hipdnn(self):
         """Get hipdnn_frontend module or skip if not available."""
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                pytest.skip("PyTorch GPU not available")
-        except ImportError as e:
-            pytest.skip(f"PyTorch not available: {e}")
-
-        try:
-            import hipdnn_frontend
-
-            # Test that we can create a handle (requires GPU)
-            hipdnn_frontend.Handle()
-            return hipdnn_frontend
-        except Exception as e:
-            pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
+        return _setup_hipdnn()
 
     def test_executor_prepare(
         self, hipdnn, sample_conv_fwd_json: Dict[str, Any]
@@ -344,13 +365,7 @@ class TestExecutionErrors:
     @pytest.fixture
     def hipdnn(self):
         """Get hipdnn_frontend module or skip if not available."""
-        try:
-            import hipdnn_frontend
-
-            hipdnn_frontend.Handle()
-            return hipdnn_frontend
-        except Exception as e:
-            pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
+        return _setup_hipdnn()
 
     def test_execute_without_prepare_raises(
         self, hipdnn, sample_conv_fwd_json: Dict[str, Any]
@@ -394,22 +409,7 @@ class TestPyTorchReferenceValidation:
     @pytest.fixture
     def hipdnn(self):
         """Get hipdnn_frontend module or skip if not available."""
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                pytest.skip("PyTorch GPU not available")
-        except ImportError as e:
-            pytest.skip(f"PyTorch not available: {e}")
-
-        try:
-            import hipdnn_frontend
-
-            # Test that we can create a handle (requires GPU)
-            hipdnn_frontend.Handle()
-            return hipdnn_frontend
-        except Exception as e:
-            pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
+        return _setup_hipdnn()
 
     @pytest.fixture
     def pytorch_provider(self):
