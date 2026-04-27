@@ -16,12 +16,19 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE
     CACHE BOOL "Add paths to linker search and installed rpath"
 )
 
-if(NOT WIN32)
-    # Only set if not already specified by user
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
-    endif()
-    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH "/opt/rocm")
+endif()
+
+# Only set if not already specified by user
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "CMAKE_INSTALL_PREFIX set using ROCM_PATH: ${CMAKE_INSTALL_PREFIX}")
+elseif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_CMAKE_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_CMAKE_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "CMAKE_INSTALL_PREFIX set using ROCM_CMAKE_PATH: ${CMAKE_INSTALL_PREFIX}")
+else()
+    message(STATUS "CMAKE_INSTALL_PREFIX set to default: ${CMAKE_INSTALL_PREFIX}")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
@@ -108,6 +115,7 @@ add_subdirectory(src/integration_tests)
 target_include_directories(${INTEGRATION_TESTS_EXE} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(${INTEGRATION_TESTS_EXE} SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/argparse
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/tomlplusplus
 )
 
 target_link_libraries(${INTEGRATION_TESTS_EXE}
@@ -117,6 +125,7 @@ target_link_libraries(${INTEGRATION_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
 target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
@@ -160,36 +169,33 @@ install(TARGETS ${INTEGRATION_TESTS_EXE}
 # Generate Config.cmake from template
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/${INTEGRATION_TESTS_EXE}Config.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/${INTEGRATION_TESTS_EXE}Config.cmake"
-    INSTALL_DESTINATION lib/cmake/${INTEGRATION_TESTS_EXE}
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}Config.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}
 )
 
 # Generate ConfigVersion.cmake
 write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/${INTEGRATION_TESTS_EXE}ConfigVersion.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}ConfigVersion.cmake"
     VERSION ${HIPDNN_INTEGRATION_TESTS_VERSION}
     COMPATIBILITY AnyNewerVersion
 )
 
 # Build-tree export so superbuild consumers can find the package without installing
 export(TARGETS ${INTEGRATION_TESTS_EXE}
-    FILE "${CMAKE_CURRENT_BINARY_DIR}/${INTEGRATION_TESTS_EXE}Targets.cmake"
-)
-file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipdnnIntegrationTestHelpers.cmake"
-    DESTINATION "${CMAKE_CURRENT_BINARY_DIR}"
+    FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}Targets.cmake"
 )
 
 # Install-tree exports
 install(EXPORT ${INTEGRATION_TESTS_EXE}_targets
     FILE ${INTEGRATION_TESTS_EXE}Targets.cmake
-    DESTINATION lib/cmake/${INTEGRATION_TESTS_EXE}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}
 )
 
 install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/${INTEGRATION_TESTS_EXE}Config.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/${INTEGRATION_TESTS_EXE}ConfigVersion.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}Config.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}/${INTEGRATION_TESTS_EXE}ConfigVersion.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipdnnIntegrationTestHelpers.cmake"
-    DESTINATION lib/cmake/${INTEGRATION_TESTS_EXE}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${INTEGRATION_TESTS_EXE}
 )
 
 add_clang_tidy_custom_target()

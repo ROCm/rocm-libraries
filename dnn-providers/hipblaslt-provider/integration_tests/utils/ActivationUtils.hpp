@@ -6,7 +6,6 @@
 #include <exception>
 #include <optional>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_frontend/Types.hpp>
 
 namespace test_activation_common
@@ -44,7 +43,7 @@ struct ActivTestCase
 
     friend std::ostream& operator<<(std::ostream& ss, const ActivTestCase& tc)
     {
-        ss << "(mode:" << hipdnn_frontend::toSdkType(tc.mode);
+        ss << "(mode:" << hipdnn_frontend::to_string(tc.mode);
         if(tc.reluLowerClip)
         {
             ss << " reluLowerClip:" << tc.reluLowerClip.value();

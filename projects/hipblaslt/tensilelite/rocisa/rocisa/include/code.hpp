@@ -119,6 +119,10 @@ namespace rocisa
                 t += "  /// " + comment;
             }
             t += "\n";
+            if(getAsmCaps()["HasVgprMSB"])
+            {
+                rocIsa::getInstance().setVgprMsb(-1);
+            }
             return t;
         }
     };
@@ -740,7 +744,12 @@ namespace rocisa
             s += ".macro " + macro->toString();
             for(const auto& x : itemList)
             {
-                s += "    " + x->toString();
+                // macro formatting
+                std::string tmp = x->toString();
+                size_t pos = tmp.find("\n");
+                if(tmp.find("s_set_vgpr_msb") != std::string::npos)
+                    tmp.insert(pos+1, "    ");
+                s += "    " + tmp;
             }
             s += ".endm\n";
             if(0)
@@ -865,6 +874,8 @@ namespace rocisa
             : ValueSet(name, value, offset)
             , regType(regType)
         {
+            if(getAsmCaps()["HasVgprMSB"] && regType == "v")
+                setIdx(value, offset);
         }
 
         RegSet(const std::string& regType,
@@ -874,6 +885,37 @@ namespace rocisa
             : ValueSet(name, value, offset)
             , regType(regType)
         {
+            if(getAsmCaps()["HasVgprMSB"] && regType == "v")
+                setIdx(value, offset);
+        }
+
+        inline void setIdx(int val, int offset) const
+        {
+            // std::cout << name.substr(4) << ": " << val + offset << "\n";
+            rocIsa::getInstance().setVgprIdx(name.substr(4), val + offset);
+        }
+
+        inline void setIdx(const std::string& value, int offset) const
+        {
+            std::map<std::string, int> m = getVgprIdx();
+            // std::cout << name.substr(4) << ": " << m[value.substr(4)] + offset << "\n";
+            // use substr to skip prefix "vgpr"
+            rocIsa::getInstance().setVgprIdx(name.substr(4), m[value.substr(4)] + offset);
+        }
+
+        std::string toString() const override
+        {
+            if(regType == "v" && getAsmCaps()["HasVgprMSB"]){
+                if(ref)
+                {
+                    setIdx(ref.value(), offset);
+                }
+                else if(value)
+                {
+                    setIdx(value.value(), offset);
+                }
+            }
+            return ValueSet::toString();
         }
     };
 
@@ -1129,6 +1171,26 @@ namespace rocisa
         }
     };
 
+    union SrdUpperFields125X
+    {
+        struct
+        {
+            uint32_t num_records_upper : 6;
+            uint32_t reserved : 6;
+            uint32_t stride : 14;
+            uint32_t stride_scale : 2;
+            uint32_t swizzle_enable : 1;
+            uint32_t oob_select : 1;
+            uint32_t type : 2;
+        };
+        unsigned int value;
+
+        SrdUpperFields125X()
+            : value(0)
+        {
+        }
+    };
+
     struct SrdUpperValue12XX : public BitfieldUnion
     {
         SrdUpperFields12XX fields;
@@ -1164,6 +1226,37 @@ namespace rocisa
         {
             return "hex: " + toString() + "\n" + fields_desc();
         }
+    };
+
+    struct SrdUpperValue125X : public BitfieldUnion
+    {
+        SrdUpperFields125X fields;
+
+        static SrdUpperValue125X staticInit()
+        {
+            SrdUpperValue125X value;
+            value.value = value.fields.value;
+            return value;
+        }
+
+        std::string fields_desc() const override
+        {
+            std::stringstream ss;
+            ss << field_desc("num_records_upper", fields.num_records_upper, 6) << "\n"
+               << field_desc("reserved", fields.reserved, 6) << "\n"
+               << field_desc("stride", fields.stride, 14) << "\n"
+               << field_desc("stride_scale", fields.stride_scale, 2) << "\n"
+               << field_desc("swizzle_enable", fields.swizzle_enable, 1) << "\n"
+               << field_desc("oob_select", fields.oob_select, 1) << "\n"
+               << field_desc("type", fields.type, 2);
+            return ss.str();
+        }
+
+        std::string desc() const override
+        {
+            return "hex: " + toString() + "\n" + fields_desc();
+        }
+
     };
 
     std::shared_ptr<BitfieldUnion> SrdUpperValue(const IsaVersion& isa);

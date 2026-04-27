@@ -1,6 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+ARG BUILD_TYPE=prebuilt
+ARG THEROCK_BASE_IMAGE=rocm/miopen:therock
+
 # ============================================================================
 # Common base image with all dependencies
 # ============================================================================
@@ -95,8 +98,8 @@ RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
     usermod -a -G render,video root
 
 # ========================================================================================
-# Build from source stage - clones and builds projects from TheRock that MIOpen depends on
-# with the exception of CK and external MIOpen deps which are built separately
+# NIGHTLY: Build from source stage - clones and builds projects from TheRock that MIOpen
+# depends on, with the exception of CK and external MIOpen deps which are built separately
 # ========================================================================================
 FROM base AS build_therock
 
@@ -215,6 +218,7 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
             -DTHEROCK_ENABLE_ROCGDB=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
+            -DTHEROCK_BUILD_TESTING=OFF \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     fi
 
@@ -226,10 +230,23 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
     fi && \
     cmake --install .
 
+#============================================================================
+# REGULAR: Use the pre-built ROCm image from TheRock to build the rest of
+# the MIOpen environment
+#============================================================================
+FROM ${THEROCK_BASE_IMAGE} AS prebuilt_therock
+
+# ============================================================================
+# Select which build stage to use
+# ============================================================================
+FROM ${BUILD_TYPE}_therock AS therock
+
 # ================================================================================
-# Build and install other 3rd party deps 
+# REGULAR: Build and install other 3rd party deps using pre-built ROCm image
 # ================================================================================
-FROM build_therock AS miopen_deps
+FROM base AS miopen_deps
+COPY --from=therock /opt/rocm /opt/rocm
+ARG THEROCK_ASIC=gfx90a
 ARG PREFIX="/usr/local"
 ARG USE_FIN="OFF"
 
@@ -248,10 +265,18 @@ RUN cd / && \
     else \
         rbuild prepare -s develop -d ${PREFIX} -DGPU_ARCHS="${THEROCK_ASIC}"; \
     fi
+# ================================================================================
+# NIGHTLY target: push this image as rocm/miopen:therock
+# ================================================================================
+FROM scratch AS update_therock
+COPY --from=miopen_deps /opt/rocm /opt/rocm
+COPY --from=miopen_deps /usr/local /usr/local
 
 # ============================================================================
 # Build and install CK
 # ============================================================================
+FROM miopen_deps AS build_ck
+ARG THEROCK_ASIC=gfx90a
 ADD miopen/script/redis-cli.conf /redis-cli.conf
 ADD miopen/script/sccache_wrapper.sh /sccache_wrapper.sh
 
@@ -263,7 +288,6 @@ ARG MIOPEN_SCCACHE=""
 ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
 ARG COMPILER_LAUNCHER=""
 ARG MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="MiOpen-Docker-CK"
-ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
 ARG THEROCK_ASIC=""
 ENV THEROCK_ASIC=${THEROCK_ASIC}
 
@@ -330,30 +354,31 @@ RUN set -x && \
     fi
 
 # ============================================================================
-# Common miopen development environment
+# REGULAR target: final MIOpen development environment
 # ============================================================================
 FROM base AS miopen
 
-COPY --from=miopen_deps /opt/rocm /opt/rocm
-COPY --from=miopen_deps /usr/local /usr/local
+COPY --from=build_ck /opt/rocm /opt/rocm
+COPY --from=build_ck /usr/local /usr/local
 
 # Install explicit version of tools that are supported for miopen development
 # (clang-format, clang-tidy)
+RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - && \
+    echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list 
+
 RUN apt-get update && apt-get install -y \
     clang-format-18 \
-    clang-tidy-20 \
-    clang-tools-20 \
-    llvm-20 \
+    clang-tidy-21 \
     && rm -rf /var/lib/apt/lists/*
 
 # Workaround for broken clang-tidy in TheRock
 RUN mv /opt/rocm/llvm/bin/clang-tidy /opt/rocm/llvm/bin/clang-tidy.disabled || true
-RUN ln -sf /usr/bin/clang-tidy-20 /opt/rocm/llvm/bin/clang-tidy
+RUN ln -sf /usr/bin/clang-tidy-21 /opt/rocm/llvm/bin/clang-tidy
 
 # Use update-alternatives to set default versions
 RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
-RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
-RUN update-alternatives --set clang-tidy /usr/bin/clang-tidy-20
+RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-21 100
+RUN update-alternatives --set clang-tidy /usr/bin/clang-tidy-21
 
 # Ensure the dynamic linker can find ROCm libraries by adding /opt/rocm/lib to the linker cache. 
 RUN printf '%s\n' /opt/rocm/lib > /etc/ld.so.conf.d/rocm.conf && ldconfig

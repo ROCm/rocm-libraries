@@ -169,6 +169,9 @@ class Assembler(Component):
             destPath: The destination path for the generated object file.
         """
         args = self._default_args
+        # Add gfx1250-specific parameters
+        if targetGfx == "gfx1250":
+            args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,
             f"-mcpu={targetGfx}",
@@ -224,6 +227,11 @@ class Compiler(Component):
             self.default_args.append("--save-temps")
         if os_name == "nt":                                                    # should we use fPIIC on all arches?
             self.default_args.extend(["-fms-extensions", "-fms-compatibility", "-fPIC", "-Wno-deprecated-declarations"])
+            # amdclang++ on Windows does not read ROCM_PATH from the environment;
+            # it requires --rocm-path on the command line to locate HIP headers.
+            rocm_path = environ.get("ROCM_PATH", "")
+            if rocm_path:
+                self.default_args.append(f"--rocm-path={rocm_path}")
 
 
     def __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str):

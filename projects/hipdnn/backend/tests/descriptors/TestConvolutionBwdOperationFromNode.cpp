@@ -11,9 +11,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvDgradConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -22,7 +22,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 
 // =============================================================================
@@ -61,10 +61,10 @@ protected:
         _tensorMap[K_DGRAD_TENSOR_DX_UID] = TensorDescriptor::fromFlatBuffer(dxAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::ConvolutionBwdAttributesT
+    static hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributesT
         createStandardConvolutionBwdAttrs()
     {
-        hipdnn_data_sdk::data_objects::ConvolutionBwdAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributesT attrs;
         attrs.dy_tensor_uid = K_DGRAD_TENSOR_DY_UID;
         attrs.w_tensor_uid = K_DGRAD_TENSOR_W_UID;
         attrs.dx_tensor_uid = K_DGRAD_TENSOR_DX_UID;

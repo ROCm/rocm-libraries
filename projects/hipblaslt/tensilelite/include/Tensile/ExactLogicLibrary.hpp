@@ -27,6 +27,8 @@
 #pragma once
 
 #include <atomic>
+#include <optional>
+#include <set>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
@@ -34,7 +36,6 @@
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
 #include <Tensile/SolutionLibrary.hpp>
-#include <type_traits>
 
 namespace TensileLite
 {
@@ -101,17 +102,21 @@ namespace TensileLite
                                                              double*          fitness
                                                              = nullptr) const override
         {
-            std::shared_ptr<MySolution> rv;
+            std::shared_ptr<MySolution> fallbackRv;
             const bool                  streamK = Debug::Instance().useExperimentalSelection() == 2;
 
+            // Return exact match immediately; otherwise keep first successful fallback.
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
-                if(row.first(problem, hardware))
+                if(!row.first(problem, hardware))
+                    continue;
+
+                if(!row.first.isFallbackMatch(hardware))
                 {
-                    rv = row.second->findBestSolution(problem, hardware, fitness);
+                    auto rv = row.second->findBestSolution(problem, hardware, fitness);
 
                     if(rv
                        && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
@@ -122,16 +127,33 @@ namespace TensileLite
                     {
                         if(Debug::Instance().printDeviceSelection())
                         {
-                            std::cout << "  Solution found: " << rv->name()
+                            std::cout << "  Solution found (exact): " << rv->name()
                                       << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
                         }
                         return rv;
                     }
                 }
+                else if(!fallbackRv)
+                {
+                    fallbackRv = row.second->findBestSolution(problem, hardware, fitness);
+
+                    if(fallbackRv
+                       && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
+                           row.first.value.get()))
+                        fallbackRv->tag = MySolution::MatchingTag::Equal;
+                }
             }
 
-            return rv;
+            if(fallbackRv && Debug::Instance().printDeviceSelection())
+            {
+                std::cout << "  Solution found (fallback): " << fallbackRv->name()
+                          << " [MatchingTag: " << fallbackRv->matchingTag() << "]" << std::endl;
+            }
+
+            return fallbackRv;
         }
+
+    public:
 
         virtual SolutionSet<MySolution>
             findAllSolutions(MyProblem const&          problem,
@@ -342,9 +364,24 @@ namespace TensileLite
     {
         std::shared_ptr<Predicates::Predicate<Hardware>> value;
 
+        // The chip IDs this predicate targets, if any. Set by callers that
+        // know the chip IDs (e.g. makeHwPred, deserialization). When empty
+        // the predicate has no chip-ID constraint and every match is exact.
+        std::set<int> targetPciChipIds;
+
         HardwarePredicate() = default;
-        HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init)
+        HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init,
+                          std::optional<int> chipId = std::nullopt)
             : value(init)
+        {
+            if(chipId)
+                targetPciChipIds.insert(chipId.value());
+        }
+
+        HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init,
+                          std::set<int>                                 chipIds)
+            : value(init)
+            , targetPciChipIds(chipIds)
         {
         }
 
@@ -362,6 +399,21 @@ namespace TensileLite
             }
 
             return rv;
+        }
+
+        // A match is a fallback when the predicate targets a specific chip ID
+        // and the GPU's chip ID is different (operator() already confirmed
+        // compatibility via ChipIdRegistry::canUseSolution).
+        bool isFallbackMatch(Hardware const& hardware) const
+        {
+            if(targetPciChipIds.empty())
+                return false;
+
+            auto gpuChipId = hardware.pciChipId();
+            if(!gpuChipId)
+                return false;
+
+            return targetPciChipIds.count(gpuChipId.value()) == 0;
         }
     };
 
@@ -416,6 +468,12 @@ namespace TensileLite
             }
 
             return rv;
+        }
+
+        // Problem predicates never involve hardware fallback.
+        bool isFallbackMatch(Hardware const&) const
+        {
+            return false;
         }
     };
 
