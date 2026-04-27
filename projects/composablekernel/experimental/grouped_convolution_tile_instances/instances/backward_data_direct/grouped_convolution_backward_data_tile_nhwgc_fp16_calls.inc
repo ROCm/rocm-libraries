@@ -1,9 +1,24 @@
+////////////////////////////////////////////////////////////////////////
 // Direct HIP convolution (streaming) kernels — configs 0-4 are Dgrad
+////////////////////////////////////////////////////////////////////////
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData4CFp16Kernel<0>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData4CFp16Kernel<1>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData4CFp16Kernel<2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData4CFp16Kernel<3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData4CFp16Kernel<4>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Direct HIP convolution (streaming) 16c kernels — configs 0-8 are Dgrad
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<0>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<4>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<5>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<6>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<7>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<8>, SIGNATURE>);
 
 /////////////////////////////////////////////////////////////////////////////
 // Direct CK Tile convolution (streaming) kernels — Dgrad v3 configs
@@ -35,18 +50,6 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<32, direc
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<33, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<34, direct_conv::Version::v3>, SIGNATURE>);
 
-////////////////////////////////////////////////////////////////////////
-// Direct HIP convolution (streaming) 16c kernels — configs 0-8 are Dgrad
-////////////////////////////////////////////////////////////////////////
-run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<0>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<2>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<3>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<4>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<5>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<6>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<7>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData16CFp16Kernel<8>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
 // Direct CK Tile convolution (streaming) 16c v2 kernels — Dgrad configs 0-8
@@ -91,3 +94,7 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<59, dire
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<60, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<61, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<62, direct_conv::Version::v2>, SIGNATURE>);
+
+// Group 4: Cyclic-shift swizzle - Dgrad indices 74-75
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<74, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData16CFp16Kernel<75, direct_conv::Version::v2>, SIGNATURE>);

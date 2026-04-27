@@ -36,20 +36,36 @@ using namespace ck_tile::direct_conv;
 // 64 threads per wave.
 constexpr int WAVE_SIZE = 64;
 
-// Block output is 16 columns wide (fixed by mfma_f32_16x16x16f16 M=16).
+// Thread block output is 16 columns wide (fixed by mfma_f32_16x16x16f16 M=16).
 constexpr int BLOCK_Q = 16;
 
 // Kernel configuration parameters.
 struct Config
 {
+    // Number of wave per workgroup.
+    // Each wave computes BLOCK_Q=16 columns and waves_per_wg * 16 input channels.
     int waves_per_wg;
 
+    // Filter width & height
     int kh = 3;
     int kw = 3;
 
-    int group_size = 16;
-
+    // Batch folding:
+    // The batch dimension is folded into the grid by a factor of n_fold, meaning each block processes n_fold batches.
+    // The grid for launching the kernel becomes 
+    //      dim3(ceil(out_W / block_q) * n_fold,   ceil(C / block_c),   ceil(N / n_fold))
+    // This means that W-tiles are interleaved with n_fold groups of images
+    // The n_fold number tells how many image slots are packed into one X-dimension stride.
+    // By spreading images into the X dimension rather than only Z, 
+    // the GPU can schedule blocks from different images onto different CUs without 
+    // waiting for one image's channel tiles to finish first.
     int n_fold = 8;
+
+    // Number of channels per convolution group.
+    int channels_per_group = 16;
+
+    // Uniform accessor for shared code (alias for channels_per_group).
+    constexpr int group_size() const { return channels_per_group; }
 
     Direction direction = Direction::Fprop;
 
@@ -57,21 +73,29 @@ struct Config
 
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 
-    constexpr int block_c() const { return group_size * waves_per_wg; }
+    // Total number of waves per workgroup.
+    constexpr int num_waves() const { return waves_per_wg; }
+
+    // Tile size in the channel dimension: number of input channels processed by one workgroup.
+    constexpr int block_c() const { return channels_per_group * waves_per_wg; }
 
     // Tile size in the output column dimension (fixed by MFMA M=16).
     constexpr int block_q() const { return BLOCK_Q; }
 
-    constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
-
-    // Total number of waves per workgroup.
-    constexpr int num_waves() const { return waves_per_wg; }
-
+    // Number of conv groups processed by one workgroup.
     constexpr int block_groups() const { return waves_per_wg; }
+
+    // Number of threads per workgroup (thread block).
+    constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
 
     std::string GetName() const
     {
-        std::string swz = (swizzle_type == SwizzleType::XOR) ? "swizzleXOR" : "noswizzle";
+        std::string swz = "noswizzle";
+        if (swizzle_type == SwizzleType::XOR)
+            swz = "xorswizzle";
+        else if (swizzle_type == SwizzleType::CyclicShift)
+            swz = "cyclicshift";
+        
         std::string base = "tile_v2_grouped_16c_" + swz + "_waves_per_wg_" +
                            std::to_string(waves_per_wg);
         if(epilogue == EpilogueType::RegistersToGlobalMemory)
@@ -314,7 +338,7 @@ inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
 template <Config cfg>
 struct TileConstants
 {
-    static constexpr int GROUP_SIZE   = cfg.group_size;   // 16
+    static constexpr int GROUP_SIZE   = cfg.group_size();   // 16
     static constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4;   // 4
     static constexpr int GROUP_SIZE_8 = GROUP_SIZE / 8;   // 2
 
@@ -530,13 +554,13 @@ struct BlockCoords
     int K;
 
     __device__ BlockCoords(int groups)
-        : C(groups * cfg.group_size), C8(C / 8), K(C)
+        : C(groups * cfg.group_size()), C8(C / 8), K(C)
     {
         const int block_q_n_idx = blockIdx.x;
         block_n     = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
         block_q     = (block_q_n_idx / cfg.n_fold) * BLOCK_Q;
         block_group = static_cast<int>(blockIdx.y) * cfg.block_groups();
-        block_k     = block_group * cfg.group_size;
+        block_k     = block_group * cfg.group_size();
         block_c8    = block_k / 8;
     }
 };

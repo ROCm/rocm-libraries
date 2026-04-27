@@ -71,7 +71,7 @@ struct SharedDescriptors
                     desc_padded,
                     ck_tile::make_tuple(
                         ck_tile::make_pass_through_transform(hi),
-                        ck_tile::make_inverse_cyclic_shift_transform(ck_tile::make_tuple(
+                        ck_tile::make_cyclic_shift_transform(ck_tile::make_tuple(
                             wi + px + right_pad_w, ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
@@ -170,7 +170,7 @@ struct SharedDescriptors
                 constexpr auto desc_cyclic_shift = ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
-                        ck_tile::make_cyclic_shift_transform(
+                        ck_tile::make_inverse_cyclic_shift_transform(
                             ck_tile::make_tuple(ck_tile::number<TC::BLOCK_W>{},
                                                 ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),

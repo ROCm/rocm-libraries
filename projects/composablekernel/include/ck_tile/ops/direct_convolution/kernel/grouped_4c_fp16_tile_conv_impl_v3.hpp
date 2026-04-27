@@ -88,7 +88,7 @@ struct Config
     constexpr int block_c() const { return waves_c64 * 64; }
 
     // Tile size in the output column dimension.
-    constexpr int block_q() const { return waves_q4 * 4; }
+    constexpr int block_q() const { return waves_q4 * WARP_Q; }
 
     // Number of conv groups processed by one workgroup.
     constexpr int block_groups() const { return waves_c64 * 16; }
