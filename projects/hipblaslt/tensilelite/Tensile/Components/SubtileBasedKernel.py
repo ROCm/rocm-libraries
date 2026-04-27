@@ -1782,69 +1782,64 @@ def mainLoop(writer, kernel):
   pgr = kernel["PrefetchGlobalRead"]
   assert pgr in (0, 2), "SubtileBasedKernel only supports PGR=0 and PGR=2, got PGR=%d" % pgr
 
-  # PGR=2 pipelining with LogicalScheduler
-  if pgr == 2:
-    from Tensile.Components.SubtileBasedLogicalScheduler import (
-        LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-        ReadGranularity)
-    tiA = writer.states.a.tileInfo
-    tiB = writer.states.b.tileInfo
-    scaleTiA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
-    scaleTiB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
+  from Tensile.Components.SubtileBasedLogicalScheduler import (
+      LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
+      ReadGranularity)
+  tiA = writer.states.a.tileInfo
+  tiB = writer.states.b.tileInfo
+  scaleTiA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
+  scaleTiB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
 
-    lrAGran = ReadGranularity(mn=1, k=1)
-    lrBGran = ReadGranularity(mn=1, k=1)
-    # Based on current subtile shape. loadRatioGR == 2.0 has 2x2 granularity.
-    grAGran = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-    grBGran = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-    lrSAGran = ReadGranularity(mn=2, k=2) if scaleTiA else None
-    lrSBGran = ReadGranularity(mn=2, k=2) if scaleTiB else None
-    grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
-    grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
+  lrAGran = ReadGranularity(mn=1, k=1)
+  lrBGran = ReadGranularity(mn=1, k=1)
+  grAGran = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+  grBGran = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+  lrSAGran = ReadGranularity(mn=2, k=2) if scaleTiA else None
+  lrSBGran = ReadGranularity(mn=2, k=2) if scaleTiB else None
+  grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
+  grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
 
-    vgprBudget = writer.states.regCaps["MaxVgpr"]
-    vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
+  schedulerPgr = 1 if pgr == 2 else 0
+  schedulerPlr = 0 if pgr == 0 else 1
 
-    for numPartM, numPartN in MFMASchedulerConfig.get_partition_candidates(tiA, tiB):
-        cfg = MFMASchedulerConfig(
-            numMFMATilesM=tiA.localMMATileGrid[0],
-            numMFMATilesN=tiB.localMMATileGrid[0],
-            numSubIterK=tiA.localMMATileGrid[1],
-            lrA=lrAGran,
-            lrB=lrBGran,
-            grA=grAGran,
-            grB=grBGran,
-            lrSA=lrSAGran,
-            lrSB=lrSBGran,
-            grSA=grSAGran,
-            grSB=grSBGran,
-            numPartitionsM=numPartM,
-            numPartitionsN=numPartN,
-        )
-        scheduler = LogicalScheduler(cfg)
-        scheduler.build()
+  vgprBudget = writer.states.regCaps["MaxVgpr"]
+  vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
 
-        numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
-        if vgprUsed + numVgpr <= vgprBudget:
-            break
+  candidates = [(1, 1)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+  for numPartM, numPartN in candidates:
+      cfg = MFMASchedulerConfig(
+          numMFMATilesM=tiA.localMMATileGrid[0],
+          numMFMATilesN=tiB.localMMATileGrid[0],
+          numSubIterK=tiA.localMMATileGrid[1],
+          lrA=lrAGran,
+          lrB=lrBGran,
+          grA=grAGran,
+          grB=grBGran,
+          lrSA=lrSAGran,
+          lrSB=lrSBGran,
+          grSA=grSAGran,
+          grSB=grSBGran,
+          numPartitionsM=numPartM,
+          numPartitionsN=numPartN,
+          pgr=schedulerPgr,
+          plr=schedulerPlr,
+      )
+      scheduler = LogicalScheduler(cfg)
+      scheduler.build()
 
+      numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+      if vgprUsed + numVgpr <= vgprBudget:
+          break
 
-    # Allocation and instruction emit
-    scheduler.allocVgprTiles(writer, tiA, tiB,
-                             scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
-    dtileInfo = writer.states.d.tileInfo
-    scheduler.populate_instructions(
-        writer, kernel,
-        tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
-        scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+  scheduler.allocVgprTiles(writer, tiA, tiB,
+                           scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+  dtileInfo = writer.states.d.tileInfo
+  scheduler.populate_instructions(
+      writer, kernel,
+      tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
+      scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
 
-    module.add(scheduler.emitAllLoops(writer, kernel))
-    scheduler.deallocVgprTiles(writer)
-
-  else:
-    # PGR=0: non-pipelined
-    module.addComment0("MAINLOOP")
-    module.add(mainLoopImplPGR0(writer, kernel))
-    module.addComment("")
+  module.add(scheduler.emitAllLoops(writer, kernel))
+  scheduler.deallocVgprTiles(writer)
 
   return module

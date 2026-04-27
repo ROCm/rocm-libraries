@@ -2136,6 +2136,7 @@ class LogicalScheduler:
 
         module = Module("AllLoops")
         uf = self.unroll_factor
+        isPGR0 = self.config.pgr == 0
 
         # ── Preloop ──
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
@@ -2145,6 +2146,8 @@ class LogicalScheduler:
         module.addComment0("MAINLOOP")
         loopBegin = Label("LoopBeginL", "")
 
+        exitValue = 0 if isPGR0 else 2
+
         if uf == 1:
             module.add(loopBegin)
             module.add(self._emitLoop(writer, kernel, "MAINLOOP",
@@ -2152,8 +2155,8 @@ class LogicalScheduler:
             module.add(SSubU32(dst=sgpr("LoopCounterL"),
                                src0=sgpr("LoopCounterL"), src1=1,
                                comment="dec counterL"))
-            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=2,
-                                 comment="counterL == 2?"))
+            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
+                                 comment=f"counterL == {exitValue}?"))
             module.add(SCBranchSCC0(labelName=loopBegin.getLabelName(),
                                     comment="restart mainloop"))
         else:
@@ -2165,8 +2168,8 @@ class LogicalScheduler:
                 module.add(SSubU32(dst=sgpr("LoopCounterL"),
                                    src0=sgpr("LoopCounterL"), src1=1,
                                    comment=f"dec counterL (copy {ui})"))
-                module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=2,
-                                     comment=f"counterL == 2? (copy {ui} exit)"))
+                module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
+                                     comment=f"counterL == {exitValue}? (copy {ui} exit)"))
                 if ui < uf - 1:
                     module.add(SCBranchSCC1(
                         labelName=exitLabels[ui].getLabelName(),
