@@ -10748,7 +10748,8 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def localWriteSwapOffsets(self, kernel, internalPointerSwap, tP, prefetch=False):
     tc = tP["tensorChar"]
-    if not self.do["LocalWrite%s"%tc] or kernel["NoLdsWriteCode"]:
+    # TDM has its own swap path (tdmSwapLdsOffset); skip here for that case.
+    if not self.do["LocalWrite%s"%tc] or (kernel["enableTDMA"] and kernel["enableTDMB"]):
       return Module("localWriteSwapOffsets (No local write%s)"%tc)
     needSwap = False if kernel["1LDSBuffer"] else True
     doMetadataCheck = kernel["ProblemType"]["Sparse"] and \
