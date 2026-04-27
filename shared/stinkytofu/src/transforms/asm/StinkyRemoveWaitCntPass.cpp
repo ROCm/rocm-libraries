@@ -23,6 +23,7 @@
 
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -65,12 +66,13 @@ class StinkyRemoveWaitCntPass : public StinkyInstPass {
         return &StinkyRemoveWaitCntPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) {
                 removeWaitCntsInBlock(bb, removeTensorWaitCnt);
             }
         }
+        return preserveCFGAnalyses();
     }
 
    private:

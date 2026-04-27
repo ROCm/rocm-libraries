@@ -128,14 +128,15 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   printSolutionRejectionReason = True
   printIndexAssignmentInfo = False
   for logicFileName in logicFiles:
-    (scheduleName, _, problemType, _, exactLogic, newLibrary) \
-        = LibraryIO.parseLibraryLogicFile(logicFileName,
-                                          assembler,
-                                          splitGSU,
-                                          printSolutionRejectionReason,
-                                          printIndexAssignmentInfo,
-                                          isaInfoMap,
-                                          globalParameters["LazyLibraryLoading"])
+    logic = LibraryIO.parseLibraryLogicFile(logicFileName,
+                                            assembler,
+                                            splitGSU,
+                                            printSolutionRejectionReason,
+                                            printIndexAssignmentInfo,
+                                            isaInfoMap,
+                                            globalParameters["LazyLibraryLoading"])
+    scheduleName, problemType, exactLogic, newLibrary = \
+        logic.schedule, logic.problemType, logic.exactLogic, logic.library
     functions.append((scheduleName, problemType))
     functionNames.append("tensile_%s" % (problemType))
     problemSizes = ProblemSizesMock(exactLogic) if exactLogic else ProblemSizesMockDummy()
