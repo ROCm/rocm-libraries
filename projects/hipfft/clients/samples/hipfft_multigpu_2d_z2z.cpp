@@ -60,7 +60,7 @@ int main()
     if(hipGetDeviceCount(&deviceCount) != hipSuccess)
         throw std::runtime_error("hipGetDeviceCount failed.");
     std::cout << "Number of available devices: " << deviceCount << std::endl;
-    if(deviceCount < ngpus)
+    if(static_cast<size_t>(deviceCount) < ngpus)
     {
         std::cout << "Sample needs at least " << ngpus << "GPUs\n";
         return 0;

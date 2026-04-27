@@ -331,7 +331,7 @@ inline void
 
 // Make the output of a r2c linear.
 template <typename Tfloat>
-inline void sneakyr2c(std::vector<Tfloat>& rinput, const int Nx, const int Ny)
+inline void sneakyr2c(std::vector<Tfloat>& rinput, const size_t Nx, const size_t Ny)
 {
     const size_t Nyp = Ny / 2 + 1;
 
@@ -395,7 +395,7 @@ inline void sneakyr2c(std::vector<Tfloat>& rinput, const int Nx, const int Ny)
 
 // Make the output of a r2c linear.
 template <typename Tfloat>
-inline void sneakyr2c(std::vector<Tfloat>& rinput, const int Nx, const int Ny, const int Nz)
+inline void sneakyr2c(std::vector<Tfloat>& rinput, const size_t Nx, const size_t Ny, const size_t Nz)
 {
     const size_t Nzp = Nz / 2 + 1;
 
@@ -463,7 +463,7 @@ inline void sneakyr2c(std::vector<Tfloat>& rinput, const int Nx, const int Ny, c
 
 // Make the output of a c2r linear.
 template <typename Tfloat>
-inline void sneakyc2r(std::vector<std::complex<Tfloat>>& cinput, const int Nx, const int Ny)
+inline void sneakyc2r(std::vector<std::complex<Tfloat>>& cinput, const size_t Nx, const size_t Ny)
 {
     if(cinput.size() < Nx * (Ny / 2 + 1))
         throw std::runtime_error("sneakyc2r has insufficient dimensions");
