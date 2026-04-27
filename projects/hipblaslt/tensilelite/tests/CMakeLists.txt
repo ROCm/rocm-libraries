@@ -76,13 +76,13 @@ set(F32_SIZES -M 133 -N 147 -K 165)
 set(F16_SIZES -M 131 -N 141 -K 151)
 set(ADDITIONAL_SIZES -M 102 -N 103 -K 105)
 
-macro(get_test_sizes TYPE OUT_SIZES)
+function(get_test_sizes TYPE OUT_SIZES)
     if("${TYPE}" STREQUAL "f32")
-        set(${OUT_SIZES} ${F32_SIZES})
+        set(${OUT_SIZES} ${F32_SIZES} PARENT_SCOPE)
     else()
-        set(${OUT_SIZES} ${F16_SIZES})
+        set(${OUT_SIZES} ${F16_SIZES} PARENT_SCOPE)
     endif()
-endmacro()
+endfunction()
 
 # Helper: convert transpose tag (NN/TN/NT/TT) to flags
 macro(get_trans_flags TRANS OUT_FLAGS)
@@ -162,17 +162,20 @@ foreach(PATH fast slow)
         )
     endforeach()
 
-endforeach()
-
-# ScaleAB tests (slow path only — fast path does not yet support useScaleAB)
-foreach(MODE Scalar Vector)
-    foreach(TYPE f32 f16 bf16)
-        get_test_sizes(${TYPE} SIZES)
-        add_cpu_gemm_test(slow_${TYPE}_ScaleAB_${MODE}
-            ARGS ${SIZES} --type ${TYPE} --validate --useScaleAB ${MODE}
+    # ScaleAB tests
+    foreach(MODE Scalar Vector)
+        foreach(TYPE f32 f16 bf16)
+            get_test_sizes(${TYPE} SIZES)
+            add_cpu_gemm_test(${PATH}_${TYPE}_ScaleAB_${MODE}
+                ARGS ${SIZES} --type ${TYPE} --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_f32_ScaleAB_${MODE}_AllFeatures
+            ARGS ${F32_SIZES} --type f32 --beta 0.5 --validate --useScaleAB ${MODE} --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        )
+        # ScaleAB with factorDim=1 (column-dimension ScaleAlphaVec)
+        add_cpu_gemm_test(${PATH}_f32_ScaleAB_${MODE}_ColN
+            ARGS ${F32_SIZES} --type f32 --validate --useScaleAB ${MODE} --scaleAlphaVec --factorDim 1 ${PATH_FLAGS}
         )
     endforeach()
-    add_cpu_gemm_test(slow_f32_ScaleAB_${MODE}_AllFeatures
-        ARGS ${F32_SIZES} --type f32 --beta 0.5 --validate --useScaleAB ${MODE} --bias --activation relu --scaleAlphaVec
-    )
 endforeach()
