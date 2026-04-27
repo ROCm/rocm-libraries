@@ -148,7 +148,22 @@ std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType
 
 bool isMi308Device(hipStream_t stream)
 {
-    int chipId = hip_kernel_provider_common::getDeviceProperties(stream).pciDeviceID;
+    int deviceId;
+    auto status = hipStreamGetDevice(stream, &deviceId);
+    if(status != hipSuccess)
+    {
+        throw std::runtime_error("hipStreamGetDevice failed with error code: "
+                                 + std::to_string(status));
+    }
+    int chipId;
+    status = hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, deviceId);
+    if(status != hipSuccess)
+    {
+        throw std::runtime_error("hipDeviceGetAttribute failed with error code: "
+                                 + std::to_string(status));
+    }
+
+    HIPDNN_PLUGIN_LOG_INFO("pciDeviceID  = " << std::hex << std::to_string(chipId));
     return chipId == 0x74a2 || chipId == 0x74a8 || chipId == 0x74b6 || chipId == 0x74bc;
 }
 
@@ -304,6 +319,21 @@ void SdpaFwdPlanBuilder::buildPlan(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelContext& executionContext) const
 {
+
+    // Get device properties
+    std::string deviceString;
+    bool isMi308;
+    try
+    {
+        deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+        isMi308 = isMi308Device(handle.getStream());
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to query device properties with error: " << e.what());
+        return;
+    }
+
     // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
     auto& sdpaAttrs = sdpaNode.attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
@@ -397,46 +427,30 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.oStrideHead = oStrideHead;
     params.oStrideBatch = oStrideBatch;
     params.attnScale = attnScale;
+    params.archString = deviceString;
+    MaskType maskType = getMaskType(sdpaAttrs);
+    params.noMask = maskType == MaskType::NO_MASK;
 
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
-    try
-    {
-        auto kernelKey
-            = getKernelNameKey(hip_kernel_provider_common::getDeviceString(handle.getStream()),
-                               getDataTypeIdentifier(qTensor->data_type(),
-                                                     kTensor->data_type(),
-                                                     vTensor->data_type(),
-                                                     oTensor->data_type()),
-                               static_cast<int>(headDimQk),
-                               static_cast<int>(headDimV),
-                               getMaskType(sdpaAttrs),
-                               getRoundingMode(sdpaAttrs),
-                               getBatchMode(sdpaAttrs),
-                               &cfg_fmha_fwd);
+    auto kernelKey = getKernelNameKey(
+        deviceString,
+        getDataTypeIdentifier(
+            qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type()),
+        static_cast<int>(headDimQk),
+        static_cast<int>(headDimV),
+        maskType,
+        getRoundingMode(sdpaAttrs),
+        getBatchMode(sdpaAttrs),
+        &cfg_fmha_fwd);
 
-        config = cfg_fmha_fwd.at(kernelKey);
-    }
-    catch(const std::exception& e)
+    if(kernelKey.empty())
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to find matching kernel with error:" << e.what());
-        return;
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to find matching kernel with error");
     }
+    config = cfg_fmha_fwd.at(kernelKey);
 
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
-
-    std::string deviceString;
-    bool isMi308;
-    try
-    {
-        deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-        isMi308 = isMi308Device(handle.getStream());
-    }
-    catch(const std::exception& e)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to query device properties with error: " << e.what());
-        return;
-    }
 
     // Load kernel module
     auto coPath = getKernelCoPath(config.co_name, deviceString, isMi308);

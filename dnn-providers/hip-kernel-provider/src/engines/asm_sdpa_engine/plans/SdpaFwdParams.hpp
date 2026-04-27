@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace asm_sdpa_engine
 {
@@ -54,6 +55,12 @@ struct SdpaFwdParams
 
     // Tile size
     unsigned int tileSizeQo;
+
+    // Architecture
+    std::string archString;
+
+    // Mask type
+    bool noMask;
 
     // Attention scale
     float attnScale;

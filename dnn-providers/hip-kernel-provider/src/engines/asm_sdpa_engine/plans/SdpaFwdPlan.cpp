@@ -13,7 +13,7 @@ namespace asm_sdpa_engine
 SdpaFwdPlan::SdpaFwdPlan(hipModule_t kernelModule, hipFunction_t function, SdpaFwdParams params)
     : _module(kernelModule)
     , _function(function)
-    , _params(params)
+    , _params(std::move(params))
 {
 }
 
@@ -33,7 +33,7 @@ SdpaFwdPlan::~SdpaFwdPlan()
 SdpaFwdPlan::SdpaFwdPlan(SdpaFwdPlan&& other) noexcept
     : _module(other._module)
     , _function(other._function)
-    , _params(other._params)
+    , _params(std::move(other._params))
 {
     // Transfer ownership - set source to nullptr to prevent double-free
     other._module = nullptr;
@@ -123,7 +123,18 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     args.s_k_Bs = _params.kStrideBatch * K_BF16_SIZE;
 
     // Options
-    args.s_opt = 0; // Default: no special options (RTNE rounding)
+    uint32_t tuneOpt = 5;
+    // if num_head is not 8N, or seqlen is bigger than 16K, downgrade to 2and3
+    if(!_params.noMask && ((_params.numHeadsQ % 8 != 0) || (_params.seqLenQ > 16384)))
+    {
+        tuneOpt -= 2;
+    }
+    if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
+    {
+        tuneOpt = 0;
+    }
+
+    args.s_opt = tuneOpt;
     args.s_lse = 0; // POC: don't compute LSE
 
     // KV dimensions
@@ -171,6 +182,11 @@ void SdpaFwdPlan::execute(const HipKernelHandle& /*handle*/,
     unsigned int gridDimX = (_params.seqLenQ + _params.tileSizeQo - 1) / _params.tileSizeQo;
     unsigned int gridDimY = _params.numHeadsQ;
     unsigned int gridDimZ = _params.batchSize;
+
+    if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
+    {
+        std::swap(gridDimX, gridDimY);
+    }
 
     unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
 

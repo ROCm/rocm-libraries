@@ -28,22 +28,26 @@ namespace
 struct SdpaTestCase
 {
     SdpaTestCase(std::vector<int64_t> qDimsIn,
-                 std::vector<int64_t> kDimsIn,
                  std::vector<int64_t> vDimsIn,
                  std::optional<float> attnScaleValueIn = std::nullopt,
                  std::vector<int64_t> attnMaskDimsIn = {},
                  bool causalMaskIn = false)
         : qDims(std::move(qDimsIn))
-        , kDims(std::move(kDimsIn))
         , vDims(std::move(vDimsIn))
         , qStrides(generateStrides(qDims))
-        , kStrides(generateStrides(kDims))
         , vStrides(generateStrides(vDims))
         , attnScaleValue(attnScaleValueIn)
         , attnMaskDims(std::move(attnMaskDimsIn))
         , attnMaskStrides(generateStrides(attnMaskDims))
         , causalMask(causalMaskIn)
     {
+        if(qDims.size() != 4 || vDims.size() != 4)
+        {
+            throw std::runtime_error("qDims and vDims vectors must have a size of 4");
+        }
+
+        kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
+        kStrides = generateStrides(kDims);
     }
 
     std::vector<int64_t> qDims;
@@ -61,8 +65,8 @@ struct SdpaTestCase
 
 std::vector<SdpaTestCase> getSdpaTestCases()
 {
-    return {SdpaTestCase({4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}),
-            SdpaTestCase({4, 8, 256, 192}, {4, 8, 256, 192}, {4, 8, 256, 128})};
+    return {SdpaTestCase({4, 8, 256, 128}, {4, 8, 256, 128}),
+            SdpaTestCase({4, 8, 256, 192}, {4, 8, 256, 128})};
 }
 
 template <typename DataType>
