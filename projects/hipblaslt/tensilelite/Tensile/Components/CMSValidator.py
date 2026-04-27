@@ -2361,65 +2361,119 @@ def derive_pack_must_start_after(
 
 
 def set_lr_needed_by_from_mfma_operands(
-    timeline: 'Timeline',
+    lrs: list[LocalRead],
+    packs: list[Pack],
+    mfmas: list[MFMA],
 ) -> dict[str, dict[int, MFMA]]:
-    """Derive LR→MFMA needed_by from register operands.
+    """Derive LR.needed_by from register operands.
 
-    Traces the register chain: LR.dst → Pack.dst → ... → MFMA.a/b
-    to find the earliest MFMA that (transitively) consumes each LR's data.
+    For each LR, finds the earliest real MFMA that (transitively, through
+    pack chains) consumes the LR's destination register. The chain follow
+    handles arbitrary depth: BF16 (LR→Pack→MFMA), regular TF32
+    (LR→CVT0→MiddlePack→CVT1→MFMA), and TF32 4x4
+    (LR→CVT0→MFMAPack→CVT1→MFMA).
 
-    Returns a dict mapping (lr_name, lr_issue_index) pairs to the consuming MFMA,
-    or empty dict if rocisa_inst is not available on any instruction.
+    Inputs MUST be loop-scoped: caller passes LRs and the candidate
+    consumers (packs + real MFMAs) from a single loop replication. For
+    LR0, consumers are same-loop. For LR1/LR3, consumers are next-loop
+    (positional baseline shifts +num_vmfma at :2775-2776).
+
+    The function is self-contained: it computes the pack-chain consumer
+    table inline by calling set_pack_needed_by_from_mfma_operands rather
+    than reading pack.needed_by. This eliminates dependence on the
+    validator pass order (add_pack_constraints need not run before
+    add_local_read_constraints) and on test mocks initializing
+    pack.needed_by.
+
+    The "issued strictly after" filter handles same-loop register reuse
+    (kernel prefetch pattern): an LR cannot pick a candidate issued at
+    or before itself, mirroring set_pack_needed_by_from_mfma_operands.
+
+    Returns dict lr_name → issue_index → real-MFMA consumer. LRs whose
+    chain does not terminate at a real MFMA (e.g. SwapPack-only
+    consumer in TF32 4x4 VW>1, missing rocisa_inst on a chain link)
+    are omitted; caller treats absence as "fall back to positional path."
     """
-    if not timeline.mfma_code:
+    if not lrs:
         return {}
 
-    # Build a map from register range → earliest MFMA that reads it
-    # Only consider MFMAs in the MAIN_LOOP (loop index 1) for the steady-state case
-    mfma_consumers: dict[tuple[str, int], MFMA] = {}
-    for _, mfma in timeline.get_instructions_combined("MFMA"):
-        if mfma.rocisa_inst is None:
-            continue
-        for rng in get_src_ranges(mfma.rocisa_inst):
-            base, start, end = rng
+    # Step 1: Compute the pack-chain consumer table inline. Independent
+    # of pack.needed_by field state.
+    pack_chain = set_pack_needed_by_from_mfma_operands(packs, mfmas)
+
+    # Build id-keyed lookup for chain-follow.
+    next_consumer: dict[int, ValidatorInstruction] = {}
+    for pack in packs:
+        per_name = pack_chain.get(pack.name, {})
+        if pack.issue_index in per_name:
+            next_consumer[id(pack)] = per_name[pack.issue_index]
+
+    # Step 2: Build candidates index (real MFMAs + non-Swap packs),
+    # sorted by issued_at per register. Mirrors Pack-side at :2459-2471.
+    candidates: list[ValidatorInstruction] = [
+        m for m in mfmas if m.rocisa_inst is not None
+    ]
+    candidates.extend(
+        p for p in packs
+        if p.rocisa_inst is not None and not isinstance(p, SwapPack)
+    )
+    by_reg: dict[tuple[str, int], list[ValidatorInstruction]] = {}
+    for inst in candidates:
+        for base, start, end in get_src_ranges(inst.rocisa_inst):
             for off in range(start, end):
-                key = (base, off)
-                if key not in mfma_consumers or mfma.issued_at < mfma_consumers[key].issued_at:
-                    mfma_consumers[key] = mfma
+                by_reg.setdefault((base, off), []).append(inst)
+    for lst in by_reg.values():
+        lst.sort(key=lambda i: i.issued_at)
 
-    # Build a map from pack dst registers → earliest consuming MFMA (direct or via other packs)
-    # Walk packs in reverse to propagate consumer info backwards through chains
-    all_packs = [(i, p) for i, p in timeline.get_instructions_combined("PackA0")]
-    for pack_name in timeline.get_instruction_names():
-        if pack_name.startswith("Pack") and pack_name != "PackA0":
-            all_packs.extend(timeline.get_instructions_combined(pack_name))
-
-    # For each pack, find the earliest MFMA that reads its output (directly or through later packs)
-    pack_to_mfma: dict[tuple[str, int], MFMA] = dict(mfma_consumers)  # start with direct MFMA consumers
-
-    # Now trace LR → Pack → MFMA
+    # Step 3: For each LR, find immediate consumer + follow chain to a
+    # real MFMA.
     result: dict[str, dict[int, MFMA]] = {}
-    for lr_name in timeline.get_instruction_names():
-        if not lr_name.startswith("LR") or lr_name.startswith("LRS"):
+    for lr in lrs:
+        if lr.rocisa_inst is None:
             continue
-        result[lr_name] = {}
-        for _, lr in timeline.get_instructions_combined(lr_name):
-            if lr.rocisa_inst is None:
-                return {}  # Can't do register-based analysis without rocisa_inst
-            dst = get_dst_range(lr.rocisa_inst)
-            if dst is None:
+        dst = get_dst_range(lr.rocisa_inst)
+        if dst is None:
+            continue
+        base, start, end = dst
+
+        # Earliest immediate consumer with strict < filter. Mirrors
+        # Pack-side at :2474-2493.
+        immediate: Optional[ValidatorInstruction] = None
+        for off in range(start, end):
+            lst = by_reg.get((base, off))
+            if not lst:
                 continue
-            # Find the earliest MFMA that (transitively) consumes this LR's data
-            base, start, end = dst
-            earliest_mfma = None
-            for off in range(start, end):
-                key = (base, off)
-                if key in pack_to_mfma:
-                    candidate = pack_to_mfma[key]
-                    if earliest_mfma is None or candidate.issued_at < earliest_mfma.issued_at:
-                        earliest_mfma = candidate
-            if earliest_mfma is not None:
-                result[lr_name][lr.issue_index] = earliest_mfma
+            for cand in lst:
+                if not (lr.issued_at < cand.issued_at):
+                    continue
+                if immediate is None or cand.issued_at < immediate.issued_at:
+                    immediate = cand
+                break  # list sorted by issued_at; first valid is earliest for this off
+
+        if immediate is None:
+            continue
+
+        # Step 4: Follow the chain. Unified loop — handles plain Pack,
+        # CVTPack, MiddlePack, MFMAPack uniformly. MFMAPack inherits Pack,
+        # so the loop continues through it; the acceptance check below
+        # rejects MFMAPack as a final answer.
+        target: Optional[ValidatorInstruction] = immediate
+        seen: set[int] = set()
+        while isinstance(target, Pack) and id(target) not in seen:
+            seen.add(id(target))
+            nxt = next_consumer.get(id(target))
+            if nxt is None:
+                target = None  # Chain dies; e.g. SwapPack with no successor
+                break
+            target = nxt
+
+        # Accept only real MFMAs (not MFMAPack, not the placeholder
+        # default at :333/:378/:476 which has rocisa_inst=None).
+        if (target is not None
+                and isinstance(target, MFMA)
+                and not isinstance(target, MFMAPack)
+                and target.rocisa_inst is not None):
+            result.setdefault(lr.name, {})[lr.issue_index] = target
 
     return result
 

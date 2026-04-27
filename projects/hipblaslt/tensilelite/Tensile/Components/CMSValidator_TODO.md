@@ -36,18 +36,28 @@ tested across all dict variations:
 
 ## Delete dead positional code
 
-Once Known Issue 4 (below) is fixed:
+Blocked on wiring `set_lr_needed_by_from_mfma_operands` into
+`add_local_read_constraints` (caller must scope LR0 to same loop,
+LR1/LR3 to next loop, apply hybrid wholesale fallback to
+`set_lr_needed_by_for_VMFMA` when chain dies). Then the following
+become safe to delete:
 - `_hook_up_packs_bf16`
 - `_hook_up_packs_f32` (keep `_hook_up_middle_16_pairs`)
 - `_hook_up_packs_f32_mfma`
 - Hardcoded `pack_dependencies` dicts
+- `set_lr_needed_by_for_VMFMA` (and `lr_needed_by_mfma` tile-math)
 
-## Known Issue 4
+## Wiring follow-ups for `set_lr_needed_by_from_mfma_operands`
 
-- `set_lr_needed_by_from_mfma_operands` doesn't propagate through pack
-  chains (LR→Pack→MFMA)
-
-Required before deleting `set_lr_needed_by_for_VMFMA`.
+- Author a `_REAL_TWIN_CONFIG_PLR_PACK` config (UsePLRPack=True) for
+  cross-loop LR1/LR3 parity testing before wiring lands. The current
+  `_REAL_TWIN_CONFIG_VW4` has PrefetchLocalRead=1 and exercises only
+  LR0/LR1 (not LR3).
+- Author a non-SwapPack registered config (LocalReadVectorWidth=1
+  variant of an existing TF32 schedule) so the parity test can verify
+  full chain coverage rather than the current "no false answers"
+  weak parity (the SwapPack path silently truncates the chain for
+  every LR in `_REAL_TWIN_CONFIG_VW4`).
 
 ## `@applies_only_once` partial state on error
 

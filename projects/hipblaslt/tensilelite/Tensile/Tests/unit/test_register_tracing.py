@@ -42,6 +42,8 @@ from Tensile.Components.CMSValidator import (
     LocalRead, MFMA,
     derive_pack_must_start_after,
     set_pack_needed_by_from_mfma_operands,
+    set_lr_needed_by_from_mfma_operands,
+    set_lr_needed_by_for_VMFMA,
     resolve_pack_type, PACK_TYPE_MAP,
     _compute_swap_register_pairs, _build_reg_to_lr_map,
     _hook_up_packs_f32_mfma,
@@ -802,3 +804,277 @@ class TestSetPackNeededByFromMFMAOperands:
         # if SwapPack weren't filtered as a candidate).
         assert result["PackA0"][0] is packs[4], \
             f"CVT0[0].needed_by must be mfma_packs[0], not the SwapPack. Got {result['PackA0'][0]}"
+
+
+# =============================================================================
+# Test: set_lr_needed_by_from_mfma_operands — chain follow + filtering
+# =============================================================================
+
+
+class TestSetLrNeededByFromMFMAOperands:
+    """Direct tests for set_lr_needed_by_from_mfma_operands.
+
+    Verifies the LR's chain-follow terminates at a real MFMA via the
+    inline pack-chain computation (no dependence on pack.needed_by).
+    Mirrors TestSetPackNeededByFromMFMAOperands six-test pattern.
+    """
+
+    def _make_tf32_4x4_group(self, vmfma_offsets, lr_base=LRA_BASE,
+                             pack_dst_base=PACK_A_DST_BASE, loop: int = 1):
+        """Build one 10-pack TF32 4x4 group with controllable per-pack vmfma."""
+        assert len(vmfma_offsets) == 10
+        mock = _make_mock_packs_tf32_4x4(10, pack_dst_base=pack_dst_base, lr_base=lr_base)
+        packs = []
+        for i in range(10):
+            cls, _ = resolve_pack_type(mock[i])
+            p = _make_pack("PackA0", vmfma_offsets[i], i, mock[i], cls=cls, group_index=0)
+            p.issued_at = SchedulePosition(loop_index=loop,
+                                           vmfma_index=p.issued_at.vmfma_index,
+                                           sub_index=p.issued_at.sub_index)
+            packs.append(p)
+        return packs
+
+    @staticmethod
+    def _set_lr_loop(lr: LocalRead, loop: int) -> None:
+        """Override an LR's loop_index (helper defaults to loop=1)."""
+        lr.issued_at = SchedulePosition(loop_index=loop,
+                                        vmfma_index=lr.issued_at.vmfma_index,
+                                        sub_index=lr.issued_at.sub_index)
+
+    def test_bf16_lr_needed_by_is_real_mfma(self):
+        """Single-hop LR→Pack→MFMA: chain follow finds the Pack, then
+        Pack.needed_by (via inline pack-chain) is the real MFMA."""
+        mock_lrs = _make_mock_lr(4, base_reg=LRA_BASE)
+        mock_packs = _make_mock_packs_bf16(4, pack_dst_base=PACK_A_DST_BASE,
+                                            lr_base=LRA_BASE, num_lrs=4)
+        # LRs at vmfma 0,1,2,3 (before packs at 5..)
+        lrs = [_make_lr("LRA0", i, i, mock_lrs[i]) for i in range(4)]
+        # Packs at vmfma 5..8 (after LRs, before MFMAs)
+        packs = [_make_pack("PackA0", 5 + i, i, mock_packs[i]) for i in range(4)]
+        # Real MFMA at vmfma=10 reads PackA0 dst (PACK_A_DST_BASE + 0..4).
+        mfmas = make_mock_mfma_code(1)
+        real_mfma = _make_mfma("MFMA", 10, mfmas[0])
+
+        result = set_lr_needed_by_from_mfma_operands(lrs, packs, [real_mfma])
+
+        assert "LRA0" in result, f"Expected LRA0 in result, got keys {list(result.keys())}"
+        for i in range(4):
+            assert i in result["LRA0"], f"LRA0[{i}] missing from result"
+            consumer = result["LRA0"][i]
+            assert consumer is real_mfma, \
+                f"LRA0[{i}].needed_by must be the real MFMA, got {consumer}"
+
+    def test_tf32_4x4_lr_chain_terminates_at_real_mfma(self):
+        """Four-hop LR→CVT0→MFMAPack→CVT1→real_MFMA: chain follow walks
+        through every Pack subclass (CVTPack, MFMAPack, CVTPack) and
+        terminates at the real MFMA, NOT at any intermediate pack."""
+        # LRs at vmfma 0..1 (before any pack). LR[0] writes regs
+        # LRA_BASE+0..4 (consumed by CVT0[0,1]); LR[1] writes
+        # LRA_BASE+4..8 (consumed by CVT0[2,3]).
+        mock_lrs = _make_mock_lr(2, base_reg=LRA_BASE)
+        lrs = [_make_lr("LRA0", i, i, mock_lrs[i]) for i in range(2)]
+
+        packs = self._make_tf32_4x4_group(
+            [10, 10, 11, 11, 15, 15, 20, 20, 21, 21]
+        )
+        mfmas = make_mock_mfma_code(1)
+        real_mfma = _make_mfma("MFMA", 30, mfmas[0])
+
+        result = set_lr_needed_by_from_mfma_operands(lrs, packs, [real_mfma])
+
+        assert "LRA0" in result
+        for i in range(2):
+            assert i in result["LRA0"], f"LRA0[{i}] missing"
+            consumer = result["LRA0"][i]
+            assert consumer is real_mfma, \
+                f"LRA0[{i}].needed_by must be the real MFMA at vmfma=30, " \
+                f"got {consumer.name}@vmfma={consumer.issued_at.vmfma_index}. " \
+                f"Chain should be LR→CVT0→MFMAPack→CVT1→real_MFMA."
+
+    def test_earliest_lr_consumer_wins(self):
+        """When LR.dst is read by multiple candidates (all issued after LR),
+        the chain follows the earliest-by-issued_at immediate consumer."""
+        # LR[0] at vmfma=0; two MFMAs read it directly at vmfma=5 and vmfma=10.
+        # The earliest (vmfma=5) wins.
+        mock_lrs = _make_mock_lr(1, base_reg=PACK_A_DST_BASE)  # LR writes pack-dst space
+        # Reuse the LR's "dst" as a register MFMAs would read.
+        lrs = [_make_lr("LRA0", 0, 0, mock_lrs[0])]
+        mfmas = make_mock_mfma_code(1)
+        early = _make_mfma("MFMA", 5, mfmas[0])
+        late = _make_mfma("MFMA", 10, mfmas[0])
+
+        result = set_lr_needed_by_from_mfma_operands(lrs, [], [early, late])
+
+        consumer = result["LRA0"][0]
+        assert consumer is early, \
+            f"LRA0[0] should pick earliest MFMA (vmfma=5), got vmfma={consumer.issued_at.vmfma_index}"
+
+    def test_lr_register_reuse_filtered_by_strict_lt(self):
+        """An LR cannot pick a candidate issued at/before itself.
+
+        Place the LR AFTER all packs — it represents the next iteration's
+        LR overwriting registers in the same loop body. The packs (issued
+        before the LR) read prior-iteration data, not this LR's data.
+        Result: the LR has no valid consumer in this scope.
+        """
+        # Packs at vmfma 5..8; LR at vmfma 20 (after all packs).
+        mock_packs = _make_mock_packs_bf16(4, pack_dst_base=PACK_A_DST_BASE,
+                                            lr_base=LRA_BASE, num_lrs=4)
+        packs = [_make_pack("PackA0", 5 + i, i, mock_packs[i]) for i in range(4)]
+        mock_lrs = _make_mock_lr(1, base_reg=LRA_BASE)
+        lrs = [_make_lr("LRA0", 20, 0, mock_lrs[0])]
+        mfmas = make_mock_mfma_code(1)
+        # MFMA at vmfma=25 (after the LR, but only reads pack output, not LR.dst).
+        real_mfma = _make_mfma("MFMA", 25, mfmas[0])
+
+        result = set_lr_needed_by_from_mfma_operands(lrs, packs, [real_mfma])
+
+        # LR at vmfma=20 has packs at vmfma 5..8 reading its dst (LRA_BASE+0..4),
+        # but they're issued BEFORE the LR — strict < filter rejects them.
+        # The MFMA at vmfma=25 doesn't read LR.dst directly, so no consumer.
+        assert result.get("LRA0", {}).get(0) is None, \
+            "LR at vmfma=20 must have no consumer; packs at vmfma 5..8 are " \
+            "issued before it and should be filtered by strict <."
+
+    def test_lr_chain_dies_when_swap_pack_only_consumer(self):
+        """When LR.dst is consumed only by a SwapPack, the chain dies and
+        the LR is omitted (caller-side fallback semantics)."""
+        from rocisa.instruction import VSwapB32
+        from rocisa.container import vgpr
+
+        # Construct one LR; its only consumer is a SwapPack.
+        mock_lrs = _make_mock_lr(1, base_reg=LRA_BASE)
+        lrs = [_make_lr("LRA0", 0, 0, mock_lrs[0])]
+
+        # SwapPack reads LRA_BASE..+1, writes elsewhere. SwapPacks are
+        # filtered from the candidates set, so LR's chain finds no
+        # immediate consumer and is omitted.
+        swap_inst = VSwapB32(dst=vgpr(SWAP_BASE := 8000, 1), src=vgpr(LRA_BASE, 1))
+        swap = _make_pack("PackA0", 5, 100, swap_inst, cls=SwapPack)
+
+        result = set_lr_needed_by_from_mfma_operands(lrs, [swap], [])
+
+        assert result.get("LRA0", {}).get(0) is None, \
+            "LR consumed only by a SwapPack must be omitted from result"
+
+    def test_lr_loop_scoping(self):
+        """When caller passes loop-scoped inputs, all assigned consumers
+        share the LR's loop_index."""
+        loop_idx = 2
+
+        # LR in loop 2.
+        mock_lrs = _make_mock_lr(2, base_reg=LRA_BASE)
+        lrs = [_make_lr("LRA0", i, i, mock_lrs[i]) for i in range(2)]
+        for lr in lrs:
+            self._set_lr_loop(lr, loop_idx)
+
+        packs = self._make_tf32_4x4_group(
+            [10, 10, 11, 11, 15, 15, 20, 20, 21, 21],
+            loop=loop_idx,
+        )
+        mfmas = make_mock_mfma_code(1)
+        real_mfma = _make_mfma("MFMA", 30, mfmas[0], loop=loop_idx)
+
+        result = set_lr_needed_by_from_mfma_operands(lrs, packs, [real_mfma])
+
+        for issue_index, consumer in result.get("LRA0", {}).items():
+            assert consumer.issued_at.loop_index == loop_idx, \
+                f"LRA0[{issue_index}].needed_by has loop {consumer.issued_at.loop_index}, " \
+                f"expected {loop_idx}"
+
+
+# =============================================================================
+# Parity test: register-based vs positional set_lr_needed_by_for_VMFMA
+# =============================================================================
+
+
+class TestSetLrNeededByParity:
+    """Parity test against the positional baseline on a real-idMap timeline.
+
+    Coverage limits:
+      - _REAL_TWIN_CONFIG_VW4 has PrefetchLocalRead=1, so this test
+        exercises LR0 (and possibly LR1) only — not LR3.
+      - The config has LocalReadVectorWidth=4, so SwapPacks are inserted
+        between LR and CVT0 (per transposeLRVregs). The current LR-side
+        algorithm filters SwapPacks from candidates, so the chain dies
+        at the SwapPack and most LRs are omitted from the register-path
+        result. The parity assertion is therefore weakened to "register
+        path produces no FALSE answers" (intersection-only check) rather
+        than "register path covers everything positional covers."
+      Both limits are tracked in CMSValidator_TODO.md as follow-ups
+      for the wiring stage.
+    """
+
+    _REAL_TWIN_CONFIG_VW4 = {
+        'ProblemType': {
+            'OperationType': 'GEMM', 'DataType': 'S', 'DestDataType': 'S',
+            'F32XdlMathOp': 'X', 'TransposeA': False, 'TransposeB': False,
+            'UseBeta': True, 'Batched': True,
+        },
+        'MatrixInstruction': [16, 16, 32, 1, 1, 4, 4, 2, 2],
+        'DepthU': 64, 'PrefetchGlobalRead': 2, 'PrefetchLocalRead': 1,
+        'DirectToLds': 1, 'TransposeLDS': 1, 'LocalReadVectorWidth': 4,
+        'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
+        'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
+        'SourceSwap': 1, 'StreamK': 0,
+        'VectorWidthA': 4,
+    }
+
+    def test_lr_needed_by_parity_against_positional_lr0(self, isa_infrastructure):
+        """For LR0 in MAIN_LOOP, the register-traced consumer matches the
+        positional baseline by issued_at."""
+        from Tensile.Components.CMSValidator import MAIN_LOOP
+
+        isa, isaInfoMap, asm = isa_infrastructure
+        id_map, mfma_code, solution = generate_real_idmap(
+            self._REAL_TWIN_CONFIG_VW4, asm, isaInfoMap
+        )
+        has_schedule, schedule_info = hasCustomSchedule(solution)
+        assert has_schedule
+
+        timeline = create_unified_timeline(schedule_info, solution, code_path=0,
+                                           id_map=id_map, mfma_code=mfma_code)
+
+        # Run the positional baseline; populates lr.needed_by on every LR.
+        set_lr_needed_by_for_VMFMA(timeline, solution, mfma_reorder=[])
+
+        # Gather MAIN_LOOP-scoped LRs/Packs/MFMAs and run the new function.
+        lr_names = [n for n in timeline.get_instruction_names()
+                    if n.startswith("LR") and not n.startswith("LRS")]
+        lr0_in_loop = []
+        for name in lr_names:
+            if name not in ("LRA0", "LRB0"):
+                continue  # LR0 only — LR1/LR3 deferred (see class docstring)
+            for _, lr in timeline.get_instructions(name, MAIN_LOOP):
+                lr0_in_loop.append(lr)
+
+        pack_names = [n for n in timeline.get_instruction_names() if n.startswith("Pack")]
+        packs_in_loop = []
+        for name in pack_names:
+            for _, p in timeline.get_instructions(name, MAIN_LOOP):
+                packs_in_loop.append(p)
+
+        mfmas_in_loop = [m for _, m in timeline.get_instructions("MFMA", MAIN_LOOP)]
+
+        result = set_lr_needed_by_from_mfma_operands(lr0_in_loop, packs_in_loop, mfmas_in_loop)
+
+        # Weakened parity: for every LR the register path DID produce a
+        # result for, that result must match the positional baseline by
+        # issued_at. The register path is allowed to silently miss LRs
+        # whose chain dies (e.g. SwapPack-only consumer); caller-side
+        # wholesale-fallback handles those cases at wiring time.
+        mismatches = []
+        for lr in lr0_in_loop:
+            reg_target = result.get(lr.name, {}).get(lr.issue_index)
+            if reg_target is None:
+                continue
+            pos_target = lr.needed_by
+            if pos_target.rocisa_inst is None:
+                # Positional placeholder; can't compare meaningfully.
+                continue
+            if reg_target.issued_at != pos_target.issued_at:
+                mismatches.append(
+                    f"{lr.name}[{lr.issue_index}]: positional={pos_target.issued_at}, "
+                    f"register={reg_target.issued_at}"
+                )
+        assert not mismatches, "Parity mismatches:\n  " + "\n  ".join(mismatches)
