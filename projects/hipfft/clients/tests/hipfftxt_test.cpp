@@ -521,7 +521,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
         //const auto device = mydesc->descriptor->GPUs[igpu];
         const auto bufsize = mydesc->descriptor->size[igpu];
         auto       devbuf  = mydesc->descriptor->data[igpu];
-        auto       hipret  = hipMemset(devbuf, bufsize, 0);
+        auto       hipret  = hipMemset(devbuf, 0, bufsize);
         EXPECT_EQ(hipret, hipSuccess) << "hipMemset failed";
         std::vector<char> hostbufpart(bufsize);
         hipret = hipMemcpy(hostbufpart.data(), devbuf, bufsize, hipMemcpyDeviceToHost);
@@ -1032,7 +1032,7 @@ TEST_P(hipfftxtformats, supportlistsinglebatch)
                 "Test infrastructure error: input format is not actually an out-of-place format");
         }
         hipLibXtDesc* outdesc = nullptr;
-        hipfft_rt             = hipfftXtMalloc(plan, &indesc, outformat);
+        hipfft_rt             = hipfftXtMalloc(plan, &outdesc, outformat);
         if(goodcase)
         {
             EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code " << hipfft_rt

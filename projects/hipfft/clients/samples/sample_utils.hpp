@@ -369,9 +369,9 @@ inline void sneakyr2c(std::vector<Tfloat>& rinput, const size_t Nx, const size_t
         throw std::runtime_error("hipMemcpy failed before hsyemmetrize round-trip");
 
     if constexpr(std::is_same_v<Tfloat, float>)
-        hipfft_rt = hipfftExecR2C(planc2r, cbuf, rbuf);
+        hipfft_rt = hipfftExecC2R(planc2r, cbuf, rbuf);
     else if constexpr(std::is_same_v<Tfloat, double>)
-        hipfft_rt = hipfftExecZ2D(planc2r, cbuf, rbuf);
+        hipfft_rt = hipfftExecD2Z(planc2r, cbuf, rbuf);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftexec failed");
 
