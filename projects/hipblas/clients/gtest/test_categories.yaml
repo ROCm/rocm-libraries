@@ -5,9 +5,11 @@ test_categories:
   quick:
     description: "Smoke - same as Jenkins smoke (timeout: 5 mins)"
     test_patterns:
-      - "*smoke*"
+      # TODO use different yaml not different filter
+      - "*quick*"
     exclude:
       - "*known_bug*"
+      # TODO remove bewlow exclusions after theRock corrects their reference libraries
       - "_/getrs*"
       - "_/getri_batched.solver*"
       - "_/gels_batched.solver*"
@@ -18,6 +20,7 @@ test_categories:
   standard:
     description: "Precheckin - same as Jenkins precheckin (timeout: 30 mins)"
     test_patterns:
+      - "*quick*"
       - "*pre_checkin*"
     exclude:
       - "*known_bug*"
@@ -32,6 +35,7 @@ test_categories:
   comprehensive:
     description: "Extended - same as Jenkins extended/nightly (timeout: 2 hours)"
     test_patterns:
+      - "*quick*"
       - "*pre_checkin*"
     exclude:
       - "*known_bug*"
@@ -46,6 +50,7 @@ test_categories:
   full:
     description: "Stress / weekly - same as Jenkins weekly"
     test_patterns:
+      - "*quick*"
       - "*pre_checkin*"
     exclude:
       - "*known_bug*"
@@ -53,6 +58,7 @@ test_categories:
       - "_/getri_batched.solver*"
       - "_/gels_batched.solver*"
     labels:
+      # TODO theRock lacks real stress test run, this is just standard compbined comprehensive for now
       - "stress"
       - "weekly"
       - "full"
