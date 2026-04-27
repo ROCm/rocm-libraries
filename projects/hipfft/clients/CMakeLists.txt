@@ -87,32 +87,10 @@ if( BUILD_CLIENTS_SAMPLES )
   add_subdirectory( samples )
 endif( )
 
-if( BUILD_CLIENTS_TESTS )
-  find_package( GTest 1.17 QUIET )
-  include( ExternalProject )
-  if( NOT GTest_FOUND )
-    set( GTEST_INCLUDE_DIRS
-      ${CMAKE_CURRENT_BINARY_DIR}/src/gtest/googletest/include
-      )
-    set( GTEST_LIBRARIES
-      ${CMAKE_CURRENT_BINARY_DIR}/src/gtest-build/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}
-      ${CMAKE_CURRENT_BINARY_DIR}/src/gtest-build/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX}
-      )
-
-    ExternalProject_Add( gtest
-      URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
-      URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
-      PREFIX ${CMAKE_CURRENT_BINARY_DIR}
-      CMAKE_ARGS -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER} -DBUILD_SHARED_LIBS=OFF
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-      INSTALL_COMMAND ""
-      BUILD_BYPRODUCTS ${GTEST_LIBRARIES}
-      )
-    ExternalProject_Get_Property( gtest source_dir binary_dir )
-  endif()
-  add_subdirectory( tests )
-endif( )
-
 if( BUILD_CLIENTS_BENCH )
   add_subdirectory( bench )
+endif( )
+
+if( BUILD_CLIENTS_TESTS )
+  add_subdirectory( tests )
 endif( )

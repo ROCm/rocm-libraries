@@ -285,13 +285,17 @@ endforeach()
 
 find_package( GTest 1.17.0 )
 
-if( GTest_FOUND )
-  target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
-  target_link_libraries( hipfft-test PRIVATE GTest::gtest )
+
+set( hipfft-test_include_dirs )
+set( hipfft-test_link_libs )
+
+if( GTest_FOUND AND GTest_VERSION VERSION_GREATER_EQUAL "1.17" )
+    target_link_libraries( hipfft-test PRIVATE GTest::gtest )
 else()
   # gtest build by the hipFFT
+  include( ../cmake/build-gtest.cmake )
   add_dependencies( hipfft-test gtest )
-  target_include_directories( hipfft-test PRIVATE hipfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
+  target_include_directories( hipfft-test PRIVATE ${GTEST_INCLUDE_DIRS} )
   target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
 endif()
 
