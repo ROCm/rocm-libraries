@@ -12,7 +12,7 @@ rocBLAS documentation is available at
 * Version and other properties to Windows `rocblas.dll`.
 * Support for `OpenBLAS` ILP64 API for host reference in clients.
 * Dockerfiles in `docker` directory to assist in setting up development.
-* Added a new hipblaslt integration to rocblas which is used when building with hipblaslt version 1.3.0 introducing the new General Batched GEMM feature.
+* Added a new hipBLASLt integration to rocBLAS. This is used when building with hipBLASLt version 1.3.0, which introduces the new General Batched GEMM feature, or later.
 
 ### Optimized
 * Improved the performance of Level 3 `geam` for pure transpose scale use cases.
