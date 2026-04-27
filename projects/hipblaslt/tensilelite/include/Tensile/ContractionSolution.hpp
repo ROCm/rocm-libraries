@@ -485,7 +485,8 @@ namespace TensileLite
                                       uint32_t const&          workspaceOffsetInByte,
                                       KA&                      args,
                                       StreamKSettings const&   sk,
-                                      uint32_t                 autoGsuVal) const;
+                                      uint32_t                 autoGsuVal,
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;                                      
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(

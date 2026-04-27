@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/LogicalToAsmMappings_generated.inc"
@@ -58,7 +59,7 @@ class CompositeInstructionLoweringPassImpl : public Pass {
         return PassName;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
@@ -70,6 +71,7 @@ class CompositeInstructionLoweringPassImpl : public Pass {
 
             expandCompositeInstructions(bb, arch);
         }
+        return preserveCFGAnalyses();
     }
 
    private:

@@ -27,6 +27,8 @@ class CMakeBuild(build_ext):
                 f"-DPython_EXECUTABLE={sys.executable}",
                 f"-DPython3_EXECUTABLE={sys.executable}",
                 "-DHIPBLASLT_BUNDLE_PYTHON_DEPS=ON",
+                "-DHIPBLASLT_ENABLE_YAML=ON",
+                "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
             ]
             if sys.platform == "win32":
                 cmakeargs.extend(["-A", "x64"])

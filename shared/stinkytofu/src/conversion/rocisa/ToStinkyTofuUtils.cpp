@@ -617,6 +617,13 @@ int getMsbOffsetFromStinkyVgpr(const StinkyRegister& reg) {
 StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgprMsb) {
     if (const rocisa::RegisterContainer* regCont =
             dynamic_cast<const rocisa::RegisterContainer*>(container)) {
+        // isOff=true signals the MUBUF "off" keyword (no address register).
+        // rocisa emits "off" for this case; produce a literal string so the
+        // emitter writes "off" instead of treating it as a named VGPR.
+        if (regCont->isOff) {
+            return StinkyRegister("off");
+        }
+
         RegType regType = stringToRegType(regCont->regType);
 
         int physicalIdx = regCont->regIdx;
@@ -953,7 +960,63 @@ std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
     };
 
-    traverseModule(module, {}, processItem);
+    // Check whether a rocisa Instruction is a global/buffer/flat load or tensor load.
+    // Excludes SMemLoadInstruction (s_load) which also inherits from GlobalReadInstruction.
+    auto isPrefetchLoadInst = [](const rocisa::Instruction* inst) -> bool {
+        return dynamic_cast<const rocisa::MUBUFReadInstruction*>(inst) ||
+               dynamic_cast<const rocisa::GLOBALLoadInstruction*>(inst) ||
+               dynamic_cast<const rocisa::FLATReadInstruction*>(inst) ||
+               dynamic_cast<const rocisa::TensorLoadToLds*>(inst);
+    };
+
+    // Recursively check whether an item contains a prefetch load instruction.
+    std::function<bool(const rocisa::Item*)> containsPrefetchLoad =
+        [&](const rocisa::Item* item) -> bool {
+        if (const auto* inst = dynamic_cast<const rocisa::Instruction*>(item))
+            return isPrefetchLoadInst(inst);
+        if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
+            for (const auto& child : mod->itemList)
+                if (containsPrefetchLoad(child.get())) return true;
+        }
+        return false;
+    };
+
+    // Auto-detect the loopWithPrefetch region: from the first global read or
+    // tensor load item up to and including Module("loopBody").
+    int pgrStartIdx = -1;
+    int loopBodyIdx = -1;
+    for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+        const auto& item = module.itemList[i];
+        if (pgrStartIdx == -1 && containsPrefetchLoad(item.get())) {
+            pgrStartIdx = i;
+        }
+        if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
+            if (subMod->name == "loopBody") {
+                loopBodyIdx = i;
+                break;
+            }
+        }
+    }
+
+    const bool hasPGR = (pgrStartIdx != -1 && loopBodyIdx != -1 && pgrStartIdx <= loopBodyIdx);
+    static const std::string kPGR = "loopWithPrefetch";
+
+    // Traverse top-level items, injecting the loopWithPrefetch group name
+    // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx].
+    for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+        const auto& item = module.itemList[i];
+        const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);
+
+        std::vector<const std::string*> base;
+        if (inPGR) base.push_back(&kPGR);
+        base.push_back(&module.name);
+
+        if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
+            traverseModule(*subMod, base, processItem);
+        } else {
+            processItem(item.get(), base);
+        }
+    }
 
     return std::make_shared<StinkyAsmModule>(std::move(stinkyAsmModule));
 }
