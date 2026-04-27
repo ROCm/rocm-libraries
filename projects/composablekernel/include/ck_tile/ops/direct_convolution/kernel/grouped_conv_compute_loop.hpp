@@ -45,15 +45,24 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                                           int py,
                                           int px)
 {
-    // --- LDS buffers ---
+    // --- Unified LDS buffer ---
+    // Weights are loaded first into LDS, consumed, then never accessed again.
+    // After that, the same LDS memory is reused for input double-buffering
+    // (and output staging for the LDS epilogue path). 
     constexpr bool use_lds_epilogue = (cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory);
 
-    __shared__ uint4 input_lds[TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8];
-    static constexpr int OUTPUT_LDS_SIZE = use_lds_epilogue
-                                               ? ck_tile::max(TC::Weight::WEIGHT_LDS_PADDED_UINT4,
-                                                              TC::Output::OUTPUT_LDS_BUFFER_SIZE)
-                                               : TC::Weight::WEIGHT_LDS_PADDED_UINT4;
-    __shared__ uint4 output_lds[OUTPUT_LDS_SIZE];
+    static constexpr int INPUT_TOTAL = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8;
+    static constexpr int WEIGHT_LDS  = TC::Weight::WEIGHT_LDS_PADDED_UINT4;
+    static constexpr int IO_LDS      = use_lds_epilogue
+                                            ? INPUT_TOTAL + TC::Output::OUTPUT_LDS_BUFFER_SIZE
+                                            : INPUT_TOTAL;
+    static constexpr int UNIFIED_LDS_SIZE = (WEIGHT_LDS > IO_LDS) ? WEIGHT_LDS : IO_LDS;
+    __shared__ uint4 lds_buf[UNIFIED_LDS_SIZE];
+    // Weight phase:  weight_lds = lds_buf (weights loaded at start, consumed before input)
+    // IO phase:      input_lds  = lds_buf (double-buffered input overwrites weight region)
+    //                output_lds = lds_buf + INPUT_TOTAL (output staging after both input buffers)
+    uint4* input_lds  = lds_buf;
+    uint4* output_lds = lds_buf + INPUT_TOTAL;
 
     // --- Coordinate setup ---
     BlockCoordsT bc(groups);
@@ -63,13 +72,13 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     InputLoaderT il(bc, input_lds, in, hi, wi, px);
     OutputWriterT ow(bc, output_lds, out, ho, wo);
 
-    // --- Weight loading ---
+    // --- Weight loading (uses start of buffer, before input phase) ---
     fp16x4_t weights_reg[cfg.kh * cfg.kw];
-    WeightLoaderT::load_to_lds(bc, output_lds, wei);
+    WeightLoaderT::load_to_lds(bc, lds_buf, wei);
     wait_vmcnt<0>();
     __syncthreads();
 
-    WeightLoaderT::read_from_lds(weights_reg, output_lds);
+    WeightLoaderT::read_from_lds(weights_reg, lds_buf);
     __syncthreads();
 
     // --- Prefetch first input row ---
