@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <limits>
 #include <unordered_map>
 #include <utility>
 
@@ -91,6 +92,18 @@ struct MhaBwdArgs
     unsigned int batch_stride_dv;
 
     // LSE/D buffer strides (elements, FP32 [B, H_q, S_q])
+    //
+    // "lsed" = LSE-and-D.  In AITER, both the LSE stats tensor and the D
+    // reduction workspace are allocated as contiguous torch::empty() with
+    // identical shape [B, H_q, S_q], so they share the same strides.  AITER
+    // uses a single stride set (nhead_stride_lsed, batch_stride_lsed) for
+    // both the ODO kernel's D output (Hs_d, BAs_d) and the DQDKDV kernel's
+    // LSE input (Hs_lsed).
+    //
+    // In hip-kernel-provider the D buffer is carved from a contiguous
+    // workspace allocation, and the LSE stats tensor is created with
+    // contiguous strides for the same shape — so the stride values are
+    // always identical, preserving AITER's shared-stride convention.
     unsigned int nhead_stride_lsed;
     unsigned int batch_stride_lsed;
 
@@ -107,6 +120,13 @@ struct MhaBwdArgs
 
 constexpr unsigned int K_BF16_SIZE = 2;
 constexpr unsigned int K_FP32_SIZE = 4;
+
+// Kernel tile sizes from AITER CSV metadata (commit 9522048).
+// TODO(Task I8.3): Production should read these from AITER CSV metadata per kernel config.
+constexpr unsigned int K_TS_ODO = 128; // fmha_bwd_odo.csv
+constexpr unsigned int K_TS_KV = 192; // fmha_bwd_dqdkdv.csv
+constexpr unsigned int K_TS_DQ = 64; // fmha_bwd_dq_convert.csv (hd128, rtne)
+constexpr unsigned int K_BWD_BLOCK_DIM = 256;
 
 // AITER reference: mha_bwd.cu::run_fmha_bwd_odo() (commit 9522048)
 asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
@@ -162,7 +182,6 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a)
     dqdkdv.nhead_q = a.nhead_q;
 
     // Tile size: ts_kv * stride_k * sizeof(BF16)
-    constexpr unsigned int K_TS_KV = 192;
     dqdkdv.Ts = K_TS_KV * a.stride_k * K_BF16_SIZE;
 
     // Q strides (bytes)
@@ -325,12 +344,25 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.batch_stride_dq_acc
         = static_cast<int64_t>(p.numHeadsQ) * p.seqLenQ * p.headDimQk; // H_q * S_q * D_qk
 
+    // The kernel args structs use uint32_t for byte strides.  Verify that
+    // stride_in_elements * K_FP32_SIZE fits before we silently truncate
+    // in buildPostArgs().  Overflow would cause the DQ_CONVERT kernel to
+    // read/write the wrong memory addresses.
+    // TODO: Move this validation to frontend graph validation or operator creation
+    // so oversized tensors are rejected before plan building.
+    constexpr auto K_U32_MAX = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
+    if(a.nhead_stride_dq_acc * K_FP32_SIZE > K_U32_MAX
+       || a.batch_stride_dq_acc * K_FP32_SIZE > K_U32_MAX)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("dq_acc byte strides overflow uint32_t "
+                                "(nhead_stride="
+                                << a.nhead_stride_dq_acc * K_FP32_SIZE
+                                << ", batch_stride=" << a.batch_stride_dq_acc * K_FP32_SIZE
+                                << ", max=" << K_U32_MAX << ")");
+    }
+
     return a;
 }
-
-// TODO(Task I8.3): Block size is hardcoded to 256 for all backward kernels.
-// Production should read block size from AITER CSV metadata per kernel config.
-constexpr unsigned int K_BWD_BLOCK_DIM = 256;
 
 } // anonymous namespace
 
@@ -353,38 +385,21 @@ SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
 }
 
 // =============================================================================
-// getDBufferSize — shared by getWorkspaceSize and execute
-// =============================================================================
-
-size_t SdpaBwdPlan::getDBufferSize() const
-{
-    size_t dSize = static_cast<size_t>(_params.batchSize) * _params.numHeadsQ * _params.seqLenQ
-                   * sizeof(float);
-    return alignUp(dSize, K_WORKSPACE_ALIGNMENT_BYTES);
-}
-
-// =============================================================================
 // getWorkspaceSize
 // =============================================================================
 
 size_t SdpaBwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
 {
-    // D buffer: [B, H_q, S_q] in FP32
-    size_t dSize = getDBufferSize();
-
-    // dq_acc buffer: [B, H_q, S_q, D_qk] in FP32 (a32 accumulator)
-    size_t dqAccSize = static_cast<size_t>(_params.batchSize) * _params.numHeadsQ * _params.seqLenQ
-                       * _params.headDimQk * sizeof(float);
-    dqAccSize = alignUp(dqAccSize, K_WORKSPACE_ALIGNMENT_BYTES);
-
-    return dSize + dqAccSize;
+    return sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ)
+           + sdpaBwdDqAccBufferSize(
+               _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
 }
 
 // =============================================================================
 // execute — 3-kernel orchestration
 // =============================================================================
 
-void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
+void SdpaBwdPlan::execute(const HipKernelHandle& handle,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           uint32_t numDeviceBuffers,
                           void* workspace) const
@@ -416,16 +431,23 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
 
     // 4. Carve workspace into sub-buffers
     auto* dBufPtr = workspace;
-    auto* dqAccPtr = static_cast<char*>(workspace) + getDBufferSize();
+    auto* dqAccPtr = static_cast<char*>(workspace)
+                     + sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
 
     // 5. Build convenience args struct (mirrors AITER mha_bwd_args)
     MhaBwdArgs mhaArgs = buildMhaBwdArgs(
         _params, qPtr, kPtr, vPtr, oPtr, doPtr, lsePtr, dqPtr, dkPtr, dvPtr, dBufPtr, dqAccPtr);
 
-    // 6. Build args and launch kernel 1: ODO
+    // 6. Launch 3 kernels on the same stream.
+    // All three kernels have data dependencies (ODO produces D, DQDKDV
+    // consumes D and produces dq_acc, DQ_CONVERT consumes dq_acc) so they
+    // must execute sequentially.  Launching on the same stream guarantees
+    // this ordering without explicit synchronization barriers.
+    auto stream = handle.getStream();
+
+    // 6a. Build args and launch kernel 1: ODO
     auto odoArgs = buildOdoArgs(mhaArgs);
 
-    constexpr unsigned int K_TS_ODO = 128; // from CSV: fmha_bwd_odo.csv
     unsigned int gdxOdo = (mhaArgs.seqlen_q + K_TS_ODO - 1) / K_TS_ODO;
 
     if(!launchKernel("SDPA backward ODO",
@@ -435,15 +457,15 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
                      gdxOdo,
                      mhaArgs.nhead_q,
                      mhaArgs.batch,
-                     K_BWD_BLOCK_DIM))
+                     K_BWD_BLOCK_DIM,
+                     stream))
     {
         return;
     }
 
-    // 7. Build args and launch kernel 2: DQDKDV
+    // 6b. Build args and launch kernel 2: DQDKDV
     auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs);
 
-    constexpr unsigned int K_TS_KV = 192; // from CSV: fmha_bwd_dqdkdv.csv
     unsigned int gdxDqdkdv = (mhaArgs.seqlen_k + K_TS_KV - 1) / K_TS_KV;
 
     if(!launchKernel("SDPA backward DQDKDV",
@@ -453,15 +475,15 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
                      gdxDqdkdv,
                      mhaArgs.nhead_q,
                      mhaArgs.batch,
-                     K_BWD_BLOCK_DIM))
+                     K_BWD_BLOCK_DIM,
+                     stream))
     {
         return;
     }
 
-    // 8. Build args and launch kernel 3: DQ_CONVERT (FP32 → BF16)
+    // 6c. Build args and launch kernel 3: DQ_CONVERT (FP32 → BF16)
     auto postArgs = buildPostArgs(mhaArgs);
 
-    constexpr unsigned int K_TS_DQ = 64; // from CSV: fmha_bwd_dq_convert.csv (hd128, rtne)
     unsigned int gdxPost = (mhaArgs.seqlen_q + K_TS_DQ - 1) / K_TS_DQ;
 
     if(!launchKernel("SDPA backward DQ_CONVERT",
@@ -471,7 +493,8 @@ void SdpaBwdPlan::execute(const HipKernelHandle& /*handle*/,
                      gdxPost,
                      mhaArgs.nhead_q,
                      mhaArgs.batch,
-                     K_BWD_BLOCK_DIM))
+                     K_BWD_BLOCK_DIM,
+                     stream))
     {
         return;
     }

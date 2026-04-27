@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <optional>
+#include <string>
 #include <utility>
 
 namespace asm_sdpa_engine
@@ -38,6 +40,32 @@ constexpr size_t alignUp(size_t size, size_t alignment)
 }
 
 // =============================================================================
+// SDPA backward workspace buffer sizes
+// =============================================================================
+//
+// Shared by SdpaBwdPlanBuilder::getMaxWorkspaceSize() (pre-plan, extracts dims
+// from the graph) and SdpaBwdPlan::getWorkspaceSize() (post-plan, reads from
+// SdpaBwdParams).  Having a single source of truth prevents the two from
+// silently diverging.
+
+/// D buffer: row-wise dot(O, dO) output, shape [B, H_q, S_q] in FP32.
+constexpr size_t sdpaBwdDBufferSize(size_t batch, size_t headsQ, size_t seqLenQ)
+{
+    return alignUp(batch * headsQ * seqLenQ * sizeof(float), K_WORKSPACE_ALIGNMENT_BYTES);
+}
+
+/// dq_acc buffer: FP32 accumulator for dQ, shape [B, H_q, S_q, D_qk] in FP32.
+/// Only needed for a32-accumulator kernels; a16 kernels write dQ in BF16 directly.
+// TODO(Task I8.2): POC assumes a32 accumulator — always allocates FP32 dq_acc buffer.
+// For a16 accumulator kernels, dQ is written directly in BF16 (no dq_acc buffer needed,
+// no dq_convert kernel launched). Provider should check accumulator type and skip
+// dq_acc allocation for a16.
+constexpr size_t sdpaBwdDqAccBufferSize(size_t batch, size_t headsQ, size_t seqLenQ, size_t headDim)
+{
+    return alignUp(batch * headsQ * seqLenQ * headDim * sizeof(float), K_WORKSPACE_ALIGNMENT_BYTES);
+}
+
+// =============================================================================
 // Kernel launch helper
 // =============================================================================
 //
@@ -52,7 +80,8 @@ inline bool launchKernel(const char* kernelName,
                          unsigned int gridX,
                          unsigned int gridY,
                          unsigned int gridZ,
-                         unsigned int blockDim)
+                         unsigned int blockDim,
+                         hipStream_t stream = nullptr)
 {
     // NOLINTNEXTLINE(modernize-avoid-c-arrays) - HIP API requires C-style array
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
@@ -61,6 +90,9 @@ inline bool launchKernel(const char* kernelName,
                       &argSize,
                       HIP_LAUNCH_PARAM_END};
 
+    // The stream determines execution ordering.  All kernels on the same
+    // stream run sequentially; using the handle's stream allows the caller
+    // to overlap SDPA work with independent operations on other streams.
     hipError_t err = hipModuleLaunchKernel(func,
                                            gridX,
                                            gridY,
@@ -69,7 +101,7 @@ inline bool launchKernel(const char* kernelName,
                                            1,
                                            1,
                                            0, // shared memory (kernel uses LDS internally)
-                                           nullptr, // stream (use default)
+                                           stream,
                                            nullptr, // kernel args (not used with config)
                                            config);
     if(err != hipSuccess)
@@ -98,9 +130,9 @@ class HipModuleGuard
 public:
     HipModuleGuard() = default;
 
-    explicit HipModuleGuard(hipModule_t module, hipFunction_t function = nullptr)
-        : _module(module)
-        , _function(function)
+    explicit HipModuleGuard(hipModule_t moduleIn, hipFunction_t functionIn = nullptr)
+        : _module(moduleIn)
+        , _function(functionIn)
     {
     }
 
@@ -162,5 +194,39 @@ private:
     hipModule_t _module = nullptr;
     hipFunction_t _function = nullptr;
 };
+
+// =============================================================================
+// Kernel module loading helper
+// =============================================================================
+//
+// Combines hipModuleLoad + hipModuleGetFunction into a single call.
+// Returns std::nullopt on failure (with error logging); on success returns
+// a HipModuleGuard that owns the module and holds the function pointer.
+
+inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
+                                                      const char* funcName)
+{
+    hipModule_t rawModule = nullptr;
+    hipError_t err = hipModuleLoad(&rawModule, coPath.c_str());
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "Failed to load kernel module: " << coPath << " error: " << hipGetErrorString(err));
+        return std::nullopt;
+    }
+    HipModuleGuard guard(rawModule);
+
+    hipFunction_t func = nullptr;
+    err = hipModuleGetFunction(&func, guard.module(), funcName);
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function '"
+                                << funcName << "' error: " << hipGetErrorString(err));
+        return std::nullopt; // guard destructor unloads module
+    }
+    guard.setFunction(func);
+
+    return guard; // moved out
+}
 
 } // namespace asm_sdpa_engine

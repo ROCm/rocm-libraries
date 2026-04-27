@@ -161,19 +161,8 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
     auto headDim = static_cast<size_t>(qTensor->dims()->Get(3));
 
-    // D buffer: row-wise dot product output [B, H_q, S_q] in FP32
-    // Always needed for both a16 and a32 accumulator variants
-    size_t dBufferSize = batch * headsQ * seqLenQ * sizeof(float);
-    dBufferSize = alignUp(dBufferSize, K_WORKSPACE_ALIGNMENT_BYTES);
-
-    // TODO(Task I8.2): POC assumes a32 accumulator — always allocates FP32 dq_acc buffer.
-    // For a16 accumulator kernels, dQ is written directly in BF16 (no dq_acc buffer needed,
-    // no dq_convert kernel launched). Provider should check accumulator type and skip
-    // dq_acc allocation for a16.
-    size_t dqAccSize = batch * headsQ * seqLenQ * headDim * sizeof(float);
-    dqAccSize = alignUp(dqAccSize, K_WORKSPACE_ALIGNMENT_BYTES);
-
-    return dBufferSize + dqAccSize;
+    return sdpaBwdDBufferSize(batch, headsQ, seqLenQ)
+           + sdpaBwdDqAccBufferSize(batch, headsQ, seqLenQ, headDim);
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
@@ -192,7 +181,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     HipKernelContext& executionContext) const
 {
     // -------------------------------------------------------------------------
-    // 1. Load 3 kernel modules
+    // 1. Load 3 kernel modules and get kernel functions from modules
     // -------------------------------------------------------------------------
     std::string odoCoPath
         = asm_kernels::getAsmKernelPath("gfx942/fmha_v3_bwd/MI300/bwd_hd128_odo_bf16.co");
@@ -201,71 +190,28 @@ void SdpaBwdPlanBuilder::buildPlan(
     std::string postCoPath = asm_kernels::getAsmKernelPath(
         "gfx942/fmha_v3_bwd/MI300/bwd_hd128_dq_convert_bf16_rtne.co");
 
-    hipModule_t rawOdoModule = nullptr;
-    hipError_t err = hipModuleLoad(&rawOdoModule, odoCoPath.c_str());
-    if(err != hipSuccess)
+    auto odoKernel = loadKernelModule(odoCoPath, "_ZN5aiter23fmha_bwd_hd128_odo_bf16E");
+    if(!odoKernel)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to load ODO kernel module: " << odoCoPath << " error: "
-                                                                     << hipGetErrorString(err));
         return;
     }
-    HipModuleGuard odoKernel(rawOdoModule);
 
-    hipModule_t rawDqdkdvModule = nullptr;
-    err = hipModuleLoad(&rawDqdkdvModule, dqdkdvCoPath.c_str());
-    if(err != hipSuccess)
+    auto dqdkdvKernel
+        = loadKernelModule(dqdkdvCoPath, "_ZN5aiter36fmha_bwd_hd128_bf16_a32_rtne_psskddvE");
+    if(!dqdkdvKernel)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to load DQDKDV kernel module: "
-                                << dqdkdvCoPath << " error: " << hipGetErrorString(err));
         return;
     }
-    HipModuleGuard dqdkdvKernel(rawDqdkdvModule);
 
-    hipModule_t rawPostModule = nullptr;
-    err = hipModuleLoad(&rawPostModule, postCoPath.c_str());
-    if(err != hipSuccess)
+    auto postKernel
+        = loadKernelModule(postCoPath, "_ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtneE");
+    if(!postKernel)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to load DQ_CONVERT kernel module: "
-                                << postCoPath << " error: " << hipGetErrorString(err));
         return;
     }
-    HipModuleGuard postKernel(rawPostModule);
 
     // -------------------------------------------------------------------------
-    // 2. Get kernel functions from modules
-    // -------------------------------------------------------------------------
-    hipFunction_t odoFunc = nullptr;
-    err = hipModuleGetFunction(&odoFunc, odoKernel.module(), "_ZN5aiter23fmha_bwd_hd128_odo_bf16E");
-    if(err != hipSuccess)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to get ODO function, error: " << hipGetErrorString(err));
-        return;
-    }
-    odoKernel.setFunction(odoFunc);
-
-    hipFunction_t dqdkdvFunc = nullptr;
-    err = hipModuleGetFunction(
-        &dqdkdvFunc, dqdkdvKernel.module(), "_ZN5aiter36fmha_bwd_hd128_bf16_a32_rtne_psskddvE");
-    if(err != hipSuccess)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to get DQDKDV function, error: " << hipGetErrorString(err));
-        return;
-    }
-    dqdkdvKernel.setFunction(dqdkdvFunc);
-
-    hipFunction_t postFunc = nullptr;
-    err = hipModuleGetFunction(
-        &postFunc, postKernel.module(), "_ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtneE");
-    if(err != hipSuccess)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "Failed to get DQ_CONVERT function, error: " << hipGetErrorString(err));
-        return;
-    }
-    postKernel.setFunction(postFunc);
-
-    // -------------------------------------------------------------------------
-    // 3. Extract SDPA backward attributes and tensor metadata from graph
+    // 2. Extract SDPA backward attributes and tensor metadata from graph
     // -------------------------------------------------------------------------
     auto& sdpaNode = opGraph.getNodeWrapper(0);
     auto& sdpaAttrs
@@ -309,7 +255,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto headDimV = static_cast<unsigned int>(vTensor->dims()->Get(3));
 
     // -------------------------------------------------------------------------
-    // 4. Extract strides (in elements) from tensor metadata
+    // 3. Extract strides (in elements) from tensor metadata
     // -------------------------------------------------------------------------
     // Q: [B, H_q, S_q, D_qk]
     auto* qStrides = qTensor->strides();
@@ -365,7 +311,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto statsStrideHead = static_cast<unsigned int>(statsStrides->Get(1));
 
     // -------------------------------------------------------------------------
-    // 5. Attention scale
+    // 4. Attention scale
     // -------------------------------------------------------------------------
     float attnScale = 1.0f / std::sqrt(static_cast<float>(headDimQk));
     auto scaleValue = sdpaAttrs.attn_scale_value();
@@ -375,7 +321,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     }
 
     // -------------------------------------------------------------------------
-    // 6. Build params and create plan
+    // 5. Build params and create plan
     // -------------------------------------------------------------------------
     SdpaBwdParams params{};
     params.qUid = qUid;
@@ -425,7 +371,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.attnScale = attnScale;
 
     executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-        std::move(odoKernel), std::move(dqdkdvKernel), std::move(postKernel), params));
+        std::move(*odoKernel), std::move(*dqdkdvKernel), std::move(*postKernel), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(

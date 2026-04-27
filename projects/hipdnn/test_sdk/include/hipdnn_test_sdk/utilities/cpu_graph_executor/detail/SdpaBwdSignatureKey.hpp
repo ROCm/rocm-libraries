@@ -23,6 +23,7 @@ struct SdpaBwdSignatureKey
     hipdnn_flatbuffers_sdk::data_objects::DataType kDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType vDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType oDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType doDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType dqDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType dkDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType dvDataType;
@@ -32,6 +33,7 @@ struct SdpaBwdSignatureKey
                                   hipdnn_flatbuffers_sdk::data_objects::DataType k,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType v,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType o,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType dO,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType dq,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType dk,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType dv)
@@ -39,6 +41,7 @@ struct SdpaBwdSignatureKey
         , kDataType(k)
         , vDataType(v)
         , oDataType(o)
+        , doDataType(dO)
         , dqDataType(dq)
         , dkDataType(dk)
         , dvDataType(dv)
@@ -61,12 +64,13 @@ struct SdpaBwdSignatureKey
         const auto* kAttr = tensorMap.at(nodeAttributes->k_tensor_uid());
         const auto* vAttr = tensorMap.at(nodeAttributes->v_tensor_uid());
         const auto* oAttr = tensorMap.at(nodeAttributes->o_tensor_uid());
+        const auto* doAttr = tensorMap.at(nodeAttributes->do_tensor_uid());
         const auto* dqAttr = tensorMap.at(nodeAttributes->dq_tensor_uid());
         const auto* dkAttr = tensorMap.at(nodeAttributes->dk_tensor_uid());
         const auto* dvAttr = tensorMap.at(nodeAttributes->dv_tensor_uid());
 
         if(qAttr == nullptr || kAttr == nullptr || vAttr == nullptr || oAttr == nullptr
-           || dqAttr == nullptr || dkAttr == nullptr || dvAttr == nullptr)
+           || doAttr == nullptr || dqAttr == nullptr || dkAttr == nullptr || dvAttr == nullptr)
         {
             throw std::runtime_error("One or more tensor attributes could not be found in the map, "
                                      "failed to construct key");
@@ -76,6 +80,7 @@ struct SdpaBwdSignatureKey
         kDataType = kAttr->data_type();
         vDataType = vAttr->data_type();
         oDataType = oAttr->data_type();
+        doDataType = doAttr->data_type();
         dqDataType = dqAttr->data_type();
         dkDataType = dkAttr->data_type();
         dvDataType = dvAttr->data_type();
@@ -93,17 +98,19 @@ struct SdpaBwdSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(kDataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(vDataType)) << 12)
                ^ (static_cast<std::size_t>(static_cast<int>(oDataType)) << 16)
-               ^ (static_cast<std::size_t>(static_cast<int>(dqDataType)) << 20)
-               ^ (static_cast<std::size_t>(static_cast<int>(dkDataType)) << 24)
-               ^ (static_cast<std::size_t>(static_cast<int>(dvDataType)) << 28);
+               ^ (static_cast<std::size_t>(static_cast<int>(doDataType)) << 20)
+               ^ (static_cast<std::size_t>(static_cast<int>(dqDataType)) << 24)
+               ^ (static_cast<std::size_t>(static_cast<int>(dkDataType)) << 28)
+               ^ (static_cast<std::size_t>(static_cast<int>(dvDataType)) << 32);
     }
 
     bool operator==(const SdpaBwdSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && qDataType == other.qDataType
                && kDataType == other.kDataType && vDataType == other.vDataType
-               && oDataType == other.oDataType && dqDataType == other.dqDataType
-               && dkDataType == other.dkDataType && dvDataType == other.dvDataType;
+               && oDataType == other.oDataType && doDataType == other.doDataType
+               && dqDataType == other.dqDataType && dkDataType == other.dkDataType
+               && dvDataType == other.dvDataType;
     }
 
     static std::unordered_map<SdpaBwdSignatureKey,
@@ -163,6 +170,7 @@ struct SdpaBwdSignatureKey
                                 KDataTypeEnum,
                                 VDataTypeEnum,
                                 ODataTypeEnum,
+                                DODataTypeEnum,
                                 DQDataTypeEnum,
                                 DKDataTypeEnum,
                                 DVDataTypeEnum)]
@@ -180,8 +188,8 @@ struct SdpaBwdSignatureKey
 inline std::ostream& operator<<(std::ostream& os, const SdpaBwdSignatureKey& key)
 {
     os << "SdpaBwd(q=" << key.qDataType << ", k=" << key.kDataType << ", v=" << key.vDataType
-       << ", o=" << key.oDataType << ", dq=" << key.dqDataType << ", dk=" << key.dkDataType
-       << ", dv=" << key.dvDataType << ")";
+       << ", o=" << key.oDataType << ", dO=" << key.doDataType << ", dq=" << key.dqDataType
+       << ", dk=" << key.dkDataType << ", dv=" << key.dvDataType << ")";
     return os;
 }
 

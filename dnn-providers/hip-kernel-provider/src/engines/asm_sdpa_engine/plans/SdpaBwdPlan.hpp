@@ -44,8 +44,6 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    size_t getDBufferSize() const;
-
     HipModuleGuard _odoKernel;
     HipModuleGuard _dqdkdvKernel;
     HipModuleGuard _postKernel;
