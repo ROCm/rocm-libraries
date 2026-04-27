@@ -228,7 +228,6 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvOclBwdWrW2<16>",                                  {22,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclBwdWrW2NonTunable",                            {23,    false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclBwdWrW53",                                     {24,    false,  false,  "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW1x1",                                    {25,    false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvHipImplicitGemmV4R1Fwd",                          {26,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmV4R1WrW",                          {31,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"fft",                                                 {34,    false,  false,  "miopenConvolutionFwdAlgoFFT"}},

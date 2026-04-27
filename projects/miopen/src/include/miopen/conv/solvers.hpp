@@ -2458,19 +2458,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvOclBwdWrW53 final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclBwdWrW1x1 final : ConvSolver
-{
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclBwdWrW1x1>(); }
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    size_t GetWorkspaceSize(const ExecutionContext&,
-                            const miopen::conv::ProblemDescription&) const override;
-    bool MayNeedWorkspace() const override { return true; }
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&) const override;
-};
-
 struct MIOPEN_INTERNALS_EXPORT fft final : ConvSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<fft>(); }
