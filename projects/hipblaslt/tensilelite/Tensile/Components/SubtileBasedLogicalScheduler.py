@@ -1983,11 +1983,17 @@ class LogicalScheduler:
                         removed.add(em.moduleId)
 
                 # Remove WaitLR if no LR remains in this subIterK
+                # but keep WaitLR ops that non-removed modules depend on
+                # (e.g. MFMAs waiting for LRs issued in a previous subIterK)
                 has_lr = any(em.opType == 'lr' and em.moduleId not in removed
                              for em in new_emitted)
                 if not has_lr:
+                    depended_on = {em.before for em in new_emitted
+                                   if em.moduleId not in removed
+                                   and em.before is not None}
                     for em in new_emitted:
-                        if em.opType == 'wait_lr':
+                        if em.opType == 'wait_lr' \
+                                and em.moduleId not in depended_on:
                             removed.add(em.moduleId)
 
                 part_nll.append(self._rewire_before(new_emitted, removed))
