@@ -115,7 +115,7 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
     };
 }
 
-auto GetTestParams(miopenDataType_t datatype)
+auto GetTestParams(miopenDataType_t /*datatype*/)
 {
 // Solution requires 64-lane wavefronts and depends on the CK dynamic library
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL

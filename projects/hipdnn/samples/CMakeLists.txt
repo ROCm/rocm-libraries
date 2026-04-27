@@ -67,7 +67,9 @@ add_hipdnn_sample(hipdnn_sample_fused_conv_fprop_bias_activ convolution/FusedCon
 add_hipdnn_sample(hipdnn_sample_conv_wgrad convolution/ConvWgrad.cpp)
 add_hipdnn_sample(hipdnn_sample_conv_fprop_deterministic convolution/ConvFpropDeterministic.cpp)
 
-add_hipdnn_sample(hipdnn_sample_sdpa_fprop sdpa/SdpaFprop.cpp)
+if(HIPDNN_ENABLE_SDPA)
+    add_hipdnn_sample(hipdnn_sample_sdpa_fprop sdpa/SdpaFprop.cpp)
+endif()
 
 add_hipdnn_sample(hipdnn_sample_serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
@@ -150,6 +152,34 @@ install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_
 find_package(hiprtc REQUIRED)
 include(ExternalProject)
 
+find_program(CLANG_TIDY_EXE NAMES clang-tidy-20 clang-tidy)
+set(EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS "")
+set(EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS "")
+if(CLANG_TIDY_EXE)
+    execute_process(
+        COMMAND "${CLANG_TIDY_EXE}" --version
+        OUTPUT_VARIABLE CLANG_TIDY_VERSION_OUTPUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(CLANG_TIDY_VERSION_OUTPUT MATCHES "version 20\\.")
+        list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS
+            "-DCMAKE_CXX_CLANG_TIDY:STRING=${CLANG_TIDY_EXE}"
+        )
+    else()
+        message(STATUS "clang-tidy found at ${CLANG_TIDY_EXE} but is not version 20; disabling clang-tidy for example_engine_plugin build")
+        list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS
+            "-UCMAKE_CXX_CLANG_TIDY"
+        )
+    endif()
+else()
+    list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS
+        "-UCMAKE_CXX_CLANG_TIDY"
+    )
+endif()
+# Force the external project to reconfigure whenever the samples project is reconfigured
+file(REMOVE
+    "${CMAKE_CURRENT_BINARY_DIR}/example_engine_plugin-prefix/src/example_engine_plugin-stamp/example_engine_plugin-configure"
+)
 ExternalProject_Add(example_engine_plugin
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/example_engine_plugin
     CMAKE_CACHE_ARGS
@@ -164,6 +194,9 @@ ExternalProject_Add(example_engine_plugin
         "-Dhiprtc_DIR:PATH=${hiprtc_DIR}"
         "-Dflatbuffers_DIR:PATH=${flatbuffers_DIR}"
         "-Dnlohmann_json_DIR:PATH=${nlohmann_json_DIR}"
+        ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS}
+    CMAKE_ARGS
+        ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS}
     INSTALL_COMMAND ""
 )
 

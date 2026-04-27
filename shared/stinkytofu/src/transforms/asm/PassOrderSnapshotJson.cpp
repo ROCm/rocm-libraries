@@ -39,7 +39,9 @@ static void linearizeProgramOrderStinky(Function& func, const PassContext& passC
     for (BasicBlock& bb : func) {
         if (!passCtx.shouldProcessBasicBlock(bb) || bb.empty()) continue;
         for (BasicBlock::iterator it = bb.begin(); it != bb.end(); ++it) {
-            out.push_back(&getStinkyInst(it));
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (!inst) continue;
+            out.push_back(inst);
         }
     }
 }

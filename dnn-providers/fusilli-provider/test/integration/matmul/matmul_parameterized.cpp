@@ -151,7 +151,10 @@ TEST_P(MatmulParameterizedTest, Correctness) {
 
   // Create graph.
   auto graph = std::make_shared<graph::Graph>();
-  graph->set_name("matmul_parameterized_test");
+  const auto *test_info =
+      ::testing::UnitTest::GetInstance()->current_test_info();
+  graph->set_name(std::string(test_info->test_suite_name()) + "_" +
+                  test_info->name());
   graph->set_io_data_type(DataType_t::FLOAT)
       .set_intermediate_data_type(DataType_t::FLOAT)
       .set_compute_data_type(DataType_t::FLOAT);

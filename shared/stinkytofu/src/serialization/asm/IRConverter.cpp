@@ -27,6 +27,7 @@
 #include "ModifierSerializer.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 
@@ -42,7 +43,33 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
         return;
     }
 
+    // "FENCE" is the mnemonic printed by AsmPrinter; "scheduling_fence" is the
+    // rocisa instruction string. Both round-trip to a scheduling fence.
+    // Fences carry no modifiers — they are hard region boundaries with no tokens.
+    if (inst->opcodeStr == "FENCE" || inst->opcodeStr == "scheduling_fence") {
+        irBuilder.createFence();
+    }
+
+    if (inst->opcodeStr == "asm_directive") {
+        AsmDirective* d = irBuilder.createIR<AsmDirective>();
+        if (!inst->srcRegs.empty() &&
+            inst->srcRegs[0].dataType == StinkyRegister::Type::LiteralString) {
+            d->name = inst->srcRegs[0].literalValue;
+            if (d->name == ".set") d->kind = AsmDirectiveKind::SET;
+        }
+        if (inst->srcRegs.size() > 1 &&
+            inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString) {
+            d->symbol = inst->srcRegs[1].literalValue;
+        }
+        return;
+    }
+
     auto opcode = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
+    if (opcode == GFX::INVALID) {
+        std::cerr << "Error: No ISA opcode found for mnemonic " << inst->opcodeStr << " in arch gfx"
+                  << static_cast<int>(arch) << "\n";
+        return;
+    }
     const HwInstDesc* hwInstDesc = getMCIDByIsaOp(static_cast<IsaOpcode>(opcode), arch);
 
     if (hwInstDesc == nullptr) {

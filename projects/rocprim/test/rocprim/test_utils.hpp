@@ -664,6 +664,18 @@ inline auto test_kernel_wrapper(F func, hipStream_t stream, const bool use_graph
     }
 }
 
+inline bool is_apu(const rocprim::detail::target_arch arch)
+{
+	if (arch == rocprim::detail::target_arch::gfx1103 ||
+		arch == rocprim::detail::target_arch::gfx1150 || 
+		arch == rocprim::detail::target_arch::gfx1151 ||
+		arch == rocprim::detail::target_arch::gfx1152)
+	{
+		return true;
+	}
+    return false;
+}
+
 } // namespace test_utils
 
 #endif // TEST_TEST_UTILS_HPP_
