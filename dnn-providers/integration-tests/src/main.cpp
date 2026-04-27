@@ -118,8 +118,6 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        std::cout << "Used for Testing CI - DELETE ME" << '\n';
-
         // Parse --test-engine, --fail-on-unsupported, and --test-config arguments
         std::optional<std::string> engineName;
         if(parser.is_used("--test-engine"))
