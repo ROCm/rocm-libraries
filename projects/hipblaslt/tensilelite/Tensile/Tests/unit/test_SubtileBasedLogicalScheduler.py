@@ -1577,6 +1577,38 @@ if __name__ == "__main__":
             if interactive and i < len(steps) - 1:
                 input("Press Enter for next step...")
 
+        kernel = create_kernel(256, 256, fp4=False, depthU=64)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=False)
+
+        sched.allocVgprTiles(writer, tiA, tiB,
+                             scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
+        sched.populate_instructions(
+            writer, kernel,
+            tileInfoA=tiA, tileInfoB=tiB,
+            dtileInfo=dTileInfo,
+            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+        )
+
+        def _print_emitLoop(label, emitted_3d):
+            module = sched._emitLoop(writer, kernel, label, emitted_3d)
+            buf = io.StringIO()
+            for inst in module.flatitems():
+                buf.write(f"  {str(inst).rstrip()}\n")
+            return buf.getvalue()
+
+        for label, emitted_3d in [
+            ("MAINLOOP", sched._emitted_per_unroll[0]),
+        ]:
+            print(f"{'=' * 60}")
+            print(f"  {label} (emitLoop)")
+            print(f"{'=' * 60}")
+            print(_print_emitLoop(label, emitted_3d))
+            if interactive:
+                input("Press Enter for next step...")
+
+        sched.deallocVgprTiles(writer)
+
         sys.exit(0)
 
     if use_bf16:
