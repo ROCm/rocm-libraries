@@ -94,7 +94,20 @@ if (NOT HIPDNN_SKIP_TESTS)
     set(SKIP_TEST_NAME_VALIDATION ON)
     include(Tests)
 endif()
-include(ClangCheck)
+# TODO: Remove this clang-format probe once TheRock's ml-libs/CMakeLists.txt passes
+# -DENABLE_CLANG_FORMAT=OFF for hipblasltprovider (as it already does for miopenprovider).
+# The common ClangCheck.cmake calls findAndCheckClangFormat() which FATAL_ERRORs when
+# clang-format is missing. TheRock's build container does not provide clang-format, so we
+# probe for it here and skip the include if absent. Other providers (miopen, hip-kernel,
+# integration-tests) rely on TheRock passing -DENABLE_CLANG_FORMAT=OFF instead.
+if(ENABLE_CLANG_FORMAT)
+    find_program(_HIPBLASLT_CLANG_FORMAT_PROBE NAMES clang-format-18 clang-format)
+    if(_HIPBLASLT_CLANG_FORMAT_PROBE)
+        include(ClangCheck)
+    else()
+        message(WARNING "ENABLE_CLANG_FORMAT=ON but clang-format not found; skipping format targets")
+    endif()
+endif()
 
 if(WIN32)
     set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "bin")
