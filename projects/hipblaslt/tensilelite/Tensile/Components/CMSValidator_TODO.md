@@ -48,13 +48,6 @@ become safe to delete:
   weak parity (the SwapPack path silently truncates the chain for
   every LR in `_REAL_TWIN_CONFIG_VW4`).
 
-## `@applies_only_once` partial state on error
-
-`hook_up_packs` is decorated with `@applies_only_once`. If
-`derive_pack_must_start_after` raises (e.g., missing `rocisa_inst`), the
-decorator may still mark the function as applied, preventing retry. Verify
-the decorator does not record the function as applied on raise.
-
 ## Dual-path comparison re-add
 
 When the primary path was wired (commit `23d8627a22`), the dual-path
