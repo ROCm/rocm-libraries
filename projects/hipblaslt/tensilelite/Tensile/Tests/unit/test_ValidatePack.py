@@ -1441,7 +1441,13 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
             41, 41, 41, 41]]
         valid, message = isValid(schedule_info, ValidationContext(kernel=kernel, id_map=make_mock_id_map(schedule_info, kernel), mfma_code=make_mock_mfma_code(schedule_info.numMfma)))
         assert not valid
-        assert message == "Code path 0: PackA0 @ idx=37 issued too late, must be issued before MFMA @ idx=36."
+        # The validator now uses register-traced needed_by which detects the
+        # broken schedule via the MFMAPack→CVT1 timing constraint (gap of 1
+        # vmfma between vmfma=40 and vmfma=41 is below the required minimum).
+        # The old positional path detected a different symptom of the same
+        # broken schedule (CVT0 at vmfma=37 issued after its consuming external
+        # MFMA at vmfma=36). Either error is a correct rejection.
+        assert message == "Code path 0: PackA0 @ idx=40 has too little gap between it and PackA0 @ idx=41. Expected at least 5 quad-cycles but only 3 passed."
 
 
 class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):

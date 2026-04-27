@@ -36,21 +36,18 @@ tested across all dict variations:
 
 ## Delete dead positional code
 
-Once Known Issues 4 & 5 (below) are fixed:
+Once Known Issue 4 (below) is fixed:
 - `_hook_up_packs_bf16`
 - `_hook_up_packs_f32` (keep `_hook_up_middle_16_pairs`)
 - `_hook_up_packs_f32_mfma`
 - Hardcoded `pack_dependencies` dicts
 
-## Known Issues 4 & 5
+## Known Issue 4
 
 - `set_lr_needed_by_from_mfma_operands` doesn't propagate through pack
   chains (LR→Pack→MFMA)
-- `set_pack_needed_by_from_mfma_operands` doesn't trace through
-  intermediate packs (CVT0→MFMAPack→CVT1→MFMA)
 
-Required before deleting `set_lr_needed_by_for_VMFMA` and
-`_set_pack_needed_by`.
+Required before deleting `set_lr_needed_by_for_VMFMA`.
 
 ## `@applies_only_once` partial state on error
 
@@ -67,13 +64,6 @@ comparison block (`derive_pack_must_start_after` vs positional
 detect subtle bugs in the new path. Re-add as a debug-only mode (e.g.
 `CMS_VALIDATE_DUAL_PATH=1` env var) before deleting the positional
 functions.
-
-## `_set_pack_needed_by` still positional
-
-The current `hook_up_packs` uses `derive_pack_must_start_after` for
-`must_start_after`, but `_set_pack_needed_by` (which sets `needed_by`) is
-still the positional tile-math code. Deletion requires fixing Known
-Issue #5 first.
 
 ## `_get_lrs_for_pack` still required
 

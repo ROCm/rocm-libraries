@@ -41,6 +41,7 @@ from Tensile.Components.CMSValidator import (
     Pack, CVTPack, MiddlePack, MFMAPack, SwapPack,
     LocalRead, MFMA,
     derive_pack_must_start_after,
+    set_pack_needed_by_from_mfma_operands,
     resolve_pack_type, PACK_TYPE_MAP,
     _compute_swap_register_pairs, _build_reg_to_lr_map,
     _hook_up_packs_f32_mfma,
@@ -380,6 +381,33 @@ class TestRegisterChainIntegrity:
         assert b_range[0] == 'v' and PACK_B_DST_BASE <= b_range[1] < PACK_B_DST_BASE + 100, \
             f"MFMA[0] .b {b_range} should read from PackB output space v[{PACK_B_DST_BASE}+]"
 
+    def test_mfmapack_dst_overlaps_cvt1_src(self):
+        """get_dst_range(MFMAPack) must return the .acc range, and CVT1 must read it.
+
+        Load-bearing precondition for set_pack_needed_by_from_mfma_operands:
+        MFMAPack→CVT1 chain depends on MFMAPack's dst (the accumulator)
+        being readable as a register range that overlaps a CVT1 src range.
+        """
+        mock_packs = _make_mock_packs_tf32_4x4(10, pack_dst_base=PACK_A_DST_BASE,
+                                                 lr_base=LRA_BASE)
+        # MFMAPack[0] (idx 4): .acc writes to LR T-space; CVT1[2] (idx 8) reads it.
+        mp0_dst = get_dst_range(mock_packs[4])
+        assert mp0_dst is not None, "MFMAPack[0] dst must be non-None"
+        cvt1_2_srcs = [s for b, s, e in get_src_ranges(mock_packs[8]) if b == mp0_dst[0]
+                       for s in range(s, e)]
+        mp0_offsets = set(range(mp0_dst[1], mp0_dst[2]))
+        assert any(s in mp0_offsets for s in cvt1_2_srcs), \
+            f"CVT1[2] srcs must overlap MFMAPack[0] dst {mp0_dst}, got srcs at {cvt1_2_srcs}"
+
+        # MFMAPack[1] (idx 5): .acc writes to pack output space; CVT1[0] (idx 6) reads it.
+        mp1_dst = get_dst_range(mock_packs[5])
+        assert mp1_dst is not None, "MFMAPack[1] dst must be non-None"
+        cvt1_0_srcs = [s for b, s, e in get_src_ranges(mock_packs[6]) if b == mp1_dst[0]
+                       for s in range(s, e)]
+        mp1_offsets = set(range(mp1_dst[1], mp1_dst[2]))
+        assert any(s in mp1_offsets for s in cvt1_0_srcs), \
+            f"CVT1[0] srcs must overlap MFMAPack[1] dst {mp1_dst}, got srcs at {cvt1_0_srcs}"
+
 
 # =============================================================================
 # Test: TF32 4x4 with VW>1 swap packs — positional vs register-based
@@ -578,3 +606,199 @@ class TestRealIdMapValidation:
         assert dst is not None, "Pack should have a dst range"
         assert dst[0] != 'v' or dst[1] > 100, \
             f"Real pack should use named registers, got numeric {dst}"
+
+
+# =============================================================================
+# Test: set_pack_needed_by_from_mfma_operands — chain identity & filtering
+# =============================================================================
+
+def _make_mfma(name: str, vmfma: int, rocisa_inst, loop: int = 1) -> MFMA:
+    m = MFMA(name=name, issued_at=_make_pos(vmfma, loop=loop))
+    m.rocisa_inst = rocisa_inst
+    return m
+
+
+class TestSetPackNeededByFromMFMAOperands:
+    """Direct tests for set_pack_needed_by_from_mfma_operands.
+
+    Verifies the register-traced needed_by reproduces the chain semantics
+    of _set_pack_needed_by: CVT0 → MFMAPack → CVT1 → real_MFMA, with the
+    earliest-by-issued_at consumer winning.
+    """
+
+    def _make_tf32_4x4_group(self, vmfma_offsets, lr_base=LRA_BASE,
+                             pack_dst_base=PACK_A_DST_BASE, loop: int = 1):
+        """Build one 10-pack TF32 4x4 group with controllable per-pack vmfma.
+
+        vmfma_offsets is a list of 10 vmfma indices for CVT0[0..3] +
+        MFMAPack[0,1] + CVT1[0..3].
+        """
+        assert len(vmfma_offsets) == 10
+        mock = _make_mock_packs_tf32_4x4(10, pack_dst_base=pack_dst_base, lr_base=lr_base)
+        packs = []
+        for i in range(10):
+            cls, _ = resolve_pack_type(mock[i])
+            p = _make_pack("PackA0", vmfma_offsets[i], i, mock[i], cls=cls, group_index=0)
+            # Override loop on the SchedulePosition (helper defaults to loop=1)
+            p.issued_at = SchedulePosition(loop_index=loop,
+                                           vmfma_index=p.issued_at.vmfma_index,
+                                           sub_index=p.issued_at.sub_index)
+            packs.append(p)
+        return packs
+
+    def test_bf16_pack_needed_by_is_consuming_real_mfma(self):
+        """BF16 PackA0 dst is read by a real MFMA — needed_by should point to it."""
+        mock_lrs = _make_mock_lr(4, base_reg=LRA_BASE)
+        mock_packs = _make_mock_packs_bf16(2, pack_dst_base=PACK_A_DST_BASE,
+                                            lr_base=LRA_BASE, num_lrs=4)
+        packs = [_make_pack("PackA0", 5 + i, i, mock_packs[i]) for i in range(2)]
+        # Build a real MFMA that reads PackA0 dst (mfma.a is in PACK_A_DST_BASE space)
+        mfmas = make_mock_mfma_code(2)
+        real_mfmas = [_make_mfma("MFMA", 10 + i, mfmas[i]) for i in range(2)]
+
+        result = set_pack_needed_by_from_mfma_operands(packs, real_mfmas)
+
+        assert "PackA0" in result
+        # Both packs should find a real MFMA as their consumer
+        for i in range(2):
+            assert i in result["PackA0"], f"PackA0[{i}] should have a needed_by"
+            consumer = result["PackA0"][i]
+            assert isinstance(consumer, MFMA), f"PackA0[{i}].needed_by must be a real MFMA"
+            assert consumer in real_mfmas, "Consumer must be one of the real MFMAs we created"
+
+    def test_tf32_4x4_intra_chain_identity(self):
+        """For a TF32 4x4 group, verify each pack's needed_by is the SPECIFIC
+        intra-chain consumer that _set_pack_needed_by would pick:
+          cvt0[0,1].needed_by = mfma_packs[0]
+          cvt0[2,3].needed_by = mfma_packs[1]
+          mfma_packs[0].needed_by = cvt1[2]
+          mfma_packs[1].needed_by = cvt1[0]
+          cvt1[i].needed_by = real_MFMA (set far enough in the future)
+        """
+        # Vmfma layout that respects the natural ordering and gives
+        # CVT0 < MFMAPack < CVT1 < external_MFMA
+        packs = self._make_tf32_4x4_group(
+            [10, 10, 11, 11, 15, 15, 20, 20, 21, 21]
+        )
+        # Real MFMA that reads the pack output (PackA dst space) — fires after CVT1
+        mfmas = make_mock_mfma_code(1)
+        real_mfma = _make_mfma("MFMA", 30, mfmas[0])
+
+        result = set_pack_needed_by_from_mfma_operands(packs, [real_mfma])
+        per_name = result["PackA0"]
+
+        # CVT0 chain identity: cvt0[0,1] feed mfma_packs[0]; cvt0[2,3] feed mfma_packs[1]
+        assert per_name[0] is packs[4], f"CVT0[0].needed_by must be mfma_packs[0], got {per_name[0]}"
+        assert per_name[1] is packs[4], f"CVT0[1].needed_by must be mfma_packs[0], got {per_name[1]}"
+        assert per_name[2] is packs[5], f"CVT0[2].needed_by must be mfma_packs[1], got {per_name[2]}"
+        assert per_name[3] is packs[5], f"CVT0[3].needed_by must be mfma_packs[1], got {per_name[3]}"
+
+        # MFMAPack chain identity: mfma_packs[0] feeds cvt1[2] (idx 8); mfma_packs[1] feeds cvt1[0] (idx 6)
+        assert per_name[4] is packs[8], f"mfma_packs[0].needed_by must be cvt1[2] (idx 8), got {per_name[4]}"
+        assert per_name[5] is packs[6], f"mfma_packs[1].needed_by must be cvt1[0] (idx 6), got {per_name[5]}"
+
+        # CVT1 packs feed the external real MFMA
+        for i in range(6, 10):
+            assert per_name[i] is real_mfma, f"cvt1[{i-6}].needed_by must be the external MFMA, got {per_name[i]}"
+
+    def test_earliest_of_multiple_candidates_wins(self):
+        """When multiple instructions read the same dst register at different
+        vmfma slots (and all fire after the pack), the earliest-by-issued_at
+        candidate wins. This is the rule that reproduces _set_pack_needed_by's
+        external-vs-intra-chain override at lines 1668-1670."""
+        packs = self._make_tf32_4x4_group(
+            [10, 10, 11, 11, 15, 15, 20, 20, 21, 21]
+        )
+        # Two real MFMAs, both reading PackA output (covering CVT1.dst).
+        # MFMA at vmfma=22 fires before MFMA at vmfma=30. CVT1 packs (vmfma
+        # 20-21) must pick the earlier MFMA (vmfma=22), not the later (30).
+        mfmas = make_mock_mfma_code(1)
+        early = _make_mfma("MFMA", 22, mfmas[0])
+        late = _make_mfma("MFMA", 30, mfmas[0])
+
+        result = set_pack_needed_by_from_mfma_operands(packs, [early, late])
+        per_name = result["PackA0"]
+
+        for i in range(6, 10):
+            consumer = per_name[i]
+            assert consumer is early, \
+                f"cvt1[{i-6}] should pick the earliest MFMA (vmfma=22), got vmfma={consumer.issued_at.vmfma_index}"
+
+    def test_register_reuse_across_iterations_filtered_out(self):
+        """A pack must NOT pick a same-loop reader issued BEFORE itself.
+
+        Construct a TF32 4x4 group where CVT0 reads from a register that an
+        earlier-iteration CVT1 writes. In the linear instruction list of one
+        loop body, that earlier-iteration's CVT1 is the SAME object as the
+        current iteration's CVT1 (single occurrence per loop body). It must
+        not be picked as the consumer of CVT0 from a later schedule slot.
+        """
+        # Order: CVT0 packs at vmfma=10-11, CVT1 packs at vmfma=5-6
+        # (CVT1 is issued BEFORE CVT0 — a contrived but illustrative case).
+        # MFMAPack at vmfma=15.
+        packs = self._make_tf32_4x4_group(
+            [10, 10, 11, 11, 15, 15, 5, 5, 6, 6]
+        )
+        mfmas = make_mock_mfma_code(1)
+        real_mfma = _make_mfma("MFMA", 30, mfmas[0])
+
+        result = set_pack_needed_by_from_mfma_operands(packs, [real_mfma])
+        per_name = result["PackA0"]
+
+        # CVT1[0..3] (vmfma 5-6) come BEFORE CVT0 (vmfma 10-11). For CVT1's
+        # dst lookup, the only candidates issued strictly after vmfma 5/6 are
+        # the external MFMA (vmfma 30) and MFMAPacks (vmfma 15). MFMAPacks
+        # don't read pack output space. So CVT1's needed_by must be the
+        # external MFMA, not a sibling CVT1.
+        for i in range(6, 10):
+            consumer = per_name[i]
+            assert consumer is real_mfma, \
+                f"cvt1[{i-6}].needed_by must be external MFMA (vmfma=30), " \
+                f"got {consumer.name}@vmfma={consumer.issued_at.vmfma_index}"
+
+    def test_loop_scoping_no_cross_loop_consumer(self):
+        """Inputs must be loop-scoped; the function trusts the caller. Verify
+        that when only same-loop instructions are passed in, all assigned
+        needed_by share the pack's loop_index (the function's correctness
+        precondition holds when caller scopes the inputs)."""
+        loop_idx = 2
+        packs = self._make_tf32_4x4_group(
+            [10, 10, 11, 11, 15, 15, 20, 20, 21, 21],
+            loop=loop_idx,
+        )
+        mfmas = make_mock_mfma_code(1)
+        real_mfma = _make_mfma("MFMA", 30, mfmas[0], loop=loop_idx)
+
+        result = set_pack_needed_by_from_mfma_operands(packs, [real_mfma])
+
+        for issue_index, consumer in result["PackA0"].items():
+            assert consumer.issued_at.loop_index == loop_idx, \
+                f"pack[{issue_index}].needed_by has loop {consumer.issued_at.loop_index}, " \
+                f"expected {loop_idx}"
+
+    def test_swap_packs_excluded(self):
+        """SwapPacks must not appear in the result and must not be assigned as consumers."""
+        packs = self._make_tf32_4x4_group(
+            [10, 10, 11, 11, 15, 15, 20, 20, 21, 21]
+        )
+        # Add a SwapPack that reads from CVT0 output space (artificially)
+        # so we can verify it's filtered as a candidate even if its register
+        # access pattern would otherwise match.
+        from rocisa.instruction import VSwapB32
+        from rocisa.container import vgpr
+        swap_inst = VSwapB32(dst=vgpr(CVT0_BASE + 100, 1), src=vgpr(CVT0_BASE, 1))
+        swap = _make_pack("PackA0", 12, 100, swap_inst, cls=SwapPack)
+        packs.append(swap)
+
+        mfmas = make_mock_mfma_code(1)
+        real_mfma = _make_mfma("MFMA", 30, mfmas[0])
+
+        result = set_pack_needed_by_from_mfma_operands(packs, [real_mfma])
+
+        # SwapPack must not be in the result
+        assert 100 not in result.get("PackA0", {}), "SwapPack must not get a needed_by entry"
+        # CVT0[0]'s needed_by must still be the MFMAPack, not the SwapPack
+        # (SwapPack reads CVT0_BASE which is CVT0[0]'s dst — would falsely match
+        # if SwapPack weren't filtered as a candidate).
+        assert result["PackA0"][0] is packs[4], \
+            f"CVT0[0].needed_by must be mfma_packs[0], not the SwapPack. Got {result['PackA0'][0]}"

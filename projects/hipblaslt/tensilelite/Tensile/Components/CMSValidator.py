@@ -2191,7 +2191,7 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
             if not packs_and_indices:
                 continue
             packs_by_name[pack_name] = [pack for _, pack in packs_and_indices]
-        
+
         # 2. Gather all middle-16 packs in the current loop.
         if is_tf32_emulation and not is_4x4mfma_tf32:
             all_middle_16_packs = []
@@ -2200,6 +2200,11 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
                     if isinstance(pack, MiddlePack):
                         all_middle_16_packs.append(pack)
             all_middle_16_packs.sort(key=lambda p: p.issued_at)
+
+        # Compute the loop-scoped register-traced needed_by map once per loop.
+        all_packs_in_loop = [p for plist in packs_by_name.values() for p in plist]
+        real_mfmas_in_loop = [m for _, m in timeline.get_instructions("MFMA", loop)]
+        needed_by_map = set_pack_needed_by_from_mfma_operands(all_packs_in_loop, real_mfmas_in_loop)
 
         # 3. Hook up the needed_by and must_start_after fields
         for pack_name, packs in packs_by_name.items():
@@ -2219,7 +2224,19 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
                 if not is_4x4mfma_tf32:
                     _hook_up_middle_16_pairs(packs, all_middle_16_packs)
 
-            _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
+            # Set needed_by: prefer the new register-traced path when every
+            # eligible pack in this pack-name is covered; otherwise fall back
+            # wholesale to _set_pack_needed_by. Per-pack mixing would let one
+            # CVT0 in a TF32 4x4 group point at the new path's MFMAPack while
+            # a sibling points at the old path's external MFMA.
+            per_name_map = needed_by_map.get(pack_name, {})
+            eligible = [p for p in packs if not isinstance(p, SwapPack)
+                        and p.rocisa_inst is not None]
+            if eligible and all(p.issue_index in per_name_map for p in eligible):
+                for pack in eligible:
+                    pack.needed_by = per_name_map[pack.issue_index]
+            else:
+                _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
 
 def derive_pack_must_start_after(
     packs: list[Pack],
@@ -2408,55 +2425,74 @@ def set_lr_needed_by_from_mfma_operands(
 
 
 def set_pack_needed_by_from_mfma_operands(
-    timeline: 'Timeline',
-) -> dict[str, dict[int, MFMA]]:
-    """Derive Pack→MFMA needed_by from register operands.
+    packs: list[Pack],
+    mfmas: list[MFMA],
+) -> dict[str, dict[int, ValidatorInstruction]]:
+    """Derive Pack.needed_by from register operands.
 
-    For each Pack, finds the earliest MFMA whose .a or .b operand
-    overlaps with the pack's destination register.
+    For each non-SwapPack, finds the earliest instruction (real MFMA or
+    another Pack) whose source register range overlaps the pack's
+    destination register range AND that is issued strictly after the pack.
 
-    For TF32 4x4 packs, MFMAPacks are intermediate consumers:
-      CVT0.dst → MFMAPack.b → MFMAPack.acc → CVT1.src → CVT1.dst → real_MFMA.a/b
+    The TF32 4x4 chain CVT0.dst → MFMAPack.b/acc → CVT1.src/dst →
+    real_MFMA.a/b emerges naturally because MFMAPacks are included in
+    `packs` (they are Pack subclass instances).
 
-    Returns a dict mapping (pack_name, issue_index) → consuming MFMA,
-    or empty dict if rocisa_inst is unavailable.
+    Inputs MUST be loop-scoped: pass packs and MFMAs from a single
+    loop replication. Physical VGPRs are reused across loop iterations,
+    so a cross-loop input would assign cross-loop needed_by and break
+    Pack.validate()'s pack.issued_at < pack.needed_by.issued_at check
+    (SchedulePosition orders by loop_index first; see CMSValidator.py:56-63).
+
+    The "issued strictly after" filter handles same-loop register reuse:
+    e.g. CVT0[3] reads from a register that an earlier-iteration CVT1[1]
+    wrote — the same physical register; in this loop's instruction list
+    CVT0[3] is issued before CVT1[1], and we must not assign
+    CVT1[1].needed_by = CVT0[3].
+
+    Returns dict pack_name → issue_index → consumer ValidatorInstruction.
+    Empty dict if no MFMAs or no eligible packs.
     """
-    if not timeline.mfma_code:
+    if not mfmas and not packs:
         return {}
 
-    # Build map from register → earliest consuming MFMA (non-MFMAPack)
-    mfma_consumers: dict[tuple[str, int], MFMA] = {}
-    for _, mfma in timeline.get_instructions_combined("MFMA"):
-        if mfma.rocisa_inst is None or isinstance(mfma, MFMAPack):
-            continue
-        for rng in get_src_ranges(mfma.rocisa_inst):
-            base, start, end = rng
-            for off in range(start, end):
-                key = (base, off)
-                if key not in mfma_consumers or mfma.issued_at < mfma_consumers[key].issued_at:
-                    mfma_consumers[key] = mfma
+    # Candidates: real MFMAs + non-SwapPack packs with a rocisa_inst.
+    candidates: list[ValidatorInstruction] = [m for m in mfmas if m.rocisa_inst is not None]
+    candidates.extend(p for p in packs
+                      if p.rocisa_inst is not None and not isinstance(p, SwapPack))
 
-    result: dict[str, dict[int, MFMA]] = {}
-    for pack_name in timeline.get_instruction_names():
-        if not pack_name.startswith("Pack"):
-            continue
-        result[pack_name] = {}
-        for _, pack in timeline.get_instructions_combined(pack_name):
-            if pack.rocisa_inst is None or isinstance(pack, SwapPack):
-                continue
-            dst = get_dst_range(pack.rocisa_inst)
-            if dst is None:
-                continue
-            base, start, end = dst
-            earliest = None
+    # Index candidates by source register, sorted by issued_at.
+    by_reg: dict[tuple[str, int], list[ValidatorInstruction]] = {}
+    for inst in candidates:
+        for base, start, end in get_src_ranges(inst.rocisa_inst):
             for off in range(start, end):
-                key = (base, off)
-                if key in mfma_consumers:
-                    candidate = mfma_consumers[key]
-                    if earliest is None or candidate.issued_at < earliest.issued_at:
-                        earliest = candidate
-            if earliest is not None:
-                result[pack_name][pack.issue_index] = earliest
+                by_reg.setdefault((base, off), []).append(inst)
+    for lst in by_reg.values():
+        lst.sort(key=lambda i: i.issued_at)
+
+    result: dict[str, dict[int, ValidatorInstruction]] = {}
+    for pack in packs:
+        if pack.rocisa_inst is None or isinstance(pack, SwapPack):
+            continue
+        dst = get_dst_range(pack.rocisa_inst)
+        if dst is None:
+            continue
+        base, start, end = dst
+        earliest: Optional[ValidatorInstruction] = None
+        for off in range(start, end):
+            lst = by_reg.get((base, off))
+            if not lst:
+                continue
+            for cand in lst:
+                if cand is pack:
+                    continue
+                if not (pack.issued_at < cand.issued_at):
+                    continue  # cand fires at/before pack — reads prior iteration
+                if earliest is None or cand.issued_at < earliest.issued_at:
+                    earliest = cand
+                break  # list sorted by issued_at; first valid is earliest for this off
+        if earliest is not None:
+            result.setdefault(pack.name, {})[pack.issue_index] = earliest
 
     return result
 
