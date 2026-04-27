@@ -19,6 +19,7 @@ when touched. Real dispatch into logicalIR is deferred to a later pass.
 
 from __future__ import annotations
 
+import enum as _stdenum
 from typing import Any, Iterable, Mapping, Type
 
 
@@ -75,32 +76,31 @@ def make_dummy_func(full_name: str):
 
 
 def make_dummy_enum(full_name: str, values: Iterable[str]) -> Type[Any]:
-    """Create a dummy enum-like class mirroring ``nb::enum_ + export_values``.
+    """Create a real ``IntEnum`` mirroring ``nb::enum_`` + ``export_values``.
 
-    Each value is an ``int`` member attached both to the class itself and
-    returned to the caller so the caller can also re-export them at
-    module scope (matching nanobind's ``export_values()`` behaviour).
-    Instantiating the enum class prints the full qualified name.
+    Each member exposes ``.name`` and ``.value`` (matching nanobind), is an
+    ``int`` itself (so ``DataTypeEnum.Float == 0`` keeps working), and the
+    class is callable as ``DataTypeEnum(0)``. The numeric value of each
+    member is its 0-based index in ``values`` — this matches the implicit
+    ``nb::enum_<...>::value(...)`` ordering used by ``rocisa::enum.cpp``.
+
+    Note (was originally a "structural-only" dummy):
+        Tensile's import-time machinery in ``Tensile/Common/DataType.py``
+        reads ``e['enum'].value`` and ``e['enum'].name`` while building the
+        ``DataType`` lookup table, so a bare ``int`` placeholder is not
+        enough to pass ``import Tensile``. ``IntEnum`` gives us both the
+        attribute surface and the raw-int behaviour the rest of the code
+        treats it as.
     """
 
     short = full_name.rsplit(".", 1)[-1]
     values = list(values)
+    module = full_name.rsplit(".", 1)[0]
 
-    class _DummyEnum:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            print(full_name)
-
-        def __repr__(self) -> str:
-            return f"<DummyEnum {full_name}>"
-
-    _DummyEnum.__name__ = short
-    _DummyEnum.__qualname__ = short
-    _DummyEnum.__module__ = full_name.rsplit(".", 1)[0]
-
-    for i, v in enumerate(values):
-        setattr(_DummyEnum, v, i)
-
-    return _DummyEnum
+    cls = _stdenum.IntEnum(short, [(v, i) for i, v in enumerate(values)])
+    cls.__module__ = module
+    cls.__qualname__ = short
+    return cls
 
 
 def export_enum_values(target_namespace: Mapping[str, Any], enum_cls: Type[Any],
