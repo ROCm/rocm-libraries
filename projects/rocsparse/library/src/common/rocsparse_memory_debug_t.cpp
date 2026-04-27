@@ -80,12 +80,7 @@ void rocsparse::memory_debug_t::info_t::reset()
 void rocsparse::memory_debug_t::reset(hipStream_t stream)
 {
     auto& instance = rocsparse::memory_debug_t::instance();
-    auto  it       = instance.m_stream2info.find(stream);
-    if(it != instance.m_stream2info.end())
-    {
-        it->second.reset();
-        instance.m_stream2info.erase(it);
-    }
+    instance.m_stream2info.erase(stream);
 }
 
 rocsparse::memory_debug_t::info_t& rocsparse::memory_debug_t::get_info(hipStream_t stream)
@@ -148,15 +143,19 @@ hipError_t rocsparse::memory_debug_t::info_t::call_memset(void* target, int valu
 
 void rocsparse::memory_debug_t::info_t::add_data_transfer(size_t size_in_bytes)
 {
-    this->m_gib = this->m_gib + double(size_in_bytes) / double(1024 * 1024 * 1024);
+    const double delta    = double(size_in_bytes) / double(1024 * 1024 * 1024);
+    double       expected = this->m_gib.load(std::memory_order_relaxed);
+    while(!this->m_gib.compare_exchange_weak(
+        expected, expected + delta, std::memory_order_relaxed, std::memory_order_relaxed))
+    {
+    }
 }
 
 void rocsparse::memory_debug_t::info_t::register_call(func_t f)
 {
-
     this->set_last_hip_call(f);
-    this->set_hip_ncalls(f, this->get_hip_ncalls(f) + 1);
-    this->set_hip_ncalls(this->get_hip_ncalls() + 1);
+    this->m_hip_count_calls[f].fetch_add(1, std::memory_order_relaxed);
+    this->m_hip_ncalls.fetch_add(1, std::memory_order_relaxed);
 }
 
 hipError_t rocsparse::memory_debug_t::info_t::call_memset_async(void*       target,
@@ -233,10 +232,15 @@ hipError_t rocsparse::memory_debug_t::info_t::call_malloc_async(void**      p_th
 
 // if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
 #if HIP_VERSION >= 50300000
-    return hipMallocAsync(p_that, size, stream);
+    auto e = hipMallocAsync(p_that, size, stream);
 #else
-    return hipMalloc(p_that, size);
+    auto e = hipMalloc(p_that, size);
 #endif
+    if(e != hipSuccess)
+    {
+        --this->m_hip_stack_count;
+    }
+    return e;
 }
 
 hipError_t rocsparse::memory_debug_t::info_t::call_free_async(void* that, hipStream_t stream)
@@ -257,7 +261,12 @@ hipError_t rocsparse::memory_debug_t::info_t::call_malloc(void** p_that, size_t 
 {
     this->register_call(func_t::hip_malloc);
     ++this->m_hip_stack_count;
-    return hipMalloc(p_that, size);
+    auto e = hipMalloc(p_that, size);
+    if(e != hipSuccess)
+    {
+        --this->m_hip_stack_count;
+    }
+    return e;
 }
 
 hipError_t rocsparse::memory_debug_t::info_t::call_free(void* that)

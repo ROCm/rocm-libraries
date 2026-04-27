@@ -28,6 +28,7 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 namespace rocsparse_clients_test
@@ -113,7 +114,7 @@ namespace rocsparse_clients_test
         {"ccsr2gebsr", {HOST_OR_SYNC_OR_PSYNC}},
         {"ccsr2gebsr_buffer_size", {HOST_OR_SYNC}},
         {"ccsr2hyb", {HOST_OR_PSYNC}},
-        {"ccsrcolor", {PSYNC}},
+        {"ccsrcolor", {PSYNC_ONLY}},
         {"ccsrgeam", {ASYNC_ONLY}},
         {"ccsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
         {"ccsrgemm_buffer_size", {HOST_ONLY}},
@@ -141,9 +142,9 @@ namespace rocsparse_clients_test
         {"ccsrsv_analysis", {HOST_OR_SYNC}},
         {"ccsrsv_buffer_size", {HOST_ONLY}},
         {"ccsrsv_solve", {ASYNC_ONLY}},
-        {"cdense2coo", {PSYNC}},
-        {"cdense2csc", {ASYNC}},
-        {"cdense2csr", {ASYNC}},
+        {"cdense2coo", {PSYNC_ONLY}},
+        {"cdense2csc", {ASYNC_ONLY}},
+        {"cdense2csr", {ASYNC_ONLY}},
         {"cdotci", {HOST_OR_ASYNC}},
         {"cdoti", {HOST_OR_ASYNC}},
         {"cell2csr", {HOST_OR_ASYNC}},
@@ -151,7 +152,7 @@ namespace rocsparse_clients_test
         {"cgebsr2csr", {PSYNC_OR_ASYNC}},
         {"cgebsr2gebsc", {ASYNC_ONLY}},
         {"cgebsr2gebsc_buffer_size", {HOST_ONLY}},
-        {"cgebsr2gebsr", {PSYNC}},
+        {"cgebsr2gebsr", {PSYNC_ONLY}},
         {"cgebsr2gebsr_buffer_size", {HOST_ONLY}},
         {"cgebsrmm", {ASYNC_ONLY}},
         {"cgebsrmv", {ASYNC_ONLY}},
@@ -171,7 +172,7 @@ namespace rocsparse_clients_test
         {"cgtsv_no_pivot_strided_batch", {ASYNC_ONLY}},
         {"cgtsv_no_pivot_strided_batch_buffer_size", {HOST_ONLY}},
         {"check_matrix_hyb", {SYNC_ONLY}},
-        {"check_matrix_hyb_buffer_size", {HOST}},
+        {"check_matrix_hyb_buffer_size", {HOST_ONLY}},
         {"check_spmat", {HOST_OR_SYNC}},
         {"chyb2csr", {ASYNC_ONLY}},
         {"chybmv", {ASYNC_ONLY}},
@@ -262,7 +263,7 @@ namespace rocsparse_clients_test
         {"dcsr2gebsr", {HOST_OR_SYNC_OR_PSYNC}},
         {"dcsr2gebsr_buffer_size", {HOST_OR_SYNC}},
         {"dcsr2hyb", {HOST_OR_PSYNC}},
-        {"dcsrcolor", {PSYNC}},
+        {"dcsrcolor", {PSYNC_ONLY}},
         {"dcsrgeam", {ASYNC_ONLY}},
         {"dcsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
         {"dcsrgemm_buffer_size", {HOST_ONLY}},
@@ -290,9 +291,9 @@ namespace rocsparse_clients_test
         {"dcsrsv_analysis", {HOST_OR_SYNC}},
         {"dcsrsv_buffer_size", {HOST_ONLY}},
         {"dcsrsv_solve", {ASYNC_ONLY}},
-        {"ddense2coo", {PSYNC}},
-        {"ddense2csc", {ASYNC}},
-        {"ddense2csr", {ASYNC}},
+        {"ddense2coo", {PSYNC_ONLY}},
+        {"ddense2csc", {ASYNC_ONLY}},
+        {"ddense2csr", {ASYNC_ONLY}},
         {"ddoti", {HOST_OR_ASYNC}},
         {"dell2csr", {HOST_OR_ASYNC}},
         {"dellmv", {HOST_OR_ASYNC}},
@@ -300,7 +301,7 @@ namespace rocsparse_clients_test
         {"dgebsr2csr", {PSYNC_OR_ASYNC}},
         {"dgebsr2gebsc", {ASYNC_ONLY}},
         {"dgebsr2gebsc_buffer_size", {HOST_ONLY}},
-        {"dgebsr2gebsr", {PSYNC}},
+        {"dgebsr2gebsr", {PSYNC_ONLY}},
         {"dgebsr2gebsr_buffer_size", {HOST_ONLY}},
         {"dgebsrmm", {ASYNC_ONLY}},
         {"dgebsrmv", {ASYNC_ONLY}},
@@ -329,7 +330,7 @@ namespace rocsparse_clients_test
         {"dprune_csr2csr_by_percentage_buffer_size", {HOST_ONLY}},
         {"dprune_csr2csr_nnz", {PSYNC_OR_ASYNC}},
         {"dprune_csr2csr_nnz_by_percentage", {PSYNC_OR_ASYNC}},
-        {"dprune_dense2csr", {ASYNC}},
+        {"dprune_dense2csr", {ASYNC_ONLY}},
         {"dprune_dense2csr_buffer_size", {HOST_ONLY}},
         {"dprune_dense2csr_by_percentage", {PSYNC_OR_ASYNC}},
         {"dprune_dense2csr_by_percentage_buffer_size", {HOST_ONLY}},
@@ -342,7 +343,7 @@ namespace rocsparse_clients_test
         {"ell2csr_nnz", {HOST_OR_SYNC}},
         {"extract", {ASYNC_ONLY}},
         {"extract_buffer_size", {HOST_ONLY}},
-        {"extract_nnz", {ASYNC}},
+        {"extract_nnz", {ASYNC_ONLY}},
         {"gather", {HOST_OR_ASYNC}},
         {"gebsr2gebsr_nnz", {SYNC_OR_ASYNC}},
         {"get_git_rev", {HOST_ONLY}},
@@ -400,7 +401,7 @@ namespace rocsparse_clients_test
         {"scsr2gebsr", {HOST_OR_SYNC_OR_PSYNC}},
         {"scsr2gebsr_buffer_size", {HOST_OR_SYNC}},
         {"scsr2hyb", {HOST_OR_PSYNC}},
-        {"scsrcolor", {PSYNC}},
+        {"scsrcolor", {PSYNC_ONLY}},
         {"scsrgeam", {ASYNC_ONLY}},
         {"scsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
         {"scsrgemm_buffer_size", {HOST_ONLY}},
@@ -430,10 +431,10 @@ namespace rocsparse_clients_test
         {"scsrsv_solve", {ASYNC_ONLY}},
         {"sddmm", {ASYNC_ONLY}},
         {"sddmm_buffer_size", {HOST_ONLY}},
-        {"sddmm_preprocess", {HOST}},
-        {"sdense2coo", {PSYNC}},
-        {"sdense2csc", {ASYNC}},
-        {"sdense2csr", {ASYNC}},
+        {"sddmm_preprocess", {HOST_ONLY}},
+        {"sdense2coo", {PSYNC_ONLY}},
+        {"sdense2csc", {ASYNC_ONLY}},
+        {"sdense2csr", {ASYNC_ONLY}},
         {"sdoti", {HOST_OR_ASYNC}},
         {"sell2csr", {HOST_OR_ASYNC}},
         {"sellmv", {HOST_OR_ASYNC}},
@@ -443,7 +444,7 @@ namespace rocsparse_clients_test
         {"sgebsr2csr", {PSYNC_OR_ASYNC}},
         {"sgebsr2gebsc", {ASYNC_ONLY}},
         {"sgebsr2gebsc_buffer_size", {HOST_ONLY}},
-        {"sgebsr2gebsr", {PSYNC}},
+        {"sgebsr2gebsr", {PSYNC_ONLY}},
         {"sgebsr2gebsr_buffer_size", {HOST_ONLY}},
         {"sgebsrmm", {ASYNC_ONLY}},
         {"sgebsrmv", {ASYNC_ONLY}},
@@ -471,7 +472,7 @@ namespace rocsparse_clients_test
         {"sparse_to_sparse_buffer_size", {HOST_OR_SYNC_OR_PSYNC}},
         {"spgeam", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
         {"spgeam_buffer_size", {HOST_ONLY}},
-        {"spgeam_get_output", {HOST}},
+        {"spgeam_get_output", {HOST_ONLY}},
         {"spgeam_set_input", {HOST_ONLY}},
         {"spgemm", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
         {"spic0", {HOST_OR_SYNC_OR_ASYNC}},
@@ -498,7 +499,7 @@ namespace rocsparse_clients_test
         {"sprune_csr2csr_by_percentage_buffer_size", {HOST_ONLY}},
         {"sprune_csr2csr_nnz", {PSYNC_OR_ASYNC}},
         {"sprune_csr2csr_nnz_by_percentage", {PSYNC_OR_ASYNC}},
-        {"sprune_dense2csr", {ASYNC}},
+        {"sprune_dense2csr", {ASYNC_ONLY}},
         {"sprune_dense2csr_buffer_size", {HOST_ONLY}},
         {"sprune_dense2csr_by_percentage", {PSYNC_OR_ASYNC}},
         {"sprune_dense2csr_by_percentage_buffer_size", {HOST_ONLY}},
@@ -567,7 +568,7 @@ namespace rocsparse_clients_test
         {"zcsr2gebsr", {HOST_OR_SYNC_OR_PSYNC}},
         {"zcsr2gebsr_buffer_size", {HOST_OR_SYNC}},
         {"zcsr2hyb", {HOST_OR_PSYNC}},
-        {"zcsrcolor", {PSYNC}},
+        {"zcsrcolor", {PSYNC_ONLY}},
         {"zcsrgeam", {ASYNC_ONLY}},
         {"zcsrgemm", {HOST_OR_PSYNC_OR_ASYNC}},
         {"zcsrgemm_buffer_size", {HOST_ONLY}},
@@ -595,9 +596,9 @@ namespace rocsparse_clients_test
         {"zcsrsv_analysis", {HOST_OR_SYNC}},
         {"zcsrsv_buffer_size", {HOST_ONLY}},
         {"zcsrsv_solve", {ASYNC_ONLY}},
-        {"zdense2coo", {PSYNC}},
-        {"zdense2csc", {ASYNC}},
-        {"zdense2csr", {ASYNC}},
+        {"zdense2coo", {PSYNC_ONLY}},
+        {"zdense2csc", {ASYNC_ONLY}},
+        {"zdense2csr", {ASYNC_ONLY}},
         {"zdotci", {HOST_OR_ASYNC}},
         {"zdoti", {HOST_OR_ASYNC}},
         {"zell2csr", {HOST_OR_ASYNC}},
@@ -605,7 +606,7 @@ namespace rocsparse_clients_test
         {"zgebsr2csr", {PSYNC_OR_ASYNC}},
         {"zgebsr2gebsc", {ASYNC_ONLY}},
         {"zgebsr2gebsc_buffer_size", {HOST_ONLY}},
-        {"zgebsr2gebsr", {PSYNC}},
+        {"zgebsr2gebsr", {PSYNC_ONLY}},
         {"zgebsr2gebsr_buffer_size", {HOST_ONLY}},
         {"zgebsrmm", {ASYNC_ONLY}},
         {"zgebsrmv", {ASYNC_ONLY}},
@@ -653,7 +654,7 @@ namespace rocsparse_clients_test
         {"coo_set_pointers", {HOST_ONLY}},
         {"coo_set_strided_batch", {HOST_ONLY}},
         {"copy_color_info", {HOST_ONLY}},
-        {"copy_hyb_mat", {SYNC}},
+        {"copy_hyb_mat", {SYNC_ONLY}},
         {"copy_mat_descr", {HOST_ONLY}},
         {"copy_mat_info", {HOST_OR_SYNC}},
         {"create_bell_descr", {HOST_ONLY}},
@@ -702,10 +703,10 @@ namespace rocsparse_clients_test
         {"destroy_mat_descr", {HOST_ONLY}},
         {"destroy_mat_info", {SYNC_ONLY}},
         {"destroy_sparse_to_sparse_descr", {HOST_OR_SYNC}},
-        {"destroy_spgeam_descr", {SYNC}},
+        {"destroy_spgeam_descr", {SYNC_ONLY}},
         {"destroy_spmat_descr", {SYNC_OR_PSYNC}},
         {"destroy_spmv_descr", {HOST_OR_SYNC}},
-        {"destroy_sptrsm_descr", {HOST}},
+        {"destroy_sptrsm_descr", {HOST_ONLY}},
         {"destroy_sptrsv_descr", {HOST_OR_SYNC}},
         {"destroy_spvec_descr", {HOST_ONLY}},
         {"dnmat_get", {HOST_ONLY}},
@@ -840,7 +841,18 @@ namespace rocsparse_clients_test
     memory_debug_synchronicity_info_t&
         memory_debug_t::get_memory_debug_synchronicity_info(const char* name)
     {
-        return memory_debug_t::s_map[name];
+        // The catalog is fully populated at static initialization; missing
+        // names should never occur in practice. Guard the lookup with a
+        // mutex anyway so concurrent threads cannot race a tree mutation
+        // (operator[] inserts on a missing key).
+        static std::mutex           s_map_mutex;
+        std::lock_guard<std::mutex> lock(s_map_mutex);
+        auto                        it = memory_debug_t::s_map.find(name);
+        if(it == memory_debug_t::s_map.end())
+        {
+            it = memory_debug_t::s_map.emplace(name, memory_debug_synchronicity_info_t{}).first;
+        }
+        return it->second;
     }
 
     bool memory_debug_t::get_non_permissive() const

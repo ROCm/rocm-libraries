@@ -37,41 +37,45 @@ namespace rocsparse_clients_test
 {
     std::string memory_debug_synchronicity_t2string(int32_t value)
     {
-        if(value & rocsparse_memory_debug_synchronicity_host)
+        // Build a list of set categories, then join either as
+        // "<single>_only" if exactly one bit is set, or
+        // "<a>_or_<b>[_or_<c>...]" otherwise.
+        const char*   names[] = {"host", "synchronous", "partially_synchronous", "asynchronous"};
+        const int32_t bits[]  = {rocsparse_memory_debug_synchronicity_host,
+                                rocsparse_memory_debug_synchronicity_sync,
+                                rocsparse_memory_debug_synchronicity_psync,
+                                rocsparse_memory_debug_synchronicity_async};
+
+        int         count = 0;
+        const char* first = nullptr;
+        std::string out;
+        for(int i = 0; i < 4; ++i)
         {
-            std::string name("host_only");
-            if(value & rocsparse_memory_debug_synchronicity_sync)
-                name += "_or_synchronous";
-            if(value & rocsparse_memory_debug_synchronicity_psync)
-                name += "_or_partially_synchronous";
-            if(value & rocsparse_memory_debug_synchronicity_async)
-                name += "_or_asynchronous";
-            return name;
+            if(value & bits[i])
+            {
+                if(count == 0)
+                {
+                    first = names[i];
+                    out   = names[i];
+                }
+                else
+                {
+                    out += "_or_";
+                    out += names[i];
+                }
+                ++count;
+            }
         }
-        else if(value & rocsparse_memory_debug_synchronicity_sync)
-        {
-            std::string name("synchronous_only");
-            if(value & rocsparse_memory_debug_synchronicity_psync)
-                name += "_or_partially_synchronous";
-            if(value & rocsparse_memory_debug_synchronicity_async)
-                name += "_or_asynchronous";
-            return name;
-        }
-        else if(value & rocsparse_memory_debug_synchronicity_psync)
-        {
-            std::string name("partially_synchronous_only");
-            if(value & rocsparse_memory_debug_synchronicity_async)
-                name += "_or_asynchronous";
-            return name;
-        }
-        else if(value & rocsparse_memory_debug_synchronicity_async)
-        {
-            return std::string("asynchronous_only");
-        }
-        else
+
+        if(count == 0)
         {
             return std::string("unknown");
         }
+        if(count == 1)
+        {
+            return std::string(first) + "_only";
+        }
+        return out;
     }
 
     int32_t memory_debug_synchronicity_info_t::get_synchronicity_value() const

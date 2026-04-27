@@ -87,12 +87,18 @@ extern "C" rocsparse_status rocsparse_memory_debug_info_get(rocsparse_handle    
                                                             void*                       data,
                                                             size_t data_size_in_bytes)
 {
+    ROCSPARSE_CHECKARG_POINTER(2, data);
+
     hipStream_t default_stream{};
     auto& info = rocsparse::memory_debug_t::get_info((handle) ? handle->stream : default_stream);
     switch(debug_info)
     {
     case rocsparse_memory_debug_info_synchronicity:
     {
+        if(data_size_in_bytes != sizeof(rocsparse_memory_debug_synchronicity))
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);
+        }
         auto p_data = reinterpret_cast<rocsparse_memory_debug_synchronicity*>(data);
         if(rocsparse::is_blocking(info))
         {
@@ -114,6 +120,10 @@ extern "C" rocsparse_status rocsparse_memory_debug_info_get(rocsparse_handle    
 
     case rocsparse_memory_debug_info_transfer_nbytes:
     {
+        if(data_size_in_bytes != sizeof(double))
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);
+        }
         *reinterpret_cast<double*>(data) = info.get_data_transfer_in_gib();
         return rocsparse_status_success;
     }

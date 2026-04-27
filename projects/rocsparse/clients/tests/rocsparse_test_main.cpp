@@ -312,18 +312,19 @@ int main(int argc, char** argv)
     //
     // Check function properties.
     //
-    auto memory_debug = rocsparse_clients_test::memory_debug_t::instance();
+    auto& memory_debug = rocsparse_clients_test::memory_debug_t::instance();
     if(memory_debug.enabled())
     {
-        std::ofstream out(memory_debug.get_filename());
         std::cout << "synchronicity check " << std::endl;
-        auto status_info_prop = memory_debug.check(nullptr, memory_debug.get_non_permissive(), out);
+        auto status_info_prop
+            = memory_debug.check(nullptr, memory_debug.get_non_permissive(), std::cerr);
         if(status_info_prop != rocsparse_status_success)
         {
             ADD_FAILURE() << argv[0] << ": memory_debug_t::check failed " << std::endl;
             return status_info_prop;
         }
         std::cout << "synchronicity report " << memory_debug.get_filename() << std::endl;
+        std::ofstream out(memory_debug.get_filename());
         memory_debug.report(nullptr, out);
     }
 

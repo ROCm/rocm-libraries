@@ -156,7 +156,7 @@ hipError_t rocsparse_hipMallocAsync_impl(void** p, size_t size_in_bytes, hipStre
         return info.call_malloc_async(p, size_in_bytes, stream);
     }
 #else
-    return rocsparse_hipMalloc(p_, size_);
+    return rocsparse_hipMalloc_impl(p, size_in_bytes);
 #endif
 }
 
