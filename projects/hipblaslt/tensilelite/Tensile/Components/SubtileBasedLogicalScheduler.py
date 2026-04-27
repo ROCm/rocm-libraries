@@ -1413,16 +1413,20 @@ class LogicalScheduler:
                     same, cross = self._split_deps(slot.mfma.deps, pi, slot.subIterK)
                     slot.mfma.deps = same
                     slot.mfma.preOps = []
-                    if cross:
+                    has_lr_dep = any(
+                        isinstance(d.ref, LRPlacement) for d in same + cross)
+                    if has_lr_dep:
                         slot.mfma.preOps.append(WaitLROp())
 
                 # ── LRs ──
                 for lr in slot.lrs:
+                    gr_deps = [d for d in lr.deps
+                               if isinstance(d.ref, GRPlacement)]
                     same, cross = self._split_deps(lr.deps, pi, lr.subIterK_slot)
                     lr.deps = same
                     lr.preOps = []
-                    if cross:
-                        dep = cross[0]
+                    if gr_deps:
+                        dep = gr_deps[0]
                         counts = self._compute_inflight_loads(
                             pi, lr.subIterK_slot, dep.ref.tensor, dep)
                         lr.preOps.append(WaitGROp(wait_gr_counts=counts,
@@ -1626,6 +1630,18 @@ class LogicalScheduler:
                         # First LR points to last GR
                         ordered_lrs[0].deps = [
                             Dep(ref=last_gr, mt_offset=0)]
+
+                # ── Phase 4: Consolidate MFMA deps ──
+                # After chaining, MFMA only needs the tail of its dep chain.
+                if slot.mfma and last_lr is not None:
+                    slot_lr_set = set(id(lr) for lr in ordered_lrs)
+                    lr_deps = [d for d in slot.mfma.deps
+                               if id(d.ref) in slot_lr_set]
+                    if len(lr_deps) > 1:
+                        other_deps = [d for d in slot.mfma.deps
+                                      if id(d.ref) not in slot_lr_set]
+                        slot.mfma.deps = other_deps + [
+                            Dep(ref=last_lr, mt_offset=lr_deps[0].mt_offset)]
 
         self._completed.add(Pass.GROUP_LR_GR)
 
