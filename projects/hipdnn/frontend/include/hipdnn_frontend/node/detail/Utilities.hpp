@@ -355,8 +355,10 @@ inline Error validateScaleNormalizedShape(const std::shared_ptr<graph::TensorAtt
     // Normalized shape = maximal trailing suffix of dims where scale[i] == input[i].
     // The variable holds the index where the suffix starts; everything from that
     // index on is normalized over, and everything before is leading (batch always leading).
-    const size_t matchCount
-        = hipdnn_data_sdk::utilities::countTrailingMatchingDims(scaleDims, inputDims);
+    // matchCount = number of trailing dims where scaleDims[i] == inputDims[i]
+    const auto [scaleMismatch, _]
+        = std::mismatch(scaleDims.rbegin(), scaleDims.rend(), inputDims.rbegin(), inputDims.rend());
+    const auto matchCount = static_cast<size_t>(std::distance(scaleDims.rbegin(), scaleMismatch));
     const size_t reductionStart
         = (matchCount >= scaleDims.size()) ? 1 : scaleDims.size() - matchCount;
 

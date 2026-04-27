@@ -326,22 +326,6 @@ inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<i
     return count == space + 1;
 }
 
-// Number of trailing dims where a[i] == b[i] (walking from the back). Used to
-// derive the normalized shape of an RMSNorm-like op (the trailing dims that
-// get normalized over).
-//
-// Example:
-//  a (input): [1, 2, 3, 3]
-//  b (scale): [1, 1, 3, 3]
-//  output: 2
-inline size_t countTrailingMatchingDims(const std::vector<int64_t>& a,
-                                        const std::vector<int64_t>& b)
-{
-    assert(a.size() == b.size() && "countTrailingMatchingDims: a and b must have equal rank");
-    const auto [mismatchA, _] = std::mismatch(a.rbegin(), a.rend(), b.rbegin(), b.rend());
-    return static_cast<size_t>(std::distance(a.rbegin(), mismatchA));
-}
-
 // Gets the derived (per channel) shape from a full Tensor shape.
 // Ex. {1, 3, 224, 224} will return {1, 3, 1, 1}
 inline std::vector<int64_t> getDerivedShape(const std::vector<int64_t>& shape)

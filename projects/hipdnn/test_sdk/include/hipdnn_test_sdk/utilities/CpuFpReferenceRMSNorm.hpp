@@ -67,8 +67,11 @@ public:
 
         // Normalized shape = maximal trailing suffix of dims where scale[i] == input[i].
         // Clamp so batch is always leading (never normalized).
-        const size_t matchCount
-            = hipdnn_data_sdk::utilities::countTrailingMatchingDims(scaleDims, xDims);
+        // matchCount = number of trailing dims where scaleDims[i] == xDims[i]
+        const auto [scaleMismatch, _]
+            = std::mismatch(scaleDims.rbegin(), scaleDims.rend(), xDims.rbegin(), xDims.rend());
+        const auto matchCount
+            = static_cast<size_t>(std::distance(scaleDims.rbegin(), scaleMismatch));
         const size_t reductionStart = (matchCount >= rank) ? 1 : rank - matchCount;
         if(reductionStart == rank)
         {
