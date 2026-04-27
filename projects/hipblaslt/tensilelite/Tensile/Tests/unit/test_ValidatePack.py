@@ -1499,11 +1499,16 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         self.setup_method()
 
     def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None) -> None:
+        # Capture test method name BEFORE the DEPTH_U guard. pytest's first
+        # setup_method call passes the method but DEPTH_U isn't set yet
+        # (the _config fixture sets it later). Subsequent calls (from the
+        # _config fixture and from test bodies) pass method=None, so
+        # capturing here is the only chance to record the test name.
+        if method is not None:
+            self._current_test_method = method.__name__ if hasattr(method, '__name__') else str(method)
         if not hasattr(self, 'DEPTH_U'):
             # Called before _config fixture — skip, _config will call us after setting params
             return
-        if method is not None:
-            self._current_test_method = method.__name__ if hasattr(method, '__name__') else str(method)
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates["UsePLRPack"] = True
         kernel_updates["UseF32XEmulation"] = True
@@ -1668,16 +1673,6 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=1 issued too early, must be issued after idx=2 (because of PackA0 issued @ idx=2).")
 
-    @pytest.mark.xfail(
-        reason="Real idMap from 128x128x64 NN VW=4 twin produces unexpected "
-               "LR↔swap dependency: T0 swaps appear to depend on X0 LRs, "
-               "forcing constraint to full-guarantee SYNC at idx=6 instead of "
-               "partial-guarantee SYNC at idx=1. Either the test's T0/X0 "
-               "register-to-LR assumption is wrong for the real kernel writer "
-               "layout, or derive_pack_must_start_after has a register-tracing "
-               "bug for VW>1. Tracked in CMSValidator_TODO.md.",
-        strict=True,
-    )
     def test_swap_depends_on_specific_lrs_vw4(self):
         """VW=4: T0 swaps (0,1,2) depend only on T0 LRs (LR0-LR3). Placing them
         after a partial guarantee (dscnt=4, guaranteeing LR0-LR3) should pass."""

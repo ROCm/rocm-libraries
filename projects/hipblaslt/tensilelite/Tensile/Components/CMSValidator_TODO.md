@@ -1,44 +1,5 @@
 # CMS Validator — Stage 09 Remaining Work
 
-## Failing tests still on the table
-
-### `test_swap_depends_on_specific_lrs_vw4` (3 parametrizations) — XFAIL
-
-These probe register-specific swap-pack ↔ LR dependencies under VW=4. The
-real twin's register layout uses two namespaces (`ValuA_T1_I0` and
-`ValuA_X1_I0`), and `derive_pack_must_start_after` finds an LR dependency
-for swap @ idx=2 that requires the full-guarantee SYNC at idx=6, while the
-test claims the swap should only depend on T-namespace LRs guaranteed by the
-partial-guarantee SYNC at idx=1.
-
-**Open question:** Either the test's T0/X0 register-to-LR mapping
-(`idx % 8 < 4`) is incorrect for the real kernel writer's layout, or
-`derive_pack_must_start_after` is over-approximating LR dependencies. The
-real LRA0 register destinations from the twin are:
-
-```
-LRA0[0]: ('ValuA_T1_I0', 0,  4)   ← T1
-LRA0[1]: ('ValuA_T1_I0', 4,  8)
-LRA0[2]: ('ValuA_T1_I0', 8, 12)
-LRA0[3]: ('ValuA_T1_I0', 12, 16)
-LRA0[4]: ('ValuA_X1_I0', 4,  8)   ← X1 (note: skips X1[0..4])
-LRA0[5]: ('ValuA_X1_I0', 12, 16)
-LRA0[6]: ('ValuA_X1_I0', 20, 24)
-LRA0[7]: ('ValuA_X1_I0', 28, 32)
-```
-
-Swap 0: `src=('ValuA_T1_I0', 1, 2), dst=('ValuA_T1_I0', 4, 5)` — should
-depend only on LRA0[0] (T1[0..4] RAW) and LRA0[1] (T1[4..8] WAR), both T1
-LRs. Validator nonetheless reports an X1 LR as the latest dep.
-
-**Investigation steps:**
-1. Manually trace `derive_pack_must_start_after`'s producers/consumers
-   dictionaries for this exact scenario.
-2. Verify `done_idx()` for LRA0[0..3] vs LRA0[4..7] under the test's
-   `dscnt=4` SYNC configuration — there may be a SYNC-counting bug.
-3. Check whether `subset_id_map`'s mock fallback is overwriting
-   `PackA1`/`LRA1` keys with mock entries that the validator then walks.
-
 ## Wholesale `make_mock_id_map` deletion
 
 Phase 1 leaves `make_mock_id_map` in place. The wholesale migration
