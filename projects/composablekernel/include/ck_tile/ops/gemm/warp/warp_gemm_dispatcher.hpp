@@ -33,6 +33,7 @@ template <typename AType,
           bool UseStructuredSparsity         = false,
           WGAttrNumAccessEnum AttrNumAccessA = ESingle,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
+          typename MXTypeEnable              = void,
           typename Enable                    = void>
 struct Dispatcher;
 
@@ -179,9 +180,9 @@ template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  16,  true> { using Ty
 #if !defined(__gfx125__)
 // scale mfma based f8f6f4
 template<typename A, typename B, WGAttrNumAccessEnum I>
-struct Dispatcher<A, B, float, 16, 16, 128, false, false, false, I, I, std::enable_if_t<I != EDefault>> { using Type = WarpGemmMfma_f32_16x16x128_f8f6f4<A, B, I>; };
+struct Dispatcher<A, B, float, 16, 16, 128, false, false, false, I, I, void, std::enable_if_t<I != EDefault>> { using Type = WarpGemmMfma_f32_16x16x128_f8f6f4<A, B, I>; };
 template<typename A, typename B, WGAttrNumAccessEnum I>
-struct Dispatcher<A, B, float, 16, 16, 128, true, false, false, I, I, std::enable_if_t<I != EDefault>> { using Type = WarpGemmMfma_f32_16x16x128_f8f6f4_CTransposed<A, B, I>; };
+struct Dispatcher<A, B, float, 16, 16, 128, true, false, false, I, I, void, std::enable_if_t<I != EDefault>> { using Type = WarpGemmMfma_f32_16x16x128_f8f6f4_CTransposed<A, B, I>; };
 #endif
 
 template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  64, false> { using Type = WarpGemmMfma_f32_32x32x64_fp8_fp8<>; };
@@ -237,6 +238,9 @@ template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<b
 
 // F8F6F4 Mixed precision cases
 template<typename A, typename B, bool TransposeC, WGAttrNumAccessEnum AttrNumAccessA, WGAttrNumAccessEnum AttrNumAccessB> struct Dispatcher<A, B, float, 16, 16, 128, TransposeC, false, false, AttrNumAccessA, AttrNumAccessB> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x128_f8f6f4<A, B, TransposeC, AttrNumAccessA, AttrNumAccessB>; };
+
+// F8F6F4 Scale16 (MXTypeEnable=scale16_tag)
+template<typename A, typename B, bool TransposeC, WGAttrNumAccessEnum AttrNumAccessA, WGAttrNumAccessEnum AttrNumAccessB> struct Dispatcher<A, B, float, 16, 16, 128, TransposeC, false, false, AttrNumAccessA, AttrNumAccessB, scale16_tag> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x128_f8f6f4_scale16<A, B, TransposeC, AttrNumAccessA, AttrNumAccessB>; };
 #else
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, false> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8<>; };
 template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8; };
@@ -265,12 +269,12 @@ template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<u
 
 template <typename AType, typename BType, typename AccType,
           index_t M, index_t N, index_t K,
-          bool TransposeC, bool SA, bool SS>
+          bool TransposeC, bool SA, bool SS, typename MXE>
 struct Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS,
-                  EDefault, EDefault,
+                  EDefault, EDefault, MXE,
                   std::enable_if_t<!std::is_base_of_v<WmmaTag,
-                      Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS, ESingle, ESingle, void>>>>
-    : Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS, ESingle, ESingle, void> {};
+                      Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS, ESingle, ESingle, MXE, void>>>>
+    : Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS, ESingle, ESingle, MXE, void> {};
 
 // clang-format on
 } // namespace warp_gemm_dispatcher
@@ -286,7 +290,8 @@ template <typename AType,
           bool SwizzleA                      = false,
           bool UseStructuredSparsity         = false,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
-          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
+          typename MXTypeEnable              = void>
 using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher< //
     AType,
     BType,
@@ -298,6 +303,7 @@ using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher< //
     SwizzleA,
     UseStructuredSparsity,
     AttrNumAccessA,
-    AttrNumAccessB>::Type;
+    AttrNumAccessB,
+    MXTypeEnable>::Type;
 
 } // namespace ck_tile

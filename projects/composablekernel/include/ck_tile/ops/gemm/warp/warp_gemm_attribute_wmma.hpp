@@ -154,6 +154,19 @@ struct CTransposedWarpDstrEncodingTrait
         typename Impl::kCTYs2RHsMinor>;
 };
 
+namespace detail {
+template <typename T, typename = void>
+struct mx_type_enable_or_void
+{
+    using type = void;
+};
+template <typename T>
+struct mx_type_enable_or_void<T, std::void_t<typename T::MXTypeEnableType>>
+{
+    using type = typename T::MXTypeEnableType;
+};
+} // namespace detail
+
 template <typename WarpGemmAttributeWmmaImpl_,
           bool kTransC                       = false,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
@@ -162,18 +175,21 @@ struct WarpGemmAttributeWmma
 {
     using Impl = remove_cvref_t<WarpGemmAttributeWmmaImpl_>;
 
-    // When kTransC is true and A/B types differ, we need an impl with swapped types
-    using TransposedImpl =
-        std::conditional_t<kTransC &&
-                               !std::is_same_v<typename Impl::ADataType, typename Impl::BDataType>,
-                           WarpGemmAttributeWmmaImpl<WmmaTraits<typename Impl::TraitsType::ArchType,
-                                                                typename Impl::BDataType,
-                                                                typename Impl::ADataType,
-                                                                typename Impl::CDataType,
-                                                                Impl::kM,
-                                                                Impl::kN,
-                                                                Impl::kK>>,
-                           Impl>;
+    // When kTransC is true and A/B types differ, we need an impl with swapped types.
+    // Propagate MXTypeEnable (e.g., scale16_tag) so the transposed impl uses the
+    // same WmmaTraits specialization family.
+    using TransposedImpl = std::conditional_t<
+        kTransC && !std::is_same_v<typename Impl::ADataType, typename Impl::BDataType>,
+        WarpGemmAttributeWmmaImpl<
+            WmmaTraits<typename Impl::TraitsType::ArchType,
+                       typename Impl::BDataType,
+                       typename Impl::ADataType,
+                       typename Impl::CDataType,
+                       Impl::kM,
+                       Impl::kN,
+                       Impl::kK,
+                       typename detail::mx_type_enable_or_void<typename Impl::TraitsType>::type>>,
+        Impl>;
 
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
@@ -272,39 +288,45 @@ struct WarpGemmAttributeWmma
 
     // scale16 overloads (int64_t scales)
     // c_vec += a_vec * b_vec
-    template <typename... Params>
+    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
     CK_TILE_DEVICE void operator()(CVecType& c_vec,
                                    const AVecType& a_vec,
                                    const int64_t& a_scale,
                                    const BVecType& b_vec,
-                                   const int64_t& b_scale) const
+                                   const int64_t& b_scale,
+                                   number<OpselA> opsel_a = {},
+                                   number<OpselB> opsel_b = {}) const
     {
         if constexpr(kTransC)
         {
             TransposedImpl{}.template operator()<Params..., SwapReuse_<true>>(
-                c_vec, b_vec, b_scale, a_vec, a_scale);
+                c_vec, b_vec, b_scale, a_vec, a_scale, opsel_b, opsel_a);
         }
         else
         {
-            Impl{}.template operator()<Params...>(c_vec, a_vec, a_scale, b_vec, b_scale);
+            Impl{}.template operator()<Params...>(
+                c_vec, a_vec, a_scale, b_vec, b_scale, opsel_a, opsel_b);
         }
     }
 
     // c_vec = a_vec * b_vec
-    template <typename... Params>
+    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec,
                                        const int64_t& a_scale,
                                        const BVecType& b_vec,
-                                       const int64_t& b_scale) const
+                                       const int64_t& b_scale,
+                                       number<OpselA> opsel_a = {},
+                                       number<OpselB> opsel_b = {}) const
     {
         if constexpr(kTransC)
         {
             return TransposedImpl{}.template operator()<Params..., SwapReuse_<true>>(
-                b_vec, b_scale, a_vec, a_scale);
+                b_vec, b_scale, a_vec, a_scale, opsel_b, opsel_a);
         }
         else
         {
-            return Impl{}.template operator()<Params...>(a_vec, a_scale, b_vec, b_scale);
+            return Impl{}.template operator()<Params...>(
+                a_vec, a_scale, b_vec, b_scale, opsel_a, opsel_b);
         }
     }
 };

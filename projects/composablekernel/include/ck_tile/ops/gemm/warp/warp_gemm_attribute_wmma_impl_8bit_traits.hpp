@@ -494,42 +494,6 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128>
         return CVecType{0};
 #endif
     }
-
-    template <typename... Params>
-    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
-                                                  const int64_t& a_scale,
-                                                  const BVecType& b_vec,
-                                                  const int64_t& b_scale,
-                                                  const CVecType& c_vec)
-    {
-#ifdef __gfx125__
-        using P       = WarpGemmParamsParser<Params...>;
-        using ATraits = MXDataTypeTrait<fp8_t>;
-        using BTraits = MXDataTypeTrait<fp8_t>;
-        return __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(
-            ATraits::OpDataType,                                              // A data format enum
-            ATraits::to_wmma_vec(bit_cast<typename ATraits::VecType>(a_vec)), // A matrix data
-            BTraits::OpDataType,                                              // B data format enum
-            BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)), // B matrix data
-            0,                         // matrix_a_reuse (CBSZ)
-            bit_cast<fp32x8_t>(c_vec), // C accumulator input
-            0,                         // OPSEL[0]    — A sub-block index (always 0 for 16x16)
-            P::scale_a,                // OPSEL_HI[0] — A scale format (0=e8m0, 1=e4m3, etc.)
-            a_scale,                   //               A scale register (int64_t: 8 e8m0 bytes)
-            0,                         // OPSEL[1]    — B sub-block index (always 0 for 16x16)
-            P::scale_b,                // OPSEL_HI[1] — B scale format
-            b_scale,                   //               B scale register (int64_t: 8 e8m0 bytes)
-            0,                         // NEG         — negate A/B data (0=none)
-            0);                        // NEG_HI      — negate A/B scales (0=none)
-#else
-        ck_tile::ignore = a_vec;
-        ck_tile::ignore = a_scale;
-        ck_tile::ignore = b_vec;
-        ck_tile::ignore = b_scale;
-        ck_tile::ignore = c_vec;
-        return CVecType{0};
-#endif
-    }
 };
 
 template <>
@@ -553,42 +517,6 @@ struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 128>
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
-        ck_tile::ignore = c_vec;
-        return CVecType{0};
-#endif
-    }
-
-    template <typename... Params>
-    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
-                                                  const int64_t& a_scale,
-                                                  const BVecType& b_vec,
-                                                  const int64_t& b_scale,
-                                                  const CVecType& c_vec)
-    {
-#ifdef __gfx125__
-        using P       = WarpGemmParamsParser<Params...>;
-        using ATraits = MXDataTypeTrait<bf8_t>;
-        using BTraits = MXDataTypeTrait<bf8_t>;
-        return __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(
-            ATraits::OpDataType,                                              // A data format enum
-            ATraits::to_wmma_vec(bit_cast<typename ATraits::VecType>(a_vec)), // A matrix data
-            BTraits::OpDataType,                                              // B data format enum
-            BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)), // B matrix data
-            0,                         // matrix_a_reuse (CBSZ)
-            bit_cast<fp32x8_t>(c_vec), // C accumulator input
-            0,                         // OPSEL[0]    — A sub-block index (always 0 for 16x16)
-            P::scale_a,                // OPSEL_HI[0] — A scale format (0=e8m0, 1=e4m3, etc.)
-            a_scale,                   //               A scale register (int64_t: 8 e8m0 bytes)
-            0,                         // OPSEL[1]    — B sub-block index (always 0 for 16x16)
-            P::scale_b,                // OPSEL_HI[1] — B scale format
-            b_scale,                   //               B scale register (int64_t: 8 e8m0 bytes)
-            0,                         // NEG         — negate A/B data (0=none)
-            0);                        // NEG_HI      — negate A/B scales (0=none)
-#else
-        ck_tile::ignore = a_vec;
-        ck_tile::ignore = a_scale;
-        ck_tile::ignore = b_vec;
-        ck_tile::ignore = b_scale;
         ck_tile::ignore = c_vec;
         return CVecType{0};
 #endif
@@ -620,42 +548,6 @@ struct WmmaTraits<gfx125_t, fp8_t, bf8_t, float, 16, 16, 128>
         return CVecType{0};
 #endif
     }
-
-    template <typename... Params>
-    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
-                                                  const int64_t& a_scale,
-                                                  const BVecType& b_vec,
-                                                  const int64_t& b_scale,
-                                                  const CVecType& c_vec)
-    {
-#ifdef __gfx125__
-        using P       = WarpGemmParamsParser<Params...>;
-        using ATraits = MXDataTypeTrait<fp8_t>;
-        using BTraits = MXDataTypeTrait<bf8_t>;
-        return __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(
-            ATraits::OpDataType,                                              // A data format enum
-            ATraits::to_wmma_vec(bit_cast<typename ATraits::VecType>(a_vec)), // A matrix data
-            BTraits::OpDataType,                                              // B data format enum
-            BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)), // B matrix data
-            0,                         // matrix_a_reuse (CBSZ)
-            bit_cast<fp32x8_t>(c_vec), // C accumulator input
-            0,                         // OPSEL[0]    — A sub-block index (always 0 for 16x16)
-            P::scale_a,                // OPSEL_HI[0] — A scale format (0=e8m0, 1=e4m3, etc.)
-            a_scale,                   //               A scale register (int64_t: 8 e8m0 bytes)
-            0,                         // OPSEL[1]    — B sub-block index (always 0 for 16x16)
-            P::scale_b,                // OPSEL_HI[1] — B scale format
-            b_scale,                   //               B scale register (int64_t: 8 e8m0 bytes)
-            0,                         // NEG         — negate A/B data (0=none)
-            0);                        // NEG_HI      — negate A/B scales (0=none)
-#else
-        ck_tile::ignore = a_vec;
-        ck_tile::ignore = a_scale;
-        ck_tile::ignore = b_vec;
-        ck_tile::ignore = b_scale;
-        ck_tile::ignore = c_vec;
-        return CVecType{0};
-#endif
-    }
 };
 
 template <>
@@ -683,33 +575,231 @@ struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128>
         return CVecType{0};
 #endif
     }
+};
+
+// scale16 specializations: fp8xfp8, bf8xbf8, fp8xbf8, bf8xfp8
+// Override kAK1PerLane/kBK1PerLane to 16 for scale16 register layout -> sequence<4,2,16>
+template <>
+struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128, scale16_tag>
+    : WmmaTraitsBase<gfx12_t, fp8_t, fp8_t, float, 128>
+{
+    using ArchType         = gfx125_t;
+    using MXTypeEnableType = scale16_tag;
+
+    static constexpr index_t kAK1PerLane = 16;
+    static constexpr index_t kAK0PerLane = kK / (kAK1PerLane * kABKLane);
+    static constexpr index_t kBK1PerLane = 16;
+    static constexpr index_t kBK0PerLane = kK / (kBK1PerLane * kABKLane);
 
     template <typename... Params>
+    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType&, const BVecType&, const CVecType&)
+    {
+        static_assert(sizeof...(Params) < 0, "scale16 WmmaTraits requires int64_t scale arguments");
+        return CVecType{0};
+    }
+
+    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
     CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
                                                   const int64_t& a_scale,
                                                   const BVecType& b_vec,
                                                   const int64_t& b_scale,
-                                                  const CVecType& c_vec)
+                                                  const CVecType& c_vec,
+                                                  number<OpselA> = {},
+                                                  number<OpselB> = {})
+    {
+#ifdef __gfx125__
+        using P       = WarpGemmParamsParser<Params...>;
+        using ATraits = MXDataTypeTrait<fp8_t>;
+        using BTraits = MXDataTypeTrait<fp8_t>;
+        return __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(
+            ATraits::OpDataType,
+            ATraits::to_wmma_vec(bit_cast<typename ATraits::VecType>(a_vec)),
+            BTraits::OpDataType,
+            BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)),
+            0,
+            bit_cast<fp32x8_t>(c_vec),
+            OpselA,
+            P::scale_a,
+            a_scale,
+            OpselB,
+            P::scale_b,
+            b_scale,
+            0,
+            0);
+#else
+        ck_tile::ignore = a_vec;
+        ck_tile::ignore = a_scale;
+        ck_tile::ignore = b_vec;
+        ck_tile::ignore = b_scale;
+        ck_tile::ignore = c_vec;
+        return CVecType{0};
+#endif
+    }
+};
+
+template <>
+struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 128, scale16_tag>
+    : WmmaTraitsBase<gfx12_t, bf8_t, bf8_t, float, 128>
+{
+    using ArchType         = gfx125_t;
+    using MXTypeEnableType = scale16_tag;
+
+    static constexpr index_t kAK1PerLane = 16;
+    static constexpr index_t kAK0PerLane = kK / (kAK1PerLane * kABKLane);
+    static constexpr index_t kBK1PerLane = 16;
+    static constexpr index_t kBK0PerLane = kK / (kBK1PerLane * kABKLane);
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType&, const BVecType&, const CVecType&)
+    {
+        static_assert(sizeof...(Params) < 0, "scale16 WmmaTraits requires int64_t scale arguments");
+        return CVecType{0};
+    }
+
+    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
+    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
+                                                  const int64_t& a_scale,
+                                                  const BVecType& b_vec,
+                                                  const int64_t& b_scale,
+                                                  const CVecType& c_vec,
+                                                  number<OpselA> = {},
+                                                  number<OpselB> = {})
+    {
+#ifdef __gfx125__
+        using P       = WarpGemmParamsParser<Params...>;
+        using ATraits = MXDataTypeTrait<bf8_t>;
+        using BTraits = MXDataTypeTrait<bf8_t>;
+        return __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(
+            ATraits::OpDataType,
+            ATraits::to_wmma_vec(bit_cast<typename ATraits::VecType>(a_vec)),
+            BTraits::OpDataType,
+            BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)),
+            0,
+            bit_cast<fp32x8_t>(c_vec),
+            OpselA,
+            P::scale_a,
+            a_scale,
+            OpselB,
+            P::scale_b,
+            b_scale,
+            0,
+            0);
+#else
+        ck_tile::ignore = a_vec;
+        ck_tile::ignore = a_scale;
+        ck_tile::ignore = b_vec;
+        ck_tile::ignore = b_scale;
+        ck_tile::ignore = c_vec;
+        return CVecType{0};
+#endif
+    }
+};
+
+template <>
+struct WmmaTraits<gfx125_t, fp8_t, bf8_t, float, 16, 16, 128, scale16_tag>
+    : WmmaTraitsBase<gfx12_t, fp8_t, bf8_t, float, 128>
+{
+    using ArchType         = gfx125_t;
+    using MXTypeEnableType = scale16_tag;
+
+    static constexpr index_t kAK1PerLane = 16;
+    static constexpr index_t kAK0PerLane = kK / (kAK1PerLane * kABKLane);
+    static constexpr index_t kBK1PerLane = 16;
+    static constexpr index_t kBK0PerLane = kK / (kBK1PerLane * kABKLane);
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType&, const BVecType&, const CVecType&)
+    {
+        static_assert(sizeof...(Params) < 0, "scale16 WmmaTraits requires int64_t scale arguments");
+        return CVecType{0};
+    }
+
+    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
+    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
+                                                  const int64_t& a_scale,
+                                                  const BVecType& b_vec,
+                                                  const int64_t& b_scale,
+                                                  const CVecType& c_vec,
+                                                  number<OpselA> = {},
+                                                  number<OpselB> = {})
+    {
+#ifdef __gfx125__
+        using P       = WarpGemmParamsParser<Params...>;
+        using ATraits = MXDataTypeTrait<fp8_t>;
+        using BTraits = MXDataTypeTrait<bf8_t>;
+        return __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(
+            ATraits::OpDataType,
+            ATraits::to_wmma_vec(bit_cast<typename ATraits::VecType>(a_vec)),
+            BTraits::OpDataType,
+            BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)),
+            0,
+            bit_cast<fp32x8_t>(c_vec),
+            OpselA,
+            P::scale_a,
+            a_scale,
+            OpselB,
+            P::scale_b,
+            b_scale,
+            0,
+            0);
+#else
+        ck_tile::ignore = a_vec;
+        ck_tile::ignore = a_scale;
+        ck_tile::ignore = b_vec;
+        ck_tile::ignore = b_scale;
+        ck_tile::ignore = c_vec;
+        return CVecType{0};
+#endif
+    }
+};
+
+template <>
+struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128, scale16_tag>
+    : WmmaTraitsBase<gfx12_t, bf8_t, fp8_t, float, 128>
+{
+    using ArchType         = gfx125_t;
+    using MXTypeEnableType = scale16_tag;
+
+    static constexpr index_t kAK1PerLane = 16;
+    static constexpr index_t kAK0PerLane = kK / (kAK1PerLane * kABKLane);
+    static constexpr index_t kBK1PerLane = 16;
+    static constexpr index_t kBK0PerLane = kK / (kBK1PerLane * kABKLane);
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType&, const BVecType&, const CVecType&)
+    {
+        static_assert(sizeof...(Params) < 0, "scale16 WmmaTraits requires int64_t scale arguments");
+        return CVecType{0};
+    }
+
+    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
+    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
+                                                  const int64_t& a_scale,
+                                                  const BVecType& b_vec,
+                                                  const int64_t& b_scale,
+                                                  const CVecType& c_vec,
+                                                  number<OpselA> = {},
+                                                  number<OpselB> = {})
     {
 #ifdef __gfx125__
         using P       = WarpGemmParamsParser<Params...>;
         using ATraits = MXDataTypeTrait<bf8_t>;
         using BTraits = MXDataTypeTrait<fp8_t>;
         return __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(
-            ATraits::OpDataType,                                              // A data format enum
-            ATraits::to_wmma_vec(bit_cast<typename ATraits::VecType>(a_vec)), // A matrix data
-            BTraits::OpDataType,                                              // B data format enum
-            BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)), // B matrix data
-            0,                         // matrix_a_reuse (CBSZ)
-            bit_cast<fp32x8_t>(c_vec), // C accumulator input
-            0,                         // OPSEL[0]    — A sub-block index (always 0 for 16x16)
-            P::scale_a,                // OPSEL_HI[0] — A scale format (0=e8m0, 1=e4m3, etc.)
-            a_scale,                   //               A scale register (int64_t: 8 e8m0 bytes)
-            0,                         // OPSEL[1]    — B sub-block index (always 0 for 16x16)
-            P::scale_b,                // OPSEL_HI[1] — B scale format
-            b_scale,                   //               B scale register (int64_t: 8 e8m0 bytes)
-            0,                         // NEG         — negate A/B data (0=none)
-            0);                        // NEG_HI      — negate A/B scales (0=none)
+            ATraits::OpDataType,
+            ATraits::to_wmma_vec(bit_cast<typename ATraits::VecType>(a_vec)),
+            BTraits::OpDataType,
+            BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)),
+            0,
+            bit_cast<fp32x8_t>(c_vec),
+            OpselA,
+            P::scale_a,
+            a_scale,
+            OpselB,
+            P::scale_b,
+            b_scale,
+            0,
+            0);
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = a_scale;

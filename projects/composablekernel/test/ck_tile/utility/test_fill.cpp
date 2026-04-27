@@ -193,7 +193,7 @@ static std::pair<int, int> expected_raw_range(float min_f, float max_f)
     constexpr int mant_bits  = ck_tile::numeric_traits<ScaleType>::mant;
     const int ieee_min       = static_cast<int>(ck_tile::numeric_utils<float>::get_exponent(min_f));
     const int ieee_max       = static_cast<int>(ck_tile::numeric_utils<float>::get_exponent(max_f));
-    // raw=0 excluded: decodes to 0.0 for e4m3/e5m3 and to 2^-127 for e8m0 — same
+    // raw=0 excluded: decodes to 0.0 for e4m3/e5m3 and to 2^-127 for e8m0 -- same
     // assumption as the implementation in FillUniformScaleDistribution.
     constexpr int raw_min = 1;
     constexpr int raw_max = static_cast<int>(ck_tile::numeric<ScaleType>::binary_max);
@@ -248,7 +248,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, RawValuesInExpectedRange)
     }
 }
 
-// 3. Reproducibility: identical seed → identical output.
+// 3. Reproducibility: identical seed -> identical output.
 TYPED_TEST(FillUniformScaleDistributionTest, SameSeedSameOutput)
 {
     using S = TypeParam;
@@ -268,7 +268,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, DifferentSeedsDifferentOutput)
     EXPECT_NE(0, std::memcmp(a.data(), b.data(), a.size() * sizeof(S)));
 }
 
-// 5. Single-value range: [v, v] → all generated raw bytes fall in that exponent band.
+// 5. Single-value range: [v, v] -> all generated raw bytes fall in that exponent band.
 TYPED_TEST(FillUniformScaleDistributionTest, SingleValueRange)
 {
     using S               = TypeParam;
@@ -307,7 +307,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, NonPowerOfTwoBoundsSnap)
 }
 
 // 7. Coverage: for a small range, every possible raw value appears at least once
-//    after enough samples (probabilistic — extremely unlikely to fail with 100k draws).
+//    after enough samples (probabilistic -- extremely unlikely to fail with 100k draws).
 TYPED_TEST(FillUniformScaleDistributionTest, AllRawValuesGenerated)
 {
     using S                 = TypeParam;
@@ -426,7 +426,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, NonPowerOfTwoMinSnapsBelow)
 }
 
 // 14. Extreme bounds that exceed the type's representable range clamp safely
-//     and still produce only finite, positive values — no NaN, no crash.
+//     and still produce only finite, positive values -- no NaN, no crash.
 TYPED_TEST(FillUniformScaleDistributionTest, ExtremeOutOfRangeBoundsClampSafely)
 {
     using S = TypeParam;
