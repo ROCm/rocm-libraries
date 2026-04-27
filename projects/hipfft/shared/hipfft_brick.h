@@ -63,7 +63,9 @@ struct hipfft_brick
 
         // Based on the field's strides, return offset
         return std::inner_product(
-            field_idx.begin(), field_idx.end(), field_stride.begin(),
+            field_idx.begin(),
+            field_idx.end(),
+            field_stride.begin(),
             static_cast<std::remove_reference_t<decltype(field_idx)>::value_type>(0));
     }
 
@@ -72,7 +74,9 @@ struct hipfft_brick
     {
         // Based on the brick's strides, return offset
         return std::inner_product(
-            brick_idx.begin(), brick_idx.end(), brick_stride.begin(),
+            brick_idx.begin(),
+            brick_idx.end(),
+            brick_stride.begin(),
             static_cast<std::remove_reference_t<decltype(brick_idx)>::value_type>(0));
     }
 };

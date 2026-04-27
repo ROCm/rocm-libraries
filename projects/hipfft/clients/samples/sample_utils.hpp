@@ -395,7 +395,8 @@ inline void sneakyr2c(std::vector<Tfloat>& rinput, const size_t Nx, const size_t
 
 // Make the output of a r2c linear.
 template <typename Tfloat>
-inline void sneakyr2c(std::vector<Tfloat>& rinput, const size_t Nx, const size_t Ny, const size_t Nz)
+inline void
+    sneakyr2c(std::vector<Tfloat>& rinput, const size_t Nx, const size_t Ny, const size_t Nz)
 {
     const size_t Nzp = Nz / 2 + 1;
 
