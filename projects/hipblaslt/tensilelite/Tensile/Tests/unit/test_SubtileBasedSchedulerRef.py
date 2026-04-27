@@ -338,6 +338,64 @@ def test_320x320_bf16_partition_1x5():
     )
 
 
+def make_256x256_bf16_pgr0():
+    kernel = create_kernel(256, 256, fp4=False, depthU=64)
+    tiA = TileInfo('A', kernel)
+    tiB = TileInfo('B', kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        numPartitionsM=1,
+        numPartitionsN=1,
+        pgr=0,
+        plr=0,
+    )
+
+
+EXPECTED_EMIT_DEP_ORDER_256x256_BF16_PGR0 = """\
+MAINLOOP (dependency paths):
+  Partition 0:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [0-7] <- [7]
+      preMFMA path 0:
+        [ 3] gr         GR A (MT n, subIterK [0,1]) ids [0-7]
+        [ 5] gr_inc     gr_inc(A)
+        [ 4] gr         GR B (MT n, subIterK [0,1]) ids [0-7]
+        [ 6] gr_inc     gr_inc(B)
+        [ 8] wait_gr    wait_gr(0)
+        [ 9] sync       sync
+        [ 1] lr         LR A  (MT n, subIterK [0]) [0-7]
+        [ 2] lr         LR B  (MT n, subIterK [0]) [0-7]
+        [ 7] wait_lr    wait_lr
+    subIterK=1:
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-7] , B : [0-7] <- [5]
+      preMFMA path 0:
+        [ 1] lr         LR A  (MT n, subIterK [1]) [0-7]
+        [ 3] lr_inc     lr_inc(A)
+        [ 2] lr         LR B  (MT n, subIterK [1]) [0-7]
+        [ 4] lr_inc     lr_inc(B)
+        [ 5] wait_lr    wait_lr
+"""
+
+
+def test_256x256_bf16_pgr0():
+    """Exact check of emit dependency order for 256x256 BF16, PGR0."""
+    cfg = make_256x256_bf16_pgr0()
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    actual = sched.print_emit_dep_order()
+    assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_BF16_PGR0, (
+        f"Emit dependency order mismatch.\n"
+        f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_BF16_PGR0}\n"
+        f"--- Actual ---\n{actual}"
+    )
+
+
 def make_256x256_fp4():
     kernel = create_kernel(256, 256, fp4=True, depthU=256)
     tiA = TileInfo('A', kernel)
@@ -411,5 +469,77 @@ def test_256x256_fp4_partition_1x1():
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP4_1x1, (
         f"Emit dependency order mismatch.\n"
         f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_FP4_1x1}\n"
+        f"--- Actual ---\n{actual}"
+    )
+
+
+def make_256x256_fp4_pgr0():
+    kernel = create_kernel(256, 256, fp4=True, depthU=256)
+    tiA = TileInfo('A', kernel)
+    tiB = TileInfo('B', kernel)
+    scaleTiA = TileInfo('MXSA', kernel)
+    scaleTiB = TileInfo('MXSB', kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        lrSA=ReadGranularity(mn=2, k=2),
+        lrSB=ReadGranularity(mn=2, k=2),
+        grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
+        grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
+        numPartitionsM=1,
+        numPartitionsN=1,
+        pgr=0,
+        plr=0,
+    )
+
+
+EXPECTED_EMIT_DEP_ORDER_256x256_FP4_PGR0 = """\
+MAINLOOP (dependency paths):
+  Partition 0:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [0-7] <- [15]
+      preMFMA path 0:
+        [ 5] gr         GR A (MT n, subIterK [0,1]) ids [0-7]
+        [11] gr_inc     gr_inc(A)
+        [ 6] gr         GR B (MT n, subIterK [0,1]) ids [0-7]
+        [12] gr_inc     gr_inc(B)
+        [ 7] gr         GR SA (MT n, subIterK [0,1]) ids [0-7]
+        [13] gr_inc     gr_inc(SA)
+        [ 8] gr         GR SB (MT n, subIterK [0,1]) ids [0-7]
+        [14] gr_inc     gr_inc(SB)
+        [16] wait_gr    wait_gr(0)
+        [17] sync       sync
+        [ 1] lr         LR A  (MT n, subIterK [0]) [0-7]
+        [ 2] lr         LR B  (MT n, subIterK [0]) [0-7]
+        [ 3] lr         LR SA (MT n, subIterK [0,1]) [0-7]
+        [ 9] lr_inc     lr_inc(SA)
+        [ 4] lr         LR SB (MT n, subIterK [0,1]) [0-7]
+        [10] lr_inc     lr_inc(SB)
+        [15] wait_lr    wait_lr
+    subIterK=1:
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-7] , B : [0-7] <- [5]
+      preMFMA path 0:
+        [ 1] lr         LR A  (MT n, subIterK [1]) [0-7]
+        [ 3] lr_inc     lr_inc(A)
+        [ 2] lr         LR B  (MT n, subIterK [1]) [0-7]
+        [ 4] lr_inc     lr_inc(B)
+        [ 5] wait_lr    wait_lr
+"""
+
+
+def test_256x256_fp4_pgr0():
+    """Exact check of emit dependency order for 256x256 FP4, PGR0."""
+    cfg = make_256x256_fp4_pgr0()
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    actual = sched.print_emit_dep_order()
+    assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP4_PGR0, (
+        f"Emit dependency order mismatch.\n"
+        f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_FP4_PGR0}\n"
         f"--- Actual ---\n{actual}"
     )
