@@ -6961,6 +6961,9 @@ class KernelWriterAssembly(KernelWriter):
             if "MX" in tPB:
               evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPB["MX"]))
             evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPB))
+            #swap local write memory token
+            self.states.ldsWriteTokenIdx = \
+              self.states.memTokenLdsBuffer1 if self.states.ldsWriteTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
 
         # generate even, odd exit code
         # not oddLabel case, order is even -> odd
@@ -10079,10 +10082,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if tc == "A" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      if "TensorLoadToLds" in self.states.setMemTokenInsts:
-        comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
-      else:
-        assert False, "TensorLoadToLds A memToken not set"
+      comp.setMemToken([self.states.ldsTensorTokenIdx])
       if self.states.inTailLoop and not kernel["1LDSBuffer"]:
         ldsAddrSgprName = comp.getLdsAddrSgprName("tdmAGroup0")
         clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -10093,10 +10093,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if tc == "MXSA" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      if "TensorLoadToLds" in self.states.setMemTokenInsts:
-        comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
-      else:
-        assert False, "TensorLoadToLds MXSA memToken not set"
+      comp.setMemToken([self.states.ldsTensorTokenIdx])
       if kernel["ProblemType"]["MXBlockA"]:
         if self.states.inTailLoop and not kernel["1LDSBuffer"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSAGroup0")
@@ -10110,10 +10107,7 @@ class KernelWriterAssembly(KernelWriter):
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if prod(kernel["MIWaveGroup"]) == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-        if "TensorLoadToLds" in self.states.setMemTokenInsts:
-          comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
-        else:
-          assert False, "TensorLoadToLds B memToken not set"
+        comp.setMemToken([self.states.ldsTensorTokenIdx])
         if self.states.inTailLoop and not kernel["1LDSBuffer"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmBGroup0")
           clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -10126,10 +10120,7 @@ class KernelWriterAssembly(KernelWriter):
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if prod(kernel["MIWaveGroup"]) == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-        if "TensorLoadToLds" in self.states.setMemTokenInsts:
-          comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
-        else:
-          assert False, "TensorLoadToLds MXSB memToken not set"
+        comp.setMemToken([self.states.ldsTensorTokenIdx])
         if self.states.inTailLoop and not kernel["1LDSBuffer"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSBGroup0")
           clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -11561,9 +11552,7 @@ class KernelWriterAssembly(KernelWriter):
                 printExit("Unsupported combination DataType%s (%s) -> DataType (%s)"%(tc, kernel["ProblemType"]["DataType%s"%tc].toChar(), kernel["ProblemType"]["DataType"].toChar()))
 
             LocalWriteX = tP["localWriteInstruction"].getInst(isHigh16Bits)
-            localWriteMemToken = self.states.setMemTokenInsts.get(
-              "TensorLoadToLds", [self.states.memTokenLdsBuffer0]
-            ) # reuse TensorLoadToLds token for local write
+            localWriteMemToken = [self.states.ldsWriteTokenIdx]
             if len(localWriteMemToken) == 1:
               memTokenComment = "sync LDS%u"%(localWriteMemToken[0])
             else:
