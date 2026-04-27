@@ -38,34 +38,34 @@ namespace rocsparse_clients_test
     {
         if(value & rocsparse_memory_debug_synchronicity_host)
         {
-            std::string name("host");
+            std::string name("host_only");
             if(value & rocsparse_memory_debug_synchronicity_sync)
                 name += "_or_synchronous";
-            if(value & rocsparse_memory_debug_synchronicity_async)
-                name += "_or_asynchronous";
             if(value & rocsparse_memory_debug_synchronicity_psync)
                 name += "_or_partially_synchronous";
+            if(value & rocsparse_memory_debug_synchronicity_async)
+                name += "_or_asynchronous";
             return name;
         }
         else if(value & rocsparse_memory_debug_synchronicity_sync)
         {
-            std::string name("synchronous");
-            if(value & rocsparse_memory_debug_synchronicity_async)
-                name += "_or_asynchronous";
+            std::string name("synchronous_only");
             if(value & rocsparse_memory_debug_synchronicity_psync)
                 name += "_or_partially_synchronous";
+            if(value & rocsparse_memory_debug_synchronicity_async)
+                name += "_or_asynchronous";
             return name;
         }
         else if(value & rocsparse_memory_debug_synchronicity_psync)
         {
-            std::string name("partially_synchronous");
+            std::string name("partially_synchronous_only");
             if(value & rocsparse_memory_debug_synchronicity_async)
                 name += "_or_asynchronous";
             return name;
         }
         else if(value & rocsparse_memory_debug_synchronicity_async)
         {
-            return std::string("asynchronous");
+            return std::string("asynchronous_only");
         }
         else
         {

@@ -82,7 +82,7 @@ int main(int argc, char** argv)
         rocsparse_clients_envariables::set(rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS,
                                            true);
     }
-
+#if 0
     //
     // Enable sync tests.
     //
@@ -105,6 +105,7 @@ int main(int argc, char** argv)
                 "rocsparse_test_sync.json");
         }
     }
+#endif
 
     // Get version
     rocsparse_handle handle;
@@ -189,6 +190,14 @@ int main(int argc, char** argv)
             rocsparse_clients_test::memory_debug_t::instance().enable();
             rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(
                 "rocsparse_test_sync.json");
+            rocsparse_clients_test::memory_debug_t::instance().set_non_permissive(false);
+        }
+        else if(strcmp(argv[i], "--test-sync-validate") == 0)
+        {
+            rocsparse_clients_test::memory_debug_t::instance().enable();
+            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(
+                "rocsparse_test_sync.json");
+            rocsparse_clients_test::memory_debug_t::instance().set_non_permissive(true);
         }
     }
 
@@ -324,20 +333,22 @@ int main(int argc, char** argv)
     // Run all tests
     int ret = RUN_ALL_TESTS();
 
-    if(rocsparse_clients_test::memory_debug_t::instance().enabled())
+    //
+    // Check function properties.
+    //
+    auto memory_debug = rocsparse_clients_test::memory_debug_t::instance();
+    if(memory_debug.enabled())
     {
-        //
-        // Check function properties.
-        //
-        auto status_info_prop = rocsparse_clients_test::memory_debug_t::instance().check(nullptr);
+        std::ofstream out(memory_debug.get_filename());
+        std::cout << "synchronicity check " << std::endl;
+        auto status_info_prop = memory_debug.check(nullptr, memory_debug.get_non_permissive(), out);
         if(status_info_prop != rocsparse_status_success)
         {
             ADD_FAILURE() << argv[0] << ": memory_debug_t::check failed " << std::endl;
             return status_info_prop;
         }
-        std::cout << "report " << rocsparse_clients_test::memory_debug_t::instance().get_filename()
-                  << std::endl;
-        rocsparse_clients_test::memory_debug_t::instance().report(nullptr);
+        std::cout << "synchronicity report " << memory_debug.get_filename() << std::endl;
+        memory_debug.report(nullptr, out);
     }
 
     auto& reproducibility = rocsparse_reproducibility_t::instance();

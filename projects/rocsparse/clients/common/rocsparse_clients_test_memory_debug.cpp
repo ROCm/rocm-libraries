@@ -843,9 +843,17 @@ namespace rocsparse_clients_test
         return s_map[name];
     }
 
-    void memory_debug_t::report(rocsparse_handle handle) const
+    bool memory_debug_t::get_non_permissive() const
     {
-        std::ofstream out(this->get_filename());
+        return this->m_non_permissive;
+    }
+    void memory_debug_t::set_non_permissive(bool value)
+    {
+        this->m_non_permissive = value;
+    };
+
+    void memory_debug_t::report(rocsparse_handle handle, std::ostream& out) const
+    {
         out << "[" << std::endl;
         int64_t count = 0;
         for(const auto& p : s_map)
@@ -869,15 +877,17 @@ namespace rocsparse_clients_test
 
             out << "{\"name\": \"rocsparse_" << name << "\"," << std::endl;
 
-            out << " \"synchronicity\": \"" << memory_debug_synchronicity_t2string(sync_value)
-                << "\"," << std::endl;
+            out << " \"synchronicity\": { \"name\" : \""
+                << memory_debug_synchronicity_t2string(sync_value) << "\"," << std::endl;
+            out << "                     \"value\" : \"" << sync_value << "\"," << std::endl;
 
-            out << " \"calls\": { \"host\": " << ncalls_host << "," << std::endl;
-
-            out << "              \"sync\": " << ncalls_synchronous << "," << std::endl;
-
-            out << "              \"psync\": " << ncalls_partially_synchronous << "," << std::endl;
-            out << "              \"async\": " << ncalls_asynchronous << "}}";
+            out << "                     \"calls\": { \"host\": " << ncalls_host << ","
+                << std::endl;
+            out << "                                \"sync\": " << ncalls_synchronous << ","
+                << std::endl;
+            out << "                                \"psync\": " << ncalls_partially_synchronous
+                << "," << std::endl;
+            out << "                                \"async\": " << ncalls_asynchronous << "}}}";
             ++count;
         }
 
@@ -889,9 +899,9 @@ namespace rocsparse_clients_test
         return this->m_filename;
     }
 
-    rocsparse_status memory_debug_t::check(rocsparse_handle handle) const
+    rocsparse_status
+        memory_debug_t::check(rocsparse_handle handle, bool non_permissive, std::ostream& out) const
     {
-        bool all    = false;
         bool failed = false;
         for(const auto& p : s_map)
         {
@@ -909,7 +919,7 @@ namespace rocsparse_clients_test
             const uint64_t ncalls_psync = info.get_calls(PSYNC);
             const uint64_t ncalls_host  = info.get_calls(HOST);
 
-            if(all)
+            if(non_permissive)
             {
                 bool inconsistent = (sync_value == 0);
                 inconsistent |= ((((sync_value & rocsparse_memory_debug_synchronicity_host) != 0)
@@ -933,15 +943,16 @@ namespace rocsparse_clients_test
                          && (ncalls_async == 0))
                         || (((sync_value & rocsparse_memory_debug_synchronicity_async) == 0)
                             && (ncalls_async > 0)));
+
                 if(inconsistent)
                 {
-                    std::cerr << "Error: rocsparse_" << name << " is declared '"
-                              << memory_debug_synchronicity_t2string(sync_value)
-                              << "' but production code returns:" << std::endl;
-                    std::cerr << "   ncalls_synchronous           : " << ncalls_sync << std::endl;
-                    std::cerr << "   ncalls_asynchronous          : " << ncalls_async << std::endl;
-                    std::cerr << "   ncalls_partially_synchronous : " << ncalls_psync << std::endl;
-                    std::cerr << "   ncalls_host                  : " << ncalls_host << std::endl;
+                    out << "Error: rocsparse_" << name << " is declared '"
+                        << memory_debug_synchronicity_t2string(sync_value)
+                        << "' but production code returns:" << std::endl;
+                    out << "   ncalls_synchronous           : " << ncalls_sync << std::endl;
+                    out << "   ncalls_asynchronous          : " << ncalls_async << std::endl;
+                    out << "   ncalls_partially_synchronous : " << ncalls_psync << std::endl;
+                    out << "   ncalls_host                  : " << ncalls_host << std::endl;
                 }
 
                 failed |= inconsistent;
@@ -971,13 +982,13 @@ namespace rocsparse_clients_test
 
                 if(inconsistent)
                 {
-                    std::cerr << "Error: rocsparse_" << name << " is declared '"
-                              << memory_debug_synchronicity_t2string(sync_value)
-                              << "' but production code returns:" << std::endl;
-                    std::cerr << "   ncalls_synchronous           : " << ncalls_sync << std::endl;
-                    std::cerr << "   ncalls_asynchronous          : " << ncalls_async << std::endl;
-                    std::cerr << "   ncalls_partially_synchronous : " << ncalls_psync << std::endl;
-                    std::cerr << "   ncalls_host                  : " << ncalls_host << std::endl;
+                    out << "Error: rocsparse_" << name << " is declared '"
+                        << memory_debug_synchronicity_t2string(sync_value)
+                        << "' but production code returns:" << std::endl;
+                    out << "   ncalls_synchronous           : " << ncalls_sync << std::endl;
+                    out << "   ncalls_asynchronous          : " << ncalls_async << std::endl;
+                    out << "   ncalls_partially_synchronous : " << ncalls_psync << std::endl;
+                    out << "   ncalls_host                  : " << ncalls_host << std::endl;
                 }
 
                 failed |= inconsistent;

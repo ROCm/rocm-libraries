@@ -33,13 +33,16 @@ namespace rocsparse_clients_test
         bool        m_enabled{};
         std::string m_filename{};
         memory_debug_t() = default;
+        bool m_non_permissive{};
 
     public:
         const std::string&                 get_filename() const;
         memory_debug_synchronicity_info_t& get_memory_debug_synchronicity_info(const char* name);
+        bool                               get_non_permissive() const;
+        void                               set_non_permissive(bool);
+        rocsparse_status check(rocsparse_handle, bool non_permissive, std::ostream&) const;
 
-        rocsparse_status       check(rocsparse_handle) const;
-        void                   report(rocsparse_handle) const;
+        void                   report(rocsparse_handle, std::ostream&) const;
         static memory_debug_t& instance();
         bool                   enabled() const;
         void                   enable();
