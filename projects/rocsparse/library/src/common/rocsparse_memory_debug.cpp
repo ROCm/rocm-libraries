@@ -130,3 +130,4 @@ extern "C" rocsparse_status rocsparse_memory_debug_info_get(rocsparse_handle    
     }
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
+
