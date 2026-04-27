@@ -74,7 +74,7 @@ if(GPU_TARGETS MATCHES "gfx950")
         test_direct_conv_grouped_4c_fp16_tile_conv
         test_direct_conv_grouped_16c_fp16_tile_conv
         test_direct_conv_mfma
-        #test_direct_conv_lds_bank_conflicts
+        test_direct_conv_lds_bank_conflicts
     )
 
     foreach(test_target ${CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS})
