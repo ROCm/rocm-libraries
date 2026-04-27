@@ -105,7 +105,7 @@ rocsparse_status rocsparse::primitives::segmented_radix_sort_pairs(rocsparse_han
             size_t           segments,                                                      \
             uint32_t         startbit,                                                      \
             uint32_t         endbit,                                                        \
-            size_t*          buffer_size);                                                           \
+            size_t * buffer_size);                                                          \
     template rocsparse_status rocsparse::primitives::segmented_radix_sort_pairs(            \
         rocsparse_handle      handle,                                                       \
         double_buffer<KTYPE>& keys,                                                         \
