@@ -232,6 +232,7 @@ set( MIOpen_Source
     solver/conv/conv_mlir_igemm_wrw.cpp
     solver/conv/conv_mlir_igemm_wrw_xdlops.cpp
     solver/conv/conv_multipass_wino3x3WrW.cpp
+    solver/conv/conv_hip_dir2D_bwdWrW_1x1.cpp
     solver/conv/conv_ocl_dir2D_bwdWrW_2.cpp
     solver/conv/conv_ocl_dir2D_bwdWrW_53.cpp
     solver/conv/conv_ocl_dir2D11x11.cpp
