@@ -30,35 +30,35 @@ auto GetCasesSmoke()
 
 } // namespace
 
-using GPU_Conv3d_FP32 = conv3d_test_base<float>;
-using GPU_Conv3d_FP16 = conv3d_test_base<half_float::half>;
+using GPU_Conv3d_Base_FP32 = conv3d_test_base<float>;
+using GPU_Conv3d_Base_FP16 = conv3d_test_base<half_float::half>;
 
-TEST_P(GPU_Conv3d_FP32, TestFloat)
+TEST_P(GPU_Conv3d_Base_FP32, TestFloat)
 {
     GetTestParams();
     run();
 }
 
-TEST_P(GPU_Conv3d_FP16, TestFloat16)
+TEST_P(GPU_Conv3d_Base_FP16, TestFloat16)
 {
     GetTestParams();
     run();
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv3d_FP32,
+                         GPU_Conv3d_Base_FP32,
                          GetCasesSmoke<float>(),
                          DefaultTestNameGenerator<TestCase>{});
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv3d_FP32,
+                         GPU_Conv3d_Base_FP32,
                          GetCasesFull<float>(),
                          DefaultTestNameGenerator<TestCase>{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Conv3d_FP16,
+                         GPU_Conv3d_Base_FP16,
                          GetCasesSmoke<half_float::half>(),
                          DefaultTestNameGenerator<TestCase>{});
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv3d_FP16,
+                         GPU_Conv3d_Base_FP16,
                          GetCasesFull<half_float::half>(),
                          DefaultTestNameGenerator<TestCase>{});
