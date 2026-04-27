@@ -62,9 +62,8 @@ struct InputLoader
     InputDramWindowType input_dram_window;
     LdsWindowType       lds_window_0;
     LdsWindowType       lds_window_1;
-    MfmaWindowType      mfma_window_0;
-    MfmaWindowType      mfma_window_1;
     uint4*              input_lds_ptr;
+    ck_tile::index_t    mfma_lds_offsets[cfg.kw];  // precomputed element offsets per kw slice
 
     template <typename BlockCoords_>
     __device__ InputLoader(const BlockCoords_& bc,
@@ -108,30 +107,32 @@ struct InputLoader
                                 ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
             {0, 0, 0, 0});
 
-        // Create MFMA windows for the two LDS buffers, to be used for register reads.
-        auto mfma_buf_0 = MfmaBuf{
-            reinterpret_cast<_Float16*>(input_lds_ptr),
-            static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16)};
-        auto mfma_view_0 = MfmaViewType{mfma_buf_0, mfma_desc};
-        mfma_window_0 = ck_tile::make_tile_window(
-            mfma_view_0,
-            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
-                                ck_tile::number<TC::BLOCK_C4>{},
-                                ck_tile::number<4>{}),
-            {0, 0, 0},
-            mfma_dist);
+        // Precompute per-thread MFMA LDS read offsets for each kw slice.
+        // Create a temporary tile_window, extract the element offset from the
+        // precomputed coordinate for each slice, then discard the window.
+        // Both LDS buffers use the same offsets (different base address).
+        {
+            auto mfma_buf_tmp = MfmaBuf{
+                reinterpret_cast<_Float16*>(input_lds_ptr),
+                static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16)};
+            auto mfma_view_tmp = MfmaViewType{mfma_buf_tmp, mfma_desc};
+            auto mfma_window_tmp = ck_tile::make_tile_window(
+                mfma_view_tmp,
+                ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
+                                    ck_tile::number<TC::BLOCK_C4>{},
+                                    ck_tile::number<4>{}),
+                {0, 0, 0},
+                mfma_dist);
 
-        auto mfma_buf_1 = MfmaBuf{
-            reinterpret_cast<_Float16*>(input_lds_ptr) + TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16,
-            static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16)};
-        auto mfma_view_1 = MfmaViewType{mfma_buf_1, mfma_desc};
-        mfma_window_1 = ck_tile::make_tile_window(
-            mfma_view_1,
-            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
-                                ck_tile::number<TC::BLOCK_C4>{},
-                                ck_tile::number<4>{}),
-            {0, 0, 0},
-            mfma_dist);
+            for(int s = 0; s < cfg.kw; s++)
+            {
+                mfma_lds_offsets[s] =
+                    mfma_window_tmp.pre_computed_coords_[ck_tile::number<0>{}]
+                                                       [ck_tile::number<1>{}].get_offset();
+                if(s < cfg.kw - 1)
+                    ck_tile::move_tile_window(mfma_window_tmp, {1, 0, 0});
+            }
+        } // mfma_window_tmp goes out of scope — no persistent VGPR cost
     }
 
     __device__ void fetch_tile_to_lds(int lds_buffer_index)
@@ -152,22 +153,14 @@ struct InputLoader
     }
 
     // Read a given kw slice for this thread from LDS into registers.
-    // Must be called for slice = 0, 1, ..., kw-1 in order.
-    // Assumes the relevant tile is already loaded and synced in LDS.
-    __device__ void read_from_lds(ck_tile::fp16x4_t& input_reg, int slice, int lds_buffer_index)
+    // Uses precomputed element offsets — no tile_window state needed.
+    __device__ void read_from_lds(ck_tile::fp16x4_t& input_reg, int slice, int lds_buffer_index) const
     {
-        auto& window = (lds_buffer_index == 0) ? mfma_window_0 : mfma_window_1;
-        auto tile = ck_tile::load_tile(window);
-        __builtin_memcpy(&input_reg, &tile.get_thread_buffer()(ck_tile::number<0>{}), sizeof(ck_tile::fp16x4_t));
-        if(slice < cfg.kw - 1)
-        {
-            ck_tile::move_tile_window(window, {1, 0, 0});
-        }
-        else
-        {
-            // Reset to origin so the next row starts at slice 0.
-            ck_tile::move_tile_window(window, {-(cfg.kw - 1), 0, 0});
-        }
+        const _Float16* base = reinterpret_cast<const _Float16*>(input_lds_ptr)
+                               + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16;
+        auto buf = MfmaBuf{const_cast<_Float16*>(base),
+                           static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16)};
+        input_reg = buf.template get<ck_tile::fp16x4_t>(mfma_lds_offsets[slice], 0, true);
     }
 };
 
