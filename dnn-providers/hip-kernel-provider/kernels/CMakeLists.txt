@@ -79,7 +79,6 @@ set(KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormBwdSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormBwdPerAct.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchnormFunctions.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchnormSpatialActivationFunctions.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/DefaultConfiguration.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/Configuration.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/ReductionFunctions.hpp

@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include <optional>
@@ -529,7 +529,6 @@ bool BatchnormPlanBuilder::isApplicable(
                 std::get<0>(nodeAttrs.value()),
                 std::get<1>(nodeAttrs.value()),
                 std::get<2>(nodeAttrs.value()));
-            validator.checkBwdActivationModeSupported(std::get<1>(nodeAttrs.value()));
         }
         catch(const std::exception& e)
         {
@@ -541,15 +540,6 @@ bool BatchnormPlanBuilder::isApplicable(
                                "activation + batchnorm backward fusion");
         return true;
     }
-    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm backward plan for node: " << nodeName);
-        buildPlanBwdSingleNode(handle,
-                               opGraph,
-                               nodeWrapper,
-                               _kernelCompiler,
-                               _devicePropertyProvider,
-                               executionContext);
-        break;
     default:
     {
         HIPDNN_PLUGIN_LOG_INFO(
@@ -785,6 +775,15 @@ void BatchnormPlanBuilder::buildPlan(
                                                  _kernelCompiler,
                                                  _devicePropertyProvider,
                                                  executionContext);
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+        HIPDNN_PLUGIN_LOG_INFO("Building batchnorm backward plan for node: " << nodeName);
+        buildPlanBwdSingleNode(handle,
+                               opGraph,
+                               nodeWrapper,
+                               _kernelCompiler,
+                               _devicePropertyProvider,
+                               executionContext);
         break;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(

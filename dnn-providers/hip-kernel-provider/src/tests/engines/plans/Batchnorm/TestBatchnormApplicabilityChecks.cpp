@@ -68,6 +68,19 @@ TEST(TestBatchnormValidator, ValidVarianceExtInferenceActiv)
         validator.checkInferenceVarianceExtActivationTensorConfigSupported(attr, activAttrs));
 }
 
+TEST(TestBatchnormValidator, ValidFwdTraining)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkFwdTrainingTensorConfigSupported(attr));
+}
+
 TEST(TestBatchnormValidator, ValidBwd)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();

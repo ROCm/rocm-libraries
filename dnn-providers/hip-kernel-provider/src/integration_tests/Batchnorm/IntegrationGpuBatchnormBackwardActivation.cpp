@@ -5,6 +5,7 @@
 #include <hip/hip_runtime.h>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../Common/ActivationCommon.hpp"
@@ -16,6 +17,7 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hip_kernel_provider::test_utilities;
 using namespace hip_kernel_provider::batchnorm::test::common;
+using namespace hipdnn_test_sdk::utilities::batchnorm;
 
 namespace
 {
@@ -30,9 +32,9 @@ struct BatchnormActivationTensorIds
     static constexpr int64_t DY_UID = 6;
 };
 
-template <typename DataType>
+template <typename InputType>
 class BatchnormBackwardActivation
-    : public IntegrationGraphVerificationHarness<DataType, BatchnormTestCase>
+    : public IntegrationGraphVerificationHarness<InputType, BatchnormTestCase>
 {
 protected:
     void runGraphTest(const TensorLayout& layout)
@@ -43,9 +45,9 @@ protected:
 
         graph::Graph graphObj;
         graphObj.set_name("BatchnormBackwardActivationTest");
-        graphObj.set_intermediate_data_type(DataType::FLOAT)
-            .set_compute_data_type(DataType::FLOAT)
-            .set_io_data_type(getDataTypeEnumFromType<DataType>());
+        graphObj.set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(getDataTypeEnumFromType<InputType>());
 
         auto xAttr
             = graph::makeTensorAttributes("x", dims, generateStrides(dims, layout.strideOrder));
@@ -53,22 +55,24 @@ protected:
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto scaleAttr = graph::makeTensorAttributes(
-            "scale", DataType::FLOAT, channelDims, generateStrides(channelDims));
+            "scale", hipdnn_frontend::DataType::FLOAT, channelDims, generateStrides(channelDims));
         scaleAttr.set_uid(BatchnormActivationTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto biasAttr = graph::makeTensorAttributes(
-            "bias", DataType::FLOAT, channelDims, generateStrides(channelDims));
+            "bias", hipdnn_frontend::DataType::FLOAT, channelDims, generateStrides(channelDims));
         biasAttr.set_uid(BatchnormActivationTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         auto meanAttr = graph::makeTensorAttributes(
-            "mean", DataType::FLOAT, channelDims, generateStrides(channelDims));
+            "mean", hipdnn_frontend::DataType::FLOAT, channelDims, generateStrides(channelDims));
         meanAttr.set_uid(BatchnormActivationTensorIds::MEAN_UID);
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-        auto invVarAttr = graph::makeTensorAttributes(
-            "inv_variance", DataType::FLOAT, channelDims, generateStrides(channelDims));
+        auto invVarAttr = graph::makeTensorAttributes("inv_variance",
+                                                      hipdnn_frontend::DataType::FLOAT,
+                                                      channelDims,
+                                                      generateStrides(channelDims));
         invVarAttr.set_uid(BatchnormActivationTensorIds::INV_VARIANCE_UID);
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
@@ -98,15 +102,16 @@ protected:
         auto& dxOut = bnBwdOuts[0];
         dxOut->set_output(true);
         auto& dscaleOut = bnBwdOuts[1];
-        dscaleOut->set_data_type(DataType::FLOAT);
+        dscaleOut->set_data_type(hipdnn_frontend::DataType::FLOAT);
         dscaleOut->set_output(true);
         auto& dbiasOut = bnBwdOuts[2];
-        dbiasOut->set_data_type(DataType::FLOAT);
+        dbiasOut->set_data_type(hipdnn_frontend::DataType::FLOAT);
         dbiasOut->set_output(true);
 
-        this->registerValidator(dxOut, this->getTolerance(graphObj, dxOut));
-        this->registerValidator(dscaleOut, this->getTolerance(graphObj, dscaleOut));
-        this->registerValidator(dbiasOut, this->getTolerance(graphObj, dbiasOut));
+        auto tolerance = getToleranceTraining<InputType>();
+        this->registerValidator(dxOut, tolerance);
+        this->registerValidator(dscaleOut, tolerance);
+        this->registerValidator(dbiasOut, tolerance);
         this->verifyGraph(graphObj, testCase.seed);
     }
 

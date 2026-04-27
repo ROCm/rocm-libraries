@@ -10,10 +10,10 @@
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/v25_9_23/hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
@@ -105,6 +105,18 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
+    void compileSpatial(const IKernelCompiler& kernelCompiler,
+                        const hipDeviceProp_t& deviceProperties,
+                        const struct ProblemDims& dims);
+
+    void executeSpatial(const HipKernelHandle& handle,
+                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
+
+    void executePerActivation(const HipKernelHandle& handle,
+                              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                              uint32_t numDeviceBuffers) const;
+
     BatchnormBwdParams _params;
 
     std::unique_ptr<ICompiledProgram> _compiledProgram;

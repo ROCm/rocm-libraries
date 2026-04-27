@@ -6,10 +6,10 @@
 #include "engines/plans/ApplicabilityChecks.hpp"
 #include <array>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/v25_9_23/hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 
 namespace hip_kernel_provider
 {
