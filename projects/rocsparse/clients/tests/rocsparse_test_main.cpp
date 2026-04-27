@@ -82,30 +82,6 @@ int main(int argc, char** argv)
         rocsparse_clients_envariables::set(rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS,
                                            true);
     }
-#if 0
-    //
-    // Enable sync tests.
-    //
-    for(int i = 1; i < argc; ++i)
-    {
-        if(!strcmp(argv[i], "--test-sync-o"))
-        {
-            if(i + 1 >= argc || !argv[i + 1][0])
-            {
-                std::cerr << "The " << argv[i] << " option requires an argument" << std::endl;
-                exit(EXIT_FAILURE);
-            }
-            rocsparse_clients_test::memory_debug_t::instance().enable();
-            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(argv[++i]);
-        }
-        else if(!strcmp(argv[i], "--test-sync"))
-        {
-            rocsparse_clients_test::memory_debug_t::instance().enable();
-            rocsparse_clients_test::memory_debug_t::instance().set_sync_report_filename(
-                "rocsparse_test_sync.json");
-        }
-    }
-#endif
 
     // Get version
     rocsparse_handle handle;

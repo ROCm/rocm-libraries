@@ -54,7 +54,7 @@ namespace rocsparse_clients_test
 #define SYNC_OR_PSYNC_OR_ASYNC SYNC | PSYNC | ASYNC
 #define PSYNC_OR_ASYNC PSYNC | ASYNC
 
-    static std::map<std::string, memory_debug_synchronicity_info_t> s_map{
+    std::map<std::string, memory_debug_synchronicity_info_t> memory_debug_t::s_map{
         {"axpby", {HOST_OR_ASYNC}},
         {"bsrgeam_nnzb", {SYNC_OR_ASYNC}},
         {"bsrgemm_nnzb", {HOST_OR_SYNC_OR_PSYNC_OR_ASYNC}},
@@ -840,7 +840,7 @@ namespace rocsparse_clients_test
     memory_debug_synchronicity_info_t&
         memory_debug_t::get_memory_debug_synchronicity_info(const char* name)
     {
-        return s_map[name];
+        return memory_debug_t::s_map[name];
     }
 
     bool memory_debug_t::get_non_permissive() const
@@ -856,7 +856,7 @@ namespace rocsparse_clients_test
     {
         out << "[" << std::endl;
         int64_t count = 0;
-        for(const auto& p : s_map)
+        for(const auto& p : memory_debug_t::s_map)
         {
             const auto& info = p.second;
             if(info.get_ncalls() == 0)
@@ -903,7 +903,7 @@ namespace rocsparse_clients_test
         memory_debug_t::check(rocsparse_handle handle, bool non_permissive, std::ostream& out) const
     {
         bool failed = false;
-        for(const auto& p : s_map)
+        for(const auto& p : memory_debug_t::s_map)
         {
             const auto& info = p.second;
             if(info.get_ncalls() == 0)

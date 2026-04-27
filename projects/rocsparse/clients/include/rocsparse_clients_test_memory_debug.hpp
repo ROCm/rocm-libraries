@@ -36,7 +36,8 @@ namespace rocsparse_clients_test
         bool m_non_permissive{};
 
     public:
-        const std::string&                 get_filename() const;
+        static std::map<std::string, memory_debug_synchronicity_info_t> s_map;
+        const std::string&                                              get_filename() const;
         memory_debug_synchronicity_info_t& get_memory_debug_synchronicity_info(const char* name);
         bool                               get_non_permissive() const;
         void                               set_non_permissive(bool);
