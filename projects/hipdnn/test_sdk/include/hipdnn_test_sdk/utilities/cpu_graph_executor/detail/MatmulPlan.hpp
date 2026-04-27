@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
@@ -17,18 +17,18 @@ namespace hipdnn_test_sdk::detail
 struct MatmulParams
 {
     MatmulParams() = default;
-    MatmulParams(const hipdnn_data_sdk::data_objects::TensorAttributes& aAttributes,
-                 const hipdnn_data_sdk::data_objects::TensorAttributes& bAttributes,
-                 const hipdnn_data_sdk::data_objects::TensorAttributes& cAttributes)
+    MatmulParams(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& aAttributes,
+                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& bAttributes,
+                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& cAttributes)
         : aTensor(unpackTensorAttributes(aAttributes))
         , bTensor(unpackTensorAttributes(bAttributes))
         , cTensor(unpackTensorAttributes(cAttributes))
     {
     }
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT aTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT bTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT cTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT aTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT bTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT cTensor;
 };
 
 template <typename ADataType, typename BDataType, typename CDataType, typename ComputeDataType>
@@ -62,10 +62,10 @@ private:
     MatmulParams _params;
 };
 
-template <hipdnn_data_sdk::data_objects::DataType ADataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType BDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType CDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
+template <hipdnn_flatbuffers_sdk::data_objects::DataType ADataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType BDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType CDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
 class MatmulPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -75,8 +75,9 @@ public:
     using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         if(node.compute_data_type() != ComputeDataTypeEnum)
@@ -102,8 +103,8 @@ public:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-                      const hipdnn_data_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_MatmulAttributes();
         if(nodeAttributes == nullptr)
@@ -112,12 +113,11 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        MatmulParams params(*tensorMap.at(nodeAttributes->a_tensor_uid()),
-                            *tensorMap.at(nodeAttributes->b_tensor_uid()),
-                            *tensorMap.at(nodeAttributes->c_tensor_uid()));
 
         return std::make_unique<MatmulPlan<ADataType, BDataType, CDataType, ComputeDataType>>(
-            std::move(params));
+            MatmulParams(*tensorMap.at(nodeAttributes->a_tensor_uid()),
+                         *tensorMap.at(nodeAttributes->b_tensor_uid()),
+                         *tensorMap.at(nodeAttributes->c_tensor_uid())));
     }
 };
 

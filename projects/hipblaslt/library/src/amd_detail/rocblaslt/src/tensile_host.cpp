@@ -133,7 +133,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          hipStream_t            stream,
                                                          void*                  Synchronizer,
                                                          bool                   swizzleA,
-                                                         bool                   swizzleB)
+                                                         bool                   swizzleB,
+                                                         hipblasLtBatchMode_t   batchMode)
     : trans_a(trans_a)
     , trans_b(trans_b)
     , m(m)
@@ -197,6 +198,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , Synchronizer(Synchronizer)
     , swizzleA(swizzleA)
     , swizzleB(swizzleB)
+    , batchMode(batchMode)
 {
     if(this->bias_type == HIPBLASLT_DATATYPE_INVALID)
     {
@@ -1629,6 +1631,7 @@ namespace
 
         // set batch mode
         tensileProblem.setStridedBatched(prob.strided_batch);
+        tensileProblem.setBatchMode(static_cast<TensileLite::ContractionProblemGemm::BATCHMODE>(static_cast<int>(prob.batchMode)));        
         tensileProblem.setGroupedGemm(prob.grouped_gemm);
         if(prob.grouped_gemm)
             tensileProblem.setUseDeviceUserArguments(true);
@@ -1869,6 +1872,7 @@ namespace
         // set batch mode
         tensileProblem.setStridedBatched(prob.strided_batch);
         tensileProblem.setGroupedGemm(prob.grouped_gemm);
+        tensileProblem.setBatchMode(static_cast<TensileLite::ContractionProblemGemm::BATCHMODE>(static_cast<int>(prob.batchMode)));
         if(prob.grouped_gemm)
             tensileProblem.setUseDeviceUserArguments(true);
         else
@@ -4013,23 +4017,44 @@ rocblaslt_status getAllSolutions(std::shared_ptr<void>                          
     return status;
 }
 
+using GemmMasterLibraryPtr
+    = std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>;
+
+static rocblaslt_status validateGemmLibraryAndHardware(const GemmMasterLibraryPtr&            library,
+                                                       const std::shared_ptr<TensileLite::Hardware>& hardware,
+                                                       const char* caller,
+                                                       const char* nullHardwareMessage)
+{
+    if(!library)
+        return rocblaslt_status_invalid_pointer;
+    if(!hardware)
+    {
+        log_error(caller, nullHardwareMessage);
+        return rocblaslt_status_invalid_pointer;
+    }
+    return rocblaslt_status_success;
+}
+
 rocblaslt_status
     getSolutionsFromIndex(rocblaslt_handle                                handle,
                           std::vector<int>&                               solutionIndex,
                           std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                           size_t                                          maxWorkSpaceBytes)
 {
-    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
-                                           library;
+    GemmMasterLibraryPtr                   library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
     auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
-    if(!library)
-    {
-        return rocblaslt_status_invalid_pointer;
-    }
+    if(rocblaslt_status const st = validateGemmLibraryAndHardware(
+           library,
+           hardware,
+           __func__,
+           "Tensile Hardware is null; cannot resolve solution indices (library not "
+           "initialized for this device?)");
+       st != rocblaslt_status_success)
+        return st;
 
     bool isOutOfBound = false;
     int  i            = 0;
@@ -4053,8 +4078,8 @@ rocblaslt_status
         rocblaslt_matmul_heuristic_result result;
         memset(&result, 0, sizeof(rocblaslt_matmul_heuristic_result));
         memset(result.algo.data, 0, sizeof(result.algo.data));
-        int* solutionIndex              = (int*)(result.algo.data);
-        *solutionIndex                  = solution->index;
+        int* const pAlgoIndex = reinterpret_cast<int*>(result.algo.data);
+        *pAlgoIndex           = solution->index;
         result.algo.max_workspace_bytes = maxWorkSpaceBytes;
         result.algo.fallback            = false;
         result.state                    = rocblaslt_status_success;
@@ -4075,25 +4100,37 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                                      const Tuning*          tuning,
                                      size_t*                workspaceSizeInBytes)
 {
-    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
-                                           library;
+    GemmMasterLibraryPtr                   library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
     auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
-    if(!library)
-    {
-        return rocblaslt_status_invalid_pointer;
-    }
+    if(rocblaslt_status const st = validateGemmLibraryAndHardware(
+           library,
+           hardware,
+           __func__,
+           "Tensile Hardware is null; cannot evaluate solution support (library not "
+           "initialized for this device?)");
+       st != rocblaslt_status_success)
+        return st;
 
     *workspaceSizeInBytes = 0;
 
-    int* solutionIndex = (int*)algo->data;
+    int* const solutionIndex = reinterpret_cast<int*>(algo->data);
     // don't overwrite data->algoIndex = *solutionIndex; here
     if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
     {
         auto solution = library->getSolutionByIndex(tensile_prob, *hardware, *solutionIndex);
+        if(!solution)
+        {
+            std::ostringstream msg;
+            msg << "getSolutionByIndex returned null for index " << *solutionIndex
+                << " (solution missing from library map; check Tensile packaging or version "
+                   "skew)";
+            log_error(__func__, msg.str());
+            return rocblaslt_status_invalid_value;
+        }
 
         if(tuning)
         {
@@ -4179,6 +4216,15 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
     {
         auto solution
             = library->getSolutionByIndex(tensile_prob.gemms[0], *hardware, *solutionIndex);
+        if(!solution)
+        {
+            std::ostringstream msg;
+            msg << "getSolutionByIndex returned null for grouped gemm, index " << *solutionIndex
+                << " (solution missing from library map; check Tensile packaging or version "
+                   "skew)";
+            log_error(__func__, msg.str());
+            return rocblaslt_status_invalid_value;
+        }
 
         if(tuning)
         {

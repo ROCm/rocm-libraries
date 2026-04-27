@@ -6,8 +6,11 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+dnn_provider_setup_version(fusilli_provider ${CMAKE_CURRENT_LIST_DIR})
+
 project(fusilli-plugin
-  VERSION 0.1.0
+  VERSION ${FUSILLI_PROVIDER_VERSION}
   DESCRIPTION "Fusilli-Plugin: A Fusilli/IREE powered hipDNN plugin for graph JIT compilation."
   LANGUAGES C CXX)
 
@@ -52,6 +55,7 @@ FetchContent_MakeAvailable(IREERuntime)
 # Other dependencies
 find_package(hip CONFIG REQUIRED)
 find_package(hipdnn_data_sdk CONFIG REQUIRED)
+find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 find_package(hipdnn_frontend CONFIG REQUIRED)
 find_package(hipdnn_test_sdk CONFIG REQUIRED)
@@ -107,7 +111,8 @@ add_library(${FUSILLI_PLUGIN_TARGET} SHARED
   src/fusilli_plugin.cpp
 )
 target_compile_options(${FUSILLI_PLUGIN_TARGET} PRIVATE ${FUSILLI_PLUGIN_WARNING_COMPILE_OPTIONS})
-target_link_libraries(${FUSILLI_PLUGIN_TARGET} PRIVATE hipdnn_plugin_sdk hipdnn_data_sdk hip::host fusilli::fusilli)
+target_link_libraries(${FUSILLI_PLUGIN_TARGET} PRIVATE hipdnn_plugin_sdk hipdnn_flatbuffers_sdk hipdnn_data_sdk hip::host fusilli::fusilli)
+dnn_provider_generate_version_header(fusilli_provider ${FUSILLI_PLUGIN_TARGET} ${CMAKE_CURRENT_LIST_DIR})
 set_target_properties(${FUSILLI_PLUGIN_TARGET} PROPERTIES
   C_VISIBILITY_PRESET hidden
   CXX_VISIBILITY_PRESET hidden

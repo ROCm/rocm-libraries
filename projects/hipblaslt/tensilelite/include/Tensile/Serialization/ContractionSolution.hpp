@@ -108,6 +108,7 @@ namespace TensileLite
                 iot::mapRequired(io, "sourceKernel", s.sourceKernel);
 
                 iot::mapRequired(io, "globalAccumulation", s.globalAccumulation);
+                iot::mapOptional(io, "adaptiveGemmGSUA", s.adaptiveGemmGSUA);
                 iot::mapRequired(io, "workspaceSizePerElemC", s.workspaceSizePerElemC);
                 iot::mapRequired(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
 

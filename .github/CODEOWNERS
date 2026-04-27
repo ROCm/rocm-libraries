@@ -39,6 +39,7 @@
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
+/shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
 
 # Next CMake-specific ownership
 /projects/hipblas-common/**/*.cmake                 @ROCm/rocm-math-lib-build-infra

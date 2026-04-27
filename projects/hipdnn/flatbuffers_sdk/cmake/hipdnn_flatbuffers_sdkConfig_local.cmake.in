@@ -7,12 +7,12 @@ include(CMakeFindDependencyMacro)
 
 find_dependency(hipdnn_data_sdk @HIPDNN_FLATBUFFERS_SDK_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
 
-# Export HIPDNN_FRONTEND_SKIP_JSON_LIB setting for consumers
-set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@ CACHE BOOL
-    "Defines whether FE should not include nlohmann/json.hpp.")
+# Reflects how hipDNN was built; not consumer-overridable, since the imported
+# target's compile definitions are already baked in.
+set(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB @HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB@)
 
-# nlohmann_json is optional based on HIPDNN_FRONTEND_SKIP_JSON_LIB
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+# nlohmann_json is optional based on HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
     find_dependency(nlohmann_json REQUIRED)
 endif()
 

@@ -7,11 +7,11 @@
 #include <flatbuffers/flatbuffer_builder.h>
 #include <fusilli.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
@@ -35,6 +35,7 @@
 #include "graph_import.h"
 #include "hipdnn_engine_plugin_execution_context.h"
 #include "utils.h"
+#include "version.h"
 
 bool loggingCallbackCalled = false;
 std::vector<std::string> capturedLogMessages;
@@ -283,7 +284,7 @@ TEST(TestFusilliPluginApi, GetVersionSuccess) {
   const char *version = nullptr;
   EXPECT_EQ(hipdnnPluginGetVersion(&version), HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_NE(version, nullptr);
-  // TODO(#2317): check returned version against single source of truth.
+  EXPECT_STREQ(version, FUSILLI_PROVIDER_VERSION_STRING);
 }
 
 TEST(TestFusilliPluginApi, GetVersionNullptr) {
@@ -477,11 +478,12 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvPointwise) {
   // Test conv + unary pointwise activation for various modes.
   // (conv -> binary -> pointwise covered in
   // GetApplicableEngineIdsConvBiasActiv)
-  for (auto mode : {hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
-                    hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
-                    hipdnn_data_sdk::data_objects::PointwiseMode::TANH_FWD,
-                    hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD,
-                    hipdnn_data_sdk::data_objects::PointwiseMode::ELU_FWD}) {
+  for (auto mode :
+       {hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_FWD,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_FWD,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD}) {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdActivGraph(
         /*xDims=*/{4, 4, 4, 4}, /*xStrides=*/{64, 16, 4, 1},
         /*wDims=*/{4, 4, 1, 1}, /*wStrides=*/{4, 1, 1, 1},
@@ -519,9 +521,9 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsConvBiasActiv) {
 
   // Graph structure: conv -> bias (ADD) -> activation
   for (auto activMode :
-       {hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
-        hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
-        hipdnn_data_sdk::data_objects::PointwiseMode::TANH_FWD}) {
+       {hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_FWD}) {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdBiasActivGraph(
         /*xDims=*/{4, 4, 4, 4}, /*xStrides=*/{64, 16, 4, 1},
         /*wDims=*/{4, 4, 1, 1}, /*wStrides=*/{4, 1, 1, 1},
@@ -588,31 +590,36 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsInt4NonBatchedMatmul) {
   // Non-batched (2D) mixed-precision int4 x fp16 matmul is not supported —
   // mixed element types require rank-3 tensors (torch.bmm). The plugin should
   // report 0 engines.
-  using DT = hipdnn_data_sdk::data_objects::DataType;
+  using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
   flatbuffers::FlatBufferBuilder builder;
   std::vector<int64_t> aDims = {4, 8}, aStrides = {8, 1};
   std::vector<int64_t> bDims = {8, 4}, bStrides = {4, 1};
   std::vector<int64_t> cDims = {4, 4}, cStrides = {4, 1};
 
-  std::vector<
-      ::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+  std::vector<::flatbuffers::Offset<
+      hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
       tensors;
-  tensors.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-      builder, 1, "A", DT::INT4, &aStrides, &aDims));
-  tensors.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-      builder, 2, "B", DT::HALF, &bStrides, &bDims));
-  tensors.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-      builder, 3, "C", DT::HALF, &cStrides, &cDims));
+  tensors.push_back(
+      hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+          builder, 1, "A", DT::INT4, &aStrides, &aDims));
+  tensors.push_back(
+      hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+          builder, 2, "B", DT::HALF, &bStrides, &bDims));
+  tensors.push_back(
+      hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+          builder, 3, "C", DT::HALF, &cStrides, &cDims));
 
   auto matmulAttr =
-      hipdnn_data_sdk::data_objects::CreateMatmulAttributes(builder, 1, 2, 3);
-  std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
-  nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+      hipdnn_flatbuffers_sdk::data_objects::CreateMatmulAttributes(builder, 1,
+                                                                   2, 3);
+  std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>>
+      nodes;
+  nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
       builder, "matmul", DT::FLOAT,
-      hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes,
+      hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MatmulAttributes,
       matmulAttr.Union()));
 
-  auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+  auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
       builder, "test", DT::HALF, DT::HALF, DT::FLOAT, &tensors, &nodes);
   builder.Finish(graphOffset);
 
@@ -648,8 +655,8 @@ TEST(TestFusilliPluginApi, CreateExecutionContext) {
   const std::vector<int64_t> expectedWStrides = {4, 1, 1, 1};
   const std::vector<int64_t> expectedYDims = {4, 4, 4, 4};
   const std::vector<int64_t> expectedYStrides = {64, 16, 4, 1};
-  const hipdnn_data_sdk::data_objects::DataType dataType =
-      hipdnn_data_sdk::data_objects::DataType::FLOAT;
+  const hipdnn_flatbuffers_sdk::data_objects::DataType dataType =
+      hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
   FUSILLI_PLUGIN_EXPECT_OR_ASSIGN(fusilli::DataType expectedDataType,
                                   hipDnnDataTypeToFusilliDataType(dataType));
 
@@ -666,7 +673,7 @@ TEST(TestFusilliPluginApi, CreateExecutionContext) {
 
   // Create engine config.
   flatbuffers::FlatBufferBuilder configBuilder;
-  auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(
+  auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(
       configBuilder, hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
   configBuilder.Finish(engineConfig);
   hipdnnPluginConstData_t engineConfigData;
@@ -791,7 +798,7 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
   // SDPA with attn_mask should be supported.
   builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
       qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims,
-      qkvStrides, hipdnn_data_sdk::data_objects::DataType::HALF,
+      qkvStrides, hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
       /*withAttnMask=*/true);
   opGraph.ptr = builder.GetBufferPointer();
   opGraph.size = builder.GetSize();
@@ -801,10 +808,33 @@ TEST(TestFusilliPluginApi, GetApplicableEngineIdsSdpa) {
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_EQ(numEngines, 1);
 
+  // SDPA with independent K/V head counts (GQA) should be supported.
+  // Mirrors test_cudnn_attention_gqa: Q=32 heads, K=8 heads, V=4 heads.
+  {
+    const std::vector<int64_t> qDims = {4, 32, 512, 128};
+    const std::vector<int64_t> qStrides = {32 * 512 * 128, 512 * 128, 128, 1};
+    const std::vector<int64_t> kDims = {4, 8, 1024, 128};
+    const std::vector<int64_t> kStrides = {8 * 1024 * 128, 1024 * 128, 128, 1};
+    const std::vector<int64_t> vDims = {4, 4, 1024, 128};
+    const std::vector<int64_t> vStrides = {4 * 1024 * 128, 1024 * 128, 128, 1};
+    const std::vector<int64_t> oDims = {4, 32, 512, 128};
+    const std::vector<int64_t> oStrides = {32 * 512 * 128, 512 * 128, 128, 1};
+    builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims, qStrides, kDims, kStrides, vDims, vStrides, oDims, oStrides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    opGraph.ptr = builder.GetBufferPointer();
+    opGraph.size = builder.GetSize();
+
+    ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIds(
+                  handle, &opGraph, engineIDs.data(), 5, &numEngines),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    ASSERT_EQ(numEngines, 1);
+  }
+
   // SDPA with stats output is NOT supported (yet).
   builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
       qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims, qkvStrides, qkvDims,
-      qkvStrides, hipdnn_data_sdk::data_objects::DataType::HALF,
+      qkvStrides, hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
       /*withAttnMask=*/false, /*withScale=*/false, /*withStats=*/true);
   opGraph.ptr = builder.GetBufferPointer();
   opGraph.size = builder.GetSize();

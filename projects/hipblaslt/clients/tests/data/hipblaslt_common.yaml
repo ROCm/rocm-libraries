@@ -580,6 +580,7 @@ Arguments:
   - ldd: c_int64*32
   - lde: c_int64*32
   - batch_count: c_int32
+  - batch_mode: c_int32
   - iters: c_int32
   - cold_iters: c_int32
   - algo: c_uint32
@@ -691,6 +692,7 @@ Defaults:
   transA: '*'
   transB: '*'
   batch_count: 1
+  batch_mode: 0
   HMM: false
   pad: 4096
   threads: 0

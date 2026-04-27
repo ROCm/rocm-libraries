@@ -15,18 +15,18 @@
 #define FUSILLI_PLUGIN_SRC_GRAPH_IMPORT_H
 
 #include <fusilli.h>
-#include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/custom_op_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/reduction_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_wrw_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/custom_op_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/matmul_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/norm_common_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include <format>
@@ -34,30 +34,29 @@
 #include <optional>
 #include <unordered_map>
 
-#include "custom_ops.h"
 #include "hipdnn_engine_plugin_execution_context.h"
 
 // Convert from hipDNN DataType to fusilli DataType.
 inline fusilli::ErrorOr<fusilli::DataType> hipDnnDataTypeToFusilliDataType(
-    hipdnn_data_sdk::data_objects::DataType hipdnnType) {
+    hipdnn_flatbuffers_sdk::data_objects::DataType hipdnnType) {
   switch (hipdnnType) {
-  case hipdnn_data_sdk::data_objects::DataType::HALF:
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
     return ok(fusilli::DataType::Half);
-  case hipdnn_data_sdk::data_objects::DataType::BFLOAT16:
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
     return ok(fusilli::DataType::BFloat16);
-  case hipdnn_data_sdk::data_objects::DataType::FLOAT:
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
     return ok(fusilli::DataType::Float);
-  case hipdnn_data_sdk::data_objects::DataType::DOUBLE:
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE:
     return ok(fusilli::DataType::Double);
-  case hipdnn_data_sdk::data_objects::DataType::INT8:
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
     return ok(fusilli::DataType::Int8);
-  case hipdnn_data_sdk::data_objects::DataType::UINT8:
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8:
     return ok(fusilli::DataType::Uint8);
-  case hipdnn_data_sdk::data_objects::DataType::INT32:
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
     return ok(fusilli::DataType::Int32);
-  case hipdnn_data_sdk::data_objects::DataType::INT4:
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::INT4:
     return ok(fusilli::DataType::Int4);
-  case hipdnn_data_sdk::data_objects::DataType::UNSET:
+  case hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET:
     return ok(fusilli::DataType::NotSet);
   default:
     return error(fusilli::ErrorCode::RuntimeFailure,
@@ -66,13 +65,13 @@ inline fusilli::ErrorOr<fusilli::DataType> hipDnnDataTypeToFusilliDataType(
 }
 
 #define FUSILLI_PLUGIN_POINTWISE_CASE(CASE)                                    \
-  case hipdnn_data_sdk::data_objects::PointwiseMode::CASE:                     \
+  case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CASE:              \
     return fusilli::PointwiseAttr::Mode::CASE;
 
 // Convert from hipDNN PointwiseMode to fusilli PointwiseAttr::Mode.
 inline fusilli::ErrorOr<fusilli::PointwiseAttr::Mode>
 hipDnnPointwiseModeToFusilliMode(
-    hipdnn_data_sdk::data_objects::PointwiseMode hipdnnMode) {
+    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode hipdnnMode) {
   switch (hipdnnMode) {
     FUSILLI_POINTWISE_OPS(FUSILLI_PLUGIN_POINTWISE_CASE)
   default:
@@ -83,11 +82,11 @@ hipDnnPointwiseModeToFusilliMode(
 
 // Convert from hipDNN NormFwdPhase to fusilli NormFwdPhase.
 inline fusilli::ErrorOr<fusilli::NormFwdPhase> hipDnnNormFwdPhaseToFusilliPhase(
-    hipdnn_data_sdk::data_objects::NormFwdPhase hipdnnPhase) {
+    hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase hipdnnPhase) {
   switch (hipdnnPhase) {
-  case hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING:
+  case hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::TRAINING:
     return ok(fusilli::NormFwdPhase::TRAINING);
-  case hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE:
+  case hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE:
     return ok(fusilli::NormFwdPhase::INFERENCE);
   default:
     return error(fusilli::ErrorCode::NotImplemented,
@@ -98,13 +97,13 @@ inline fusilli::ErrorOr<fusilli::NormFwdPhase> hipDnnNormFwdPhaseToFusilliPhase(
 // Convert from hipDNN ReductionMode to fusilli ReductionAttr::Mode.
 inline fusilli::ErrorOr<fusilli::ReductionAttr::Mode>
 hipDnnReductionModeToFusilliMode(
-    hipdnn_data_sdk::data_objects::ReductionMode hipdnnMode) {
+    hipdnn_flatbuffers_sdk::data_objects::ReductionMode hipdnnMode) {
   switch (hipdnnMode) {
-  case hipdnn_data_sdk::data_objects::ReductionMode::ADD:
+  case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::ADD:
     return ok(fusilli::ReductionAttr::Mode::SUM);
-  case hipdnn_data_sdk::data_objects::ReductionMode::MIN_OP:
+  case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MIN_OP:
     return ok(fusilli::ReductionAttr::Mode::MIN);
-  case hipdnn_data_sdk::data_objects::ReductionMode::MAX_OP:
+  case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MAX_OP:
     return ok(fusilli::ReductionAttr::Mode::MAX);
   default:
     return error(fusilli::ErrorCode::NotImplemented,
@@ -144,13 +143,13 @@ private:
       uidToVirtualTensor;
 
   // Helper class for reading from flatbuffer.
-  hipdnn_plugin_sdk::GraphWrapper opGraphWrapper;
+  hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper;
 
   GraphImport(const hipdnnPluginConstData_t *opGraph)
       : opGraphWrapper(opGraph->ptr, opGraph->size) {}
 
   fusilli::ErrorObject importGraph() {
-    const hipdnn_data_sdk::data_objects::Graph &hipDnnGraph =
+    const hipdnn_flatbuffers_sdk::data_objects::Graph &hipDnnGraph =
         opGraphWrapper.getGraph();
 
     // Import graph level properties.
@@ -176,7 +175,7 @@ private:
   // Import all graph nodes.
   fusilli::ErrorObject importNodes() {
     for (uint32_t i = 0; i < opGraphWrapper.nodeCount(); ++i) {
-      const hipdnn_data_sdk::data_objects::Node &node =
+      const hipdnn_flatbuffers_sdk::data_objects::Node &node =
           opGraphWrapper.getNode(i);
       FUSILLI_CHECK_ERROR(importNode(node));
     }
@@ -186,43 +185,47 @@ private:
 
   // Import single graph node.
   fusilli::ErrorObject
-  importNode(const hipdnn_data_sdk::data_objects::Node &node) {
+  importNode(const hipdnn_flatbuffers_sdk::data_objects::Node &node) {
     switch (node.attributes_type()) {
-    case hipdnn_data_sdk::data_objects::NodeAttributes::
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
         ConvolutionFwdAttributes:
       FUSILLI_CHECK_ERROR(
           importConvFPropAttr(node.attributes_as_ConvolutionFwdAttributes()));
       break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
         ConvolutionWrwAttributes:
       FUSILLI_CHECK_ERROR(
           importConvWGradAttr(node.attributes_as_ConvolutionWrwAttributes()));
       break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
         ConvolutionBwdAttributes:
       FUSILLI_CHECK_ERROR(
           importConvDGradAttr(node.attributes_as_ConvolutionBwdAttributes()));
       break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
+        PointwiseAttributes:
       FUSILLI_CHECK_ERROR(
           importPointwiseAttr(node.attributes_as_PointwiseAttributes()));
       break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MatmulAttributes:
       FUSILLI_CHECK_ERROR(
           importMatmulAttr(node.attributes_as_MatmulAttributes()));
       break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes:
       FUSILLI_CHECK_ERROR(importSdpaAttr(node.attributes_as_SdpaAttributes()));
       break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::ReductionAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
+        ReductionAttributes:
       FUSILLI_CHECK_ERROR(
           importReductionAttr(node.attributes_as_ReductionAttributes()));
       break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
+        RMSNormAttributes:
       FUSILLI_CHECK_ERROR(
           importRmsnormAttr(node.attributes_as_RMSNormAttributes()));
       break;
-    case hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes:
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
+        CustomOpAttributes:
       FUSILLI_CHECK_ERROR(
           importCustomOpAttr(node.attributes_as_CustomOpAttributes()));
       break;
@@ -234,7 +237,7 @@ private:
   }
 
   fusilli::ErrorObject importConvFPropAttr(
-      const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes
+      const hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes
           *hipDnnConvFwdAttr) {
     // Import node inputs.
     FUSILLI_ASSIGN_OR_RETURN(
@@ -266,7 +269,7 @@ private:
   }
 
   fusilli::ErrorObject importConvWGradAttr(
-      const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes
+      const hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes
           *hipDnnConvWrwAttr) {
     // Import node inputs.
     FUSILLI_ASSIGN_OR_RETURN(
@@ -298,7 +301,7 @@ private:
   }
 
   fusilli::ErrorObject importConvDGradAttr(
-      const hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes
+      const hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes
           *hipDnnConvBwdAttr) {
     // Import node inputs.
     FUSILLI_ASSIGN_OR_RETURN(
@@ -330,7 +333,8 @@ private:
   }
 
   fusilli::ErrorObject importPointwiseAttr(
-      const hipdnn_data_sdk::data_objects::PointwiseAttributes *hipDnnPwAttr) {
+      const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes
+          *hipDnnPwAttr) {
     // Get mode and determine input count.
     FUSILLI_ASSIGN_OR_RETURN(
         fusilli::PointwiseAttr::Mode mode,
@@ -375,8 +379,9 @@ private:
     return fusilli::ok();
   }
 
-  fusilli::ErrorObject importMatmulAttr(
-      const hipdnn_data_sdk::data_objects::MatmulAttributes *hipDnnMatmulAttr) {
+  fusilli::ErrorObject
+  importMatmulAttr(const hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes
+                       *hipDnnMatmulAttr) {
     // Import node inputs.
     FUSILLI_ASSIGN_OR_RETURN(
         std::shared_ptr<fusilli::TensorAttr> a,
@@ -397,23 +402,99 @@ private:
     return fusilli::ok();
   }
 
-  fusilli::ErrorObject importSdpaAttr(
-      const hipdnn_data_sdk::data_objects::SdpaAttributes *hipDnnSdpaAttr) {
-    // Are available SDPA templates applicable?
-    FUSILLI_CHECK_ERROR(SdpaImport::validateTemplate(hipDnnSdpaAttr));
+  fusilli::ErrorObject
+  importSdpaAttr(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes
+                     *hipDnnSdpaAttr) {
+    // Reject hipDNN features not supported by the fusilli SDPA path.
+    if (hipDnnSdpaAttr->dropout_probability().has_value() &&
+        *hipDnnSdpaAttr->dropout_probability() > 0.0f) {
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA with dropout not supported.");
+    }
+    if (hipDnnSdpaAttr->alibi_mask()) {
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA with alibi mask not supported.");
+    }
+    if (hipDnnSdpaAttr->padding_mask()) {
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA with padding mask not supported.");
+    }
+    if (hipDnnSdpaAttr->stats_tensor_uid().has_value()) {
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA with stats output not supported.");
+    }
+    if (hipDnnSdpaAttr->seed_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->offset_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->dropout_mask_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->dropout_scale_tensor_uid().has_value()) {
 
-    // mma_core_mode requests a specific accumulator precision. Our MLIR path
-    // accumulates in the query element type, so reject if the requested mode
-    // doesn't match. UNSET (the default) is always fine.
-    auto mmaCoreMode = hipDnnSdpaAttr->mma_core_mode();
-    if (mmaCoreMode != hipdnn_data_sdk::data_objects::DataType::UNSET) {
-      auto qDataType = opGraphWrapper.getTensorMap()
-                           .at(hipDnnSdpaAttr->q_tensor_uid())
-                           ->data_type();
-      if (mmaCoreMode != qDataType)
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA with dropout tensors not supported.");
+    }
+    if (hipDnnSdpaAttr->page_table_k_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->page_table_v_tensor_uid().has_value()) {
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA with paged attention not supported.");
+    }
+    if (hipDnnSdpaAttr->block_mask_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->sink_token_tensor_uid().has_value()) {
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA with block mask not supported.");
+    }
+    if (hipDnnSdpaAttr->left_bound().has_value() ||
+        hipDnnSdpaAttr->right_bound().has_value()) {
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA with sliding window not supported.");
+    }
+    if (hipDnnSdpaAttr->descale_q_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->descale_k_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->descale_v_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->descale_s_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->scale_s_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->scale_o_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->amax_s_tensor_uid().has_value() ||
+        hipDnnSdpaAttr->amax_o_tensor_uid().has_value()) {
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA with FP8 quantization not supported.");
+    }
+    if (hipDnnSdpaAttr->diagonal_alignment() !=
+        hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT) {
+      return fusilli::error(
+          fusilli::ErrorCode::NotImplemented,
+          "SDPA with non-TOP_LEFT diagonal alignment not supported.");
+    }
+    // This is out of an over-abundance of caution, IREE doesn't need a backend
+    // implementation hint so if one is given the user is likely targeting a
+    // different backend.
+    if (hipDnnSdpaAttr->implementation() !=
+        hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation::AUTO) {
+      return fusilli::error(
+          fusilli::ErrorCode::NotImplemented,
+          "SDPA with explicit implementation strategy not supported.");
+    }
+    // Causal attention implies an explicit attn_mask, additional attention mask
+    // doesn't make sense and torch dialect will reject it.
+    if (hipDnnSdpaAttr->causal_mask() &&
+        hipDnnSdpaAttr->attn_mask_tensor_uid().has_value()) {
+      return fusilli::error(
+          fusilli::ErrorCode::NotImplemented,
+          "SDPA with both causal mask and attention mask not supported.");
+    }
+    // mma_core_mode requests a specific accumulator precision. Fusilli's
+    // lowering path accumulates in the query element type, so reject if the
+    // requested mode doesn't match. UNSET (the default) is always fine.
+    hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode =
+        hipDnnSdpaAttr->mma_core_mode();
+    if (mmaCoreMode != hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET) {
+      hipdnn_flatbuffers_sdk::data_objects::DataType qDataType =
+          opGraphWrapper.getTensorMap()
+              .at(hipDnnSdpaAttr->q_tensor_uid())
+              ->data_type();
+      if (mmaCoreMode != qDataType) {
         return fusilli::error(
             fusilli::ErrorCode::NotImplemented,
             "SDPA mma_core_mode must match query tensor dtype.");
+      }
     }
 
     bool hasAttnMask = hipDnnSdpaAttr->attn_mask_tensor_uid().has_value();
@@ -430,18 +511,12 @@ private:
         std::shared_ptr<fusilli::TensorAttr> v,
         importNodeInput(hipDnnSdpaAttr->v_tensor_uid(), "v"));
 
-    // Validate inputs to graph
-    FUSILLI_CHECK_ERROR(SdpaImport::validateInputs(q, k, v));
-
-    std::vector<std::shared_ptr<fusilli::TensorAttr>> inputs = {q, k, v};
-
     // Import optional attn_mask tensor.
+    std::shared_ptr<fusilli::TensorAttr> mask = nullptr;
     if (hasAttnMask) {
       FUSILLI_ASSIGN_OR_RETURN(
-          std::shared_ptr<fusilli::TensorAttr> mask,
-          importNodeInput(*hipDnnSdpaAttr->attn_mask_tensor_uid(),
-                          "attn_mask"));
-      inputs.push_back(mask);
+          mask, importNodeInput(*hipDnnSdpaAttr->attn_mask_tensor_uid(),
+                                "attn_mask"));
     }
 
     // Read optional attention scale.
@@ -459,32 +534,42 @@ private:
                               "SDPA scale must be a pass-by-value scalar, "
                               "not a device tensor.");
       if (scaleTensor->value_type() !=
-          hipdnn_data_sdk::data_objects::TensorValue::Float32Value)
+          hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value)
         return fusilli::error(fusilli::ErrorCode::NotImplemented,
                               "SDPA scale tensor must be Float32.");
       scaleValue = scaleTensor->value_as_Float32Value()->value();
     }
 
-    // GQA: enable when Q has more heads than K/V.
-    bool enableGqa = q->getDim()[1] != k->getDim()[1];
+    // GQA: enable when Q has more heads than K or V.
+    bool enableGqa =
+        q->getDim()[1] != k->getDim()[1] || q->getDim()[1] != v->getDim()[1];
 
-    // Build MLIR template and create CustomOp.
-    std::string mlir = SdpaImport::buildMLIR(hasAttnMask, /*dropoutP=*/0.0f,
-                                             isCausal, scaleValue, enableGqa);
-    fusilli::CustomOpAttr sdpaAttr;
-    sdpaAttr.setName("sdpa_fprop").setMlir(mlir).setNumOutputs(1);
-    auto outs = fusilliGraph.customOp(inputs, sdpaAttr);
+    // #TODO(iree/issues/21858) GQA with f32 triggers an IREE distribution
+    // failure. SdpaNode does not check this, so we must reject here.
+    if (enableGqa && q->getDataType() == fusilli::DataType::Float)
+      return fusilli::error(fusilli::ErrorCode::NotImplemented,
+                            "SDPA GQA with f32 not supported.");
 
-    // Import output tensor. importNodeOutput sets dim/stride/dtype from the
-    // flatbuffer tensor attributes.
+    // Import node.
+    fusilli::SdpaAttr sdpaAttr;
+    sdpaAttr.setName("sdpa_fprop")
+        .setIsCausal(isCausal)
+        .setEnableGqa(enableGqa);
+    if (scaleValue.has_value())
+      sdpaAttr.setScale(scaleValue);
+    std::shared_ptr<fusilli::TensorAttr> o =
+        fusilliGraph.sdpa(q, k, v, mask, sdpaAttr);
+
+    // Import node output.
     FUSILLI_CHECK_ERROR(
-        importNodeOutput(hipDnnSdpaAttr->o_tensor_uid(), "o", outs[0]));
+        importNodeOutput(hipDnnSdpaAttr->o_tensor_uid(), "o", o));
 
     return fusilli::ok();
   }
 
   fusilli::ErrorObject importReductionAttr(
-      const hipdnn_data_sdk::data_objects::ReductionAttributes *hipDnnRedAttr) {
+      const hipdnn_flatbuffers_sdk::data_objects::ReductionAttributes
+          *hipDnnRedAttr) {
     // Import node input.
     FUSILLI_ASSIGN_OR_RETURN(
         std::shared_ptr<fusilli::TensorAttr> x,
@@ -507,9 +592,9 @@ private:
     return fusilli::ok();
   }
 
-  fusilli::ErrorObject
-  importRmsnormAttr(const hipdnn_data_sdk::data_objects::RMSNormAttributes
-                        *hipDnnRmsnormAttr) {
+  fusilli::ErrorObject importRmsnormAttr(
+      const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes
+          *hipDnnRmsnormAttr) {
     // Fusilli's rmsnorm does not support the optional bias input.
     if (hipDnnRmsnormAttr->bias_tensor_uid().has_value())
       return fusilli::error(fusilli::ErrorCode::NotImplemented,
@@ -564,7 +649,8 @@ private:
   }
 
   fusilli::ErrorObject importCustomOpAttr(
-      const hipdnn_data_sdk::data_objects::CustomOpAttributes *hipDnnAttr) {
+      const hipdnn_flatbuffers_sdk::data_objects::CustomOpAttributes
+          *hipDnnAttr) {
     // Only import custom ops targeting this plugin.
     std::string customOpId = hipDnnAttr->custom_op_id()->str();
     if (!customOpId.starts_with("fusilli.")) {
@@ -614,8 +700,8 @@ private:
   importNodeInput(int64_t uid, const char *name) {
     // Get hipDNN tensor. TensorMap is created from the graph that uid variable
     // is read from, so .at() call should be safe.
-    const hipdnn_data_sdk::data_objects::TensorAttributes *hipDnnTensorAttr =
-        opGraphWrapper.getTensorMap().at(uid);
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes
+        *hipDnnTensorAttr = opGraphWrapper.getTensorMap().at(uid);
 
     // A virtual tensor indicates an intermediate (non-boundary) tensor.
     if (hipDnnTensorAttr->virtual_()) {
@@ -631,15 +717,15 @@ private:
     fusilli::TensorAttr fusilliTensorAttr;
     if (isPassByValue(hipDnnTensorAttr)) { // handle scalar tensors
       switch (hipDnnTensorAttr->value_type()) {
-      case hipdnn_data_sdk::data_objects::TensorValue::Float32Value:
+      case hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value:
         fusilliTensorAttr = fusilli::TensorAttr(
             hipDnnTensorAttr->value_as_Float32Value()->value());
         break;
-      case hipdnn_data_sdk::data_objects::TensorValue::Float64Value:
+      case hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float64Value:
         fusilliTensorAttr = fusilli::TensorAttr(
             hipDnnTensorAttr->value_as_Float64Value()->value());
         break;
-      case hipdnn_data_sdk::data_objects::TensorValue::Int32Value:
+      case hipdnn_flatbuffers_sdk::data_objects::TensorValue::Int32Value:
         fusilliTensorAttr = fusilli::TensorAttr(
             hipDnnTensorAttr->value_as_Int32Value()->value());
         break;
@@ -669,8 +755,8 @@ private:
                    const std::shared_ptr<fusilli::TensorAttr> &nodeOutput) {
     // Get hipDNN tensor. TensorMap is created from the graph that uid variable
     // is read from, so .at() call should be safe.
-    const hipdnn_data_sdk::data_objects::TensorAttributes *hipDnnTensorAttr =
-        opGraphWrapper.getTensorMap().at(uid);
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes
+        *hipDnnTensorAttr = opGraphWrapper.getTensorMap().at(uid);
 
     // Import attrs.
     nodeOutput->setName(std::format("{}_{}", name, uid)); // C++20
@@ -696,16 +782,16 @@ private:
 
   // Whether the hipDNN tensor carries a pass-by-value scalar (equivalent to
   // hipDNN frontend's TensorAttributes::get_pass_by_value()).
-  static bool
-  isPassByValue(const hipdnn_data_sdk::data_objects::TensorAttributes *src) {
+  static bool isPassByValue(
+      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes *src) {
     return src->value_type() !=
-           hipdnn_data_sdk::data_objects::TensorValue::NONE;
+           hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE;
   }
 
   // Import tensor attrs (dims, strides, datatype) from hipDNN to fusilli.
-  fusilli::ErrorObject
-  importAttrs(fusilli::TensorAttr &dest,
-              const hipdnn_data_sdk::data_objects::TensorAttributes *src) {
+  fusilli::ErrorObject importAttrs(
+      fusilli::TensorAttr &dest,
+      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes *src) {
     FUSILLI_ASSIGN_OR_RETURN(auto dataType,
                              hipDnnDataTypeToFusilliDataType(src->data_type()));
     dest.setIsVirtual(src->virtual_())

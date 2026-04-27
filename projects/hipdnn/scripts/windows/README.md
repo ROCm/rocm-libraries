@@ -51,7 +51,7 @@ Override default paths and GPU target:
 | `-SHA`       | *(empty)*                      | Build SHA for S3 staging. Omit to use nightlies. |
 | `-VenvPath`  | `D:\develop\latest_wheels`     | Where to create the Python virtual environment.  |
 | `-ClangPath` | `D:\develop\dist\clang\bin`    | Path to the Clang toolchain bin directory.        |
-| `-GpuTarget` | `gfx1103`                      | GPU architecture for the CMake example output.   |
+| `-GpuTarget` | `gfx1151`                      | GPU architecture for wheel selection and CMake output. |
 
 For the full built-in help, run:
 

@@ -319,9 +319,9 @@ set( MIOpen_Source
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source conv/heuristics/ai_heuristics.cpp)
-    list(APPEND MIOpen_Source conv/heuristics/metadata_3d.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/metadata_nd.cpp)
     list(APPEND MIOpen_Source conv/heuristics/ai_candidate_selection.cpp)
-    list(APPEND MIOpen_Source conv/heuristics/ai_conv_3d_kernel_tuning_utils.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/ai_conv_nd_kernel_tuning_utils.cpp)
     list(APPEND MIOpen_Source anyramdb.cpp)
 endif()
 
@@ -658,7 +658,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_dilation2.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride1.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride2.s
-        kernels/MIOpenConvBwdBias.cl
         kernels/MIOpenBatchNormActivInfer.cpp
         kernels/MIOpenCTCLoss.cpp
         kernels/MIOpenDropoutHIP.cpp

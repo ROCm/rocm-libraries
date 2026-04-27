@@ -14,10 +14,10 @@ namespace hipdnn_sdk_test_utils
 {
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildLayernormFpropGraph(hipdnn_data_sdk::data_objects::DataType inputDataType,
-                             hipdnn_data_sdk::data_objects::DataType scaleBiasDataType,
-                             hipdnn_data_sdk::data_objects::DataType meanInvVarianceDataType,
-                             hipdnn_data_sdk::data_objects::DataType computeDataType,
+    buildLayernormFpropGraph(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                              const std::vector<int64_t>& dims,
                              const int64_t normalizedDimCount,
                              const hipdnn_data_sdk::utilities::TensorLayout& layout,

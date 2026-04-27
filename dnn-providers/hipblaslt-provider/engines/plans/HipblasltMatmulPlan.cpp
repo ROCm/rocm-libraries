@@ -7,9 +7,9 @@
 #include <string>
 
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "HipblasltMatmulPlan.hpp"
@@ -29,8 +29,8 @@ inline int64_t getBatchCount(const std::vector<int64_t>& dims)
 }
 } // namespace
 
-hipblasOperation_t
-    MatmulParams::getTrans(const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
+hipblasOperation_t MatmulParams::getTrans(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
 {
     const auto& strides = t.strides();
     PLUGIN_THROW_IF_FALSE(strides.size() > 1,
@@ -51,8 +51,8 @@ hipblasOperation_t
 }
 
 hipblasComputeType_t MatmulParams::getComputeDataType(
-    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
-    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB)
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB)
 {
     auto hipDataTypeA = hipblaslt_utils::tensorDataTypeToHipDataType(tA.dataType());
     auto hipDataTypeB = hipblaslt_utils::tensorDataTypeToHipDataType(tB.dataType());
@@ -68,18 +68,20 @@ hipblasComputeType_t MatmulParams::getComputeDataType(
 }
 
 MatmulParams::MatmulParams(
-    const hipdnn_data_sdk::data_objects::MatmulAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : MatmulParams(attributes, nullptr, nullptr, tensorMap)
 {
 }
 
 MatmulParams::MatmulParams(
-    const hipdnn_data_sdk::data_objects::MatmulAttributes& attributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     const auto tA = hipblaslt_utils::findTensorAttributes(tensorMap, attributes.a_tensor_uid());
@@ -166,9 +168,9 @@ MatmulParams::MatmulParams(
 }
 
 void MatmulParams::setBatchInfo(
-    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
-    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
-    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC)
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC)
 {
     // Batch support: we flatten all batch dimensions (all except last two) into a single batch count.
     // hipBLASLt uses a single strided batch offset, so we can only support uniform batch strides.
@@ -213,8 +215,9 @@ void MatmulParams::setBatchInfo(
     }
 }
 
-void MatmulParams::setEpilogue(const hipdnn_data_sdk::data_objects::PointwiseAttributes* activAttr,
-                               hipDataType biasDataType)
+void MatmulParams::setEpilogue(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
+    hipDataType biasDataType)
 {
     auto epilogueParams
         = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(activAttr, _biasUid.has_value());
