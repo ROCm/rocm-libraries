@@ -47,7 +47,7 @@ directory. Ask if either is missing.
      (`EXAMPLE_PROVIDER_RELU_ENGINE`, `EXAMPLE_PROVIDER_CONV_FWD_ENGINE`)
      -- the example engines are placeholders to be replaced by the user.
    - Rename version infrastructure: `version.json` (update key name),
-     `version.h.in` (rename header guard and macro prefix),
+     `templates/version.h.in` (rename header guard and macro prefix),
      `cmake/VersionUtils.cmake` (rename the three function names).
    - Handle, Context, and Settings are at global scope (outside namespace).
      Keep them there.
@@ -56,7 +56,7 @@ directory. Ask if either is missing.
 
 5. Grep the target directory for remaining occurrences of
    `example_provider`, `ExampleProvider`, `EXAMPLE_PROVIDER`,
-   `hipdnn_example`, and `hipdnn-example` to verify nothing was missed. Engine registration
+   `EXAMPLEPROVIDER_`, `hipdnn_example`, and `hipdnn-example` to verify nothing was missed. Engine registration
    identifiers (`EXAMPLE_PROVIDER_RELU_ENGINE`,
    `EXAMPLE_PROVIDER_CONV_FWD_ENGINE`) are expected to remain.
 

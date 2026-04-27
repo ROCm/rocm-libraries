@@ -74,6 +74,12 @@ protected:
     void SetUp() override
     {
         IntegrationTestFixture::SetUp();
+        // GTEST_SKIP() in the base only unwinds the base SetUp() frame; without this
+        // guard, the post-base setup below would dereference a null _handle.
+        if(IsSkipped())
+        {
+            return;
+        }
 
         // Query the exact plugin paths the backend resolved when loading,
         // then find the knobs plugin by name. This ensures we dlopen the same

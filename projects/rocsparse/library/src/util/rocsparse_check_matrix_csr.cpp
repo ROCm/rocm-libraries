@@ -130,7 +130,7 @@ rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
     {
         // offsets buffer
         tmp_offsets = reinterpret_cast<I*>(ptr);
-        ptr += ((sizeof(I) * m) / 256 + 1) * 256;
+        ptr += ((sizeof(I) * (m + 1)) / 256 + 1) * 256;
 
         // columns 1 buffer
         tmp_cols1 = reinterpret_cast<J*>(ptr);

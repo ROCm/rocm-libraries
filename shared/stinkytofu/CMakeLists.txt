@@ -60,7 +60,7 @@ configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h
 # This is a temporary solution until:
 # (1) stinkytofu designs a new rocisa IR to replace the original ones, or
 # (2) stinkytofu completely replaces rocisa IR with stinkyAsm IR.
-if(TARGET rocisa)
+if(TARGET _rocisa)
     add_subdirectory(src/conversion/rocisa)
 endif()
 

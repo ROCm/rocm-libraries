@@ -1178,6 +1178,10 @@ class Solution(collections.abc.Mapping):
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
     state["_GlobalAccumulation"] = None
     computeName  = state["ProblemType"]["ComputeDataType"].toName()
+    if state["UseDotInstruction"] and state["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel':
+      # dot2 kernel does not support MBSK
+      state["GlobalSplitUAlgorithm"] = 'MultipleBuffer'
+      state["MbskPrefetchMethod"] = 0
     if state["StreamK"] > 0 and state["StreamKAtomic"] == 0:
       # StreamK Workspace size
       state["_GlobalAccumulation"] = 'PartialsBuffer'
@@ -1206,6 +1210,7 @@ class Solution(collections.abc.Mapping):
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
+      state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
       # if state["PersistentKernel"]:
@@ -3807,7 +3812,7 @@ class Solution(collections.abc.Mapping):
         state["NumElementsPerBatchStore"] = 16 if not state["ProblemType"]["DataType"].numBytes() == 8 else 1
 
     # Mbsk prefetch optimization
-    if state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
+    if state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel' and state["AdaptiveGemmGSUA"] == 0:
         state["MbskPrefetchMethod"] = 0
     elif state["MbskPrefetchMethod"] == -1:
       numStoreElements = state["NumElementsPerThread"] // state["StoreVectorWidth"]
