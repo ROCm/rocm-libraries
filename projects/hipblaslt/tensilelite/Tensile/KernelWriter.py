@@ -858,7 +858,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def _makeSubIterSchedule(self, kernel, tPA, tPB, localReadCode, iteration, pointerLWCode, pointerLRCode, waitCode, macIterCode, \
       waitLWCode = Module(), syncCode = Module(), packCode = Module(), packPreCode = Module(), prevIterCode = Module(), localReadCodeSecondHalf = Module(), NLLlast = False, \
-                   tailloopInNll = False, isNLLorNGLL=False):
+                   tailloopInNll = False, isNLLorNGLL=False, capture=None):
 
     iterCode = Module()
     globalReadCode       = deepcopy(self.codes.perIterGlobalRead[iteration])
@@ -874,6 +874,31 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if (NLLlast and tailloopInNll):
       # use scheduleIterAlg = 0 for NLLlast and tailloopInNll case
       scheduleIterAlg = 0
+
+    # Schedule capture (Phase 3 of plans/then-let-s-work-on-jaunty-reddy.md):
+    # only SIA3 is captureable. SIA0/SIA1 lack a per-MFMA loop entirely; SIA2
+    # only schedules pack against MFMAs and inserts non-CMS-id_map instructions
+    # (SSetPrior/VMov). Hard-fail at capture entry rather than silently emit a
+    # malformed LoopBodyCapture.
+    capture_id_to_category = None
+    if capture is not None:
+      assert scheduleIterAlg == 3, (
+        "Schedule capture is only supported for ScheduleIterAlg=3 (SIA3); "
+        f"got ScheduleIterAlg={scheduleIterAlg}. SIA0/SIA1/SIA2 do not produce "
+        "per-MFMA slotted schedules and cannot be captured into a comparable form."
+      )
+      # Snapshot identity sets BEFORE SIA3 reorders the input modules. Module
+      # popFirstItem / popFirstNItems / addItems preserve item identity per the
+      # rocisa C++ API (verified against KernelWriter.py:1106-1125 reorder logic
+      # and the popFirstNItems behavior at 1669, 1675).
+      capture_id_to_category = self._buildCaptureIdentityMap(
+        iteration=iteration,
+        localReadCode=localReadCode,
+        localWriteCode=localWriteCode,
+        globalReadCode=globalReadCode,
+        packCode=packCode,
+        packPreCode=packPreCode,
+      )
     # Default schedule is other, local reads, then local writes:
     if scheduleIterAlg == 0:
       # simple schedule, just add the modules in-order
@@ -2554,7 +2579,173 @@ class KernelWriter(metaclass=abc.ABCMeta):
         waitCode.comment += " for iteration == 0"
       waitCode.dscnt = dscnt
 
+    # Schedule capture (Phase 3 of plans/then-let-s-work-on-jaunty-reddy.md):
+    # post-hoc walk of iterCode classifies each emitted instruction by its
+    # source-bucket via id() lookup against pre-snapshotted identity sets,
+    # falling back to isinstance for SYNC/SNOP/MFMA. This avoids modifying
+    # SIA3's internal flow at every pop site. Only runs when capture is
+    # provided (asserted SIA3-only above).
+    if capture is not None:
+      self._captureSubIterToBuilder(
+        iterCode=iterCode,
+        capture=capture,
+        iteration=iteration,
+        numMfmaPerIter=self.states.numMfmaPerIter,
+        id_to_category=capture_id_to_category,
+      )
+
     return iterCode
+
+  def _buildCaptureIdentityMap(self, iteration, localReadCode, localWriteCode,
+                                globalReadCode, packCode, packPreCode):
+    """Build {id(item) -> category} for SIA3 schedule capture.
+
+    Snapshotted at SIA3 entry before any reordering. Item identity survives
+    Module.popFirstItem / popFirstNItems / addItems through SIA3's localRead
+    reorder loop (KernelWriter.py:1086-1125) and the global/pack pop sites
+    elsewhere in SIA3.
+    """
+    id_to_category = {}
+
+    def tag_module(mod, category):
+      if mod is None:
+        return
+      for item in mod.flatitems():
+        id_to_category[id(item)] = category
+
+    # localReadCode is a Module containing named submodules LocalReadDoA_I*,
+    # LocalReadDoB_I*, LocalReadDoMXSA_I*, LocalReadDoMXSB_I*, LocalReadDoMetadata_I*.
+    # Tag by tensor.
+    if localReadCode is not None:
+      for iui in range(self.states.kernel["InnerUnroll"] if hasattr(self.states, "kernel") else 1):
+        pass  # handled by named-submodule walk below
+      for child in localReadCode.flatitems():
+        # Per-instruction; we need the parent named module to know A/B.
+        # Since flatitems flattens, we lose the parent name. Use direct
+        # findNamedItem instead.
+        pass
+
+      for iui_name in ("LocalReadDoA", "LocalReadDoB", "LocalReadDoMXSA",
+                       "LocalReadDoMXSB", "LocalReadDoMetadata"):
+        # Try multiple InnerUnroll indices.
+        for iui in range(8):
+          sub = localReadCode.findNamedItem(f"{iui_name}_I{iui}")
+          if sub is None:
+            continue
+          if iui_name == "LocalReadDoA":
+            cat = f"LRA{iteration}"
+          elif iui_name == "LocalReadDoB":
+            cat = f"LRB{iteration}"
+          elif iui_name == "LocalReadDoMXSA":
+            cat = f"LRMXSA{iteration}"
+          elif iui_name == "LocalReadDoMXSB":
+            cat = f"LRMXSB{iteration}"
+          elif iui_name == "LocalReadDoMetadata":
+            cat = f"LRMetadata{iteration}"
+          tag_module(sub, cat)
+
+    # globalReadCode: tag generically as 'GR'. globalReadCode is a deepcopy
+    # of self.codes.perIterGlobalRead (deepcopy happens at KernelWriter.py:834
+    # under SIA3), so id() lookups against self.codes.globalReadA/B miss
+    # deterministically. A vs B distinction at this level isn't recoverable
+    # without parsing the actual buffer-load semantics; the comparison rule
+    # aggregates GR/GRA/GRB into a single global-read total.
+    if globalReadCode is not None:
+      for item in globalReadCode.flatitems():
+        # First-tag-wins: don't overwrite if this item was already tagged
+        # by an earlier source (e.g. DirectToLds mode where globalRead and
+        # localWrite share instructions).
+        if id(item) not in id_to_category:
+          id_to_category[id(item)] = "GR"
+
+    # localWriteCode: tag generically as 'LW'. Same first-tag-wins behavior
+    # because under DirectToLds=1, globalRead instructions ARE the local
+    # writes (same Instruction objects), and we want them tagged 'GR' to
+    # match the CMS-side idMap key for the schedule's globalRead bucket.
+    if localWriteCode is not None:
+      for item in localWriteCode.flatitems():
+        if id(item) not in id_to_category:
+          id_to_category[id(item)] = "LW"
+
+    # packCode / packPreCode: split A vs B by named submodule.
+    for pack_mod, prefix_a, prefix_b in (
+      (packCode, "packA", "packB"),
+      (packPreCode, "packA", "packB"),
+    ):
+      if pack_mod is None:
+        continue
+      for iui in range(8):
+        sub_a = pack_mod.findNamedItem(f"{prefix_a}_I{iui}")
+        sub_b = pack_mod.findNamedItem(f"{prefix_b}_I{iui}")
+        if sub_a is not None:
+          tag_module(sub_a, f"PackA{iteration}")
+        if sub_b is not None:
+          tag_module(sub_b, f"PackB{iteration}")
+        sub_a_pre = pack_mod.findNamedItem(f"{prefix_a}_I{iui} Pre")
+        sub_b_pre = pack_mod.findNamedItem(f"{prefix_b}_I{iui} Pre")
+        if sub_a_pre is not None:
+          tag_module(sub_a_pre, f"PackA{iteration}")
+        if sub_b_pre is not None:
+          tag_module(sub_b_pre, f"PackB{iteration}")
+
+    return id_to_category
+
+  def _captureSubIterToBuilder(self, iterCode, capture, iteration,
+                                 numMfmaPerIter, id_to_category):
+    """Walk iterCode.flatitems() and append TaggedInstructions to capture.
+
+    mfma_index assignment: tracks the most recently emitted MFMA's local index
+    (0..numMfmaPerIter-1), then converts to absolute via
+    iteration * numMfmaPerIter. Instructions before the first MFMA carry
+    slot_kind=PRE_LOOP and mfma_index=-1. SYNC/SNOP/MFMA category fallback via
+    isinstance for items not in id_to_category (synthetic SNops added by SIA3
+    for pack-latency padding, MFMAs themselves, in-line SWaitCnts).
+    """
+    from rocisa.code import TextBlock
+    from rocisa.instruction import (
+      MFMAInstruction, SMFMAInstruction, SWaitCnt, SBarrier, SNop,
+    )
+    try:
+      from rocisa.instruction import MXMFMAInstruction
+      mfma_classes = (MFMAInstruction, SMFMAInstruction, MXMFMAInstruction)
+    except ImportError:
+      mfma_classes = (MFMAInstruction, SMFMAInstruction)
+
+    from Tensile.Components.ScheduleCapture import (
+      SLOT_KIND_PRE_LOOP, SLOT_KIND_MFMA,
+    )
+
+    local_mfma_idx = -1
+
+    for item in iterCode.flatitems():
+      if isinstance(item, TextBlock):
+        continue
+
+      category = id_to_category.get(id(item))
+      if category is None:
+        if isinstance(item, mfma_classes):
+          category = "MFMA"
+        elif isinstance(item, (SWaitCnt, SBarrier)):
+          category = "SYNC"
+        elif isinstance(item, SNop):
+          category = "SNOP"
+        else:
+          category = "UNKNOWN"
+
+      if category == "MFMA":
+        local_mfma_idx += 1
+
+      if local_mfma_idx == -1:
+        slot_kind = SLOT_KIND_PRE_LOOP
+        mfma_index = -1
+      else:
+        slot_kind = SLOT_KIND_MFMA
+        mfma_index = iteration * numMfmaPerIter + local_mfma_idx
+
+      capture.append(
+        inst=item, category=category, iteration=iteration,
+        slot_kind=slot_kind, mfma_index=mfma_index,
+      )
 
   ##############################################################################
   # returns list of modules or text
@@ -4359,6 +4550,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         mfmaIter = self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollLoopIdx=lc, unrollIdx = u, initCIterWmma=(initCIter and uIdx == 0))
         if kernel["UseCustomMainLoopSchedule"]:
           MfmaCodeAllIters.add(mfmaIter)
+          # Phase 4 of plans/then-let-s-work-on-jaunty-reddy.md: when default-
+          # side capture is enabled, the shadow _makeSubIterSchedule call needs
+          # macIterCode populated with this iteration's MFMAs (the non-CMS path
+          # populates it; CMS otherwise routes MFMAs only to MfmaCodeAllIters).
+          # Use a deepcopy so MfmaCodeAllIters' reference is unaffected by SIA3
+          # consuming macIterCode via macIterItems.pop.
+          if getattr(self.states, "_captureDefaultSchedule", False):
+            macIterCode.add(deepcopy(mfmaIter))
         else:
           macIterCode.add(mfmaIter)
       else:
@@ -4389,6 +4588,34 @@ class KernelWriter(metaclass=abc.ABCMeta):
         subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], module, localReadsSecondHalf)
         module.add(subIterCode) # add scheduled "other", local reads, local writes
+      elif getattr(self.states, "_captureDefaultSchedule", False):
+        # Phase 4 of plans/then-let-s-work-on-jaunty-reddy.md: drive shadow
+        # _makeSubIterSchedule with capture on so we can build a default-style
+        # main_loop schedule alongside the CMS one for diff. ALL input modules
+        # are deepcopied for the shadow run because SIA3 mutates them via
+        # popFirstItem / popFirstNItems (KernelWriter.py:1086-1125, 1669-1682)
+        # — without the deepcopies, the shadow run would consume the items
+        # that the CMS bucket-accumulation path needs immediately afterward.
+        # writer state (localReadsVacancy/Wait/FIFO, scheduledGRInstCounts,
+        # perIterLocalWriteCanSkip) is mutated by the shadow; this only
+        # affects shadow runs themselves and is benign for downstream code
+        # (NLL/NGL short-circuit at KernelWriter.py:2858-2866). The captured
+        # iterCode is discarded — only the builder's appended TaggedInstructions
+        # matter.
+        if not hasattr(self.states, "_defaultCaptureBuilder") or self.states._defaultCaptureBuilder is None:
+          from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder
+          self.states._defaultCaptureBuilder = LoopBodyCaptureBuilder()
+        self._makeSubIterSchedule(
+          kernel, tensorParametersA, tensorParametersB,
+          deepcopy(localReads),
+          u,
+          deepcopy(pointerLWCode), deepcopy(pointerLRCode),
+          deepcopy(waitCode), deepcopy(macIterCode),
+          deepcopy(waitLWCode), deepcopy(syncCode),
+          deepcopy(pack[packIdx]), deepcopy(packPre[packPreIdx]),
+          module,
+          capture=self.states._defaultCaptureBuilder,
+        )
 
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       # reset pack/packPre code
@@ -4397,6 +4624,62 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
 
     if kernel["UseCustomMainLoopSchedule"]:
+      # Phase 8 of plans/then-let-s-work-on-jaunty-reddy.md: reject OptNLL+CMS
+      # when capture is enabled. OptNLL bypasses _makeSubIterSchedule entirely
+      # (noLoadLoopBody short-circuits at KernelWriter.py:2858-2866), so the
+      # SIA3 capture machinery never sees those iterations. Allowing this would
+      # produce a misleadingly partial default capture. Gating mirrors the
+      # OptNLL invocation conditions at Components/GSU.py:558-561.
+      if getattr(self.states, "_captureDefaultSchedule", False):
+        opt_nll_active = (
+          kernel.get("KernelLanguage") == "Assembly"
+          and kernel.get("OptNoLoadLoop")
+          and kernel.get("BufferLoad")
+          and kernel.get("BufferStore")
+          and getattr(self.states, "doShadowInit", False)
+          and kernel.get("LocalSplitU") == 1
+          and getattr(self.states, "actualSummationLoops", 0) == 1
+          and kernel.get("GlobalSplitU", 1) > 1
+        )
+        if opt_nll_active:
+          raise NotImplementedError(
+            "Schedule capture is not yet supported for kernels that emit "
+            "OptNLL (CMS+GSU>1 with OptNoLoadLoop). The OptNLL path bypasses "
+            "_makeSubIterSchedule entirely (KernelWriter.py:2858-2866), so the "
+            "default-side capture would be incomplete. Disable OptNoLoadLoop "
+            "or GlobalSplitU>1 to capture this kernel, or wait for Phase 5+ "
+            "support."
+          )
+
+      # Finalize default-side main_loop capture (Phase 4) before
+      # customMainLoopSchedule mutates opt1/InstStreams. main_loop_prev is a
+      # verbatim deepcopy of main_loop[0] (under CMS, loopCopies==1 in practice
+      # — see Solution.py:1667-1675 force-stripping ExpandPointerSwap).
+      if getattr(self.states, "_captureDefaultSchedule", False):
+        from Tensile.Components.ScheduleCapture import (
+          FourPartCapture, clone_loop_body,
+        )
+        builder = getattr(self.states, "_defaultCaptureBuilder", None)
+        if builder is not None:
+          main_body = builder.finalize()
+          num_mfma = sum(1 for ti in main_body.instructions if ti.category == "MFMA")
+          # n_gl and n_ll capture comes in Phase 5 (shadow runs inside noLoadLoop).
+          # For now leave them as empty bodies; the comparison rule's per-body
+          # MFMA invariant check will be skipped via empty-body guard.
+          from Tensile.Components.ScheduleCapture import LoopBodyCapture
+          empty_body = LoopBodyCapture(instructions=[])
+          self._last_default_capture = FourPartCapture(
+            main_loop={0: main_body},
+            main_loop_prev={0: clone_loop_body(main_body)},
+            n_gl={0: empty_body},
+            n_ll={0: empty_body},
+            num_mfma=num_mfma,
+            num_codepaths=1,
+            source="default-sia3",
+          )
+          # Reset for next kernel.
+          self.states._defaultCaptureBuilder = None
+
       optSchedule, numCodePath = customMainLoopSchedule(self, kernel, tensorParametersA, tensorParametersB, globalReadIncACode, globalReadIncBCode, \
                                                    LRCodeAAllIters, PackCodeAAllIters, LRCodeBAllIters, PackCodeBAllIters, \
                                                    LRSwapAAllIters, LRSwapBAllIters, self.codes.globalReadA, self.codes.globalReadB, \
@@ -4404,6 +4687,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                                    self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, False, nta=nta, ntb=ntb), nta=nta, ntb=ntb)
       module.add(optSchedule)
       module.add(self.simdSpecDispatch(kernel, numCodePath, nta=nta, ntb=ntb))
+
+      # Phase 6 of plans/then-let-s-work-on-jaunty-reddy.md: cross-scheduler
+      # capture comparison. Runs only when both captures exist (i.e. capture
+      # was enabled). compare_captures handles None inputs gracefully.
+      if (getattr(self, "_last_default_capture", None) is not None
+          and getattr(self, "_last_cms_capture", None) is not None):
+        from Tensile.Components.ScheduleCapture import compare_captures
+        ok, msg = compare_captures(self._last_default_capture, self._last_cms_capture)
+        assert ok, (
+          f"Schedule capture comparison failed for kernel "
+          f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}: {msg}"
+        )
 
     # close unrolled loop
     endStr = ""

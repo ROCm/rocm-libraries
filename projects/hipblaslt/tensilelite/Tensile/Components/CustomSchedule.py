@@ -43,6 +43,7 @@ from copy import deepcopy
 from typing import Callable, Optional, Union, Tuple
 from enum import Enum, auto
 import Tensile.Components.CMSValidator as cmsv
+import Tensile.Components.ScheduleCapture as scap
 from typing import Callable
 from itertools import product
 
@@ -391,6 +392,19 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         case_str = "Unknown"
     assert status is True, f"CMS validation failed for kernel {kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']} {case_str}: {message}"
 
+    # Snapshot opt1 BEFORE scheduleInst() mutates opt1.optSchedule[key][cp][i] = ph
+    # at line ~422 below. The capture machinery and any future rules that want
+    # the as-built schedule recipe inspect this copy.
+    opt1_for_capture = deepcopy(opt1)
+
+    # Side-channel populated as instructions are added to the macro: maps the
+    # Python id() of each emitted Instruction to its CMS id_map category. The
+    # macro walker (Tensile.Components.ScheduleCapture.expand_cms_macro) reads
+    # this map to recover tags after macro expansion. Deepcopied SWaitCnts from
+    # nllvmcntHandling are not in the map but the walker falls back to SYNC via
+    # isinstance checks against sync_class.
+    tag_by_origin_id: dict = {}
+
     InstStreams = {key: [stream, idMap[key]] for key, stream in opt1.optSchedule.items()}
 
     macro = Macro("MAINLOOP%s%s"%(strNta, strNtb), ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
@@ -400,7 +414,9 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     for miIndex in range(-1, len(mfmaCode)):
         if miIndex >= 0:
             macro.addComment0("mfmaIndex:%u"%(miIndex))
-            macro.add(mfmaCode[miIndex])
+            mfmaItem = mfmaCode[miIndex]
+            tag_by_origin_id[id(mfmaItem)] = "MFMA"
+            macro.add(mfmaItem)
 
         def scheduleInst(keyName, indexList, instructionList):
             ret = [None]*len(indexList)
@@ -465,10 +481,18 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                 return "\\useLoop == 1"
             return ""
 
-        def emit_instructions(instModule, macroGuard: str):
-            """Emit instructions from a module with optional macro guard."""
+        def emit_instructions(instModule, macroGuard: str, category: str = ""):
+            """Emit instructions from a module with optional macro guard.
+
+            category: id_map key under which these instructions are being
+            emitted (e.g. 'GRA', 'LRA0', 'PackB1', 'SYNC'). Used to populate
+            tag_by_origin_id for the macro walker. Empty string means do not
+            tag (caller did its own tagging).
+            """
             if instModule is not None:
                 for inst in instModule.flatitems():
+                    if category:
+                        tag_by_origin_id[id(inst)] = category
                     if isinstance(inst, SWaitCnt):
                         nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
                     else:
@@ -482,7 +506,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             macroGuard = get_macro_guard(k)
 
             if len(ts) == 1:
-                emit_instructions(ts[0], macroGuard)
+                emit_instructions(ts[0], macroGuard, category=k)
             elif len(ts) == numCodePath:
                 # Multi codepath - emit inside ID conditionals
                 for codepath in range(numCodePath):
@@ -490,12 +514,35 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                         macro.add(ValueIf("\\ID == %u" % codepath))
                     else:
                         macro.add(ValueElseIf("\\ID == %u" % codepath))
-                    emit_instructions(ts[codepath], macroGuard)
+                    emit_instructions(ts[codepath], macroGuard, category=k)
                 macro.add(ValueEndif(comment="EndIf \\ID checks"))
             else:
                 raise ValueError(f"Invalid number of instructions for {k}: {len(ts)}")
- 
+
     module.add(macro)
+
+    # Build the CMS-side FourPartCapture and stash it on the writer for the
+    # default-side capture path (Phase 4) and the comparison rule (Phase 6) to
+    # consume. The macro walker reads tag_by_origin_id (populated above) and
+    # falls back to isinstance checks against sync_class / snop_class /
+    # mfma_classes for instructions added directly to the macro (MFMAs at
+    # mfmaCode[miIndex], deepcopied SWaitCnts from nllvmcntHandling).
+    mfma_classes = (MFMAInstruction, SMFMAInstruction)
+    try:
+        from rocisa.instruction import MXMFMAInstruction
+        mfma_classes = mfma_classes + (MXMFMAInstruction,)
+    except ImportError:
+        pass
+    writer._last_cms_capture = scap.build_cms_four_part_capture(
+        macro,
+        num_codepaths=numCodePath,
+        tag_by_origin_id=tag_by_origin_id,
+        sync_class=SWaitCnt,
+        snop_class=SNop,
+        mfma_classes=mfma_classes,
+    )
+    writer._last_opt1_for_capture = opt1_for_capture
+
     return module, numCodePath
 
 

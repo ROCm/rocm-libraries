@@ -3063,6 +3063,12 @@ class ValidationContext:
     id_map: dict
     mfma_code: list
     mfma_reorder: list[int] = field(default_factory=list)
+    # Phase 6 of plans/then-let-s-work-on-jaunty-reddy.md: schedule captures
+    # for default-vs-CMS comparison rules. Both fields are optional and
+    # populated by customMainLoopSchedule when capture is enabled. None means
+    # the comparison rule is skipped (existing behavior preserved).
+    default_capture: object = None
+    cms_capture: object = None
 
     @property
     def swap_global_read_order(self) -> bool:
@@ -3419,6 +3425,17 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
             if error:
                 scheduleInfo.pretty_print()
                 return False, f"Code path {code_path}: {error}"
+
+    # Phase 6 of plans/then-let-s-work-on-jaunty-reddy.md: cross-scheduler
+    # comparison rule. Only fires when both default and CMS captures are
+    # present in the context (i.e. capture was enabled when this kernel was
+    # scheduled). Currently checks only data-movement totals; richer per-edge
+    # diff comes with Phase 7's dataflow graph.
+    if context.default_capture is not None and context.cms_capture is not None:
+        from Tensile.Components.ScheduleCapture import compare_captures
+        ok, msg = compare_captures(context.default_capture, context.cms_capture)
+        if not ok:
+            return False, f"Schedule capture comparison failed: {msg}"
 
     # All rules passed, considered valid.
     return True, ""

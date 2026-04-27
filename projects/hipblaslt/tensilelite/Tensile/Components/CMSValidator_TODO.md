@@ -77,6 +77,45 @@ schedule. Verify if/when that test is migrated to the real path.
 ## Investigate if build a full register chain is a good idea
 Instead of having diferent functions recreating a traversal fo the registers, build the chain onces, and then have the different functions simply walk the already build graph.
 
+## Schedule capture follow-ups (Phases 5, 7, 9 of plans/then-let-s-work-on-jaunty-reddy.md)
+
+The schedule capture infrastructure (Phases 1-4, 6, 8) lands the data
+structures, the macro walker for CMS-side capture, the SIA3 instrumentation
+and shadow driver for default-side `main_loop`, the `compare_captures` rule
+wired into `isValid`, and the OptNLL+CMS rejection. The following are
+explicitly deferred:
+
+- **Phase 5: Default-side `n_gl` and `n_ll` capture.** The shadow runs need
+  to live inside `KernelWriter.noLoadLoop` (after the pre-trimming logic at
+  lines 3352-3379) to capture the default scheduler's tail-loop bodies.
+  Currently `n_gl` and `n_ll` in `_last_default_capture` are empty
+  `LoopBodyCapture` instances. `compare_captures` skips empty bodies in the
+  per-body MFMA-count check.
+- **Phase 7: Per-edge dataflow comparison.** `build_dataflow_graph` is a
+  no-op skeleton. The cross-scheduler `compare_captures` currently checks
+  only the combined GR+LW data-movement total. Real semantic equivalence
+  needs per-register RAW-edge comparison. F32X-emulation kernels in
+  particular have `MFMA` instructions that the default scheduler tags into
+  pack-code submodules (`PackB1`/`LRA3`/etc.) while CMS tags as `MFMA`; the
+  cross-scheduler `num_mfma` count therefore differs and is currently NOT
+  checked by `compare_captures`.
+- **Phase 9 documentation gaps**:
+  - `SSetPrior` instructions have no CMS id_map equivalent and currently
+    fall through to `'UNKNOWN'` category in the default-side capture.
+  - DirectToLds=1 kernels share Instruction objects between
+    `self.codes.globalReadA/B` and `self.codes.localWriteA/B`; the
+    default-side identity-set classification uses first-tag-wins which
+    typically tags them `'GR'` or `'LW'` depending on traversal order.
+    `compare_captures` aggregates both into a single GR+LW total to
+    sidestep the difference.
+  - `_makeSubIterSchedule` shadow runs do not currently snapshot/restore
+    `vgprPool` because SIA3 doesn't check out vregs (line 1027's checkout
+    is in the SIA2 branch). If SIA3 is ever modified to check out vregs,
+    the shadow path needs `vgprPool` cloning too.
+  - OptNLL+CMS+GSU>1 kernels are explicitly rejected at the capture
+    dispatch site (`KernelWriter._loopBody:~4280`) rather than producing
+    a partial capture. Lifting this requires Phase 5+ first.
+
 ## NGL/NLL hard-coded to code-path 0 — `isValid` does not validate other codepaths' tail behavior
 
 `KernelWriter.py:2858-2866` (CMS branch of `noLoadLoopBody`) emits the NGL and NLL
