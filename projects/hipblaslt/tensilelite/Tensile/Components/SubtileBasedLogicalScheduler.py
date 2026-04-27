@@ -130,11 +130,11 @@ class SchedulerConfig:
     grSB: Optional[ReadGranularity] = None
     numPartitionsM: int = 1   # partition grid in M dimension
     numPartitionsN: int = 1   # partition grid in N dimension
-    pgr: int = 1              # Prefetch Global Read: 0 = current MT, 1 = next MT
+    pgr: int = 2              # Prefetch Global Read: 0 = current MT, 2 = next MT
     plr: int = 1              # Prefetch Local Read: 0 = current subIterK, 1 = next subIterK
 
     def __post_init__(self):
-        assert self.pgr in (0, 1), f"pgr must be 0 or 1, got {self.pgr}"
+        assert self.pgr in (0, 2), f"pgr must be 0 or 2, got {self.pgr}"
         assert self.plr in (0, 1), f"plr must be 0 or 1, got {self.plr}"
         if self.pgr == 0:
             assert self.plr == 0, "pgr=0 requires plr=0"

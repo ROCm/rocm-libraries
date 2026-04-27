@@ -1799,7 +1799,7 @@ def mainLoop(writer, kernel):
   grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
   grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
 
-  schedulerPgr = 1 if pgr == 2 else 0
+  schedulerPgr = pgr
   schedulerPlr = 0 if pgr == 0 else 1
 
   vgprBudget = writer.states.regCaps["MaxVgpr"]
