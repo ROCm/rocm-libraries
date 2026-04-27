@@ -39,24 +39,18 @@ rocsparse_status
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    using config
-        = rocprim::segmented_radix_sort_config<7,
-                                               rocprim::kernel_config<256, 16>,
-                                               rocprim::WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
-                                               1>;
-
     rocprim::double_buffer<K> rocprim_keys(nullptr, nullptr);
 
-    RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_keys<config>(nullptr,
-                                                                   *buffer_size,
-                                                                   rocprim_keys,
-                                                                   length,
-                                                                   segments,
-                                                                   (I*)nullptr,
-                                                                   (I*)nullptr,
-                                                                   startbit,
-                                                                   endbit,
-                                                                   handle->stream));
+    RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_keys(nullptr,
+                                                           *buffer_size,
+                                                           rocprim_keys,
+                                                           length,
+                                                           segments,
+                                                           (I*)nullptr,
+                                                           (I*)nullptr,
+                                                           startbit,
+                                                           endbit,
+                                                           handle->stream));
 
     return rocsparse_status_success;
 }
@@ -77,22 +71,16 @@ rocsparse_status rocsparse::primitives::segmented_radix_sort_keys(rocsparse_hand
 
     rocprim::double_buffer<K> rocprim_keys(keys.current(), keys.alternate());
 
-    using config
-        = rocprim::segmented_radix_sort_config<7,
-                                               rocprim::kernel_config<256, 16>,
-                                               rocprim::WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
-                                               1>;
-
-    RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_keys<config>(buffer,
-                                                                   buffer_size,
-                                                                   rocprim_keys,
-                                                                   length,
-                                                                   segments,
-                                                                   begin_offsets,
-                                                                   end_offsets,
-                                                                   startbit,
-                                                                   endbit,
-                                                                   handle->stream));
+    RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_keys(buffer,
+                                                           buffer_size,
+                                                           rocprim_keys,
+                                                           length,
+                                                           segments,
+                                                           begin_offsets,
+                                                           end_offsets,
+                                                           startbit,
+                                                           endbit,
+                                                           handle->stream));
     if(keys.current() != rocprim_keys.current())
     {
         keys.swap();
@@ -217,7 +205,7 @@ rocsparse_status rocsparse::primitives::sort_csr_column_indices(rocsparse_handle
             size_t           segments,                                              \
             uint32_t         startbit,                                              \
             uint32_t         endbit,                                                \
-            size_t * buffer_size);                                                  \
+            size_t*          buffer_size);                                                   \
     template rocsparse_status rocsparse::primitives::segmented_radix_sort_keys(     \
         rocsparse_handle      handle,                                               \
         double_buffer<KTYPE>& keys,                                                 \

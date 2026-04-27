@@ -39,25 +39,20 @@ rocsparse_status
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    using config
-        = rocprim::segmented_radix_sort_config<7,
-                                               rocprim::kernel_config<256, 16>,
-                                               rocprim::WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
-                                               1>;
     rocprim::double_buffer<K> rocprim_keys(nullptr, nullptr);
     rocprim::double_buffer<V> rocprim_values(nullptr, nullptr);
 
-    RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_pairs<config>(nullptr,
-                                                                    *buffer_size,
-                                                                    rocprim_keys,
-                                                                    rocprim_values,
-                                                                    length,
-                                                                    segments,
-                                                                    (I*)nullptr,
-                                                                    (I*)nullptr,
-                                                                    startbit,
-                                                                    endbit,
-                                                                    handle->stream));
+    RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_pairs(nullptr,
+                                                            *buffer_size,
+                                                            rocprim_keys,
+                                                            rocprim_values,
+                                                            length,
+                                                            segments,
+                                                            (I*)nullptr,
+                                                            (I*)nullptr,
+                                                            startbit,
+                                                            endbit,
+                                                            handle->stream));
     return rocsparse_status_success;
 }
 
@@ -79,23 +74,17 @@ rocsparse_status rocsparse::primitives::segmented_radix_sort_pairs(rocsparse_han
     rocprim::double_buffer<K> rocprim_keys(keys.current(), keys.alternate());
     rocprim::double_buffer<V> rocprim_values(values.current(), values.alternate());
 
-    using config
-        = rocprim::segmented_radix_sort_config<7,
-                                               rocprim::kernel_config<256, 16>,
-                                               rocprim::WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
-                                               1>;
-
-    RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_pairs<config>(buffer,
-                                                                    buffer_size,
-                                                                    rocprim_keys,
-                                                                    rocprim_values,
-                                                                    length,
-                                                                    segments,
-                                                                    begin_offsets,
-                                                                    end_offsets,
-                                                                    startbit,
-                                                                    endbit,
-                                                                    handle->stream));
+    RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_pairs(buffer,
+                                                            buffer_size,
+                                                            rocprim_keys,
+                                                            rocprim_values,
+                                                            length,
+                                                            segments,
+                                                            begin_offsets,
+                                                            end_offsets,
+                                                            startbit,
+                                                            endbit,
+                                                            handle->stream));
     if(keys.current() != rocprim_keys.current())
     {
         keys.swap();
@@ -116,7 +105,7 @@ rocsparse_status rocsparse::primitives::segmented_radix_sort_pairs(rocsparse_han
             size_t           segments,                                                      \
             uint32_t         startbit,                                                      \
             uint32_t         endbit,                                                        \
-            size_t * buffer_size);                                                          \
+            size_t*          buffer_size);                                                           \
     template rocsparse_status rocsparse::primitives::segmented_radix_sort_pairs(            \
         rocsparse_handle      handle,                                                       \
         double_buffer<KTYPE>& keys,                                                         \
