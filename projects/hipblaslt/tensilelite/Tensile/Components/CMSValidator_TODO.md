@@ -107,3 +107,80 @@ revealed:
      chains (LR→Pack→MFMA)
    - `set_pack_needed_by_from_mfma_operands` doesn't trace through
      intermediate packs (CVT0→MFMAPack→CVT1→MFMA)
+
+## Other issues encountered during the transition
+
+These are smaller items that came up while attempting the test transition.
+Listed here so they're not lost.
+
+### `subset_id_map` SYNC/SNOP for direct `isValid` calls
+
+`cms_validation_base.py`'s `validate()` would pass `syncCode`/`snopCode` to
+`subset_id_map`. But two test methods in `TestValidatePackTF32MFMA4x4x4MultipleTiles`
+(lines 1413, 1425 of `test_ValidatePack.py`) call `isValid` directly with mocks,
+bypassing `validate()`. When transitioned, the SYNC/SNOP handling needs to be
+threaded through manually at those call sites.
+
+### `_make_solution` ISA selection ambiguity
+
+`isa_infrastructure` now returns `isaInfoMap` containing both `IsaVersion(9,5,0)`
+and `IsaVersion(11,5,1)`. But `_make_solution` does `next(iter(isaInfoMap.keys()))`
+which picks whichever ISA the dict iterates first — not necessarily the one
+matching the kernel. For gfx1151 tests, this picks the wrong ISA.
+
+**Fix:** Have `_make_solution` accept an explicit ISA parameter, or pull `ISA`
+from the kernel config and look it up in `isaInfoMap`.
+
+### `@applies_only_once` partial state on error
+
+`hook_up_packs` is decorated with `@applies_only_once`. With the register-based
+path now primary, if `derive_pack_must_start_after` raises (e.g., missing
+`rocisa_inst`), the decorator may still mark the function as "applied",
+preventing retry. Verify error handling — the decorator should not record the
+function as applied if it raised.
+
+### Dual-path comparison no longer present
+
+When the primary path was wired (commit `23d8627a22`), the dual-path comparison
+block (`derive_pack_must_start_after` vs positional `_hook_up_packs_*`) was
+removed from `hook_up_packs`. We now have no way to detect subtle bugs in
+`derive_pack_must_start_after` — if it produces wrong dependencies, validation
+results are silently wrong.
+
+**Fix:** Re-add the comparison as a debug-only mode (e.g., gated by env var
+`CMS_VALIDATE_DUAL_PATH=1`) before deleting the positional functions.
+
+### `_set_pack_needed_by` is still positional code
+
+The current `hook_up_packs` uses `derive_pack_must_start_after` for
+`must_start_after`, but `_set_pack_needed_by` (which sets `needed_by`) is still
+the positional tile-math code. Deleting `_set_pack_needed_by` requires fixing
+Known Issue #5 first (`set_pack_needed_by_from_mfma_operands` doesn't trace
+through intermediate packs).
+
+### `_get_lrs_for_pack` still required
+
+The plan for stage 09 was to delete `_get_lrs_for_pack`, but it's still needed
+to tell `derive_pack_must_start_after` WHICH local reads to consider for a
+given pack (the function inspects pack source registers but needs to know the
+relevant LR scope). Either keep it or replace it with a register-based helper
+that walks the timeline.
+
+### `_frozen_config_key` cache key stability untested
+
+The lazy-caching approach for `cms_validation_base.py` uses
+`_frozen_config_key(config)` to key the cache. The implementation handles
+`IsaVersion` namedtuples specially via tuple conversion, but the JSON
+serialization with `sort_keys=True` hasn't been tested across all dict
+variations. Edge cases:
+- Nested dicts with non-deterministic key insertion order
+- `IsaVersion` inside list values (not just top-level)
+- Mock objects that don't serialize cleanly
+
+### `MIArchVgpr` test specifically affected
+
+`MIArchVgpr` is copied through `kernel_to_solution_config` but the test that
+exercises it (`test_schedule_128x128x32_TF32_MIArchVgpr`) calls `_make_context`.
+`MIArchVgpr` affects register allocation, so the real idMap may differ in
+subtle ways from what the test's hardcoded schedule expects. May need
+verification once the transition is attempted.
