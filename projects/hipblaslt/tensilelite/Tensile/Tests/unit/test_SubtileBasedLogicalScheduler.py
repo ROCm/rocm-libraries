@@ -844,10 +844,10 @@ class TestAnnotateDeps:
         assert ('LR', 'A', 3, 3, -1) in mfma_p0_s0
         assert len(mfma_p0_s0) == 4
 
-        # P3 MFMA(k=0): deps from earlier partitions
+        # P3 MFMA(k=0): deps on LRs that loaded subIterK=0 data for P3 tiles
         mfma_p3_s0 = _dep_refs(parts[3][0].mfma)
-        assert ('LR', 'A', 1, 2, 0) in mfma_p3_s0
-        assert ('LR', 'SA', 1, 0, 0) in mfma_p3_s0
+        assert ('LR', 'A', 0, 3, 0) in mfma_p3_s0
+        assert ('LR', 'SA', 0, 2, 0) in mfma_p3_s0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1552,17 +1552,30 @@ if __name__ == "__main__":
 
         sched = LogicalScheduler(cfg)
 
+        interactive = "--interactive" in sys.argv or "-i" in sys.argv
+
         steps = [
-            ("Place LRs", lambda: (sched.place_LRs(), sched.print_lr())),
-            ("Place GRs", lambda: (sched.place_GRs(), sched.print_gr())),
+            ("Place LRs",                     lambda: (sched.place_LRs(), sched.print_lr())),
+            ("Place GRs",                     lambda: (sched.place_GRs(), sched.print_gr())),
+            ("Annotate deps",                 lambda: (sched.annotate_deps(), sched.print_deps())),
+            ("Remove unnecessary GR deps",    lambda: (sched.remove_unnecessary_gr_deps(), sched.print_deps())),
+            ("Remove unnecessary LR deps",    lambda: (sched.remove_unnecessary_lr_deps(), sched.print_deps())),
+            ("Remove cross deps",             lambda: (sched.remove_cross_deps(), sched.print_remove_deps())),
+            ("Insert gr/lr inc",              lambda: (sched.insert_gr_lr_inc(), sched.print_group_lr_gr())),
+            ("Group LR/GR",                   lambda: (sched.group_lr_gr(), sched.print_group_lr_gr())),
+            ("Remove unnecessary wait_lr_sync", lambda: (sched.remove_unnecessary_wait_lr_sync(), sched.print_group_lr_gr())),
+            ("Emit",                          lambda: (sched.emit(), sched.print_emit())),
+            ("Emit (dependency order)",       lambda: (None, sched.print_emit_dep_order())),
         ]
 
-        for title, run in steps:
+        for i, (title, run) in enumerate(steps):
             _, output = run()
             print(f"{'=' * 60}")
             print(f"  {title}")
             print(f"{'=' * 60}")
             print(output)
+            if interactive and i < len(steps) - 1:
+                input("Press Enter for next step...")
 
         sys.exit(0)
 
@@ -1888,3 +1901,86 @@ class TestPlaceGRs_PGR0:
         assert "GR B (MT n," in output
         assert "MT n+1" not in output
         assert "MT n+2" not in output
+
+
+class TestAnnotateDeps_PGR0:
+
+    def _build(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.place_LRs()
+        sched.place_GRs()
+        sched.annotate_deps()
+        return cfg, sched
+
+    def test_no_crash(self):
+        self._build()
+
+    def test_gr_has_no_deps(self):
+        _, sched = self._build()
+        slots = sched._partitions[0]
+        for slot in slots:
+            for gr in slot.grs:
+                assert gr.deps == []
+
+    def test_mfma_deps_on_lr_mt0(self):
+        _, sched = self._build()
+        slots = sched._partitions[0]
+        for slot in slots:
+            if slot.mfma:
+                for dep in slot.mfma.deps:
+                    assert isinstance(dep.ref, LRPlacement)
+                    assert dep.ref.mtIteration == 0
+
+    def test_lr_deps_on_gr_mt0(self):
+        _, sched = self._build()
+        slots = sched._partitions[0]
+        for slot in slots:
+            for lr in slot.lrs:
+                for dep in lr.deps:
+                    assert isinstance(dep.ref, GRPlacement)
+                    assert dep.ref.mtIteration == 0
+
+
+class TestEmit_PGR0:
+
+    def test_emit_succeeds(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        assert sched._emitted is not None
+        assert len(sched._emitted) == 1
+        assert len(sched._emitted[0]) == cfg.numSubIterK
+
+    def test_no_gr_inc_lr_inc(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        for partition in sched._emitted:
+            for emitted in partition:
+                for em in emitted:
+                    assert em.opType not in ('gr_inc', 'lr_inc')
+
+
+class TestBuildLoopVariants_PGR0:
+
+    def test_preloop_empty(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        preloop = sched.build_preloop()
+        assert preloop == [[[]]]
+
+    def test_ngll_empty(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        ngll = sched.build_ngll()
+        assert ngll == [[[]]]
+
+    def test_nll_empty(self):
+        cfg = make_cfg_bf16_pgr0()
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        nll = sched.build_nll()
+        assert nll == [[[]]]

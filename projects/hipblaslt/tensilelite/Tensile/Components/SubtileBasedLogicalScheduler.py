@@ -1155,25 +1155,23 @@ class LogicalScheduler:
         def _mt_offset(consumer_partition, consumer_slot, consumer_type, producer, consumer=None):
             # MFMA→LR: MFMA always consumes mt=0 (current).
             if consumer_type == 'MFMA' and isinstance(producer, LRPlacement):
-                if producer.mtIteration > 0:
-                    return -producer.mtIteration
+                return -producer.mtIteration
             # LR→GR: mt difference determines how many iterations back.
             if consumer_type == 'LR' and isinstance(producer, GRPlacement) and consumer:
-                diff = producer.mtIteration - consumer.mtIteration
-                if diff != 0:
-                    return -diff
-            # Same effective mt: partition+slot ordering decides.
+                return consumer.mtIteration - producer.mtIteration
+            # Fallback: partition+slot ordering decides.
             return _slot_offset(consumer_partition, consumer_slot, consumer_type, producer)
 
         def _tiles_overlap(mfma, lr_tensor, lr_tiles):
             """Check if LR tile range overlaps with MFMA's tile range for that tensor."""
-            # SA/SB follow A/B tile ranges respectively
             if lr_tensor in ('A', 'SA'):
                 mfma_range = mfma.tileA
             else:
                 mfma_range = mfma.tileB
             return (lr_tiles.tileId_start < mfma_range.tileId_end and
-                    lr_tiles.tileId_end > mfma_range.tileId_start)
+                    lr_tiles.tileId_end > mfma_range.tileId_start and
+                    lr_tiles.subIterK_start < mfma_range.subIterK_end and
+                    lr_tiles.subIterK_end > mfma_range.subIterK_start)
 
         def _range_overlaps(a: MFMATileRange, b: MFMATileRange) -> bool:
             """Check if two tile ranges overlap on both tile ids and subIterK."""
@@ -1213,21 +1211,19 @@ class LogicalScheduler:
 
             # GR: depends on collision LR (LDS double-buffer)
             # GR(n+x) collides with LR(n+x-2) — same buffer, period 2.
-            # target_data = gr.mtIteration - 2. For each LR of same tensor,
-            # mt_offset = target_data - lr.mtIteration. Dedup keeps latest.
-            #   GR(2)→LR(0):  mt_offset = 0   (same iteration)
-            #   GR(2)→LR(1):  mt_offset = -1  (prev iter LR(1) handled n)
-            #   GR(1)→LR(0):  mt_offset = -1  (prev iter LR(0) handled n-1)
-            for gr in slot.grs:
-                target_data = gr.mtIteration - 2
-                for lr in lr_by_tensor.get(gr.tensor, []):
-                    if _range_overlaps(lr.tiles, gr.tiles):
-                        mt_off = target_data - lr.mtIteration
-                        gr.deps.append(Dep(ref=lr, mt_offset=mt_off))
-                if not gr.deps:
-                    raise ValueError(
-                        f"GR {gr.tensor} mt={fmt_mt(gr.mtIteration)} at slot {k} "
-                        f"has no overlapping LR(n) dependency")
+            # Only applies when PGR >= 1 (GR writes to a different buffer
+            # than the one LR is reading from). PGR=0 has no collision.
+            if cfg.pgr > 0:
+                for gr in slot.grs:
+                    target_data = gr.mtIteration - 2
+                    for lr in lr_by_tensor.get(gr.tensor, []):
+                        if _range_overlaps(lr.tiles, gr.tiles):
+                            mt_off = target_data - lr.mtIteration
+                            gr.deps.append(Dep(ref=lr, mt_offset=mt_off))
+                    if not gr.deps:
+                        raise ValueError(
+                            f"GR {gr.tensor} mt={fmt_mt(gr.mtIteration)} at slot {k} "
+                            f"has no overlapping LR(n) dependency")
 
         for slot in slots:
             for lr in slot.lrs:
@@ -1845,6 +1841,10 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.EMIT)
 
+        if self.config.pgr == 0:
+            self._ngll_emitted = [[[]]]
+            return self._ngll_emitted
+
         ngll = []
         for partition_emitted in self._emitted:
             part_ngll = []
@@ -1870,6 +1870,10 @@ class LogicalScheduler:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
         WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n) with zeroed counts."""
         self._ensure_pass(Pass.EMIT)
+
+        if self.config.pgr == 0:
+            self._nll_emitted = [[[]]]
+            return self._nll_emitted
 
         nll = []
         for partition_emitted in self._emitted:
@@ -1955,6 +1959,8 @@ class LogicalScheduler:
     def build_preloop(self) -> List[List[List[EmittedModule]]]:
         """Build preloop: pipeline initialization sequence before mainloop.
 
+        PGR=0: no preloop (mainloop only).
+
         High-level sequence (waits/syncs auto-inserted by _insert_preloop_waits):
           GR(MT 0)  — all tensors, all tiles
           GR_INC
@@ -1967,6 +1973,10 @@ class LogicalScheduler:
 
         Returns [1 partition][1 subIterK][EmittedModules] to match emit() shape.
         """
+        if self.config.pgr == 0:
+            self._preloop_emitted = [[[]]]
+            return self._preloop_emitted
+
         cfg = self.config
         numK = cfg.numSubIterK
         part0 = self._partition_tile_range(0)
