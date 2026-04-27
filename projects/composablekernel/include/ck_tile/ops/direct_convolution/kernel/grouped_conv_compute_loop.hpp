@@ -69,9 +69,6 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     if(bc.block_n >= N)
         return;
 
-    InputLoaderT il(bc, input_lds, in, hi, wi, px);
-    OutputWriterT ow(bc, output_lds, out, ho, wo);
-
     // --- Weight loading (uses start of buffer, before input phase) ---
     fp16x4_t weights_reg[cfg.kh * cfg.kw];
     WeightLoaderT::load_to_lds(bc, lds_buf, wei);
@@ -79,12 +76,14 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     __syncthreads();
 
     WeightLoaderT::read_from_lds(weights_reg, lds_buf);
+
+    InputLoaderT il(bc, input_lds, in, hi, wi, px);
+    OutputWriterT ow(bc, output_lds, out, ho, wo);
+
     __syncthreads();
 
     // --- Prefetch first input row ---
     il.prefetch_tile_to_lds(0);
-    wait_vmcnt<0>();
-    __syncthreads();
 
     // --- Circular accumulator buffer ---
     constexpr auto Zero = fp32x4_t{0.f, 0.f, 0.f, 0.f};
@@ -165,14 +164,14 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                 tic ^= 1;
                 toc ^= 1;
 
-                // Flush completed output row to global memory. 
-                // After processing input row y = y_base + Y_LOCAL, 
-                // the output row p_out = y - (kh-1) + py  (py is padding in y-direction) has received contributions from all R values 
-                // (since the earliest contributor to p_out was input row p_out - py, processed kh-1 steps ago). 
+                // Flush completed output row to global memory.
+                // After processing input row y = y_base + Y_LOCAL,
+                // the output row p_out = y - (kh-1) + py  (py is padding in y-direction) has received contributions from all R values
+                // (since the earliest contributor to p_out was input row p_out - py, processed kh-1 steps ago).
                 // That slot is done and can be flushed to global memory.
-                // The slot index is a compile-time const that is computed from the accumulator index definition 
+                // The slot index is a compile-time const that is computed from the accumulator index definition
                 // p_idx = (y_local - R + kh) % kh, with R = kh-1 (the last contributor to p_out).
-                constexpr int P_IDX_FLUSH = (Y_LOCAL + 1) % cfg.kh; 
+                constexpr int P_IDX_FLUSH = (Y_LOCAL + 1) % cfg.kh;
                 int p_out             = y + py - (cfg.kh - 1);
                 if(p_out >= 0 && p_out < ho)
                     ow.flush(acc[P_IDX_FLUSH], p_out);
