@@ -1084,3 +1084,123 @@ class TestLRNeededByMFMA:
                 for lr_idx in range(len(expected_indices))
             ]
             assert actual_indices == expected_indices, f"{lr_name}: expected {expected_indices}, got {actual_indices}"
+
+
+class TestLRAfterMFMA(CMSValidationTestBase):
+    """
+    Negative regression tests: LR is positioned or guaranteed after the MFMA that
+    consumes its data. Covers LR0 and LR1 in the default kernel; LR3 lives in
+    TestLRAfterMFMA_LR3 below.
+
+    Two shapes per LR type:
+      A: LR placed at a high vmfma_index. The only SWaitCnt that can cover it
+         comes from the next loop iteration (cross-iter wraparound) and falls
+         after the consumer MFMA.
+      B: LR placed at a low vmfma_index, but the SWaitCnt that covers it sits
+         in the same iteration after the consumer MFMA.
+
+    Both shapes fire LocalRead.validate() at CMSValidator.py:356 ("issued too late").
+    """
+    validator_passes = [add_local_read_constraints]
+
+    def test_LR0_A_positionally_late(self):
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[3]],
+            "LRA0": [[0, 6]],
+            "LRB0": [[0, 0]],
+        }
+        syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
+        self.validate(
+            optSchedule, syncCode, 1, None, None, 0,
+            "LRA0 @ idx=6 issued too late, must be guaranteed before MFMA @ idx=5 but only guaranteed @ idx=3."
+        )
+
+    def test_LR0_B_waitcnt_after_consumer(self):
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[6]],
+            "LRA0": [[0, 0]],
+            "LRB0": [[0, 0]],
+        }
+        syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
+        self.validate(
+            optSchedule, syncCode, 1, None, None, 0,
+            "LRA0 @ idx=0 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=6."
+        )
+
+    def test_LR0_baseline_passing(self):
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[3]],
+            "LRA0": [[0, 0]],
+            "LRB0": [[0, 0]],
+        }
+        syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+
+    def test_LR1_A_positionally_late(self):
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[3]],
+            "LRA0": [[0, 0]],
+            "LRB0": [[0, 0]],
+            "LRA1": [[7, 7]],
+        }
+        syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
+        self.validate(
+            optSchedule, syncCode, 1, None, None, 0,
+            "LRA1 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
+        )
+
+    def test_LR1_B_waitcnt_after_consumer(self):
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[1]],
+            "LRA0": [[0, 0]],
+            "LRB0": [[0, 0]],
+            "LRA1": [[4, 4]],
+        }
+        syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
+        self.validate(
+            optSchedule, syncCode, 1, None, None, 0,
+            "LRA1 @ idx=4 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=1."
+        )
+
+
+class TestLRAfterMFMA_LR3(CMSValidationTestBase):
+    """LR3 variant of TestLRAfterMFMA. Requires ForceUnrollSubIter kernel setup."""
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"ForceUnrollSubIter": True, "MIWaveTileA": 4, "MIWaveTileB": 4, "DepthU": 32})
+        super().setup_method(method, kernel_updates=kernel_updates)
+
+    validator_passes = [add_local_read_constraints]
+
+    def test_LR3_A_positionally_late(self):
+        assert self.num_vmfma == 16
+        optSchedule = {
+            "SYNC": [[3]],
+            "LRA0": [[0, 0]],
+            "LRB0": [[0, 0]],
+            "LRA3": [[15, 15]],
+        }
+        syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
+        self.validate(
+            optSchedule, syncCode, 1, None, None, 0,
+            "LRA3 @ idx=15 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
+        )
+
+    def test_LR3_B_waitcnt_after_consumer(self):
+        assert self.num_vmfma == 16
+        optSchedule = {
+            "SYNC": [[3]],
+            "LRA0": [[0, 0]],
+            "LRB0": [[0, 0]],
+            "LRA3": [[7, 7]],
+        }
+        syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
+        self.validate(
+            optSchedule, syncCode, 1, None, None, 0,
+            "LRA3 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
+        )

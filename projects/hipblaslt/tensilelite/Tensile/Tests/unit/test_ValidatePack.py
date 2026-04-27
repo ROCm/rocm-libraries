@@ -1792,3 +1792,371 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
+
+
+class TestLRAfterPack(CMSValidationTestBase):
+    """
+    Negative regression tests: LR is positioned or guaranteed after a Pack that
+    consumes its register data. The Pack reads stale data and the validator must
+    flag it.
+
+    Two shapes per LR type:
+      A: LR placed at an idx > Pack's idx. Pack reads from registers before the LR
+         (positionally) writes them.
+      B: LR placed at an idx < Pack's idx, but the SWaitCnt that covers the LR
+         sits AFTER the Pack. Pack issues before LR is guaranteed done.
+
+    Both shapes fire Pack.validate() at CMSValidator.py:400 ("issued too early"),
+    via Pack.must_start_after derived by derive_pack_must_start_after.
+
+    LR1 covered here in default-kernel class; LR3 in TestLRAfterPack_LR3.
+    """
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
+
+    def test_LR0_A_LR_after_Pack(self):
+        """LRA0 placed at idx=1, after PackA0[0] @ idx=0. SWaitCnt @ idx=2 covers LRs.
+        Pack must come after LR.guaranteed_by=2; Pack at 0 fires "issued too early"."""
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[2, 7]],
+            "LRA0": [[1, 1, 1, 1, 1, 1, 1, 1]],
+            "LRB0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "PackA0": [[0, 3, 3, 3, 3, 3, 3, 3]],
+            "PackB0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "LRA1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "LRB1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "PackA1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+            "PackB1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
+        ]
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "PackA0 @ idx=0 issued too early, must be issued after idx=2 (because of LRA0 issued @ idx=1)."
+        )
+
+    def test_LR0_B_waitcnt_after_Pack(self):
+        """LRA0 at idx=0, PackA0[0] @ idx=2. SWaitCnt @ idx=3 sits AFTER PackA0[0].
+        LR.guaranteed_by=3 > Pack.issued_at=2 -> "issued too early"."""
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[3, 7]],
+            "LRA0": [[0, 0, 0, 0, 1, 1, 1, 1]],
+            "LRB0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "PackA0": [[2, 3, 3, 3, 3, 3, 3, 3]],
+            "PackB0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "LRA1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "LRB1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "PackA1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+            "PackB1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
+        ]
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "PackA0 @ idx=2 issued too early, must be issued after idx=3 (because of LRA0 issued @ idx=0)."
+        )
+
+    def test_LR0_baseline_passing(self):
+        """Same skeleton as variant B with PackA0[0] moved to a valid position."""
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[3, 7]],
+            "LRA0": [[0, 0, 0, 0, 1, 1, 1, 1]],
+            "LRB0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "PackA0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "PackB0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "LRA1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "LRB1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "PackA1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+            "PackB1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
+        ]
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+
+
+class TestLRAfterPack_LR1(CMSValidationTestBase):
+    """LR1 variant of TestLRAfterPack. Requires UsePLRPack=True so PackA1 can sit
+    inside the main loop (vs the standard pre-loop placement at idx=-1)."""
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"UsePLRPack": True})
+        super().setup_method(method, kernel_updates=kernel_updates)
+
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
+
+    def test_LR1_A_LR_after_Pack(self):
+        """LRA1 at idx=5, PackA1[0] @ idx=4. SWaitCnt for LR1 at idx=6 covers LRA1.
+        Pack must come after LR.guaranteed_by=6; Pack at 4 fires "issued too early"."""
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[3, 6]],
+            "LRA0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "LRB0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "PackA0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "PackB0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "LRA1": [[5, 5, 5, 5, 5, 5, 5, 5]],
+            "LRB1": [[5, 5, 5, 5, 5, 5, 5, 5]],
+            "PackA1": [[4, 6, 6, 6, 6, 6, 6, 6]],
+            "PackB1": [[6, 6, 6, 6, 6, 6, 6, 6]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
+        ]
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "PackA1 @ idx=4 issued too early, must be issued after idx=6 (because of LRA1 issued @ idx=5)."
+        )
+
+    def test_LR1_B_waitcnt_after_Pack(self):
+        """LRA1 at idx=4, PackA1[0] @ idx=5. SWaitCnt for LR1 at idx=6 sits AFTER
+        PackA1[0]. LR.guaranteed_by=6 > Pack.issued_at=5 -> "issued too early"."""
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[3, 6]],
+            "LRA0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "LRB0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "PackA0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "PackB0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "LRA1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "LRB1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "PackA1": [[5, 6, 6, 6, 6, 6, 6, 6]],
+            "PackB1": [[6, 6, 6, 6, 6, 6, 6, 6]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
+        ]
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "PackA1 @ idx=5 issued too early, must be issued after idx=6 (because of LRA1 issued @ idx=4)."
+        )
+
+
+class TestLRAfterPack_LR3(CMSValidationTestBase):
+    """LR3 variant of TestLRAfterPack. Uses TF32 + ForceUnrollSubIter + PLR + Direct32X
+    setup, which is the only mode that places PackA3/PackB3 inside the main loop with
+    a valid needed_by mapping. BF16 + ForceUnrollSubIter does not support Pack3 — its
+    needed_by computation looks up MFMAs in iterations the validator does not simulate
+    (KeyError on `mfma_for_linear_index`). Schedule shape mirrors
+    TestValidatePackTF32::test_passing (CMSValidator tests for TF32 packs)."""
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({
+            "UsePLRPack": True, "UseF32XEmulation": True, "ForceUnrollSubIter": True,
+            "UseDirect32XEmulation": True, "DepthU": 32,
+        })
+        super().setup_method(method, kernel_updates=kernel_updates)
+        self.q1s = 0
+        self.q1e = self.num_vmfma // 4 - 1
+        self.q2s = self.q1e + 1
+        self.q2e = self.num_vmfma // 2 - 1
+        self.q3s = self.q2e + 1
+        self.q3e = self.num_vmfma // 4 * 3 - 1
+        self.q4s = self.q3e + 1
+        self.q4e = self.num_vmfma - 1
+
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
+
+    def _base_schedule(self):
+        """Quarter-aligned valid skeleton; tests mutate one PackA3 / LRA3 entry."""
+        return {
+            "SYNC": [[self.q1s + 1, self.q2s + 1, self.q3s + 1, self.q4s + 1]],
+            "LRA0": [[self.q1s] * 2],
+            "PackA0": [[self.q1e] * 24],
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [[self.q2e] * 24],
+            "LRB3": [[self.q3s] * 2],
+            "PackB3": [[self.q3e] * 24],
+            "LRA3": [[self.q4s] * 2],
+            "PackA3": [[self.q4e] * 24],
+        }
+
+    def _sync_code(self):
+        return [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s"),
+        ]
+
+    def test_LR3_baseline_passing(self):
+        """Sanity: the base skeleton validates."""
+        self.validate(self._base_schedule(), self._sync_code(), 1, 2, 2, 0, None)
+
+    def test_LR3_A_LR_after_Pack(self):
+        """Move LRA3 AFTER PackA3[0]: PackA3[0] at q4s, LRA3 at q4s+1.
+        SWaitCnt for LRA3s sits at q4s+1 covering LR; PackA3[0] reads stale regs."""
+        opt = self._base_schedule()
+        opt["PackA3"] = [[self.q4s] + [self.q4e] * 23]
+        opt["LRA3"] = [[self.q4s + 1] * 2]
+        opt["SYNC"] = [[self.q1s + 1, self.q2s + 1, self.q3s + 1, self.q4s + 2]]
+        self.validate(
+            opt, self._sync_code(), 1, 2, 2, 0,
+            f"PackA3 @ idx={self.q4s} issued too early, must be issued after idx={self.q4s + 2} (because of LRA3 issued @ idx={self.q4s + 1})."
+        )
+
+    def test_LR3_B_waitcnt_after_Pack(self):
+        """Keep LRA3 at q4s; move PackA3[0] to q4s and the LRA3 SWaitCnt to q4s+1
+        (after the Pack). Pack issues before LR is guaranteed done."""
+        opt = self._base_schedule()
+        opt["PackA3"] = [[self.q4s] + [self.q4e] * 23]
+        opt["SYNC"] = [[self.q1s + 1, self.q2s + 1, self.q3s + 1, self.q4s + 1]]
+        self.validate(
+            opt, self._sync_code(), 1, 2, 2, 0,
+            f"PackA3 @ idx={self.q4s} issued too early, must be issued after idx={self.q4s + 1} (because of LRA3 issued @ idx={self.q4s})."
+        )
+
+
+class TestPackAfterMFMA(CMSValidationTestBase):
+    """
+    Negative regression tests: Pack is issued at or after the MFMA that consumes
+    its result. Fires Pack.validate() at CMSValidator.py:405 ("issued too late").
+
+    Single variant per LR type — Pack has no `guaranteed_by`, so the only way to
+    push it past its consumer is to move its `issued_at`.
+    """
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
+
+    def test_LR0_Pack_after_MFMA(self):
+        """PackA0[0] @ idx=5, AFTER consumer MFMA @ idx=4."""
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[2, 7]],
+            "LRA0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "LRB0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "PackA0": [[5, 3, 3, 3, 3, 3, 3, 3]],
+            "PackB0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "LRA1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "LRB1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "PackA1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+            "PackB1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
+        ]
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "PackA0 @ idx=5 issued too late, must be issued before MFMA @ idx=4."
+        )
+
+    def test_LR0_baseline_passing(self):
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[2, 7]],
+            "LRA0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "LRB0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "PackA0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "PackB0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "LRA1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "LRB1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "PackA1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+            "PackB1": [[-1, -1, -1, -1, -1, -1, -1, -1]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
+        ]
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+
+
+class TestPackAfterMFMA_LR1(CMSValidationTestBase):
+    """LR1 / PackA1 variant. Requires UsePLRPack so PackA1 can sit inside the loop."""
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"UsePLRPack": True})
+        super().setup_method(method, kernel_updates=kernel_updates)
+
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
+
+    def test_LR1_Pack_after_MFMA(self):
+        """PackA1[0] @ idx=1 of next iter (loop semantics), but cleanly: place
+        PackA1[0] at idx=7 (last vmfma of current iter). Wait — PackA1's consumer is
+        next iter's first MFMA. Within one-iter view, valid PackA1 idx is 0..7.
+
+        To fire "issued too late", PackA1 must be at idx >= consumer MFMA's idx.
+        Consumer is MFMA[0] of NEXT iter, so any idx in current iter is "before"
+        from the validator's loop-aware perspective. Need different approach.
+
+        Use Pack0 path instead: PackA0[0] needed by MFMA@4. Place PackA0 too late
+        in PLR mode to confirm the check still fires under PLR."""
+        assert self.num_vmfma == 8
+        optSchedule = {
+            "SYNC": [[2, 5]],
+            "LRA0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "LRB0": [[0, 0, 0, 0, 0, 0, 0, 0]],
+            "PackA0": [[5, 3, 3, 3, 3, 3, 3, 3]],
+            "PackB0": [[3, 3, 3, 3, 3, 3, 3, 3]],
+            "LRA1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "LRB1": [[4, 4, 4, 4, 4, 4, 4, 4]],
+            "PackA1": [[6, 6, 6, 6, 6, 6, 6, 6]],
+            "PackB1": [[6, 6, 6, 6, 6, 6, 6, 6]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
+        ]
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "PackA0 @ idx=5 issued too late, must be issued before MFMA @ idx=4."
+        )
+
+
+class TestPackAfterMFMA_LR3(CMSValidationTestBase):
+    """LR3 / PackA3 variant. Same TF32 setup as TestLRAfterPack_LR3."""
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({
+            "UsePLRPack": True, "UseF32XEmulation": True, "ForceUnrollSubIter": True,
+            "UseDirect32XEmulation": True, "DepthU": 32,
+        })
+        super().setup_method(method, kernel_updates=kernel_updates)
+        self.q1s = 0
+        self.q1e = self.num_vmfma // 4 - 1
+        self.q2s = self.q1e + 1
+        self.q2e = self.num_vmfma // 2 - 1
+        self.q3s = self.q2e + 1
+        self.q3e = self.num_vmfma // 4 * 3 - 1
+        self.q4s = self.q3e + 1
+        self.q4e = self.num_vmfma - 1
+
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
+
+    def test_LR3_Pack0_after_MFMA(self):
+        """In LR3 (TF32 + ForceUnrollSubIter + PLR) mode, push PackA0[0] past its
+        consumer MFMA. Pack3 itself can't be tested here: PackA3's needed_by lives
+        in the next iteration (offset by num_vmfma) and the schedule only addresses
+        the current iteration. Exercising the Pack-too-late check on PackA0 still
+        confirms it fires correctly under the TF32+LR3 kernel config."""
+        opt = {
+            "SYNC": [[self.q1s + 1, self.q2s + 1, self.q3s + 1, self.q4s + 1]],
+            "LRA0": [[self.q1s] * 2],
+            # All PackA0 pushed to q2e — pushing only [0] would create a WAR
+            # dependency from PackA0[1] to PackA0[0] that fires "too early" first.
+            "PackA0": [[self.q2e] * 24],
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [[self.q2e] * 24],
+            "LRB3": [[self.q3s] * 2],
+            "PackB3": [[self.q3e] * 24],
+            "LRA3": [[self.q4s] * 2],
+            "PackA3": [[self.q4e] * 24],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s"),
+        ]
+        self.validate(
+            opt, syncCode, 1, 2, 2, 0,
+            f"PackA0 @ idx={self.q2e} issued too late, must be issued before MFMA @ idx={self.q2s}."
+        )
