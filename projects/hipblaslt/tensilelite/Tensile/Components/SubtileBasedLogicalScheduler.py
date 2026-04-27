@@ -1539,6 +1539,12 @@ class LogicalScheduler:
           a single dep on the last LR of the phase-1 chain.  Each GR keeps its
           own preOps; only redundant wait_lr_sync ops are removed (keep the
           first occurrence only).
+
+        Phase 3 — Cross-group merge:
+          If any LR has a dep on a GR in the same slot, merge the two chains
+          into one: GR chain → LR chain (first LR points to last GR, LR's
+          original GR dep is removed).  This avoids two nodes sharing the
+          same parent.
         """
         self._ensure_pass(Pass.GR_INC)
 
@@ -1602,6 +1608,24 @@ class LogicalScheduler:
                     if ordered_grs[0].deps and last_lr is not None:
                         ordered_grs[0].deps = [
                             Dep(ref=last_lr, mt_offset=0)]
+
+                # ── Phase 3: Cross-group merge ──
+                # If any LR depends on a GR in this slot, merge into one
+                # chain: GR_group → LR_group to avoid shared parents.
+                if ordered_grs and ordered_lrs:
+                    slot_gr_set = set(id(gr) for gr in ordered_grs)
+                    lr_has_gr_dep = any(
+                        any(id(d.ref) in slot_gr_set for d in lr.deps)
+                        for lr in ordered_lrs if lr.deps)
+                    if lr_has_gr_dep:
+                        last_gr = ordered_grs[-1]
+                        # Clear LR deps that point to GRs in this slot
+                        for lr in ordered_lrs:
+                            lr.deps = [d for d in lr.deps
+                                       if id(d.ref) not in slot_gr_set]
+                        # First LR points to last GR
+                        ordered_lrs[0].deps = [
+                            Dep(ref=last_gr, mt_offset=0)]
 
         self._completed.add(Pass.GROUP_LR_GR)
 
