@@ -46,6 +46,11 @@ class GPU_AsymPooling2d_NHWC_FP16 : public testing::TestWithParam<std::vector<st
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
+class GPU_AsymPooling2d_NHWC_BFP16 : public testing::TestWithParam<std::vector<std::string>>
+{
+    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
+};
+
 void GetArgs(const std::string& param, std::vector<std::string>& tokens)
 {
     std::stringstream ss(param);
@@ -63,14 +68,14 @@ void Run2dDriver(miopenDataType_t prec)
     {
     case miopenFloat: params = GPU_AsymPooling2d_NHWC_FP32::GetParam(); break;
     case miopenHalf: params = GPU_AsymPooling2d_NHWC_FP16::GetParam(); break;
-    case miopenBFloat16:
+    case miopenBFloat16: params = GPU_AsymPooling2d_NHWC_BFP16::GetParam(); break;
     case miopenInt8:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt32:
     case miopenInt64:
     case miopenDouble:
-        FAIL() << "miopenBFloat16, miopenInt8, miopenInt32, miopenDouble, miopenFloat8_fnuz, "
+        FAIL() << "miopenInt8, miopenInt32, miopenDouble, miopenFloat8_fnuz, "
                   "miopenBFloat8_fnuz "
                   "data type not supported by "
                   "pooling2d_asymmetric_nhwc test";
@@ -101,13 +106,14 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 {
     const auto& flag_arg = env::value(MIOPEN_TEST_FLAGS_ARGS);
 
-    const std::vector<std::string> test_cases = {
+    return std::vector<std::string>{
         // clang-format off
-    {"test_pooling2d " + precision + " --all --dataset 1 --limit 0 --in_layout NHWC --out_layout NHWC " + flag_arg}
+        // Forward pooling with NHWC layout (batched transpose)
+        {"test_pooling2d " + precision + " --all --dataset 1 --limit 0 --in_layout NHWC --out_layout NHWC " + flag_arg},
+        // Backward pooling with NHWC layout (batched transpose)
+        {"test_pooling2d " + precision + " --forw 0 --in_layout NHWC --out_layout NHWC " + flag_arg}
         // clang-format on
     };
-
-    return test_cases;
 }
 
 } // namespace pooling2d_asymmetric_nhwc
@@ -137,6 +143,18 @@ TEST_P(GPU_AsymPooling2d_NHWC_FP16, HalfTest_pooling2d_asymmetric_nhwc)
     }
 };
 
+TEST_P(GPU_AsymPooling2d_NHWC_BFP16, BFloat16Test_pooling2d_asymmetric_nhwc)
+{
+    if(IsTestSupportedForDevice())
+    {
+        Run2dDriver(miopenBFloat16);
+    }
+    else
+    {
+        GTEST_SKIP();
+    }
+};
+
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AsymPooling2d_NHWC_FP32,
                          testing::Values(GetTestCases("--float")));
@@ -144,3 +162,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AsymPooling2d_NHWC_FP16,
                          testing::Values(GetTestCases("--half")));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_AsymPooling2d_NHWC_BFP16,
+                         testing::Values(GetTestCases("--bfloat16")));

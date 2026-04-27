@@ -2,13 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -16,14 +13,19 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 #include "GoldenReferenceCpu.hpp"
+#endif
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::types;
+using hipdnn_test_sdk::detail::safeTestTypeCast;
 
-namespace fs = std::filesystem;
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 template <class T>
 class TestCpuBatchnormFwdInferenceGoldenReference : public TestGoldenReferenceCpu
@@ -47,7 +49,7 @@ class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16
 };
 
 class TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16
-    : public TestCpuBatchnormFwdInferenceGoldenReference<hip_bfloat16>
+    : public TestCpuBatchnormFwdInferenceGoldenReference<bfloat16>
 {
 };
 
@@ -96,6 +98,8 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32,
                          getGoldenReferenceParams("BatchnormFwdInference/ncdhw/fp32"));
 
+#endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+
 //--------------------------
 
 template <typename T1, typename T2>
@@ -107,11 +111,11 @@ struct TypePair
 
 using TypesFwdInferenceNchw = ::testing::Types<TypePair<float, float>,
                                                TypePair<half, float>,
-                                               TypePair<hip_bfloat16, float>,
+                                               TypePair<bfloat16, float>,
                                                TypePair<double, double>,
                                                TypePair<int8_t, float>,
-                                               TypePair<hip_fp8_e4m3, float>,
-                                               TypePair<hip_fp8_e5m2, float>>;
+                                               TypePair<fp8_e4m3, float>,
+                                               TypePair<fp8_e5m2, float>>;
 
 template <class T>
 class CpuFpReferenceBatchnormFwdInferenceNchw : public ::testing::Test
@@ -122,19 +126,18 @@ TYPED_TEST_SUITE(CpuFpReferenceBatchnormFwdInferenceNchw, TypesFwdInferenceNchw,
 
 TYPED_TEST(CpuFpReferenceBatchnormFwdInferenceNchw, BatchnormFwdInferenceNchw)
 {
-    Tensor<typename TypeParam::First> inputTensor({1, 3, 224, 224});
+    const Tensor<typename TypeParam::First> inputTensor({1, 3, 224, 224});
     Tensor<typename TypeParam::First> outputTensor({1, 3, 224, 224});
-    Tensor<typename TypeParam::Second> biasTensor({1, 3});
-    Tensor<typename TypeParam::Second> scaleTensor({1, 3});
-    Tensor<typename TypeParam::Second> meanTensor({1, 3});
-    Tensor<typename TypeParam::Second> varianceTensor({1, 3});
+    const Tensor<typename TypeParam::Second> biasTensor({1, 3});
+    const Tensor<typename TypeParam::Second> scaleTensor({1, 3});
+    const Tensor<typename TypeParam::Second> meanTensor({1, 3});
+    const Tensor<typename TypeParam::Second> varianceTensor({1, 3});
 
     CpuFpReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-using TypesFwdInferenceNhwc
-    = ::testing::Types<TypePair<float, float>, TypePair<half, hip_bfloat16>>;
+using TypesFwdInferenceNhwc = ::testing::Types<TypePair<float, float>, TypePair<half, bfloat16>>;
 
 template <class T>
 class CpuFpReferenceBatchnormFwdInferenceNhwc : public ::testing::Test
@@ -145,12 +148,12 @@ TYPED_TEST_SUITE(CpuFpReferenceBatchnormFwdInferenceNhwc, TypesFwdInferenceNhwc,
 
 TYPED_TEST(CpuFpReferenceBatchnormFwdInferenceNhwc, BatchnormFwdInferenceNhwc)
 {
-    Tensor<typename TypeParam::First> inputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
+    const Tensor<typename TypeParam::First> inputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
     Tensor<typename TypeParam::First> outputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
-    Tensor<typename TypeParam::Second> biasTensor({1, 3});
-    Tensor<typename TypeParam::Second> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> varianceTensor({1, 3});
+    const Tensor<typename TypeParam::Second> biasTensor({1, 3});
+    const Tensor<typename TypeParam::Second> scaleTensor({1, 3});
+    const Tensor<float> meanTensor({1, 3});
+    const Tensor<float> varianceTensor({1, 3});
 
     CpuFpReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
@@ -301,12 +304,12 @@ struct TypeTriplet
 };
 
 using TypesBackwardNchw = ::testing::Types<TypeTriplet<float, float, float>,
-                                           TypeTriplet<hip_bfloat16, float, float>,
+                                           TypeTriplet<bfloat16, float, float>,
                                            TypeTriplet<half, float, float>,
                                            TypeTriplet<int8_t, float, float>,
-                                           TypeTriplet<hip_fp8_e4m3, float, float>,
-                                           TypeTriplet<hip_fp8_e5m2, float, float>,
-                                           TypeTriplet<half, hip_bfloat16, float>,
+                                           TypeTriplet<fp8_e4m3, float, float>,
+                                           TypeTriplet<fp8_e5m2, float, float>,
+                                           TypeTriplet<half, bfloat16, float>,
                                            TypeTriplet<double, double, double>>;
 
 template <typename T>
@@ -318,12 +321,12 @@ TYPED_TEST_SUITE(CpuFpReferenceBatchnormBackwardNchw, TypesBackwardNchw, );
 
 TYPED_TEST(CpuFpReferenceBatchnormBackwardNchw, BatchnormBackwardNchw)
 {
-    Tensor<typename TypeParam::First> xTensor({6, 3, 32, 32});
-    Tensor<typename TypeParam::First> dyTensor({6, 3, 32, 32});
+    const Tensor<typename TypeParam::First> xTensor({6, 3, 32, 32});
+    const Tensor<typename TypeParam::First> dyTensor({6, 3, 32, 32});
     Tensor<typename TypeParam::First> dxTensor({6, 3, 32, 32});
-    Tensor<typename TypeParam::Second> scaleTensor({1, 3});
-    Tensor<typename TypeParam::Third> meanTensor({1, 3});
-    Tensor<typename TypeParam::Third> invVarianceTensor({1, 3});
+    const Tensor<typename TypeParam::Second> scaleTensor({1, 3});
+    const Tensor<typename TypeParam::Third> meanTensor({1, 3});
+    const Tensor<typename TypeParam::Third> invVarianceTensor({1, 3});
     Tensor<typename TypeParam::Second> dscaleTensor({1, 3});
     Tensor<typename TypeParam::Second> dbiasTensor({1, 3});
 
@@ -339,12 +342,12 @@ TYPED_TEST(CpuFpReferenceBatchnormBackwardNchw, BatchnormBackwardNchw)
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNhwc)
 {
-    Tensor<float> xTensor({6, 3, 32, 32}, TensorLayout::NHWC);
-    Tensor<float> dyTensor({6, 3, 32, 32}, TensorLayout::NHWC);
+    const Tensor<float> xTensor({6, 3, 32, 32}, TensorLayout::NHWC);
+    const Tensor<float> dyTensor({6, 3, 32, 32}, TensorLayout::NHWC);
     Tensor<float> dxTensor({6, 3, 32, 32});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> invVarianceTensor({1, 3});
+    const Tensor<float> scaleTensor({1, 3});
+    const Tensor<float> meanTensor({1, 3});
+    const Tensor<float> invVarianceTensor({1, 3});
     Tensor<float> dscaleTensor({1, 3});
     Tensor<float> dbiasTensor({1, 3});
 
@@ -760,7 +763,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsLargeEps
     dyTensor.setHostValue(0.5f, 0, 0, 0, 0);
     scaleTensor.setHostValue(1.0f, 0, 0);
 
-    double largeEpsilon = 1.0;
+    const double largeEpsilon = 1.0;
 
     // Computed statistics with large epsilon:
     // mean = 5.0
@@ -857,7 +860,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithRunningStats)
         prevRunningVariance.setHostValue(1.0f, 0, i);
     }
 
-    double momentum = 0.1;
+    const double momentum = 0.1;
 
     // Cannot deduce template with partial nullptr params
     CpuFpReferenceBatchnorm::fwdTraining<float, float, float, float, float>(
@@ -958,13 +961,13 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwFullFeatures)
     }
 }
 
-using TypesFwdTrainingNhwc = ::testing::Types<TypeTriplet<hip_bfloat16, float, float>,
+using TypesFwdTrainingNhwc = ::testing::Types<TypeTriplet<bfloat16, float, float>,
                                               TypeTriplet<half, float, float>,
                                               TypeTriplet<double, double, double>,
                                               TypeTriplet<int8_t, double, double>,
-                                              TypeTriplet<hip_fp8_e4m3, float, float>,
-                                              TypeTriplet<hip_fp8_e5m2, float, float>,
-                                              TypeTriplet<half, hip_bfloat16, float>>;
+                                              TypeTriplet<fp8_e4m3, float, float>,
+                                              TypeTriplet<fp8_e5m2, float, float>,
+                                              TypeTriplet<half, bfloat16, float>>;
 
 template <typename T>
 class CpuFpReferenceBatchnromFwdTrainingNchw : public ::testing::Test
@@ -982,11 +985,11 @@ TYPED_TEST(CpuFpReferenceBatchnromFwdTrainingNchw, BatchnormFwdTrainingNchw)
     Tensor<typename TypeParam::Third> savedMean({1, 3});
     Tensor<typename TypeParam::Third> savedInvVariance({1, 3});
 
-    inputTensor.fillWithValue(static_cast<typename TypeParam::First>(1.0));
+    inputTensor.fillWithValue(safeTestTypeCast<typename TypeParam::First>(1.0));
     for(int i = 0; i < 3; i++)
     {
-        scaleTensor.setHostValue(static_cast<typename TypeParam::Second>(1.0), 0, i);
-        biasTensor.setHostValue(static_cast<typename TypeParam::Second>(0.0), 0, i);
+        scaleTensor.setHostValue(safeTestTypeCast<typename TypeParam::Second>(1.0), 0, i);
+        biasTensor.setHostValue(safeTestTypeCast<typename TypeParam::Second>(0.0), 0, i);
     }
 
     CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
@@ -1028,8 +1031,8 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingSanityValidationNchw)
     prevRunningMean.setHostValue(0.0, 0, 0);
     prevRunningVariance.setHostValue(1.0, 0, 0);
 
-    double epsilon = BATCHNORM_DEFAULT_EPSILON;
-    double momentum = 0.1;
+    const double epsilon = BATCHNORM_DEFAULT_EPSILON;
+    const double momentum = 0.1;
 
     // During training, batch statistics are calculated:
     // mean = (1+2+3+4)/4 = 2.5

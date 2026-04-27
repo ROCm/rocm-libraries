@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/convolution.hpp>
 
 #include <miopen/any_solver.hpp>
@@ -42,14 +20,13 @@
 
 #include <nlohmann/json.hpp>
 
-#include <cassert>
-#include <cstddef>
 #include <algorithm>
+#include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <ostream>
-
-#include <boost/range/combine.hpp>
-#include <boost/range/adaptors.hpp>
+#include <ranges>
+#include <tuple>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM)
@@ -80,8 +57,7 @@ std::size_t GetWorkSpaceSizeGEMM(const miopen::ExecutionContext& ctx,
                                  const conv::ProblemDescription& problem)
 {
 #if MIOPEN_USE_GEMM
-    if(env::disabled(MIOPEN_DEBUG_CONV_GEMM) ||
-       miopen::any_of(problem.GetConv().GetConvDilations(), [](auto v) { return v > 1; }))
+    if(env::disabled(MIOPEN_DEBUG_CONV_GEMM))
         return 0;
 
     return GetMaxWorkSpaceSize(AllGemmWorkspaceSize(ctx, problem));
@@ -250,17 +226,17 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
     std::size_t in_n, in_c;
     std::tie(in_n, in_c) = miopen::tie_pick<0, 1>{}(xDesc.GetLengths());
 
-    auto in_spatial = boost::adaptors::slice(xDesc.GetLengths(), 2, 2 + spatial_dim);
+    auto in_spatial = xDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     std::size_t wei_k, wei_c;
     std::tie(wei_k, wei_c) = miopen::tie_pick<0, 1>{}(wDesc.GetLengths());
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    auto wei_spatial = wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     if(wDesc.GetLayout_str() == "CHWNc")
     {
         std::tie(wei_k, wei_c) = miopen::tie_pick<3, 0>{}(wDesc.GetLengths());
-        wei_spatial            = boost::adaptors::slice(wDesc.GetLengths(), 1, 1 + spatial_dim);
+        wei_spatial = wDesc.GetLengths() | std::views::drop(1) | std::views::take(spatial_dim);
     }
 
     if(mode == miopenConvolution)
@@ -279,9 +255,14 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
             MIOPEN_THROW(miopenStatusBadParm, "Channels do not match for the filter");
         }
 
-        if(miopen::any_of(boost::combine(GetTransposeConvPads(), GetConvStrides()), [](auto v) {
-               auto trans_conv_pad = boost::get<0>(v);
-               auto stride         = boost::get<1>(v);
+        const auto& pads_    = GetTransposeConvPads();
+        const auto& strides_ = GetConvStrides();
+        auto zip_            = std::views::iota(std::size_t(0), pads_.size()) |
+                    std::views::transform(
+                        [&](std::size_t i) { return std::make_tuple(pads_[i], strides_[i]); });
+
+        if(std::ranges::any_of(zip_, [](auto v) {
+               auto [trans_conv_pad, stride] = v;
                return trans_conv_pad >= stride;
            }))
         {
@@ -293,7 +274,7 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
     std::size_t out_c = 0;
     std::vector<std::size_t> out_lens(spatial_dim + 2);
 
-    auto out_spatial = boost::adaptors::slice(out_lens, 2, 2 + spatial_dim);
+    auto out_spatial = out_lens | std::views::drop(2) | std::views::take(spatial_dim);
 
     if(paddingMode == miopenPaddingSame && mode == miopenConvolution &&
        miopen::all_of(GetConvDilations(), [](auto v) { return v == 1; }))
@@ -398,7 +379,8 @@ bool ConvolutionDescriptor::IsWinograd3x3SupportedAndFast(
     if(!(problem.GetOutChannels() >= 16 && problem.GetOutChannels() % 2 == 0))
         return false;
 
-    return solver::conv::ConvBinWinograd3x3U{}.IsApplicable(ctx, problem);
+    return solver::conv::ConvBinWinograd3x3U{}.IsApplicable(ctx, problem) ||
+           solver::conv::TransposedConvBinWinograd3x3U{}.IsApplicable(ctx, problem);
 }
 
 std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
@@ -423,16 +405,20 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
         /// the same workspace for Run phase. That is why we shall return
         /// actually required workspace here.
         auto fallback        = FallbackPath();
-        const auto solutions = GetSolutions(ctx, problem, 1, &fallback);
+        const auto n         = GetSolutionCount(ctx, problem);
+        const auto solutions = GetSolutions(ctx, problem, n > 0 ? n : 1, &fallback);
         if(solutions.empty() || ((findMode.IsHybrid(ctx) && fallback != FallbackPath::None) &&
                                  !env::enabled(MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK)))
         {
             ctx.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
-            break; // Fall down to Normal Find.
+            break;
         }
-        const auto id             = solver::Id{solutions.front().solution_id};
-        const auto& s             = id.GetSolver();
-        const auto workspace_size = s.GetWorkspaceSize(ctx, problem);
+        std::size_t workspace_size = 0;
+        for(const auto& sol : solutions)
+        {
+            const auto& s  = solver::Id{sol.solution_id}.GetSolver();
+            workspace_size = std::max(workspace_size, s.GetWorkspaceSize(ctx, problem));
+        }
 
         MIOPEN_LOG_I(workspace_size);
         return workspace_size;

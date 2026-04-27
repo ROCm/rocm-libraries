@@ -5,14 +5,17 @@
 
 #include <optional>
 
-#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
-#include "PlanInterface.hpp"
 
 namespace miopen_plugin
 {
@@ -21,17 +24,19 @@ class BatchnormBwdParams
 {
 public:
     BatchnormBwdParams(
-        const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormBwdParams(
-        const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes&
             batchnormBackwardAttributes,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes&
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes&
             batchnormInferenceAttributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormBwdParams(const BatchnormBwdParams&) = delete;
@@ -66,10 +71,10 @@ private:
     std::optional<MiopenTensor> _optBias;
 };
 
-class BatchnormBwdPlan : public IPlan
+class BatchnormBwdPlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
-    BatchnormBwdPlan(BatchnormBwdParams&& params, bool benchmarkingEnabled = false);
+    BatchnormBwdPlan(BatchnormBwdParams&& params, const HipdnnMiopenSettings& executionSettings);
 
     BatchnormBwdPlan(const BatchnormBwdPlan&) = delete;
     BatchnormBwdPlan& operator=(const BatchnormBwdPlan&) = delete;
@@ -77,16 +82,16 @@ public:
     BatchnormBwdPlan(BatchnormBwdPlan&&) = default;
     BatchnormBwdPlan& operator=(BatchnormBwdPlan&&) = default;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    size_t getWorkspaceSize(const HipdnnMiopenHandle& handle) const override;
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    void execute(const HipdnnMiopenHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
 private:
     BatchnormBwdParams _params;
-    bool _benchmarkingEnabled;
+    HipdnnMiopenSettings _executionSettings;
 };
 
 } // namespace miopen_plugin

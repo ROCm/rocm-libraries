@@ -21,6 +21,9 @@
 
 #define DEBUG_LOG 0
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -69,50 +72,6 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     ignore = karg;
 #endif // end of if (defined(__gfx9__))
 }
-
-#if 0
-template <typename GridwiseGemm,
-          bool HasMainKBlockLoop,
-          InMemoryDataOperationEnum CGlobalMemoryDataOperation,
-          index_t MinimumOccupancy = 1,
-          TailNumber TailNum       = TailNumber::Even>
-__global__ void
-#if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
-#endif
-    // __attribute__((amdgpu_waves_per_eu(1, 1)))
-    kernel_moe_mxgemm_2lds(typename GridwiseGemm::Argument karg)
-{
-#if defined(__gfx9__)
-    if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
-    {
-    __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
-    __shared__ char p_shared1[GridwiseGemm::GetSharedMemoryNumberOfByte()];
-
-    // auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg, blockIdx.z);
-
-    GridwiseGemm::template Run_2Lds<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
-        karg.p_sorted_token_ids,
-        karg.p_sorted_expert_ids,
-        karg.p_max_token_id,
-        karg.p_a_grid,
-        karg.p_a_scale_grid,
-        karg.p_b_grid,
-        karg.p_b_scale_grid,
-        karg.p_ds_grid,
-        karg.p_c_grid,
-        p_shared,
-        p_shared1,
-        karg,
-        karg.a_element_op,
-        karg.b_element_op,
-        karg.c_element_op);
-    }
-#else
-    ignore = karg;
-#endif // end of if (defined(__gfx9__))
-}
-#endif
 
 template <typename ALayout,
           typename BLayout,
@@ -1235,10 +1194,10 @@ struct GridwiseMoeGemmMXBNS
             gather_offsets(m0) = static_cast<IndexType>(token_offset) * problem.K;
         });
 
-        const index_t expert_stride =
-            __builtin_amdgcn_readfirstlane(problem.N * problem.K * (IsInputGemm ? 2 : 1));
-        const index_t expert_scale_stride = __builtin_amdgcn_readfirstlane(
-            problem.N * (IsInputGemm ? 2 : 1) *
+        const long_index_t expert_stride = __builtin_amdgcn_readfirstlane(
+            static_cast<long_index_t>(problem.N) * problem.K * (IsInputGemm ? 2 : 1));
+        const long_index_t expert_scale_stride = __builtin_amdgcn_readfirstlane(
+            static_cast<long_index_t>(problem.N) * (IsInputGemm ? 2 : 1) *
             math::integer_divide_ceil(problem.K, ScaleBlockSize / BPackedSize));
 
         // N0, K0, Blocksize*KPack
@@ -1249,13 +1208,15 @@ struct GridwiseMoeGemmMXBNS
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
         const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_b_grid + expert_id * expert_stride, b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
+            p_b_grid + static_cast<long_index_t>(expert_id) * expert_stride,
+            b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
 
         // A, B scale buffer
         const auto a_scale_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_scale_grid, a_scale_grid_desc_am_ak.GetElementSpaceSize());
         const auto b_scale_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_b_scale_grid + (expert_id * expert_scale_stride) / sizeof(BScaleDataType),
+            p_b_scale_grid + (static_cast<long_index_t>(expert_id) * expert_scale_stride) /
+                                 sizeof(BScaleDataType),
             b_scale_grid_desc_bn_ak.GetElementSpaceSize());
 
         // lds max alignment
@@ -1421,7 +1382,7 @@ struct GridwiseMoeGemmMXBNS
 
             const BDataType* p_b_grid_up = p_b_grid + expert_stride / 2;
             const auto b_grid_buf_up     = make_dynamic_buffer<AddressSpaceEnum::Global>(
-                p_b_grid_up + expert_id * expert_stride,
+                p_b_grid_up + static_cast<long_index_t>(expert_id) * expert_stride,
                 b_grid_desc_bk0_n_bk1.GetElementSpaceSize());
 
             auto b_blockwise_copy_up =
@@ -1457,7 +1418,8 @@ struct GridwiseMoeGemmMXBNS
             const BScaleDataType* p_b_scale_grid_up =
                 p_b_scale_grid + expert_scale_stride / 2 / sizeof(BScaleDataType);
             const auto b_scale_grid_buf_up = make_dynamic_buffer<AddressSpaceEnum::Global>(
-                p_b_scale_grid_up + expert_id * expert_scale_stride / sizeof(BScaleDataType),
+                p_b_scale_grid_up + static_cast<long_index_t>(expert_id) * expert_scale_stride /
+                                        sizeof(BScaleDataType),
                 b_scale_grid_desc_bn_ak.GetElementSpaceSize());
 
             auto b_scale_thread_copy_up = ThreadwiseTensorSliceTransfer_v2<
@@ -1763,10 +1725,10 @@ struct GridwiseMoeGemmMXBNS
             gather_offsets(m0) = static_cast<IndexType>(token_offset) * problem.K;
         });
 
-        const index_t expert_stride =
-            __builtin_amdgcn_readfirstlane(problem.N * problem.K * (IsInputGemm ? 2 : 1));
-        const index_t expert_scale_stride = __builtin_amdgcn_readfirstlane(
-            problem.N * math::integer_divide_ceil(problem.K, ScaleBlockSize / BPackedSize));
+        const long_index_t expert_stride =
+            __builtin_amdgcn_readfirstlane(static_cast<long_index_t>(problem.N) * problem.K * (IsInputGemm ? 2 : 1));
+        const long_index_t expert_scale_stride = __builtin_amdgcn_readfirstlane(
+            static_cast<long_index_t>(problem.N) * math::integer_divide_ceil(problem.K, ScaleBlockSize / BPackedSize));
 
         // N0, K0, Blocksize*KPack
         const index_t n_block_data_idx_on_grid =
@@ -1776,12 +1738,12 @@ struct GridwiseMoeGemmMXBNS
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
 
         const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_b_grid + expert_id * expert_stride, b_grid_desc_bpreshuffled.GetElementSpaceSize());
+            p_b_grid + static_cast<long_index_t>(expert_id) * expert_stride, b_grid_desc_bpreshuffled.GetElementSpaceSize());
 
         const auto a_scale_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_scale_grid, a_scale_grid_desc_am_ak.GetElementSpaceSize());
         const auto b_scale_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_b_scale_grid + (expert_id * expert_scale_stride) / sizeof(BScaleDataType),
+            p_b_scale_grid + (static_cast<long_index_t>(expert_id) * expert_scale_stride) / sizeof(BScaleDataType),
             b_scale_grid_desc_bn_ak.GetElementSpaceSize());
 
         // A matrix in LDS memory, dst of blockwise copy
@@ -1933,7 +1895,7 @@ struct GridwiseMoeGemmMXBNS
         {
             const BDataType* p_b_grid_up = p_b_grid + expert_stride / 2 / BPackedSize;
             const auto b_grid_buf_up     = make_dynamic_buffer<AddressSpaceEnum::Global>(
-                p_b_grid_up + expert_id * expert_stride / BPackedSize,
+                p_b_grid_up + static_cast<long_index_t>(expert_id) * expert_stride / BPackedSize,
                 b_grid_desc_bpreshuffled.GetElementSpaceSize());
             auto b_blockwise_copy_up = ThreadwiseTensorSliceTransfer_v2<
                 BDataType,
@@ -1952,7 +1914,7 @@ struct GridwiseMoeGemmMXBNS
                                        KPack / KGroup * (get_thread_local_1d_id() % WarpSize)));
             const BScaleDataType* p_b_scale_grid_up = p_b_scale_grid + expert_scale_stride / 2;
             const auto b_scale_grid_buf_up          = make_dynamic_buffer<AddressSpaceEnum::Global>(
-                p_b_scale_grid_up + expert_id * expert_scale_stride,
+                p_b_scale_grid_up + static_cast<long_index_t>(expert_id) * expert_scale_stride,
                 b_scale_grid_desc_bn_ak.GetElementSpaceSize());
             auto b_scale_thread_copy_up = ThreadwiseTensorSliceTransfer_v2<
                 BScaleDataType,
@@ -2379,3 +2341,4 @@ struct GridwiseMoeGemmMXBNS
 };
 
 } // namespace ck
+#pragma clang diagnostic pop

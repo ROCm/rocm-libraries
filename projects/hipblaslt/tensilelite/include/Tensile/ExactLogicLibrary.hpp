@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,13 +27,15 @@
 #pragma once
 
 #include <atomic>
+#include <optional>
+#include <set>
 
+#include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
 #include <Tensile/SolutionLibrary.hpp>
-#include <type_traits>
 
 namespace TensileLite
 {
@@ -100,20 +102,21 @@ namespace TensileLite
                                                              double*          fitness
                                                              = nullptr) const override
         {
-            std::shared_ptr<MySolution> rv;
+            std::shared_ptr<MySolution> fallbackRv;
             const bool                  streamK = Debug::Instance().useExperimentalSelection() == 2;
 
+            // Return exact match immediately; otherwise keep first successful fallback.
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
-                // Set library context for debug output
-                row.first.setLibrary(row.second);
+                if(!row.first(problem, hardware))
+                    continue;
 
-                if(row.first(problem, hardware))
+                if(!row.first.isFallbackMatch(hardware))
                 {
-                    rv = row.second->findBestSolution(problem, hardware, fitness);
+                    auto rv = row.second->findBestSolution(problem, hardware, fitness);
 
                     if(rv
                        && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
@@ -124,16 +127,33 @@ namespace TensileLite
                     {
                         if(Debug::Instance().printDeviceSelection())
                         {
-                            std::cout << "  Solution found: " << rv->name()
+                            std::cout << "  Solution found (exact): " << rv->name()
                                       << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
                         }
                         return rv;
                     }
                 }
+                else if(!fallbackRv)
+                {
+                    fallbackRv = row.second->findBestSolution(problem, hardware, fitness);
+
+                    if(fallbackRv
+                       && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
+                           row.first.value.get()))
+                        fallbackRv->tag = MySolution::MatchingTag::Equal;
+                }
             }
 
-            return rv;
+            if(fallbackRv && Debug::Instance().printDeviceSelection())
+            {
+                std::cout << "  Solution found (fallback): " << fallbackRv->name()
+                          << " [MatchingTag: " << fallbackRv->matchingTag() << "]" << std::endl;
+            }
+
+            return fallbackRv;
         }
+
+    public:
 
         virtual SolutionSet<MySolution>
             findAllSolutions(MyProblem const&          problem,
@@ -142,21 +162,27 @@ namespace TensileLite
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
             SolutionSet<MySolution> rv;
-            const bool              debug = Debug::Instance().printPropertyEvaluation();
-            const bool              streamK = Debug::Instance().useExperimentalSelection() == 2;
+            const bool              debug       = Debug::Instance().printPropertyEvaluation();
+            const bool              streamK     = Debug::Instance().useExperimentalSelection() == 2;
             const auto&             excludedLib = Debug::Instance().excludedLibFromGetAll();
+
+            auto amdGPU             = static_cast<AMDGPU const*>(&hardware);
+            bool isStandardCUDevice = amdGPU->isStandardCU();
 
             for(auto const& row : rows)
             {
-                // we want to exclude this lib from getAll
-                if(excludedLib.count(row.first.value->type()))
-                    continue;
+                // we want to exclude this lib from getAll. If the Set is not empty,
+                // it means we want to skip searched GridBased, Prediction.
+                // But if this is a non-standard-CU GPU, we still need to search all for CU-Fallback solutions.
+                // In this case, we don't skip the excludedLib.
+                if(!excludedLib.empty() && isStandardCUDevice)
+                {
+                    if(excludedLib.count(row.first.value->type()))
+                        continue;
+                }
 
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
-
-                // Set library context for debug output
-                row.first.setLibrary(row.second);
 
                 if(row.first.value->type() == "AMDGPU" && !row.first(problem, hardware))
                     continue;
@@ -172,22 +198,26 @@ namespace TensileLite
                 // except for Equal, we test others only when debug mode.
                 else if(debug)
                 {
-                    if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                    if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(
+                           row.first.value.get()))
                     {
                         for(auto& sol : rowSolutions)
                             sol->tag = MySolution::MatchingTag::GridBased;
                     }
-                    else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
+                    else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(
+                                row.first.value.get()))
                     {
                         for(auto& sol : rowSolutions)
                             sol->tag = MySolution::MatchingTag::Range;
                     }
-                    else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
+                    else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(
+                                row.first.value.get()))
                     {
                         for(auto& sol : rowSolutions)
                             sol->tag = MySolution::MatchingTag::FreeSize;
                     }
-                    else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
+                    else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(
+                                row.first.value.get()))
                     {
                         for(auto& sol : rowSolutions)
                             sol->tag = MySolution::MatchingTag::Prediction;
@@ -232,7 +262,7 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv, solutions;
-            const bool                 debug = Debug::Instance().printPropertyEvaluation();
+            const bool                 debug   = Debug::Instance().printPropertyEvaluation();
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary();
 
@@ -244,12 +274,10 @@ namespace TensileLite
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
-                if(predictionLib && ((row.first.value->type() == "EqualityMatching")
-                                     || (row.first.value->type() == "RangeMatching")))
+                if(predictionLib
+                   && ((row.first.value->type() == "EqualityMatching")
+                       || (row.first.value->type() == "RangeMatching")))
                     continue;
-
-                // Set library context for debug output
-                row.first.setLibrary(row.second);
 
                 if(row.first(problem, hardware))
                 {
@@ -257,7 +285,8 @@ namespace TensileLite
                         = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
 
                     // hipblaslt_ext::matmulIsTuned() -> rocblaslt_matmul_is_tuned() needs this Equal test
-                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
+                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(
+                           row.first.value.get()))
                     {
                         for(auto& sol : solutions)
                             sol->tag = MySolution::MatchingTag::Equal;
@@ -265,22 +294,26 @@ namespace TensileLite
                     // except for Equal, we test others only when debug mode.
                     else if(debug)
                     {
-                        if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                        if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(
+                               row.first.value.get()))
                         {
                             for(auto& sol : solutions)
                                 sol->tag = MySolution::MatchingTag::GridBased;
                         }
-                        else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
+                        else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(
+                                    row.first.value.get()))
                         {
                             for(auto& sol : solutions)
                                 sol->tag = MySolution::MatchingTag::Range;
                         }
-                        else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
+                        else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(
+                                    row.first.value.get()))
                         {
                             for(auto& sol : solutions)
                                 sol->tag = MySolution::MatchingTag::FreeSize;
                         }
-                        else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
+                        else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(
+                                    row.first.value.get()))
                         {
                             for(auto& sol : solutions)
                                 sol->tag = MySolution::MatchingTag::Prediction;
@@ -330,41 +363,57 @@ namespace TensileLite
     struct HardwarePredicate
     {
         std::shared_ptr<Predicates::Predicate<Hardware>> value;
-        mutable std::string libraryFileName;
+
+        // The chip IDs this predicate targets, if any. Set by callers that
+        // know the chip IDs (e.g. makeHwPred, deserialization). When empty
+        // the predicate has no chip-ID constraint and every match is exact.
+        std::set<int> targetPciChipIds;
 
         HardwarePredicate() = default;
-        HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init)
+        HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init,
+                          std::optional<int> chipId = std::nullopt)
             : value(init)
         {
+            if(chipId)
+                targetPciChipIds.insert(chipId.value());
         }
 
-        template <typename MyProblem, typename MySolution>
-        void setLibrary(std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> lib) const
+        HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init,
+                          std::set<int>                                 chipIds)
+            : value(init)
+            , targetPciChipIds(chipIds)
         {
-            if(lib)
-                libraryFileName = lib->getLibraryFileName();
         }
 
         template <typename Any>
         bool operator()(Any const& problem, Hardware const& hardware) const
         {
-            bool debug  = Debug::Instance().printDeviceSelection();
-            bool rv = (*value)(hardware);
+            bool debug = Debug::Instance().printDeviceSelection();
+            bool rv    = (*value)(hardware);
 
             if(debug)
             {
-                // Print library filename if available
-                if(!libraryFileName.empty())
-                {
-                    PredicateDebugger::printLibraryFileBanner(std::cout, libraryFileName);
-                }
-
                 PredicateDebugger::printHeader(std::cout, "ExactLogic: Hardware");
                 value->debugEval(hardware, std::cout);
                 PredicateDebugger::printFooter(std::cout, rv);
             }
 
             return rv;
+        }
+
+        // A match is a fallback when the predicate targets a specific chip ID
+        // and the GPU's chip ID is different (operator() already confirmed
+        // compatibility via ChipIdRegistry::canUseSolution).
+        bool isFallbackMatch(Hardware const& hardware) const
+        {
+            if(targetPciChipIds.empty())
+                return false;
+
+            auto gpuChipId = hardware.pciChipId();
+            if(!gpuChipId)
+                return false;
+
+            return targetPciChipIds.count(gpuChipId.value()) == 0;
         }
     };
 
@@ -399,7 +448,6 @@ namespace TensileLite
     struct ProblemPredicate
     {
         std::shared_ptr<Predicates::Predicate<MyProblem>> value;
-        mutable std::string libraryFileName;
 
         ProblemPredicate() = default;
         ProblemPredicate(std::shared_ptr<Predicates::Predicate<MyProblem>> init)
@@ -407,32 +455,25 @@ namespace TensileLite
         {
         }
 
-        template <typename MySolution>
-        void setLibrary(std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> lib) const
-        {
-            if(lib)
-                libraryFileName = lib->getLibraryFileName();
-        }
-
         bool operator()(MyProblem const& problem, Hardware const& hardware) const
         {
-            bool debug  = Debug::Instance().printPredicateEvaluation();
-            bool rv = (*value)(problem);
+            bool debug = Debug::Instance().printPredicateEvaluation();
+            bool rv    = (*value)(problem);
 
             if(debug)
             {
-                // Print library filename if available
-                if(!libraryFileName.empty())
-                {
-                    PredicateDebugger::printLibraryFileBanner(std::cout, libraryFileName);
-                }
-
                 PredicateDebugger::printHeader(std::cout, "ExactLogic: Problem");
                 value->debugEval(problem, std::cout);
                 PredicateDebugger::printFooter(std::cout, rv);
             }
 
             return rv;
+        }
+
+        // Problem predicates never involve hardware fallback.
+        bool isFallbackMatch(Hardware const&) const
+        {
+            return false;
         }
     };
 

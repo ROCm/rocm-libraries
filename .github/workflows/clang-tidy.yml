@@ -1,0 +1,117 @@
+name: clang-tidy
+
+on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+    paths:
+      - 'projects/hipdnn/**/*.[ch]p?p?'
+      - 'projects/hipdnn/cmake/ClangTidy.cmake'
+      - 'projects/hipdnn/.clang-tidy'
+      # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
+      # - 'dnn-providers/miopen-provider/**/*.[ch]p?p?'
+      # - 'dnn-providers/miopen-provider/cmake/ClangTidy.cmake'
+      # - 'dnn-providers/miopen-provider/.clang-tidy'
+      - '.github/workflows/clang-tidy.yml'
+  pull_request:
+    paths:
+      - 'projects/hipdnn/**/*.[ch]p?p?'
+      - 'projects/hipdnn/cmake/ClangTidy.cmake'
+      - 'projects/hipdnn/.clang-tidy'
+      # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
+      # - 'dnn-providers/miopen-provider/**/*.[ch]p?p?'
+      # - 'dnn-providers/miopen-provider/cmake/ClangTidy.cmake'
+      # - 'dnn-providers/miopen-provider/.clang-tidy'
+      - '.github/workflows/clang-tidy.yml'
+  workflow_dispatch:
+
+concurrency:
+  # For PRs, group by PR number so a new commit cancels any in-progress run
+  # for the same PR. For postsubmits, group by commit SHA (unique per commit)
+  # so runs never cancel each other. The workflow name is prepended to avoid
+  # conflicts between different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  clang-tidy:
+    runs-on: azure-linux-scale-rocm
+    steps:
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@v6
+
+      - name: Detect changed projects
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: changes
+        with:
+          filters: |
+            hipdnn:
+              - 'projects/hipdnn/**'
+            # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
+            # miopen-provider:
+            #   - 'dnn-providers/miopen-provider/**'
+
+      - name: Checkout TheRock
+        uses: actions/checkout@v6
+        with:
+          repository: ROCm/TheRock
+          path: TheRock
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            python3-venv \
+            lsb-release wget \
+            software-properties-common \
+            gnupg
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang-tidy-20 \
+            clang-tools-20
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install boto3 cmake
+          pip install -r TheRock/requirements.txt
+
+      - name: Install ROCm
+        run: |
+          sudo .venv/bin/python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+            --latest-release \
+            --amdgpu-family gfx94X-dcgpu \
+            --output-dir /opt/rocm \
+            --base-only
+
+      - name: Run clang-tidy (hipDNN)
+        if: steps.changes.outputs.hipdnn == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          . .venv/bin/activate
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          cmake -S projects/hipdnn -B build-hipdnn -G Ninja \
+            -DENABLE_CLANG_TIDY=ON \
+            -DROCM_PATH=/opt/rocm \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DENABLE_CLANG_FORMAT=OFF \
+            -DHIP_PLATFORM=amd
+          ninja -C build-hipdnn tidy
+
+      # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
+      # - name: Run clang-tidy (miopen-provider)
+      #   if: steps.changes.outputs.miopen-provider == 'true' || github.event_name == 'workflow_dispatch'
+      #   run: |
+      #     . .venv/bin/activate
+      #     export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+      #     export CXX=/opt/rocm/llvm/bin/clang++
+      #     cmake -S dnn-providers/miopen-provider -B build-miopen-provider -G Ninja \
+      #       -DENABLE_CLANG_TIDY=ON \
+      #       -DROCM_PATH=/opt/rocm \
+      #       -DCMAKE_PREFIX_PATH=/opt/rocm \
+      #       -DENABLE_CLANG_FORMAT=OFF \
+      #       -DHIP_PLATFORM=amd
+      #     ninja -C build-miopen-provider tidy

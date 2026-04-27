@@ -50,6 +50,14 @@ struct FmhaFwdFp8Fp32
 {
 };
 
+struct FmhaFwdMxFp8
+{
+};
+
+struct FmhaFwdMxFp4
+{
+};
+
 template <typename DataType>
 struct FmhaFwdTypeConfig;
 
@@ -165,6 +173,54 @@ struct FmhaFwdTypeConfig<FmhaFwdFp8Fp32>
     using ODataType             = float;
 };
 
+template <>
+struct FmhaFwdTypeConfig<FmhaFwdMxFp8>
+{
+    using QDataType             = ck_tile::fp8_t;
+    using KDataType             = ck_tile::fp8_t;
+    using VDataType             = ck_tile::fp8_t;
+    using BiasDataType          = float;
+    using RandValOutputDataType = uint8_t;
+    using LSEDataType           = float; // data type for lse(logsumexp L_j = max_j + log(l_j))
+    using SaccDataType          = float; // data type for first gemm accumulation
+    using SMPLComputeDataType   = float; // data type for reduction, softmax
+    using PDataType             = ck_tile::fp8_t; // data type for A matrix of second gemm
+    using OaccDataType          = float;          // data type for second gemm accumulation
+    using ODataType             = float;
+
+    using QScaleDataType = ck_tile::e8m0_t;
+    using KScaleDataType = ck_tile::e8m0_t;
+    using VScaleDataType = ck_tile::e8m0_t;
+    using PScaleDataType = ck_tile::e8m0_t;
+
+    static constexpr ck_tile::index_t kQKScaleGranularity = 32;
+    static constexpr ck_tile::index_t kVScaleGranularity  = 32;
+};
+
+template <>
+struct FmhaFwdTypeConfig<FmhaFwdMxFp4>
+{
+    using QDataType             = ck_tile::pk_fp4_t;
+    using KDataType             = ck_tile::pk_fp4_t;
+    using VDataType             = ck_tile::pk_fp4_t;
+    using BiasDataType          = float;
+    using RandValOutputDataType = uint8_t;
+    using LSEDataType           = float; // data type for lse(logsumexp L_j = max_j + log(l_j))
+    using SaccDataType          = float; // data type for first gemm accumulation
+    using SMPLComputeDataType   = float; // data type for reduction, softmax
+    using PDataType             = ck_tile::pk_fp4_t; // data type for A matrix of second gemm
+    using OaccDataType          = float;             // data type for second gemm accumulation
+    using ODataType             = float;
+
+    using QScaleDataType = ck_tile::e8m0_t;
+    using KScaleDataType = ck_tile::e8m0_t;
+    using VScaleDataType = ck_tile::e8m0_t;
+    using PScaleDataType = ck_tile::e8m0_t;
+
+    static constexpr ck_tile::index_t kQKScaleGranularity = 32;
+    static constexpr ck_tile::index_t kVScaleGranularity  = 32;
+};
+
 struct FmhaMasks
 {
     using NoMask      = ck_tile::GenericAttentionMask<false>;
@@ -232,6 +288,7 @@ struct fmha_fwd_args
                                            // array [batch + 1]. (Used with padding)
     const void* block_scale_seqstart_q_ptr;
     const void* block_scale_seqstart_k_ptr;
+    const void* seqstart_v_scale_ptr;
     const void* sink_ptr;
 
     ck_tile::index_t seqlen_q;
@@ -242,6 +299,8 @@ struct fmha_fwd_args
     ck_tile::index_t hdim_v;
     ck_tile::index_t nhead_q;
     ck_tile::index_t nhead_k;
+    ck_tile::index_t num_head_q_total = 0;
+    ck_tile::index_t head_start       = 0;
 
     float scale_s;
     float logits_soft_cap;
@@ -252,6 +311,9 @@ struct fmha_fwd_args
     ck_tile::index_t stride_bias; // if alibi, b*h need set this to h, 1*h need set this to 0
     ck_tile::index_t stride_randval;
     ck_tile::index_t stride_o;
+    ck_tile::index_t stride_q_descale;
+    ck_tile::index_t stride_k_descale;
+    ck_tile::index_t stride_v_descale;
     ck_tile::index_t nhead_stride_q;
     ck_tile::index_t nhead_stride_k;
     ck_tile::index_t nhead_stride_v;
@@ -611,6 +673,33 @@ struct fmha_batch_prefill_args
     ck_tile::index_t nhead_stride_kv_block_descale  = 0; // Stride along num_kv_head dimension
 };
 
+// Selects the KV-cache load mode for a batch-prefill dispatch arm.
+//   GLOBAL_LOAD_LDS: required when (a) the page is smaller than one K/V tile
+//     so per-page SRD is impossible, AND (b) the total KV-pool byte size
+//     exceeds INT32_MAX so SRD's 32-bit byte offset cannot address it.
+//   BUFFER_LOAD: every other case — the SGPR-resident SRD path is fastest.
+// Inputs are taken as plain integers so the helper has no template parameter
+// and can be called from each codegen-emitted dispatcher arm with the arm's
+// compile-time kN0 / element_bytes substituted as constants.
+inline ck_tile::BlockAttentionKVCacheLoadModeEnum
+fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
+                                       ck_tile::index_t kN0,
+                                       ck_tile::index_t num_total_pages,
+                                       ck_tile::index_t batch_stride_k,
+                                       ck_tile::index_t element_bytes)
+{
+    // Promote every operand to long_index_t so overflow is impossible regardless
+    // of multiplication order. A bare `static_cast<long_index_t>(num_total_pages)
+    // * batch_stride_k * element_bytes` only works because of left-to-right
+    // associativity — a future reorder of the operands would silently truncate.
+    const auto kv_pool_bytes = static_cast<ck_tile::long_index_t>(num_total_pages) *
+                               static_cast<ck_tile::long_index_t>(batch_stride_k) *
+                               static_cast<ck_tile::long_index_t>(element_bytes);
+    return (page_block_size < kN0 && kv_pool_bytes > INT32_MAX)
+               ? ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS
+               : ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
+}
+
 template <typename FmhaKernel>
 auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 {
@@ -635,6 +724,7 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.seqlen_k_ptr,
                                              args.block_scale_seqstart_q_ptr,
                                              args.block_scale_seqstart_k_ptr,
+                                             args.seqstart_v_scale_ptr,
                                              args.hdim_q,
                                              args.hdim_v,
                                              args.nhead_q,
@@ -647,6 +737,9 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.stride_bias,
                                              args.stride_randval,
                                              args.stride_o,
+                                             args.stride_q_descale,
+                                             args.stride_k_descale,
+                                             args.stride_v_descale,
                                              args.nhead_stride_q,
                                              args.nhead_stride_k,
                                              args.nhead_stride_v,
@@ -669,7 +762,9 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.block_scale_size_kv,
                                              args.cu_seqlen_q_ptr,
                                              args.cu_seqlen_k_ptr,
-                                             args.sink_ptr);
+                                             args.sink_ptr,
+                                             args.num_head_q_total,
+                                             args.head_start);
         }
         else
         { // create batch mode kernel arguments
@@ -697,6 +792,9 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.stride_bias,
                                              args.stride_randval,
                                              args.stride_o,
+                                             args.stride_q_descale,
+                                             args.stride_k_descale,
+                                             args.stride_v_descale,
                                              args.nhead_stride_q,
                                              args.nhead_stride_k,
                                              args.nhead_stride_v,
@@ -728,7 +826,9 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.block_scale_size_kv,
                                              args.cu_seqlen_q_ptr,
                                              args.cu_seqlen_k_ptr,
-                                             args.sink_ptr);
+                                             args.sink_ptr,
+                                             args.num_head_q_total,
+                                             args.head_start);
         }
     }();
 
@@ -771,6 +871,9 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
             return FmhaKernel::MakeKargs(args.q_ptr,
                                          args.k_ptr,
                                          args.v_ptr,
+                                         args.q_descale_ptr,
+                                         args.k_descale_ptr,
+                                         args.v_descale_ptr,
                                          nullptr, // lse_ptr
                                          args.o_ptr,
                                          args.seqstart_q_ptr,
@@ -804,6 +907,9 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
             return FmhaKernel::MakeKargs(args.q_ptr,
                                          args.k_ptr,
                                          args.v_ptr,
+                                         args.q_descale_ptr,
+                                         args.k_descale_ptr,
+                                         args.v_descale_ptr,
                                          nullptr, // lse_ptr
                                          args.o_ptr,
                                          args.seqlen_q,
@@ -1373,11 +1479,14 @@ template <ck_tile::index_t HDim_,
           bool kPadDv_,
           bool kUseTrLoad_,
           bool kSkipMinSeqlenQ_            = false,
+          bool kHasSink_                   = false,
           ck_tile::index_t kPageBlockSize_ = 1,
           ck_tile::BlockAttentionKVCacheMemoryLayoutEnum kKVMemoryLayout_ =
               ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT,
           ck_tile::BlockAttentionKVCacheLookupTableEnum kKVLookupTable_ =
-              ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D>
+              ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D,
+          ck_tile::BlockAttentionKVCacheLoadModeEnum kKVLoadMode_ =
+              ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD>
 struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
                                                                 DataType_,
                                                                 kIsGroupMode_,
@@ -1401,11 +1510,12 @@ struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
                                                                 kPadDv_,
                                                                 kUseTrLoad_,
                                                                 kSkipMinSeqlenQ_,
-                                                                false>
+                                                                kHasSink_>
 {
     static constexpr auto kKVMemoryLayout            = kKVMemoryLayout_;
     static constexpr auto kKVLookupTable             = kKVLookupTable_;
     static constexpr ck_tile::index_t kPageBlockSize = kPageBlockSize_;
+    static constexpr auto kKVLoadMode                = kKVLoadMode_;
     static_assert(kIsVLayoutRowMajor_, "Batch prefill only supports row-major V layout");
 };
 
@@ -1635,8 +1745,8 @@ struct fmha_fwd_splitkv_traits
     mask_enum mask_type;
     bias_enum bias_type; // 0:no bias, 1:elementwise bias, 2:alibi. sync with BlockAttentionBiasEnum
     bool has_lse;
-    bool do_fp8_static_quant;
-    bool has_sink = false;
+    bool do_fp8_static_quant = false;
+    bool has_sink            = false;
     // TODO: padding check is inside this api
 };
 float fmha_fwd_splitkv(fmha_fwd_splitkv_traits,

@@ -21,6 +21,7 @@
 #include "../hipfftw_helper.h"
 
 #include "../../shared/environment.h"
+#include "../../shared/fftw_transform.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"
@@ -57,24 +58,18 @@ namespace
     size_t max_byte_size_for_hipfftw_tests()
     {
         auto get_io_byte_size_limit = []() {
-            size_t tmp = vramgb * ONE_GiB;
-            if(tmp == 0)
+            size_t tmp = system_memory::singleton().get_limit_bytes();
+            for(size_t dev_id = 0; dev_id < device_memory_accountant::singleton().num_devices();
+                dev_id++)
             {
-                size_t free = 0, total = 0;
-                if(hipMemGetInfo(&free, &total) == hipSuccess)
-                    tmp = total / 8;
+                tmp = std::min(
+                    tmp, device_memory_accountant::singleton().get_limit_bytes_on_device(dev_id));
             }
-            tmp = std::min(tmp, ramgb * ONE_GiB);
             tmp = std::min(tmp, max_io_gb_for_hipfftw_test * ONE_GiB);
             if(verbose > 0)
             {
-                std::cout << "Limit for the size of I/O data used in hipfftw tests: ";
-                if(tmp >= ONE_GiB)
-                    std::cout << float(tmp) / ONE_GiB << " GiB." << std ::endl;
-                else if(tmp >= ONE_MiB)
-                    std::cout << float(tmp) / ONE_MiB << " MiB." << std ::endl;
-                else
-                    std::cout << float(tmp) / ONE_KiB << " KiB." << std ::endl;
+                std::cout << "Limit for the size of I/O data used in hipfftw tests: "
+                          << byte_size_to_str(tmp) << std ::endl;
             }
             return tmp;
         };
@@ -1987,6 +1982,10 @@ namespace
             {
                 GTEST_SKIP() << e.what();
             }
+            catch(const DEVICEBUF_MEM_USAGE& e)
+            {
+                GTEST_SKIP() << e.what();
+            }
             catch(const std::bad_alloc&)
             {
                 GTEST_SKIP() << "host memory allocation failure";
@@ -2170,7 +2169,7 @@ namespace
     {
         pageable_host,
         pinned_host,
-#ifndef WIN32
+#ifndef _WIN32
         // linux-only
         managed,
 #endif
@@ -2184,7 +2183,7 @@ namespace
             std::vector<hipfftw_data_memory_type> ret = {hipfftw_data_memory_type::pageable_host,
                                                          hipfftw_data_memory_type::pinned_host,
                                                          hipfftw_data_memory_type::device};
-#ifndef WIN32
+#ifndef _WIN32
             // "managed" may or may not be supported
             hipDeviceProp_t props;
             if(hipGetDeviceProperties(&props, get_current_device_id()) == hipSuccess)
@@ -2210,7 +2209,7 @@ namespace
         case hipfftw_data_memory_type::pinned_host:
             return "pinned_host";
             break;
-#ifndef WIN32
+#ifndef _WIN32
         case hipfftw_data_memory_type::managed:
             return "managed";
             break;
@@ -2683,7 +2682,7 @@ namespace
                         }
                         else
                         {
-#ifndef WIN32
+#ifndef _WIN32
                             const auto hip_status = gpu_io_buffer[map_key].alloc(
                                 data_size, mem_type == hipfftw_data_memory_type::managed);
 #else
@@ -2706,6 +2705,7 @@ namespace
                        && verification_output.size() != 1))
                     GTEST_FAIL() << "Verification IO buffer incorrectly initialized";
                 // generate input data
+                const std::vector<size_t> ioffset = {0};
                 const std::vector<size_t> field_lower(params.get_rank(), 0);
                 set_input<hostbuf, hipfftw_real_t<prec>>(verification_input,
                                                          fft_input_random_generator_host,
@@ -2713,6 +2713,7 @@ namespace
                                                          params.get_lengths(),
                                                          params.get_ilengths(),
                                                          params.get_istride(),
+                                                         ioffset,
                                                          params.get_idist(),
                                                          params.get_nbatch(),
                                                          get_curr_device_prop(),
@@ -2721,11 +2722,12 @@ namespace
                                                          params.get_contiguous_istrides(),
                                                          params.get_contiguous_idist());
                 // create the reference plan (systematically using the most general guru64 creation)
-                reference_plan = params.plan_helper.get_reference_plan(
-                    verification_input[0].data(),
-                    params.get_placement() == fft_placement_inplace
-                        ? verification_input[0].data()
-                        : verification_output[0].data());
+                reference_plan = fftw_trait<hipfftw_real_t<prec>>::make_wrapper(
+                    params.plan_helper.get_reference_plan(verification_input[0].data(),
+                                                          params.get_placement()
+                                                                  == fft_placement_inplace
+                                                              ? verification_input[0].data()
+                                                              : verification_output[0].data()));
 
                 if(!reference_plan)
                 {
@@ -2743,6 +2745,10 @@ namespace
             {
                 GTEST_SKIP() << e.what();
             }
+            catch(const DEVICEBUF_MEM_USAGE& e)
+            {
+                GTEST_SKIP() << e.what();
+            }
             catch(const std::bad_alloc&)
             {
                 GTEST_SKIP() << "host memory allocation failure";
@@ -2755,10 +2761,7 @@ namespace
             execution_results_on_host.clear();
             host_io_buffer.clear();
             gpu_io_buffer.clear();
-            if constexpr(prec == fft_precision_single)
-                fftwf_destroy_plan(reference_plan);
-            else
-                fftw_destroy_plan(reference_plan);
+            reference_plan.reset();
             this->GetParam().plan_helper.release_plan();
         }
         // verification buffers (set_input and other common routines require std::vector's of size 1 for these)
@@ -2770,7 +2773,8 @@ namespace
         // possible nonhost buffers (may be current/other device or runtime-managed)
         std::map<std::pair<hipfftw_step, fft_io>, gpubuf> gpu_io_buffer;
         // reference plan
-        hipfftw_plan_t<prec> reference_plan = nullptr;
+        fftw_plan_wrapper_t<hipfftw_real_t<prec>> reference_plan
+            = fftw_trait<hipfftw_real_t<prec>>::make_wrapper(nullptr);
 
         void functional_test() const
         {
@@ -2876,10 +2880,7 @@ namespace
                 }
 
                 std::shared_future<void> reference_cpu_dft = std::async(std::launch::async, [&]() {
-                    if constexpr(prec == fft_precision_single)
-                        fftwf_execute(reference_plan);
-                    else
-                        fftw_execute(reference_plan);
+                    fftw_execute_type<hipfftw_real_t<prec>>(reference_plan);
                 });
                 hipfftw_exception_logger exception_logger;
 

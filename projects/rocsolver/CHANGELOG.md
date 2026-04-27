@@ -6,17 +6,28 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
+* Computation of solution for LU factorization without pivoting
+    * GETRS_NPVT (with batched and strided\_batched versions)
+    * GETRS_NPVT_64 (with batched and strided\_batched versions)
+
 * Support added for the gfx1150, gfx1152, and gfx1153 architectures
 * Computation of different matrix norms
     * LANGE
     * LANGE_64
+* Computation of different matrix condition numbers
+    * GECON
+    * GECON_64
 
 ### Changed
 ### Removed
 ### Optimized
+
+* Improved the performance of POTF2 and downstream functions such as POTRF.
+
 ### Resolved issues
 
-* Fixed synchronization issue in GETF2.
+* Fixed a synchronization issue in STEBZ and downstream functions, such as SYEVX and SYEVDX.
+* Fixed a synchronization issue in GETF2.
 
 ### Known issues
 ### Upcoming changes

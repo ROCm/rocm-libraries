@@ -219,12 +219,13 @@ protected:
                                              miopen::conv::Direction::Forward};
         auto ctx = miopen::ExecutionContext{};
         ctx.SetStream(&get_handle());
+        ctx.disable_search_enforce = true;
         context_filler(ctx);
 
         const auto sol = FindSolution(ctx, problem, db_path);
 
         EXPECT_TRUE(sol.construction_params.size() > 0);
-        EXPECT_EQ(sol.construction_params[0].kernel_file, expected_kernel);
+        EXPECT_EQ(sol.construction_params[0].kernel_file, std::string(expected_kernel));
     }
 };
 

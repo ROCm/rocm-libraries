@@ -239,42 +239,10 @@ static inline auto to_string(const std::size_t& v) { return std::to_string(v); }
 /// of code between different COMgr versions.
 ///
 /// \todo Request comgr to expose this stuff via API.
-static std::string to_string(const amd_comgr_language_t val)
+template <typename T>
+static std::string to_string(const T val)
 {
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_LANGUAGE_NONE,
-                    AMD_COMGR_LANGUAGE_OPENCL_1_2,
-                    AMD_COMGR_LANGUAGE_OPENCL_2_0,
-                    AMD_COMGR_LANGUAGE_HIP);
-    return oss.str();
-}
-
-static std::string to_string(const amd_comgr_data_kind_t val)
-{
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_DATA_KIND_UNDEF,
-                    AMD_COMGR_DATA_KIND_SOURCE,
-                    AMD_COMGR_DATA_KIND_INCLUDE,
-                    AMD_COMGR_DATA_KIND_LOG,
-                    AMD_COMGR_DATA_KIND_EXECUTABLE);
-    return oss.str();
-}
-
-static std::string to_string(const amd_comgr_action_kind_t val)
-{
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS,
-                    AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE,
-                    AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
-                    AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
-                    AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC);
-    return oss.str();
+    return (std::ostringstream() << val).str();
 }
 
 static bool PrintVersionImpl()
@@ -286,11 +254,7 @@ static bool PrintVersionImpl()
     return true;
 }
 
-static void PrintVersion()
-{
-    static const auto once = PrintVersionImpl();
-    std::ignore            = once;
-}
+static void PrintVersion() { std::ignore = PrintVersionImpl(); }
 
 static std::string GetStatusText(const amd_comgr_status_t status, const bool unknown_error = false)
 {
@@ -525,17 +489,26 @@ static std::string GetLog(const Dataset& dataset, const bool comgr_error_handlin
         /// \todo Clarify API and update implementation.
         const auto count = dataset.GetDataCount(AMD_COMGR_DATA_KIND_LOG);
         if(count < 1)
-            return {comgr_error_handling ? "comgr warning: error log not found" : ""};
+        {
+            text = comgr_error_handling ? "comgr warning: error log not found" : "";
+            return text;
+        }
 
         const auto data = dataset.GetData(AMD_COMGR_DATA_KIND_LOG, 0);
         text            = data.GetString();
         if(text.empty())
-            return {comgr_error_handling ? "comgr info: error log empty" : ""};
+        {
+            text = comgr_error_handling ? "comgr info: error log empty" : "";
+            return text;
+        }
     }
     catch(ComgrError&)
     {
         if(comgr_error_handling)
-            return {"comgr error: failed to get error log"};
+        {
+            text = "comgr error: failed to get error log";
+            return text;
+        }
         // deepcode ignore EmptyThrowOutsideCatch: false positive
         throw;
         /// \anchor catch_and_rethrow_in_getlog

@@ -86,7 +86,7 @@ globalParameters["PreciseKernelTime"] = True      # T=On hip, use the timestamps
 globalParameters["CodeFromFiles"] = True          # if False byte arrays will be generated during Benchmarking phase as before
 globalParameters["SortProblems"] = False          # sort problems by size; else use order in YAML file
 globalParameters["PinClocks"] = False             # T=pin gpu clocks and fan, F=don't
-globalParameters["HardwareMonitor"] = True        # False: disable benchmarking client monitoring clocks using rocm-smi.
+globalParameters["HardwareMonitor"] = True        # False: disable benchmarking client monitoring clocks using amd-smi.
 globalParameters["NumBenchmarks"] = 1             # how many benchmark data points to collect per problem/solution
 globalParameters["NumWarmups"] = 0                # how many warmup runs to perform before benchmark
 globalParameters["SyncsPerBenchmark"] = 1         # how iterations of the stream synchronization for-loop to do per benchmark data point
@@ -246,12 +246,12 @@ globalParameters["NumMergedFiles"] = 1            # The number of files that ker
 
 globalParameters["MaxFileName"] = 64              # If a file name would be longer than this, shorten it with a hash.
 globalParameters["SupportedISA"] = [(8,0,3),
-                                    (9,0,0), (9,0,6), (9,0,8), (9,0,10),
+                                    (9,0,0), (9,0,6), (9,0,8), (9,0,10), (9,0,12),
                                     (9,4,2), (9,5,0),
                                     (10,1,0), (10,1,1), (10,1,2), (10,3,0), (10,3,1), (10,3,2), (10,3,3), (10,3,4), (10,3,5), (10,3,6),
                                     (11,0,0), (11,0,1), (11,0,2), (11,0,3),
                                     (11,5,0), (11,5,1), (11,5,2), (11,5,3),
-                                    (12,0,0), (12,0,1)] # assembly kernels writer supports these architectures
+                                    (12,0,0), (12,0,1), (12,5,0)] # assembly kernels writer supports these architectures
 
 globalParameters["KeepBuildTmp"] = True                           # Do not remove build artifacts during the build process or build_tmp after build completes
 globalParameters["GenerateManifestAndExit"] = False               # Output manifest file with list of expected library objects and exit
@@ -268,7 +268,7 @@ globalParameters["DictLibraryLogic"] = False
 # internal, i.e., gets set during startup
 globalParameters["CurrentISA"] = (0,0,0)
 globalParameters["ROCmAgentEnumeratorPath"] = None      # /opt/rocm/bin/rocm_agent_enumerator
-globalParameters["ROCmSMIPath"] = None                  # /opt/rocm/bin/rocm-smi
+globalParameters["AMDSMIPath"] = None                  # /opt/rocm/bin/amd-smi
 globalParameters["AssemblerPath"] = None                # /opt/rocm/llvm/bin/clang++
 globalParameters["WorkingPath"] = os.getcwd()           # path where tensile called from
 globalParameters["IndexChars"] =  "IJKLMNOPQRSTUVWXYZ"  # which characters to use for C[ij]=Sum[k] A[ik]*B[jk]
@@ -317,7 +317,7 @@ defaultGlobalParameters = deepcopy(globalParameters)
 # Translate GPU targets to filter filenames in Tensile_LOGIC directory
 architectureMap = {
   'all':'_', 'gfx000':'none', 'fallback':'hip',
-  'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10',
+  'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10', 'gfx90c':'vega10',
   'gfx906':'vega20', 'gfx906:xnack+':'vega20', 'gfx906:xnack-':'vega20',
   'gfx908':'arcturus','gfx908:xnack+':'arcturus', 'gfx908:xnack-':'arcturus',
   'gfx90a':'aldebaran', 'gfx90a:xnack+':'aldebaran', 'gfx90a:xnack-':'aldebaran',
@@ -328,7 +328,8 @@ architectureMap = {
   'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33', 'gfx1103':'gfx1103',
   'gfx1150':'strixpoint', 'gfx1151':'strixhalo', 'gfx1152':'gfx1152', 'gfx1153':'gfx1153',
   'gfx1200':'gfx1200',
-  'gfx1201':'gfx1201'
+  'gfx1201':'gfx1201',
+  'gfx1250':'gfx1250'
 }
 
 def getArchitectureName(gfxName: str) -> Optional[str]:
@@ -1994,7 +1995,7 @@ def printExit(message):
 
 ################################################################################
 # Locate Executables
-# rocm-smi, hip-clang, rocm_agent_enumerator, clang-offload-bundler
+# amd-smi, hip-clang, rocm_agent_enumerator, clang-offload-bundler
 ################################################################################
 def isExe( filePath ):
   return os.path.isfile(filePath) and os.access(filePath, os.X_OK)
@@ -2453,7 +2454,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
   else:
     raise ValueError("OffloadBundler not specified in config")
 
-  globalParameters["ROCmSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "rocm-smi")
+  globalParameters["AMDSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "amd-smi")
 
   globalParameters["ExtractKernelPath"] = locateExe(os.path.join(globalParameters["ROCmPath"], "hip/bin"), "extractkernel")
 
@@ -2528,9 +2529,9 @@ def setupRestoreClocks():
   import atexit
   def restoreClocks():
     if globalParameters["PinClocks"]:
-      rsmi = globalParameters["ROCmSMIPath"]
-      subprocess.call([rsmi, "-d", "0", "--resetclocks"])
-      subprocess.call([rsmi, "-d", "0", "--setfan", "50"])
+      asmi = globalParameters["AMDSMIPath"]
+      subprocess.call([asmi, "-d", "0", "--resetclocks"])
+      subprocess.call([asmi, "-d", "0", "--setfan", "50"])
   atexit.register(restoreClocks)
 setupRestoreClocks()
 

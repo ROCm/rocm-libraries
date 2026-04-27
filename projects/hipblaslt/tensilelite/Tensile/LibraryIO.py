@@ -23,16 +23,21 @@
 ################################################################################
 
 from .CustomKernels import getCustomKernelConfig
+from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
 from Tensile import __version__
 from Tensile.Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
+from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
+from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
-from typing import NamedTuple, List, Dict
+from typing import IO, NamedTuple, List, Dict, Optional
+from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs
+import io
 import os
 import sys
 import subprocess
@@ -66,9 +71,16 @@ except ImportError:
     printWarning("CSafeLoader not installed. Fallback to SafeLoader.")
 
 try:
+    from yaml import CSafeDumper as yamlDumper
+except ImportError:
+    from yaml import SafeDumper as yamlDumper
+    printWarning("CSafeDumper not installed. Fallback to SafeDumper.")
+
+try:
     import msgpack
 except ImportError:
     print("Message pack python library not detected. Must use YAML backend instead.")
+
 
 
 ###################
@@ -97,7 +109,7 @@ def writeYAML(filename, data, **kwargs):
         kwargs["default_flow_style"] = None
 
     with open(filename, "w") as f:
-        yaml.dump(data, f, **kwargs)
+        yaml.dump(data, f, Dumper=yamlDumper, **kwargs)
 
 def writeJson(filename, data):
     """Writes data to file in json format."""
@@ -110,45 +122,80 @@ def writeMsgPack(filename, data):
     with open(filename, "wb") as f:
         msgpack.pack(data, f)
 
-def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutions, cache=False):
+def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs]) -> None:
+    """Write the YAML header (version, problem sizes, bias/activation args)."""
+    f.write("- MinimumRequiredVersion: {}\n".format(__version__))
+    f.write("- ProblemSizes:\n")
+    if problemSizes:
+        for sizeRange in problemSizes.ranges:
+            f.write("  - Range: {}\n".format(sizeRange))
+        for problemExact in problemSizes.exacts:
+            #FIXME-problem, this ignores strides:
+            f.write("  - Exact: {}\n".format(problemExact))
+    if biasTypeArgs:
+        f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
+    if activationArgs:
+        f.write("- ActivationArgs:\n")
+        for setting in activationArgs.settingList:
+            f.write("  - [Enum: %s]\n"%(setting.activationEnum))
+
+def _findBodyOffset(filename: str, headerKeys: set[str]) -> int:
+    """Find the character offset where solution entries begin, skipping the header."""
+    with open(filename, "r") as f:
+        while True:
+            pos = f.tell()
+            line = f.readline()
+            if not line:
+                return pos
+            if line.startswith("- "):
+                key = line[2:].split(":")[0].strip()
+                if key not in headerKeys:
+                    return pos
+
+def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], solutions: list, cache: bool = False) -> None:
     """Writes solution YAML file."""
 
-    # convert objects to nested dictionaries
-    solutionStates = []
-
     if cache:
-        solYaml = read(filename)
-        if biasTypeArgs and activationArgs:
-            solutionStates = solYaml[4:]
-        elif biasTypeArgs or activationArgs:
-            solutionStates = solYaml[3:]
-        else:
-            solutionStates = solYaml[2:]
-    else:
-        for solution in solutions:
-            solutionState = solution.getAttributes()
-            solutionState["ProblemType"] = solutionState["ProblemType"].state
-            problemTypeToEnum(solutionState["ProblemType"])
-            isa = solutionState["ISA"]
-            solutionState["ISA"] = [isa[0], isa[1], isa[2]]
-            solutionStates.append(solutionState)
-    # write dictionaries
+        # Solutions unchanged; rewrite only the header in place
+        with timing_context("python_wsol_prepare"):
+            with timing_context("python_wsol_prepare_cache"):
+                newHeader = io.StringIO()
+                _writeSolutionsHeader(newHeader, problemSizes, biasTypeArgs, activationArgs)
+                newHeader = newHeader.getvalue()
+                headerKeys = {line[2:].split(":")[0].strip()
+                              for line in newHeader.splitlines() if line.startswith("- ")}
+                oldBodyOffset = _findBodyOffset(filename, headerKeys)
+        with timing_context("python_wsol_header"):
+            if len(newHeader) == oldBodyOffset:
+                # Same size header; overwrite in place, body untouched
+                with open(filename, "r+") as f:
+                    f.write(newHeader)
+            else:
+                # Header size changed; must shift the body
+                with open(filename, "r+") as f:
+                    f.seek(oldBodyOffset)
+                    solutionsBody = f.read()
+                    f.seek(0)
+                    f.write(newHeader)
+                    f.write(solutionsBody)
+                    f.truncate()
+        return
+
+    with timing_context("python_wsol_prepare"):
+        with timing_context("python_wsol_prepare_nocache"):
+            solutionStates: list[dict] = []
+            for solution in solutions:
+                solutionState = solution.getAttributes()
+                solutionState["ProblemType"] = solutionState["ProblemType"].state
+                problemTypeToEnum(solutionState["ProblemType"])
+                isa = solutionState["ISA"]
+                solutionState["ISA"] = [isa[0], isa[1], isa[2]]
+                solutionStates.append(solutionState)
     with open(filename, "w") as f:
-        f.write("- MinimumRequiredVersion: {}\n".format(__version__))
-        f.write("- ProblemSizes:\n")
-        if problemSizes:
-            for sizeRange in problemSizes.ranges:
-                f.write("  - Range: {}\n".format(sizeRange))
-            for problemExact in problemSizes.exacts:
-                #FIXME-problem, this ignores strides:
-                f.write("  - Exact: {}\n".format(problemExact))
-        if biasTypeArgs:
-            f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
-        if activationArgs:
-            f.write("- ActivationArgs:\n")
-            for setting in activationArgs.settingList:
-                f.write("  - [Enum: %s]\n"%(setting.activationEnum))
-        yaml.dump(solutionStates, f, default_flow_style=None)
+        with timing_context("python_wsol_header"):
+            _writeSolutionsHeader(f, problemSizes, biasTypeArgs, activationArgs)
+        with timing_context("python_wsol_dump"):
+            yaml.dump(solutionStates, f, Dumper=yamlDumper, default_flow_style=None)
 
 
 ###############################
@@ -247,7 +294,30 @@ def parseSolutionsData(
     problemSizes = ProblemSizes(problemType, problemSizesConfig)
     return (problemSizes, solutions)
 
+def getRealDataTypeA(dataType):
+    if dataType == DataTypeEnum.Float8BFloat8.value:
+        return DataTypeEnum.Float8.value
+    elif dataType == DataTypeEnum.BFloat8Float8.value:
+        return DataTypeEnum.BFloat8.value
+    elif dataType == DataTypeEnum.Float8BFloat8_fnuz.value:
+        return DataTypeEnum.Float8_fnuz.value
+    elif dataType == DataTypeEnum.BFloat8Float8_fnuz.value:
+        return DataTypeEnum.BFloat8_fnuz.value
+    else:
+        return dataType
 
+def getRealDataTypeB(dataType):
+    if dataType == DataTypeEnum.Float8BFloat8.value:
+        return DataTypeEnum.BFloat8.value
+    elif dataType == DataTypeEnum.BFloat8Float8.value:
+        return DataTypeEnum.Float8.value
+    elif dataType == DataTypeEnum.Float8BFloat8_fnuz.value:
+        return DataTypeEnum.BFloat8_fnuz.value
+    elif dataType == DataTypeEnum.BFloat8Float8_fnuz.value:
+        return DataTypeEnum.Float8_fnuz.value
+    else:
+        return dataType
+    
 class LibraryLogic(NamedTuple):
     """Return tuple for parseLibraryLogicData()"""
     schedule: str
@@ -256,6 +326,7 @@ class LibraryLogic(NamedTuple):
     solutions: list
     exactLogic: list
     library: SolutionLibrary.MasterSolutionLibrary
+    typeMismatches: dict = {}
 
 def parseLibraryLogicFile(
         filename,
@@ -295,6 +366,21 @@ def parseLibraryLogicData(
 
     if "CUCount" not in data:
         data["CUCount"] = None
+    if 'MacDataTypeA' not in data["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
+        data["ProblemType"]['MacDataTypeA'] = getRealDataTypeA(data["ProblemType"]['DataType'])
+
+    if 'MacDataTypeB' not in data["ProblemType"]:
+        data["ProblemType"]['MacDataTypeB'] = getRealDataTypeB(data["ProblemType"]['DataType'])
+
+    if 'DataTypeA' not in data["ProblemType"]:
+        data["ProblemType"]['DataTypeA'] = data["ProblemType"]['MacDataTypeA']
+    else:
+        data["ProblemType"]['DataTypeA'] = getRealDataTypeA(data["ProblemType"]['DataTypeA'])
+
+    if 'DataTypeB' not in data["ProblemType"]:
+        data["ProblemType"]['DataTypeB'] = data["ProblemType"]['MacDataTypeB']
+    else:
+        data["ProblemType"]['DataTypeB'] = getRealDataTypeB(data["ProblemType"]['DataTypeB'])
 
     if not versionIsCompatible(data["MinimumRequiredVersion"]):
         printWarning("Version = {} in library logic file {} does not match Tensile version = {}" \
@@ -308,6 +394,7 @@ def parseLibraryLogicData(
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
         solutionState["CUCount"] = data["CUCount"]
+        solutionState["DeviceNames"] = data.get("DeviceNames", None)
         # force redo the deriving of parameters, make sure old version logic yamls can be validated
         solutionState["AssignedProblemIndependentDerivedParameters"] = False
         solutionState["AssignedDerivedParameters"] = False
@@ -323,6 +410,22 @@ def parseLibraryLogicData(
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
         # overwrite problemType if any
         solutionState["ProblemType"] = problemType
+        if 'MacDataTypeA' not in solutionState["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
+            solutionState["ProblemType"]['MacDataTypeA'] = getRealDataTypeA(solutionState["ProblemType"]['DataType'])
+
+        if 'MacDataTypeB' not in solutionState["ProblemType"]:
+            solutionState["ProblemType"]['MacDataTypeB'] = getRealDataTypeB(solutionState["ProblemType"]['DataType'])
+
+        if 'DataTypeA' not in solutionState["ProblemType"]:
+            solutionState["ProblemType"]['DataTypeA'] = solutionState["ProblemType"]['MacDataTypeA']
+        else:
+            solutionState["ProblemType"]['DataTypeA'] = getRealDataTypeA(solutionState["ProblemType"]['DataTypeA'])
+
+        if 'DataTypeB' not in solutionState["ProblemType"]:
+            solutionState["ProblemType"]['DataTypeB'] = solutionState["ProblemType"]['MacDataTypeB']
+        else:
+            solutionState["ProblemType"]['DataTypeB'] = getRealDataTypeB(solutionState["ProblemType"]['DataTypeB'])
+
         solutionObject = Solution(
                              solutionState,
                              splitGSU,
@@ -334,7 +437,9 @@ def parseLibraryLogicData(
                          )
         return solutionObject
 
+    resetTypeMismatchCollector()
     solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(
         data,
@@ -344,11 +449,12 @@ def parseLibraryLogicData(
         printIndexAssignmentInfo,
         assembler,
         isaInfoMap,
-        lazyLibraryLoading
+        lazyLibraryLoading,
+        logicFile=srcFile
     )
 
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \
-            data.get("ExactLogic"), newLibrary)
+            data.get("ExactLogic"), newLibrary, typeMismatches)
 
 
 def parseLibraryLogicList(data, srcFile="?"):
@@ -479,6 +585,10 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     problemTypeState = problemType.state
     problemTypeState["DataType"] = \
             problemTypeState["DataType"].value
+    problemTypeState["MacDataTypeA"] = \
+            problemTypeState["MacDataTypeA"].value
+    problemTypeState["MacDataTypeB"] = \
+            problemTypeState["MacDataTypeB"].value
     problemTypeState["DataTypeA"] = \
             problemTypeState["DataTypeA"].value
     problemTypeState["DataTypeB"] = \
@@ -502,6 +612,12 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     if "DataTypeMetadata" in problemTypeState:
         problemTypeState["DataTypeMetadata"] = \
                 problemTypeState["DataTypeMetadata"].value
+    if "DataTypeMXSA" in problemTypeState:
+        problemTypeState["DataTypeMXSA"] = \
+                problemTypeState["DataTypeMXSA"].value
+    if "DataTypeMXSB" in problemTypeState:
+        problemTypeState["DataTypeMXSB"] = \
+                problemTypeState["DataTypeMXSB"].value
     data.append(problemTypeState)
     # solutions
     solutionList = []

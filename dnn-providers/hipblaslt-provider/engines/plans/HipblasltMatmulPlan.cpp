@@ -7,9 +7,9 @@
 #include <string>
 
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "HipblasltMatmulPlan.hpp"
@@ -29,8 +29,8 @@ inline int64_t getBatchCount(const std::vector<int64_t>& dims)
 }
 } // namespace
 
-hipblasOperation_t
-    MatmulParams::getTrans(const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
+hipblasOperation_t MatmulParams::getTrans(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
 {
     const auto& strides = t.strides();
     PLUGIN_THROW_IF_FALSE(strides.size() > 1,
@@ -51,8 +51,8 @@ hipblasOperation_t
 }
 
 hipblasComputeType_t MatmulParams::getComputeDataType(
-    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
-    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB)
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB)
 {
     auto hipDataTypeA = hipblaslt_utils::tensorDataTypeToHipDataType(tA.dataType());
     auto hipDataTypeB = hipblaslt_utils::tensorDataTypeToHipDataType(tB.dataType());
@@ -68,8 +68,20 @@ hipblasComputeType_t MatmulParams::getComputeDataType(
 }
 
 MatmulParams::MatmulParams(
-    const hipdnn_data_sdk::data_objects::MatmulAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+    : MatmulParams(attributes, nullptr, nullptr, tensorMap)
+{
+}
+
+MatmulParams::MatmulParams(
+    const hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     const auto tA = hipblaslt_utils::findTensorAttributes(tensorMap, attributes.a_tensor_uid());
@@ -78,13 +90,21 @@ MatmulParams::MatmulParams(
 
     _matrixLayoutA = HipblasltMatrixLayout(tA);
     _matrixLayoutB = HipblasltMatrixLayout(tB);
-    _matrixLayoutC = HipblasltMatrixLayout(tC);
 
-    // Row-major BLAS trick: to compute C = A * B with row-major data,
-    // we compute C^T = B^T * A^T with column-major BLAS.
-    // So we swap the transpose operations: transA in desc = getTrans(B), transB in desc = getTrans(A)
-    _matmulDesc
-        = HipblasltMatmulDesc(getTrans(tB), getTrans(tA), getComputeDataType(tA, tB), HIP_R_32F);
+    if(activAttr != nullptr)
+    {
+        _matrixLayoutC = HipblasltMatrixLayout(
+            hipblaslt_utils::findTensorAttributes(tensorMap, activAttr->out_0_tensor_uid()));
+    }
+    else if(biasAttr != nullptr)
+    {
+        _matrixLayoutC = HipblasltMatrixLayout(
+            hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid()));
+    }
+    else
+    {
+        _matrixLayoutC = HipblasltMatrixLayout(tC);
+    }
 
     const auto& aDims = tA.dims();
     const auto& bDims = tB.dims();
@@ -96,49 +116,149 @@ MatmulParams::MatmulParams(
             "Unsupported input matrix ranks: they should be the same");
     }
 
+    hipDataType biasDataType = HIP_R_32F;
+    if(biasAttr)
+    {
+        if(!biasAttr->in_1_tensor_uid().has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "MatmulParams: biasAttr missing in_1_tensor_uid");
+        }
+
+        if(biasAttr->in_0_tensor_uid() == attributes.c_tensor_uid())
+        {
+            _biasUid = biasAttr->in_1_tensor_uid().value();
+        }
+        else if(biasAttr->in_1_tensor_uid().value() == attributes.c_tensor_uid())
+        {
+            _biasUid = biasAttr->in_0_tensor_uid();
+        }
+        else
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "MatmulParams: biasAttr tensor UIDs do not match c_tensor_uid");
+        }
+
+        const auto tBias = hipblaslt_utils::findTensorAttributes(tensorMap, _biasUid.value());
+        const auto& biasDims = tBias.dims();
+
+        PLUGIN_THROW_IF_TRUE(
+            biasDims.empty() || biasDims.back() != cDims.back()
+                || std::accumulate(
+                       biasDims.cbegin(), biasDims.cend(), int64_t(1), std::multiplies<int64_t>())
+                       != biasDims.back(),
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Bias tensor dims must be equal to column dimension of output matrix");
+        biasDataType = hipblaslt_utils::tensorDataTypeToHipDataType(tBias.dataType());
+    }
+
+    // Row-major BLAS trick: to compute C = A * B with row-major data,
+    // we compute C^T = B^T * A^T with column-major BLAS.
+    // So we swap the transpose operations: transA in desc = getTrans(B), transB in desc = getTrans(A)
+    _matmulDesc
+        = HipblasltMatmulDesc(getTrans(tB), getTrans(tA), getComputeDataType(tA, tB), HIP_R_32F);
+    setEpilogue(activAttr, biasDataType);
+
+    if(aDims.size() > 2)
+    {
+        setBatchInfo(tA, tB, tC);
+    }
+}
+
+void MatmulParams::setBatchInfo(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC)
+{
     // Batch support: we flatten all batch dimensions (all except last two) into a single batch count.
     // hipBLASLt uses a single strided batch offset, so we can only support uniform batch strides.
     // Supported: [3, M, K] x [1, K, N] or [3, M, K] x [3, K, N] - single batch dimension, uniform stride.
     // Not supported: [3, 1, M, K] x [1, 3, K, N] - would require non-uniform stride pattern for broadcasting.
-    const auto rank = aDims.size();
-    if(rank > 2)
+    const int64_t aBatch = getBatchCount(tA.dims());
+    const int64_t bBatch = getBatchCount(tB.dims());
+    const int64_t cBatch = getBatchCount(tC.dims());
+
+    if(aBatch != bBatch && aBatch != 1 && bBatch != 1)
     {
-        const int64_t aBatch = getBatchCount(aDims);
-        const int64_t bBatch = getBatchCount(bDims);
-        const int64_t cBatch = getBatchCount(cDims);
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported input matrix batch dimensions: they should be equal or one of them "
+            "should be 1");
+    }
 
-        if(aBatch != bBatch && aBatch != 1 && bBatch != 1)
+    if(cBatch != std::max(aBatch, bBatch))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported matrix batch dimensions: output batch should be the same as the max "
+            "of the input batch dimensions");
+    }
+
+    if(cBatch > 1)
+    {
+        _matrixLayoutA.setBatchCount(cBatch);
+        _matrixLayoutB.setBatchCount(cBatch);
+        _matrixLayoutC.setBatchCount(cBatch);
+
+        size_t rank = tA.dims().size();
+        if(aBatch > 1)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Unsupported input matrix batch dimensions: they should be equal or one of them "
-                "should be 1");
+            _matrixLayoutA.setStridedBatchOffset(tA.strides()[rank - 3]);
         }
-
-        if(cBatch != std::max(aBatch, bBatch))
+        if(bBatch > 1)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Unsupported matrix batch dimensions: output batch should be the same as the max "
-                "of the input batch dimensions");
+            _matrixLayoutB.setStridedBatchOffset(tB.strides()[rank - 3]);
         }
+        _matrixLayoutC.setStridedBatchOffset(tC.strides()[rank - 3]);
+    }
+}
 
-        if(cBatch > 1)
-        {
-            _matrixLayoutA.setBatchCount(cBatch);
-            _matrixLayoutB.setBatchCount(cBatch);
-            _matrixLayoutC.setBatchCount(cBatch);
+void MatmulParams::setEpilogue(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
+    hipDataType biasDataType)
+{
+    auto epilogueParams
+        = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(activAttr, _biasUid.has_value());
 
-            if(aBatch > 1)
-            {
-                _matrixLayoutA.setStridedBatchOffset(tA.strides()[rank - 3]);
-            }
-            if(bBatch > 1)
-            {
-                _matrixLayoutB.setStridedBatchOffset(tB.strides()[rank - 3]);
-            }
-            _matrixLayoutC.setStridedBatchOffset(tC.strides()[rank - 3]);
-        }
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
+                                                               HIPBLASLT_MATMUL_DESC_EPILOGUE,
+                                                               &epilogueParams.epilogue,
+                                                               sizeof(epilogueParams.epilogue)));
+    if(epilogueParams.act0 != 0.0f)
+    {
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
+                                            &epilogueParams.act0,
+                                            sizeof(epilogueParams.act0)));
+    }
+    if(epilogueParams.act1 != 0.0f)
+    {
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
+                                            &epilogueParams.act1,
+                                            sizeof(epilogueParams.act1)));
+    }
+
+    if(_biasUid.has_value())
+    {
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE,
+                                            &biasDataType,
+                                            sizeof(biasDataType)));
+
+        // hipBLASLt requires initialized bias pointer in matmul descriptor for algorithm search.
+        // Since the pointer is unknown on this stage, we initialize it by dummy pointer to update it in execution stage.
+        void* dummyBiasPtr = reinterpret_cast<void*>(0x1);
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
+                                            &dummyBiasPtr,
+                                            sizeof(dummyBiasPtr)));
     }
 }
 
@@ -160,6 +280,11 @@ const HipblasltMatrixLayout& MatmulParams::c() const
 const HipblasltMatmulDesc& MatmulParams::desc() const
 {
     return _matmulDesc;
+}
+
+const std::optional<int64_t>& MatmulParams::biasUid() const
+{
+    return _biasUid;
 }
 
 MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& params)
@@ -219,6 +344,18 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
         = hipblaslt_utils::findDeviceBuffer(_params.b().uid(), deviceBuffers, numDeviceBuffers);
     auto cBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.c().uid(), deviceBuffers, numDeviceBuffers);
+
+    // Update bias pointer in the descriptor if they are present.
+    if(_params.biasUid().has_value())
+    {
+        auto biasBuffer = hipblaslt_utils::findDeviceBuffer(
+            _params.biasUid().value(), deviceBuffers, numDeviceBuffers);
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(_params.desc().matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
+                                            &biasBuffer.ptr,
+                                            sizeof(biasBuffer.ptr)));
+    }
     // A, B and C matrices are row-major. But hipBLASLt works with column-major matrices
     // To work with row-major matrices, we transpose them.
     // This is done by changing the order of A and B matrices in arguments:

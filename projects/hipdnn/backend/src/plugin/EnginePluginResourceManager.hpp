@@ -5,7 +5,9 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -14,11 +16,24 @@
 
 #include "hipdnn_backend.h"
 
-namespace hipdnn_data_sdk::data_objects
+// Forward declarations
+namespace hipdnn_backend::plugin
+{
+class EnginePlugin;
+class EnginePluginManager;
+} // namespace hipdnn_backend::plugin
+
+// Include base template (manager types will be complete when base methods are used in .cpp)
+#include "PluginResourceManagerBase.hpp"
+
+// Include complete manager type for template instantiation
+#include "EnginePluginManager.hpp"
+
+namespace hipdnn_flatbuffers_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct EngineDetails;
-} // namespace hipdnn_data_sdk::data_objects
+} // namespace hipdnn_flatbuffers_sdk::data_objects
 
 namespace hipdnn_backend
 {
@@ -32,23 +47,48 @@ class EngineExecutionContextWrapper;
 class EnginePlugin;
 class EnginePluginManager;
 
-class EnginePluginResourceManager
+struct EngineInfo
 {
+    std::string engineName;
+    std::string pluginName;
+    int64_t engineId;
+    std::string version;
+    std::string type;
+};
+
+class EnginePluginResourceManager : public PluginResourceManagerBase<EnginePluginResourceManager,
+                                                                     EnginePluginManager,
+                                                                     EnginePlugin>
+{
+    // Allow base class to access private static accessors
+    friend class PluginResourceManagerBase<EnginePluginResourceManager,
+                                           EnginePluginManager,
+                                           EnginePlugin>;
+
+private:
+    // Static accessors for CRTP base class
+    static std::mutex& getMutex();
+    static PluginLoadingConfig& getConfig();
+    static std::weak_ptr<EnginePluginManager>& getWeakPtr();
+    static std::shared_ptr<EnginePluginManager>& getPersistentPtr();
+    static std::atomic<bool>& getShutdownFlag();
+    static const char* getPluginTypeName();
+
 protected:
     // Protected constructor for mock testing
     EnginePluginResourceManager();
 
 public:
-    // MT-safe static functions
-    // Load plugins from a specific path, for testing purposes
-    static void setPluginPaths(const std::vector<std::filesystem::path>& pluginPaths,
-                               hipdnnPluginLoadingMode_ext_t loadingMode);
-    static std::set<std::filesystem::path> getPluginPaths();
+    // MT-safe static functions (inherited from base, re-declared for documentation)
+    using PluginResourceManagerBase::getPluginPaths;
+    using PluginResourceManagerBase::setPluginLogLevel;
+    using PluginResourceManagerBase::setPluginPaths;
+    using PluginResourceManagerBase::setPluginUnloadingMode;
 
     static std::shared_ptr<EnginePluginResourceManager> create();
 
     EnginePluginResourceManager(std::shared_ptr<EnginePluginManager> pm);
-    virtual ~EnginePluginResourceManager();
+    ~EnginePluginResourceManager() override;
 
     // Prevent copying
     EnginePluginResourceManager(const EnginePluginResourceManager&) = delete;
@@ -61,7 +101,8 @@ public:
     // MT-unsafe instance methods
     // virtual for gMock testing
     virtual void setStream(hipStream_t stream) const;
-    virtual std::vector<int64_t> getApplicableEngineIds(const GraphDescriptor* graphDesc) const;
+    virtual std::vector<int64_t> getApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                        bool findFirst = false) const;
     virtual size_t getWorkspaceSize(int64_t engineId,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const GraphDescriptor* graphDesc) const;
@@ -81,10 +122,16 @@ public:
                                const hipdnnPluginConstData_t* engineConfig,
                                const GraphDescriptor* graphDesc);
 
-    virtual void
-        getLoadedPluginFiles(size_t* numPlugins, char** pluginPaths, size_t* maxStringLen) const;
+    virtual size_t getEngineCount() const;
+    virtual std::vector<EngineInfo> getEngineInfos() const;
+
+    // Inherited from base: getLoadedPluginFiles()
+    using PluginResourceManagerBase::getLoadedPluginFiles;
 
     virtual std::string toString() const;
+
+protected:
+    // Note: _pm member is inherited from PluginResourceManagerBase
 
 private:
     // MT-unsafe instance methods
@@ -109,9 +156,9 @@ private:
                         const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                         uint32_t numDeviceBuffers) const;
 
-    std::shared_ptr<EnginePluginManager> _pm;
     std::unordered_map<hipdnnEnginePluginHandle_t, const EnginePlugin*> _handleToPlugin;
     std::unordered_map<int64_t, hipdnnEnginePluginHandle_t> _engineIdToHandle;
+    mutable std::optional<std::vector<EngineInfo>> _cachedEngineInfos;
 
     friend class EngineDetailsWrapper;
     friend class EngineExecutionContextWrapper;
@@ -134,7 +181,7 @@ public:
     EngineDetailsWrapper(EngineDetailsWrapper&& other) noexcept;
     EngineDetailsWrapper& operator=(EngineDetailsWrapper&& other) noexcept;
 
-    const hipdnn_data_sdk::data_objects::EngineDetails* get() const;
+    const hipdnn_flatbuffers_sdk::data_objects::EngineDetails* get() const;
 
 private:
     std::shared_ptr<EnginePluginResourceManager> _rm;

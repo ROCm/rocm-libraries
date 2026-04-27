@@ -6,12 +6,19 @@
 - [Plugin Types](#plugin-types)
 - [SDK Libraries](#sdk-libraries)
 - [Plugin API](#plugin-api)
+- [Engine IDs](#engine-ids)
 - [Creating a Kernel Engine Plugin](#creating-a-kernel-engine-plugin)
+  - [Prerequisites](#prerequisites)
   - [Steps Overview](#steps-overview)
   - [Implementation Details & Best Practices](#implementation-details)
+  - [Providing Knobs](#providing-knobs)
+    - [Plugin SDK Knob Utilities](#plugin-sdk-knob-utilities)
+    - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
+    - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
   - [Key Files Reference](#key-files-reference)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
+- [How to Test Plugins](#how-to-test-plugins)
 - [Example: MIOpen Provider Plugin](#example-miopen-provider-plugin)
 - [Troubleshooting](#troubleshooting)
 
@@ -43,13 +50,21 @@ hipDNN provides several C++ SDK libraries for plugin development:
 
 ### Data SDK (`data_sdk`)
 
-The Data SDK contains the FlatBuffers schemas and data structures for graph representation. It includes:
+The Data SDK contains shared types and utilities used across hipDNN. It includes:
+
+- Type helpers (e.g., `half`, `bfloat16`)
+- Tensor and memory utilities
+- The engine name registry (`EngineNames.hpp`)
+
+### FlatBuffers SDK (`flatbuffers_sdk`)
+
+The FlatBuffers SDK contains the FlatBuffers schemas, generated headers, and graph wrapper classes. It includes:
 
 - FlatBuffers schema definitions for graphs, nodes, and attributes
-- Data structures for deserializing serialized graphs
-- Utilities for working with graph data
+- Generated headers under `hipdnn_flatbuffers_sdk/data_objects/`
+- Wrapper classes (`GraphWrapper`, `NodeWrapper`, `IEngineConfig`) for working with serialized graphs
 
-For adding new operations to the Data SDK (schemas, nodes, attributes), see the [How-To Guide](./HowTo.md#adding-a-new-operation-to-existing-plugins).
+For adding new operations to the FlatBuffers SDK (schemas, nodes, attributes), see the [How-To Guide](./HowTo.md#adding-a-new-operation-to-existing-plugins).
 
 ### Plugin SDK (`plugin_sdk`)
 
@@ -90,20 +105,20 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 ### Using Engine IDs
 
 ```cpp
-#include <hipdnn_plugin_sdk/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 // Option 1: Use a registered engine ID
-const int64_t engineId = hipdnn_plugin_sdk::engine_names::MIOPEN_PLUGIN_ID;
+const int64_t engineId = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
 
 // Option 2: Generate ID from custom name
-const int64_t customEngineId = hipdnn_data_sdk::engineNameToId("MY_CUSTOM_ENGINE");
+const int64_t customEngineId = hipdnn_data_sdk::utilities::engineNameToId("MY_CUSTOM_ENGINE");
 
 // In your engine implementation
 class MyEngine {
     int64_t _id;
 public:
     MyEngine(const char* engineName)
-        : _id(hipdnn_data_sdk::engineNameToId(engineName)) {
+        : _id(hipdnn_data_sdk::utilities::engineNameToId(engineName)) {
         // Engine is now initialized with a unique ID
     }
 };
@@ -117,9 +132,9 @@ To add your engine name to the official registry:
    - Use UPPER_CASE with underscores
    - Make the name match the value.
 
-2. **Add to Registry**: Submit a PR to add your engine name to [`plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp):
+2. **Add to Registry**: Submit a PR to add your engine name to [`data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp`](../data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp):
    ```cpp
-   HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE, "MY_NEW_ENGINE")
+   HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE)
    ```
 
 3. **Test Locally First**: You can use unregistered names during development - they'll generate a warning but work correctly
@@ -132,7 +147,7 @@ To add your engine name to the official registry:
 - **Forward Compatible**: New engines can be used without registry updates
 
 > [!TIP]
-> 💡 The engine ID system ensures globally unique identifiers across all plugins. You can query registered engines using `hipdnn_plugin_sdk::engine_names::getAllEngineNames()` and check for name collisions using the provided test utilities.
+> 💡 The engine ID system ensures globally unique identifiers across all plugins. You can query registered engines using `hipdnn_data_sdk::utilities::getAllEngineNames()` and check for name collisions using the provided test utilities.
 
 
 ## Creating a Kernel Engine Plugin
@@ -156,7 +171,7 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
    - **Engine Manager**: Manages available engines and their capabilities
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique `int64_t` ID)
    - **Execution Plans**: Define how operations are executed
-   - **Engine Name & ID**: Name your engine and place it in the [EngineNames](../plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp) registry
+   - **Engine Name & ID**: Name your engine and place it in the [EngineNames](../data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp) registry
 
 3. **Build and Deploy Plugin**
    - Configure CMake to build the plugin as a shared library
@@ -164,26 +179,39 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
 
 ### Implementation Details
 
-The **Engine Manager** is responsible for:
-- Creating and managing engine instances
-- Reporting supported operations
+The Plugin SDK provides template interfaces that simplify plugin development. While you can implement the raw C API directly, using these interfaces is recommended for code organization and maintainability.
+
+#### Using Plugin SDK Interfaces
+
+**Template Parameters**: All SDK interfaces are templated on three types:
+- `THandle` - Your plugin's handle type (wraps backend resources)
+- `TSettings` - Your plugin's settings type (stores knob values)
+- `TContext` - Your plugin's context type (holds the execution plan)
+
+The **EngineManager** ([`EngineManager.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/EngineManager.hpp)) is responsible for:
+- Creating and managing `IEngine` instances
+- Reporting supported operations via `getApplicableEngineIds()`
+- Delegating to the appropriate engine based on engine ID
 - Handling resource allocation
-- Managing device-specific contexts
 
-For **Engine Implementations**:
+For **Engine Implementations** ([`IEngine.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IEngine.hpp)):
 - Each engine must have a unique inter-plugin `int64_t` identifier
-- Implement the `execute()` method for graph execution
-- Provide `get_supported_operations()` to report capabilities
-- Handle operation-specific kernel launches
-- Manage memory transfers and synchronization
+- Implement `isApplicable()` to report graph support
+- Implement `getDetails()` to return engine metadata and knobs
+- Delegate plan building to `IPlanBuilder` implementations
 
-**Execution plans** for kernel engines:
+For **Plan Builder Implementations** ([`IPlanBuilder.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp)):
+- Implement `getCustomKnobs()` to expose configurable parameters
+- Implement `initializeExecutionSettings()` to apply knob values
+- Implement `buildPlan()` to create executable plans
+
+**Execution plans** ([`IPlan.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlan.hpp)) for kernel engines:
 - Map hipDNN operations to backend-specific kernel implementations
 - Define memory layouts and data transformations
 - Specify kernel launch configurations
 - Handle device-specific optimizations
 
-In general, the **best practices** consist of:
+#### Best Practices
 
 1. Organizing kernels by operation type
 2. Efficiently managing device memory allocations and transfers
@@ -193,12 +221,203 @@ In general, the **best practices** consist of:
 6. Validating and documenting supported operations, hardware requirements, and limitations
 7. Including unit tests and integration tests
 
-### Key Files Reference
+### Providing Knobs
 
-- **Plugin API Interface**: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-- **Example Plugin Implementation**: [`dnn-providers/miopen-provider/MiopenPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenPlugin.cpp)
-- **Example Engine Manager**: [`dnn-providers/miopen-provider/EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp)
-- **Example Engine Implementation**: [`dnn-providers/miopen-provider/engines/MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp)
+Knobs allow plugin developers to expose configurable runtime parameters to end-users. This enables performance tuning, feature toggles, and algorithmic choices without requiring code changes or recompilation.
+
+#### What are Knobs?
+
+**Knobs** are runtime-configurable parameters that:
+- Control engine behavior (e.g., enable benchmarking, select algorithms)
+- Tune performance parameters (e.g., tile sizes, workspace limits)
+- Allow users to make trade-offs (e.g., memory vs. performance)
+
+Each knob has:
+- **Unique identifier**: String-based ID following namespace conventions
+- **Type**: Integer (int64), Float (double), or String
+- **Default value**: Used when not explicitly set by the user
+- **Constraints**: Valid ranges or explicit allowed values
+- **Description**: Human-readable explanation
+
+#### Knob Naming Conventions
+
+Follow a hierarchical naming scheme to avoid conflicts:
+
+```
+<plugin_name>.<category>.<knob_name>
+```
+
+**Examples**:
+```
+miopen.conv.tile_size
+miopen.global.benchmarking
+rocblas.gemm.algorithm
+custom_plugin.matmul.block_size
+```
+
+> [!IMPORTANT]
+> The `global.*` namespace is **reserved** for standard knobs. Custom plugins must use their own namespace prefix.
+
+**Standard global knobs** available for all plugins:
+- `global.benchmarking` - Enable kernel benchmarking
+- `global.workspace_size_limit` - Maximum workspace memory (operation-specific)
+
+These constants are defined in [`GlobalKnobDefines.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/GlobalKnobDefines.hpp):
+
+```cpp
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+
+// Use the constants instead of string literals
+hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME        // "global.benchmarking"
+hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME // "global.workspace_size_limit"
+```
+
+#### Plugin SDK Knob Utilities
+
+The Plugin SDK provides helper classes that simplify knob implementation:
+
+| Class | Purpose |
+|-------|---------|
+| [`KnobFactory`](../plugin_sdk/include/hipdnn_plugin_sdk/KnobFactory.hpp) | Create knob definitions with constraints |
+| [`KnobSettingFactory`](../plugin_sdk/include/hipdnn_plugin_sdk/KnobSettingFactory.hpp) | Create knob settings (for testing) |
+| [`GlobalKnobDefines`](../plugin_sdk/include/hipdnn_plugin_sdk/GlobalKnobDefines.hpp) | Constants for standard global knobs |
+
+The [`IPlanBuilder`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp) interface includes a `getCustomKnobs()` method that plan builders implement to expose their knobs.
+
+#### Registering Knobs with the Plugin SDK
+
+Plugins expose knobs through the `IPlanBuilder::getCustomKnobs()` method. When hipDNN queries your engine for its details, the engine collects knobs from all applicable plan builders and includes them in the response.
+
+```cpp
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> MyPlanBuilder::getCustomKnobs(
+    const HipdnnMiopenHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> knobs;
+
+    if(!isApplicable(handle, opGraph))
+    {
+        return knobs;
+    }
+
+    hipdnn_flatbuffers_sdk::data_objects::KnobT sampleKnob;
+    sampleKnob.knob_id = "myplugin.myoperation.myknob";
+    sampleKnob.description = "Sample Knob Description";
+
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValue;
+    defaultValue.value = 1;
+    sampleKnob.default_value.Set(defaultValue);
+
+    hipdnn_flatbuffers_sdk::data_objects::IntConstraintT constraint;
+    constraint.min_value = 0;
+    constraint.max_value = 4;
+    constraint.step = 1;
+    sampleKnob.constraint.Set(constraint);
+
+    knobs.push_back(std::move(sampleKnob));
+
+    return knobs;
+}
+```
+
+#### Accessing Knob Settings in Your Plugin
+
+When a user creates an execution plan with knob settings, those settings are passed in the `EngineConfig` to your plan builder. Your plugin should:
+
+1. **Extract knob settings** in `initializeExecutionSettings()` or `buildPlan()`
+2. **Validate settings** against your knob constraints
+3. **Store settings** in your execution settings or plan
+4. **Apply settings** during plan execution
+
+**Using the IPlanBuilder Interface**
+
+The recommended approach is to implement the [`IPlanBuilder`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp) interface. This interface provides a clean separation between knob definition (`getCustomKnobs()`) and knob consumption (`initializeExecutionSettings()`, `buildPlan()`):
+
+```cpp
+#include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+
+class MyPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<MyHandle, MySettings, MyContext>
+{
+public:
+    // Define the knobs this plan builder supports
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> getCustomKnobs(
+        const MyHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override
+    {
+        // Return knob definitions (see "Registering Knobs" section above)
+        return {};
+    }
+
+    // Initialize execution settings from knob values
+    void initializeExecutionSettings(
+        const MyHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        MySettings& executionSettings) const override
+    {
+        // Extract and apply knob settings to execution settings
+        for (const auto& setting : engineConfig.knobSettings()) {
+            const std::string& knobId = setting.knobIdStr();
+
+            if (knobId == hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME) {
+                executionSettings.benchmarkingEnabled = (setting.intValue() == 1);
+            }
+            else if (knobId == "myplugin.tile_size") {
+                executionSettings.tileSize = setting.intValue();
+            }
+        }
+    }
+
+    // Build the plan using the configured settings
+    void buildPlan(
+        const MyHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        MyContext& executionContext) const override
+    {
+        // Build plan using engineConfig knob settings
+    }
+};
+```
+
+#### Validation Best Practices
+
+1. **Validate during finalization**: The frontend validates against constraints, but plugins should also validate logical combinations:
+   ```cpp
+   // Example: Knob A can only be 1 if Knob B is 0
+   if (knobA == 1 && knobB != 0) {
+       return error("Knob A requires Knob B to be 0");
+   }
+   ```
+
+2. **Provide defaults**: Always provide sensible default values so knobs are optional.
+
+3. **Document constraints**: Clearly document valid ranges and value combinations in your knob descriptions.
+
+4. **Log usage**: Log when non-default knob values are used to aid debugging.
+
+#### Custom vs. Global Knobs
+
+**Custom Knobs** (recommended for most use cases):
+- Use your plugin namespace (e.g., `miopen.*`)
+- Plugin-specific behavior
+- Full control over semantics
+
+**Global Knobs** (use existing ones when applicable):
+- `global.benchmarking`: Enable benchmarking for kernel selection
+- `global.workspace_size_limit`: Limit workspace memory (when applicable)
+
+#### Deprecating Knobs
+
+When a knob is no longer needed, mark it as deprecated rather than removing it. All knobs have a deprecated flag on them that can be set.
+
+2. **Update documentation** to indicate the deprecation and recommend alternatives.
+
+3. **Remove only during major version updates** to maintain backward compatibility.
 
 ## Plugin Architecture
 
@@ -231,7 +450,7 @@ Your plugin's CMakeLists.txt should:
 When building an external plugin, the hipDNN Data SDK provides CMake variables to help you install your plugin in the correct location:
 
 - **Absolute path** (`HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR`):
-  - Hardcoded at CMake configure time
+  - Computed at `find_package()` time relative to the installed hipDNN location
   - This is intended for **developer use only**
 
 - **Relative path** (`HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR`):

@@ -19,7 +19,7 @@
 // THE SOFTWARE.
 
 #include "hipfft/hipfft.h"
-#include "../../../shared/data_layout.h"
+#include "../../../shared/client_data_layout_helpers.h"
 #include "../../../shared/hipfft_brick.h"
 #include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "hipfft/hipfftXt.h"

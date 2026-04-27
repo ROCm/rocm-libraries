@@ -376,6 +376,10 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
 
             return false;
         }
+        if constexpr(KPerBlock < 16)
+        {
+            return false;
+        }
 #endif
 
         if constexpr(Base::GetSharedMemoryNumberOfByte(get_device_arch()) >
@@ -415,6 +419,16 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         static_assert(KPerBlock % AK1Value == 0 && KPerBlock % BK1Value == 0,
                       "KPerBlock must be divisible by AK1Value and BK1Value!");
 
+#ifndef __HIPCC_RTC__
+        if constexpr(KPerBlock < 16)
+        {
+            if(ck::is_gfx12_supported() || ck::is_gfx11_supported())
+            {
+                return false;
+            }
+        }
+#endif
+
         const auto M  = a_grid_desc_m_k.GetLength(I0);
         const auto N  = b_grid_desc_n_k.GetLength(I0);
         const auto AK = a_grid_desc_m_k.GetLength(I1);
@@ -449,12 +463,6 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         {
             return false;
         }
-
-        // check block-to-E-tile
-        // if(!block_2_etile_map.CheckValidity(e_grid_desc_m_n))
-        //{
-        // return false;
-        //}
 
         // TODO: also check validity of all components (blockwise-copy, threadwise-copy, etc)
         // check tensor size: cannot be larger than 2GB each

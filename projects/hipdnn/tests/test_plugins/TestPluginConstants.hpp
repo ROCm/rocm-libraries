@@ -14,30 +14,30 @@ namespace hipdnn_tests::plugin_constants
 // Test plugin directory constants relative to backend library location
 inline const std::string& getTestPluginDefaultDir()
 {
-    static std::string s_defaultDir
+    static const std::string s_defaultDir
         = (std::filesystem::path(".") / "test_plugins" / "default").string();
     return s_defaultDir;
 }
 
 inline const std::string& getTestPluginCustomDir()
 {
-    static std::string s_customDir
+    static const std::string s_customDir
         = (std::filesystem::path(".") / "test_plugins" / "custom").string();
     return s_customDir;
 }
 
 // Compose full plugin path with existence checking
-inline std::string getPluginPath(const char* pluginName)
+inline std::string getTestCustomFilepathForPlugin(const char* pluginName)
 {
     namespace fs = std::filesystem;
 
-    fs::path pluginFile = fs::path(getTestPluginCustomDir())
-                          / hipdnn_data_sdk::utilities::getLibraryName(pluginName);
+    const fs::path pluginFile = fs::path(getTestPluginCustomDir())
+                                / hipdnn_data_sdk::utilities::getLibraryName(pluginName);
 
     return pluginFile.string();
 }
 
-inline std::string getDefaultPluginPath()
+inline std::string testDefaultGoodPluginPath()
 {
     namespace fs = std::filesystem;
     return (fs::path(getTestPluginDefaultDir())
@@ -47,62 +47,71 @@ inline std::string getDefaultPluginPath()
 
 inline const std::string& testGoodPluginPath()
 {
-    static const std::string s_testGoodPluginPath = getPluginPath(TEST_GOOD_PLUGIN_NAME);
+    static const std::string s_testGoodPluginPath
+        = getTestCustomFilepathForPlugin(TEST_GOOD_PLUGIN_NAME);
     return s_testGoodPluginPath;
 }
 
 inline const std::string& testExecuteFailsPluginPath()
 {
     static const std::string s_testExecuteFailsPluginPath
-        = getPluginPath(TEST_EXECUTE_FAILS_PLUGIN_NAME);
+        = getTestCustomFilepathForPlugin(TEST_EXECUTE_FAILS_PLUGIN_NAME);
     return s_testExecuteFailsPluginPath;
 }
 
 inline const std::string& testNoApplicableEnginesAPluginPath()
 {
     static const std::string s_testNoApplicableEnginesPluginPath
-        = getPluginPath(TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME);
+        = getTestCustomFilepathForPlugin(TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME);
     return s_testNoApplicableEnginesPluginPath;
 }
 
 inline const std::string& testNoApplicableEnginesBPluginPath()
 {
     static const std::string s_testNoApplicableEnginesPluginPath
-        = getPluginPath(TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME);
+        = getTestCustomFilepathForPlugin(TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME);
     return s_testNoApplicableEnginesPluginPath;
 }
 
 inline const std::string& testDuplicateIdAPluginPath()
 {
     static const std::string s_testDuplicateIdAPluginPath
-        = getPluginPath(TEST_DUPLICATE_ID_A_PLUGIN_NAME);
+        = getTestCustomFilepathForPlugin(TEST_DUPLICATE_ID_A_PLUGIN_NAME);
     return s_testDuplicateIdAPluginPath;
 }
 
 inline const std::string& testDuplicateIdBPluginPath()
 {
     static const std::string s_testDuplicateIdBPluginPath
-        = getPluginPath(TEST_DUPLICATE_ID_B_PLUGIN_NAME);
+        = getTestCustomFilepathForPlugin(TEST_DUPLICATE_ID_B_PLUGIN_NAME);
     return s_testDuplicateIdBPluginPath;
 }
 
 inline const std::string& testIncompleteApiPluginPath()
 {
     static const std::string s_testIncompleteApiPluginPath
-        = getPluginPath(TEST_INCOMPLETE_API_PLUGIN_NAME);
+        = getTestCustomFilepathForPlugin(TEST_INCOMPLETE_API_PLUGIN_NAME);
     return s_testIncompleteApiPluginPath;
 }
 
 inline const std::string& testKnobsPluginPath()
 {
-    static const std::string s_testKnobsPluginPath = getPluginPath(TEST_KNOBS_PLUGIN_NAME);
+    static const std::string s_testKnobsPluginPath
+        = getTestCustomFilepathForPlugin(TEST_KNOBS_PLUGIN_NAME);
     return s_testKnobsPluginPath;
 }
 
 inline const std::string& testKnobConstraintValidationPluginPath()
 {
     static const std::string s_testKnobConstraintValidationPluginPath
-        = getPluginPath(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME);
+        = getTestCustomFilepathForPlugin(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME);
     return s_testKnobConstraintValidationPluginPath;
+}
+
+inline const std::string& testIncompatibleVersionPluginPath()
+{
+    static const std::string s_testIncompatibleVersionPluginPath
+        = getTestCustomFilepathForPlugin(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME);
+    return s_testIncompatibleVersionPluginPath;
 }
 } // namespace hipdnn_tests::plugin_constants

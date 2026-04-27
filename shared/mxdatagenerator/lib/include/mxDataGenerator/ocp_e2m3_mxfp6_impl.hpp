@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include "dataTypeInfo.hpp"
@@ -101,7 +78,7 @@ inline bool isNaN<ocp_e2m3_mxfp6>(uint8_t const* scaleBytes,
                                   index_t         dataIndex [[maybe_unused]])
 {
     // no need to check for NAN in dataBytes since there's no NAN representation
-    return *(scaleBytes + scaleIndex) == Constants::E8M0_NAN;
+    return *(scaleBytes + scaleIndex) == getScaleNan<ScaleType::E8M0>();
 }
 
 template <>
@@ -196,7 +173,7 @@ inline double toDouble<ocp_e2m3_mxfp6>(uint8_t const* scaleBytes,
                                              ocp_e2m3_mxfp6::scaleInfo.mantissaBits,
                                              ocp_e2m3_mxfp6::scaleInfo.exponentBits);
 
-    return convertToDouble<uint8_t, OCP_E2M3_MXFP6_DATA, E8M0_SCALE_INFO>(data, scaleExp);
+    return convertToDouble<uint8_t, OCP_E2M3_MXFP6_DATA, ScaleInfo<ScaleType::E8M0>>(data, scaleExp);
 }
 
 template <>
@@ -217,7 +194,7 @@ inline double toDoublePacked<ocp_e2m3_mxfp6>(uint8_t const* scaleBytes,
                                              ocp_e2m3_mxfp6::scaleInfo.mantissaBits,
                                              ocp_e2m3_mxfp6::scaleInfo.exponentBits);
 
-    return convertToDouble<uint8_t, OCP_E2M3_MXFP6_DATA, E8M0_SCALE_INFO>(data, scaleExp);
+    return convertToDouble<uint8_t, OCP_E2M3_MXFP6_DATA, ScaleInfo<ScaleType::E8M0>>(data, scaleExp);
 }
 
 template <>
@@ -238,7 +215,7 @@ inline float toFloat<ocp_e2m3_mxfp6>(uint8_t const* scaleBytes,
                                              ocp_e2m3_mxfp6::scaleInfo.mantissaBits,
                                              ocp_e2m3_mxfp6::scaleInfo.exponentBits);
 
-    return convertToFloat<uint8_t, OCP_E2M3_MXFP6_DATA, E8M0_SCALE_INFO>(data, scaleExp);
+    return convertToFloat<uint8_t, OCP_E2M3_MXFP6_DATA, ScaleInfo<ScaleType::E8M0>>(data, scaleExp);
 }
 
 template <>
@@ -259,7 +236,7 @@ inline float toFloatPacked<ocp_e2m3_mxfp6>(uint8_t const* scaleBytes,
                                              ocp_e2m3_mxfp6::scaleInfo.mantissaBits,
                                              ocp_e2m3_mxfp6::scaleInfo.exponentBits);
 
-    return convertToFloat<uint8_t, OCP_E2M3_MXFP6_DATA, E8M0_SCALE_INFO>(data, scaleExp);
+    return convertToFloat<uint8_t, OCP_E2M3_MXFP6_DATA, ScaleInfo<ScaleType::E8M0>>(data, scaleExp);
 }
 
 template <>
@@ -289,7 +266,7 @@ inline void setNaN<ocp_e2m3_mxfp6>(uint8_t* scaleBytes,
                                    index_t   scaleIndex,
                                    index_t   dataIndex [[maybe_unused]])
 {
-    *(scaleBytes + scaleIndex) = Constants::E8M0_NAN;
+    *(scaleBytes + scaleIndex) = getScaleNan<ScaleType::E8M0>();
 }
 
 //ocp_e3m2_mxfp6 does not have an infinity representation, method will just return
@@ -340,7 +317,7 @@ inline void setNaNPacked<ocp_e2m3_mxfp6>(uint8_t* scaleBytes,
                                          index_t   scaleIndex,
                                          index_t   dataIndex [[maybe_unused]])
 {
-    *(scaleBytes + scaleIndex) = Constants::E8M0_NAN;
+    *(scaleBytes + scaleIndex) = getScaleNan<ScaleType::E8M0>();
 }
 
 //ocp_e3m2_mxfp6 does not have an infinity representation, method will just return

@@ -1,0 +1,219 @@
+operation:
+  name: "Pointwise"
+  class_name: "PointwiseOperationDescriptor"
+  fbs_table: "PointwiseAttributes"
+  fbs_generated_header: "pointwise_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_POINTWISE"
+
+  frontend:
+    packer_function: "createPointwiseOperation"
+    unpacker_function: "unpackPointwiseOperation"
+    node_class: "PointwiseNode"
+    attributes_class: "PointwiseAttributes"
+
+    inputs:
+      - name: "input_0"
+        enum_name: "IN_0"
+        enum_value: 0
+        required: true
+        getter_name: "get_input_0"
+        setter_name: "set_input_0"
+      - name: "input_1"
+        enum_name: "IN_1"
+        enum_value: 1
+        required: false
+        getter_name: "get_input_1"
+        setter_name: "set_input_1"
+      - name: "input_2"
+        enum_name: "IN_2"
+        enum_value: 2
+        required: false
+        getter_name: "get_input_2"
+        setter_name: "set_input_2"
+    outputs:
+      - name: "output_0"
+        enum_name: "OUT_0"
+        enum_value: 0
+        required: true
+        getter_name: "get_output_0"
+        setter_name: "set_output_0"
+    graph_method_name: "pointwise"
+    graph_method_params:
+      - name: "in0"
+        tensor_name: "input_0"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "output_0"
+    node_type_enum: "NodeType::POINTWISE"
+    node_attributes_union_type: "PointwiseAttributes"
+    compatibility_typedef: "Pointwise_attributes"
+
+  tensor_fields:
+    - name: "in_0"
+      fbs_field: "in_0_tensor_uid"
+      attr_suffix: "IN_0_EXT"
+      required: true
+      frontend_getter: "get_in_0()"
+
+    - name: "out_0"
+      fbs_field: "out_0_tensor_uid"
+      attr_suffix: "OUT_0_EXT"
+      required: true
+      frontend_getter: "get_out_0()"
+
+    - name: "in_1"
+      fbs_field: "in_1_tensor_uid"
+      attr_suffix: "IN_1_EXT"
+      required: false
+      frontend_getter: "get_in_1()"
+
+    - name: "in_2"
+      fbs_field: "in_2_tensor_uid"
+      attr_suffix: "IN_2_EXT"
+      required: false
+      frontend_getter: "get_in_2()"
+
+  data_fields:
+    - name: "operation"
+      fbs_field: "operation"
+      attr_name: "HIPDNN_ATTR_POINTWISE_MODE"
+      type: "mode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::PointwiseMode"
+      frontend_type: "PointwiseMode"
+      required: true
+      default_value: "PointwiseMode::NOT_SET"
+      frontend_getter: "get_mode()"
+      backend_setter: "setPointwiseMode"
+      backend_getter: "getPointwiseMode"
+      backend_converter: "toBackendPointwiseMode"
+      frontend_inverse_converter: "fromHipdnnPointwiseMode"
+      backend_type_name: "HIPDNN_TYPE_POINTWISE_MODE"
+      test_enum_value: "ADD"
+      test_alt_enum_value: "MUL"
+      test_backend_value: "HIPDNN_POINTWISE_ADD"
+      test_c_type: "hipdnnPointwiseMode_t"
+      test_default_value: "HIPDNN_POINTWISE_ABS"
+      # Verification: enum_def for PointwiseMode (matches existing hand-written code)
+      enum_def:
+        backend_header: "HipdnnPointwiseMode.h"
+        backend_prefix: "HIPDNN_POINTWISE_"
+        values:
+          - { name: "NOT_SET", value: 0, sentinel: true }
+          - { name: "ABS", value: 1, description: "Absolute value: |x|" }
+          - { name: "ADD", value: 2, description: "Addition: x + y" }
+          - { name: "ADD_SQUARE", value: 3, description: "Add x to y squared: x + y^2" }
+          - { name: "BINARY_SELECT", value: 4, description: "Ternary select based on condition" }
+          - { name: "CEIL", value: 5, description: "Ceiling function" }
+          - { name: "CMP_EQ", value: 6, description: "Compare equal: x == y" }
+          - { name: "CMP_GE", value: 7, description: "Compare greater or equal: x >= y" }
+          - { name: "CMP_GT", value: 8, description: "Compare greater than: x > y" }
+          - { name: "CMP_LE", value: 9, description: "Compare less or equal: x <= y" }
+          - { name: "CMP_LT", value: 10, description: "Compare less than: x < y" }
+          - { name: "CMP_NEQ", value: 11, description: "Compare not equal: x != y" }
+          - { name: "DIV", value: 12, description: "Division: x / y" }
+          - { name: "ELU_BWD", value: 13, description: "ELU activation backward pass" }
+          - { name: "ELU_FWD", value: 14, description: "ELU activation forward pass" }
+          - { name: "ERF", value: 15, description: "Error function" }
+          - { name: "EXP", value: 16, description: "Exponential: e^x" }
+          - { name: "FLOOR", value: 17, description: "Floor function" }
+          - { name: "GELU_APPROX_TANH_BWD", value: 18, description: "GELU (tanh approximation) backward" }
+          - { name: "GELU_APPROX_TANH_FWD", value: 19, description: "GELU (tanh approximation) forward" }
+          - { name: "GELU_BWD", value: 20, description: "GELU activation backward" }
+          - { name: "GELU_FWD", value: 21, description: "GELU activation forward" }
+          - { name: "GEN_INDEX", value: 22, description: "Generate index tensor" }
+          - { name: "IDENTITY", value: 23, description: "Identity: y = x" }
+          - { name: "LOG", value: 24, description: "Natural logarithm" }
+          - { name: "LOGICAL_AND", value: 25, description: "Logical AND" }
+          - { name: "LOGICAL_NOT", value: 26, description: "Logical NOT" }
+          - { name: "LOGICAL_OR", value: 27, description: "Logical OR" }
+          - { name: "MAX", value: 28, sdk_name: "MAX_OP", description: "Element-wise maximum" }
+          - { name: "MIN", value: 29, sdk_name: "MIN_OP", description: "Element-wise minimum" }
+          - { name: "MUL", value: 30, description: "Multiplication: x * y" }
+          - { name: "NEG", value: 31, description: "Negation: -x" }
+          - { name: "RECIPROCAL", value: 32, description: "Reciprocal: 1/x" }
+          - { name: "RELU_BWD", value: 33, description: "ReLU backward pass" }
+          - { name: "RELU_FWD", value: 34, description: "ReLU forward pass" }
+          - { name: "RSQRT", value: 35, description: "Reciprocal square root: 1/sqrt(x)" }
+          - { name: "SIGMOID_BWD", value: 36, description: "Sigmoid backward pass" }
+          - { name: "SIGMOID_FWD", value: 37, description: "Sigmoid forward pass" }
+          - { name: "SIN", value: 38, description: "Sine function" }
+          - { name: "SOFTPLUS_BWD", value: 39, description: "Softplus backward pass" }
+          - { name: "SOFTPLUS_FWD", value: 40, description: "Softplus forward pass" }
+          - { name: "SQRT", value: 41, description: "Square root" }
+          - { name: "SUB", value: 42, description: "Subtraction: x - y" }
+          - { name: "SWISH_BWD", value: 43, description: "Swish activation backward" }
+          - { name: "SWISH_FWD", value: 44, description: "Swish activation forward" }
+          - { name: "TAN", value: 45, description: "Tangent function" }
+          - { name: "TANH_BWD", value: 46, description: "Tanh backward pass" }
+          - { name: "TANH_FWD", value: 47, description: "Tanh forward pass" }
+
+    - name: "relu_lower_clip"
+      fbs_field: "relu_lower_clip"
+      attr_name: "HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP"
+      type: "scalar_float"
+      required: false
+      frontend_getter: "get_relu_lower_clip()"
+
+    - name: "relu_upper_clip"
+      fbs_field: "relu_upper_clip"
+      attr_name: "HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP"
+      type: "scalar_float"
+      required: false
+      frontend_getter: "get_relu_upper_clip()"
+
+    - name: "relu_lower_clip_slope"
+      fbs_field: "relu_lower_clip_slope"
+      attr_name: "HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE"
+      type: "scalar_float"
+      required: false
+      frontend_getter: "get_relu_lower_clip_slope()"
+
+    - name: "swish_beta"
+      fbs_field: "swish_beta"
+      attr_name: "HIPDNN_ATTR_POINTWISE_SWISH_BETA"
+      type: "scalar_float"
+      required: false
+      frontend_getter: "get_swish_beta()"
+
+    - name: "elu_alpha"
+      fbs_field: "elu_alpha"
+      attr_name: "HIPDNN_ATTR_POINTWISE_ELU_ALPHA"
+      type: "scalar_float"
+      required: false
+      frontend_getter: "get_elu_alpha()"
+
+    - name: "softplus_beta"
+      fbs_field: "softplus_beta"
+      attr_name: "HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA"
+      type: "scalar_float"
+      required: false
+      frontend_getter: "get_softplus_beta()"
+
+    - name: "axis"
+      fbs_field: "axis_tensor_uid"
+      attr_name: "HIPDNN_ATTR_POINTWISE_AXIS"
+      type: "scalar_int64"
+      required: false
+      frontend_getter: "get_axis()"
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_POINTWISE_MATH_PREC"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_POINTWISE_EXT"
+
+  test_data:
+    constants_include: "PointwiseConstants"
+    tensor_const_prefix: "K_PW_"
+    tensor_uids: { in_0: 1300, out_0: 1301, in_1: 1302, in_2: 1303 }
+    tensor_configs:
+      in_0: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      out_0: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      in_1: { dims: [1], strides: [1] }
+      in_2: { dims: [1], strides: [1] }
+    field_values: {}

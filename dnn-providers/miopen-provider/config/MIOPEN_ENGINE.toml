@@ -1,0 +1,13 @@
+# Integration test configuration for MIOPEN_ENGINE
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance

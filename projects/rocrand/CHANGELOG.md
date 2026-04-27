@@ -3,6 +3,26 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 4.4.0 for ROCm 7.13
+
+### Added
+
+* rocrand.dll now contains embedded file version metadata.
+
+### Resolved Issues
+
+* Fixed memory leak in unit tests.
+
+## rocRAND 4.3.0 for ROCm 7.12
+
+### Resolved issue
+
+* Fixed dynamic ordering support for threefry generators.
+
+### Changed
+
+* Optimized `xorwow` generator performance for `gfx908` and `gfx942` architectures.
+
 ## rocRAND 4.2.0 for ROCm 7.2
 
 ### Removed
@@ -103,8 +123,8 @@ Documentation for rocRAND is available at
 
 * Added host generator for MT19937
 * Support for `rocrand_generate_poisson` in hipGraphs
-* Added engine, distribution, mode, throughput_gigabytes_per_second, and lambda columns for the csv format in 
-  `benchmark_rocrand_host_api` and `benchmark_rocrand_device_api`. To see these new columns, set `--benchmark_format=csv` 
+* Added engine, distribution, mode, throughput_gigabytes_per_second, and lambda columns for the csv format in
+  `benchmark_rocrand_host_api` and `benchmark_rocrand_device_api`. To see these new columns, set `--benchmark_format=csv`
   or `--benchmark_out_format=csv --benchmark_out="outName.csv"`.
 
 ### Changed

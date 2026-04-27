@@ -26,6 +26,7 @@ target_link_libraries(hipblaslt-clients-common
         ${LAPACK_LIBRARIES}
     PRIVATE
         hip::device
+        tensilelite::tensilelite-host
 )
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
@@ -86,7 +87,7 @@ add_executable(hipblaslt-bench-extop-amax "${CMAKE_CURRENT_SOURCE_DIR}/bench/src
 target_link_libraries(hipblaslt-bench-extop-amax PRIVATE hipblaslt-clients-common hip::device)
 target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL_API)
 
-if(HIPBLASLT_ENABLE_LLVM)
+if(HIPBLASLT_ENABLE_YAML)
     find_package(LLVM REQUIRED)
     add_executable(hipblaslt-sequence "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_sequence.cpp")
     target_link_libraries(hipblaslt-sequence PRIVATE hipblaslt-clients-common hip::device)
@@ -95,7 +96,7 @@ if(HIPBLASLT_ENABLE_LLVM)
     target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
 endif()
 if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
-    find_package(GTest REQUIRED)
+    find_package(GTest CONFIG REQUIRED)
     add_executable(hipblaslt-test)
     if(amd_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE amd_smi)
@@ -112,9 +113,9 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
+
     add_subdirectory(tests)
 endif()
-
 if(HIPBLASLT_ENABLE_SAMPLES)
     add_subdirectory(samples)
 endif()

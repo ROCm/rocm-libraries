@@ -35,7 +35,6 @@
 #define PERF_ENABLE 0
 
 #if PERF_ENABLE
-#define COMPARE_WITH_OPENCL 1
 #define NUM_WARMUP_RUNS_TEST 10
 #define NUM_PERF_RUNS_TEST 100
 #endif
@@ -48,16 +47,15 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                            const float activ_gamma,
                            const miopen::TensorDescriptor& xDesc,
                            ConstData_t x,
-                           const miopen::TensorDescriptor& yDesc,
+                           const miopen::TensorDescriptor& /*yDesc*/,
                            Data_t y,
-                           const miopen::TensorDescriptor& bnScaleBiasMeanVarDesc,
+                           const miopen::TensorDescriptor& /*bnScaleBiasMeanVarDesc*/,
                            ConstData_t bnScale,
                            ConstData_t bnBias,
                            ConstData_t estimatedMean,
                            ConstData_t estimatedVariance,
                            double epsilon,
-                           PerfHelper& perf_helper,
-                           bool use_hip = true)
+                           PerfHelper& perf_helper)
 {
     int n, c, h, w;
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
@@ -96,12 +94,10 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         {"MIOPEN_USE_FPMIX", static_cast<int>(xDesc.GetType() == miopenHalf)},
         {"MIOPEN_USE_FP32", static_cast<int>(xDesc.GetType() == miopenFloat)}};
 
-    std::string kernel_file =
-        (use_hip ? "MIOpenBatchNormActivInferHIP.cpp" : "MIOpenBatchNormActivInfer.cl");
+    std::string kernel_file = "MIOpenBatchNormActivInfer.cpp";
     std::string kernel_name = "MIOpenBatchNormActivInfer";
 
-    std::string params = use_hip ? build_params.GenerateFor(miopen::kbp::HIP{})
-                                 : build_params.GenerateFor(miopen::kbp::OpenCL{});
+    std::string params = build_params.GenerateFor(miopen::kbp::HIP{});
 
     if(bn_mode == miopenBNSpatial)
     {
@@ -114,7 +110,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
 
     // Generate the network config
     std::ostringstream ss;
-    ss << (use_hip ? "hip" : "ocl");
     ss << "bfp16" << static_cast<int>(xDesc.GetType() == miopenBFloat16);
     ss << "fp16" << static_cast<int>(xDesc.GetType() == miopenHalf);
     ss << "fp32" << static_cast<int>(xDesc.GetType() == miopenFloat);
@@ -138,7 +133,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
             perf_helper.perfTest(handle,
                                  kernel_name,
                                  network_config,
-                                 use_hip,
                                  static_cast<float>(activ_alpha),
                                  static_cast<float>(activ_beta),
                                  static_cast<float>(activ_gamma),
@@ -155,7 +149,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
             perf_helper.perfTest(handle,
                                  kernel_name,
                                  network_config,
-                                 use_hip,
                                  static_cast<_Float16>(activ_alpha),
                                  static_cast<_Float16>(activ_beta),
                                  static_cast<_Float16>(activ_gamma),
@@ -172,7 +165,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
             perf_helper.perfTest(handle,
                                  kernel_name,
                                  network_config,
-                                 use_hip,
                                  static_cast<bfloat16>(activ_alpha),
                                  static_cast<bfloat16>(activ_beta),
                                  static_cast<bfloat16>(activ_gamma),
@@ -250,10 +242,10 @@ struct BatchNormActivInferTester : public BatchNormInferTester<XDataType,
     }
 #endif
 
-    void RunTestGPU(bool hip_en = true) override
+    void RunTestGPU() override
     {
         auto&& handle    = get_handle();
-        auto& output_ref = hip_en ? this->output.data : this->ref_out.data;
+        auto& output_ref = this->output.data;
         // Clear the output data
         std::fill(
             output_ref.begin(), output_ref.end(), std::numeric_limits<YDataType>::quiet_NaN());
@@ -275,8 +267,7 @@ struct BatchNormActivInferTester : public BatchNormInferTester<XDataType,
                               this->estMean_dev.get(),
                               this->estVariance_dev.get(),
                               this->epsilon,
-                              this->perf_helper,
-                              hip_en);
+                              this->perf_helper);
         // Read the output
         output_ref = handle.Read<YDataType>(this->out_dev, this->output.data.size());
     }
@@ -333,13 +324,8 @@ using namespace BatchNormActivInfer;
 
 TEST_P(GPU_bn_activ_infer_spatial_FP32, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
@@ -348,13 +334,8 @@ TEST_P(GPU_bn_activ_infer_spatial_FP32, PortTest)
 
 TEST_P(GPU_bn_activ_infer_per_act_FP32, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
@@ -363,13 +344,8 @@ TEST_P(GPU_bn_activ_infer_per_act_FP32, PortTest)
 
 TEST_P(GPU_bn_activ_infer_spatial_FP16, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
@@ -378,13 +354,8 @@ TEST_P(GPU_bn_activ_infer_spatial_FP16, PortTest)
 
 TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
@@ -393,8 +364,6 @@ TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
 
 TEST_P(GPU_bn_activ_infer_spatial_BFP16, PortTest)
 {
-    // Not sure if the OpenCL path works well for BFP16
-    // So, not running the COMPARE_WITH_OPENCL path here
     // Run the CPU implementation
     RunTestCPU();
     // Run the HIP implementation
@@ -405,8 +374,6 @@ TEST_P(GPU_bn_activ_infer_spatial_BFP16, PortTest)
 
 TEST_P(GPU_bn_activ_infer_per_act_BFP16, PortTest)
 {
-    // Not sure if the OpenCL path works well for BFP16
-    // So, not running the COMPARE_WITH_OPENCL path here
     // Run the CPU implementation
     RunTestCPU();
     // Run the HIP implementation

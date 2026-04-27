@@ -5,7 +5,10 @@ This dictionary is used to map specific file directory changes to the correspond
 import os
 
 subtree_to_project_map = {
+    "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
+    "dnn-providers/hip-kernel-provider": "hip-kernel-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
+    "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
@@ -15,7 +18,7 @@ subtree_to_project_map = {
     "projects/hiprand": "rand",
     "projects/hipsolver": "solver",
     "projects/hipsparse": "sparse",
-    "projects/hipsparselt": "sparse",
+    "projects/hipsparselt": "sparselt",
     "projects/miopen": "miopen",
     "projects/rocblas": "blas",
     "projects/rocfft": "fft",
@@ -47,20 +50,21 @@ project_map = {
     "miopen": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPEN=ON",
-            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
-        "projects_to_test": ["miopen", "miopen_plugin"],
+        "projects_to_test": ["miopen", "miopenprovider"],
     },
     "fft": {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "projects_to_test": ["hipfft", "rocfft"],
     },
-    "rocwmma": {
-        "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
-        "projects_to_test": ["rocwmma"],
+    "hip-kernel-provider": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
+            "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
+        ],
+        "projects_to_test": ["hipkernelprovider"],
     },
 }
 
@@ -71,7 +75,12 @@ project_map = {
 additional_options = {
     "sparse": {
         "cmake_options": ["-DTHEROCK_ENABLE_SPARSE=ON"],
-        "projects_to_test": ["rocsparse", "hipsparse", "hipsparselt"],
+        "projects_to_test": ["rocsparse", "hipsparse"],
+        "project_to_add": "blas",
+    },
+    "sparselt": {
+        "cmake_options": ["-DTHEROCK_ENABLE_SPARSE=ON"],
+        "projects_to_test": ["hipsparselt"],
         "project_to_add": "blas",
     },
     "solver": {
@@ -79,26 +88,44 @@ additional_options = {
         "projects_to_test": ["rocsolver", "hipsolver"],
         "project_to_add": "blas",
     },
-    # due to MIOpen plugin project being inside the hipDNN directory, we cannot have the MIOpen plugin project as a separate project for now https://github.com/ROCm/rocm-libraries/issues/2316
     "hipdnn": {
         "cmake_options": [
-            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
+            "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
+            "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
-        "projects_to_test": ["hipdnn", "miopen_plugin"],
+        "projects_to_test": [
+            "hipdnn",
+            "hipdnn_install",
+            "hipdnn-samples",
+            "miopenprovider",
+            "hipblasltprovider",
+            "hipkernelprovider",
+        ],
         "project_to_add": "miopen",
     },
     "miopen-provider": {
         "cmake_options": [
-            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
-        "projects_to_test": ["miopen_plugin"],
+        "projects_to_test": ["miopenprovider"],
         "project_to_add": "miopen",
+    },
+    "hipblaslt-provider": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
+        ],
+        "projects_to_test": ["hipblasltprovider"],
+        "project_to_add": "blas",
+    },
+    "rocwmma": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
+        "projects_to_test": ["rocwmma"],
+        "project_to_add": "blas",
     },
 }
 

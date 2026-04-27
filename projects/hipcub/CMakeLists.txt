@@ -27,11 +27,11 @@ cmake_policy(VERSION 3.18...3.25)
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.2.0")
+set(VERSION_STRING "4.4.0")
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
-set(ROCM_DEP_RELEASE_BRANCH "release/rocm-rel-7.2" CACHE STRING "Download branch for ROCm dependencies")
+set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.13" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
 
 # Install prefix

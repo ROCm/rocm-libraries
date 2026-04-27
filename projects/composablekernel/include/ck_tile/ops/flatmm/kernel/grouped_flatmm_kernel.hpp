@@ -10,6 +10,9 @@
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/flatmm/kernel/flatmm_kernel.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 namespace ck_tile {
 
 template <class ScaleM       = FlatmmScalePointer<-1>,
@@ -227,8 +230,10 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
 
     CK_TILE_HOST static const std::string GetName()
     {
-        return concat(
-            '_', "grouped_flatmm", gemm_prec_str<ADataType, BDataType>, FlatmmPipeline::GetName());
+        return concat('_',
+                      "grouped_flatmm",
+                      gemm_prec_str<ADataType, BDataType>(),
+                      FlatmmPipeline::GetName());
     }
 
     template <class ScaleM       = FlatmmScalePointer<-1>,
@@ -337,16 +342,6 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
     {
         return hostArgs;
     }
-    // CK_TILE_HOST static constexpr auto
-    // MakeKernelArgs(const ContiguousGroupedFlatmmHostArgs& hostArgs)
-    // {
-    //     return hostArgs;
-    // }
-    // CK_TILE_HOST static constexpr auto
-    // MakeKernelArgs(const MaskedGroupedFlatmmHostArgs& hostArgs)
-    // {
-    //     return hostArgs;
-    // }
 
     template <class ScaleM       = FlatmmScalePointer<-1>,
               class ScaleN       = FlatmmScalePointer<-1>,
@@ -476,3 +471,5 @@ struct GroupedFlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Epi
 };
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

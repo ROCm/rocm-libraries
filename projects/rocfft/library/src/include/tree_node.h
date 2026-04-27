@@ -27,6 +27,8 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "../../../shared/device_properties.h"
@@ -37,12 +39,14 @@
 #include "../device/kernels/common.h"
 #include "callback_map.h"
 #include "compute_scheme.h"
+#include "data_layout.h"
 #include "enum_printer.h"
 #include "function_map_key.h"
 #include "function_pool.h"
 #include "kargs.h"
 #include "load_store_ops.h"
 #include "logging.h"
+#include "rocfft_current_function.h"
 #include "rocfft_mpi.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
@@ -173,6 +177,192 @@ class TreeNode;
 class LeafNode;
 class function_pool;
 
+// Internally-allocated temporary buffers (as opposed to
+// user-provided work/in/out buffers)
+class InternalTempBuffer
+{
+public:
+    InternalTempBuffer(int comm_rank)
+        : comm_rank(comm_rank)
+    {
+    }
+    InternalTempBuffer(const InternalTempBuffer&) = delete;
+    InternalTempBuffer& operator=(const InternalTempBuffer&) = delete;
+    ~InternalTempBuffer()                                    = default;
+
+    void set_size_bytes(size_t in)
+    {
+        if(buf)
+            throw std::runtime_error("cannot set internal buffer size after allocation");
+        if(in > size_bytes)
+            size_bytes = in;
+    }
+
+    size_t get_size_bytes() const
+    {
+        return size_bytes;
+    }
+
+    void alloc(int deviceID)
+    {
+        rocfft_scoped_device device(deviceID);
+        if(buf.alloc(size_bytes) != hipSuccess)
+            throw std::runtime_error("internal temp buffer allocation failure");
+    }
+
+    void* data()
+    {
+        return buf.data();
+    }
+
+    int get_comm_rank() const
+    {
+        return comm_rank;
+    }
+
+private:
+    int    comm_rank  = 0;
+    size_t size_bytes = 0;
+    gpubuf buf;
+};
+
+// Class representing a buffer in a multi-plan item.
+//
+// An item in a plan can work on inputs or outputs like:
+// - a specific temp buffer allocated during plan creation
+// - the Nth pointer that the user provided as input at execute time
+// - the Mth pointer that the user provided as output at execute time
+//
+// These buffers need to be set during plan creation.  While temp
+// buffers are knowable at that time, user-provided pointers are not.
+// So this class just records which logical pointer we will want.
+//
+// The get() method accepts the user-provided input/output pointers,
+// and returns the correct pointer during plan executions.
+class BufferPtr
+{
+public:
+    BufferPtr()                 = default;
+    BufferPtr(const BufferPtr&) = default;
+    BufferPtr& operator=(const BufferPtr&) = default;
+    ~BufferPtr()                           = default;
+
+    // return a new BufferPtr that points to a user input
+    static BufferPtr user_input(size_t idx, int comm_rank)
+    {
+        BufferPtr ret;
+        ret.type      = PTR_USER_IN;
+        ret.idx       = idx;
+        ret.comm_rank = comm_rank;
+        return ret;
+    }
+
+    // return a new BufferPtr that points to a user output
+    static BufferPtr user_output(size_t idx, int comm_rank)
+    {
+        BufferPtr ret;
+        ret.type      = PTR_USER_OUT;
+        ret.idx       = idx;
+        ret.comm_rank = comm_rank;
+        return ret;
+    }
+
+    // return a new BufferPtr that points to a temp buffer
+    static BufferPtr temp(std::shared_ptr<InternalTempBuffer> ptr)
+    {
+        BufferPtr ret;
+        ret.type      = PTR_TEMP;
+        ret.temp_ptr  = ptr;
+        ret.comm_rank = ptr->get_comm_rank();
+        return ret;
+    }
+
+    // Get a pointer to the buffer.  The buffer might be an
+    // user-provided input or output buffer that's only known at
+    // execute time.
+    void* get(void* in_buffer[], void* out_buffer[], int local_comm_rank) const
+    {
+        if(comm_rank != local_comm_rank)
+            return nullptr;
+        switch(type)
+        {
+        case PTR_NULL:
+            throw std::runtime_error("fetching null item pointer");
+        case PTR_USER_IN:
+            return in_buffer[idx];
+        case PTR_USER_OUT:
+            return out_buffer[idx];
+        case PTR_TEMP:
+            return temp_ptr->data();
+        }
+    }
+
+    std::string str() const
+    {
+        switch(type)
+        {
+        case PTR_NULL:
+            return "(null)";
+        case PTR_USER_IN:
+            if(comm_rank != -1)
+                return "user input buffer " + std::to_string(idx) + " on rank "
+                       + std::to_string(comm_rank);
+            else
+                return "user input buffer " + std::to_string(idx);
+        case PTR_USER_OUT:
+            if(comm_rank != -1)
+                return "user output buffer " + std::to_string(idx) + " on rank "
+                       + std::to_string(comm_rank);
+            else
+                return "user output buffer " + std::to_string(idx);
+        case PTR_TEMP:
+        {
+            std::stringstream ss;
+            ss << "temp buffer on rank " << comm_rank << " ";
+            if(temp_ptr)
+                ss << temp_ptr->data();
+            else
+                ss << "(null)";
+            return ss.str();
+        }
+        }
+    }
+
+    operator bool() const
+    {
+        return type != PTR_NULL;
+    }
+
+    bool operator==(const BufferPtr& other) const
+    {
+        return this->type == other.type && this->idx == other.idx
+               && this->temp_ptr == other.temp_ptr;
+    }
+    bool operator!=(const BufferPtr& other) const
+    {
+        return !(*this == other);
+    }
+
+    enum PtrType
+    {
+        PTR_NULL,
+        PTR_USER_IN,
+        PTR_USER_OUT,
+        PTR_TEMP,
+    };
+
+    PtrType ptr_type() const
+    {
+        return type;
+    }
+
+private:
+    PtrType                             type      = PTR_NULL;
+    size_t                              idx       = 0;
+    int                                 comm_rank = -1;
+    std::shared_ptr<InternalTempBuffer> temp_ptr;
+};
+
 // The mininal tree node data needed to decide the scheme
 struct NodeMetaData
 {
@@ -185,13 +375,38 @@ struct NodeMetaData
     size_t                  iDist = 0, oDist = 0;
     size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
-    int                     direction    = -1;
-    rocfft_result_placement placement    = rocfft_placement_inplace;
-    rocfft_precision        precision    = rocfft_precision_single;
-    rocfft_array_type       inArrayType  = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType = rocfft_array_type_unset;
-    hipDeviceProp_t         deviceProp   = {};
-    bool                    rootIsC2C;
+    int                     direction         = -1;
+    rocfft_result_placement placement         = rocfft_placement_inplace;
+    rocfft_precision        precision         = rocfft_precision_single;
+    rocfft_array_type       inArrayType       = rocfft_array_type_unset;
+    rocfft_array_type       outArrayType      = rocfft_array_type_unset;
+    rocfft_transform_type   rootTransformType = rocfft_transform_type_complex_forward;
+    hipDeviceProp_t         deviceProp        = {};
+    BufferPtr               input_buffer, output_buffer;
+
+    // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
+    // `outStride`, `iDist`, and `oDist` could (and should) be replaced
+    // by two data_layout_t member objects instead.
+    inline data_layout_t layout_for(io_data_label io) const
+    {
+        switch(io)
+        {
+        case io_data_label::INPUT:
+            return data_layout_t::full_layout(length, inStride, batch, iDist);
+        case io_data_label::OUTPUT:
+            return data_layout_t::full_layout(outputLength, outStride, batch, oDist);
+        default:
+            throw std::invalid_argument("Unknown io data label given to "
+                                        + ROCFFT_CURRENT_FUNCTION);
+        }
+    };
+
+    inline bool is_using_default_contiguous_layout_for(io_data_label io) const
+    {
+        return layout_for(io)
+               == data_layout_t::default_full_layout(
+                   io == io_data_label::INPUT ? length : outputLength, batch);
+    };
 
     explicit NodeMetaData(TreeNode* refNode);
 };
@@ -502,7 +717,7 @@ public:
     // Check node scheme to see if partial pass is enabled
     bool isPartialPassEnabled() const
     {
-        return (scheme == CS_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
+        return (scheme == CS_3D_PP || scheme == CS_REAL_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
                 || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC);
     }
 
@@ -544,7 +759,7 @@ public:
     void RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& newNode);
 
     // Get root node of plan
-    TreeNode* GetPlanRoot();
+    const TreeNode* GetPlanRoot() const;
     // If 'this' is a leaf, return it.  Otherwise, return the first
     // leaf node under 'this' in the execution sequence.
     TreeNode* GetFirstLeaf();
@@ -554,7 +769,14 @@ public:
     // Return ancestor node of 'this' that is real-even (1D/2D/3D), or
     // nullptr if there is no such ancestor
     TreeNode* GetRealEvenAncestor();
-    bool      IsRootPlanC2CTransform();
+
+    // Return true if the root plan is C2C, R2C, or C2R
+    bool IsRootPlanC2CTransform() const;
+    bool IsRootPlanR2CTransform() const;
+    bool IsRootPlanC2RTransform() const;
+
+    // Return the transform type of the root plan
+    rocfft_transform_type GetRootPlanTransformType() const;
 
     // Return ancestor node of 'this' that is partial-pass, or
     // nullptr if there is no such ancestor
@@ -602,7 +824,7 @@ public:
                                 : FMKey(length[0], length[1], precision, scheme);
     }
 
-    // Partial pass parent nodes, e.g., CS_3D_PP, have
+    // Partial pass parent nodes, e.g., CS_3D_PP or CS_REAL_3D_PP, have
     // two kernels associated with them. The key for
     // querying the function pool is different from the
     // the standard kernel key.
@@ -619,6 +841,7 @@ public:
                        pp_parent_node->length[1],
                        pp_parent_node->length[2],
                        precision,
+                       GetRootPlanTransformType(),
                        pp_parent_node->scheme);
     }
 
@@ -840,194 +1063,17 @@ struct rocfft_location_t
         return comm_rank == other.comm_rank && device == other.device;
     }
 
-    int comm_rank = 0;
-    int device    = 0;
-};
-
-// Internally-allocated temporary buffers (as opposed to
-// user-provided work/in/out buffers)
-class InternalTempBuffer
-{
-public:
-    InternalTempBuffer(int comm_rank)
-        : comm_rank(comm_rank)
-    {
-    }
-    InternalTempBuffer(const InternalTempBuffer&) = delete;
-    InternalTempBuffer& operator=(const InternalTempBuffer&) = delete;
-    ~InternalTempBuffer()                                    = default;
-
-    void set_size_bytes(size_t in)
-    {
-        if(buf)
-            throw std::runtime_error("cannot set internal buffer size after allocation");
-        if(in > size_bytes)
-            size_bytes = in;
-    }
-
-    size_t get_size_bytes() const
-    {
-        return size_bytes;
-    }
-
-    void alloc(int deviceID)
-    {
-        rocfft_scoped_device device(deviceID);
-        if(buf.alloc(size_bytes) != hipSuccess)
-            throw std::runtime_error("internal temp buffer allocation failure");
-    }
-
-    void* data()
-    {
-        return buf.data();
-    }
-
-    int get_comm_rank() const
-    {
-        return comm_rank;
-    }
-
-private:
-    int    comm_rank  = 0;
-    size_t size_bytes = 0;
-    gpubuf buf;
-};
-
-// Class representing a buffer in a multi-plan item.
-//
-// An item in a plan can work on inputs or outputs like:
-// - a specific temp buffer allocated during plan creation
-// - the Nth pointer that the user provided as input at execute time
-// - the Mth pointer that the user provided as output at execute time
-//
-// These buffers need to be set during plan creation.  While temp
-// buffers are knowable at that time, user-provided pointers are not.
-// So this class just records which logical pointer we will want.
-//
-// The get() method accepts the user-provided input/output pointers,
-// and returns the correct pointer during plan executions.
-class BufferPtr
-{
-public:
-    BufferPtr()                 = default;
-    BufferPtr(const BufferPtr&) = default;
-    BufferPtr& operator=(const BufferPtr&) = default;
-    ~BufferPtr()                           = default;
-
-    // return a new BufferPtr that points to a user input
-    static BufferPtr user_input(size_t idx, int comm_rank)
-    {
-        BufferPtr ret;
-        ret.type      = PTR_USER_IN;
-        ret.idx       = idx;
-        ret.comm_rank = comm_rank;
-        return ret;
-    }
-
-    // return a new BufferPtr that points to a user output
-    static BufferPtr user_output(size_t idx, int comm_rank)
-    {
-        BufferPtr ret;
-        ret.type      = PTR_USER_OUT;
-        ret.idx       = idx;
-        ret.comm_rank = comm_rank;
-        return ret;
-    }
-
-    // return a new BufferPtr that points to a temp buffer
-    static BufferPtr temp(std::shared_ptr<InternalTempBuffer> ptr)
-    {
-        BufferPtr ret;
-        ret.type      = PTR_TEMP;
-        ret.temp_ptr  = ptr;
-        ret.comm_rank = ptr->get_comm_rank();
-        return ret;
-    }
-
-    // Get a pointer to the buffer.  The buffer might be an
-    // user-provided input or output buffer that's only known at
-    // execute time.
-    void* get(void* in_buffer[], void* out_buffer[], int local_comm_rank) const
-    {
-        if(comm_rank != local_comm_rank)
-            return nullptr;
-        switch(type)
-        {
-        case PTR_NULL:
-            throw std::runtime_error("fetching null item pointer");
-        case PTR_USER_IN:
-            return in_buffer[idx];
-        case PTR_USER_OUT:
-            return out_buffer[idx];
-        case PTR_TEMP:
-            return temp_ptr->data();
-        }
-    }
-
     std::string str() const
     {
-        switch(type)
-        {
-        case PTR_NULL:
-            return "(null)";
-        case PTR_USER_IN:
-            if(comm_rank != -1)
-                return "user input buffer " + std::to_string(idx) + " on rank "
-                       + std::to_string(comm_rank);
-            else
-                return "user input buffer " + std::to_string(idx);
-        case PTR_USER_OUT:
-            if(comm_rank != -1)
-                return "user output buffer " + std::to_string(idx) + " on rank "
-                       + std::to_string(comm_rank);
-            else
-                return "user output buffer " + std::to_string(idx);
-        case PTR_TEMP:
-        {
-            std::stringstream ss;
-            ss << "temp buffer on rank " << comm_rank << " ";
-            if(temp_ptr)
-                ss << temp_ptr->data();
-            else
-                ss << "(null)";
-            return ss.str();
-        }
-        }
+        std::string ret = "comm rank ";
+        ret += std::to_string(comm_rank);
+        ret += " device ";
+        ret += std::to_string(device);
+        return ret;
     }
 
-    operator bool() const
-    {
-        return type != PTR_NULL;
-    }
-
-    bool operator==(const BufferPtr& other) const
-    {
-        return this->type == other.type && this->idx == other.idx
-               && this->temp_ptr == other.temp_ptr;
-    }
-    bool operator!=(const BufferPtr& other) const
-    {
-        return !(*this == other);
-    }
-
-    enum PtrType
-    {
-        PTR_NULL,
-        PTR_USER_IN,
-        PTR_USER_OUT,
-        PTR_TEMP,
-    };
-
-    PtrType ptr_type() const
-    {
-        return type;
-    }
-
-private:
-    PtrType                             type      = PTR_NULL;
-    size_t                              idx       = 0;
-    int                                 comm_rank = -1;
-    std::shared_ptr<InternalTempBuffer> temp_ptr;
+    int comm_rank = 0;
+    int device    = 0;
 };
 
 struct rocfft_mp_request_t;
@@ -1050,7 +1096,7 @@ struct MultiPlanItem
     virtual void ExecuteAsync(const rocfft_plan                       plan,
                               void*                                   in_buffer[],
                               void*                                   out_buffer[],
-                              rocfft_execution_info                   info,
+                              const rocfft_execution_info_internal&   info,
                               size_t                                  multiPlanIdx,
                               const std::map<int, device_callback_t>& callbacks)
         = 0;
@@ -1063,9 +1109,9 @@ struct MultiPlanItem
 
     // Get work buffer requirements for this item.  Only ExecPlans
     // should need this, as data movement shouldn't need temp buffers.
-    virtual size_t WorkBufBytes(size_t base_type_size) const
+    virtual void WorkBufBytesPerDevice(size_t               base_type_size,
+                                       std::vector<size_t>& workBufBytes) const
     {
-        return 0;
     }
 
     // Print a description of this item to the plan log
@@ -1143,11 +1189,11 @@ struct CommPointToPoint : public MultiPlanItem
         }
     }
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
@@ -1241,11 +1287,11 @@ struct CommScatter : public MultiPlanItem
         ops.emplace_back(std::move(op));
     }
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
@@ -1346,11 +1392,11 @@ struct CommGather : public MultiPlanItem
         ops.emplace_back(std::move(op));
     }
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
@@ -1446,11 +1492,11 @@ struct CommAllToAll : public MultiPlanItem
     CommStatus  comm_status = COMM_SUCCESS;
     std::string error_message;
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
 
     void Wait() override;
@@ -1527,7 +1573,7 @@ struct ExecPlan : public MultiPlanItem
     void ExecuteAsync(const rocfft_plan                       plan,
                       void*                                   in_buffer[],
                       void*                                   out_buffer[],
-                      rocfft_execution_info                   info,
+                      const rocfft_execution_info_internal&   info,
                       size_t                                  multiPlanIdx,
                       const std::map<int, device_callback_t>& callbacks) override;
 
@@ -1584,11 +1630,13 @@ struct ExecPlan : public MultiPlanItem
     // OB_IN refers to iStride, OB_OUT refers to oStride
     std::map<OperatingBuffer, bool> isUnitStride;
 
-    size_t WorkBufBytes(size_t base_type_size) const override
+    void WorkBufBytesPerDevice(size_t               base_type_size,
+                               std::vector<size_t>& workBufBytes) const override
     {
         // base type is the size of one real, work buf counts in
         // complex numbers
-        return workBufSize * 2 * base_type_size;
+        workBufBytes[location.device]
+            = std::max(workBufSize * 2 * base_type_size, workBufBytes[location.device]);
     }
 
     // for callbacks, work out which nodes of the plan are loading data
@@ -1603,6 +1651,12 @@ struct ExecPlan : public MultiPlanItem
     bool ExecutesOnRank(int comm_rank) const override
     {
         return location.comm_rank == comm_rank;
+    }
+
+    // accessor for plan-local stream
+    hipStream_t get_local_stream() const
+    {
+        return stream;
     }
 
 private:

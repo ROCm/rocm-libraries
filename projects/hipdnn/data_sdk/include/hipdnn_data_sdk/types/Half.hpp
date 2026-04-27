@@ -18,8 +18,12 @@ namespace hipdnn_data_sdk::types
 enum class Bfloat16RoundingMode;
 template <Bfloat16RoundingMode>
 struct bfloat16_t;
+struct fp4_e2m1;
+struct fp6_e2m3;
+struct fp6_e3m2;
 struct fp8_e4m3;
 struct fp8_e5m2;
+struct fp8_e8m0;
 // NOLINTEND(readability-identifier-naming)
 
 namespace detail
@@ -102,17 +106,14 @@ constexpr uint32_t HALF_ROUND_THRESHOLD = 0x1000;
 /// Mask for remainder bits during rounding (13 LSB of float mantissa)
 constexpr uint32_t HALF_REMAINDER_MASK = 0x1FFF;
 
-// NOLINTBEGIN(readability-identifier-naming,readability-else-after-return,
-//              readability-implicit-bool-conversion,modernize-use-auto,
-//              clang-diagnostic-sign-conversion)
-
 // Convert float to fp16 bits using round-to-nearest-even
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline uint16_t float_to_half_bits(float f) noexcept
 {
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
-    uint32_t sign = (bits >> 16) & 0x8000;
+    const uint32_t sign = (bits >> 16) & 0x8000;
     int32_t exp = static_cast<int32_t>(((bits >> 23) & 0xFF)) - 127 + 15;
     uint32_t mant = bits & 0x007FFFFF;
 
@@ -126,7 +127,7 @@ inline uint16_t float_to_half_bits(float f) noexcept
         }
         // Denormalized number
         mant |= 0x00800000;
-        uint32_t shift = static_cast<uint32_t>(14 - exp);
+        auto shift = static_cast<uint32_t>(14 - exp);
         mant >>= shift;
         return static_cast<uint16_t>(sign | (mant >> 13));
     }
@@ -147,7 +148,7 @@ inline uint16_t float_to_half_bits(float f) noexcept
 
     // Round to nearest even
     uint32_t halfMant = mant >> 13;
-    uint32_t remainder = mant & HALF_REMAINDER_MASK;
+    const uint32_t remainder = mant & HALF_REMAINDER_MASK;
     if(remainder > HALF_ROUND_THRESHOLD
        || (remainder == HALF_ROUND_THRESHOLD && ((halfMant & 1) != 0U)))
     {
@@ -167,6 +168,7 @@ inline uint16_t float_to_half_bits(float f) noexcept
 }
 
 // Convert fp16 bits to float
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline float half_bits_to_float(uint16_t bits) noexcept
 {
     uint32_t sign = (static_cast<uint32_t>(bits) & 0x8000) << 16;
@@ -210,10 +212,6 @@ inline float half_bits_to_float(uint16_t bits) noexcept
     std::memcpy(&f, &floatBits, sizeof(float));
     return f;
 }
-
-// NOLINTEND(readability-identifier-naming,readability-else-after-return,
-//           readability-implicit-bool-conversion,modernize-use-auto,
-//           clang-diagnostic-sign-conversion)
 
 } // namespace detail
 
@@ -268,11 +266,15 @@ struct half
     // These are defined inline but require forward declarations above
     template <Bfloat16RoundingMode M>
     inline explicit half(bfloat16_t<M> b) noexcept;
+    inline explicit half(fp4_e2m1 f) noexcept;
+    inline explicit half(fp6_e2m3 f) noexcept;
+    inline explicit half(fp6_e3m2 f) noexcept;
     inline explicit half(fp8_e4m3 f) noexcept;
     inline explicit half(fp8_e5m2 f) noexcept;
+    inline explicit half(fp8_e8m0 f) noexcept;
 
     // Factory for raw bits
-    // NOLINTNEXTLINE(readability-identifier-naming) - using snake_case for factory function
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr half from_bits(uint16_t bits) noexcept
     {
         half val;
@@ -443,13 +445,14 @@ inline bool isfinite(half x)
 
 inline half copysign(half x, half y)
 {
-    uint16_t xBits = x.data & detail::HALF_ABS_MASK;
-    uint16_t ySign = y.data & detail::HALF_SIGN_MASK;
+    const uint16_t xBits = x.data & detail::HALF_ABS_MASK;
+    const uint16_t ySign = y.data & detail::HALF_SIGN_MASK;
     return half::from_bits(xBits | ySign);
 }
 
-// Min/max with NaN handling
-inline half max(half a, half b)
+// Equivalent to std::fmax/std::fmin
+// If one input is NaN and the other is not, returns the non-NaN value.
+inline half fmax(half a, half b)
 {
     if(isnan(a))
     {
@@ -462,7 +465,7 @@ inline half max(half a, half b)
     return a > b ? a : b;
 }
 
-inline half min(half a, half b)
+inline half fmin(half a, half b)
 {
     if(isnan(a))
     {
@@ -473,6 +476,18 @@ inline half min(half a, half b)
         return a;
     }
     return a < b ? a : b;
+}
+
+// Equivalent to std::max/std::min
+// No NaN handling
+inline half max(half a, half b)
+{
+    return a < b ? b : a;
+}
+
+inline half min(half a, half b)
+{
+    return b < a ? b : a;
 }
 
 // Rounding functions

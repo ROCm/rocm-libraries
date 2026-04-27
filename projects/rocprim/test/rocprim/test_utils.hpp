@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -570,7 +570,7 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
     const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
     using value_type  = typename std::iterator_traits<ForwardIt>::value_type;
 
-    for(T value = value_mod; first != last; value++, *first++)
+    for(T value = value_mod; first != last; value++, static_cast<void>(first++))
     {
         if(static_cast<size_t>(value) >= ubound)
         {
@@ -593,7 +593,7 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
     const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
     using value_type  = rocprim::half;
 
-    for(T value = value_mod; first != last; value++, *first++)
+    for(T value = value_mod; first != last; value++, static_cast<void>(first++))
     {
         if(static_cast<float>(static_cast<value_type>(value)) >= ubound)
         {
@@ -662,6 +662,18 @@ inline auto test_kernel_wrapper(F func, hipStream_t stream, const bool use_graph
     {
         gHelper.cleanupGraphHelper();
     }
+}
+
+inline bool is_apu(const rocprim::detail::target_arch arch)
+{
+	if (arch == rocprim::detail::target_arch::gfx1103 ||
+		arch == rocprim::detail::target_arch::gfx1150 || 
+		arch == rocprim::detail::target_arch::gfx1151 ||
+		arch == rocprim::detail::target_arch::gfx1152)
+	{
+		return true;
+	}
+    return false;
 }
 
 } // namespace test_utils

@@ -74,7 +74,7 @@ MultiBufferWorkspaceTraits SplitBufferToWorkspace(const std::vector<size_t>& len
 miopen::HipEventPtr make_hip_fast_event()
 {
     hipEvent_t result = nullptr;
-    hipEventCreateWithFlags(&result, hipEventDisableTiming);
+    (void)hipEventCreateWithFlags(&result, hipEventDisableTiming);
     return miopen::HipEventPtr{result};
 }
 } // namespace
@@ -223,13 +223,13 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
 
             auto recordSyncEvent = [&handle_]() {
                 auto event = make_hip_fast_event();
-                hipEventRecord(event.get(), handle_.GetStream());
+                (void)hipEventRecord(event.get(), handle_.GetStream());
                 return event;
             };
 
             auto waitSyncEvent = [&handle_](HipEventPtr&& event) {
                 auto tmp_for_deletion(std::move(event));
-                hipStreamWaitEvent(handle_.GetStream(), tmp_for_deletion.get(), 0);
+                (void)hipStreamWaitEvent(handle_.GetStream(), tmp_for_deletion.get(), 0);
             };
 
             if(profiling)
@@ -237,7 +237,7 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
                 start = make_hip_event();
                 stop  = make_hip_event();
                 handle_.EnableProfiling(false);
-                hipEventRecord(start.get(), handle_.GetStream());
+                (void)hipEventRecord(start.get(), handle_.GetStream());
             }
 
             void* fp32_QxK_S_ws = getBuffPart(params.GetWorkspace(), 0);
@@ -248,17 +248,17 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
             void* fp32_dSxK_ws      = getBuffPart(params.GetWorkspace(), 3);
             void* fp32_dSxQ_ws      = getBuffPart(params.GetWorkspace(), 4);
 
-            decltype(auto) dOxO_reduction_kernel = handle_.Run(kernels[0]);
-            dOxO_reduction_kernel(dataBwd.doData,
-                                  dataBwd.oData,
-                                  fp32_dOxO_SxdO_ws,
-                                  dataBwd.descaleDOData,
-                                  dataBwd.descaleOData,
-                                  dataBwd.dropoutProbabilityData,
-                                  emb_dim,
-                                  nhs);
-            hipMemsetAsync(dataBwd.amaxDSData, 0, sizeof(float), handle_.GetStream());
-            hipMemsetAsync(dataBwd.amaxDVData, 0, sizeof(float), handle_.GetStream());
+            decltype(auto) dOxO_reduction_kernel_ = handle_.Run(kernels[0]);
+            dOxO_reduction_kernel_(dataBwd.doData,
+                                   dataBwd.oData,
+                                   fp32_dOxO_SxdO_ws,
+                                   dataBwd.descaleDOData,
+                                   dataBwd.descaleOData,
+                                   dataBwd.dropoutProbabilityData,
+                                   emb_dim,
+                                   nhs);
+            (void)hipMemsetAsync(dataBwd.amaxDSData, 0, sizeof(float), handle_.GetStream());
+            (void)hipMemsetAsync(dataBwd.amaxDVData, 0, sizeof(float), handle_.GetStream());
 
             handle_.SetStreamFromPool(1);
             gemm(handle_,
@@ -283,7 +283,7 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
                  true);
 
             HipEventPtr event_QxK = recordSyncEvent();
-            hipMemsetAsync(dataBwd.amaxDQData, 0, sizeof(float), handle_.GetStream());
+            (void)hipMemsetAsync(dataBwd.amaxDQData, 0, sizeof(float), handle_.GetStream());
 
             handle_.SetStreamFromPool(2);
             gemm(handle_,
@@ -308,32 +308,32 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
                  true);
 
             HipEventPtr event_dOxV = recordSyncEvent();
-            hipMemsetAsync(dataBwd.amaxDKData, 0, sizeof(float), handle_.GetStream());
+            (void)hipMemsetAsync(dataBwd.amaxDKData, 0, sizeof(float), handle_.GetStream());
 
             handle_.SetStreamFromPool(0);
             waitSyncEvent(std::move(event_QxK));
             waitSyncEvent(std::move(event_dOxV));
 
-            decltype(auto) bwd_attention_kernel = handle_.Run(kernels[1]);
-            bwd_attention_kernel(fp32_QxK_S_ws,
-                                 fp32_dOxV_ws,
-                                 fp32_dS_ws,
-                                 dataBwd.mData,
-                                 dataBwd.zInvData,
-                                 fp32_dOxO_SxdO_ws,
-                                 dataBwd.amaxDSData,
-                                 dataBwd.descaleQData,
-                                 dataBwd.descaleKData,
-                                 dataBwd.descaleDOData,
-                                 dataBwd.descaleVData,
-                                 dataBwd.scaleSData,
-                                 dataBwd.scaleDSData,
-                                 dataBwd.dropoutSeedData,
-                                 dataBwd.dropoutOffsetData,
-                                 dataBwd.dropoutProbabilityData,
-                                 scale,
-                                 seq_len,
-                                 nhs);
+            decltype(auto) bwd_attention_kernel_ = handle_.Run(kernels[1]);
+            bwd_attention_kernel_(fp32_QxK_S_ws,
+                                  fp32_dOxV_ws,
+                                  fp32_dS_ws,
+                                  dataBwd.mData,
+                                  dataBwd.zInvData,
+                                  fp32_dOxO_SxdO_ws,
+                                  dataBwd.amaxDSData,
+                                  dataBwd.descaleQData,
+                                  dataBwd.descaleKData,
+                                  dataBwd.descaleDOData,
+                                  dataBwd.descaleVData,
+                                  dataBwd.scaleSData,
+                                  dataBwd.scaleDSData,
+                                  dataBwd.dropoutSeedData,
+                                  dataBwd.dropoutOffsetData,
+                                  dataBwd.dropoutProbabilityData,
+                                  scale,
+                                  seq_len,
+                                  nhs);
 
             gemm(handle_,
                  false,
@@ -439,11 +439,11 @@ ConvSolution MhaBackward::GetSolution(const ExecutionContext& context,
 
             if(profiling)
             {
-                hipEventRecord(stop.get(), handle_.GetStream());
+                (void)hipEventRecord(stop.get(), handle_.GetStream());
                 handle_.EnableProfiling(true);
-                hipEventSynchronize(stop.get());
+                (void)hipEventSynchronize(stop.get());
                 float mS = 0;
-                hipEventElapsedTime(&mS, start.get(), stop.get());
+                (void)hipEventElapsedTime(&mS, start.get(), stop.get());
                 handle_.ResetKernelTime();
                 handle_.AccumKernelTime(mS);
             }

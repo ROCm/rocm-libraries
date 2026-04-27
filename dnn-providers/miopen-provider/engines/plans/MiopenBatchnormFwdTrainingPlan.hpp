@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
-#include "PlanBuilderInterface.hpp"
-#include "PlanInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <optional>
 
@@ -17,14 +19,16 @@ class BatchnormFwdTrainingParams
 {
 public:
     BatchnormFwdTrainingParams(
-        const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdTrainingParams(
-        const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdTrainingParams(const BatchnormFwdTrainingParams&) = delete;
@@ -77,11 +81,11 @@ private:
     std::optional<MiopenTensor> _activationOut;
 };
 
-class BatchnormFwdTrainingPlan : public IPlan
+class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
     BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
-                             bool benchmarkingEnabled = false);
+                             const HipdnnMiopenSettings& executionSettings);
 
     BatchnormFwdTrainingPlan(const BatchnormFwdTrainingPlan&) = delete;
     BatchnormFwdTrainingPlan& operator=(const BatchnormFwdTrainingPlan&) = delete;
@@ -89,16 +93,16 @@ public:
     BatchnormFwdTrainingPlan(BatchnormFwdTrainingPlan&&) = default;
     BatchnormFwdTrainingPlan& operator=(BatchnormFwdTrainingPlan&&) = default;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    size_t getWorkspaceSize(const HipdnnMiopenHandle& handle) const override;
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    void execute(const HipdnnMiopenHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
 private:
     BatchnormFwdTrainingParams _trainingParams;
-    bool _benchmarkingEnabled;
+    HipdnnMiopenSettings _executionSettings;
 };
 
 }
