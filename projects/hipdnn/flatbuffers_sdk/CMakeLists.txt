@@ -35,24 +35,6 @@ if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB AND NOT TARGET nlohmann_json::nlohma
     hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 endif()
 
-# Supported FlatBuffers versions (oldest to newest)
-# 24.12.23 matches PyTorch's FlatBuffers version for compatibility
-set(HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS "24.12.23" "${HIPDNN_FLATBUFFERS_VERSION}")
-
-if(NOT HIPDNN_FLATBUFFERS_VERSION IN_LIST HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS)
-    message(FATAL_ERROR
-        "Unsupported FlatBuffers version: ${HIPDNN_FLATBUFFERS_VERSION}. "
-        "Supported versions are: ${HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS}"
-    )
-endif()
-
-# Compute versioned directory name from version string (e.g., "25.9.23" -> "v25_9_23")
-string(REPLACE "." "_" _fb_version_tag "${HIPDNN_FLATBUFFERS_VERSION}")
-set(HIPDNN_FLATBUFFERS_VERSION_DIR "v${_fb_version_tag}")
-set(HIP_DNN_FLATBUFFERS_SDK_GENERATED_INCLUDE_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects/${HIPDNN_FLATBUFFERS_VERSION_DIR}"
-)
-
 # --- Dependency processing ---
 set(_hipdnn_flatbuffers_sdk_local_export_targets)
 set(_hipdnn_flatbuffers_sdk_local_export_includes)
@@ -138,7 +120,6 @@ target_compile_definitions(
 
 target_include_directories(
     hipdnn_flatbuffers_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_FLATBUFFERS_SDK_INCLUDE_DIR}>
-                                     $<BUILD_INTERFACE:${HIP_DNN_FLATBUFFERS_SDK_GENERATED_INCLUDE_DIR}>
                                      $<INSTALL_INTERFACE:${HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR}>
 )
 
@@ -146,6 +127,11 @@ target_include_directories(
 if(HIPDNN_GENERATE_SDK_HEADERS)
     include(../cmake/FlatBuffersGenerate.cmake)
 
+    # GENERATED_INCLUDE_DIR points directly at the data_objects/ directory because
+    # the .fbs files declare `namespace hipdnn_flatbuffers_sdk.data_objects;`, so
+    # flatc writes <name>_generated.h directly there. Downstream code includes via
+    # <hipdnn_flatbuffers_sdk/data_objects/<name>_generated.h>, which resolves
+    # against the include/ root (BUILD_INTERFACE) or the install include root.
     hipdnn_generate_flatbuffer_headers(
         TARGET hipdnn_flatbuffers_sdk
         SCHEMAS
@@ -177,8 +163,6 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/reduction_attributes.fbs
             schemas/tensor_attributes.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
-        PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}
-        SUPPORTED_VERSIONS ${HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS}
         GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects"
         OUTPUT_NAMESPACE hipdnn_flatbuffers_sdk
     )

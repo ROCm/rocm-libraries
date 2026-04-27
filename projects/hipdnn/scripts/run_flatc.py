@@ -63,9 +63,6 @@ def main():
         )
         sys.exit(1)
 
-    # Convert version to directory format (e.g., "25.9.23" -> "v25_9_23")
-    ver_tag = REQUIRED_VER.replace(".", "_")
-
     for f in sys.argv[1:]:
         sdk_dir, namespace = detect_sdk(f)
         if sdk_dir is None:
@@ -74,16 +71,11 @@ def main():
 
         schemas_dir = os.path.join(script_dir, "..", sdk_dir, "schemas")
 
-        # Output path matches multi-version structure:
-        # include/.../data_objects/v{ver}/{namespace}/data_objects/
         output_dir = os.path.join(
             script_dir,
             "..",
             sdk_dir,
             "include",
-            namespace,
-            "data_objects",
-            f"v{ver_tag}",
             namespace,
             "data_objects",
         )
