@@ -294,7 +294,6 @@ if( GTest_FOUND AND GTest_VERSION VERSION_GREATER_EQUAL "1.17" )
 else()
   # gtest build by the hipFFT
   include( ../cmake/build-gtest.cmake )
-  add_dependencies( hipfft-test gtest )
   target_include_directories( hipfft-test PRIVATE ${GTEST_INCLUDE_DIRS} )
   target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
 endif()
