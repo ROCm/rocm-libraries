@@ -205,6 +205,14 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
         endif()
 
+        # Force GENERIC target to ensure binaries work on all CPUs
+        list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+
+        # Downgrade incompatible-pointer-types errors to warnings when using Clang
+        if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_C_FLAGS=-Wno-error=incompatible-pointer-types)
+        endif()
+
         include(ExternalProject)
         # Use OpenBLAS v0.3.33 (commit 62bcfb0)
         ExternalProject_Add(hipsolver-static-lapack
