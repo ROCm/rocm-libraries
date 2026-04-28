@@ -50,7 +50,7 @@ def rocisa(c, rocisa_dir=None):
     import pathlib
 
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else pathlib.Path(__file__).parent / "rocisa"
-    c.run(f"pip install -e {src}")
+    c.run(f"pip install -e {shlex.quote(str(src))}")
 
 
 @task(
