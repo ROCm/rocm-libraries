@@ -1,6 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Capture the directory of THIS file at include time. CMAKE_CURRENT_LIST_DIR
+# inside the function below would resolve to the *caller's* directory, not
+# this module's, so the shared flag file would not be found.
+set(_HIPDNN_FLATBUFFERS_GENERATE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
 # FlatBuffers header generation.
 #
 # Provides hipdnn_generate_flatbuffer_headers() which generates C++ headers from .fbs schema
@@ -33,7 +38,18 @@ function(hipdnn_generate_flatbuffer_headers)
         set(ARG_OUTPUT_NAMESPACE "hipdnn_flatbuffers_sdk")
     endif()
 
-    set(_flatc_extra_flags --gen-object-api --gen-mutable --gen-compare --defaults-json --scoped-enums)
+    # Single source of truth — the same flags are consumed by run_flatc.py.
+    # See cmake/flatc_flags.txt for the format and comment rules.
+    set(_flatc_flags_file "${_HIPDNN_FLATBUFFERS_GENERATE_DIR}/flatc_flags.txt")
+    file(STRINGS "${_flatc_flags_file}" _flatc_flag_lines)
+    set(_flatc_extra_flags "")
+    foreach(_line IN LISTS _flatc_flag_lines)
+        string(STRIP "${_line}" _stripped)
+        if(_stripped STREQUAL "" OR _stripped MATCHES "^#")
+            continue()
+        endif()
+        list(APPEND _flatc_extra_flags "${_stripped}")
+    endforeach()
 
     set(_output_dir "${ARG_GENERATED_INCLUDE_DIR}")
 

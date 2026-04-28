@@ -22,32 +22,15 @@ set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hip
 # fast if a system-installed FlatBuffers satisfied the loose minimum but does
 # not match exactly — the generated headers and runtime are version-locked,
 # so a mismatch surfaces later as an opaque static_assert or link error.
+# The validation logic is shared with the imported Config template via
+# hipdnn_flatbuffers_version_check.cmake.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_flatbuffers_version_check.cmake)
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
-
-if(DEFINED flatbuffers_VERSION)
-    if(NOT flatbuffers_VERSION VERSION_EQUAL HIPDNN_FLATBUFFERS_VERSION)
-        message(FATAL_ERROR
-            "FlatBuffers version mismatch: hipDNN requires "
-            "${HIPDNN_FLATBUFFERS_VERSION} but found ${flatbuffers_VERSION} "
-            "(via ${flatbuffers_DIR}). Point flatbuffers_DIR at the matching "
-            "package, uninstall the system FlatBuffers so hipDNN can fetch the "
-            "correct version, or update HIPDNN_FLATBUFFERS_VERSION to match."
-        )
-    endif()
-elseif(flatbuffers_FOUND)
-    # find_package succeeded but the config didn't populate flatbuffers_VERSION
-    # (some vendored or repackaged distributions skip it). Warn rather than
-    # fail-close — a real ABI mismatch would still surface as a static_assert
-    # in the FlatBuffers headers later — but flag it so users can investigate.
-    message(WARNING
-        "Could not validate FlatBuffers version: find_package(flatbuffers) "
-        "succeeded but did not set flatbuffers_VERSION. hipDNN expects "
-        "${HIPDNN_FLATBUFFERS_VERSION}; if the bundled package is a different "
-        "version this will fail later at compile time."
-    )
-endif()
-# If flatbuffers_FOUND is also unset, FetchContent built FlatBuffers from the
-# git tag pinned to HIPDNN_FLATBUFFERS_VERSION — no validation needed.
+hipdnn_check_flatbuffers_version(
+    EXPECTED ${HIPDNN_FLATBUFFERS_VERSION}
+    CONTEXT  "hipDNN"
+    DETAIL   "Point flatbuffers_DIR at the matching package, uninstall the system FlatBuffers so hipDNN can fetch the correct version, or update HIPDNN_FLATBUFFERS_VERSION to match."
+)
 
 # Per-library JSON gate. Defaults from the umbrella HIPDNN_SKIP_JSON_LIB when
 # building as part of the top-level project; can be set independently when
@@ -265,6 +248,15 @@ install(
     FILES
         "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk/hipdnn_flatbuffers_sdkConfig.cmake"
         "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk/hipdnn_flatbuffers_sdkConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk
+    COMPONENT Development
+)
+
+# Ship the shared version-check helper so the installed imported Config can
+# include() it (single-source the comparison logic between build- and
+# consumer-time validation).
+install(
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_flatbuffers_version_check.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk
     COMPONENT Development
 )

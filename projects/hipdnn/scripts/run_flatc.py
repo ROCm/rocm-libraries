@@ -8,13 +8,15 @@ import os
 import re
 
 
-def _read_required_version():
+_HIPDNN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read_required_version(cmake_file=None):
     """Read HIPDNN_FLATBUFFERS_VERSION from projects/hipdnn/CMakeLists.txt
     so the script stays in sync with the single source of truth.
     """
-    cmake_file = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "CMakeLists.txt"
-    )
+    if cmake_file is None:
+        cmake_file = os.path.join(_HIPDNN_DIR, "CMakeLists.txt")
     pattern = re.compile(
         r'set\s*\(\s*HIPDNN_FLATBUFFERS_VERSION\s+"([^"]+)"', re.IGNORECASE
     )
@@ -29,7 +31,31 @@ def _read_required_version():
     )
 
 
+def _read_flatc_flags(flags_file=None):
+    """Read the shared flatc flag list. Single source of truth lives in
+    cmake/flatc_flags.txt and is also consumed by FlatBuffersGenerate.cmake.
+    Lines starting with '#' and blank lines are ignored. The C++ output mode
+    (--cpp) is implied by the consumer and is NOT in the file.
+    """
+    if flags_file is None:
+        flags_file = os.path.join(_HIPDNN_DIR, "cmake", "flatc_flags.txt")
+    flags = []
+    with open(flags_file, encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            flags.append(stripped)
+    if not flags:
+        raise RuntimeError(
+            f"No flatc flags parsed from {flags_file}. The shared flag list "
+            "is empty or all lines were filtered out."
+        )
+    return flags
+
+
 REQUIRED_VER = _read_required_version()
+FLATC_EXTRA_FLAGS = _read_flatc_flags()
 
 # Supported SDKs and their namespace paths for generated output
 SDKS = {
@@ -109,11 +135,7 @@ def main():
                     "-I",
                     schemas_dir,
                     "--cpp",
-                    "--gen-object-api",
-                    "--gen-mutable",
-                    "--gen-compare",
-                    "--defaults-json",
-                    "--scoped-enums",
+                    *FLATC_EXTRA_FLAGS,
                     "-o",
                     output_dir,
                     f,

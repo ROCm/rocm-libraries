@@ -9,28 +9,16 @@ find_dependency(hipdnn_data_sdk @HIPDNN_FLATBUFFERS_SDK_DATA_SDK_MIN_VERSION@ CO
 
 find_dependency(flatbuffers REQUIRED)
 
-# Validate the FlatBuffers the consumer found matches the version
-# hipDNN was built against. The imported target's compile definitions
-# and any inline FlatBuffers code are baked against this version, so a
-# mismatch is unsafe. If the consumer's flatbuffers config didn't
-# populate flatbuffers_VERSION (some vendored distributions skip it),
-# warn rather than fail-close — a real ABI mismatch would still surface
-# as a static_assert in the FlatBuffers headers later.
-if(DEFINED flatbuffers_VERSION)
-    if(NOT flatbuffers_VERSION VERSION_EQUAL "@HIPDNN_FLATBUFFERS_VERSION@")
-        message(FATAL_ERROR
-            "hipDNN Flatbuffers SDK: FlatBuffers version mismatch. hipDNN was built "
-            "against @HIPDNN_FLATBUFFERS_VERSION@ but found ${flatbuffers_VERSION}."
-        )
-    endif()
-else()
-    message(WARNING
-        "hipDNN Flatbuffers SDK: Could not validate FlatBuffers version. "
-        "find_dependency(flatbuffers) succeeded but did not set "
-        "flatbuffers_VERSION. hipDNN was built against @HIPDNN_FLATBUFFERS_VERSION@; "
-        "a different version may fail later at compile time."
-    )
-endif()
+# Validate the consumer's FlatBuffers matches the version hipDNN was built
+# against. The imported target's compile definitions and any inline
+# FlatBuffers code are baked against this version, so a mismatch is unsafe.
+# Comparison + messaging are shared with the build-time guard in
+# flatbuffers_sdk/CMakeLists.txt via this helper module.
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_flatbuffers_version_check.cmake")
+hipdnn_check_flatbuffers_version(
+    EXPECTED "@HIPDNN_FLATBUFFERS_VERSION@"
+    CONTEXT  "hipDNN Flatbuffers SDK"
+)
 
 # Reflects how hipDNN was built; not consumer-overridable, since the imported
 # target's compile definitions are already baked in.
