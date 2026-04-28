@@ -4,15 +4,185 @@
 #include "plans/SdpaFwdPlanBuilder.hpp"
 #include "HipKernelUtils.hpp"
 #include "asm/AsmKernelPath.hpp"
+#include "asm_fmha_v3_fwd_configs.hpp"
 #include "plans/SdpaFwdPlan.hpp"
 
 #include <cmath>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine
 {
+
+enum MaskType : int
+{
+    NO_MASK = 0,
+    TOP_LEFT_CAUSAL,
+    BOTTOM_RIGHT_CAUSAL,
+    WINDOW_GENERIC
+};
+
+MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    bool leftAndRightBoundsSet = attrs.left_bound().has_value() && attrs.right_bound().has_value();
+    // No bounds set at all → check deprecated bools, otherwise no mask
+    if(!leftAndRightBoundsSet)
+    {
+        if(attrs.causal_mask()) // Deprecated
+        {
+            return MaskType::TOP_LEFT_CAUSAL;
+        }
+        if(attrs.causal_mask_bottom_right()) // Deprecated
+        {
+            return MaskType::BOTTOM_RIGHT_CAUSAL;
+        }
+        return MaskType::NO_MASK;
+    }
+
+    // -1 == unbound
+    auto left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
+    auto right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
+    // Both unbounded: no mask
+    if(left == -1 && right == -1)
+    {
+        return MaskType::NO_MASK;
+    }
+    // Causal: left unbounded, right = 0 (don't attend past diagonal)
+    if(left == -1 && right == 0)
+    {
+        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
+                   ? MaskType::BOTTOM_RIGHT_CAUSAL
+                   : MaskType::TOP_LEFT_CAUSAL;
+    }
+    // Anything else is sliding window
+    return MaskType::WINDOW_GENERIC;
+}
+
+enum RoundingMode : int
+{
+    RTNE = 0, // Round to Nearest Even (IEEE default)
+    RTNA, // Round to Nearest Away from zero
+    RTZ // Round toward Zero
+};
+
+RoundingMode getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
+{
+    // TODO Cannot be specified in the graph, this will require specialized handling
+    return RoundingMode::RTNE;
+}
+
+enum BatchMode : int
+{
+    BATCH = 0, // All sequences have same length
+    GROUP // Variable sequence lengths
+};
+
+BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+{
+    return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
+               ? BatchMode::GROUP
+               : BatchMode::BATCH;
+}
+
+std::string getKernelNameKey(const std::string& archId,
+                             const std::string& dataType,
+                             int hdim_q, // NOLINT(readability-identifier-naming)
+                             int hdim_v, // NOLINT(readability-identifier-naming)
+                             MaskType maskType,
+                             RoundingMode bf16_cvt, // NOLINT(readability-identifier-naming)
+                             BatchMode mode,
+                             const CFG* cfgs)
+{
+    std::string kernelNameKey{};
+    for(const auto& el : *cfgs)
+    {
+        const auto& cfg = el.second;
+        if(cfg.arch != archId)
+        {
+            continue;
+        }
+
+        if(cfg.dtype == dataType && cfg.hdim_q == hdim_q && cfg.hdim_v == hdim_v
+           && static_cast<int>(cfg.mask) == maskType && static_cast<int>(cfg.mode) == mode)
+        {
+            if(archId == "gfx950")
+            {
+                kernelNameKey = el.first;
+                break;
+            }
+            if(archId == "gfx942" && cfg.bf16_cvt == bf16_cvt)
+            {
+                kernelNameKey = el.first;
+                break;
+            }
+        }
+    }
+
+    return kernelNameKey;
+}
+
+std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType qType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType kType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType vType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType oType)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    if(qType == DataType::BFLOAT16 && kType == DataType::BFLOAT16 && vType == DataType::BFLOAT16
+       && oType == DataType::BFLOAT16)
+    {
+        return "bf16";
+    }
+    if(qType == DataType::FP8_E4M3 && kType == DataType::FP8_E4M3 && vType == DataType::FP8_E4M3
+       && oType == DataType::BFLOAT16)
+    {
+        return "fp8bf16";
+    }
+
+    return "";
+}
+
+bool isMi308Device(hipStream_t stream)
+{
+    int deviceId;
+    auto status = hipStreamGetDevice(stream, &deviceId);
+    if(status != hipSuccess)
+    {
+        throw std::runtime_error("hipStreamGetDevice failed with error code: "
+                                 + std::to_string(status));
+    }
+    int chipId;
+    status = hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, deviceId);
+    if(status != hipSuccess)
+    {
+        throw std::runtime_error("hipDeviceGetAttribute failed with error code: "
+                                 + std::to_string(status));
+    }
+
+    HIPDNN_PLUGIN_LOG_INFO("pciDeviceID  = " << std::hex << std::to_string(chipId));
+    return chipId == 0x74a2 || chipId == 0x74a8 || chipId == 0x74b6 || chipId == 0x74bc;
+}
+
+std::string getKernelCoPath(std::string coName, const std::string& archId, bool isMi308)
+{
+    if(archId == "gfx942")
+    {
+        auto pos = coName.rfind('/');
+        if(isMi308)
+        {
+            coName = coName.substr(0, pos + 1) + "MI308/" + coName.substr(pos + 1);
+        }
+        else
+        {
+            coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
+        }
+    }
+    return asm_kernels::getAsmKernelPath(coName);
+}
 
 bool SdpaFwdPlanBuilder::isApplicable(
     const HipKernelHandle& handle,
@@ -24,12 +194,14 @@ bool SdpaFwdPlanBuilder::isApplicable(
 
     auto& nodeWrappers = opGraph.nodeWrappers();
 
+    std::string deviceString;
+
     try
     {
-        auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+        deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
         HIP_KERNEL_RETURN_FALSE_IF(
-            deviceString != "gfx942",
-            "Device string does not match gfx942 (Actual value: " + deviceString + ")");
+            deviceString != "gfx942" && deviceString != "gfx950",
+            "Device string does not match gfx942 or gfx950 (Actual value: " + deviceString + ")");
     }
     catch(const std::exception& e)
     {
@@ -43,18 +215,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                "Node attribute type is not SdpaAttributes");
 
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.causal_mask(), "causal_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.causal_mask_bottom_right(),
-                               "causal_mask_bottom_right must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.left_bound().has_value(), "left_bound must be unset");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.right_bound().has_value(), "right_bound must be unset");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
                                "dropout_probability must be unset or zero (Actual value: "
                                    + std::to_string(attrs.dropout_probability().value()) + ")");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid(), "seq_len_q tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
                                "attn_mask tensor not supported");
 
@@ -73,30 +239,57 @@ bool SdpaFwdPlanBuilder::isApplicable(
     int64_t oUid = attrs.o_tensor_uid();
 
     auto* qTensor = tensorMap.at(qUid);
-    HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != DataType::BFLOAT16,
-                               "q tensor datatype must be BF16 (Actual type: "
-                                   + EnumNameDataType(qTensor->data_type()) + ")");
+    auto* kTensor = tensorMap.at(kUid);
+    auto* vTensor = tensorMap.at(vUid);
+    auto* oTensor = tensorMap.at(oUid);
+
     HIP_KERNEL_RETURN_FALSE_IF(
         qTensor->dims()->size() != 4,
         "q tensor must be rank 4 (Actual rank: " + std::to_string(qTensor->dims()->size()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(qTensor->dims()->Get(3) != 128,
-                               "q tensor head dimension must be 128 (Actual value: "
-                                   + std::to_string(qTensor->dims()->Get(3)) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        vTensor->dims()->size() != 4,
+        "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        kTensor->dims()->size() != 4,
+        "k tensor must be rank 4 (Actual rank: " + std::to_string(kTensor->dims()->size()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        oTensor->dims()->size() != 4,
+        "o tensor must be rank 4 (Actual rank: " + std::to_string(oTensor->dims()->size()) + ")");
 
-    auto* kTensor = tensorMap.at(kUid);
-    HIP_KERNEL_RETURN_FALSE_IF(kTensor->data_type() != DataType::BFLOAT16,
-                               "k tensor datatype must be BF16 (Actual type: "
-                                   + EnumNameDataType(kTensor->data_type()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != kTensor->data_type()
+                                   || qTensor->data_type() != vTensor->data_type(),
+                               "Input tensors must all share a type (q tensor: "
+                                   + EnumNameDataType(qTensor->data_type())
+                                   + ", k tensor: " + EnumNameDataType(kTensor->data_type())
+                                   + ", v tensor: " + EnumNameDataType(vTensor->data_type()) + ")");
 
-    auto* vTensor = tensorMap.at(vUid);
-    HIP_KERNEL_RETURN_FALSE_IF(vTensor->data_type() != DataType::BFLOAT16,
-                               "v tensor datatype must be BF16 (Actual type: "
-                                   + EnumNameDataType(vTensor->data_type()) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        kTensor->dims()->Get(1) != vTensor->dims()->Get(1),
+        "k tensor and v tensor must shared the same head count (Actual value: k = "
+            + std::to_string(kTensor->dims()->Get(1))
+            + " v = " + std::to_string(vTensor->dims()->Get(1)) + ")");
 
-    auto* oTensor = tensorMap.at(oUid);
-    HIP_KERNEL_RETURN_FALSE_IF(oTensor->data_type() != DataType::BFLOAT16,
-                               "o tensor datatype must be BF16 (Actual type: "
-                                   + EnumNameDataType(oTensor->data_type()) + ")");
+    auto dataTypeId = getDataTypeIdentifier(
+        qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
+
+    HIP_KERNEL_RETURN_FALSE_IF(
+        dataTypeId.empty(),
+        "output tensor must have datatype BFLOAT16 (Actual type: "
+            + EnumNameDataType(oTensor->data_type())
+            + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3 (Actual type: "
+            + EnumNameDataType(qTensor->data_type()) + ")");
+
+    auto key = getKernelNameKey(deviceString,
+                                dataTypeId,
+                                static_cast<int>(qTensor->dims()->Get(3)),
+                                static_cast<int>(vTensor->dims()->Get(3)),
+                                getMaskType(attrs),
+                                getRoundingMode(attrs),
+                                getBatchMode(attrs),
+                                &cfg_fmha_fwd);
+
+    HIP_KERNEL_RETURN_FALSE_IF(key.empty(),
+                               "Could not find matching kernel for parameter combination");
 
     return true;
 }
@@ -121,35 +314,23 @@ void SdpaFwdPlanBuilder::initializeExecutionSettings(
 }
 
 void SdpaFwdPlanBuilder::buildPlan(
-    const HipKernelHandle& /* handle */,
+    const HipKernelHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     HipKernelContext& executionContext) const
 {
-    // Load kernel module
-    std::string coPath
-        = asm_kernels::getAsmKernelPath("gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co");
 
-    hipModule_t module;
-    hipError_t err = hipModuleLoad(&module, coPath.c_str());
-    if(err != hipSuccess)
+    // Get device properties
+    std::string deviceString;
+    bool isMi308;
+    try
     {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "Failed to load kernel module: " << coPath << " error: " << hipGetErrorString(err));
-        return;
+        deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+        isMi308 = isMi308Device(handle.getStream());
     }
-
-    hipFunction_t function;
-    err = hipModuleGetFunction(&function, module, "_ZN5aiter24fmha_fwd_hd128_bf16_rtneE");
-    if(err != hipSuccess)
+    catch(const std::exception& e)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function, error: " << hipGetErrorString(err));
-        err = hipModuleUnload(module);
-        if(err != hipSuccess)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR(
-                "Failed to unload kernel module on error, error: " << hipGetErrorString(err));
-        }
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to query device properties with error: " << e.what());
         return;
     }
 
@@ -246,6 +427,58 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.oStrideHead = oStrideHead;
     params.oStrideBatch = oStrideBatch;
     params.attnScale = attnScale;
+    params.archString = deviceString;
+    MaskType maskType = getMaskType(sdpaAttrs);
+    params.noMask = maskType == MaskType::NO_MASK;
+
+    // Find matching kernel to graph
+    fmha_v3_fwdConfig config;
+    auto kernelKey = getKernelNameKey(
+        deviceString,
+        getDataTypeIdentifier(
+            qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type()),
+        static_cast<int>(headDimQk),
+        static_cast<int>(headDimV),
+        maskType,
+        getRoundingMode(sdpaAttrs),
+        getBatchMode(sdpaAttrs),
+        &cfg_fmha_fwd);
+
+    if(kernelKey.empty())
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to find matching kernel with error");
+    }
+    config = cfg_fmha_fwd.at(kernelKey);
+
+    params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
+
+    // Load kernel module
+    auto coPath = getKernelCoPath(config.co_name, deviceString, isMi308);
+
+    HIPDNN_PLUGIN_LOG_INFO("Using kernel with path: " << coPath);
+
+    hipModule_t module;
+    hipError_t err = hipModuleLoad(&module, coPath.c_str());
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "Failed to load kernel module: " << coPath << " error: " << hipGetErrorString(err));
+        return;
+    }
+
+    hipFunction_t function;
+    err = hipModuleGetFunction(&function, module, config.knl_name.c_str());
+    if(err != hipSuccess)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function, error: " << hipGetErrorString(err));
+        err = hipModuleUnload(module);
+        if(err != hipSuccess)
+        {
+            HIPDNN_PLUGIN_LOG_ERROR(
+                "Failed to unload kernel module on error, error: " << hipGetErrorString(err));
+        }
+        return;
+    }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(module, function, params));
 }
