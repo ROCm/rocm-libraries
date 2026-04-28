@@ -61,10 +61,10 @@ struct BatchedContractionMultiABDKernelArgs
     ck_tile::index_t K_dims[NumDimK];
     ck_tile::index_t G_dims[NumDimG];
 
-    std::array<ck_tile::index_t, NumATensor> batch_stride_As;
-    std::array<ck_tile::index_t, NumBTensor> batch_stride_Bs;
-    ck_tile::index_t batch_stride_E;
-    std::array<ck_tile::index_t, NumDTensor> batch_stride_Ds;
+    std::array<std::array<ck_tile::index_t, NumDimG>, NumATensor> batch_strides_As;
+    std::array<std::array<ck_tile::index_t, NumDimG>, NumBTensor> batch_strides_Bs;
+    std::array<ck_tile::index_t, NumDimG> batch_strides_E;
+    std::array<std::array<ck_tile::index_t, NumDimG>, NumDTensor> batch_strides_Ds;
 
     ck_tile::index_t G_total;
     ck_tile::index_t M_total;
@@ -223,6 +223,31 @@ struct BatchedContractionMultiABDKernel
     {
         return dim3(
             TilePartitioner::GridSize(kargs.M_total, kargs.N_total), kargs.G_total, kargs.k_batch);
+    }
+
+    template <typename GStrides>
+    CK_TILE_DEVICE static ck_tile::index_t
+    GetBatchOffset(ck_tile::index_t i_batch_flat,
+                   const ck_tile::index_t (&g_dims)[NumDimG],
+                   const GStrides& g_strides)
+    {
+        if constexpr(NumDimG == 1)
+        {
+            (void)g_dims;
+            return i_batch_flat * g_strides[0];
+        }
+
+        ck_tile::index_t offset = 0;
+        ck_tile::index_t temp   = i_batch_flat;
+
+        static_for<0, NumDimG, 1>{}([&](auto reverse_i) {
+            constexpr ck_tile::index_t i = NumDimG - 1 - reverse_i.value;
+            const auto g_idx             = temp % g_dims[i];
+            offset += g_idx * g_strides[i];
+            temp /= g_dims[i];
+        });
+
+        return offset;
     }
 
     /// @brief Core GEMM computation with tuple-based descriptor windows for multi-ABD.
@@ -457,22 +482,25 @@ struct BatchedContractionMultiABDKernel
         {
             kargs.as_grid_desc_m_k[a] = DescriptorUtils::Make_A_GridDescriptor_M_K(
                 host_args.As_dims[a], host_args.As_strides[a]);
-            kargs.batch_stride_As[a] = host_args.As_strides[a][NumDimG - 1];
-            kargs.stride_As[a]       = kargs.K_total;
+            for(ck_tile::index_t i = 0; i < NumDimG; ++i)
+                kargs.batch_strides_As[a][i] = host_args.As_strides[a][i];
+            kargs.stride_As[a] = kargs.K_total;
         }
 
         for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
         {
             kargs.bs_grid_desc_n_k[b] = DescriptorUtils::Make_B_GridDescriptor_N_K(
                 host_args.Bs_dims[b], host_args.Bs_strides[b]);
-            kargs.batch_stride_Bs[b] = host_args.Bs_strides[b][NumDimG - 1];
-            kargs.stride_Bs[b]       = kargs.K_total;
+            for(ck_tile::index_t i = 0; i < NumDimG; ++i)
+                kargs.batch_strides_Bs[b][i] = host_args.Bs_strides[b][i];
+            kargs.stride_Bs[b] = kargs.K_total;
         }
 
         kargs.e_grid_desc_m_n =
             DescriptorUtils::Make_E_GridDescriptor_M_N(host_args.E_dims, host_args.E_strides);
-        kargs.batch_stride_E = host_args.E_strides[NumDimG - 1];
-        kargs.stride_E       = kargs.N_total;
+        for(ck_tile::index_t i = 0; i < NumDimG; ++i)
+            kargs.batch_strides_E[i] = host_args.E_strides[i];
+        kargs.stride_E = kargs.N_total;
 
         for(ck_tile::index_t d = 0; d < NumDTensor; ++d)
         {
@@ -483,8 +511,9 @@ struct BatchedContractionMultiABDKernel
             }
             kargs.ds_grid_desc_m_n[d] = DescriptorUtils::Make_E_GridDescriptor_M_N(
                 host_args.Ds_dims[d], host_args.Ds_strides[d]);
-            kargs.batch_stride_Ds[d] = host_args.Ds_strides[d][NumDimG - 1];
-            kargs.stride_Ds[d]       = kargs.N_total;
+            for(ck_tile::index_t i = 0; i < NumDimG; ++i)
+                kargs.batch_strides_Ds[d][i] = host_args.Ds_strides[d][i];
+            kargs.stride_Ds[d] = kargs.N_total;
         }
 
         return kargs;
@@ -505,24 +534,28 @@ struct BatchedContractionMultiABDKernel
         std::array<const void*, NumATensor> as_batch_ptr;
         static_for<0, NumATensor, 1>{}([&](auto i) {
             using AiDataType = ck_tile::remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
-            const auto batch_offset = i_batch_flat * kargs.batch_stride_As[i];
+            const auto batch_offset =
+                GetBatchOffset(i_batch_flat, kargs.G_dims, kargs.batch_strides_As[i]);
             as_batch_ptr[i] = static_cast<const AiDataType*>(kargs.as_ptr[i]) + batch_offset;
         });
 
         std::array<const void*, NumBTensor> bs_batch_ptr;
         static_for<0, NumBTensor, 1>{}([&](auto i) {
             using BiDataType = ck_tile::remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
-            const auto batch_offset = i_batch_flat * kargs.batch_stride_Bs[i];
+            const auto batch_offset =
+                GetBatchOffset(i_batch_flat, kargs.G_dims, kargs.batch_strides_Bs[i]);
             bs_batch_ptr[i] = static_cast<const BiDataType*>(kargs.bs_ptr[i]) + batch_offset;
         });
 
         EDataType* e_ptr =
-            static_cast<EDataType*>(kargs.e_ptr) + i_batch_flat * kargs.batch_stride_E;
+            static_cast<EDataType*>(kargs.e_ptr) +
+            GetBatchOffset(i_batch_flat, kargs.G_dims, kargs.batch_strides_E);
 
         std::array<const void*, NumDTensor> ds_batch_ptr;
         static_for<0, NumDTensor, 1>{}([&](auto i) {
             using DiDataType = ck_tile::remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
-            const auto batch_offset = i_batch_flat * kargs.batch_stride_Ds[i];
+            const auto batch_offset =
+                GetBatchOffset(i_batch_flat, kargs.G_dims, kargs.batch_strides_Ds[i]);
             ds_batch_ptr[i] = static_cast<const DiDataType*>(kargs.ds_ptr[i]) + batch_offset;
         });
 

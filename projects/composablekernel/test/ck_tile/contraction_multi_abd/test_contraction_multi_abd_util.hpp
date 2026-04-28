@@ -267,7 +267,8 @@ class TestCkTileContractionMultiABD : public ::testing::Test
              const std::vector<ck_tile::index_t>& N_dims,
              const std::vector<ck_tile::index_t>& K_dims,
              ck_tile::index_t k_batch       = 1,
-             bool expect_supported          = true)
+             bool expect_supported          = true,
+             bool use_padded_g_strides      = false)
     {
         auto calc_total = [](const std::vector<ck_tile::index_t>& dims) {
             ck_tile::index_t t = 1;
@@ -292,9 +293,28 @@ class TestCkTileContractionMultiABD : public ::testing::Test
         std::vector<ck_tile::index_t> B_dims = concat({G_dims, N_dims, K_dims});
         std::vector<ck_tile::index_t> E_dims = concat({G_dims, M_dims, N_dims});
 
-        const auto a_desc = ck_tile::HostTensorDescriptor(A_dims);
-        const auto b_desc = ck_tile::HostTensorDescriptor(B_dims);
-        const auto e_desc = ck_tile::HostTensorDescriptor(E_dims);
+        auto make_desc = [&](const std::vector<ck_tile::index_t>& dims, std::size_t padding) {
+            auto desc    = ck_tile::HostTensorDescriptor(dims);
+            auto strides = desc.get_strides();
+            if(use_padded_g_strides)
+            {
+                if constexpr(NumDimG > 1)
+                {
+                    strides[NumDimG - 1] += padding;
+                    for(ck_tile::index_t reverse_i = 1; reverse_i < NumDimG; ++reverse_i)
+                    {
+                        const ck_tile::index_t i = NumDimG - 1 - reverse_i;
+                        strides[i] =
+                            static_cast<std::size_t>(dims[i + 1]) * strides[i + 1] + padding;
+                    }
+                }
+            }
+            return ck_tile::HostTensorDescriptor(dims, strides);
+        };
+
+        const auto a_desc = make_desc(A_dims, 17);
+        const auto b_desc = make_desc(B_dims, 29);
+        const auto e_desc = make_desc(E_dims, 43);
 
         auto as_host = make_host_tensor_array<ADataType, NumATensor>(a_desc);
         auto bs_host = make_host_tensor_array<BDataType, NumBTensor>(b_desc);

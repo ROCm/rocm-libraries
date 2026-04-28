@@ -21,6 +21,11 @@ TYPED_TEST(TestCkTileContractionMultiABD, CShuffle_G2_M1_N1_K1_256x256x256)
     EXPECT_TRUE((this->template Run<2, 1, 1, 1>({1, 2}, {256}, {256}, {256})));
 }
 
+TYPED_TEST(TestCkTileContractionMultiABD, CShuffle_G2_M1_N1_K1_padded_g_strides)
+{
+    EXPECT_TRUE((this->template Run<2, 1, 1, 1>({2, 2}, {128}, {128}, {64}, 1, true, true)));
+}
+
 // G=1, M=1, N=1, K=1 with larger problem
 TYPED_TEST(TestCkTileContractionMultiABD, CShuffle_G1_M1_N1_K1_512x512x256)
 {
