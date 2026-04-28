@@ -36,7 +36,8 @@ if _bi is not None:
     _stale = [
         str(p)
         for _root in _roots
-        for p in _root.rglob("*.[ch]pp")
+        for _pattern in ("*.[ch]pp", "*.h")
+        for p in _root.rglob(_pattern)
         if p.stat().st_mtime > _so_mtime
     ]
     if _stale:
