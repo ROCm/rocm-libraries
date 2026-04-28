@@ -36,13 +36,14 @@ namespace v2 = ck_tile::direct_conv::grouped_16c_tile::v2;
 // accumulation loop at a given kw_slice position. This uses the production
 // tile_distribution and LDS read descriptor.
 template <typename TC>
-__global__ void capture_lds_offsets_kernel(int* offsets, int kw_slice)
+__global__ void capture_lds_read_offsets_kernel(int* offsets, int kw_slice)
 {
     const int tid = threadIdx.x;
     const int warp_id = tid / 64;
     const int lane_id = tid % 64;
 
-    // Create the MFMA distribution (production code path).
+    // Create the MFMA distribution.
+    // This doesn't contain swizzle.
     constexpr auto dist = TC::Mfma::MakeDistribution();
 
     // Calculate the X-space index for this (warp_id, lane_id).
@@ -58,7 +59,8 @@ __global__ void capture_lds_offsets_kernel(int* offsets, int kw_slice)
     // The MFMA reads at position (q_local + kw_slice, c4_local, c_sub).
     const ck_tile::index_t w_coord = q_local + kw_slice;
 
-    // Create the LDS read descriptor (production code path).
+    // Create the LDS read descriptor.
+    // This contains the swizzle (e.g., cyclic shift) that is applied to the MFMA read addresses.
     constexpr auto lds_desc = TC::Input::MakeLdsReadDescriptor();
 
     // Calculate element offset (in fp16 units), convert to byte offset.
@@ -83,7 +85,7 @@ __global__ void capture_lds_offsets_kernel(int* offsets, int kw_slice)
 int count_bank_conflicts(const std::vector<int>& byte_offsets, int block_size)
 {
     constexpr int WAVE_SIZE = 64;
-    constexpr int NUM_BANKS = 32;
+    constexpr int NUM_BANKS = 64; // gfx950: 64 LDS banks
     int total_conflicts = 0;
 
     const int num_waves = block_size / WAVE_SIZE;
@@ -146,7 +148,7 @@ std::vector<int> run_capture_kernel(int block_size, int kw_slice)
     ck_tile::hip_check_error(
         hipMalloc(&d_offsets, block_size * sizeof(int)));
 
-    capture_lds_offsets_kernel<TC>
+    capture_lds_read_offsets_kernel<TC>
         <<<1, block_size>>>(d_offsets, kw_slice);
     ck_tile::hip_check_error(hipDeviceSynchronize());
 
@@ -403,7 +405,7 @@ TEST_F(LdsBankConflictTest, AllLanesDistinct_16c)
 // ============================================================================
 
 template <int BLOCK_C, int GROUP_SIZE_4>
-__global__ void capture_hip_conv_offsets_kernel(int* offsets, int kw_slice)
+__global__ void capture_hip_conv_lds_read_offsets_kernel(int* offsets, int kw_slice)
 {
     using Sw = ck_tile::direct_conv::SwizzleT<BLOCK_C>;
 
@@ -426,7 +428,7 @@ std::vector<int> run_hip_conv_capture_kernel(int block_size, int kw_slice)
     int* d_offsets = nullptr;
     ck_tile::hip_check_error(hipMalloc(&d_offsets, block_size * sizeof(int)));
 
-    capture_hip_conv_offsets_kernel<BLOCK_C, GROUP_SIZE_4>
+    capture_hip_conv_lds_read_offsets_kernel<BLOCK_C, GROUP_SIZE_4>
         <<<1, block_size>>>(d_offsets, kw_slice);
     ck_tile::hip_check_error(hipDeviceSynchronize());
 
