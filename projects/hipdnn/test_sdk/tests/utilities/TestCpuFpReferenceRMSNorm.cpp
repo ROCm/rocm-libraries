@@ -390,9 +390,9 @@ TEST(TestCpuFpReferenceRMSNorm, RMSNormFwdBiasIsOptional)
 
 TEST(TestCpuFpReferenceRMSNorm, RMSNormFwdRejectsRankMismatch)
 {
-    Tensor<float> inputTensor({2, 3, 4, 4});
+    const Tensor<float> inputTensor({2, 3, 4, 4});
     Tensor<float> outputTensor({2, 3, 4, 4});
-    Tensor<float> scaleTensor({1, 3, 4}); // wrong rank
+    const Tensor<float> scaleTensor({1, 3, 4}); // wrong rank
     EXPECT_THROW(CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5),
                  std::runtime_error);
 }
