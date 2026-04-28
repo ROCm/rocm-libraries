@@ -1410,24 +1410,23 @@ struct tile_window_with_static_distribution
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
 
-                constexpr auto idx_ys_offset = [&]() {
-                    constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
-                    constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
-                        StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
-                        container_concat(array<index_t, Base::NDimP>{0},
-                                         to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
-                    return adapter_ys_offset.get_bottom_index();
-                }();
-
                 const auto ys_offset = [&]() {
                     if constexpr(static_move_ys)
                     {
+                        constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                        constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
+                            StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
+                            container_concat(array<index_t, Base::NDimP>{0},
+                                             to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
                         const auto coord_ys_offset = make_tensor_coordinate(
-                            this->get_bottom_tensor_view().get_tensor_descriptor(), idx_ys_offset);
+                            this->get_bottom_tensor_view().get_tensor_descriptor(),
+                            adapter_ys_offset.get_bottom_index());
                         return coord_ys_offset.get_offset();
                     }
                     else
+                    {
                         return 0;
+                    }
                 }();
 
                 // read from bottom tensor

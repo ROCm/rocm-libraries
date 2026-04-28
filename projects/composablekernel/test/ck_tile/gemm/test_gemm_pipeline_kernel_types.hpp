@@ -157,18 +157,22 @@ using KernelTypesCompV3Async = ::testing::Types<
     std::tuple<    Row,     Row,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Row,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Row,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Col,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Row,     Col,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Col,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Row,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Row,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Row,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Row,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Col,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
     std::tuple<    Col,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
-    std::tuple<    Col,     Col,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
+    std::tuple<    Col,     Col,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Col,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
 >;
 
 #ifdef CK_USE_GFX1250

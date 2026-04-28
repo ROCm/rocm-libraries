@@ -485,13 +485,13 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
             // A DRAM tile window for load
             // A LDS tile window for store
             // A LDS tile for block GEMM
-            auto&& [a_tile_windows, a_copy_lds_window, a_lds_ld_window] =
+            auto&& [a_tile_windows, a_copy_lds_window, a_lds_gemm_window] =
                 Base::GetAWindows(a_dram_block_window_tmp, a_lds_block, a_lds_load_tile_distr);
 
             // B DRAM tile window for load
             // B LDS tile window for store
             // B LDS tile for block GEMM
-            auto&& [b_tile_windows, b_copy_lds_window, b_lds_ld_window] =
+            auto&& [b_tile_windows, b_copy_lds_window, b_lds_gemm_window] =
                 Base::GetBWindows(b_dram_block_window_tmp, b_lds_block, b_lds_load_tile_distr);
 
             // Block GEMM
@@ -666,7 +666,7 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
             }
 
             block_gemm.LocalPrefetch(
-                a_lds_ld_window, b_lds_ld_window, is_a_load_tr_v, is_b_load_tr_v);
+                a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
 
             sync_after_local_prefetch();
 
@@ -692,10 +692,6 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                 index_t i = 0;
                 do
                 {
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile(";; HotLoop Start ;;");
-                    __builtin_amdgcn_sched_barrier(0);
-
                     local_prefill(true_type{});
 
                     global_prefetch(a_copy_lds_window,
@@ -711,7 +707,7 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                                     b_global_tile,
                                     number<PrefillBefore>{});
 
-                    block_gemm(c_block_tile, a_lds_ld_window, b_lds_ld_window);
+                    block_gemm(c_block_tile, a_lds_gemm_window, b_lds_gemm_window);
 
                     if constexpr(Problem::Async)
                     {
@@ -723,7 +719,7 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                     }
 
                     block_gemm.LocalPrefetch(
-                        a_lds_ld_window, b_lds_ld_window, is_a_load_tr_v, is_b_load_tr_v);
+                        a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
 
                     sync_after_local_prefetch();
 
@@ -743,9 +739,6 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                     HotLoopScheduler();
 
                     i += 1;
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile(";; HotLoop End ;;");
-                    __builtin_amdgcn_sched_barrier(0);
                 } while(i < (num_loop - 1));
             }
 
@@ -754,11 +747,11 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
             {
                 // Leak last MFMA block to epilogue region, cover the potential lds-shuffle
                 // latency
-                block_gemm(c_block_tile, a_lds_ld_window, b_lds_ld_window);
+                block_gemm(c_block_tile, a_lds_gemm_window, b_lds_gemm_window);
             }
             else
             {
-                block_gemm(c_block_tile, a_lds_ld_window, b_lds_ld_window);
+                block_gemm(c_block_tile, a_lds_gemm_window, b_lds_gemm_window);
 
                 local_prefill(true_type{});
 
@@ -772,9 +765,9 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                 }
 
                 block_gemm.LocalPrefetch(
-                    a_lds_ld_window, b_lds_ld_window, is_a_load_tr_v, is_b_load_tr_v);
+                    a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
 
-                block_gemm(c_block_tile, a_lds_ld_window, b_lds_ld_window);
+                block_gemm(c_block_tile, a_lds_gemm_window, b_lds_gemm_window);
             }
             return c_block_tile;
         }
@@ -798,7 +791,7 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                       (AsDramBlockWindowTmp::size() == 1 && BsDramBlockWindowTmp::size() == 1 &&
                        std::is_same_v<AElementFunction, element_wise::PassThrough> &&
                        std::is_same_v<BElementFunction, element_wise::PassThrough> &&
-                       std::is_same_v<ADataType, BDataType>));
+                       sizeof(ADataType) == sizeof(BDataType) && APackedSize == BPackedSize));
 
         const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
         const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
@@ -836,7 +829,7 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
     {
         static_assert(!Problem::Async ||
                       (AsDramBlockWindowTmp::size() == 1 && BsDramBlockWindowTmp::size() == 1 &&
-                       std::is_same_v<ADataType, BDataType>));
+                       sizeof(ADataType) == sizeof(BDataType) && APackedSize == BPackedSize));
 
         const auto RunPipeline = [&](auto hot_loop_, auto tail_num_) {
             constexpr bool hot_loop    = hot_loop_.value;

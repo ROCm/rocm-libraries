@@ -25,14 +25,15 @@ struct GemmPipelineAgBgCrDefaultPolicy
 
     // The swizzle factor is defined base on the number of contiguous lanes
     // in the instruction.
-    template <typename DataType, typename WarpTile, bool IsTranspose>
-    static constexpr auto get_swizzle_factor = [](auto kpack) {
+    template <typename DataType, typename WarpTile, bool IsTranspose, index_t KPack>
+    CK_TILE_DEVICE static constexpr auto get_swizzle_factor(number<KPack>)
+    {
         constexpr index_t WarpTileK = WarpTile::at(I2);
         constexpr bool is_8bit_float =
             std::is_same_v<DataType, fp8_t> || std::is_same_v<DataType, bf8_t>;
         constexpr index_t NumAccess = is_8bit_float ? 2 : 1;
 
-        return IsTranspose ? 2 * sizeof(DataType) : WarpTileK / kpack / NumAccess;
+        return IsTranspose ? 2 * sizeof(DataType) : WarpTileK / KPack / NumAccess;
     };
 
     template <index_t YPerBlock,
@@ -40,15 +41,15 @@ struct GemmPipelineAgBgCrDefaultPolicy
               typename WarpTile,
               typename WindowTmp,
               bool IsTranspose>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeDramTensorView(const WindowTmp& window_tmp,
-                                                                 bool_constant<IsTranspose>)
+    CK_TILE_DEVICE static constexpr auto MakeDramTensorView(const WindowTmp& window_tmp,
+                                                            bool_constant<IsTranspose>)
     {
         constexpr index_t PackedSize = numeric_traits<DataType>::PackedSize;
 
         constexpr auto ndims = std::decay_t<decltype(window_tmp)>::get_num_of_dimension();
         static_assert(ndims == 2, "only support 2D tensor");
-        auto&& tensor_view_tmp = window_tmp.get_bottom_tensor_view();
-        const auto [Xs, Ys]    = tensor_view_tmp.get_tensor_descriptor().get_lengths();
+        auto&& tensor_view  = window_tmp.get_bottom_tensor_view();
+        const auto [Xs, Ys] = tensor_view.get_tensor_descriptor().get_lengths();
 
         constexpr index_t ContiguousElementsCacheLine =
             (kDramLoadPackBytes / sizeof(DataType) * PackedSize);
@@ -61,11 +62,11 @@ struct GemmPipelineAgBgCrDefaultPolicy
         const index_t Y0     = integer_divide_ceil(Ys, Y1 * Y2);
         const auto Y_lens    = make_tuple(Y0, number<Y1>{}, number<Y2>{});
 
-        constexpr index_t X1 = get_swizzle_factor<DataType, WarpTile, IsTranspose>(KPack);
+        constexpr index_t X1 = get_swizzle_factor<DataType, WarpTile, IsTranspose>(number<KPack>{});
         const index_t X0     = integer_divide_ceil(Xs, X1);
         const auto X_lens    = make_tuple(X0, number<X1>{});
 
-        const auto& desc_0 = tensor_view_tmp.get_tensor_descriptor();
+        const auto& desc_0 = tensor_view.get_tensor_descriptor();
 
         const auto desc_1 = transform_tensor_descriptor(
             desc_0,
@@ -89,12 +90,12 @@ struct GemmPipelineAgBgCrDefaultPolicy
                                         make_tuple(sequence<0, 1>{}, sequence<2, 3, 4>{}),
                                         make_tuple(sequence<0>{}, sequence<1>{}));
 
-        auto&& byte_ptr = &(tensor_view_tmp.get_buffer_view()(0));
+        auto&& byte_ptr = &(tensor_view.get_buffer_view()(0));
         return make_tensor_view<address_space_enum::global>(byte_ptr, desc);
     }
 
     template <typename Problem, typename WindowTmp>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeADramTensorView(const WindowTmp& window_tmp)
+    CK_TILE_DEVICE static constexpr auto MakeADramTensorView(const WindowTmp& window_tmp)
     {
         if constexpr(Problem::Async)
         {
@@ -114,7 +115,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
     }
 
     template <typename Problem, typename WindowTmp>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBDramTensorView(const WindowTmp& window_tmp)
+    CK_TILE_DEVICE static constexpr auto MakeBDramTensorView(const WindowTmp& window_tmp)
     {
         if constexpr(Problem::Async)
         {
@@ -138,7 +139,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
               index_t KPerBlock,
               index_t BlockSize,
               bool IsTranspose>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeDramTileDistribution(bool_constant<IsTranspose>)
+    CK_TILE_DEVICE static constexpr auto MakeDramTileDistribution(bool_constant<IsTranspose>)
     {
         constexpr index_t WaveSize   = get_warp_size();
         constexpr index_t PackedSize = numeric_traits<DataType>::PackedSize;
@@ -168,7 +169,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeADramTileDistribution()
+    CK_TILE_DEVICE static constexpr auto MakeADramTileDistribution()
     {
         if constexpr(Problem::Async)
         {
@@ -188,7 +189,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBDramTileDistribution()
+    CK_TILE_DEVICE static constexpr auto MakeBDramTileDistribution()
     {
         if constexpr(Problem::Async)
         {
@@ -212,7 +213,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
               typename DataType,
               typename WarpTile,
               bool IsTranspose>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsBlockDescriptor(bool_constant<IsTranspose>)
+    CK_TILE_DEVICE static constexpr auto MakeLdsBlockDescriptor(bool_constant<IsTranspose>)
     {
         constexpr index_t XPerBlock = IsTranspose ? KPerBlock : MNPerBlock;
         constexpr index_t YPerBlock = IsTranspose ? MNPerBlock : KPerBlock;
@@ -233,11 +234,16 @@ struct GemmPipelineAgBgCrDefaultPolicy
 
         constexpr index_t WaveSize = get_warp_size();
 
-        constexpr index_t X3 = get_swizzle_factor<DataType, WarpTile, IsTranspose>(KPack);
+        constexpr index_t X3 = get_swizzle_factor<DataType, WarpTile, IsTranspose>(number<KPack>{});
         constexpr index_t X2 = WaveSize / Y1 / X3;
         constexpr index_t X1 = XPerXdl / (X2 * X3);
         constexpr index_t X0 = XPerBlock / (X1 * X2 * X3);
         static_assert(X0 * X1 * X2 * X3 == XPerBlock, "X0, X1, X2, X3 must cover whole XPerBlock!");
+
+        // We pad the tensor layout to fix bank conflicts only within
+        // NumContiguousElements x MNPerXdl tile to minimize padding needed.
+        // X0 and Y0 define the number of such tiles in both dimensions, so the stride for those
+        // dimensions take into account only the padding within the above defined tile
 
         constexpr index_t Pad = X3 * Y2;
 
@@ -294,7 +300,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
 
     template <typename Problem,
               typename OverrideADataType = remove_cvref_t<typename Problem::ADataType>>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeALdsBlockDescriptor()
+    CK_TILE_DEVICE static constexpr auto MakeALdsBlockDescriptor()
     {
         if constexpr(Problem::Async)
         {
@@ -313,7 +319,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
+    CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
         if constexpr(Problem::Async)
         {
@@ -332,7 +338,7 @@ struct GemmPipelineAgBgCrDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
+    CK_TILE_DEVICE static constexpr auto GetBlockGemm()
     {
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
