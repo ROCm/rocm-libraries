@@ -536,6 +536,9 @@ class KernelWriterAssembly(KernelWriter):
     return RegSet("s", "sgpr"+name, self.sgprs[name])
 
   def undefineSgpr(self, name):
+    if name not in self.sgprs:
+      # TODO: Remove guard after full TileInfo migration
+      return ValueSet(name="sgpr"+name, value="UNDEF", format = -1)
     self.sgprPool.checkIn(self.sgprs[name])
     # undefine a sgpr string twice will cause compiler error.
     # User must not add the UNDEF code module except it is the last one.
@@ -7543,8 +7546,8 @@ class KernelWriterAssembly(KernelWriter):
         # can emit correct moves instead of referencing "ValuC+N" (which points
         # to the wrong location in the subtile allocation scheme).
         for vtile in self.states.d.tileInfo.vgprTiles:
-          if vtile.regList.regPool == self.vgprPool:
-            spilledVgprBase = vtile.regList.regValues[0]
+          if vtile.regList.is_vgpr:
+            spilledVgprBase = vtile.regList.indices[0]
             break
       self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False, spilledVgprBase=spilledVgprBase)
       if (kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0) or \

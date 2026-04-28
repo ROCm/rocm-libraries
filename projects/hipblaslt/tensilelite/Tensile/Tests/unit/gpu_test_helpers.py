@@ -40,7 +40,7 @@ from rocisa.container import vgpr, sgpr
 from rocisa.instruction import SLoadB32, SLoadB64, SLoadB128, SWaitCnt, VLShiftLeftB32, VMovB32
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
-from Tensile.Components.SubtileBasedKernel import TileInfo
+from Tensile.Components.Subtile.SubtileBasedKernel import TileInfo, AB_B16
 
 # ---- Constants ----
 GFX_TARGET = "gfx950"
@@ -161,8 +161,8 @@ def create_writer(cfg, mi_wave_group=None):
     # Build kernel and TileInfo
     kernel = _create_kernel(cfg, mi_wave_group=mi_wave_group)
 
-    tileInfoA = TileInfo('A', kernel)
-    tileInfoB = TileInfo('B', kernel)
+    tileInfoA = TileInfo(AB_B16, 'A', writer, kernel)
+    tileInfoB = TileInfo(AB_B16, 'B', writer, kernel)
 
     writer.agprPool = RegisterPool(0, RegisterType.Accvgpr,
                                     defaultPreventOverflow=False, printRP=False)
