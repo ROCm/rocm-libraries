@@ -1636,9 +1636,9 @@ The following test situations require additional consideration:
 
       ROCBLAS_CLIENT_RAM_GB_LIMIT=32 ./rocblas-test --gtest_filter=*stress*
 
-   If you have the ``rocblas-test`` process getting killed due to an out of memory (OOM) condition, then reduce the client limit by half
-   and try again.  It is not advised to run stress tests at all if you have less than 8 GB VRAM available to your graphics device.
-   Use the test subtraction syntax if combining with other filters, ``-*stress*``.
+   If the ``rocblas-test`` process is being killed due to an out of memory (OOM) condition, then reduce the client limit by half
+   and try again.  It is not advisable to run any stress tests if you have less than 8 GB VRAM available to your graphics device.
+   Use the test subtraction syntax if combining with other filters, for example, ``-*stress*``.
 
 *  Long-running tests
 
