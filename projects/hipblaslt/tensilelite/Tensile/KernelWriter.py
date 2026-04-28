@@ -3481,9 +3481,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     skip2ndWaitForDtl = kernel["DirectToLds%s"%tc1] or kernel["UseCustomMainLoopSchedule"]
     self.codes.dtlsM0UpdateB = self.directToLdsM0Update(kernel, 1, tensorParameters2nd, skip2ndWaitForDtl)
 
-    # swap Tensor memToken
-    self.states.ldsTensorTokenIdx = \
-        self.states.memTokenLdsBuffer1 if self.states.ldsTensorTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+    if kernel["PrefetchGlobalRead"] > 1:
+      # swap Tensor memToken before doing global read
+      self.states.ldsTensorTokenIdx = \
+          self.states.memTokenLdsBuffer1 if self.states.ldsTensorTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
 
     g2lBufIdx1st = 0
     if grBA==True or (kernel["DirectToVgpr%s"%tc1] and isDTVGRSecondBuf):
@@ -3512,6 +3513,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # use second buffer
       g2lBufIdx2nd = 1
     self.codes.globalReadB = self.globalReadDo(kernel, 1, tensorParameters2nd, unrollLoopIdx=lc, g2lBufIdx=g2lBufIdx2nd)
+
+    if kernel["PrefetchGlobalRead"] <= 1:
+      # swap Tensor memToken after doing global read
+      self.states.ldsTensorTokenIdx = \
+          self.states.memTokenLdsBuffer1 if self.states.ldsTensorTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
 
     # unrolled loop: increment global read addresses
     self.codes.globalReadIncrements = self.globalReadIncrementAB(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, 0)
