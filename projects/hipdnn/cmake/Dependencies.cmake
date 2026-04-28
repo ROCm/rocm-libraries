@@ -39,8 +39,10 @@ function(hipdnn_add_dependency dep_name)
         else()
             message(
                 STATUS
-                    "Found ${dep_name}: ${${dep_name}_DIR} (found version \"${${dependency_name}_VERSION}\")"
+                    "Found ${dep_name}: ${${dep_name}_DIR} (found version \"${${dep_name}_VERSION}\")"
             )
+            set(${dep_name}_FOUND ${${dep_name}_FOUND} PARENT_SCOPE)
+            set(${dep_name}_VERSION "${${dep_name}_VERSION}" PARENT_SCOPE)
             foreach(VAR IN LISTS ${dep_name}_EXPORT_VARS)
                 set(${VAR} ${${VAR}} PARENT_SCOPE)
             endforeach()

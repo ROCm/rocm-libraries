@@ -18,9 +18,8 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_flatbuffers_sdkTargets.cmake")
 
-# In the local build, FlatBuffers is bundled (no find_dependency call above), so
-# flatbuffers_VERSION isn't populated by CMake. Pin it from the version hipDNN
-# was built against for the status message below.
-set(flatbuffers_VERSION "@HIPDNN_FLATBUFFERS_VERSION@")
-
-message(STATUS "hipDNN Flatbuffers SDK: Using local FlatBuffers ${flatbuffers_VERSION} headers")
+# In the local build FlatBuffers headers are bundled with the install, so
+# CMake doesn't populate flatbuffers_VERSION via find_dependency. The bundled
+# headers are guaranteed to match HIPDNN_FLATBUFFERS_VERSION (enforced at
+# hipDNN configure time), so just surface that version in the status message.
+message(STATUS "hipDNN Flatbuffers SDK: Using local FlatBuffers @HIPDNN_FLATBUFFERS_VERSION@ headers")

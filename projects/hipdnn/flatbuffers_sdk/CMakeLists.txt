@@ -16,7 +16,38 @@ set(HIP_DNN_FLATBUFFERS_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/flatbuffers_sdk")
 
 # --- FlatBuffers dependency ---
+# HIPDNN_FLATBUFFERS_VERSION (set in projects/hipdnn/CMakeLists.txt) is the
+# single source of truth. hipdnn_add_dependency uses it as the minimum for
+# find_package and as the exact tag for FetchContent. After resolution, fail
+# fast if a system-installed FlatBuffers satisfied the loose minimum but does
+# not match exactly — the generated headers and runtime are version-locked,
+# so a mismatch surfaces later as an opaque static_assert or link error.
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
+
+if(DEFINED flatbuffers_VERSION)
+    if(NOT flatbuffers_VERSION VERSION_EQUAL HIPDNN_FLATBUFFERS_VERSION)
+        message(FATAL_ERROR
+            "FlatBuffers version mismatch: hipDNN requires "
+            "${HIPDNN_FLATBUFFERS_VERSION} but found ${flatbuffers_VERSION} "
+            "(via ${flatbuffers_DIR}). Point flatbuffers_DIR at the matching "
+            "package, uninstall the system FlatBuffers so hipDNN can fetch the "
+            "correct version, or update HIPDNN_FLATBUFFERS_VERSION to match."
+        )
+    endif()
+elseif(flatbuffers_FOUND)
+    # find_package succeeded but the config didn't populate flatbuffers_VERSION
+    # (some vendored or repackaged distributions skip it). Warn rather than
+    # fail-close — a real ABI mismatch would still surface as a static_assert
+    # in the FlatBuffers headers later — but flag it so users can investigate.
+    message(WARNING
+        "Could not validate FlatBuffers version: find_package(flatbuffers) "
+        "succeeded but did not set flatbuffers_VERSION. hipDNN expects "
+        "${HIPDNN_FLATBUFFERS_VERSION}; if the bundled package is a different "
+        "version this will fail later at compile time."
+    )
+endif()
+# If flatbuffers_FOUND is also unset, FetchContent built FlatBuffers from the
+# git tag pinned to HIPDNN_FLATBUFFERS_VERSION — no validation needed.
 
 # Per-library JSON gate. Defaults from the umbrella HIPDNN_SKIP_JSON_LIB when
 # building as part of the top-level project; can be set independently when
@@ -45,7 +76,7 @@ set(_hipdnn_flatbuffers_sdk_local_export_includes)
 # INCLUDE_DIR - Optional parent include directory to bundle with the install
 function(_hipdnn_flatbuffers_sdk_process_dependency TARGET_NAME ALIAS_NAME)
     set(options "")
-    set(oneValueArgs INCLUDE_SUBDIR INCLUDE_DIR)
+    set(oneValueArgs INCLUDE_DIR)
     set(multiValueArgs "")
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -83,7 +114,6 @@ if(TARGET FlatBuffers)
     endif()
     _hipdnn_flatbuffers_sdk_process_dependency(
         FlatBuffers flatbuffers::flatbuffers INCLUDE_DIR ${HIP_DNN_FLATBUFFERS_INCLUDE_DIR}
-        INCLUDE_SUBDIR flatbuffers
     )
 endif()
 

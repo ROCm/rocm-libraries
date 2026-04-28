@@ -5,9 +5,31 @@ import sys
 import subprocess
 import shutil
 import os
+import re
 
-# Needs to subscribe to HIPDNN_FLATBUFFERS_VERSION CMake variable
-REQUIRED_VER = "25.9.23"
+
+def _read_required_version():
+    """Read HIPDNN_FLATBUFFERS_VERSION from projects/hipdnn/CMakeLists.txt
+    so the script stays in sync with the single source of truth.
+    """
+    cmake_file = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "CMakeLists.txt"
+    )
+    pattern = re.compile(
+        r'set\s*\(\s*HIPDNN_FLATBUFFERS_VERSION\s+"([^"]+)"', re.IGNORECASE
+    )
+    with open(cmake_file, encoding="utf-8") as f:
+        for line in f:
+            match = pattern.search(line)
+            if match:
+                return match.group(1)
+    raise RuntimeError(
+        f"Could not find HIPDNN_FLATBUFFERS_VERSION in {cmake_file}. "
+        "Update run_flatc.py if the cache variable was renamed or moved."
+    )
+
+
+REQUIRED_VER = _read_required_version()
 
 # Supported SDKs and their namespace paths for generated output
 SDKS = {
