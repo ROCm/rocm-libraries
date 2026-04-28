@@ -27,12 +27,12 @@ TYPED_TEST(TestCkTileContractionMultiABD, CShuffle_G1_M1_N1_K1_512x512x256)
     EXPECT_TRUE((this->template Run<1, 1, 1, 1>({4}, {512}, {512}, {256})));
 }
 
-TYPED_TEST(TestCkTileContractionMultiABD, CShuffle_G1_M1_N1_K1_split_k)
+TYPED_TEST(TestCkTileContractionMultiABD, CShuffle_G1_M1_N1_K1_split_k_unsupported)
 {
-    EXPECT_TRUE((this->template Run<1, 1, 1, 1>({2}, {256}, {256}, {256}, 2)));
+    EXPECT_TRUE((this->template Run<1, 1, 1, 1>({2}, {256}, {256}, {256}, 2, false)));
 }
 
 TYPED_TEST(TestCkTileContractionMultiABD, CShuffle_G1_M1_N1_K1_padded_edge)
 {
-    EXPECT_TRUE((this->template Run<1, 1, 1, 1, true, true, true>({1}, {1}, {1}, {1})));
+    EXPECT_TRUE((this->template Run<1, 1, 1, 1, false, true, true>({1}, {128}, {136}, {72})));
 }

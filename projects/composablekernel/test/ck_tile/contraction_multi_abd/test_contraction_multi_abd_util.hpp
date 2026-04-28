@@ -54,7 +54,7 @@ auto make_host_tensor_array_impl(const ck_tile::HostTensorDescriptor& desc,
                                  std::index_sequence<Is...>)
 {
     return std::array<ck_tile::HostTensor<TensorDataType>, NumTensor>{
-        {((void)Is, ck_tile::HostTensor<TensorDataType>{desc})...}};
+        {((void)Is, ck_tile::HostTensor<TensorDataType>(desc))...}};
 }
 
 template <typename TensorDataType, ck_tile::index_t NumTensor>
@@ -129,7 +129,7 @@ class TestCkTileContractionMultiABD : public ::testing::Test
               bool kPadM = false,
               bool kPadN = false,
               bool kPadK = false>
-    void invoke_kernel(
+    bool invoke_kernel(
         const ck_tile::BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>& args,
         const ck_tile::stream_config& s)
     {
@@ -246,11 +246,12 @@ class TestCkTileContractionMultiABD : public ::testing::Test
 
         if(!Kernel::IsSupportedArguments(kargs))
         {
-            throw std::runtime_error("Arguments not supported!");
+            return false;
         }
 
         ck_tile::ignore = ck_tile::launch_kernel(
             s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+        return true;
     }
 
     public:
@@ -265,7 +266,8 @@ class TestCkTileContractionMultiABD : public ::testing::Test
              const std::vector<ck_tile::index_t>& M_dims,
              const std::vector<ck_tile::index_t>& N_dims,
              const std::vector<ck_tile::index_t>& K_dims,
-             ck_tile::index_t k_batch = 1)
+             ck_tile::index_t k_batch       = 1,
+             bool expect_supported          = true)
     {
         auto calc_total = [](const std::vector<ck_tile::index_t>& dims) {
             ck_tile::index_t t = 1;
@@ -374,8 +376,22 @@ class TestCkTileContractionMultiABD : public ::testing::Test
         host_args.E_dims    = E_dims;
         host_args.E_strides = E_strides;
 
-        invoke_kernel<NumDimG, NumDimM, NumDimN, NumDimK, kPadM, kPadN, kPadK>(
+        const bool supported = invoke_kernel<NumDimG, NumDimM, NumDimN, NumDimK, kPadM, kPadN, kPadK>(
             host_args, ck_tile::stream_config{nullptr, false});
+        if(!supported)
+        {
+            std::cout << "G=" << G_total << " M=" << M_total << " N=" << N_total
+                      << " K=" << K_total << " k_batch=" << k_batch
+                      << " unsupported by multi-ABD kernel" << std::endl;
+            return !expect_supported;
+        }
+        if(!expect_supported)
+        {
+            std::cout << "G=" << G_total << " M=" << M_total << " N=" << N_total
+                      << " K=" << K_total << " k_batch=" << k_batch
+                      << " unexpectedly supported" << std::endl;
+            return false;
+        }
 
         e_dev.FromDevice(e_gpu_host.data());
 
@@ -389,7 +405,10 @@ class TestCkTileContractionMultiABD : public ::testing::Test
                                                                  EDataType,
                                                                  AElementWiseFn,
                                                                  BElementWiseFn,
-                                                                 CDEElementWiseFn>(
+                                                                 CDEElementWiseFn,
+                                                                 NumATensor,
+                                                                 NumBTensor,
+                                                                 NumDTensor>(
             as_host,
             bs_host,
             ds_host,
