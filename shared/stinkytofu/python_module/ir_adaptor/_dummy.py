@@ -35,7 +35,13 @@ def make_dummy_class(full_name: str) -> Type[Any]:
 
     short = full_name.rsplit(".", 1)[-1]
 
-    class _DummyInstance:
+    class _DummyMeta(type):
+        def __getattr__(cls, name: str) -> Any:
+            def _classlevel_noop(*args: Any, **kwargs: Any) -> None:
+                return 1
+            return _classlevel_noop
+
+    class _DummyInstance(metaclass=_DummyMeta):
         __slots__ = ("_full_name",)
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
