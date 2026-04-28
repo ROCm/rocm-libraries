@@ -149,6 +149,12 @@ class GroupedConvKernelConfig:
     pad_n: bool = True
     pad_k: bool = True
 
+    # Additional trait config options
+    double_smem_buffer: bool = False
+    split_image: bool = False
+    explicit_gemm: bool = False
+    two_stage: bool = False
+
     def __post_init__(self):
         self.variant = _resolve_variant(self.variant)
         if (
@@ -175,10 +181,21 @@ class GroupedConvKernelConfig:
 
     @property
     def name(self) -> str:
-        return (
-            f"grouped_conv_{self.variant}_{self.dtype}_{self.ndim_spatial}d_"
-            f"{self.tile_str}_{self.pipeline}"
-        )
+        parts = [
+            f"grouped_conv_{self.variant}_{self.dtype}_{self.ndim_spatial}d",
+            self.tile_str,
+            self.pipeline,
+            self.scheduler,  # NEW: Include scheduler
+        ]
+        if self.num_groups_to_merge != 1:
+            parts.append(f"gm{self.num_groups_to_merge}")  # NEW: Group merge
+        if self.double_smem_buffer:
+            parts.append("dsb")  # NEW: Double SMEM buffer
+        if self.split_image:
+            parts.append("si")  # NEW: Split image
+        if self.two_stage:
+            parts.append("2stage")  # NEW: Two-stage
+        return "_".join(parts)
 
     def to_dict(self) -> dict:
         """Convert to legacy dict format for codegen compatibility."""
@@ -207,6 +224,10 @@ class GroupedConvKernelConfig:
                 "block_per_cu": [self.block_per_cu],
                 "num_wave_groups": [self.num_wave_groups],
                 "num_groups_to_merge": [self.num_groups_to_merge],
+                "double_smem_buffer": [self.double_smem_buffer],
+                "split_image": [self.split_image],
+                "explicit_gemm": [self.explicit_gemm],
+                "two_stage": [self.two_stage],
             },
             "variant": self.variant,
             "ndim_spatial": self.ndim_spatial,
@@ -1235,11 +1256,13 @@ def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
     try:
         res_c = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=300)
         if res_c.returncode != 0:
-            return False, None, f"Compile failed: {res_c.stderr[:400]}"
+            err = (res_c.stderr or res_c.stdout or "").rstrip()
+            return False, None, f"Compile failed (rc={res_c.returncode}):\n{err}"
 
         res_l = subprocess.run(link_cmd, capture_output=True, text=True, timeout=300)
         if res_l.returncode != 0:
-            return False, None, f"Link failed: {res_l.stderr[:400]}"
+            err = (res_l.stderr or res_l.stdout or "").rstrip()
+            return False, None, f"Link failed (rc={res_l.returncode}):\n{err}"
 
         return True, lib_path, ""
     except subprocess.TimeoutExpired:
@@ -1265,8 +1288,8 @@ def _run_conv_codegen_subprocess(args: dict) -> Tuple[bool, Optional[str], str]:
     try:
         res = subprocess.run(args["cmd"], capture_output=True, text=True, timeout=300)
         if res.returncode != 0:
-            err = (res.stderr or res.stdout or "").strip()[:500]
-            return False, None, f"Codegen failed: {err}"
+            err = (res.stderr or res.stdout or "").rstrip()
+            return False, None, f"Codegen failed (rc={res.returncode}):\n{err}"
 
         generated = sorted(
             out_dir.glob("grouped_conv_*.hpp"),
@@ -1302,6 +1325,10 @@ def _config_key(c: GroupedConvKernelConfig) -> Tuple[Any, ...]:
         c.pipeline,
         c.epilogue,
         c.scheduler,
+        c.num_groups_to_merge,
+        c.double_smem_buffer,
+        c.split_image,
+        c.two_stage,
     )
 
 
@@ -1572,7 +1599,15 @@ class GroupedConvCodegenRunner:
                 c.scheduler,
                 "--epilogue",
                 c.epilogue,
+                "--num-groups-to-merge",
+                str(c.num_groups_to_merge),
+                "--double-smem-buffer",
+                "true" if c.double_smem_buffer else "false",
             ]
+            if c.split_image:
+                cmd.append("--split-image")
+            if c.two_stage:
+                cmd.append("--two-stage")
             gen_jobs.append({"cmd": cmd, "output_dir": str(cfg_dir)})
 
         generated_headers: List[Optional[Path]] = [None] * len(configs)
@@ -1605,9 +1640,20 @@ class GroupedConvCodegenRunner:
             dispatch_header = cfg_dir / "conv_python_dispatch.hpp"
             _write_single_conv_dispatch_header(c, hdr_path, dispatch_header)
 
+            # Build suffix with all distinguishing config options
+            suffix = ""
+            if c.num_groups_to_merge != 1:
+                suffix += f"_gm{c.num_groups_to_merge}"
+            if c.double_smem_buffer:
+                suffix += "_dsb"
+            if c.split_image:
+                suffix += "_si"
+            if c.two_stage:
+                suffix += "_2stage"
+
             lib_name = (
                 f"libdispatcher_conv_{c.variant}_{c.ndim_spatial}d_{c.dtype}_"
-                f"{c.tile_str}_{c.wave_str}_{c.warp_str}_{c.pipeline}_{c.scheduler}.so"
+                f"{c.tile_str}_{c.wave_str}_{c.warp_str}_{c.pipeline}_{c.scheduler}{suffix}.so"
             )
             lib_path = self.build_dir / "examples" / lib_name
             obj_file = lib_path.with_suffix(".o")
@@ -1667,13 +1713,19 @@ class GroupedConvCodegenRunner:
             if success and lib_path:
                 results_map[idx] = Path(lib_path)
             if verbose:
-                status = "OK" if success else f"FAIL ({err})"
                 name = (
                     Path(lib_path).name
                     if success and lib_path
                     else compile_jobs[j]["config_name"]
                 )
-                print(f"  {status} {name}")
+                if success:
+                    print(f"  OK {name}")
+                else:
+                    # Print the full multi-line error indented for readability
+                    # so users don't have to monkey-patch to see real compile output.
+                    print(f"  FAIL {name}")
+                    for line in (err or "").splitlines() or [""]:
+                        print(f"    {line}")
 
         return [results_map.get(i) for i in range(len(configs))]
 
@@ -1759,11 +1811,13 @@ def setup_multiple_grouped_conv_dispatchers(
     This mirrors FMHA design: keep GPU context out of JIT phase entirely.
 
     Architecture filtering workflow:
-      1. Validate + auto-correct each requested config
-      2. Query codegen's arch-valid config set for each (arch, dtype, variant, ndim)
-      3. Map each request to nearest valid config
-      4. Serial codegen + serial compile (avoids fork/GPU context issues)
-      5. Return paths (NOT loaded libraries)
+      1. Validate each requested config via validate_grouped_conv_config; if invalid,
+         attempt auto_correct_grouped_conv_config. Drop configs that remain invalid.
+      2. Trust the (possibly auto-corrected) config as-is. Knobs such as scheduler,
+         num_groups_to_merge, double_smem_buffer, split_image, two_stage are preserved
+         exactly as requested -- no remap to a hardcoded "default" set.
+      3. Serial codegen + serial compile (avoids fork/GPU context issues).
+      4. Return paths (NOT loaded libraries).
 
     Note: max_workers parameter is accepted for API compatibility but codegen/compile
     runs serially to avoid ProcessPoolExecutor + GPU fork() issues.
@@ -1773,13 +1827,6 @@ def setup_multiple_grouped_conv_dispatchers(
     """
     if not configs:
         return []
-
-    codegen_script = (
-        Path(__file__).parent.parent / "codegen" / "unified_grouped_conv_codegen.py"
-    )
-    arch_valid_cache: Dict[
-        Tuple[str, str, str, int], List[GroupedConvKernelConfig]
-    ] = {}
 
     selected_configs: List[Optional[GroupedConvKernelConfig]] = []
     for i, original in enumerate(configs):
@@ -1816,34 +1863,10 @@ def setup_multiple_grouped_conv_dispatchers(
             c.scheduler = str(_first(trait_cfg.get("scheduler", c.scheduler)))
             c.epilogue = str(_first(trait_cfg.get("epilogue", c.epilogue)))
 
-        cache_key = (c.arch, c.dtype, c.variant, c.ndim_spatial)
-        if cache_key not in arch_valid_cache:
-            arch_valid_cache[cache_key] = _list_arch_valid_grouped_conv_configs(
-                codegen_script=codegen_script,
-                arch=c.arch,
-                dtype=c.dtype,
-                variant=c.variant,
-                ndim_spatial=c.ndim_spatial,
-            )
-            if verbose and not arch_valid_cache[cache_key]:
-                print(
-                    f"  FAIL [{i}] no arch-valid configs listed for "
-                    f"{c.arch}/{c.dtype}/{c.variant}/{c.ndim_spatial}d"
-                )
-
-        candidates = arch_valid_cache[cache_key]
-        if not candidates:
-            selected_configs.append(None)
-            continue
-
-        selected = _select_best_arch_valid_conv_config(c, candidates)
-        if verbose and _config_key(selected) != _config_key(c):
-            print(
-                f"  INFO [{i}] mapped to arch-valid config: "
-                f"{selected.tile_str} {selected.wave_str} {selected.warp_str} "
-                f"{selected.pipeline}/{selected.scheduler}/{selected.epilogue}"
-            )
-        selected_configs.append(selected)
+        # Trust the validated config -- no remap to a hardcoded arch-valid set.
+        # Knobs (num_groups_to_merge, double_smem_buffer, split_image, two_stage)
+        # and scheduler choice are preserved exactly as requested.
+        selected_configs.append(c)
 
     unique_configs: List[GroupedConvKernelConfig] = []
     unique_index_by_key: Dict[Tuple[Any, ...], int] = {}

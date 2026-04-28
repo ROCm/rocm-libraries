@@ -514,6 +514,21 @@ struct {kernel_name}_Config {{
         # Create valid C++ namespace name
         ns_name = "ns_" + kernel_name.replace("-", "_")
 
+        # basic_v1 / basic_async_v1 inherit BaseGemmPipelineAGmemBGmemCRegV1
+        # whose TailHandler takes (run_func, has_hot_loop) and invokes
+        # run_func(bool_constant<...>) -- 1 lambda arg. Other pipelines pass
+        # (run_func, has_hot_loop, tail_number) and invoke 2-arg run_func.
+        if tr.pipeline in ("basic_v1", "basic_async_v1"):
+            tail_handler_call = "BaseGemmPipeline::TailHandler(Run, has_hot_loop);"
+            run_lambda_signature = "[&](const auto has_hot_loop_)"
+        else:
+            tail_handler_call = (
+                "BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);"
+            )
+            run_lambda_signature = (
+                "[&](const auto has_hot_loop_, const auto tail_number_)"
+            )
+
         return f"""
 // Unique namespace for this kernel to avoid conflicts when including multiple kernels
 namespace {ns_name} {{
@@ -625,7 +640,7 @@ struct {kernel_name}_Launcher {{
         using Kernel = {kernel_type}<
             GroupedConvTraitsType, TilePartitioner, GemmPipeline, ConvEpilogue>;
         
-        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
+        const auto Run = {run_lambda_signature} {{
             auto kargs = Kernel::MakeKernelArgs(args);
             
             if (!Kernel::IsSupportedArgument(kargs)) {{
@@ -641,7 +656,7 @@ struct {kernel_name}_Launcher {{
             return ave_time;
         }};
         
-        BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+        {tail_handler_call}
         return ave_time;
     }}
 }};
@@ -1652,7 +1667,16 @@ def main():
     parser.add_argument(
         "--pipeline",
         type=str,
-        choices=["mem", "compv3", "compv4", "compv5"],
+        choices=[
+            "basic_v1",
+            "basic_async_v1",
+            "mem",
+            "compv3",
+            "compv4",
+            "compv5",
+            "compv6",
+            "comp_async",
+        ],
         help="Pipeline type",
     )
     parser.add_argument(
@@ -1684,6 +1708,16 @@ def main():
         type=str,
         default=None,
         help="Double SMEM buffer (true/false)",
+    )
+    parser.add_argument(
+        "--split-image",
+        action="store_true",
+        help="Enable split-image (EnableSplitImage) for large spatial tensors",
+    )
+    parser.add_argument(
+        "--two-stage",
+        action="store_true",
+        help="Enable two-stage bwd_weight (fp32 workspace + elementwise convert)",
     )
 
     args = parser.parse_args()
@@ -1722,7 +1756,13 @@ def main():
         if args.double_smem_buffer is not None:
             dsb = args.double_smem_buffer.lower() == "true"
         else:
-            dsb = pipeline == "compv4"  # compv4 requires double buffer
+            # Historical default: only compv4 auto-defaults to dsb=true.
+            # Other pipelines that also require DoubleSmemBuffer (e.g. comp_async)
+            # must be told explicitly via --double-smem-buffer true; otherwise
+            # they will fail loudly at the pipeline header static_assert. This
+            # is intentional -- silent fallback to a different config would
+            # mask the user's input.
+            dsb = pipeline == "compv4"
 
         trait = GroupedConvTraitConfig(
             pipeline=pipeline,
@@ -1733,6 +1773,8 @@ def main():
             pad_k=args.pad_k,
             double_smem_buffer=dsb,
             num_groups_to_merge=args.num_groups_to_merge,
+            split_image=args.split_image,
+            two_stage=args.two_stage,
         )
         config = GroupedConvKernelConfig(
             tile=tile,

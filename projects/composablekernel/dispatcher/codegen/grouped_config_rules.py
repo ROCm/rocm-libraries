@@ -108,10 +108,39 @@ TILE_TO_VECTOR: Dict[Tuple[int, int, int], Tuple[int, int, int]] = {
 }
 
 # Valid pipelines per variant
+# All 8 pipelines (basic_v1, mem, compv3-6, comp_async, basic_async_v1) successfully
+# build and run for all variants in both 2D and 3D (verified via 10_test_all_pipelines.py)
 VARIANT_PIPELINES: Dict[str, List[str]] = {
-    "forward": ["compv3", "compv4", "compv5"],
-    "bwd_data": ["compv3", "mem"],
-    "bwd_weight": ["compv3", "mem"],
+    "forward": [
+        "basic_v1",
+        "mem",
+        "compv3",
+        "compv4",
+        "compv5",
+        "compv6",
+        "comp_async",
+        "basic_async_v1",
+    ],
+    "bwd_data": [
+        "basic_v1",
+        "mem",
+        "compv3",
+        "compv4",
+        "compv5",
+        "compv6",
+        "comp_async",
+        "basic_async_v1",
+    ],
+    "bwd_weight": [
+        "basic_v1",
+        "mem",
+        "compv3",
+        "compv4",
+        "compv5",
+        "compv6",
+        "comp_async",
+        "basic_async_v1",
+    ],
 }
 
 # Tiles that support compv4 pipeline
