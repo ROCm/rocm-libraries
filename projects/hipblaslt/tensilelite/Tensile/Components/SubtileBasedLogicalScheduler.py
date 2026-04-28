@@ -884,38 +884,34 @@ class LogicalScheduler:
 
         return gr_list
 
-    def _build_lr_conflict_map(self):
-        """Build per-partition LR(MT n) info for LDS conflict checking.
+    def _build_gr_slot_bounds(self):
+        """Build lower and upper slot bounds for GR placement.
 
-        Returns dict: (partition_idx, tensor) -> list of
-                      (subIterK_slot, k_start, k_end).
+        lower: (pi, tensor) -> [(subIterK, k_start, k_end)] for LR(mt=0).
+               GR(mt=2) can't be placed at a slot where a later LR(mt=0)
+               in the same partition has overlapping k-range (LDS conflict).
+        upper: (tensor, mt) -> first flat slot index with LR(tensor, mt).
+               GR(tensor, mt) must be placed strictly before this slot.
         """
-        lr_mt_n_info = {}
-        for pi, partition_slots in enumerate(self._partitions):
-            for slot in partition_slots:
-                for lr in slot.lrs:
-                    if lr.mtIteration == 0:
-                        lr_mt_n_info.setdefault((pi, lr.tensor), []).append(
-                            (slot.subIterK,
-                             lr.tiles.subIterK_start,
-                             lr.tiles.subIterK_end))
-        return lr_mt_n_info
-
-    def _build_gr_deadline_map(self):
-        """Per (tensor, mt) earliest LR flat index — GR must be placed before it."""
         numK = self.config.numSubIterK
-        deadline = {}
+        lower = {}
+        upper = {}
         for pi, partition_slots in enumerate(self._partitions):
             for slot in partition_slots:
                 flat = pi * numK + slot.subIterK
                 for lr in slot.lrs:
+                    if lr.mtIteration == 0:
+                        lower.setdefault((pi, lr.tensor), []).append(
+                            (slot.subIterK,
+                             lr.tiles.subIterK_start,
+                             lr.tiles.subIterK_end))
                     key = (lr.tensor, lr.mtIteration)
-                    if key not in deadline or flat < deadline[key]:
-                        deadline[key] = flat
-        return deadline
+                    if key not in upper or flat < upper[key]:
+                        upper[key] = flat
+        return lower, upper
 
     @staticmethod
-    def _has_lr_conflict(lr_mt_n_info, tensor, mt_val, pi, subIterK,
+    def _has_lr_conflict(lr_lower, tensor, mt_val, pi, subIterK,
                          gr_k_start, gr_k_end):
         """Return True if placing GR(mt_val) at (pi, subIterK) conflicts.
 
@@ -925,12 +921,12 @@ class LogicalScheduler:
         """
         if mt_val != 2:
             return False
-        for lr_slot, lr_ks, lr_ke in lr_mt_n_info.get((pi, tensor), []):
+        for lr_slot, lr_ks, lr_ke in lr_lower.get((pi, tensor), []):
             if lr_slot > subIterK and gr_k_start < lr_ke and lr_ks < gr_k_end:
                 return True
         return False
 
-    def _distribute_grs(self, gr_list, lr_mt_n_info, gr_deadline=None, debug=False):
+    def _distribute_grs(self, gr_list, gr_slot_bounds, debug=False):
         """Phase 2: Distribute GR atoms across partition × subIterK slots.
 
         Explodes GR entries into atomic loads, distributes them into flat
@@ -941,6 +937,7 @@ class LogicalScheduler:
         numK = cfg.numSubIterK
         numP = cfg.numPartitions
         numSlots = numP * numK
+        lower, upper = gr_slot_bounds
 
         # 2a. Explode GR entries into atomic loads (1 load each)
         atoms = []
@@ -957,12 +954,11 @@ class LogicalScheduler:
         for atom in atoms:
             tensor, mt_val, _, _, ks, ke = atom
             cur = 0
-            last = gr_deadline.get((tensor, mt_val), numSlots) - 1 if gr_deadline else numSlots - 1
-            last = min(last, numSlots - 1)
+            last = min(upper.get((tensor, mt_val), numSlots) - 1, numSlots - 1)
             while cur < last:
                 pi = cur // numK
                 subK = cur % numK
-                if (not self._has_lr_conflict(lr_mt_n_info, tensor, mt_val,
+                if (not self._has_lr_conflict(lower, tensor, mt_val,
                                               pi, subK, ks, ke) and
                         len(buckets[cur]) < loads_per_slot):
                     break
@@ -1025,13 +1021,9 @@ class LogicalScheduler:
         pgr = self.config.pgr
         offsetMT = 0 if pgr == 0 else 1
         offsetPartition = 1 if pgr >= 2 else 0
-        # Build ordered list of GRs to place for the entire MT based on the partitioning ordering and the GR granularities.
         gr_list = self._build_gr_list(part_ranges, offsetMT, offsetPartition)
-        # Map to keep track of LR(MT n) for each partiion and tensor, used for LDS double buffer conflict checking when placing GRs.
-        lr_mt_n_info = self._build_lr_conflict_map()
-        gr_deadline = self._build_gr_deadline_map()
-        # Distribute GRs accross partition.
-        self._distribute_grs(gr_list, lr_mt_n_info, gr_deadline)
+        gr_slot_bounds = self._build_gr_slot_bounds()
+        self._distribute_grs(gr_list, gr_slot_bounds)
 
         self._completed.add(Pass.GR)
         return self._partitions[0]
