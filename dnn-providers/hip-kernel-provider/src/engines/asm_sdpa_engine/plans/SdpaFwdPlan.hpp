@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
 #include "SdpaFwdParams.hpp"
+#include "SdpaKernelUtils.hpp"
 
 namespace asm_sdpa_engine
 {
@@ -22,17 +22,17 @@ public:
     /**
      * @brief Construct a plan with kernel module and precomputed metadata.
      */
-    SdpaFwdPlan(hipModule_t kernelModule, hipFunction_t function, SdpaFwdParams params);
+    SdpaFwdPlan(HipModuleGuard kernel, SdpaFwdParams params);
 
-    ~SdpaFwdPlan() override;
+    ~SdpaFwdPlan() override = default;
 
     // Delete copy operations (resource ownership)
     SdpaFwdPlan(const SdpaFwdPlan&) = delete;
     SdpaFwdPlan& operator=(const SdpaFwdPlan&) = delete;
 
-    // Move operations
-    SdpaFwdPlan(SdpaFwdPlan&& other) noexcept;
-    SdpaFwdPlan& operator=(SdpaFwdPlan&& other) noexcept;
+    // Move operations (defaulted — HipModuleGuard handles resource cleanup)
+    SdpaFwdPlan(SdpaFwdPlan&&) noexcept = default;
+    SdpaFwdPlan& operator=(SdpaFwdPlan&&) noexcept = default;
 
     size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
 
@@ -42,8 +42,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    hipModule_t _module;
-    hipFunction_t _function;
+    HipModuleGuard _kernel;
     SdpaFwdParams _params;
 };
 
