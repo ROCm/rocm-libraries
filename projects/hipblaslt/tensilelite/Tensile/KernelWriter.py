@@ -3211,22 +3211,48 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # No Load Loop Body
   ##############################################################################
+  def _emitNoLoadLoopBodyCMSMacro(self, kernel, isNGLL):
+    """Emit the CMS-mode tail-loop body — a single MAINLOOP macro invocation
+    parameterized for nGL or nLL flag values. Extracted from noLoadLoopBody
+    to keep the dispatcher seam clean."""
+    strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
+    module = Module()
+    if isNGLL:
+      module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=1, useLoop = 0")
+      module.add(MacroInstruction(name="MAINLOOP%s"%strNtab, args=[0,0,1,1,0]))
+    else:
+      module.addComment0("Code-path 0, useGR=0, usePLR=0, useGRInc=0, useLoop = 0")
+      module.add(MacroInstruction(name="MAINLOOP%s"%strNtab, args=[0,0,0,0,0]))
+    return module
+
   def noLoadLoopBody( self, kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=0, NLLnum=1, \
                       useTailloopInNll=False, remainPgr=0):
+    """Dispatcher: under CMS emit a single MAINLOOP macro invocation,
+    otherwise run the full default-scheduler body (also reused by Phase 5
+    schedule-capture shadow runs via the capture= parameter)."""
+    if kernel["UseCustomMainLoopSchedule"]:
+      return self._emitNoLoadLoopBodyCMSMacro(kernel, isNGLL)
+    return self._noLoadLoopBodyDefault(
+        kernel, tensorParametersA, tensorParametersB, pack, packPre,
+        isOptNLL, isNGLL, NLLfirst, NLLlast,
+        NLLindex=NLLindex, NLLnum=NLLnum,
+        useTailloopInNll=useTailloopInNll, remainPgr=remainPgr,
+    )
+
+  def _noLoadLoopBodyDefault( self, kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=0, NLLnum=1, \
+                              useTailloopInNll=False, remainPgr=0, capture=None):
+    """Default (non-CMS) scheduler implementation of the noLoadLoopBody.
+
+    Also called as a shadow run by the Phase 5 schedule-capture machinery
+    in noLoadLoop, where capture is a LoopBodyCaptureBuilder. When capture
+    is provided, the per-iteration _makeSubIterSchedule call inside this
+    function plumbs it through to record the default-side n_gl / n_ll
+    instruction streams alongside the real CMS macro emission.
+    """
     UnrollLoopSwapGlobalReadOrder = kernel["UnrollLoopSwapGlobalReadOrder"]
     if kernel["DirectToLdsA"] and kernel["DirectToLdsB"] and kernel["PrefetchGlobalRead"] >= 2:
       # DTLA+DTLB code case, NGLL code is exactly same and no need to consider UnrollLoopSwapGlobalReadOrder
       UnrollLoopSwapGlobalReadOrder = 0
-    if kernel["UseCustomMainLoopSchedule"]:
-      strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
-      module = Module()
-      if isNGLL:
-        module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=1, useLoop = 0")
-        module.add(MacroInstruction(name="MAINLOOP%s"%strNtab, args=[0,0,1,1,0]))
-      else:
-        module.addComment0("Code-path 0, useGR=0, usePLR=0, useGRInc=0, useLoop = 0")
-        module.add(MacroInstruction(name="MAINLOOP%s"%strNtab, args=[0,0,0,0,0]))
-      return module
     module = Module("noLoadLoopBody")
     expand = kernel["ExpandPointerSwap"]
     lastuIdx = False
@@ -3716,7 +3742,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         macIterCode.add(self.exclasses.biasSumUnroll.loopSum(self, kernel, tP, u, kernel["InnerUnroll"]))
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], \
-                      module, NLLlast=NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True)
+                      module, NLLlast=NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True, capture=capture)
       module.add(subIterCode)
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       pack[packIdx] = Module()
@@ -3828,6 +3854,42 @@ class KernelWriter(metaclass=abc.ABCMeta):
     elif kernel["enableTDMA"] and kernel["enableTDMB"]:
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
       module.add(self._syncThreads(kernel, "wait for tensor load done, sync"))
+
+    # Phase 5 of plans/then-let-s-work-on-jaunty-reddy.md: drive a shadow
+    # _noLoadLoopBodyDefault to capture the default-side n_gl / n_ll bodies
+    # alongside the CMS macro emission. Deepcopy mutable inputs (pack, packPre)
+    # to prevent the shadow from consuming items the real CMS path doesn't
+    # need but other paths might. Empirical verification (see Phase 5 plan)
+    # confirms shadow mutations of self.codes are safe — every consumer is
+    # inside the shadow's own scope or re-overwritten by the next noLoadLoop's
+    # pre-trim+makeSchedule cycle. Specifically the shadow mutates:
+    #   - self.codes.localWriteA/B/MXSA/MXSB
+    #   - self.codes.globalReadA/B/MXSA/MXSB
+    #   - self.codes.unrollLoopHeader, perIterGlobalRead, perIterLocalWrite
+    #     (via makeSchedule)
+    #   - self.codes.perIterLocalWriteCodeNGLL (when lastLc=True)
+    #   - self.states.SubTileIdx
+    # Future audit point: if _noLoadLoopBodyDefault ever starts calling
+    # vgprPool.checkOut, the shadow path leaks vregs and needs vgprPool
+    # snapshotting. Currently SIA3 doesn't (verified in Phase 4).
+    if getattr(self.states, "_captureDefaultSchedule", False) and not isOptNLL:
+      from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder
+      shadow_pack = deepcopy(pack)
+      shadow_packPre = deepcopy(packPre)
+      shadow_capture = LoopBodyCaptureBuilder()
+      self._noLoadLoopBodyDefault(
+          kernel, tensorParametersA, tensorParametersB,
+          shadow_pack, shadow_packPre, isOptNLL, isNGLL,
+          NLLfirst, NLLlast, NLLindex=NLLindex, NLLnum=NLLnum,
+          useTailloopInNll=useTailloopInNll, remainPgr=remainPgr,
+          capture=shadow_capture,
+      )
+      finalized = shadow_capture.finalize()
+      if isNGLL:
+        self.states._defaultNGLCapture = finalized
+      else:
+        self.states._defaultNLLCapture = finalized
+
     # generate no Load Loop Body code
     module.add(self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=NLLindex, \
                                    NLLnum=NLLnum, useTailloopInNll=useTailloopInNll, remainPgr=remainPgr))
@@ -4652,32 +4714,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           )
 
       # Finalize default-side main_loop capture (Phase 4) before
-      # customMainLoopSchedule mutates opt1/InstStreams. main_loop_prev is a
-      # verbatim deepcopy of main_loop[0] (under CMS, loopCopies==1 in practice
-      # — see Solution.py:1667-1675 force-stripping ExpandPointerSwap).
+      # Phase 5 of plans/then-let-s-work-on-jaunty-reddy.md: stash the
+      # main-loop builder so kernelBody can assemble the full FourPartCapture
+      # after all noLoadLoop calls have populated _defaultNGLCapture and
+      # _defaultNLLCapture. Cross-scheduler comparison moved to kernelBody for
+      # the same reason.
       if getattr(self.states, "_captureDefaultSchedule", False):
-        from Tensile.Components.ScheduleCapture import (
-          FourPartCapture, clone_loop_body,
-        )
         builder = getattr(self.states, "_defaultCaptureBuilder", None)
         if builder is not None:
-          main_body = builder.finalize()
-          num_mfma = sum(1 for ti in main_body.instructions if ti.category == "MFMA")
-          # n_gl and n_ll capture comes in Phase 5 (shadow runs inside noLoadLoop).
-          # For now leave them as empty bodies; the comparison rule's per-body
-          # MFMA invariant check will be skipped via empty-body guard.
-          from Tensile.Components.ScheduleCapture import LoopBodyCapture
-          empty_body = LoopBodyCapture(instructions=[])
-          self._last_default_capture = FourPartCapture(
-            main_loop={0: main_body},
-            main_loop_prev={0: clone_loop_body(main_body)},
-            n_gl={0: empty_body},
-            n_ll={0: empty_body},
-            num_mfma=num_mfma,
-            num_codepaths=1,
-            source="default-sia3",
-          )
-          # Reset for next kernel.
+          self._last_default_main_capture = builder.finalize()
           self.states._defaultCaptureBuilder = None
 
       optSchedule, numCodePath = customMainLoopSchedule(self, kernel, tensorParametersA, tensorParametersB, globalReadIncACode, globalReadIncBCode, \
@@ -4687,18 +4732,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                                    self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, False, nta=nta, ntb=ntb), nta=nta, ntb=ntb)
       module.add(optSchedule)
       module.add(self.simdSpecDispatch(kernel, numCodePath, nta=nta, ntb=ntb))
-
-      # Phase 6 of plans/then-let-s-work-on-jaunty-reddy.md: cross-scheduler
-      # capture comparison. Runs only when both captures exist (i.e. capture
-      # was enabled). compare_captures handles None inputs gracefully.
-      if (getattr(self, "_last_default_capture", None) is not None
-          and getattr(self, "_last_cms_capture", None) is not None):
-        from Tensile.Components.ScheduleCapture import compare_captures
-        ok, msg = compare_captures(self._last_default_capture, self._last_cms_capture)
-        assert ok, (
-          f"Schedule capture comparison failed for kernel "
-          f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}: {msg}"
-        )
 
     # close unrolled loop
     endStr = ""
@@ -5778,6 +5811,57 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
 
     self.postMainLoopBarrierCheckAndReset(kernel, module)
+
+    # Phase 5 of plans/then-let-s-work-on-jaunty-reddy.md: assemble the
+    # default-side FourPartCapture from the main-loop body (stashed by
+    # _loopBody) plus the n_gl/n_ll bodies (stashed by noLoadLoop's shadow
+    # driver). Then run the cross-scheduler comparison rule. Empty bodies
+    # are skipped by compare_captures, so this works whether Step 2 has
+    # populated them or not.
+    if getattr(self.states, "_captureDefaultSchedule", False):
+      from Tensile.Components.ScheduleCapture import (
+        FourPartCapture, LoopBodyCapture, clone_loop_body, compare_captures,
+      )
+      # Loop-copies invariant: the relocation of compare_captures relies on
+      # exactly one _loopBody invocation having produced
+      # _last_default_main_capture. Solution.py:1667-1675 force-strips
+      # ExpandPointerSwap under CMS, but kernelBody:loopCopies can be
+      # re-bumped to 2 via needSecondLoop = (not expand) and (isULSGRO or
+      # isDTV). If a future CMS+DTV or CMS+UnrollLoopSwapGlobalReadOrder
+      # kernel hits that path, the second _loopBody silently overwrites the
+      # first's _last_default_main_capture. Assert here so the failure is
+      # loud rather than a confused comparison report.
+      assert loopCopies == 1, (
+        f"Phase 5 capture relocation requires loopCopies==1 under CMS; "
+        f"got loopCopies={loopCopies}. needSecondLoop or DTV/ULSGRO may "
+        f"have re-bumped it. Capture machinery needs per-lc support."
+      )
+      main = getattr(self, "_last_default_main_capture", None)
+      n_gl = getattr(self.states, "_defaultNGLCapture", LoopBodyCapture(instructions=[]))
+      n_ll = getattr(self.states, "_defaultNLLCapture", LoopBodyCapture(instructions=[]))
+      if main is not None:
+        num_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
+        self._last_default_capture = FourPartCapture(
+          main_loop={0: main},
+          main_loop_prev={0: clone_loop_body(main)},
+          n_gl={0: n_gl},
+          n_ll={0: n_ll},
+          num_mfma=num_mfma,
+          num_codepaths=1,
+          source="default-sia3",
+        )
+        if getattr(self, "_last_cms_capture", None) is not None:
+          ok, msg = compare_captures(self._last_default_capture, self._last_cms_capture)
+          assert ok, (
+            f"Schedule capture comparison failed for kernel "
+            f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}: {msg}"
+          )
+      # Reset state for the next kernel. _last_default_main_capture must
+      # also be cleared — without this, a subsequent kernel that fails to
+      # populate _defaultCaptureBuilder would re-consume the stale value.
+      self.states._defaultNGLCapture = None
+      self.states._defaultNLLCapture = None
+      self._last_default_main_capture = None
 
     if self.states.actualSummationLoops>1 and self.states.staggerUCode:
       module.addComment1("remove stagger offsets")

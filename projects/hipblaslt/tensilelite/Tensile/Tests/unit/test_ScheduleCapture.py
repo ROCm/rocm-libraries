@@ -272,14 +272,29 @@ class TestCompareCaptures:
         # num_mfma is no longer compared, so this passes.
         assert ok, f"unexpected failure: {msg}"
 
-    def test_per_body_mfma_invariant_violation_fails(self):
+    def test_per_body_zero_mfma_fails(self):
+        """The per-body MFMA presence check (not strict equality) catches
+        the gross failure of an entire body with zero MFMAs. Strict equality
+        was relaxed because F32X emulation distributes MFMAs into pack-code
+        submodules differently across bodies (main_loop's 'PackB1'-tagged
+        MFMAs may not appear in n_gl, etc.)."""
         d = _make_capture(source="default-sia3", num_mfma=4)
-        # Corrupt: drop one MFMA from main_loop[0].
-        d.main_loop[0].instructions.pop()
+        # Corrupt: replace main_loop[0]'s instructions with non-MFMA only.
+        d.main_loop[0].instructions = [
+            ti for ti in d.main_loop[0].instructions if ti.category != "MFMA"
+        ]
+        # Add a non-MFMA so the body isn't empty (which would be skipped).
+        from Tensile.Components.ScheduleCapture import (
+            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+        )
+        d.main_loop[0].instructions.append(TaggedInstruction(
+            inst="non-mfma", category="GRA",
+            slot=SlotKey(0, SLOT_KIND_MFMA, 0, 0),
+        ))
         c = _make_capture(source="cms", num_mfma=4)
         ok, msg = compare_captures(d, c)
         assert not ok
-        assert "MFMA" in msg
+        assert "zero MFMA" in msg
 
     def test_data_movement_count_mismatch_fails(self):
         # Comparison aggregates GR+LW. Build captures with different totals.
@@ -1056,3 +1071,89 @@ class TestPhase4DefaultCapture:
         # Both main_loop bodies should be substantially populated (rough sanity).
         assert len(default_cap.main_loop[0].instructions) > 10
         assert len(cms_cap.main_loop[0].instructions) > 10
+
+
+# =============================================================================
+# Phase 5: end-to-end default-side n_gl and n_ll capture
+# =============================================================================
+
+
+class TestPhase5DefaultTailCapture:
+    """Verify Phase 5's shadow driver in noLoadLoop populates the default-side
+    n_gl and n_ll bodies of the FourPartCapture, and the cross-scheduler
+    comparison rule runs without false positives."""
+
+    def _build_with_capture(self, isa_infrastructure):
+        from cms_test_utils import _make_solution
+        from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
+
+        isa, isaInfoMap, asm = isa_infrastructure
+        config = {
+            'ProblemType': {
+                'OperationType': 'GEMM', 'DataType': 'S', 'DestDataType': 'S',
+                'F32XdlMathOp': 'X', 'TransposeA': True, 'TransposeB': False,
+                'UseBeta': True, 'Batched': True,
+            },
+            'MatrixInstruction': [16, 16, 32, 1, 1, 4, 4, 2, 2],
+            'DepthU': 32, 'PrefetchGlobalRead': 2, 'PrefetchLocalRead': 1,
+            'DirectToLds': 1, 'TransposeLDS': 1, 'LocalReadVectorWidth': 4,
+            'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
+            'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
+            'SourceSwap': 1, 'StreamK': 0,
+        }
+        solution = _make_solution(config, asm, isaInfoMap)
+        writer = KernelWriterAssembly(asm, DebugConfig())
+
+        original_setupNewTile = writer.setupNewTile
+        def _setupNewTile_with_flag(*args, **kwargs):
+            result = original_setupNewTile(*args, **kwargs)
+            writer.states._captureDefaultSchedule = True
+            return result
+        writer.setupNewTile = _setupNewTile_with_flag
+
+        writer._getKernelSource(solution)
+        return writer
+
+    def test_n_gl_and_n_ll_populated(self, isa_infrastructure):
+        """Phase 5 populates default-side n_gl and n_ll bodies. Both must be
+        non-empty and contain at least one MFMA-tagged instruction."""
+        writer = self._build_with_capture(isa_infrastructure)
+        cap = writer._last_default_capture
+        assert cap is not None
+
+        # Both tail-loop bodies must be populated (the whole point of Phase 5).
+        assert len(cap.n_gl[0].instructions) > 0, "n_gl body is empty"
+        assert len(cap.n_ll[0].instructions) > 0, "n_ll body is empty"
+
+        # Each body must have at least one MFMA-tagged instruction (presence
+        # check; not strict equality vs cap.num_mfma — F32X emulation
+        # distributes MFMAs into pack-code submodules differently across bodies).
+        n_gl_mfmas = sum(1 for ti in cap.n_gl[0].instructions if ti.category == "MFMA")
+        n_ll_mfmas = sum(1 for ti in cap.n_ll[0].instructions if ti.category == "MFMA")
+        assert n_gl_mfmas > 0, f"n_gl has no MFMA-tagged instructions"
+        assert n_ll_mfmas > 0, f"n_ll has no MFMA-tagged instructions"
+
+    def test_no_false_positive_on_clean_cms_kernel(self, isa_infrastructure):
+        """The Phase 5 cross-scheduler comparison rule must not false-positive
+        on a known-good CMS kernel. If this test fails with an AssertionError
+        from kernelBody, the comparison rule is too strict for real kernels."""
+        # The build itself runs compare_captures from kernelBody. If it
+        # asserts, the test fails with the specific message.
+        writer = self._build_with_capture(isa_infrastructure)
+        # If we got here, comparison passed.
+        assert writer._last_default_capture is not None
+        assert writer._last_cms_capture is not None
+
+    def test_n_gl_n_ll_state_resets_after_kernel(self, isa_infrastructure):
+        """Phase 5's reset block in kernelBody must clear the per-kernel
+        capture state on self.states._defaultNGLCapture, ._defaultNLLCapture,
+        and self._last_default_main_capture. The final FourPartCapture
+        survives on writer._last_default_capture (intentional — it's the
+        consumer-facing artifact)."""
+        writer = self._build_with_capture(isa_infrastructure)
+        # After build, intermediate state should be reset.
+        assert writer.states._defaultNGLCapture is None
+        assert writer.states._defaultNLLCapture is None
+        assert writer._last_default_main_capture is None
+        # But the final consumer-facing capture survives.
+        assert writer._last_default_capture is not None
