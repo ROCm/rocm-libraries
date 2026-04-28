@@ -14,9 +14,12 @@ using F32  = float;
 
 // clang-format off
 using KernelTypes = ::testing::Types<
-    //          A0DataType, A1DataType, B0DataType, D0DataType, AccDataType, EDataType, AElementWiseFn, BElementWiseFn, CDEElementWiseFn, UseCshuffleEpilog
-    std::tuple<    F16,        F16,        F16,        F16,        F32,        F16,     AddScale,       PassThrough,    AddDs,            std::false_type>,
-    std::tuple<    F16,        F16,        F16,        F32,        F32,        F32,     AddScale,       PassThrough,    AddDs,            std::false_type>
+    //          AsDataType,                   BsDataType,                   DsDataType,                   AccDataType, EDataType, AElementWiseFn, BElementWiseFn, CDEElementWiseFn, UseCshuffleEpilog
+    std::tuple<    ck_tile::tuple<F16, F16>,     ck_tile::tuple<F16>,          ck_tile::tuple<F16>,          F32,        F16,       AddScale,       PassThrough,    AddDs,            std::false_type>,
+    std::tuple<    ck_tile::tuple<F16, F16>,     ck_tile::tuple<F16>,          ck_tile::tuple<F32>,          F32,        F32,       AddScale,       PassThrough,    AddDs,            std::false_type>,
+    std::tuple<    ck_tile::tuple<F16, F16>,     ck_tile::tuple<F16, F16>,     ck_tile::tuple<F16>,          F32,        F16,       AddScale,       AddScale,       AddDs,            std::false_type>,
+    std::tuple<    ck_tile::tuple<F16, F16>,     ck_tile::tuple<F16>,          ck_tile::tuple<F16, F16>,     F32,        F16,       AddScale,       PassThrough,    AddDs,            std::false_type>,
+    std::tuple<    ck_tile::tuple<BF16, BF16>,   ck_tile::tuple<BF16>,         ck_tile::tuple<BF16>,         F32,        BF16,      AddScale,       PassThrough,    AddDs,            std::false_type>
      >;
 // clang-format on
 

@@ -55,6 +55,25 @@ struct ExtractDValues<DDataType, NumDTensor, std::index_sequence<Is...>>
     }
 };
 
+template <typename TensorDataType,
+          ck_tile::index_t NumTensor,
+          typename Indices = std::make_index_sequence<NumTensor>>
+struct ExtractElementWiseValues;
+
+template <typename TensorDataType, ck_tile::index_t NumTensor, std::size_t... Is>
+struct ExtractElementWiseValues<TensorDataType, NumTensor, std::index_sequence<Is...>>
+{
+    template <typename OutputDataType, typename ElementWise>
+    CK_TILE_HOST static void
+    apply_at_offsets(OutputDataType& result,
+                     const ElementWise& elementwise,
+                     const std::array<ck_tile::HostTensor<TensorDataType>, NumTensor>& tensors,
+                     const std::array<std::size_t, NumTensor>& offsets)
+    {
+        elementwise(result, tensors[Is].mData[offsets[Is]]...);
+    }
+};
+
 template <typename ADataType,
           typename BDataType,
           typename DDataType,
@@ -428,53 +447,23 @@ void compute_reference_batched_contraction_multi_abd(
             {
                 // Fuse all A tensors via a_elementwise
                 ADataType fused_a{};
-                if constexpr(NumATensor == 1)
+                std::array<std::size_t, NumATensor> a_offsets;
+                for(ck_tile::index_t a = 0; a < NumATensor; ++a)
                 {
-                    const auto a_off = compute_a_offset(0, g_flat, m_flat, k_flat);
-                    a_elementwise(fused_a, as_tensors[0].mData[a_off]);
+                    a_offsets[a] = compute_a_offset(a, g_flat, m_flat, k_flat);
                 }
-                else if constexpr(NumATensor == 2)
-                {
-                    const auto a0_off = compute_a_offset(0, g_flat, m_flat, k_flat);
-                    const auto a1_off = compute_a_offset(1, g_flat, m_flat, k_flat);
-                    a_elementwise(
-                        fused_a, as_tensors[0].mData[a0_off], as_tensors[1].mData[a1_off]);
-                }
-                else if constexpr(NumATensor == 3)
-                {
-                    const auto a0_off = compute_a_offset(0, g_flat, m_flat, k_flat);
-                    const auto a1_off = compute_a_offset(1, g_flat, m_flat, k_flat);
-                    const auto a2_off = compute_a_offset(2, g_flat, m_flat, k_flat);
-                    a_elementwise(fused_a,
-                                  as_tensors[0].mData[a0_off],
-                                  as_tensors[1].mData[a1_off],
-                                  as_tensors[2].mData[a2_off]);
-                }
+                ExtractElementWiseValues<ADataType, NumATensor>::apply_at_offsets(
+                    fused_a, a_elementwise, as_tensors, a_offsets);
 
                 // Fuse all B tensors via b_elementwise
                 BDataType fused_b{};
-                if constexpr(NumBTensor == 1)
+                std::array<std::size_t, NumBTensor> b_offsets;
+                for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
                 {
-                    const auto b_off = compute_b_offset(0, g_flat, n_flat, k_flat);
-                    b_elementwise(fused_b, bs_tensors[0].mData[b_off]);
+                    b_offsets[b] = compute_b_offset(b, g_flat, n_flat, k_flat);
                 }
-                else if constexpr(NumBTensor == 2)
-                {
-                    const auto b0_off = compute_b_offset(0, g_flat, n_flat, k_flat);
-                    const auto b1_off = compute_b_offset(1, g_flat, n_flat, k_flat);
-                    b_elementwise(
-                        fused_b, bs_tensors[0].mData[b0_off], bs_tensors[1].mData[b1_off]);
-                }
-                else if constexpr(NumBTensor == 3)
-                {
-                    const auto b0_off = compute_b_offset(0, g_flat, n_flat, k_flat);
-                    const auto b1_off = compute_b_offset(1, g_flat, n_flat, k_flat);
-                    const auto b2_off = compute_b_offset(2, g_flat, n_flat, k_flat);
-                    b_elementwise(fused_b,
-                                  bs_tensors[0].mData[b0_off],
-                                  bs_tensors[1].mData[b1_off],
-                                  bs_tensors[2].mData[b2_off]);
-                }
+                ExtractElementWiseValues<BDataType, NumBTensor>::apply_at_offsets(
+                    fused_b, b_elementwise, bs_tensors, b_offsets);
 
                 sum += static_cast<AccDataType>(fused_a) * static_cast<AccDataType>(fused_b);
             }
@@ -482,38 +471,14 @@ void compute_reference_batched_contraction_multi_abd(
             const std::size_t e_offset = compute_e_offset(e_strides, g_flat, m_flat, n_flat);
 
             // Apply CDE elementwise with D tensors
-            EDataType result{};
-            if constexpr(NumDTensor == 0)
+            std::array<std::size_t, NumDTensor> d_offsets;
+            for(ck_tile::index_t d = 0; d < NumDTensor; ++d)
             {
-                result = static_cast<EDataType>(sum);
+                d_offsets[d] = compute_e_offset(ds_strides[d], g_flat, m_flat, n_flat);
             }
-            else if constexpr(NumDTensor == 1)
-            {
-                const auto d0_off = compute_e_offset(ds_strides[0], g_flat, m_flat, n_flat);
-                cde_elementwise(result,
-                                ck_tile::type_convert<float>(sum),
-                                ck_tile::type_convert<float>(ds_tensors[0].mData[d0_off]));
-            }
-            else if constexpr(NumDTensor == 2)
-            {
-                const auto d0_off = compute_e_offset(ds_strides[0], g_flat, m_flat, n_flat);
-                const auto d1_off = compute_e_offset(ds_strides[1], g_flat, m_flat, n_flat);
-                cde_elementwise(result,
-                                ck_tile::type_convert<float>(sum),
-                                ck_tile::type_convert<float>(ds_tensors[0].mData[d0_off]),
-                                ck_tile::type_convert<float>(ds_tensors[1].mData[d1_off]));
-            }
-            else if constexpr(NumDTensor == 3)
-            {
-                const auto d0_off = compute_e_offset(ds_strides[0], g_flat, m_flat, n_flat);
-                const auto d1_off = compute_e_offset(ds_strides[1], g_flat, m_flat, n_flat);
-                const auto d2_off = compute_e_offset(ds_strides[2], g_flat, m_flat, n_flat);
-                cde_elementwise(result,
-                                ck_tile::type_convert<float>(sum),
-                                ck_tile::type_convert<float>(ds_tensors[0].mData[d0_off]),
-                                ck_tile::type_convert<float>(ds_tensors[1].mData[d1_off]),
-                                ck_tile::type_convert<float>(ds_tensors[2].mData[d2_off]));
-            }
+            EDataType result = static_cast<EDataType>(sum);
+            ExtractDValues<DDataType, NumDTensor>::apply_at_offsets(
+                result, sum, cde_elementwise, ds_tensors, d_offsets);
 
             e_tensor.mData[e_offset] = result;
         }

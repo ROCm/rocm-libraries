@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #pragma once
+#include <cstdint>
 #include <sstream>
 #include <gtest/gtest.h>
 
@@ -28,6 +29,40 @@ struct AddDs
         e = ck_tile::type_convert<E>(x0_f);
     }
 };
+
+template <typename T, std::size_t>
+struct RepeatType
+{
+    using type = T;
+};
+
+template <typename T, typename Indices>
+struct RepeatedTuple;
+
+template <typename T, std::size_t... Is>
+struct RepeatedTuple<T, std::index_sequence<Is...>>
+{
+    using type = ck_tile::tuple<typename RepeatType<T, Is>::type...>;
+};
+
+template <typename T, ck_tile::index_t N>
+using RepeatedTupleT =
+    typename RepeatedTuple<T, std::make_index_sequence<static_cast<std::size_t>(N)>>::type;
+
+template <typename TensorDataType, ck_tile::index_t NumTensor, std::size_t... Is>
+auto make_host_tensor_array_impl(const ck_tile::HostTensorDescriptor& desc,
+                                 std::index_sequence<Is...>)
+{
+    return std::array<ck_tile::HostTensor<TensorDataType>, NumTensor>{
+        {((void)Is, ck_tile::HostTensor<TensorDataType>{desc})...}};
+}
+
+template <typename TensorDataType, ck_tile::index_t NumTensor>
+auto make_host_tensor_array(const ck_tile::HostTensorDescriptor& desc)
+{
+    return make_host_tensor_array_impl<TensorDataType, NumTensor>(
+        desc, std::make_index_sequence<static_cast<std::size_t>(NumTensor)>{});
+}
 
 template <typename A0DataType_,
           typename B0DataType_,
@@ -61,37 +96,39 @@ template <typename Tuple>
 class TestCkTileContractionMultiABD : public ::testing::Test
 {
     protected:
-    using A0DataType        = std::tuple_element_t<0, Tuple>;
-    using A1DataType        = std::tuple_element_t<1, Tuple>;
-    using B0DataType        = std::tuple_element_t<2, Tuple>;
-    using D0DataType        = std::tuple_element_t<3, Tuple>;
-    using AccDataType       = std::tuple_element_t<4, Tuple>;
-    using EDataType         = std::tuple_element_t<5, Tuple>;
-    using AElementWiseFn    = std::tuple_element_t<6, Tuple>;
-    using BElementWiseFn    = std::tuple_element_t<7, Tuple>;
-    using CDEElementWiseFn  = std::tuple_element_t<8, Tuple>;
-    using UseCshuffleEpilog = std::tuple_element_t<9, Tuple>;
+    using AsDataType        = std::tuple_element_t<0, Tuple>;
+    using BsDataType        = std::tuple_element_t<1, Tuple>;
+    using DsDataType        = std::tuple_element_t<2, Tuple>;
+    using AccDataType       = std::tuple_element_t<3, Tuple>;
+    using EDataType         = std::tuple_element_t<4, Tuple>;
+    using AElementWiseFn    = std::tuple_element_t<5, Tuple>;
+    using BElementWiseFn    = std::tuple_element_t<6, Tuple>;
+    using CDEElementWiseFn  = std::tuple_element_t<7, Tuple>;
+    using UseCshuffleEpilog = std::tuple_element_t<8, Tuple>;
 
     using Row = ck_tile::tensor_layout::gemm::RowMajor;
     using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
 
-    using AsDataType = ck_tile::tuple<A0DataType, A1DataType>;
-    using BsDataType = ck_tile::tuple<B0DataType>;
-    using DsDataType = ck_tile::tuple<D0DataType>;
-
-    using AsLayout = ck_tile::tuple<Row, Row>;
-    using BsLayout = ck_tile::tuple<Col>;
-    using DsLayout = ck_tile::tuple<Row>;
-    using ELayout  = Row;
+    using ADataType = ck_tile::remove_cvref_t<std::tuple_element_t<0, AsDataType>>;
+    using BDataType = ck_tile::remove_cvref_t<std::tuple_element_t<0, BsDataType>>;
+    using DDataType = ck_tile::remove_cvref_t<std::tuple_element_t<0, DsDataType>>;
 
     static constexpr ck_tile::index_t NumATensor = AsDataType::size();
     static constexpr ck_tile::index_t NumBTensor = BsDataType::size();
     static constexpr ck_tile::index_t NumDTensor = DsDataType::size();
 
+    using AsLayout = RepeatedTupleT<Row, NumATensor>;
+    using BsLayout = RepeatedTupleT<Col, NumBTensor>;
+    using DsLayout = RepeatedTupleT<Row, NumDTensor>;
+    using ELayout  = Row;
+
     template <ck_tile::index_t NumDimG,
               ck_tile::index_t NumDimM,
               ck_tile::index_t NumDimN,
-              ck_tile::index_t NumDimK>
+              ck_tile::index_t NumDimK,
+              bool kPadM = false,
+              bool kPadN = false,
+              bool kPadK = false>
     void invoke_kernel(
         const ck_tile::BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>& args,
         const ck_tile::stream_config& s)
@@ -115,9 +152,6 @@ class TestCkTileContractionMultiABD : public ::testing::Test
 #endif
 
         constexpr bool DoubleSmemBuffer = false;
-        constexpr bool kPadM            = false;
-        constexpr bool kPadN            = false;
-        constexpr bool kPadK            = false;
         constexpr bool TransposeC       = false;
 
         constexpr int kBlockPerCu                         = 1;
@@ -223,11 +257,15 @@ class TestCkTileContractionMultiABD : public ::testing::Test
     template <ck_tile::index_t NumDimG,
               ck_tile::index_t NumDimM,
               ck_tile::index_t NumDimN,
-              ck_tile::index_t NumDimK>
+              ck_tile::index_t NumDimK,
+              bool kPadM = false,
+              bool kPadN = false,
+              bool kPadK = false>
     bool Run(const std::vector<ck_tile::index_t>& G_dims,
              const std::vector<ck_tile::index_t>& M_dims,
              const std::vector<ck_tile::index_t>& N_dims,
-             const std::vector<ck_tile::index_t>& K_dims)
+             const std::vector<ck_tile::index_t>& K_dims,
+             ck_tile::index_t k_batch = 1)
     {
         auto calc_total = [](const std::vector<ck_tile::index_t>& dims) {
             ck_tile::index_t t = 1;
@@ -256,27 +294,48 @@ class TestCkTileContractionMultiABD : public ::testing::Test
         const auto b_desc = ck_tile::HostTensorDescriptor(B_dims);
         const auto e_desc = ck_tile::HostTensorDescriptor(E_dims);
 
-        ck_tile::HostTensor<A0DataType> a0_host(a_desc);
-        ck_tile::HostTensor<A1DataType> a1_host(a_desc);
-        ck_tile::HostTensor<B0DataType> b0_host(b_desc);
-        ck_tile::HostTensor<D0DataType> d0_host(e_desc);
+        auto as_host = make_host_tensor_array<ADataType, NumATensor>(a_desc);
+        auto bs_host = make_host_tensor_array<BDataType, NumBTensor>(b_desc);
+        auto ds_host = make_host_tensor_array<DDataType, NumDTensor>(e_desc);
         ck_tile::HostTensor<EDataType> e_gpu_host(e_desc);
 
-        ck_tile::FillUniformDistribution<A0DataType>{-1.f, 1.f}(a0_host);
-        ck_tile::FillUniformDistribution<A1DataType>{-1.f, 1.f}(a1_host);
-        ck_tile::FillUniformDistribution<B0DataType>{-1.f, 1.f}(b0_host);
-        ck_tile::FillUniformDistribution<D0DataType>{-1.f, 1.f}(d0_host);
+        constexpr uint32_t seed = 11939;
+        for(ck_tile::index_t a = 0; a < NumATensor; ++a)
+        {
+            ck_tile::FillUniformDistribution<ADataType>{
+                -1.f, 1.f, static_cast<uint32_t>(seed + a)}(as_host[a]);
+        }
+        for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
+        {
+            ck_tile::FillUniformDistribution<BDataType>{
+                -1.f, 1.f, static_cast<uint32_t>(seed + NumATensor + b)}(bs_host[b]);
+        }
+        for(ck_tile::index_t d = 0; d < NumDTensor; ++d)
+        {
+            ck_tile::FillUniformDistribution<DDataType>{
+                -1.f, 1.f, static_cast<uint32_t>(seed + NumATensor + NumBTensor + d)}(ds_host[d]);
+        }
 
-        ck_tile::DeviceMem a0_dev(a0_host.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem a1_dev(a1_host.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem b0_dev(b0_host.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem d0_dev(d0_host.get_element_space_size_in_bytes());
+        std::array<ck_tile::DeviceMem, NumATensor> as_dev;
+        std::array<ck_tile::DeviceMem, NumBTensor> bs_dev;
+        std::array<ck_tile::DeviceMem, NumDTensor> ds_dev;
         ck_tile::DeviceMem e_dev(e_gpu_host.get_element_space_size_in_bytes());
 
-        a0_dev.ToDevice(a0_host.data());
-        a1_dev.ToDevice(a1_host.data());
-        b0_dev.ToDevice(b0_host.data());
-        d0_dev.ToDevice(d0_host.data());
+        for(ck_tile::index_t a = 0; a < NumATensor; ++a)
+        {
+            as_dev[a].Realloc(as_host[a].get_element_space_size_in_bytes());
+            as_dev[a].ToDevice(as_host[a].data());
+        }
+        for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
+        {
+            bs_dev[b].Realloc(bs_host[b].get_element_space_size_in_bytes());
+            bs_dev[b].ToDevice(bs_host[b].data());
+        }
+        for(ck_tile::index_t d = 0; d < NumDTensor; ++d)
+        {
+            ds_dev[d].Realloc(ds_host[d].get_element_space_size_in_bytes());
+            ds_dev[d].ToDevice(ds_host[d].data());
+        }
         e_dev.SetZero();
         e_gpu_host.SetZero();
 
@@ -286,32 +345,37 @@ class TestCkTileContractionMultiABD : public ::testing::Test
             return converted;
         };
 
-        std::vector<ck_tile::index_t> A0_strides = convert_strides(a0_host.get_strides());
-        std::vector<ck_tile::index_t> A1_strides = convert_strides(a1_host.get_strides());
-        std::vector<ck_tile::index_t> B0_strides = convert_strides(b0_host.get_strides());
-        std::vector<ck_tile::index_t> D0_strides = convert_strides(d0_host.get_strides());
         std::vector<ck_tile::index_t> E_strides  = convert_strides(e_gpu_host.get_strides());
 
         using HostArgs =
             ck_tile::BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>;
 
         HostArgs host_args;
-        host_args.as_ptr     = {a0_dev.GetDeviceBuffer(), a1_dev.GetDeviceBuffer()};
-        host_args.bs_ptr     = {b0_dev.GetDeviceBuffer()};
-        host_args.ds_ptr     = {d0_dev.GetDeviceBuffer()};
-        host_args.e_ptr      = e_dev.GetDeviceBuffer();
-        host_args.k_batch    = 1;
-        host_args.As_dims    = {A_dims, A_dims};
-        host_args.Bs_dims    = {B_dims};
-        host_args.Ds_dims    = {E_dims};
-        host_args.E_dims     = E_dims;
-        host_args.As_strides = {A0_strides, A1_strides};
-        host_args.Bs_strides = {B0_strides};
-        host_args.Ds_strides = {D0_strides};
-        host_args.E_strides  = E_strides;
+        for(ck_tile::index_t a = 0; a < NumATensor; ++a)
+        {
+            host_args.as_ptr[a]     = as_dev[a].GetDeviceBuffer();
+            host_args.As_dims[a]    = A_dims;
+            host_args.As_strides[a] = convert_strides(as_host[a].get_strides());
+        }
+        for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
+        {
+            host_args.bs_ptr[b]     = bs_dev[b].GetDeviceBuffer();
+            host_args.Bs_dims[b]    = B_dims;
+            host_args.Bs_strides[b] = convert_strides(bs_host[b].get_strides());
+        }
+        for(ck_tile::index_t d = 0; d < NumDTensor; ++d)
+        {
+            host_args.ds_ptr[d]     = ds_dev[d].GetDeviceBuffer();
+            host_args.Ds_dims[d]    = E_dims;
+            host_args.Ds_strides[d] = convert_strides(ds_host[d].get_strides());
+        }
+        host_args.e_ptr     = e_dev.GetDeviceBuffer();
+        host_args.k_batch   = k_batch;
+        host_args.E_dims    = E_dims;
+        host_args.E_strides = E_strides;
 
-        invoke_kernel<NumDimG, NumDimM, NumDimN, NumDimK>(host_args,
-                                                          ck_tile::stream_config{nullptr, false});
+        invoke_kernel<NumDimG, NumDimM, NumDimN, NumDimK, kPadM, kPadN, kPadK>(
+            host_args, ck_tile::stream_config{nullptr, false});
 
         e_dev.FromDevice(e_gpu_host.data());
 
@@ -326,9 +390,9 @@ class TestCkTileContractionMultiABD : public ::testing::Test
                                                                  AElementWiseFn,
                                                                  BElementWiseFn,
                                                                  CDEElementWiseFn>(
-            {a0_host, a1_host},
-            {b0_host},
-            {d0_host},
+            as_host,
+            bs_host,
+            ds_host,
             e_ref_host,
             G_total,
             M_total,
@@ -345,8 +409,8 @@ class TestCkTileContractionMultiABD : public ::testing::Test
         const float max_accumulated_value =
             *std::max_element(e_ref_host.mData.begin(), e_ref_host.mData.end());
         const auto rtol_atol =
-            calculate_rtol_atol<A0DataType, B0DataType, AccDataType, EDataType, D0DataType>(
-                K_total, 1, max_accumulated_value);
+            calculate_rtol_atol<ADataType, BDataType, AccDataType, EDataType, DDataType>(
+                K_total, k_batch, max_accumulated_value);
 
         bool pass = ck_tile::check_err(e_gpu_host,
                                        e_ref_host,
