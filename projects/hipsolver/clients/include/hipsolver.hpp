@@ -10405,9 +10405,6 @@ inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t           API,
                                                     size_t*             lworkOnDevice,
                                                     size_t*             lworkOnHost)
 {
-    // NOTE: hipsolverDnXsytrs_bufferSize returns workspace sizes in bytes,
-    // which may over-allocate when used with typed workspace buffers (e.g. T instead of char)
-    *lworkOnHost = 0;
     switch(API)
     {
     case API_COMPAT:
@@ -10425,6 +10422,7 @@ inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t           API,
                                             lworkOnDevice,
                                             lworkOnHost);
     default:
+        *lworkOnHost   = 0;
         *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -10443,9 +10441,6 @@ inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t           API,
                                                     size_t*             lworkOnDevice,
                                                     size_t*             lworkOnHost)
 {
-    // NOTE: hipsolverDnXsytrs_bufferSize returns workspace sizes in bytes,
-    // which may over-allocate when used with typed workspace buffers (e.g. T instead of char)
-    *lworkOnHost = 0;
     switch(API)
     {
     case API_COMPAT:
@@ -10463,6 +10458,7 @@ inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t           API,
                                             lworkOnDevice,
                                             lworkOnHost);
     default:
+        *lworkOnHost   = 0;
         *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -10481,9 +10477,6 @@ inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t           API,
                                                     size_t*             lworkOnDevice,
                                                     size_t*             lworkOnHost)
 {
-    // NOTE: hipsolverDnXsytrs_bufferSize returns workspace sizes in bytes,
-    // which may over-allocate when used with typed workspace buffers (e.g. T instead of char)
-    *lworkOnHost = 0;
     switch(API)
     {
     case API_COMPAT:
@@ -10501,6 +10494,7 @@ inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t           API,
                                             lworkOnDevice,
                                             lworkOnHost);
     default:
+        *lworkOnHost   = 0;
         *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -10519,9 +10513,6 @@ inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t               API,
                                                     size_t*                 lworkOnDevice,
                                                     size_t*                 lworkOnHost)
 {
-    // NOTE: hipsolverDnXsytrs_bufferSize returns workspace sizes in bytes,
-    // which may over-allocate when used with typed workspace buffers (e.g. T instead of char)
-    *lworkOnHost = 0;
     switch(API)
     {
     case API_COMPAT:
@@ -10539,6 +10530,7 @@ inline hipsolverStatus_t hipsolver_sytrs_bufferSize(testAPI_t               API,
                                             lworkOnDevice,
                                             lworkOnHost);
     default:
+        *lworkOnHost   = 0;
         *lworkOnDevice = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -10551,12 +10543,9 @@ inline hipsolverStatus_t hipsolver_sytrs(testAPI_t           API,
                                          int64_t             nrhs,
                                          float*              A,
                                          int64_t             lda,
-                                         rocblas_stride      stA,
                                          const int64_t*      ipiv,
-                                         rocblas_stride      stP,
                                          float*              B,
                                          int64_t             ldb,
-                                         rocblas_stride      stB,
                                          void*               workOnDevice,
                                          size_t              lworkOnDevice,
                                          void*               workOnHost,
@@ -10595,12 +10584,9 @@ inline hipsolverStatus_t hipsolver_sytrs(testAPI_t           API,
                                          int64_t             nrhs,
                                          double*             A,
                                          int64_t             lda,
-                                         rocblas_stride      stA,
                                          const int64_t*      ipiv,
-                                         rocblas_stride      stP,
                                          double*             B,
                                          int64_t             ldb,
-                                         rocblas_stride      stB,
                                          void*               workOnDevice,
                                          size_t              lworkOnDevice,
                                          void*               workOnHost,
@@ -10639,12 +10625,9 @@ inline hipsolverStatus_t hipsolver_sytrs(testAPI_t           API,
                                          int64_t             nrhs,
                                          hipsolverComplex*   A,
                                          int64_t             lda,
-                                         rocblas_stride      stA,
                                          const int64_t*      ipiv,
-                                         rocblas_stride      stP,
                                          hipsolverComplex*   B,
                                          int64_t             ldb,
-                                         rocblas_stride      stB,
                                          void*               workOnDevice,
                                          size_t              lworkOnDevice,
                                          void*               workOnHost,
@@ -10683,12 +10666,9 @@ inline hipsolverStatus_t hipsolver_sytrs(testAPI_t               API,
                                          int64_t                 nrhs,
                                          hipsolverDoubleComplex* A,
                                          int64_t                 lda,
-                                         rocblas_stride          stA,
                                          const int64_t*          ipiv,
-                                         rocblas_stride          stP,
                                          hipsolverDoubleComplex* B,
                                          int64_t                 ldb,
-                                         rocblas_stride          stB,
                                          void*                   workOnDevice,
                                          size_t                  lworkOnDevice,
                                          void*                   workOnHost,

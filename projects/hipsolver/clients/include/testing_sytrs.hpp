@@ -38,16 +38,13 @@ void sytrs_checkBadArgs(const hipsolverHandle_t   handle,
                         const I                   nrhs,
                         Td                        dA,
                         const I                   lda,
-                        const rocblas_stride      stA,
                         Id                        dIpiv,
-                        const rocblas_stride      stP,
                         Td                        dB,
                         const I                   ldb,
-                        const rocblas_stride      stB,
                         Ud                        dWork,
-                        const SIZE                lworkOnDevice,
+                        const SIZE                dlwork,
                         Ud                        hWork,
-                        const SIZE                lworkOnHost,
+                        const SIZE                hlwork,
                         INTd                      dInfo,
                         const int                 bc)
 {
@@ -59,16 +56,13 @@ void sytrs_checkBadArgs(const hipsolverHandle_t   handle,
                                           nrhs,
                                           dA,
                                           lda,
-                                          stA,
                                           dIpiv,
-                                          stP,
                                           dB,
                                           ldb,
-                                          stB,
                                           dWork,
-                                          lworkOnDevice,
+                                          dlwork,
                                           hWork,
-                                          lworkOnHost,
+                                          hlwork,
                                           dInfo,
                                           bc),
                           HIPSOLVER_STATUS_NOT_INITIALIZED);
@@ -81,16 +75,13 @@ void sytrs_checkBadArgs(const hipsolverHandle_t   handle,
                                           nrhs,
                                           dA,
                                           lda,
-                                          stA,
                                           dIpiv,
-                                          stP,
                                           dB,
                                           ldb,
-                                          stB,
                                           dWork,
-                                          lworkOnDevice,
+                                          dlwork,
                                           hWork,
-                                          lworkOnHost,
+                                          hlwork,
                                           dInfo,
                                           bc),
                           HIPSOLVER_STATUS_INVALID_ENUM);
@@ -104,16 +95,13 @@ void sytrs_checkBadArgs(const hipsolverHandle_t   handle,
                                           nrhs,
                                           (Td) nullptr,
                                           lda,
-                                          stA,
                                           dIpiv,
-                                          stP,
                                           dB,
                                           ldb,
-                                          stB,
                                           dWork,
-                                          lworkOnDevice,
+                                          dlwork,
                                           hWork,
-                                          lworkOnHost,
+                                          hlwork,
                                           dInfo,
                                           bc),
                           HIPSOLVER_STATUS_INVALID_VALUE);
@@ -124,16 +112,13 @@ void sytrs_checkBadArgs(const hipsolverHandle_t   handle,
                                           nrhs,
                                           dA,
                                           lda,
-                                          stA,
                                           (Id) nullptr,
-                                          stP,
                                           dB,
                                           ldb,
-                                          stB,
                                           dWork,
-                                          lworkOnDevice,
+                                          dlwork,
                                           hWork,
-                                          lworkOnHost,
+                                          hlwork,
                                           dInfo,
                                           bc),
                           HIPSOLVER_STATUS_INVALID_VALUE);
@@ -144,16 +129,13 @@ void sytrs_checkBadArgs(const hipsolverHandle_t   handle,
                                           nrhs,
                                           dA,
                                           lda,
-                                          stA,
                                           dIpiv,
-                                          stP,
                                           (Td) nullptr,
                                           ldb,
-                                          stB,
                                           dWork,
-                                          lworkOnDevice,
+                                          dlwork,
                                           hWork,
-                                          lworkOnHost,
+                                          hlwork,
                                           dInfo,
                                           bc),
                           HIPSOLVER_STATUS_INVALID_VALUE);
@@ -164,16 +146,13 @@ void sytrs_checkBadArgs(const hipsolverHandle_t   handle,
                                           nrhs,
                                           dA,
                                           lda,
-                                          stA,
                                           dIpiv,
-                                          stP,
                                           dB,
                                           ldb,
-                                          stB,
                                           dWork,
-                                          lworkOnDevice,
+                                          dlwork,
                                           hWork,
-                                          lworkOnHost,
+                                          hlwork,
                                           (INTd) nullptr,
                                           bc),
                           HIPSOLVER_STATUS_INVALID_VALUE);
@@ -190,9 +169,6 @@ void testing_sytrs_bad_arg()
     I                      nrhs = 1;
     I                      lda  = 1;
     I                      ldb  = 1;
-    rocblas_stride         stA  = 1;
-    rocblas_stride         stP  = 1;
-    rocblas_stride         stB  = 1;
     int                    bc   = 1;
 
     if(BATCHED)
@@ -212,7 +188,7 @@ void testing_sytrs_bad_arg()
         CHECK_HIP_ERROR(dIpiv.memcheck());
         CHECK_HIP_ERROR(dInfo.memcheck());
 
-        SIZE lworkOnDevice, lworkOnHost;
+        SIZE size_dW, size_hW;
         hipsolver_sytrs_bufferSize(API,
                                    handle,
                                    uplo,
@@ -223,18 +199,12 @@ void testing_sytrs_bad_arg()
                                    dIpiv.data(),
                                    dB.data(),
                                    ldb,
-                                   &lworkOnDevice,
-                                   &lworkOnHost);
-
-        // NOTE: lworkOnDevice/lworkOnHost are in bytes when using the hipsolverDnX API,
-        // so convert to a count of T elements (rounding up) before allocating
-        SIZE                           lworkOnDeviceT = (lworkOnDevice + sizeof(T) - 1) / sizeof(T);
-        SIZE                           lworkOnHostT   = (lworkOnHost + sizeof(T) - 1) / sizeof(T);
-        device_strided_batch_vector<T> dWork(lworkOnDeviceT, 1, lworkOnDeviceT, 1);
-        if(lworkOnDeviceT)
+                                   &size_dW,
+                                   &size_hW);
+        host_strided_batch_vector<uint8_t>   hWork(size_hW, 1, size_hW, 1);
+        device_strided_batch_vector<uint8_t> dWork(size_dW, 1, size_dW, 1);
+        if(size_dW)
             CHECK_HIP_ERROR(dWork.memcheck());
-
-        std::vector<T> hWork(lworkOnHostT);
 
         // check bad arguments
         sytrs_checkBadArgs<API>(handle,
@@ -243,16 +213,13 @@ void testing_sytrs_bad_arg()
                                 nrhs,
                                 dA.data(),
                                 lda,
-                                stA,
                                 dIpiv.data(),
-                                stP,
                                 dB.data(),
                                 ldb,
-                                stB,
                                 (void*)dWork.data(),
-                                lworkOnDevice,
+                                size_dW,
                                 (void*)hWork.data(),
-                                lworkOnHost,
+                                size_hW,
                                 dInfo.data(),
                                 bc);
     }
@@ -273,12 +240,9 @@ void sytrs_initData(const hipsolverHandle_t   handle,
                     const I                   nrhs,
                     Td&                       dA,
                     const I                   lda,
-                    const rocblas_stride      stA,
                     Id&                       dIpiv,
-                    const rocblas_stride      stP,
                     Td&                       dB,
                     const I                   ldb,
-                    const rocblas_stride      stB,
                     const int                 bc,
                     Th&                       hA,
                     Ih&                       hIpiv,
@@ -354,16 +318,13 @@ void sytrs_getError(const hipsolverHandle_t   handle,
                     const I                   nrhs,
                     Td&                       dA,
                     const I                   lda,
-                    const rocblas_stride      stA,
                     Id&                       dIpiv,
-                    const rocblas_stride      stP,
                     Td&                       dB,
                     const I                   ldb,
-                    const rocblas_stride      stB,
                     void*                     dWork,
-                    const SIZE                lworkOnDevice,
+                    const SIZE                dlwork,
                     void*                     hWork,
-                    const SIZE                lworkOnHost,
+                    const SIZE                hlwork,
                     INTd&                     dInfo,
                     const int                 bc,
                     Th&                       hA,
@@ -376,23 +337,8 @@ void sytrs_getError(const hipsolverHandle_t   handle,
                     double*                   max_err)
 {
     // input data initialization
-    sytrs_initData<true, true, T>(handle,
-                                  uplo,
-                                  n,
-                                  nrhs,
-                                  dA,
-                                  lda,
-                                  stA,
-                                  dIpiv,
-                                  stP,
-                                  dB,
-                                  ldb,
-                                  stB,
-                                  bc,
-                                  hA,
-                                  hIpiv,
-                                  hIpiv_cpu,
-                                  hB);
+    sytrs_initData<true, true, T>(
+        handle, uplo, n, nrhs, dA, lda, dIpiv, dB, ldb, bc, hA, hIpiv, hIpiv_cpu, hB);
 
     // execute computations
     // GPU lapack
@@ -403,16 +349,13 @@ void sytrs_getError(const hipsolverHandle_t   handle,
                                         nrhs,
                                         dA.data(),
                                         lda,
-                                        stA,
                                         dIpiv.data(),
-                                        stP,
                                         dB.data(),
                                         ldb,
-                                        stB,
                                         dWork,
-                                        lworkOnDevice,
+                                        dlwork,
                                         hWork,
-                                        lworkOnHost,
+                                        hlwork,
                                         dInfo.data(),
                                         bc));
     CHECK_HIP_ERROR(hBRes.transfer_from(dB));
@@ -463,16 +406,13 @@ void sytrs_getPerfData(const hipsolverHandle_t   handle,
                        const I                   nrhs,
                        Td&                       dA,
                        const I                   lda,
-                       const rocblas_stride      stA,
                        Id&                       dIpiv,
-                       const rocblas_stride      stP,
                        Td&                       dB,
                        const I                   ldb,
-                       const rocblas_stride      stB,
                        void*                     dWork,
-                       const SIZE                lworkOnDevice,
+                       const SIZE                dlwork,
                        void*                     hWork,
-                       const SIZE                lworkOnHost,
+                       const SIZE                hlwork,
                        INTd&                     dInfo,
                        const int                 bc,
                        Th&                       hA,
@@ -487,23 +427,8 @@ void sytrs_getPerfData(const hipsolverHandle_t   handle,
 {
     if(!perf)
     {
-        sytrs_initData<true, false, T>(handle,
-                                       uplo,
-                                       n,
-                                       nrhs,
-                                       dA,
-                                       lda,
-                                       stA,
-                                       dIpiv,
-                                       stP,
-                                       dB,
-                                       ldb,
-                                       stB,
-                                       bc,
-                                       hA,
-                                       hIpiv,
-                                       hIpiv_cpu,
-                                       hB);
+        sytrs_initData<true, false, T>(
+            handle, uplo, n, nrhs, dA, lda, dIpiv, dB, ldb, bc, hA, hIpiv, hIpiv_cpu, hB);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -514,44 +439,14 @@ void sytrs_getPerfData(const hipsolverHandle_t   handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    sytrs_initData<true, false, T>(handle,
-                                   uplo,
-                                   n,
-                                   nrhs,
-                                   dA,
-                                   lda,
-                                   stA,
-                                   dIpiv,
-                                   stP,
-                                   dB,
-                                   ldb,
-                                   stB,
-                                   bc,
-                                   hA,
-                                   hIpiv,
-                                   hIpiv_cpu,
-                                   hB);
+    sytrs_initData<true, false, T>(
+        handle, uplo, n, nrhs, dA, lda, dIpiv, dB, ldb, bc, hA, hIpiv, hIpiv_cpu, hB);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        sytrs_initData<false, true, T>(handle,
-                                       uplo,
-                                       n,
-                                       nrhs,
-                                       dA,
-                                       lda,
-                                       stA,
-                                       dIpiv,
-                                       stP,
-                                       dB,
-                                       ldb,
-                                       stB,
-                                       bc,
-                                       hA,
-                                       hIpiv,
-                                       hIpiv_cpu,
-                                       hB);
+        sytrs_initData<false, true, T>(
+            handle, uplo, n, nrhs, dA, lda, dIpiv, dB, ldb, bc, hA, hIpiv, hIpiv_cpu, hB);
 
         CHECK_ROCBLAS_ERROR(hipsolver_sytrs(API,
                                             handle,
@@ -560,16 +455,13 @@ void sytrs_getPerfData(const hipsolverHandle_t   handle,
                                             nrhs,
                                             dA.data(),
                                             lda,
-                                            stA,
                                             dIpiv.data(),
-                                            stP,
                                             dB.data(),
                                             ldb,
-                                            stB,
                                             dWork,
-                                            lworkOnDevice,
+                                            dlwork,
                                             hWork,
-                                            lworkOnHost,
+                                            hlwork,
                                             dInfo.data(),
                                             bc));
     }
@@ -581,23 +473,8 @@ void sytrs_getPerfData(const hipsolverHandle_t   handle,
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
-        sytrs_initData<false, true, T>(handle,
-                                       uplo,
-                                       n,
-                                       nrhs,
-                                       dA,
-                                       lda,
-                                       stA,
-                                       dIpiv,
-                                       stP,
-                                       dB,
-                                       ldb,
-                                       stB,
-                                       bc,
-                                       hA,
-                                       hIpiv,
-                                       hIpiv_cpu,
-                                       hB);
+        sytrs_initData<false, true, T>(
+            handle, uplo, n, nrhs, dA, lda, dIpiv, dB, ldb, bc, hA, hIpiv, hIpiv_cpu, hB);
 
         start = get_time_us_sync(stream);
         hipsolver_sytrs(API,
@@ -607,16 +484,13 @@ void sytrs_getPerfData(const hipsolverHandle_t   handle,
                         nrhs,
                         dA.data(),
                         lda,
-                        stA,
                         dIpiv.data(),
-                        stP,
                         dB.data(),
                         ldb,
-                        stB,
                         dWork,
-                        lworkOnDevice,
+                        dlwork,
                         hWork,
-                        lworkOnHost,
+                        hlwork,
                         dInfo.data(),
                         bc);
         *gpu_time_used += get_time_us_sync(stream) - start;
@@ -624,12 +498,7 @@ void sytrs_getPerfData(const hipsolverHandle_t   handle,
     *gpu_time_used /= hot_calls;
 }
 
-template <testAPI_t API,
-          bool      BATCHED,
-          bool      STRIDED,
-          typename T,
-          typename I    = int64_t,
-          typename SIZE = size_t>
+template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
 void testing_sytrs(Arguments& argus)
 {
     // get arguments
@@ -639,15 +508,10 @@ void testing_sytrs(Arguments& argus)
     I                      nrhs  = argus.get<int>("nrhs", n);
     I                      lda   = argus.get<int>("lda", n);
     I                      ldb   = argus.get<int>("ldb", n);
-    rocblas_stride         stA   = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride         stP   = argus.get<rocblas_stride>("strideP", n);
-    rocblas_stride         stB   = argus.get<rocblas_stride>("strideB", ldb * nrhs);
 
     hipsolverFillMode_t uplo      = char2hipsolver_fill(uploC);
     int                 bc        = argus.batch_count;
     int                 hot_calls = argus.iters;
-
-    rocblas_stride stBRes = (argus.unit_check || argus.norm_check) ? stB : 0;
 
     // check non-supported values
     if(uplo != HIPSOLVER_FILL_MODE_UPPER && uplo != HIPSOLVER_FILL_MODE_LOWER)
@@ -665,12 +529,9 @@ void testing_sytrs(Arguments& argus)
                                                   nrhs,
                                                   (T*)nullptr,
                                                   lda,
-                                                  stA,
                                                   (I*)nullptr,
-                                                  stP,
                                                   (T*)nullptr,
                                                   ldb,
-                                                  stB,
                                                   (void*)nullptr,
                                                   (SIZE)0,
                                                   (void*)nullptr,
@@ -711,12 +572,9 @@ void testing_sytrs(Arguments& argus)
                                                   nrhs,
                                                   (T*)nullptr,
                                                   lda,
-                                                  stA,
                                                   (I*)nullptr,
-                                                  stP,
                                                   (T*)nullptr,
                                                   ldb,
-                                                  stB,
                                                   (void*)nullptr,
                                                   (SIZE)0,
                                                   (void*)nullptr,
@@ -733,7 +591,7 @@ void testing_sytrs(Arguments& argus)
     }
 
     // memory size query is necessary
-    SIZE lworkOnDevice, lworkOnHost;
+    SIZE size_dW, size_hW;
     hipsolver_sytrs_bufferSize(API,
                                handle,
                                uplo,
@@ -744,12 +602,12 @@ void testing_sytrs(Arguments& argus)
                                (I*)nullptr,
                                (T*)nullptr,
                                ldb,
-                               &lworkOnDevice,
-                               &lworkOnHost);
+                               &size_dW,
+                               &size_hW);
 
     if(argus.mem_query)
     {
-        rocsolver_bench_inform(inform_mem_query, lworkOnDevice);
+        rocsolver_bench_inform(inform_mem_query, size_dW);
         return;
     }
 
@@ -761,22 +619,19 @@ void testing_sytrs(Arguments& argus)
     else
     {
         // memory allocations
-        host_strided_batch_vector<T>     hA(size_A, 1, stA, bc);
-        host_strided_batch_vector<T>     hB(size_B, 1, stB, bc);
-        host_strided_batch_vector<T>     hBRes(size_BRes, 1, stBRes, bc);
-        host_strided_batch_vector<I>     hIpiv(size_P, 1, stP, bc);
-        host_strided_batch_vector<int>   hIpiv_cpu(size_P, 1, stP, bc);
-        host_strided_batch_vector<int>   hInfo(1, 1, 1, bc);
-        host_strided_batch_vector<int>   hInfoRes(1, 1, 1, bc);
-        device_strided_batch_vector<T>   dA(size_A, 1, stA, bc);
-        device_strided_batch_vector<T>   dB(size_B, 1, stB, bc);
-        device_strided_batch_vector<I>   dIpiv(size_P, 1, stP, bc);
-        device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
-        // NOTE: lworkOnDevice/lworkOnHost are in bytes when using the hipsolverDnX API,
-        // so convert to a count of T elements (rounding up) before allocating
-        SIZE                           lworkOnDeviceT = (lworkOnDevice + sizeof(T) - 1) / sizeof(T);
-        SIZE                           lworkOnHostT   = (lworkOnHost + sizeof(T) - 1) / sizeof(T);
-        device_strided_batch_vector<T> dWork(lworkOnDeviceT, 1, lworkOnDeviceT, 1);
+        host_strided_batch_vector<T>         hA(size_A, 1, size_A, bc);
+        host_strided_batch_vector<T>         hB(size_B, 1, size_B, bc);
+        host_strided_batch_vector<T>         hBRes(size_BRes, 1, size_BRes, bc);
+        host_strided_batch_vector<I>         hIpiv(size_P, 1, size_P, bc);
+        host_strided_batch_vector<int>       hIpiv_cpu(size_P, 1, size_P, bc);
+        host_strided_batch_vector<int>       hInfo(1, 1, 1, bc);
+        host_strided_batch_vector<int>       hInfoRes(1, 1, 1, bc);
+        host_strided_batch_vector<uint8_t>   hWork(size_hW, 1, size_hW, 1);
+        device_strided_batch_vector<T>       dA(size_A, 1, size_A, bc);
+        device_strided_batch_vector<T>       dB(size_B, 1, size_B, bc);
+        device_strided_batch_vector<I>       dIpiv(size_P, 1, size_P, bc);
+        device_strided_batch_vector<int>     dInfo(1, 1, 1, bc);
+        device_strided_batch_vector<uint8_t> dWork(size_dW, 1, size_dW, 1);
         if(size_A)
             CHECK_HIP_ERROR(dA.memcheck());
         if(size_B)
@@ -784,10 +639,8 @@ void testing_sytrs(Arguments& argus)
         if(size_P)
             CHECK_HIP_ERROR(dIpiv.memcheck());
         CHECK_HIP_ERROR(dInfo.memcheck());
-        if(lworkOnDeviceT)
+        if(size_dW)
             CHECK_HIP_ERROR(dWork.memcheck());
-
-        std::vector<T> hWork(lworkOnHostT);
 
         // check computations
         if(argus.unit_check || argus.norm_check)
@@ -797,16 +650,13 @@ void testing_sytrs(Arguments& argus)
                                    nrhs,
                                    dA,
                                    lda,
-                                   stA,
                                    dIpiv,
-                                   stP,
                                    dB,
                                    ldb,
-                                   stB,
                                    (void*)dWork.data(),
-                                   lworkOnDevice,
+                                   size_dW,
                                    (void*)hWork.data(),
-                                   lworkOnHost,
+                                   size_hW,
                                    dInfo,
                                    bc,
                                    hA,
@@ -826,16 +676,13 @@ void testing_sytrs(Arguments& argus)
                                       nrhs,
                                       dA,
                                       lda,
-                                      stA,
                                       dIpiv,
-                                      stP,
                                       dB,
                                       ldb,
-                                      stB,
                                       (void*)dWork.data(),
-                                      lworkOnDevice,
+                                      size_dW,
                                       (void*)hWork.data(),
-                                      lworkOnHost,
+                                      size_hW,
                                       dInfo,
                                       bc,
                                       hA,
@@ -862,22 +709,9 @@ void testing_sytrs(Arguments& argus)
             std::cerr << "\n============================================\n";
             std::cerr << "Arguments:\n";
             std::cerr << "============================================\n";
-            if(BATCHED)
-            {
-                rocsolver_bench_output("uplo", "n", "nrhs", "lda", "ldb", "strideP", "batch_c");
-                rocsolver_bench_output(uploC, n, nrhs, lda, ldb, stP, bc);
-            }
-            else if(STRIDED)
-            {
-                rocsolver_bench_output(
-                    "uplo", "n", "nrhs", "lda", "ldb", "strideA", "strideP", "strideB", "batch_c");
-                rocsolver_bench_output(uploC, n, nrhs, lda, ldb, stA, stP, stB, bc);
-            }
-            else
-            {
-                rocsolver_bench_output("uplo", "n", "nrhs", "lda", "ldb");
-                rocsolver_bench_output(uploC, n, nrhs, lda, ldb);
-            }
+            rocsolver_bench_output("uplo", "n", "nrhs", "lda", "ldb");
+            rocsolver_bench_output(uploC, n, nrhs, lda, ldb);
+
             std::cerr << "\n============================================\n";
             std::cerr << "Results:\n";
             std::cerr << "============================================\n";
