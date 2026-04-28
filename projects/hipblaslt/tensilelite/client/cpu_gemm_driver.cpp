@@ -29,6 +29,7 @@
 #include <cmath>
 #include <iostream>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "ProgramOptions.hpp"
@@ -91,10 +92,18 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat16;
     };
 
-    // A naive, slow, golden reference implementation of GEMM.
+    // A slow, easy to understand, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
-    // Calculates D = activation(alpha * scaleA[i] * scaleB[j] * scaleAlphaVec[d] * (A * B) + beta * C + bias[i])
-    // where d = i (row/M) when factorDim==0, or d = j (col/N) when factorDim==1.
+    // Calculates, for each element (i, j):
+    //   D[i,j] = activation( effectiveAlpha * (A * B)[i,j] + beta * C[i,j] + bias[i] )
+    // where:
+    //   effectiveAlpha = alpha
+    //                  * scaleA[i]                              (if scaleAVec     != nullptr)
+    //                  * scaleB[j]                              (if scaleBVec     != nullptr)
+    //                  * scaleAlphaVec[factorDim == 0 ? i : j]  (if scaleAlphaVec != nullptr)
+    //
+    // scaleA is always indexed by row (M), scaleB always by col (N).
+    // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).   
     void columnMajorGemm(const float*   a,
                          const float*   b,
                          const float*   c,
@@ -113,6 +122,17 @@ namespace
                          const float*   scaleBVec     = nullptr,
                          int            factorDim     = 0)
     {
+
+        switch(activation)
+        {
+        case ActivationType::None:
+        case ActivationType::Relu:
+            break;
+        default:
+            throw std::runtime_error(
+                "Unsupported activation for CPU reference GEMM "
+                "(supported: None, Relu).");
+        }
         size_t strideAK = transA ? 1 : m;
         size_t strideAM = transA ? k : 1;
         size_t strideBK = transB ? n : 1;
@@ -143,13 +163,7 @@ namespace
                     result += biasVec[i];
 
                 if(activation == ActivationType::Relu)
-                {
                     result = std::max(0.0f, result);
-                }
-                else
-                {
-                    assert(activation == ActivationType::None);
-                }
 
                 d[i + j * m] = result;
             }
@@ -274,6 +288,7 @@ int runGemm(size_t         m,
         // setUseScaleAB must be called before setScaleA/setScaleB,
         // because setScaleA/B silently skips tensor registration when
         // m_useScaleAB is still empty.
+        // See: https://github.com/ROCm/rocm-libraries/issues/6541
         contraction.setUseScaleAB("Scalar");
         contraction.setScaleA(rocisa::DataType::Float, 1);
         contraction.setScaleB(rocisa::DataType::Float, 1);
@@ -291,7 +306,7 @@ int runGemm(size_t         m,
 
     if(activation != ActivationType::None)
     {
-        contraction.setActivationType(ActivationType::All);
+        contraction.setActivationType(activation);
         contraction.setParams().setActivationEnum(activation);
     }
 

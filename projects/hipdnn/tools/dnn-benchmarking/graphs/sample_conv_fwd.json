@@ -33,7 +33,7 @@
         {
             "name": "conv_fprop_node",
             "type": "ConvolutionFwdAttributes",
-            "compute_data_type": "unset",
+            "compute_data_type": "float",
             "inputs": {
                 "x_tensor_uid": 1,
                 "w_tensor_uid": 2

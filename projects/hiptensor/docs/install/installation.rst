@@ -87,18 +87,22 @@ The following dependencies are required:
 
 .. <!-- spellcheck-disable -->
 
-*  `ROCm <https://github.com/ROCm/ROCm>`_ (Version 7.0 or later)
+*  `ROCm <https://github.com/ROCm/ROCm>`_ (Version 7.0 or later for Linux, Version 7.13 or later for Windows)
 *  `CMake <https://cmake.org/>`_ (Version 3.14 or later)
 *  `rocm-cmake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.8.0 or later)
 *  `HIP runtime <https://github.com/ROCm/hip>`_ (Version 7.0.0 or later) (Or the ROCm hip-runtime-amd package)
 *  LLVM dev package (Version 7.0 or later) (Also available as the ROCm rocm-llvm-dev package)
-*  `composable kernel <https://github.com/ROCm/composable_kernel>`_ (hipTensor uses the amd-master branch, which is a stable and widely adopted version for development.)
+*  `composable kernel <https://github.com/ROCm/rocm-libraries/tree/develop/projects/composablekernel>`_ (hipTensor uses the amd-master branch, which is a stable and widely adopted version for development.)
 
 .. <!-- spellcheck-enable -->
 
 .. note::
 
    It's best to use ROCm packages from the same release where applicable.
+
+.. note::
+
+   If building Composable Kernel from source, adding the cmake parameter ``-DHIPTENSOR_BUILD_TESTS=ON`` will speed up the build by compiling only the targets required by hipTensor.
 
 Downloading hipTensor
 -------------------------------------------
@@ -149,8 +153,13 @@ To download hipTensor on ROCm version `x.y`, use this command:
 Replace ``x.y`` in the above command with the version of ROCm installed on your machine.
 For example, if you have ROCm 7.0 installed, then replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-7.0``.
 
-Build configuration
+Building on Linux
 -------------------------------------------
+
+.. note::
+
+   The CMake options and make targets described in this section apply to all platforms.
+   For Windows-specific build instructions, see `Building on Windows`_.
 
 You can choose to build any of the following combinations:
 
@@ -187,6 +196,9 @@ Here are the available options to build the hipTensor library, with or without c
     *   -   ``HIPTENSOR_INLINE_UNARY_OPS``
         -   Inline all contraction unary ops for best runtime performance (slower compilation)
         -   ``OFF``
+    *   -   ``CREATE_TEST_APP_LOCAL_DEPLOY``
+        -   Copy ROCm runtime DLLs next to test binaries so they take precedence over System32 (Windows only)
+        -   ``OFF``
 
 Here are some example project configurations:
 
@@ -197,6 +209,11 @@ Here are some example project configurations:
    "Basic", "``CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B<build_dir> .``"
    "Targeting gfx908", "``CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B<build_dir> . -DGPU_TARGETS=gfx908``"
    "Debug build", "``CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B<build_dir> . -DCMAKE_BUILD_TYPE=Debug``"
+
+.. tip::
+
+   Dockerfiles are available for Ubuntu 24.04 with prebuilt or source-built ROCm (using TheRock).
+   See `docker/README.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hiptensor/docker/README.md>`_ for instructions.
 
 Building the library alone
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -214,6 +231,12 @@ After configuration, build the library using this command:
 .. code-block:: bash
 
    cmake --build <build_dir> -- -j<nproc>
+
+And install the built binaries into the system ROCm with:
+
+.. code-block:: bash
+
+   cmake --install .
 
 .. note::
 
@@ -493,6 +516,89 @@ The following table highlights the relationships between high-level grouped targ
 |                                   +---------------------------------------------------------------------------------+
 |                                   |``rank6_reduction_test``                                                         |
 +-----------------------------------+---------------------------------------------------------------------------------+
+
+Building on Windows
+-------------------------------------------
+
+.. note::
+
+   The CMake options (``GPU_TARGETS``, ``HIPTENSOR_BUILD_TESTS``, etc.) and make targets
+   described in `Building on Linux`_ apply equally on Windows.
+
+Prerequisites
+^^^^^^^^^^^^^
+
+*  **Visual Studio 2026** (VS 18) or **Visual Studio 2022** — open a **"Command Prompt for VS 18"** (or "Command Prompt for VS 2022") terminal for all commands below.
+*  **CMake 4.2.3 or later** — the version bundled with Visual Studio 2026 (msvc3) is recommended.
+*  **vcpkg** — bundled with the VS command prompt. If ``vcpkg --version`` or ``echo %VCPKG_ROOT%`` returns nothing, install it following the `vcpkg getting-started guide <https://learn.microsoft.com/en-us/vcpkg/get_started/get-started>`_.
+*  **ROCm** — version 7.13 or later.
+
+Installing ROCm (TheRock)
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. If not already installed, `install ROCm from TheRock <https://github.com/ROCm/TheRock#installing-from-releases>`
+   and set the installation directory as a variable so you can reuse it in subsequent steps:
+
+   .. code-block:: bat
+
+      set ROCM_PATH=C:\dist\TheRock
+
+2. If you choose to `install from prebuilt tarball <https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-from-tarballs>`, create the directory:
+
+   .. code-block:: bat
+
+      mkdir %ROCM_PATH%
+
+   Download the tarball from the `TheRock releases page <https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-from-tarballs>`_
+   and extract it to ``%ROCM_PATH%``.
+
+3. Set the required environment variables:
+
+   .. code-block:: bat
+
+      set HIP_PATH=%ROCM_PATH%
+      set HIP_DEVICE_LIB_PATH=%ROCM_PATH%\lib\llvm\amdgcn\bitcode
+      set HIP_PLATFORM=amd
+
+Configure and build hipTensor
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Change to the hipTensor source directory, create a build directory, and run the CMake configure
+command (the example below targets ``gfx11-generic``):
+
+.. code-block:: bat
+
+   cd hiptensor
+   mkdir build
+   cd build
+
+   cmake -G Ninja ^
+     -DCMAKE_INSTALL_PREFIX=%ROCM_PATH% ^
+     -DCMAKE_BUILD_TYPE=Release ^
+     -DCMAKE_CXX_COMPILER="%ROCM_PATH%/lib/llvm/bin/clang++.exe" ^
+     -DCMAKE_C_COMPILER="%ROCM_PATH%/lib/llvm/bin/clang.exe" ^
+     -DCMAKE_PREFIX_PATH="%ROCM_PATH%" ^
+     -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" ^
+     -DVCPKG_TARGET_TRIPLET=x64-windows-static ^
+     -DGPU_TARGETS=gfx11-generic ^
+     -DHIPTENSOR_BUILD_TESTS=ON ^
+     -B. ..
+
+.. note::
+
+   If your system has a different version of ROCm installed alongside the build toolchain (for
+   example, a system ROCm in ``System32`` and a development build under ``%ROCM_PATH%``), add
+   ``-DCREATE_TEST_APP_LOCAL_DEPLOY=ON`` to the CMake command. This copies the required ROCm
+   runtime DLLs (``amdhip64``, ``amd_comgr``, ``rocm_kpack``, etc.) from ``%ROCM_PATH%\bin``
+   next to the test binaries at configure time, ensuring the correct runtime is loaded instead
+   of the one found in ``System32``.
+
+Then build and install:
+
+.. code-block:: bat
+
+   cmake --build . -- -j%NUMBER_OF_PROCESSORS%
+   cmake --install .
 
 Benchmarking scripts
 -------------------------------------------
