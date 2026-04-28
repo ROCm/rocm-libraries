@@ -9,7 +9,6 @@ validation/
 ├── README.md                          # This file
 ├── validate_ml_heuristic.py           # GEMM universal validation
 └── grouped_conv/                      # Grouped convolution specific
-    ├── validate_generalization.py     # True generalization test
     ├── validate_training_shapes.py    # Training data sanity check
     └── validate_backward_models.py    # Backward pass prediction quality
 ```
@@ -38,40 +37,7 @@ python validate_ml_heuristic.py --dtype bf16 --model_dir models/gemm_universal_b
 
 ## Grouped Convolution Validation
 
-### 2. `grouped_conv/validate_generalization.py` - True Generalization Test
-
-**Purpose**: **The gold standard** for testing ML generalization on unseen production shapes.
-
-**Usage**:
-```bash
-cd dispatcher/heuristics/validation/grouped_conv
-python validate_generalization.py
-```
-
-**What it does**:
-1. Loads MIOpen production shapes NOT in training data
-2. Randomly selects 10 unseen shapes
-3. For each shape:
-   - Builds and runs ALL 20 kernels on hardware
-   - Finds oracle-best (highest measured TFLOPS)
-   - Uses ML to predict best kernel
-   - Compares ML vs oracle efficiency
-
-**Output**:
-- Per-shape efficiency (ML TFLOPS / Oracle TFLOPS)
-- Mean efficiency across all unseen shapes
-- Kernel match rate (how often ML picks the oracle-best)
-
-**Runtime**: ~30-60 minutes (builds 200 kernels, runs on hardware)
-
-**When to use**:
-- After training a new model → verify it generalizes to production
-- Before deploying to production → final validation
-- Debugging poor production performance
-
----
-
-### 3. `grouped_conv/validate_training_shapes.py` - Training Data Sanity Check
+### 2. `grouped_conv/validate_training_shapes.py` - Training Data Sanity Check
 
 **Purpose**: Quick sanity check on shapes WITH multiple kernels in training data.
 
@@ -104,7 +70,7 @@ python validate_training_shapes.py
 
 ---
 
-### 4. `grouped_conv/validate_backward_models.py` - Backward Pass Prediction Quality
+### 3. `grouped_conv/validate_backward_models.py` - Backward Pass Prediction Quality
 
 **Purpose**: Quick prediction quality check for bwd_data and bwd_weight ML models.
 
@@ -144,7 +110,6 @@ python validate_backward_models.py
 | Script | Operation | Hardware? | Shapes Tested | Runtime | Use Case |
 |--------|-----------|-----------|---------------|---------|----------|
 | `validate_ml_heuristic.py` | GEMM universal | ✗ | All training | <1 min | GEMM model validation |
-| `validate_generalization.py` | Grouped conv fwd | ✓ | 10 unseen | 30-60 min | **Gold standard** generalization test |
 | `validate_training_shapes.py` | Grouped conv fwd | ✓ | 5 training | 5-10 min | Quick sanity check |
 | `validate_backward_models.py` | Grouped conv bwd | ✗ | 5-7 hardcoded | <1 min | Backward prediction quality |
 
@@ -154,21 +119,11 @@ python validate_backward_models.py
    ```bash
    # Quick check
    python grouped_conv/validate_training_shapes.py
-
-   # Full validation
-   python grouped_conv/validate_generalization.py
    ```
 
 2. **After training backward models**:
    ```bash
    python grouped_conv/validate_backward_models.py
-   ```
-
-3. **Before production deployment**:
-   ```bash
-   # Must pass generalization test
-   python grouped_conv/validate_generalization.py
-   # Target: >90% mean efficiency on unseen shapes
    ```
 
 ## Target Metrics

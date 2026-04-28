@@ -27,6 +27,7 @@ sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
 sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
 
 from grouped_conv_utils import GroupedConvKernelConfig  # noqa: E402
+from grouped_config_rules import COMPV4_COMPATIBLE_TILES  # noqa: E402
 
 # Import tile configurations from grouped_config_rules (single source of truth)
 try:
@@ -164,6 +165,38 @@ def expand_sweep(
     # Layouts (always nhwgc for now)
     layouts = VALID_LAYOUTS
 
+    # Additional trait config options
+    allowed_num_groups_to_merge = _allow("num_groups_to_merge")
+    if allowed_num_groups_to_merge is not None:
+        num_groups_to_merge_values = sorted(allowed_num_groups_to_merge)
+    else:
+        num_groups_to_merge_values = [1]  # Default
+
+    allowed_double_smem_buffer = _allow("double_smem_buffer")
+    if allowed_double_smem_buffer is not None:
+        double_smem_buffer_values = sorted(allowed_double_smem_buffer)
+    else:
+        double_smem_buffer_values = [False]  # Default
+
+    allowed_split_image = _allow("split_image")
+    if allowed_split_image is not None:
+        split_image_values = sorted(allowed_split_image)
+    else:
+        split_image_values = [False]  # Default
+
+    allowed_explicit_gemm = _allow("explicit_gemm")
+    if allowed_explicit_gemm is not None:
+        explicit_gemm_values = sorted(allowed_explicit_gemm)
+    else:
+        explicit_gemm_values = [False]  # Default
+
+    allowed_two_stage = _allow("two_stage")
+    if allowed_two_stage is not None:
+        two_stage_values = sorted(allowed_two_stage)
+    else:
+        # Default: only bwd_weight generates both False/True
+        two_stage_values = [False, True] if variant == "bwd_weight" else [False]
+
     # Generate all combinations
     configs: List[GroupedConvKernelConfig] = []
 
@@ -177,38 +210,50 @@ def expand_sweep(
                     vec_a, vec_b, vec_c = _get_vector_sizes(tile)
 
                     for pipeline in pipelines:
+                        # Skip tiles incompatible with compv4
+                        if pipeline == "compv4" and tile not in COMPV4_COMPATIBLE_TILES:
+                            continue
                         for scheduler in schedulers:
                             for epilogue in epilogues:
-                                configs.append(
-                                    GroupedConvKernelConfig(
-                                        variant=variant,
-                                        ndim_spatial=ndim,
-                                        dtype=dtype,
-                                        layout=layout,
-                                        arch=arch,
-                                        tile_m=tile_m,
-                                        tile_n=tile_n,
-                                        tile_k=tile_k,
-                                        wave_m=wave_m,
-                                        wave_n=wave_n,
-                                        wave_k=wave_k,
-                                        warp_tile_m=warp_m,
-                                        warp_tile_n=warp_n,
-                                        warp_tile_k=warp_k,
-                                        pipeline=pipeline,
-                                        epilogue=epilogue,
-                                        scheduler=scheduler,
-                                        vector_size_a=vec_a,
-                                        vector_size_b=vec_b,
-                                        vector_size_c=vec_c,
-                                        pad_m=True,
-                                        pad_n=True,
-                                        pad_k=True,
-                                        block_per_cu=1,
-                                        num_wave_groups=1,
-                                        num_groups_to_merge=1,
-                                    )
-                                )
+                                for num_groups_to_merge in num_groups_to_merge_values:
+                                    for double_smem_buffer in double_smem_buffer_values:
+                                        for split_image in split_image_values:
+                                            for explicit_gemm in explicit_gemm_values:
+                                                for two_stage in two_stage_values:
+                                                    configs.append(
+                                                        GroupedConvKernelConfig(
+                                                            variant=variant,
+                                                            ndim_spatial=ndim,
+                                                            dtype=dtype,
+                                                            layout=layout,
+                                                            arch=arch,
+                                                            tile_m=tile_m,
+                                                            tile_n=tile_n,
+                                                            tile_k=tile_k,
+                                                            wave_m=wave_m,
+                                                            wave_n=wave_n,
+                                                            wave_k=wave_k,
+                                                            warp_tile_m=warp_m,
+                                                            warp_tile_n=warp_n,
+                                                            warp_tile_k=warp_k,
+                                                            pipeline=pipeline,
+                                                            epilogue=epilogue,
+                                                            scheduler=scheduler,
+                                                            vector_size_a=vec_a,
+                                                            vector_size_b=vec_b,
+                                                            vector_size_c=vec_c,
+                                                            pad_m=True,
+                                                            pad_n=True,
+                                                            pad_k=True,
+                                                            block_per_cu=1,
+                                                            num_wave_groups=1,
+                                                            num_groups_to_merge=num_groups_to_merge,
+                                                            double_smem_buffer=double_smem_buffer,
+                                                            split_image=split_image,
+                                                            explicit_gemm=explicit_gemm,
+                                                            two_stage=two_stage,
+                                                        )
+                                                    )
 
     # Dedup by name (same name = same compiled kernel)
     seen: Set[str] = set()

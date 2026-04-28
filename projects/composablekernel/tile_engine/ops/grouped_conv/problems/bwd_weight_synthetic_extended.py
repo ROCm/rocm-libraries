@@ -5,8 +5,10 @@ Extended synthetic training set for BWD_WEIGHT targeting validation gaps.
 Based on validation analysis:
 - Current model: 96.5% mean efficiency, 90.1% P10, 20% top-1 accuracy
 - Needs better coverage for diverse problem sizes and channel combinations
+- CRITICAL: Add dilation support (zero training data exists)
+- Already has groups and stride-2 coverage
 
-This set focuses on ~1000-1500 carefully selected problems covering weak areas.
+This set focuses on ~2000+ carefully selected problems covering weak areas + dilation.
 """
 
 import sys
@@ -354,10 +356,75 @@ for Hi in [14, 28, 56]:
                     )
                 )
 
+# 10. DILATED CONVOLUTIONS - Critical for semantic segmentation backward weight
+# Common dilations: 2, 4, 6 with 3x3 filters (DeepLab, PSPNet)
+for dilation in [2, 4, 6]:
+    for Hi in [14, 28, 56]:
+        for C, K in [(64, 128), (128, 256), (256, 512), (128, 128), (256, 256)]:
+            for N in [1, 4, 8, 16]:
+                # 3x3 dilated conv backward weight
+                pad = dilation * (3 - 1) // 2
+                TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC.append(
+                    GroupedConvProblem(
+                        N=N,
+                        C=C,
+                        K=K,
+                        G=1,
+                        Hi=Hi,
+                        Wi=Hi,
+                        Y=3,
+                        X=3,
+                        stride_h=1,
+                        stride_w=1,
+                        pad_h=pad,
+                        pad_w=pad,
+                        dilation_h=dilation,
+                        dilation_w=dilation,
+                        direction="bwd_weight",
+                    )
+                )
+
+# 11. Additional dilated convolutions with different spatial sizes
+for dilation in [2, 4]:
+    for Hi in [7, 32, 112]:
+        for C, K in [(64, 64), (128, 128), (256, 256)]:
+            for N in [2, 8]:
+                pad = dilation * (3 - 1) // 2
+                TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC.append(
+                    GroupedConvProblem(
+                        N=N,
+                        C=C,
+                        K=K,
+                        G=1,
+                        Hi=Hi,
+                        Wi=Hi,
+                        Y=3,
+                        X=3,
+                        stride_h=1,
+                        stride_w=1,
+                        pad_h=pad,
+                        pad_w=pad,
+                        dilation_h=dilation,
+                        dilation_w=dilation,
+                        direction="bwd_weight",
+                    )
+                )
+
 if __name__ == "__main__":
+    num_dilated = sum(
+        1 for p in TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC if p.dilation_h > 1 or p.dilation_w > 1
+    )
+    num_stride2_3x3 = sum(
+        1
+        for p in TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC
+        if p.Y == 3 and p.X == 3 and p.stride_h == 2 and p.stride_w == 2
+    )
+
     print(
         f"Generated {len(TRAINING_PROBLEMS_BWD_WEIGHT_SYNTHETIC)} extended synthetic training problems for BWD_WEIGHT"
     )
+    print(f"  Dilated problems: {num_dilated}")
+    print(f"  Stride-2 3x3 problems: {num_stride2_3x3}")
     print()
     print("Coverage:")
     print("  Batch sizes: 1-128")
@@ -366,3 +433,7 @@ if __name__ == "__main__":
     print("  Spatial: 7x7 to 112x112")
     print("  Filters: 1x1, 3x3, 7x7")
     print("  Strides: 1, 2")
+    print("  Dilations: 1 (standard), 2, 4, 6 (atrous)")
+    print()
+    print("NEW in this version:")
+    print("  ✓ Dilated convolutions (dilation=2,4,6)")

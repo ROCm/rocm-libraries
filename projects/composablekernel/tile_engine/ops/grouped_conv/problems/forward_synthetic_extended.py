@@ -13,8 +13,10 @@ Covers:
 - Grouped convolutions (G=1,2,4,8) and depthwise (G=C=K)
 - Common filter sizes (1x1, 3x3, 7x7)
 - Stride variations (1, 2)
+- DILATED convolutions (dilation=2, 4, 6 for semantic segmentation)
+- 3D convolutions (for video/medical imaging)
 
-Total: ~2165 carefully selected problems covering diverse workloads.
+Total: ~4000+ carefully selected problems covering diverse workloads including dilation and 3D.
 """
 
 import sys
@@ -374,6 +376,115 @@ for Hi in [56, 112]:
                 )
             )
 
+# 10. DILATED CONVOLUTIONS - Critical for semantic segmentation (DeepLab, PSPNet)
+# Common dilations: 2, 4, 6 with 3x3 filters
+for dilation in [2, 4, 6]:
+    for Hi in [14, 28, 56]:
+        for C, K in [(64, 128), (128, 256), (256, 512), (128, 128), (256, 256)]:
+            for N in [1, 4, 8, 16]:
+                # 3x3 dilated conv (atrous convolution)
+                # Padding is chosen to maintain same spatial size: pad = dilation * (filter_size - 1) / 2
+                pad = dilation * (3 - 1) // 2
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
+                    GroupedConvProblem(
+                        N=N,
+                        C=C,
+                        K=K,
+                        G=1,
+                        Hi=Hi,
+                        Wi=Hi,
+                        Y=3,
+                        X=3,
+                        stride_h=1,
+                        stride_w=1,
+                        pad_h=pad,
+                        pad_w=pad,
+                        dilation_h=dilation,
+                        dilation_w=dilation,
+                        direction="forward",
+                    )
+                )
+
+# 11. 3D CONVOLUTIONS - For video and medical imaging
+# Common 3D patterns: small depth (8-32) with moderate spatial (28-56)
+for Di in [8, 16, 32]:
+    for Hi in [28, 56]:
+        for C, K in [(64, 128), (128, 256), (128, 128)]:
+            for N in [1, 2, 4, 8]:
+                # 3x3x3 3D conv
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
+                    GroupedConvProblem(
+                        N=N,
+                        C=C,
+                        K=K,
+                        G=1,
+                        Di=Di,
+                        Hi=Hi,
+                        Wi=Hi,
+                        Z=3,
+                        Y=3,
+                        X=3,
+                        stride_d=1,
+                        stride_h=1,
+                        stride_w=1,
+                        pad_d=1,
+                        pad_h=1,
+                        pad_w=1,
+                        direction="forward",
+                    )
+                )
+
+                # 1x1x1 3D pointwise
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
+                    GroupedConvProblem(
+                        N=N,
+                        C=C,
+                        K=K,
+                        G=1,
+                        Di=Di,
+                        Hi=Hi,
+                        Wi=Hi,
+                        Z=1,
+                        Y=1,
+                        X=1,
+                        stride_d=1,
+                        stride_h=1,
+                        stride_w=1,
+                        pad_d=0,
+                        pad_h=0,
+                        pad_w=0,
+                        direction="forward",
+                    )
+                )
+
+# 12. 3D temporal convolutions with stride (video downsampling)
+for Di in [16, 32]:
+    for Hi in [28, 56]:
+        for C, K in [(64, 128), (128, 256)]:
+            for N in [1, 2, 4]:
+                # 3x3x3 with stride 2 in temporal dimension
+                TRAINING_PROBLEMS_FORWARD_SYNTHETIC.append(
+                    GroupedConvProblem(
+                        N=N,
+                        C=C,
+                        K=K,
+                        G=1,
+                        Di=Di,
+                        Hi=Hi,
+                        Wi=Hi,
+                        Z=3,
+                        Y=3,
+                        X=3,
+                        stride_d=2,
+                        stride_h=1,
+                        stride_w=1,
+                        pad_d=1,
+                        pad_h=1,
+                        pad_w=1,
+                        direction="forward",
+                    )
+                )
+
 # Validate all problems meet constraints
 for prob in TRAINING_PROBLEMS_FORWARD_SYNTHETIC:
     assert prob.C % 8 == 0, f"C={prob.C} not divisible by 8"
@@ -381,17 +492,29 @@ for prob in TRAINING_PROBLEMS_FORWARD_SYNTHETIC:
     assert prob.K % prob.G == 0, f"K={prob.K} not divisible by G={prob.G}"
 
 if __name__ == "__main__":
+    # Count 2D vs 3D problems
+    num_2d = sum(1 for p in TRAINING_PROBLEMS_FORWARD_SYNTHETIC if not p.is_3d)
+    num_3d = sum(1 for p in TRAINING_PROBLEMS_FORWARD_SYNTHETIC if p.is_3d)
+    num_dilated = sum(
+        1 for p in TRAINING_PROBLEMS_FORWARD_SYNTHETIC if p.dilation_h > 1 or p.dilation_w > 1
+    )
+
     print(
         f"Generated {len(TRAINING_PROBLEMS_FORWARD_SYNTHETIC)} extended synthetic training problems for FORWARD"
     )
+    print(f"  2D problems: {num_2d}")
+    print(f"  3D problems: {num_3d}")
+    print(f"  Dilated problems: {num_dilated}")
     print()
     print("Coverage:")
     print("  Batch sizes: 1-128")
     print("  Channels: 64-1024 (all divisible by 8)")
     print("  Groups: 1, 2, 4, 8, depthwise")
-    print("  Spatial: 8x8 to 112x112")
-    print("  Filters: 1x1, 3x3, 7x7")
+    print("  Spatial 2D: 8x8 to 112x112")
+    print("  Spatial 3D: depth 8-32, HW 28-56")
+    print("  Filters: 1x1, 3x3, 7x7 (2D), 1x1x1, 3x3x3 (3D)")
     print("  Strides: 1, 2")
+    print("  Dilations: 1 (standard), 2, 4, 6 (atrous)")
     print()
     print("Constraints verified:")
     print("  ✓ All C % 8 == 0")

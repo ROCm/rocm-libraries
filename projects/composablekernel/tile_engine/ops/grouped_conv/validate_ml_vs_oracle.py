@@ -1,586 +1,230 @@
 #!/usr/bin/env python3
 """
-Compare ML predictions against oracle benchmark results for grouped convolution (FORWARD, BWD_DATA, BWD_WEIGHT).
+Validate ML heuristic predictions against oracle-best performance.
 
 This script:
-1. Loads ML model predictions for validation problems
-2. Loads oracle results from validation_{variant}_bf16_gfx950.csv (when available)
-3. Computes efficiency metrics: how close is ML's top-1 pick to oracle's best?
-4. Optionally runs ML-picked kernels on hardware for actual TFLOPS measurement (--run-ml-hw)
+1. Loads 300 validation problems
+2. Runs ML heuristic to predict best kernel for each
+3. Compares predicted kernel TFLOPS vs oracle-best TFLOPS
+4. Reports efficiency metrics
 """
 
-import argparse
-import csv
-import json
-import os
-import subprocess
 import sys
 from pathlib import Path
-from collections import defaultdict
+import pandas as pd
+import numpy as np
 
-_THIS_DIR = Path(__file__).resolve().parent
-_DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"
+_THIS_DIR = Path(__file__).parent
+_DISPATCHER_ROOT = _THIS_DIR.parent.parent.parent / "dispatcher"
+
 sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
 sys.path.insert(0, str(_DISPATCHER_ROOT / "heuristics"))
 sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
 sys.path.insert(0, str(_THIS_DIR / "problems"))
 
-from predict import Predictor  # noqa: E402
-from feature_engine_grouped_conv import GroupedConvFeatureEngine  # noqa: E402
-from grouped_config_rules import COMMON_TILES, VARIANT_PIPELINES  # noqa: E402
+from validation_holdout import VALIDATION_PROBLEMS
+from predict import Predictor
+from feature_engine_grouped_conv import GroupedConvFeatureEngine
+from grouped_config_rules import COMMON_TILES, TILE_TO_WAVE
 
-
-def get_kernel_pool(variant: str) -> list:
-    """Get kernel pool for a variant from single source of truth.
-
-    Returns list of dicts with keys: block_size, gemm_m_per_block, gemm_n_per_block, pipeline
-    """
+# Generate kernel pool (same as predict_grouped_conv.py)
+def _generate_kernel_pool(pipelines):
+    """Generate kernel pool from tile configs and pipeline variants."""
     kernels = []
-    pipelines = VARIANT_PIPELINES.get(variant, [])
-
     for tile_m, tile_n, tile_k in COMMON_TILES:
+        if (tile_m, tile_n, tile_k) not in TILE_TO_WAVE:
+            continue
+
+        wave_m, wave_n, wave_k = TILE_TO_WAVE[(tile_m, tile_n, tile_k)]
+        block_size = wave_m * wave_n * wave_k * 64
+
         for pipeline in pipelines:
-            kernels.append(
-                {
-                    "block_size": tile_m,
-                    "gemm_m_per_block": tile_n,
-                    "gemm_n_per_block": tile_k,
-                    "pipeline": pipeline,
-                }
-            )
+            kernels.append({
+                "block_size": block_size,
+                "gemm_m_per_block": tile_m,
+                "gemm_n_per_block": tile_n,
+                "pipeline": pipeline,
+            })
 
     return kernels
 
+# Kernel pool for forward convolutions
+kernel_pool = _generate_kernel_pool(["compv3", "compv4"])
 
-def problem_to_dict(p):
-    """Convert GroupedConvProblem to dictionary."""
-    return {
-        "N": p.N,
-        "C": p.C,
-        "K": p.K,
-        "G": p.G,
-        "Hi": p.Hi,
-        "Wi": p.Wi,
-        "Y": p.Y,
-        "X": p.X,
-        "stride_h": p.stride_h,
-        "stride_w": p.stride_w,
-        "pad_h": p.pad_h,
-        "pad_w": p.pad_w,
-        "dtype": "bf16",
+# Load model
+model_dir = _DISPATCHER_ROOT / "heuristics/models/grouped_conv_forward_bf16_gfx950_2d_3d_no_compv5"
+feature_engine = GroupedConvFeatureEngine()
+predictor = Predictor(model_dir, feature_engine=feature_engine)
+
+print("=" * 80)
+print("ML Heuristic Validation")
+print("=" * 80)
+print(f"Model: {model_dir.name}")
+print(f"Kernel pool: {len(kernel_pool)} candidates")
+print(f"Validation problems: {len(VALIDATION_PROBLEMS)}")
+print()
+
+# Load oracle benchmark results
+oracle_df = pd.read_csv(_THIS_DIR / "validation_oracle_results.csv")
+print(f"Oracle measurements: {len(oracle_df)}")
+print()
+
+# Get oracle-best for each problem
+oracle_best = {}
+for prob_idx in range(len(VALIDATION_PROBLEMS)):
+    prob_measurements = oracle_df[oracle_df['problem_idx'] == prob_idx]
+    if len(prob_measurements) > 0:
+        best_idx = prob_measurements['tflops'].idxmax()
+        best_row = prob_measurements.loc[best_idx]
+        oracle_best[prob_idx] = {
+            'kernel': best_row['kernel'],
+            'tflops': best_row['tflops'],
+            'latency_ms': best_row['latency_ms']
+        }
+
+print(f"Oracle-best available for {len(oracle_best)} / {len(VALIDATION_PROBLEMS)} problems")
+print()
+
+# Run heuristic predictions
+print("Running ML heuristic predictions...")
+print()
+
+heuristic_predictions = []
+for prob_idx, prob in enumerate(VALIDATION_PROBLEMS):
+    # Build problem dictionary
+    problem = {
+        'N': prob.N,
+        'C': prob.C,
+        'K': prob.K,
+        'G': prob.G,
+        'Hi': prob.Hi,
+        'Wi': prob.Wi,
+        'Y': prob.Y,
+        'X': prob.X,
+        'stride_h': prob.stride_h,
+        'stride_w': prob.stride_w,
+        'pad_h': prob.pad_h,
+        'pad_w': prob.pad_w,
+        'dtype': 'bf16',
     }
 
+    # Predict for all kernels
+    predictions = []
+    for kernel in kernel_pool:
+        try:
+            pred_tflops = predictor.predict_tflops(problem, kernel)
+            predictions.append({
+                'kernel_config': kernel,
+                'predicted_tflops': pred_tflops,
+            })
+        except Exception as e:
+            # Skip kernels that fail (e.g., dimension mismatches)
+            pass
 
-def format_problem(p):
-    """Format problem for display."""
-    return (
-        f"N={p.N:3d} C={p.C:4d} K={p.K:4d} "
-        f"{p.Hi:2d}x{p.Wi:2d}→{p.Ho:2d}x{p.Wo:2d} "
-        f"f{p.Y}x{p.X}"
-    )
+    if predictions:
+        # Find best predicted kernel
+        best_pred = max(predictions, key=lambda x: x['predicted_tflops'])
 
+        # Generate kernel name for matching with oracle
+        kconf = best_pred['kernel_config']
+        Di = getattr(prob, 'Di', 1)
+        ndim = "3d" if Di > 1 else "2d"
+        kernel_name = f"grouped_conv_forward_bf16_{ndim}_{kconf['gemm_m_per_block']}x{kconf['gemm_n_per_block']}x64_{kconf['pipeline']}"
 
-def kernel_to_name(kernel, variant="forward", short=False):
-    """Convert kernel dict to name.
+        heuristic_predictions.append({
+            'problem_idx': prob_idx,
+            'predicted_kernel': kernel_name,
+            'predicted_tflops': best_pred['predicted_tflops'],
+            'num_candidates': len(predictions)
+        })
 
-    Args:
-        kernel: Kernel configuration dict
-        variant: 'forward', 'bwd_data', or 'bwd_weight'
-        short: If True, return short name (e.g., "16x64x64_compv3")
-               If False, return oracle name (e.g., "grouped_conv_forward_bf16_2d_16x64x64_compv3")
-    """
-    tile_name = f"{kernel['block_size']}x{kernel['gemm_m_per_block']}x{kernel['gemm_n_per_block']}"
-    pipeline = kernel["pipeline"]
+print(f"Heuristic predictions: {len(heuristic_predictions)}")
+print()
 
-    if short:
-        return f"{tile_name}_{pipeline}"
-    else:
-        return f"grouped_conv_{variant}_bf16_2d_{tile_name}_{pipeline}"
+# Compare heuristic vs oracle-best
+print("=" * 80)
+print("Comparison: Heuristic vs Oracle-Best")
+print("=" * 80)
 
+efficiencies = []
+results = []
 
-def load_oracle_results(csv_path):
-    """Load oracle benchmark results from CSV.
+for pred in heuristic_predictions:
+    prob_idx = pred['problem_idx']
 
-    Returns:
-        dict: {problem_idx: [(kernel_name, tflops), ...]}
-    """
-    if not Path(csv_path).exists():
-        return None
+    if prob_idx in oracle_best:
+        oracle = oracle_best[prob_idx]
 
-    results = defaultdict(list)
+        # Get actual TFLOPS of the predicted kernel from oracle data
+        prob_measurements = oracle_df[
+            (oracle_df['problem_idx'] == prob_idx) &
+            (oracle_df['kernel'] == pred['predicted_kernel'])
+        ]
 
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            problem_idx = int(row["problem_idx"])
-            kernel_name = row["kernel"]
-            tflops = float(row["tflops"]) if row["tflops"] not in ["nan", ""] else 0.0
+        if len(prob_measurements) > 0:
+            actual_tflops = prob_measurements.iloc[0]['tflops']
+            oracle_tflops = oracle['tflops']
 
-            results[problem_idx].append((kernel_name, tflops))
+            efficiency = actual_tflops / oracle_tflops if oracle_tflops > 0 else 0
+            efficiencies.append(efficiency)
 
-    # Sort each problem's results by TFLOPS descending
-    for idx in results:
-        results[idx].sort(key=lambda x: x[1], reverse=True)
-
-    return dict(results)
-
-
-def run_oracle_benchmark(variant, output_csv):
-    """Run full oracle benchmark to generate CSV results.
-
-    Args:
-        variant: 'forward', 'bwd_data', or 'bwd_weight'
-        output_csv: Path to output CSV file
-
-    Returns:
-        bool: True if benchmark succeeded, False otherwise
-    """
-    print(f"  Starting oracle benchmark for {variant}...")
-    print(f"  Output: {output_csv}")
-    print()
-
-    # Determine config path (try _bf16 suffix first, then without)
-    config_path = _THIS_DIR / "configs" / f"{variant}_bf16.json"
-    if not config_path.exists():
-        config_path = _THIS_DIR / "configs" / f"{variant}.json"
-        if not config_path.exists():
-            print(f"  ✗ Config file not found: {config_path}")
-            return False
-
-    # Problem set name
-    problems_module = f"{variant}_test_validation"
-
-    # Run benchmark script
-    benchmark_script = _THIS_DIR / "grouped_conv_full_benchmark.py"
-
-    cmd = [
-        sys.executable,
-        str(benchmark_script),
-        str(config_path),
-        "--arch",
-        "gfx950",
-        "--problems",
-        problems_module,
-        "--csv",
-        str(output_csv),
-        "--workers",
-        "8",
-        "--batch-size",
-        "10",
-    ]
-
-    try:
-        print(f"  Running: {' '.join(cmd)}")
-        print()
-
-        result = subprocess.run(
-            cmd,
-            cwd=_THIS_DIR,
-            capture_output=False,  # Show output in real-time
-            text=True,
-            timeout=3600,  # 1 hour timeout
-        )
-
-        if result.returncode == 0:
-            print()
-            print("  ✓ Benchmark completed successfully")
-            return True
+            results.append({
+                'problem_idx': prob_idx,
+                'oracle_kernel': oracle['kernel'],
+                'oracle_tflops': oracle_tflops,
+                'predicted_kernel': pred['predicted_kernel'],
+                'actual_tflops': actual_tflops,
+                'efficiency': efficiency,
+                'match': pred['predicted_kernel'] == oracle['kernel']
+            })
         else:
-            print()
-            print(f"  ✗ Benchmark failed with exit code {result.returncode}")
-            return False
+            # Predicted kernel wasn't benchmarked (may have timed out)
+            results.append({
+                'problem_idx': prob_idx,
+                'oracle_kernel': oracle['kernel'],
+                'oracle["tflops"]': oracle["tflops"],
+                'predicted_kernel': pred['predicted_kernel'],
+                'actual_tflops': 0.0,
+                'efficiency': 0.0,
+                'match': False
+            })
 
-    except subprocess.TimeoutExpired:
-        print()
-        print("  ✗ Benchmark timed out after 1 hour")
-        return False
-    except Exception as e:
-        print()
-        print(f"  ✗ Benchmark error: {e}")
-        return False
+# Calculate metrics
+if len(efficiencies) > 0:
+    efficiencies = np.array(efficiencies)
+    matches = sum(1 for r in results if r['match'])
 
-
-def find_kernel_so_path(kernel_name, arch="gfx950"):
-    """Find the .so path for a compiled kernel.
-
-    Args:
-        kernel_name: e.g., "32x128x64_compv3"
-        arch: GPU architecture
-
-    Returns:
-        Path to .so file or None if not found
-    """
-    # Parse kernel name to construct .so filename
-    # kernel_name format: "32x128x64_compv3"
-    parts = kernel_name.split("_")
-    tile = parts[0]  # "32x128x64"
-    pipeline = parts[1]  # "compv3" or "mem"
-
-    # The .so files are in _THIS_DIR / ".ck_dispatcher_build" / arch
-    build_dir = _THIS_DIR / ".ck_dispatcher_build" / arch
-
-    # Find matching .so - pattern: libdispatcher_conv_bwd_data_2d_bf16_*_{pipeline}_intrawave.so
-    import glob
-
-    pattern = str(
-        build_dir / f"libdispatcher_conv_bwd_data_2d_bf16_*_{pipeline}_intrawave.so"
-    )
-    matches = glob.glob(pattern)
-
-    # Filter by tile size in the name
-    for match in matches:
-        if tile.replace("x", "x") in match:
-            return Path(match)
-
-    return None
-
-
-def run_ml_kernel_on_hw(problem_idx, problem, kernel_name, variant="forward"):
-    """Run a specific ML-picked kernel on hardware.
-
-    Args:
-        problem_idx: Problem index
-        problem: GroupedConvProblem object
-        kernel_name: Kernel name (e.g., "32x128x64_compv3")
-        variant: 'forward', 'bwd_data', or 'bwd_weight'
-
-    Returns:
-        dict: {'status': 'SUCCESS'/'FAIL', 'tflops': float, 'latency_ms': float, 'error': str}
-    """
-    # Find the compiled .so for this kernel
-    so_path = find_kernel_so_path(kernel_name)
-
-    if so_path is None or not so_path.exists():
-        return {"status": "FAIL", "error": f"Kernel .so not found: {kernel_name}"}
-
-    # Prepare problem dict for subprocess
-    prob_dict = {
-        "N": problem.N,
-        "C": problem.C,
-        "K": problem.K,
-        "G": problem.G,
-        "Hi": problem.Hi,
-        "Wi": problem.Wi,
-        "Y": problem.Y,
-        "X": problem.X,
-        "stride_h": problem.stride_h,
-        "stride_w": problem.stride_w,
-        "pad_h": problem.pad_h,
-        "pad_w": problem.pad_w,
-        "dilation_h": getattr(problem, "dilation_h", 1),
-        "dilation_w": getattr(problem, "dilation_w", 1),
-        "direction": variant,
-    }
-
-    # Run via subprocess
-    runner_script = _THIS_DIR / "run_one_grouped_conv_kernel.py"
-
-    input_data = json.dumps(
-        {"so_path": str(so_path), "problem": prob_dict, "kernel_name": kernel_name}
-    )
-
-    try:
-        env = os.environ.copy()
-        env["GCONV_PYPATH"] = str(_DISPATCHER_ROOT / "python")
-        env["ROCR_VISIBLE_DEVICES"] = "0"
-
-        result = subprocess.run(
-            ["python3", str(runner_script)],
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=_THIS_DIR,
-            env=env,
-        )
-
-        if result.returncode != 0:
-            return {
-                "status": "FAIL",
-                "error": f"Subprocess error: {result.stderr[:200]}",
-            }
-
-        # Parse JSON output
-        output = result.stdout.strip()
-        data = json.loads(output)
-
-        if data.get("ok"):
-            return {
-                "status": "SUCCESS",
-                "tflops": data["tflops"],
-                "latency_ms": data["ms"],
-            }
-        else:
-            return {"status": "FAIL", "error": data.get("error", "Unknown error")}
-
-    except subprocess.TimeoutExpired:
-        return {"status": "FAIL", "error": "Timeout (30s)"}
-    except json.JSONDecodeError:
-        return {"status": "FAIL", "error": f"JSON parse error: {result.stdout[:200]}"}
-    except Exception as e:
-        return {"status": "FAIL", "error": str(e)[:200]}
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Validate ML heuristic predictions against oracle"
-    )
-    parser.add_argument(
-        "--variant",
-        choices=["forward", "bwd_data", "bwd_weight"],
-        default="forward",
-        help="Variant to validate (forward, bwd_data, or bwd_weight)",
-    )
-    parser.add_argument(
-        "--run-ml-hw",
-        action="store_true",
-        help="Run ML-picked kernels on hardware for actual TFLOPS measurement",
-    )
-    args = parser.parse_args()
-
-    variant = args.variant
-
-    # Load appropriate validation problems
-    if variant == "forward":
-        from forward_test_validation import (
-            VALIDATION_PROBLEMS_FORWARD as validation_problems,
-        )
-    elif variant == "bwd_data":
-        from bwd_data_test_validation import (
-            VALIDATION_PROBLEMS_BWD_DATA as validation_problems,
-        )
-    else:  # bwd_weight
-        from bwd_weight_test_validation import (
-            VALIDATION_PROBLEMS_BWD_WEIGHT as validation_problems,
-        )
-
+    print(f"Problems compared: {len(results)}")
+    print(f"  Predictions with oracle data: {len(efficiencies)}")
+    print(f"  Predictions missing oracle data: {len(results) - len(efficiencies)}")
+    print(f"Kernel match rate: {matches / len(results) * 100:.1f}% ({matches}/{len(results)})")
     print()
-    print("=" * 120)
-    if args.run_ml_hw:
-        print(
-            f"  {variant.upper()} ML MODEL VALIDATION - Hardware Execution of ML Picks"
-        )
-    else:
-        print(
-            f"  {variant.upper()} ML MODEL VALIDATION - Prediction vs Oracle Comparison"
-        )
-    print("=" * 120)
+    print("TFLOPS Efficiency (predicted_kernel_tflops / oracle_best_tflops):")
+    print(f"  Mean:   {efficiencies.mean():.4f} ({efficiencies.mean() * 100:.2f}%)")
+    print(f"  Median: {np.median(efficiencies):.4f} ({np.median(efficiencies) * 100:.2f}%)")
+    print(f"  P10:    {np.percentile(efficiencies, 10):.4f} ({np.percentile(efficiencies, 10) * 100:.2f}%)")
+    print(f"  P90:    {np.percentile(efficiencies, 90):.4f} ({np.percentile(efficiencies, 90) * 100:.2f}%)")
+    print(f"  Min:    {efficiencies.min():.4f} ({efficiencies.min() * 100:.2f}%)")
+    print(f"  Max:    {efficiencies.max():.4f} ({efficiencies.max() * 100:.2f}%)")
     print()
 
-    # Load ML model
-    model_dir = (
-        _DISPATCHER_ROOT
-        / "heuristics"
-        / "models"
-        / f"grouped_conv_{variant}_bf16_gfx950"
-    )
-    if not model_dir.exists():
-        print(f"ERROR: Model not found: {model_dir}")
-        sys.exit(1)
-
-    feature_engine = GroupedConvFeatureEngine()
-    predictor = Predictor(model_dir, feature_engine=feature_engine)
-    print(f"  ✓ ML model loaded: {model_dir.name}")
-    print(f"  ✓ Validation problems: {len(validation_problems)}")
+    # Show worst cases
+    print("Worst 10 predictions (lowest efficiency):")
     print()
-
-    # Try to load oracle results
-    oracle_csv = _THIS_DIR / f"validation_{variant}_bf16_gfx950.csv"
-    oracle_results = load_oracle_results(oracle_csv)
-
-    if oracle_results is None:
-        print(f"  ⚠  Oracle results not found: {oracle_csv}")
-        print("  ⚠  Running full benchmark to generate oracle results...")
+    results_df = pd.DataFrame(results)
+    worst_10 = results_df.nsmallest(10, 'efficiency')
+    for idx, row in worst_10.iterrows():
+        prob = VALIDATION_PROBLEMS[row['problem_idx']]
+        Di = getattr(prob, 'Di', 1)
+        ndim = "3D" if Di > 1 else "2D"
+        print(f"Problem {row['problem_idx']}: N={prob.N} C={prob.C} K={prob.K} H={prob.Hi} W={prob.Wi} ({ndim})")
+        print(f"  Oracle: {row['oracle_kernel']:<50} {row['oracle_tflops']:>8.2f} TFLOPS")
+        print(f"  Predicted: {row['predicted_kernel']:<47} {row['actual_tflops']:>8.2f} TFLOPS")
+        print(f"  Efficiency: {row['efficiency']:.2%}")
         print()
 
-        # Run benchmark to generate oracle CSV
-        success = run_oracle_benchmark(variant, oracle_csv)
-
-        if not success:
-            print("  ✗ Benchmark failed. Continuing in prediction-only mode.")
-            print()
-            mode = "prediction_only"
-        else:
-            # Try loading again
-            oracle_results = load_oracle_results(oracle_csv)
-            if oracle_results is None:
-                print("  ✗ Failed to load oracle results after benchmark.")
-                mode = "prediction_only"
-            else:
-                print(f"  ✓ Oracle results loaded: {oracle_csv}")
-                print(
-                    f"  ✓ Oracle benchmarks: {sum(len(v) for v in oracle_results.values())} kernel measurements"
-                )
-                print()
-                mode = "hardware" if args.run_ml_hw else "comparison"
-    else:
-        print(f"  ✓ Oracle results loaded: {oracle_csv}")
-        print(
-            f"  ✓ Oracle benchmarks: {sum(len(v) for v in oracle_results.values())} kernel measurements"
-        )
-        print()
-        mode = "hardware" if args.run_ml_hw else "comparison"
-
-    # Get ML predictions for each problem
-    if mode == "hardware":
-        print(
-            f"  {'Problem':<40} {'Oracle Best':<20} {'Oracle':>10} {'ML Pick':<20} {'ML Pred':>10} {'ML HW':>10} {'Efficiency':>11}"
-        )
-        print("  " + "-" * 115)
-    elif mode == "comparison":
-        print(
-            f"  {'Problem':<45} {'ML Pick':<25} {'ML Pred':>11} {'Oracle Best':<25} {'Oracle':>13} {'Efficiency':>11}"
-        )
-        print("  " + "-" * (45 + 25 + 11 + 25 + 13 + 11 + 4))
-    else:
-        print(f"  {'Problem':<45} {'ML Pick':<25} {'ML TFLOPS':>11}")
-        print("  " + "-" * (45 + 25 + 11 + 2))
-
-    efficiencies = []
-
-    # Get kernel pool for this variant
-    kernel_pool = get_kernel_pool(variant)
-
-    for idx, problem in enumerate(validation_problems):
-        prob_str = format_problem(problem)
-        prob_dict = problem_to_dict(problem)
-
-        # Get ML predictions
-        predictions = []
-        for kernel in kernel_pool:
-            pred_tflops = predictor.predict_tflops(prob_dict, kernel)
-            predictions.append(
-                {
-                    "kernel": kernel,
-                    "name": kernel_to_name(
-                        kernel, variant=variant, short=False
-                    ),  # Use oracle format for matching
-                    "short_name": kernel_to_name(
-                        kernel, variant=variant, short=True
-                    ),  # For display
-                    "pred_tflops": pred_tflops,
-                }
-            )
-
-        # Sort by predicted TFLOPS
-        predictions.sort(key=lambda x: x["pred_tflops"], reverse=True)
-
-        ml_pick = predictions[0]
-        ml_name = ml_pick["name"]  # Oracle format for matching
-        ml_short_name = ml_pick["short_name"]  # Short format for display
-        ml_pred_tflops = ml_pick["pred_tflops"]
-
-        if mode == "hardware":
-            # Get oracle best
-            oracle_list = oracle_results.get(idx, [])
-            oracle_best_name, oracle_best_tflops = (
-                oracle_list[0] if oracle_list else ("N/A", 0.0)
-            )
-            oracle_short = (
-                oracle_best_name.replace("grouped_conv_bwd_data_bf16_2d_", "")
-                if oracle_best_name != "N/A"
-                else "N/A"
-            )
-
-            # Run ML pick on hardware
-            hw_result = run_ml_kernel_on_hw(idx, problem, ml_short_name, variant)
-
-            if hw_result["status"] == "SUCCESS":
-                ml_hw_tflops = hw_result["tflops"]
-                efficiency = (
-                    100.0 * ml_hw_tflops / oracle_best_tflops
-                    if oracle_best_tflops > 0
-                    else 0.0
-                )
-                efficiencies.append(efficiency)
-                print(
-                    f"  {prob_str:<40} {oracle_short:<20} {oracle_best_tflops:>10.2f} {ml_short_name:<20} {ml_pred_tflops:>10.2f} {ml_hw_tflops:>10.2f} {efficiency:>10.1f}%"
-                )
-            else:
-                print(
-                    f"  {prob_str:<40} {oracle_short:<20} {oracle_best_tflops:>10.2f} {ml_short_name:<20} {ml_pred_tflops:>10.2f} {'FAIL':>10} {'N/A':>11}"
-                )
-                print(f"    Error: {hw_result['error']}")
-
-        elif mode == "comparison":
-            # Get oracle best and find ML pick in oracle results
-            oracle_list = oracle_results.get(idx, [])
-            if oracle_list:
-                oracle_best_name, oracle_best_tflops = oracle_list[0]
-                oracle_short = oracle_best_name.replace(
-                    f"grouped_conv_{variant}_bf16_2d_", ""
-                )
-
-                # Find ML's pick in oracle results (match by full name)
-                ml_oracle_tflops = None
-                for name, tflops in oracle_list:
-                    if name == ml_name:
-                        ml_oracle_tflops = tflops
-                        break
-
-                if ml_oracle_tflops is not None and oracle_best_tflops > 0:
-                    efficiency = 100.0 * ml_oracle_tflops / oracle_best_tflops
-                    efficiencies.append(efficiency)
-                    print(
-                        f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f} {oracle_short:<25} {oracle_best_tflops:>13.2f} {efficiency:>10.1f}%"
-                    )
-                else:
-                    print(
-                        f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f} {oracle_short:<25} {oracle_best_tflops:>13.2f} {'N/A':>11}"
-                    )
-            else:
-                print(
-                    f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f} {'N/A':<25} {'N/A':>13} {'N/A':>11}"
-                )
-        else:
-            print(f"  {prob_str:<45} {ml_short_name:<25} {ml_pred_tflops:>11.2f}")
-
-    print()
-    print("  " + "=" * 100)
-    print()
-
-    if mode == "comparison" and efficiencies:
-        print("  EFFICIENCY METRICS:")
-        print(f"  {'Metric':<30} {'Value':>15}")
-        print("  " + "-" * 47)
-        print(
-            f"  {'Mean Efficiency':<30} {sum(efficiencies) / len(efficiencies):>14.1f}%"
-        )
-        print(
-            f"  {'P10 Efficiency':<30} {sorted(efficiencies)[len(efficiencies) // 10]:>14.1f}%"
-        )
-        print(
-            f"  {'P50 Efficiency (Median)':<30} {sorted(efficiencies)[len(efficiencies) // 2]:>14.1f}%"
-        )
-        print(f"  {'Min Efficiency':<30} {min(efficiencies):>14.1f}%")
-        print(f"  {'Max Efficiency':<30} {max(efficiencies):>14.1f}%")
-        print()
-
-        # Top-1 accuracy (how often ML picks the oracle best)
-        top1_count = sum(1 for eff in efficiencies if eff >= 99.9)
-        print(
-            f"  {'Top-1 Accuracy':<30} {100 * top1_count / len(efficiencies):>14.1f}% ({top1_count}/{len(efficiencies)})"
-        )
-        print()
-    elif mode == "prediction_only":
-        # Show statistics on predictions
-        print("  ML PREDICTION STATISTICS (Oracle not yet available):")
-        print(f"  {'Metric':<30} {'Value':>15}")
-        print("  " + "-" * 47)
-
-        avg_tflops = sum(p["pred_tflops"] for p in predictions) / len(predictions)
-        print(f"  {'Avg Predicted TFLOPS':<30} {avg_tflops:>15.2f}")
-        print()
-        print("  Run oracle benchmark to enable efficiency comparison:")
-        print("  python3 grouped_conv_full_benchmark.py --arch gfx950 \\")
-        print(f"    --problems {variant}_test_validation \\")
-        print(f"    --csv validation_{variant}_bf16_gfx950.csv \\")
-        print(f"    --batch-size 5 configs/{variant}_bf16.json")
-        print()
-
-    print("  " + "=" * 100)
-    print()
-
-
-if __name__ == "__main__":
-    main()
+    # Save detailed results
+    results_df.to_csv(_THIS_DIR / "validation_heuristic_vs_oracle.csv", index=False)
+    print(f"Detailed results saved to: validation_heuristic_vs_oracle.csv")
+else:
+    print("ERROR: No predictions could be compared with oracle data")

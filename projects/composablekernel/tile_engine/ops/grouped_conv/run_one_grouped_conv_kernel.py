@@ -34,20 +34,25 @@ import numpy as np  # noqa: E402
 def _run_one(idx, so_path, prob_dict, kernel_name):
     """Run a single kernel and output result as JSON."""
     try:
-        # Create problem from dict (include dilation if present)
+        # Create problem from dict (include dilation and 3D if present)
         problem = GroupedConvProblem(
             N=prob_dict["N"],
             C=prob_dict["C"],
             K=prob_dict["K"],
             G=prob_dict["G"],
+            Di=prob_dict.get("Di", 1),
             Hi=prob_dict["Hi"],
             Wi=prob_dict["Wi"],
+            Z=prob_dict.get("Z", 1),
             Y=prob_dict["Y"],
             X=prob_dict["X"],
+            stride_d=prob_dict.get("stride_d", 1),
             stride_h=prob_dict["stride_h"],
             stride_w=prob_dict["stride_w"],
+            pad_d=prob_dict.get("pad_d", 0),
             pad_h=prob_dict["pad_h"],
             pad_w=prob_dict["pad_w"],
+            dilation_d=prob_dict.get("dilation_d", 1),
             dilation_h=prob_dict.get("dilation_h", 1),
             dilation_w=prob_dict.get("dilation_w", 1),
             direction=prob_dict["direction"],
