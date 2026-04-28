@@ -1507,7 +1507,8 @@ try
                                                                 ldb));
     }
     else
-        return HIPSOLVER_STATUS_INVALID_ENUM;
+        status = HIPSOLVER_STATUS_INVALID_ENUM;
+
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
     return status;
 }

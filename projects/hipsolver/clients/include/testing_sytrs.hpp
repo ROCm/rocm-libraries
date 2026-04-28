@@ -538,7 +538,7 @@ void testing_sytrs(Arguments& argus)
                                                   (SIZE)0,
                                                   (int*)nullptr,
                                                   bc),
-                                  HIPSOLVER_STATUS_INVALID_VALUE);
+                                  HIPSOLVER_STATUS_INVALID_ENUM);
         }
 
         if(argus.timing)
