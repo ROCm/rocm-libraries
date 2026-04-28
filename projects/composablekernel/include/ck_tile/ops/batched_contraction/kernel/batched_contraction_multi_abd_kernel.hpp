@@ -22,7 +22,6 @@ struct BatchedContractionMultiABDHostArgs
     std::array<const void*, NumBTensor> bs_ptr;
     std::array<const void*, NumDTensor> ds_ptr;
     void* e_ptr;
-    ck_tile::index_t k_batch;
 
     // Per-tensor dims: A[i] = [G0,..,M0,..,K0,..], B[j] = [G0,..,N0,..,K0,..]
     std::array<std::vector<ck_tile::index_t>, NumATensor> As_dims;
@@ -54,7 +53,6 @@ struct BatchedContractionMultiABDKernelArgs
     std::array<const void*, NumBTensor> bs_ptr;
     std::array<const void*, NumDTensor> ds_ptr;
     void* e_ptr;
-    ck_tile::index_t k_batch;
 
     ck_tile::index_t M_dims[NumDimM];
     ck_tile::index_t N_dims[NumDimN];
@@ -180,10 +178,6 @@ struct BatchedContractionMultiABDKernel
 
     CK_TILE_HOST static constexpr bool IsSupportedArguments(const KernelArgs& kargs)
     {
-        if(kargs.k_batch > 1)
-        {
-            return false;
-        }
         if(kargs.G_total <= 0)
         {
             return false;
@@ -200,7 +194,7 @@ struct BatchedContractionMultiABDKernel
                                                             kargs.stride_Bs,
                                                             kargs.stride_Ds,
                                                             kargs.stride_E,
-                                                            kargs.k_batch};
+                                                            1};
 
         return UniversalGemmKernel::IsSupportedArgument(gemm_kargs);
     }
@@ -221,8 +215,7 @@ struct BatchedContractionMultiABDKernel
 
     CK_TILE_HOST static constexpr auto GridSize(const KernelArgs& kargs)
     {
-        return dim3(
-            TilePartitioner::GridSize(kargs.M_total, kargs.N_total), kargs.G_total, kargs.k_batch);
+        return dim3(TilePartitioner::GridSize(kargs.M_total, kargs.N_total), kargs.G_total);
     }
 
     template <typename GStrides>
@@ -395,7 +388,6 @@ struct BatchedContractionMultiABDKernel
         kargs.bs_ptr  = host_args.bs_ptr;
         kargs.ds_ptr  = host_args.ds_ptr;
         kargs.e_ptr   = host_args.e_ptr;
-        kargs.k_batch = host_args.k_batch;
 
         // Validate G dimensions are identical across all tensors (use first A tensor as reference)
         for(ck_tile::index_t i = 0; i < NumDimG; ++i)

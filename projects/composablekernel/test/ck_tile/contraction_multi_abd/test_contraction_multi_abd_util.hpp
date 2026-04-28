@@ -266,9 +266,7 @@ class TestCkTileContractionMultiABD : public ::testing::Test
              const std::vector<ck_tile::index_t>& M_dims,
              const std::vector<ck_tile::index_t>& N_dims,
              const std::vector<ck_tile::index_t>& K_dims,
-             ck_tile::index_t k_batch       = 1,
-             bool expect_supported          = true,
-             bool use_padded_g_strides      = false)
+             bool use_padded_g_strides = false)
     {
         auto calc_total = [](const std::vector<ck_tile::index_t>& dims) {
             ck_tile::index_t t = 1;
@@ -392,7 +390,6 @@ class TestCkTileContractionMultiABD : public ::testing::Test
             host_args.Ds_strides[d] = convert_strides(ds_host[d].get_strides());
         }
         host_args.e_ptr     = e_dev.GetDeviceBuffer();
-        host_args.k_batch   = k_batch;
         host_args.E_dims    = E_dims;
         host_args.E_strides = E_strides;
 
@@ -401,15 +398,7 @@ class TestCkTileContractionMultiABD : public ::testing::Test
         if(!supported)
         {
             std::cout << "G=" << G_total << " M=" << M_total << " N=" << N_total
-                      << " K=" << K_total << " k_batch=" << k_batch
-                      << " unsupported by multi-ABD kernel" << std::endl;
-            return !expect_supported;
-        }
-        if(!expect_supported)
-        {
-            std::cout << "G=" << G_total << " M=" << M_total << " N=" << N_total
-                      << " K=" << K_total << " k_batch=" << k_batch
-                      << " unexpectedly supported" << std::endl;
+                      << " K=" << K_total << " unsupported by multi-ABD kernel" << std::endl;
             return false;
         }
 
@@ -449,7 +438,7 @@ class TestCkTileContractionMultiABD : public ::testing::Test
             *std::max_element(e_ref_host.mData.begin(), e_ref_host.mData.end());
         const auto rtol_atol =
             calculate_rtol_atol<ADataType, BDataType, AccDataType, EDataType, DDataType>(
-                K_total, k_batch, max_accumulated_value);
+                K_total, 1, max_accumulated_value);
 
         bool pass = ck_tile::check_err(e_gpu_host,
                                        e_ref_host,

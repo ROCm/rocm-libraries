@@ -124,7 +124,6 @@ int run_contraction_multi_abd_example(int argc, char* argv[])
     host_args.bs_ptr     = {b0_dev.GetDeviceBuffer()};
     host_args.ds_ptr     = {d0_dev.GetDeviceBuffer()};
     host_args.e_ptr      = e_dev.GetDeviceBuffer();
-    host_args.k_batch    = 1;
     host_args.As_dims    = {A_dims, A_dims};
     host_args.Bs_dims    = {B_dims};
     host_args.Ds_dims    = {E_dims};

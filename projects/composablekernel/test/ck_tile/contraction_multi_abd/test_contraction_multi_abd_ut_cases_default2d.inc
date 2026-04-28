@@ -20,12 +20,7 @@ TYPED_TEST(TestCkTileContractionMultiABD, Default2D_G2_M1_N1_K1_256x256x256)
 
 TYPED_TEST(TestCkTileContractionMultiABD, Default2D_G2_M1_N1_K1_padded_g_strides)
 {
-    EXPECT_TRUE((this->template Run<2, 1, 1, 1>({2, 2}, {128}, {128}, {64}, 1, true, true)));
-}
-
-TYPED_TEST(TestCkTileContractionMultiABD, Default2D_G1_M1_N1_K1_split_k_unsupported)
-{
-    EXPECT_TRUE((this->template Run<1, 1, 1, 1>({2}, {256}, {256}, {256}, 2, false)));
+    EXPECT_TRUE((this->template Run<2, 1, 1, 1>({2, 2}, {128}, {128}, {64}, true)));
 }
 
 TYPED_TEST(TestCkTileContractionMultiABD, Default2D_G1_M1_N1_K1_padded_edge)
