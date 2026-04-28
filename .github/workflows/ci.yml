@@ -164,15 +164,15 @@ jobs:
       continue-on-error: true
       run: |
         source .venv/bin/activate
+        pip install lit
         export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
         export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
-        export LLVM_PROJECT_DIR=/home/runner/llvm-project
         export GPULIB_SOURCE_DIR=$GITHUB_WORKSPACE
         export GPULIB_BUILD_DIR=$GITHUB_WORKSPACE/build-debug
         
         echo "Running lit unit tests..."
         cd $GITHUB_WORKSPACE
-        /home/runner/llvm-project/build/bin/llvm-lit -a -v --echo-all-commands -j 1 test/
+        lit -a -v --echo-all-commands -j 1 test/
         
     - name: "Benchmark: SAXPY (step3-simdize)"
       timeout-minutes: 4

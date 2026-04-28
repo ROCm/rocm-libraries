@@ -2,6 +2,7 @@ build/bin
 build/lib
 build/test
 build/.cmake
+__pycache__/
 
 test/temp.cxx
 
