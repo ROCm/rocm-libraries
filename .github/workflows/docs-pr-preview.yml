@@ -122,6 +122,42 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Sync RTD versions to discover PR branch
+        # Without a GitHub webhook configured on the repo, RTD is unaware of new branches.
+        # Triggering a sync forces RTD to re-scan the repository and register the PR branch
+        # as a version before we attempt to activate it in the next step.
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          curl \
+            --connect-timeout 180 \
+            --fail \
+            --request POST \
+            --header "Authorization: Token $RTD_TOKEN" \
+            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/sync-versions/"
+
+      - name: Wait for RTD to register PR branch version
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          version_url="https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
+          echo "Polling for version to appear: $version_url"
+          for i in $(seq 1 20); do
+            status=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+              --header "Authorization: Token $RTD_TOKEN" \
+              "$version_url")
+            if [ "$status" = "200" ]; then
+              echo "Version found after $i attempt(s)."
+              exit 0
+            fi
+            echo "Attempt $i: version not yet registered (HTTP $status), waiting 15s..."
+            sleep 15
+          done
+          echo "Timed out waiting for RTD to register version."
+          exit 1
+
       - name: Activate PR branch as a new RTD version
         if: steps.rtd.outputs.exists == 'true'
         env:
