@@ -13,10 +13,18 @@ for _name, _obj in vars(_rocisa).items():
         sys.modules.setdefault(f"rocisa.{_name}", _obj)
 
 # Staleness check: only active in source builds.
-# Pre-built packages (wheels, apt) lack _build_info.py, so the import fails
-# silently and the check is skipped.
+# Pre-built packages (wheels, apt) lack _build_info.py — the import is
+# silently skipped. Catching ImportError (not just ModuleNotFoundError)
+# because Python 3.10 raises ImportError for missing relative submodules.
+# The intentional staleness ImportError is raised outside the try/except
+# so it is never swallowed.
+_bi = None
 try:
     from . import _build_info as _bi
+except ImportError:
+    pass  # Pre-built package — no source tree, skip check
+
+if _bi is not None:
     from pathlib import Path
 
     _so = Path(_rocisa.__file__)
@@ -33,5 +41,3 @@ try:
             "  Rebuild:  cmake --build <build_dir> --target _rocisa"
         )
     del _bi, _so, _so_mtime, _stale, Path
-except ModuleNotFoundError:
-    pass  # Pre-built package — no source tree, skip check
