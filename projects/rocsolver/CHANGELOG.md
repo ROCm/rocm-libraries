@@ -29,6 +29,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Resolved issues
 
+* Fixed a memory access error in SYTRF and synchronization issues in LASYF and SYTF2.
 * Fixed a synchronization issue in STEBZ and downstream functions, such as SYEVX and SYEVDX.
 * Fixed a synchronization issue in GETF2.
 
