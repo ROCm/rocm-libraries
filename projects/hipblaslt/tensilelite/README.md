@@ -50,10 +50,26 @@ invoke build-client \
 Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
 ```
 
-> **Note:** If you modify rocisa C++ sources after `invoke rocisa`, run
-> `cmake --build build_tmp --target _rocisa` to rebuild the bindings.
-> Importing rocisa with stale bindings will raise an `ImportError` with
-> a clear rebuild hint.
+### Rebuilding rocisa after C++ changes
+
+`invoke rocisa` only needs to be re-run when `pyproject.toml` or `CMakeLists.txt` change.
+For day-to-day C++ source edits, rebuild only the extension:
+
+```bash
+# default build_tmp location
+cmake --build build_tmp --target _rocisa
+
+# or a custom build directory
+cmake --build <build_dir> --target _rocisa
+```
+
+If you forget to rebuild, importing rocisa will raise an `ImportError` listing the stale files:
+
+```
+ImportError: rocisa C++ sources are newer than the built _rocisa.so — bindings are stale.
+  Modified: .../rocisa/src/main.cpp
+  Rebuild:  cmake --build <build_dir> --target _rocisa
+```
 
 **3. Build with CMake (Custom Location) and Run Test with Path Flag**
 
