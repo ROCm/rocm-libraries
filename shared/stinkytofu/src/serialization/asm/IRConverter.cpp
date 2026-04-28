@@ -43,24 +43,23 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
         return;
     }
 
-    // AsmDirective (TEXTBLOCK / .set / etc.) — produced by RawAsmParser for unknown mnemonics,
-    // directives, and symbolic-register lines it cannot fully parse.
+    // "FENCE" is the mnemonic printed by AsmPrinter; "scheduling_fence" is the
+    // rocisa instruction string. Both round-trip to a scheduling fence.
+    // Fences carry no modifiers — they are hard region boundaries with no tokens.
+    if (inst->opcodeStr == "FENCE" || inst->opcodeStr == "scheduling_fence") {
+        irBuilder.createFence();
+    }
+
     if (inst->opcodeStr == "asm_directive") {
-        AsmDirective* directive = irBuilder.createIR<AsmDirective>();
-        // srcRegs encoding: [0]=kind-string  [1]=value  [2]=symbol (for .set)
+        AsmDirective* d = irBuilder.createIR<AsmDirective>();
         if (!inst->srcRegs.empty() &&
             inst->srcRegs[0].dataType == StinkyRegister::Type::LiteralString) {
-            const std::string& kindStr = inst->srcRegs[0].literalValue;
-            if (kindStr == ".set") {
-                directive->kind = AsmDirectiveKind::SET;
-                directive->name = ".set";
-                if (inst->srcRegs.size() > 1) directive->symbol = inst->srcRegs[1].literalValue;
-                if (inst->srcRegs.size() > 2) directive->value = inst->srcRegs[2].literalValue;
-            } else {
-                // TEXTBLOCK — raw line stored in srcRegs[1]
-                directive->kind = AsmDirectiveKind::TEXTBLOCK;
-                if (inst->srcRegs.size() > 1) directive->value = inst->srcRegs[1].literalValue;
-            }
+            d->name = inst->srcRegs[0].literalValue;
+            if (d->name == ".set") d->kind = AsmDirectiveKind::SET;
+        }
+        if (inst->srcRegs.size() > 1 &&
+            inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString) {
+            d->symbol = inst->srcRegs[1].literalValue;
         }
         return;
     }

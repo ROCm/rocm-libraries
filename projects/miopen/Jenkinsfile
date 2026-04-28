@@ -1058,6 +1058,9 @@ pipeline {
             githubNotify context: 'Math CI Summary',
                          status: 'FAILURE',
                          description: 'Some checks have failed'
+            script {
+                utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
+            }
         }
     }
 }

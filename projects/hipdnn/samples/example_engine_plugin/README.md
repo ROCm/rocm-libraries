@@ -260,7 +260,7 @@ contains nodes (operations) with typed attributes and tensor metadata.
 
 #### GraphWrapper and NodeWrapper
 
-The data SDK provides wrapper classes in `hipdnn_data_sdk/flatbuffer_utilities/`
+The FlatBuffers SDK provides wrapper classes in `hipdnn_flatbuffers_sdk/flatbuffer_utilities/`
 that simplify working with the serialized graph data:
 
 - **`GraphWrapper`** -- wraps the serialized graph buffer. It validates the buffer on
@@ -625,7 +625,7 @@ changed. They are the same for every plugin:
 | `HIPDNN_PLUGIN_NAME`, `HIPDNN_PLUGIN_VERSION`, `HIPDNN_PLUGIN_CONTAINER_TYPE`, `HIPDNN_PLUGIN_HANDLE_TYPE`, `HIPDNN_PLUGIN_CONTEXT_TYPE` | Macro names expected by `EnginePluginImpl.inl` (values are plugin-specific) |
 | `EnginePluginImpl.inl` | Plugin SDK header that generates C entry points |
 | `IPlan`, `EngineManager` | Plugin SDK types |
-| `IGraph`, `IEngineConfig` | Data SDK types |
+| `IGraph`, `IEngineConfig` | FlatBuffers SDK types |
 
 ## Testing Your Plugin
 
