@@ -7,8 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/RMSNormBackwardConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -20,8 +20,8 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 
 namespace
 {
@@ -65,7 +65,8 @@ protected:
     /// Builds and lowers a graph, returning the deserialized GraphT.
     /// Callers set up attrs before calling; this creates tensors, calls the
     /// graph method, validates, lowers, serializes, and deserializes.
-    hipdnn_data_sdk::data_objects::GraphT buildAndDeserialize(RMSNormBackwardAttributes attrs)
+    hipdnn_flatbuffers_sdk::data_objects::GraphT
+        buildAndDeserialize(RMSNormBackwardAttributes attrs)
     {
         auto graph = std::make_shared<TestableGraph>();
         graph->set_name("RMSNormBackwardIntegrationTest")
@@ -113,8 +114,8 @@ protected:
                       rawDesc, serializedSize, &serializedSize, serializedData.data()),
                   HIPDNN_STATUS_SUCCESS);
 
-        hipdnn_data_sdk::data_objects::GraphT graphT;
-        hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+        hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
+        hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
         return graphT;
     }
 
@@ -134,7 +135,8 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardLoweringRoun
     ASSERT_EQ(graphT.tensors.size(), 6u);
 
     // Verify tensor attributes
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
+        tensorMap;
     for(const auto& t : graphT.tensors)
     {
         tensorMap[t->uid] = t.get();

@@ -7,7 +7,7 @@
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 
 #include <flatbuffers/flatbuffers.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include <memory>
 #include <unordered_set>
