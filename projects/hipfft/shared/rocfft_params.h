@@ -334,6 +334,9 @@ public:
             const int ndevices = rocfft_scoped_device::device_count();
             for(int device = 0; device < ndevices; ++device)
             {
+                if(workbuffersizes[device] == 0)
+                    continue;
+
                 rocfft_scoped_device dev(device);
 
                 hipError_t hip_status = hipSuccess;

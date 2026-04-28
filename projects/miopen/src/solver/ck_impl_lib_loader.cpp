@@ -329,6 +329,13 @@ void CkImplLibLoader::BindOptionalKernelTypeSymbols()
             MIOPEN_LOG_I2("Optional CK symbol not found: " << symbol_name);
     };
 
+    bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConvFwd)].get_all_kernel_types,
+                  "ck_impl_fwd_get_all_kernel_type_strings");
+    bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConvBwd)].get_all_kernel_types,
+                  "ck_impl_bwd_get_all_kernel_type_strings");
+    bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConvWrw)].get_all_kernel_types,
+                  "ck_impl_wrw_get_all_kernel_type_strings");
+
     bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConv3dFwd)].get_all_kernel_types,
                   "ck_impl_3d_fwd_get_all_kernel_type_strings");
     bind_optional(solver_fns_[ToSolverIndex(CKSolverType::GrpConv3dBwd)].get_all_kernel_types,

@@ -75,6 +75,9 @@ if(CMAKE_PROJECT_NAME STREQUAL "hiptensor")
     option(BUILD_OFFLOAD_COMPRESS "Build hiptensor with offload compression" ON)
     option(HIPTENSOR_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
     option(HIPTENSOR_INLINE_UNARY_OPS "Inline all unary ops for best runtime performance (slower compilation)" OFF)
+    if(WIN32)
+        option(CREATE_TEST_APP_LOCAL_DEPLOY "Copy ROCm runtime DLLs next to test binaries so they take precedence over System32 (Windows only)" OFF)
+    endif()
 endif()
 
 # Setup output paths

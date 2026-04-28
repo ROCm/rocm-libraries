@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -1360,6 +1360,24 @@ rocfft_status
                                         + ROCFFT_CURRENT_FUNCTION);
         }
     }
+
+    // Non-zero offsets are not supported yet, actually.
+    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+    {
+        const auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
+        if(!io_fields.empty())
+            continue; // offsets are ignored if fields are used
+        const auto& io_offsets    = io == io_data_label::INPUT ? inOffset : outOffset;
+        const auto  io_array_type = io == io_data_label::INPUT ? inArrayType : outArrayType;
+        if(io_offsets[0] != 0 || (array_type_is_planar(io_array_type) && io_offsets[1] != 0))
+        {
+            if(LOG_PLAN_ENABLED())
+                *LogSingleton::GetInstance().GetPlanOS()
+                    << "Non-zero offsets are not supported yet" << std::endl;
+            return rocfft_status_invalid_offset;
+        }
+    }
+
     // -----------------------------------------
     //        In-place specific validations
     // -----------------------------------------
