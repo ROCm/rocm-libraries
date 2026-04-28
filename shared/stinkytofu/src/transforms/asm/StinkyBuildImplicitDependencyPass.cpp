@@ -128,19 +128,18 @@ static std::unordered_set<const BasicBlock*> collectOptLevel3MemTokenCheckBlocks
     for (const Loop& loop : loops) {
         // loop BBs
         for (const BasicBlock* bodyBB : loop.bodyBBs) {
-            if (bodyBB) checkBlocks.insert(bodyBB);
+            checkBlocks.insert(bodyBB);
         }
 
         // preloop BBs: predecessors of loop header that are outside loop body.
         if (loop.headerBB) {
             for (const BasicBlock* pred : loop.headerBB->getPredecessors()) {
-                if (pred && !loop.contains(pred)) checkBlocks.insert(pred);
+                if (!loop.contains(pred)) checkBlocks.insert(pred);
             }
         }
 
         // postloop BBs: successors of loop body that are outside loop body.
         for (const BasicBlock* bodyBB : loop.bodyBBs) {
-            if (!bodyBB) continue;
             for (const BasicBlock* succ : bodyBB->getSuccessors()) {
                 if (succ && !loop.contains(succ)) checkBlocks.insert(succ);
             }
