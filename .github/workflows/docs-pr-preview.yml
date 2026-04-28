@@ -117,6 +117,18 @@ jobs:
 
           if echo "$project_list" | grep -Fxq "$project_slug"; then
             echo "exists=true" >> $GITHUB_OUTPUT
+
+            # Fetch the RTD-configured documentation URL to get the correct alias
+            doc_url=$(curl \
+              --connect-timeout 180 \
+              --silent \
+              --header "Authorization: Token $RTD_TOKEN" \
+              "https://app.readthedocs.com/api/v3/projects/$project_slug/" \
+              | jq -r '.urls.documentation')
+
+            # Strip trailing version segment (e.g. ".../en/latest/") to get the base
+            doc_base=$(echo "$doc_url" | sed 's|/[^/]*/$||')
+            echo "doc_base=$doc_base" >> $GITHUB_OUTPUT
           else
             echo "${{ steps.extract.outputs.project_name }} does not exist on Read the Docs, skipping."
             echo "exists=false" >> $GITHUB_OUTPUT
@@ -189,7 +201,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          preview_url="https://rocm.docs.amd.com/projects/${{ steps.extract.outputs.project_name }}/en/${{ steps.rtd.outputs.version_slug }}/"
+          preview_url="${{ steps.rtd.outputs.doc_base }}/${{ steps.rtd.outputs.version_slug }}/"
           gh pr comment ${{ github.event.issue.number }} \
             --repo ${{ github.repository }} \
             --body "Docs preview for **${{ steps.extract.outputs.project_name }}** is building on Read the Docs: $preview_url \
