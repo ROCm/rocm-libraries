@@ -25,7 +25,7 @@ namespace direct_conv {
 //   TC::Input::MakeLdsStoreDescriptor()
 //   TC::Input::MakeLdsReadDescriptor()
 //   TC::Mfma::MakeDistribution()
-//   TC::TOTAL_SPATIAL, TC::BLOCK_C8, TC::BLOCK_C4, TC::BLOCK_Q
+//   TC::TOTAL_SPATIAL, TC::BLOCK_W, TC::BLOCK_C8, TC::BLOCK_C4, TC::BLOCK_Q
 //   TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8, TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16
 template <typename TC, auto cfg>
 struct InputLoader
@@ -60,6 +60,7 @@ struct InputLoader
     CK_TILE_LDS_ADDR _Float16*        store_input_lds;      // per-thread LDS write destination (lane-0 address)
     ck_tile::index_t                  row_stride_bytes;     // bytes per input row (for y-advance)
     ck_tile::index_t                  is_valid;             // per-thread pad-transform validity (constant across rows)
+    bool                              load_active;          // whether this thread should issue buffer_load_lds
     uint4*                            input_lds_ptr;        // LDS buffer base (for MFMA reads)
     ck_tile::index_t                  mfma_lds_offsets[cfg.kw]; // precomputed element offsets per kw slice
 
@@ -111,6 +112,18 @@ struct InputLoader
             auto lds_coord = ck_tile::make_tensor_coordinate(lds_store_desc, warp_adaptor_bottom_idx);
             auto warp_lds_offset = lds_coord.get_offset();
 
+            // Determine load_active from the thread's LDS write position.
+            // buffer_load_lds writes lane l at warp_lds_offset + l*8 fp16
+            // elements. In the LDS layout [TOTAL_SPATIAL, BLOCK_C8, 8],
+            // the valid region spans BLOCK_W * BLOCK_C8 * 8 fp16 elements.
+            // Threads writing beyond this boundary are in the padded region
+            // (TOTAL_SPATIAL > BLOCK_W) and can skip the instruction.
+            {
+                const int lane_id = ck_tile::get_lane_id();
+                load_active = (warp_lds_offset + lane_id * 8
+                               < TC::BLOCK_W * TC::BLOCK_C8 * 8);
+            }
+
             // Create buffer resource from the same base pointer the tile_window uses.
             auto elem_space_size = input_dram_desc.get_element_space_size();
             input_rsrc = ck_tile::make_builtin_buffer_resource(
@@ -131,6 +144,7 @@ struct InputLoader
         row_stride_bytes = static_cast<ck_tile::index_t>(wi * bc.C * sizeof(_Float16));
 
         // Precompute per-thread MFMA LDS read offsets for each kw slice.
+        // This saves rgisters as we don't need to store the heavy tile window state.
         {
             auto mfma_buf_tmp = MfmaBuf{
                 reinterpret_cast<_Float16*>(input_lds_ptr),
@@ -157,28 +171,34 @@ struct InputLoader
 
     __device__ void fetch_tile_to_lds(int lds_buffer_index)
     {
-        input_voffset += row_stride_bytes;
+        if(load_active)
+        {
+            input_voffset += row_stride_bytes;
+        }
         prefetch_tile_to_lds(lds_buffer_index);
     }
 
     __device__ void prefetch_tile_to_lds(int lds_buffer_index)
     {
-        // Compute LDS destination for the selected double-buffer slot.
-        CK_TILE_LDS_ADDR _Float16* lds_dest =
-            store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16;
+        if(load_active)
+        {
+            // Compute LDS destination for the selected double-buffer slot.
+            CK_TILE_LDS_ADDR _Float16* lds_dest =
+                store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16;
 
-        // Async DRAM→LDS load: 8 × fp16 = 16 bytes per thread.
-        // oob_conditional_check=true: use is_valid from pad transform to force OOB for
-        // threads in padding regions. Without this, threads in the padding zone but within
-        // the buffer's address range would load real data instead of zeros.
-        ck_tile::amd_async_buffer_load<_Float16, 8,
-            ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
-            lds_dest,
-            input_rsrc,
-            input_voffset,  // per-thread byte offset (VGPR)
-            0,              // wave offset (SGPR)
-            ck_tile::number<0>{},  // immediate offset
-            is_valid);      // pad-transform validity flag
+            // Async DRAM→LDS load: 8 × fp16 = 16 bytes per thread.
+            // oob_conditional_check=true: use is_valid from pad transform to force OOB for
+            // threads in padding regions. Without this, threads in the padding zone but within
+            // the buffer's address range would load real data instead of zeros.
+            ck_tile::amd_async_buffer_load<_Float16, 8,
+                ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
+                lds_dest,
+                input_rsrc,
+                input_voffset,  // per-thread byte offset (VGPR)
+                0,              // wave offset (SGPR)
+                ck_tile::number<0>{},  // immediate offset
+                is_valid);      // pad-transform validity flag
+        }
     }
 
     // Read a given kw slice for this thread from LDS into registers.
