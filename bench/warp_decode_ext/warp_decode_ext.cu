@@ -19,8 +19,8 @@
 //     IntermediateDataType = bf16_t
 //
 // Shared config for all three: WDataType = fp8_t, WScaleLayout =
-// Block2D<128, 128>, YDataType = bf16_t. FP8-heavy paths use kVector = 16,
-// while BF16 gate/up keeps kVector = 8.
+// Block2D<128, 128>, YDataType = bf16_t. FP8-heavy aligned paths use
+// kVector = 16, while BF16 gate/up and non-aligned down/reduce keep kVector = 8.
 
 #include <torch/extension.h>
 
@@ -46,6 +46,7 @@ using ck_tile::WarpDecodeDownReduceProblem;
 
 constexpr index_t kVectorDefault = 8;
 constexpr index_t kVectorFP8     = 16;
+constexpr index_t kWaveSize      = 64;
 
 using XScaleLayoutFP8  = WarpDecodeScaleLayout::Block2D<1, 128>;
 using XScaleLayoutBF16 = WarpDecodeScaleLayout::PerTensor;
@@ -75,14 +76,23 @@ using GateUpProblemBF16 = WarpDecodeGateUpProblem<bf16_t,
                                                   kVectorDefault>;
 using GateUpKernelBF16 = WarpDecodeGateUpKernel<GateUpProblemBF16, WarpDecodePolicy>;
 
-using DownProblem = WarpDecodeDownReduceProblem<bf16_t,
-                                                fp8_t,
-                                                float,
-                                                bf16_t,
-                                                float,
-                                                WScaleLayoutAll,
-                                                kVectorFP8>;
-using DownKernel  = WarpDecodeDownReduceKernel<DownProblem, WarpDecodePolicy>;
+using DownProblemDefault = WarpDecodeDownReduceProblem<bf16_t,
+                                                       fp8_t,
+                                                       float,
+                                                       bf16_t,
+                                                       float,
+                                                       WScaleLayoutAll,
+                                                       kVectorDefault>;
+using DownKernelDefault = WarpDecodeDownReduceKernel<DownProblemDefault, WarpDecodePolicy>;
+
+using DownProblemFP8 = WarpDecodeDownReduceProblem<bf16_t,
+                                                  fp8_t,
+                                                  float,
+                                                  bf16_t,
+                                                  float,
+                                                  WScaleLayoutAll,
+                                                  kVectorFP8>;
+using DownKernelFP8 = WarpDecodeDownReduceKernel<DownProblemFP8, WarpDecodePolicy>;
 
 hipStream_t current_hip_stream()
 {
@@ -119,6 +129,40 @@ void check_tensor(const torch::Tensor& t,
             ++i;
         }
     }
+}
+
+template <typename DownKernel>
+void launch_down_reduce_kernel(const torch::Tensor& intermediate,
+                               const torch::Tensor& w_down,
+                               const torch::Tensor& w_down_scale,
+                               const torch::Tensor& router_ids,
+                               const torch::Tensor& router_wts,
+                               torch::Tensor& y,
+                               index_t B,
+                               index_t HIDDEN,
+                               index_t INTER,
+                               index_t TOP_K,
+                               index_t E,
+                               const ck_tile::stream_config& s)
+{
+    typename DownKernel::Kargs kargs{
+        intermediate.data_ptr(),
+        w_down.data_ptr(),
+        w_down_scale.data_ptr(),
+        static_cast<const int32_t*>(router_ids.data_ptr()),
+        static_cast<const float*>(router_wts.data_ptr()),
+        y.data_ptr(),
+        B,
+        HIDDEN,
+        INTER,
+        TOP_K,
+        E,
+        INTER,
+        INTER,
+        HIDDEN,
+    };
+
+    ck_tile::launch_warp_decode_down_reduce<DownKernel>(kargs, s);
 }
 
 }  // namespace
@@ -265,25 +309,38 @@ void warp_decode_down_reduce(const torch::Tensor& intermediate,
     check_tensor(router_wts,   "router_wts",   torch::kFloat,         {B, TOP_K});
     check_tensor(y,            "y",            torch::kBFloat16,      {B, HIDDEN});
 
-    DownKernel::Kargs kargs{
-        intermediate.data_ptr(),
-        w_down.data_ptr(),
-        w_down_scale.data_ptr(),
-        static_cast<const int32_t*>(router_ids.data_ptr()),
-        static_cast<const float*>(router_wts.data_ptr()),
-        y.data_ptr(),
-        static_cast<index_t>(B),
-        static_cast<index_t>(HIDDEN),
-        static_cast<index_t>(INTER),
-        static_cast<index_t>(TOP_K),
-        static_cast<index_t>(E),
-        static_cast<index_t>(INTER),
-        static_cast<index_t>(INTER),
-        static_cast<index_t>(HIDDEN),
-    };
-
     auto s = make_stream_cfg();
-    ck_tile::launch_warp_decode_down_reduce<DownKernel>(kargs, s);
+    const bool use_kvector_fp8 = (INTER % (kWaveSize * kVectorFP8)) == 0;
+    if(use_kvector_fp8)
+    {
+        launch_down_reduce_kernel<DownKernelFP8>(intermediate,
+                                                 w_down,
+                                                 w_down_scale,
+                                                 router_ids,
+                                                 router_wts,
+                                                 y,
+                                                 static_cast<index_t>(B),
+                                                 static_cast<index_t>(HIDDEN),
+                                                 static_cast<index_t>(INTER),
+                                                 static_cast<index_t>(TOP_K),
+                                                 static_cast<index_t>(E),
+                                                 s);
+    }
+    else
+    {
+        launch_down_reduce_kernel<DownKernelDefault>(intermediate,
+                                                     w_down,
+                                                     w_down_scale,
+                                                     router_ids,
+                                                     router_wts,
+                                                     y,
+                                                     static_cast<index_t>(B),
+                                                     static_cast<index_t>(HIDDEN),
+                                                     static_cast<index_t>(INTER),
+                                                     static_cast<index_t>(TOP_K),
+                                                     static_cast<index_t>(E),
+                                                     s);
+    }
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)

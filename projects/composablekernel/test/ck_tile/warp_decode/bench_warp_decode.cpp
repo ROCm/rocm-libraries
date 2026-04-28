@@ -37,6 +37,7 @@ namespace {
 
 constexpr index_t kVectorDefault = 8;
 constexpr index_t kVectorFP8     = 16;
+constexpr index_t kWaveSize      = 64;
 constexpr index_t kBlock_N = 128;
 constexpr index_t kBlock_K = 128;
 constexpr index_t kBlockXK = 128;
@@ -69,14 +70,23 @@ using GateUpProblemBF16 = WarpDecodeGateUpProblem<bf16_t,
                                                   kVectorDefault>;
 using GateUpKernelBF16 = WarpDecodeGateUpKernel<GateUpProblemBF16, WarpDecodePolicy>;
 
-using DownProblem = WarpDecodeDownReduceProblem<bf16_t,
-                                                fp8_t,
-                                                float,
-                                                bf16_t,
-                                                float,
-                                                WScaleLayoutAll,
-                                                kVectorFP8>;
-using DownKernel = WarpDecodeDownReduceKernel<DownProblem, WarpDecodePolicy>;
+using DownProblemDefault = WarpDecodeDownReduceProblem<bf16_t,
+                                                       fp8_t,
+                                                       float,
+                                                       bf16_t,
+                                                       float,
+                                                       WScaleLayoutAll,
+                                                       kVectorDefault>;
+using DownKernelDefault = WarpDecodeDownReduceKernel<DownProblemDefault, WarpDecodePolicy>;
+
+using DownProblemFP8 = WarpDecodeDownReduceProblem<bf16_t,
+                                                  fp8_t,
+                                                  float,
+                                                  bf16_t,
+                                                  float,
+                                                  WScaleLayoutAll,
+                                                  kVectorFP8>;
+using DownKernelFP8 = WarpDecodeDownReduceKernel<DownProblemFP8, WarpDecodePolicy>;
 
 struct Shape
 {
@@ -404,18 +414,34 @@ void bench_shape(const Shape& shape,
 
         // ---- Down/reduce (shared) ----
         {
-            DownKernel::Kargs kargs{
-                inter_dev.GetDeviceBuffer(),
-                w_down_dev.GetDeviceBuffer(),
-                w_down_scale_dev.GetDeviceBuffer(),
-                static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
-                static_cast<const float*>(router_wts_dev.GetDeviceBuffer()),
-                y_dev.GetDeviceBuffer(),
-                B, HIDDEN, INTER, TOPK, E,
-                INTER, INTER, HIDDEN};
-
-            const float ms =
-                launch_warp_decode_down_reduce<DownKernel>(kargs, cfg);
+            const bool use_kvector_fp8 = (INTER % (kWaveSize * kVectorFP8)) == 0;
+            float ms = 0.0f;
+            if(use_kvector_fp8)
+            {
+                DownKernelFP8::Kargs kargs{
+                    inter_dev.GetDeviceBuffer(),
+                    w_down_dev.GetDeviceBuffer(),
+                    w_down_scale_dev.GetDeviceBuffer(),
+                    static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                    static_cast<const float*>(router_wts_dev.GetDeviceBuffer()),
+                    y_dev.GetDeviceBuffer(),
+                    B, HIDDEN, INTER, TOPK, E,
+                    INTER, INTER, HIDDEN};
+                ms = launch_warp_decode_down_reduce<DownKernelFP8>(kargs, cfg);
+            }
+            else
+            {
+                DownKernelDefault::Kargs kargs{
+                    inter_dev.GetDeviceBuffer(),
+                    w_down_dev.GetDeviceBuffer(),
+                    w_down_scale_dev.GetDeviceBuffer(),
+                    static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                    static_cast<const float*>(router_wts_dev.GetDeviceBuffer()),
+                    y_dev.GetDeviceBuffer(),
+                    B, HIDDEN, INTER, TOPK, E,
+                    INTER, INTER, HIDDEN};
+                ms = launch_warp_decode_down_reduce<DownKernelDefault>(kargs, cfg);
+            }
             const double flops = down_flops(B, HIDDEN, INTER, TOPK);
             const double bytes = down_bytes(B, HIDDEN, INTER, TOPK,
                                             element_bytes<bf16_t>(),
