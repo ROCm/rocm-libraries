@@ -36,6 +36,7 @@
 #include "stinkytofu/pipeline/OptimizationPasses.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
@@ -119,8 +120,12 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         }
     }
 
-    // Whole-kernel pass. Always run regardless of OptLevel.
+    // -- kernel --
     pm.addPass(createInsertVgprMsbPass());
+    if (optLevel != OptLevel::O0) {
+        pm.addPass(createCFGBuilderPass());
+        pm.addPass(createInsertDelayAluPass());
+    }
 
     return true;
 }

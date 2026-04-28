@@ -338,12 +338,20 @@ inline bool isMUBUFStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_MUBUFStore);
 }
 
+inline bool isMUBUFAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_MUBUFAtomic);
+}
+
 inline bool isFLATLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATLoad);
 }
 
 inline bool isFLATStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATStore);
+}
+
+inline bool isFLATAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_FLATAtomic);
 }
 
 inline bool isGLOBALLoad(const StinkyInstruction& inst) {
@@ -380,8 +388,7 @@ inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_SMemAtomic) || inst.is(InstFlag::IF_MUBUFAtomic) ||
-           inst.is(InstFlag::IF_FLATAtomic);
+    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst);
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
@@ -398,6 +405,10 @@ inline bool isDSRead(const StinkyInstruction& inst) {
 
 inline bool isDSWrite(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_DSStore);
+}
+
+inline bool isDSAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_DSAtomic);
 }
 
 inline bool isBarrier(const StinkyInstruction& inst) {

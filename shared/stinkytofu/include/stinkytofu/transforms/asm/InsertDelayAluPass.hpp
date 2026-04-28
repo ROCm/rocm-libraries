@@ -22,48 +22,16 @@
  * ************************************************************************ */
 #pragma once
 
-#include <unordered_map>
-#include <unordered_set>
+#include <memory>
 
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
-/// Per-DWORD register key used to track individual register components
-/// across definitions and uses.
-struct RegKey {
-    RegType type;
-    unsigned idx;
+class Pass;
 
-    bool operator==(const RegKey& o) const noexcept {
-        return type == o.type && idx == o.idx;
-    }
-};
-
-struct RegKeyHash {
-    size_t operator()(const RegKey& k) const noexcept {
-        size_t h = std::hash<int>{}(static_cast<int>(k.type));
-        h ^= std::hash<unsigned>{}(k.idx) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
-        return h;
-    }
-};
-
-template <typename V>
-using RegKeyMap = std::unordered_map<RegKey, V, RegKeyHash>;
-
-using RegKeySet = std::unordered_set<RegKey, RegKeyHash>;
-
-inline RegKey toRegKey(const StinkyRegister& reg, unsigned offset = 0) {
-    return {reg.reg.type, reg.reg.idx + offset};
-}
-
-/// Invoke fn(RegKey) for each DWORD in a register operand.
-/// Skips non-register operands (literals, immediates).
-template <typename Fn>
-void forEachRegUnit(const StinkyRegister& reg, Fn&& fn) {
-    if (reg.dataType != StinkyRegister::Type::Register) return;
-    for (unsigned i = 0; i < reg.reg.num; ++i) {
-        fn(toRegKey(reg, i));
-    }
-}
+/// Inserts s_delay_alu instructions to avoid pipeline stalls on dependent
+/// ALU instructions.
+/// Should run after scheduling and waitcnt insertion to see final instruction order.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertDelayAluPass();
 
 }  // namespace stinkytofu
