@@ -128,7 +128,7 @@ class PersistentLoopOn(PersistentLoop):
         module = Module("PersistentLoop On closePersistentLoop")
         skCloseLoopLabel = Label("SK_CloseLoop", "")
         module.add(skCloseLoopLabel)
-        if kernel.get("PersistentKernelLoopForever", False):
+        if kernel.get("DebugPersistentKernelLoopForever", False):
             # StreamK 1/2/3 have no other exit, so this makes the kernel loop infinitely.
             with writer.allocTmpSgpr(3) as tmpSgprInfo:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
