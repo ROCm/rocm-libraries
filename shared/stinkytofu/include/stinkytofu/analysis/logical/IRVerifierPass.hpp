@@ -57,7 +57,7 @@ class LogicalIRVerifierPass : public Pass {
     const char* getName() const override {
         return "LogicalIRVerifier";
     }
-    void run(Function& func, PassContext& ctx) override;
+    PreservedAnalyses run(Function& func, PassContext& ctx, AnalysisManager& /*AM*/) override;
 
    private:
     LogicalIRVerifierConfig config_;

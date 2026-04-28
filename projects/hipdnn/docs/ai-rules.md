@@ -13,7 +13,8 @@ hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based a
 |-----------|------|----------|---------|
 | **Backend** (`backend/`) | Shared library (C API) | Data SDK | Core engine, plugin loading, graph execution |
 | **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API (uses Data SDK for types/logging, not FlatBuffers) |
-| **Data SDK** (`data_sdk/`) | Header-only | Third-party deps | Shared data objects, Flatbuffer schemas, logging |
+| **Data SDK** (`data_sdk/`) | Header-only | (none) | Shared data types, logging |
+| **FlatBuffers SDK** (`flatbuffers_sdk/`) | Header-only | FlatBuffers, nlohmann_json | FlatBuffer schemas, generated headers, JSON helpers |
 | **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK | Interfaces for plugin development |
 | **Test SDK** (`test_sdk/`) | Header-only | Data SDK | Shared test utilities |
 
