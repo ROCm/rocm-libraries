@@ -360,17 +360,15 @@ struct TileConstants
     static constexpr int STORE_VECS = BLOCK_Q * BLOCK_C8;
 
     // LDS double buffering for input loads.
-    static constexpr int NUM_INPUT_LDS_BUFFERS = 2;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_C8 = BLOCK_C8 * BLOCK_W;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_C4 = INPUT_LDS_BUFFER_SIZE_C8 * 2;
+    static constexpr int NUM_INPUT_LDS_BUFFERS    = 2;
+    static constexpr int INPUT_LDS_BUFFER_SIZE_C8  = BLOCK_C8 * BLOCK_W;
+    static constexpr int INPUT_LDS_BUFFER_SIZE_C4  = INPUT_LDS_BUFFER_SIZE_C8 * 2;
+    static constexpr int INPUT_LDS_BUFFER_SIZE_FP16 = INPUT_LDS_BUFFER_SIZE_C8 * 8;
 
     // Tile-level async load constants.
     static constexpr int NUM_WAVES     = cfg.waves_per_wg;
     static constexpr int LANES_PER_ROW = WAVE_SIZE / BLOCK_C8;
     static constexpr int TOTAL_SPATIAL  = cfg.block_size() / BLOCK_C8;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_PADDED_C8   = BLOCK_C8 * TOTAL_SPATIAL;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_PADDED_C4   = INPUT_LDS_BUFFER_SIZE_PADDED_C8 * 2;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_PADDED_FP16 = INPUT_LDS_BUFFER_SIZE_PADDED_C8 * 8;
 
     static constexpr int KH_KW = cfg.kh * cfg.kw;
     static constexpr int KW    = cfg.kw;
@@ -418,7 +416,7 @@ struct TileConstants
     //
     // Memory stages:
     //   DRAM:  4D [hi, wi_padded, BLOCK_C8, 8] in fp16 — async loaded to LDS.
-    //   LDS:   4D [1, TOTAL_SPATIAL, BLOCK_C8, 8] in fp16 — staging buffer.
+    //   LDS:   4D [1, BLOCK_W, BLOCK_C8, 8] in fp16 — staging buffer.
     //   Regs:  3D [BLOCK_W, BLOCK_C4, 4] in fp16 — MFMA A operand.
     // -----------------------------------------------------------------------
     struct Input

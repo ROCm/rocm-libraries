@@ -101,15 +101,15 @@ struct SharedDescriptors
                     ck_tile::sequence<0, 0>>{});
         }
 
-        // LDS store descriptor: [1, TOTAL_SPATIAL, BLOCK_C8, 8] contiguous.
+        // LDS store descriptor: [1, BLOCK_W, BLOCK_C8, 8] contiguous.
         static constexpr auto MakeLdsStoreDescriptor()
         {
             return ck_tile::make_naive_tensor_descriptor(
                 ck_tile::make_tuple(ck_tile::number<1>{},
-                                    ck_tile::number<TC::TOTAL_SPATIAL>{},
+                                    ck_tile::number<TC::BLOCK_W>{},
                                     ck_tile::number<TC::BLOCK_C8>{},
                                     ck_tile::number<8>{}),
-                ck_tile::make_tuple(ck_tile::number<TC::TOTAL_SPATIAL * TC::BLOCK_C8 * 8>{},
+                ck_tile::make_tuple(ck_tile::number<TC::BLOCK_W * TC::BLOCK_C8 * 8>{},
                                     ck_tile::number<TC::BLOCK_C8 * 8>{},
                                     ck_tile::number<8>{},
                                     ck_tile::number<1>{}),

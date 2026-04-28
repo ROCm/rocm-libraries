@@ -26,7 +26,7 @@ namespace direct_conv {
 //   TC::Input::MakeLdsReadDescriptor()
 //   TC::Mfma::MakeDistribution()
 //   TC::TOTAL_SPATIAL, TC::BLOCK_W, TC::BLOCK_C8, TC::BLOCK_C4, TC::BLOCK_Q
-//   TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8, TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16
+//   TC::INPUT_LDS_BUFFER_SIZE_C8, TC::INPUT_LDS_BUFFER_SIZE_FP16
 template <typename TC, auto cfg>
 struct InputLoader
 {
@@ -148,7 +148,7 @@ struct InputLoader
         {
             auto mfma_buf_tmp = MfmaBuf{
                 reinterpret_cast<_Float16*>(input_lds_ptr),
-                static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16)};
+                static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_FP16)};
             auto mfma_view_tmp = MfmaViewType{mfma_buf_tmp, mfma_desc};
             auto mfma_window_tmp = ck_tile::make_tile_window(
                 mfma_view_tmp,
@@ -184,7 +184,7 @@ struct InputLoader
         {
             // Compute LDS destination for the selected double-buffer slot.
             CK_TILE_LDS_ADDR _Float16* lds_dest =
-                store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16;
+                store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
 
             // Async DRAM→LDS load: 8 × fp16 = 16 bytes per thread.
             // oob_conditional_check=true: use is_valid from pad transform to force OOB for
@@ -206,9 +206,9 @@ struct InputLoader
     __device__ void read_from_lds(ck_tile::fp16x4_t& input_reg, int slice, int lds_buffer_index) const
     {
         const _Float16* base = reinterpret_cast<const _Float16*>(input_lds_ptr)
-                               + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16;
+                               + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
         auto buf = MfmaBuf{const_cast<_Float16*>(base),
-                           static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_PADDED_FP16)};
+                           static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_FP16)};
         input_reg = buf.template get<ck_tile::fp16x4_t>(mfma_lds_offsets[slice], 0, true);
     }
 };

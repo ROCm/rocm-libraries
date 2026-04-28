@@ -51,7 +51,7 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     // (and output staging for the LDS epilogue path). 
     constexpr bool use_lds_epilogue = (cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory);
 
-    static constexpr int INPUT_TOTAL = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_PADDED_C8;
+    static constexpr int INPUT_TOTAL = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8;
     static constexpr int WEIGHT_LDS  = TC::Weight::WEIGHT_LDS_PADDED_UINT4;
     static constexpr int IO_LDS      = use_lds_epilogue
                                             ? INPUT_TOTAL + TC::Output::OUTPUT_LDS_BUFFER_SIZE
