@@ -17,6 +17,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Computation of different matrix condition numbers
     * GECON
     * GECON_64
+* Linear solver routines for symmetric matrices
+    * SYTRS (with batched and strided\_batched versions)
+    * SYTRS_64 (with batched and strided\_batched versions)
 
 ### Changed
 ### Removed
