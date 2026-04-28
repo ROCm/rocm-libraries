@@ -70,6 +70,9 @@ constexpr size_t sdpaBwdDqAccBufferSize(size_t batch, size_t headsQ, size_t seqL
 // =============================================================================
 //
 // Wraps hipModuleLaunchKernel with HIP_LAUNCH_PARAM config for ASM kernels.
+// Uses HIP_LAUNCH_PARAM_BUFFER_POINTER/SIZE mechanism which is required for
+// passing large argument structures (e.g. 656 bytes for fwd, 784 bytes for bwd)
+// to ASM kernels.
 // Logs error on failure, logs grid/block info on success.
 // Returns true on success, false on failure.
 
@@ -83,6 +86,11 @@ inline bool launchKernel(const char* kernelName,
                          unsigned int blockDim,
                          hipStream_t stream = nullptr)
 {
+    // All AITER fmha kernels (fwd, bwd ODO/DQDKDV/DQ_CONVERT, all 319 variants
+    // across gfx942/gfx950) use 1D thread blocks.
+    constexpr unsigned int K_BLOCK_DIM_Y = 1;
+    constexpr unsigned int K_BLOCK_DIM_Z = 1;
+
     // NOLINTNEXTLINE(modernize-avoid-c-arrays) - HIP API requires C-style array
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
                       args,
@@ -98,8 +106,8 @@ inline bool launchKernel(const char* kernelName,
                                            gridY,
                                            gridZ,
                                            blockDim,
-                                           1,
-                                           1,
+                                           K_BLOCK_DIM_Y,
+                                           K_BLOCK_DIM_Z,
                                            0, // shared memory (kernel uses LDS internally)
                                            stream,
                                            nullptr, // kernel args (not used with config)

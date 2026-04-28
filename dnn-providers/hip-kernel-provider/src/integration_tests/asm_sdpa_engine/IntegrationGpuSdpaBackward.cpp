@@ -27,19 +27,19 @@ namespace
 struct SdpaBwdTestCase
 {
     SdpaBwdTestCase(std::vector<int64_t> qDimsIn,
-                    std::vector<int64_t> kDimsIn,
                     std::vector<int64_t> vDimsIn,
                     std::optional<float> attnScaleValueIn = std::nullopt,
                     bool causalMaskIn = false)
         : qDims(std::move(qDimsIn))
-        , kDims(std::move(kDimsIn))
         , vDims(std::move(vDimsIn))
         , qStrides(generateStrides(qDims))
-        , kStrides(generateStrides(kDims))
         , vStrides(generateStrides(vDims))
         , attnScaleValue(attnScaleValueIn)
         , causalMask(causalMaskIn)
     {
+        // K tensor is [B, H_kv, S_kv, D_qk]: B and D_qk from Q, H_kv and S_kv from V
+        kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
+        kStrides = generateStrides(kDims);
     }
 
     std::vector<int64_t> qDims;
@@ -56,7 +56,7 @@ struct SdpaBwdTestCase
 std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
 {
     // Small case for fast CPU reference execution (backward CPU ref is O(B*H*S^2*D))
-    return {SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, {1, 1, 256, 128})};
+    return {SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128})};
 }
 
 template <typename DataType>
@@ -122,8 +122,8 @@ protected:
         auto oStrides = generateStrides(oDims);
 
         // dO has same dims/strides as O
-        auto doDims = oDims;
-        auto doStrides = oStrides;
+        const auto& doDims = oDims;
+        const auto& doStrides = oStrides;
 
         // Stats (LSE) dims: [B, H_q, S_q] with contiguous strides
         std::vector<int64_t> statsDims = {testCase.qDims[0], testCase.qDims[1], testCase.qDims[2]};
@@ -216,7 +216,10 @@ TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
     // recomputation (exp/log with 7-bit mantissa). Flash Attention uses a
     // relative-to-reference approach (3x baseline error), and PyTorch's own
     // BF16 backward SDPA test is disabled on MI350 CI. Use generous tolerance
-    // for this smoke test; most values match within 5-15%.
+    // for this smoke test; most values match within 5-15%. Outliers occur at
+    // positions where |ref| ≈ 0 and softmax probability differences amplify.
+    // Tolerance: 2e0 (atol=2.0, rtol=2.0)
+
     auto tolerance = 2e0f;
 
     runGraphTest(tolerance);
