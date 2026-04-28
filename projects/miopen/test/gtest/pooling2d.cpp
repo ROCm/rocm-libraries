@@ -78,7 +78,7 @@ std::vector<pooling_gtest::PoolingTestCase> GetPooling2dTestCases()
                                             num_uint64_case,
                                             num_uint64_case_imgidx,
                                             true,
-                                            false,
+                                            false, // skip_wide_check=false for Dataset 0
                                             "NCHW");
     }
 
