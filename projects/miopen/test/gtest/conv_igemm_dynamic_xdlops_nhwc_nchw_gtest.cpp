@@ -2,12 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <half/half.hpp>
 #include <miopen/miopen.h>
 
 #include "conv2d_gtest.hpp"
 #include "get_handle.hpp"
-#include "gtest/gtest_common.hpp"
 #include "lib_env_var.hpp"
 
 namespace {
