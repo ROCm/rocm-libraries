@@ -327,6 +327,18 @@ hipsolverDn<type><type>gesv()
    :outline:
 .. doxygenfunction:: hipsolverDnSSgesv
 
+.. _dense_sytrs_bufferSize:
+
+hipsolverDn<type>sytrs_bufferSize()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverDnXsytrs_bufferSize
+
+.. _dense_sytrs:
+
+hipsolverDn<type>sytrs()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverDnXsytrs
+
 
 
 .. _dense_leastsqr:
