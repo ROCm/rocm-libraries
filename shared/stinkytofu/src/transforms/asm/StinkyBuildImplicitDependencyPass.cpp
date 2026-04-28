@@ -235,7 +235,8 @@ class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
 
         PASS_DEBUG(std::cerr << "[BuildImplicitDep] mem-token consistency checks on "
                              << checkBlocks.size() << " BBs (preloop/loop/postloop derived)\n");
-        PASS_DEBUG(for (const BasicBlock* bb : checkBlocks) {
+        PASS_DEBUG(for (const BasicBlock* bb
+                        : checkBlocks) {
             if (bb) std::cerr << "  [BuildImplicitDep] check BB: " << bb->getLabel() << "\n";
         });
 

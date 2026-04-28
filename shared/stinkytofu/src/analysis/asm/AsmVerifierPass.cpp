@@ -157,8 +157,8 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
             // M64 operands are 64-bit lane masks that may be truncated to
             // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
             bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
-            bool dynamicWmmaWidth = allowDynamicWmmaScaleSrcWidth(
-                hwDesc, isDest, operandIndex, expectedWidth, reg.reg.num);
+            bool dynamicWmmaWidth = allowDynamicWmmaScaleSrcWidth(hwDesc, isDest, operandIndex,
+                                                                  expectedWidth, reg.reg.num);
 
             if (reg.reg.num != expectedWidth && !m64Truncated && !dynamicWmmaWidth) {
                 errors << "Instruction '";
