@@ -133,7 +133,7 @@ struct _rocblaslt_handle
  * content. It must be initialized using rocblaslt_matrix_layout_create()
  * and the retured handle must be passed
  * to all subsequent library function calls that involve the matrix.
- * It should be destroyed at the end using rocblaslt_matrix_layout_destory().
+ * It should be destroyed at the end using rocblaslt_matrix_layout_destroy().
  *******************************************************************************/
 struct _rocblaslt_matrix_layout
 {

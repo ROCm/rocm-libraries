@@ -634,7 +634,7 @@ rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
  * content. It must be initialized using rocblaslt_matrix_layout_create()
  * and the retured handle must be passed
  * to all subsequent library function calls that involve the matrix.
- * It should be destroyed at the end using rocblaslt_matrix_layout_destory().
+ * It should be destroyed at the end using rocblaslt_matrix_layout_destroy().
  *******************************************************************************/
 rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDescr,
                                                 hipDataType              valueType,
@@ -682,7 +682,7 @@ rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDesc
 /********************************************************************************
  * \brief destroy matrix descriptor
  *******************************************************************************/
-rocblaslt_status rocblaslt_matrix_layout_destory(const rocblaslt_matrix_layout matDescr)
+rocblaslt_status rocblaslt_matrix_layout_destroy(const rocblaslt_matrix_layout matDescr)
 {
     if(matDescr == nullptr)
     {
