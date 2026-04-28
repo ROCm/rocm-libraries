@@ -810,6 +810,34 @@ class TestPlaceGRs:
             _assert_slot_grs(parts[pi][0], ['B'], f"P{pi} s0")
             _assert_gr(parts[pi][0], 'B', 0, 2, b_idx, b_idx+1, mt=2)
 
+    def test_pgr1_gr_before_corresponding_lr(self):
+        """PGR=1: GR(T, mt=X) must be placed strictly before first LR(T, mt=X)."""
+        cfg = make_cfg_bf16_pgr1()
+        sched = LogicalScheduler(cfg)
+        sched.place_GRs()
+        parts = sched._partitions
+        numK = cfg.numSubIterK
+
+        # Build per-(tensor, mt) earliest LR flat index
+        lr_first = {}
+        for pi, slots in enumerate(parts):
+            for slot in slots:
+                flat = pi * numK + slot.subIterK
+                for lr in slot.lrs:
+                    key = (lr.tensor, lr.mtIteration)
+                    if key not in lr_first or flat < lr_first[key]:
+                        lr_first[key] = flat
+
+        for pi, slots in enumerate(parts):
+            for slot in slots:
+                flat = pi * numK + slot.subIterK
+                for gr in slot.grs:
+                    key = (gr.tensor, gr.mtIteration)
+                    if key in lr_first:
+                        assert flat < lr_first[key], (
+                            f"GR({gr.tensor}, mt={gr.mtIteration}) at flat={flat} "
+                            f"must be before first LR at flat={lr_first[key]}")
+
 
 # ══════════════════════════════════════════════════════════════
 # Step 4: Annotate deps

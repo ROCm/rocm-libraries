@@ -901,6 +901,19 @@ class LogicalScheduler:
                              lr.tiles.subIterK_end))
         return lr_mt_n_info
 
+    def _build_gr_deadline_map(self):
+        """Per (tensor, mt) earliest LR flat index — GR must be placed before it."""
+        numK = self.config.numSubIterK
+        deadline = {}
+        for pi, partition_slots in enumerate(self._partitions):
+            for slot in partition_slots:
+                flat = pi * numK + slot.subIterK
+                for lr in slot.lrs:
+                    key = (lr.tensor, lr.mtIteration)
+                    if key not in deadline or flat < deadline[key]:
+                        deadline[key] = flat
+        return deadline
+
     @staticmethod
     def _has_lr_conflict(lr_mt_n_info, tensor, mt_val, pi, subIterK,
                          gr_k_start, gr_k_end):
@@ -917,7 +930,7 @@ class LogicalScheduler:
                 return True
         return False
 
-    def _distribute_grs(self, gr_list, lr_mt_n_info, debug=False):
+    def _distribute_grs(self, gr_list, lr_mt_n_info, gr_deadline=None, debug=False):
         """Phase 2: Distribute GR atoms across partition × subIterK slots.
 
         Explodes GR entries into atomic loads, distributes them into flat
@@ -944,7 +957,9 @@ class LogicalScheduler:
         for atom in atoms:
             tensor, mt_val, _, _, ks, ke = atom
             cur = 0
-            while cur < numSlots - 1:
+            last = gr_deadline.get((tensor, mt_val), numSlots) - 1 if gr_deadline else numSlots - 1
+            last = min(last, numSlots - 1)
+            while cur < last:
                 pi = cur // numK
                 subK = cur % numK
                 if (not self._has_lr_conflict(lr_mt_n_info, tensor, mt_val,
@@ -1007,20 +1022,18 @@ class LogicalScheduler:
         if self.config.pgr == 0:
             return self._place_GRs_PGR0()
 
-        if self.config.pgr == 1:
-            return self._place_GRs_PGR1()
-
         part_ranges = [self._partition_tile_range(pi)
                        for pi in range(self.config.numPartitions)]
 
         offsetMT = 1
-        offsetPartition = 1
+        offsetPartition = 0 if self.config.pgr == 1 else 1
         # Build ordered list of GRs to place for the entire MT based on the partitioning ordering and the GR granularities.
         gr_list = self._build_gr_list(part_ranges, offsetMT, offsetPartition)
         # Map to keep track of LR(MT n) for each partiion and tensor, used for LDS double buffer conflict checking when placing GRs.
         lr_mt_n_info = self._build_lr_conflict_map()
+        gr_deadline = self._build_gr_deadline_map()
         # Distribute GRs accross partition.
-        self._distribute_grs(gr_list, lr_mt_n_info)
+        self._distribute_grs(gr_list, lr_mt_n_info, gr_deadline)
 
         self._completed.add(Pass.GR)
         return self._partitions[0]
@@ -1065,45 +1078,6 @@ class LogicalScheduler:
         self._completed.add(Pass.GR)
         return self._partitions[0]
 
-    def _place_GRs_PGR1(self) -> List[SubIterKSlot]:
-        """Place GRs for PGR=1: load next MT data, all in subIterK=0.
-
-        All GRs must complete before lr_inc in subIterK=1 swaps the read
-        buffer, so they cannot be distributed across subIterKs.
-        """
-        cfg = self.config
-        cur = self._partition_tile_range(0)
-        slot0 = self._partitions[0][0]
-
-        items = [('A', cur['A'], cfg.grA),
-                 ('B', cur['B'], cfg.grB)]
-        if cfg.hasScale:
-            items.append(('SA', cur['A'], cfg.grSA))
-            items.append(('SB', cur['B'], cfg.grSB))
-
-        for tensor, (t_start, t_end), gr_gran in items:
-            mn = gr_gran.mn
-            k_gran = gr_gran.k
-
-            gr_tile_start = (t_start // mn) * mn
-            gr_tile_end = ((t_end + mn - 1) // mn) * mn
-
-            num_k_chunks = cfg.numSubIterK // k_gran
-            for chunk_idx in range(num_k_chunks):
-                gr_k_start = chunk_idx * k_gran
-                gr_k_end = gr_k_start + k_gran
-
-                slot0.grs.append(GRPlacement(
-                    tensor=tensor,
-                    mtIteration=1,
-                    tiles=MFMATileRange(gr_k_start, gr_k_end,
-                                        gr_tile_start, gr_tile_end),
-                    subIterK_slot=0,
-                    partition=0,
-                ))
-
-        self._completed.add(Pass.GR)
-        return self._partitions[0]
 
     # ── Annotate dependencies ─────────────────────────────
 
