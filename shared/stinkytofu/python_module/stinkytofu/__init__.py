@@ -85,7 +85,8 @@ if _bi is not None:
     _so_mtime = _so.stat().st_mtime
     _stale = [
         str(p)
-        for p in Path(_bi.SOURCE_ROOT).rglob("*.[ch]pp")
+        for _pattern in ("*.[ch]pp", "*.h")
+        for p in Path(_bi.SOURCE_ROOT).rglob(_pattern)
         if p.stat().st_mtime > _so_mtime
     ]
     if _stale:
