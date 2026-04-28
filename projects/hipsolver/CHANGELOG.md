@@ -8,15 +8,15 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Added
 
 * Added compatibility-only functions:
-  * sytrs
-    * hipsolverDnXsytrs_bufferSize
-    * hipsolverDnXsytrs
   * syevBatched
     * hipsolverDnXsyevBatched_bufferSize
     * hipsolverDnXsyevBatched
   * syevd
     * hipsolverDnXsyevd_bufferSize
     * hipsolverDnXsyevd
+  * sytrs
+    * hipsolverDnXsytrs_bufferSize
+    * hipsolverDnXsytrs
 
 ### Changed
 ### Removed

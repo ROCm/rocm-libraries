@@ -84,24 +84,23 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
             throw ROCFFT_FAIL{ss.str()};
         }
     }
-    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes(dev_id);
+    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes_all_devices();
 
     // First try a quick estimation of vram footprint, to speed up skipping tests
     // that are too large to fit in the gpu (no plan created with the rocFFT backend)
-    const auto raw_vram_footprint
-        = params.fft_params_vram_footprint() + twiddle_table_vram_footprint(params);
+    const auto io_vram_footprint = params.io_vram_footprint();
 
-    if(!vram_fits_problem(raw_vram_footprint, vram_avail))
+    if(!vram_fits_problem(io_vram_footprint, vram_avail))
     {
         std::stringstream ss;
-        ss << "Raw problem size (" << byte_size_to_str(raw_vram_footprint)
-           << ") exceeds usable memory on device (" << byte_size_to_str(vram_avail) << ")";
+        ss << "Raw problem size (" << byte_sizes_to_str(io_vram_footprint)
+           << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 
     if(verbose > 2)
     {
-        std::cout << "Raw problem size: " << raw_vram_footprint << std::endl;
+        std::cout << "Raw problem size: " << byte_sizes_to_str(io_vram_footprint) << std::endl;
     }
 
     // If it passed the quick estimation test, go for the more
@@ -115,8 +114,8 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
             std::cout << "Problem raw data won't fit on device; skipped." << std::endl;
         }
         std::stringstream ss;
-        ss << "Problem size (" << byte_size_to_str(vram_footprint)
-           << ") exceeds usable memory on device (" << byte_size_to_str(vram_avail) << ")";
+        ss << "Problem size (" << byte_sizes_to_str(vram_footprint)
+           << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 }

@@ -5,8 +5,40 @@
 
 import argparse
 from pathlib import Path
+from typing import List
 
-from ..config.benchmark_config import BenchmarkConfig
+
+def _parse_engine_list(s: str) -> List[int]:
+    """Parse --engine value as a single ID or comma-separated list of IDs.
+
+    Engine IDs are deterministic FNV-1a hashes of the engine name and may
+    be negative when interpreted as signed int64, so we accept any int.
+    Duplicates are removed while preserving first-seen order.
+
+    Examples:
+      "1"                      -> [1]
+      "1,2,3"                  -> [1, 2, 3]
+      "1, 2"                   -> [1, 2]
+      "1,1,2"                  -> [1, 2]
+      "3,1,3,2"                -> [3, 1, 2]
+      "-4567890123456789012"   -> [-4567890123456789012]
+    """
+    parts = [p.strip() for p in s.split(",")]
+    parts = [p for p in parts if p]
+    if not parts:
+        raise argparse.ArgumentTypeError("--engine requires at least one ID")
+    try:
+        ids = [int(p) for p in parts]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--engine expects integer ID(s), got {s!r}")
+    # Deduplicate while preserving first-seen order
+    seen: set = set()
+    deduped: List[int] = []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            deduped.append(i)
+    return deduped
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -28,6 +60,8 @@ Examples:
   dnn-benchmark --graph ./graphs/conv1_fwd.json
   dnn-benchmark --graph ./graphs/conv1_fwd.json --warmup 20 --iters 200
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1
+  dnn-benchmark -g ./graphs/conv1_fwd.json -v        # verbose per-engine output
+  dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2    # compare engines 1 and 2
 
 PyTorch Backend (GPU via PyTorch):
   dnn-benchmark -g ./graph.json --backend pytorch
@@ -35,21 +69,27 @@ PyTorch Backend (GPU via PyTorch):
 
 Reference Validation:
   dnn-benchmark -g ./graph.json --validate pytorch
-  dnn-benchmark -g ./graph.json --validate pytorch --validate-rtol 1e-3
+  dnn-benchmark -g ./graph.json --validate pytorch --rtol 1e-3
 
 A/B Testing:
   dnn-benchmark -g ./graph.json --AId 1 --BId 2
   dnn-benchmark -g ./graph.json --APath /path/pluginA --AId 1 --BPath /path/pluginB --BId 2
+
+Suite Mode (multiple graphs):
+  dnn-benchmark --graph 'graphs/*.json' --warmup 10 --iters 100
+  dnn-benchmark --graph 'graphs/*.json' -o results.json
+  dnn-benchmark --graph 'graphs/*.json' -v           # rich block per (graph, engine)
         """,
     )
 
     parser.add_argument(
         "--graph",
         "-g",
-        type=Path,
+        type=str,
         required=True,
         metavar="PATH",
-        help="Path to JSON-serialized hipDNN graph file",
+        help="Path to JSON graph file, or glob pattern for suite mode "
+        "(e.g., 'graphs/*.json')",
     )
 
     parser.add_argument(
@@ -71,12 +111,13 @@ A/B Testing:
     )
 
     parser.add_argument(
-        "--engine-id",
+        "--engine",
         "-e",
-        type=int,
-        default=1,
-        metavar="ID",
-        help="Engine ID to use (default: 1 for MIOpen)",
+        type=_parse_engine_list,
+        default=None,
+        metavar="IDS",
+        help="Engine ID or comma-separated list of IDs to run "
+        "(default: all discovered engines). Examples: -e 1, -e 1,2,3",
     )
 
     parser.add_argument(
@@ -110,13 +151,18 @@ A/B Testing:
         help="Export benchmark results to JSON file for offline comparison",
     )
     output_group.add_argument(
-        "--gpu-backend",
-        type=str,
-        choices=["torch", "auto", "none"],
-        default="auto",
-        metavar="BACKEND",
-        help="GPU timer backend (default: auto). "
-        "Options: torch (PyTorch CUDA/ROCm), auto, none (E2E only)",
+        "--no-kernel-timing",
+        action="store_true",
+        default=False,
+        help="Disable GPU kernel timing (E2E wall-clock only)",
+    )
+    output_group.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Show detailed per-engine breakdown for each graph "
+        "(default: summary table)",
     )
 
     # A/B Testing arguments
@@ -149,19 +195,21 @@ A/B Testing:
         metavar="ID",
         help="Engine ID for configuration B",
     )
-    ab_group.add_argument(
+    # Comparison tolerances (used by A/B testing, validation, and suite mode)
+    comparison_group = parser.add_argument_group("Comparison")
+    comparison_group.add_argument(
         "--rtol",
         type=float,
         default=1e-5,
         metavar="TOL",
-        help="Relative tolerance for A/B comparison (default: 1e-5)",
+        help="Relative tolerance for output comparison (default: 1e-5)",
     )
-    ab_group.add_argument(
+    comparison_group.add_argument(
         "--atol",
         type=float,
         default=1e-8,
         metavar="TOL",
-        help="Absolute tolerance for A/B comparison (default: 1e-8)",
+        help="Absolute tolerance for output comparison (default: 1e-8)",
     )
 
     # Reference Validation arguments
@@ -175,42 +223,15 @@ A/B Testing:
         help="Reference provider for validation (default: none). "
         "Options: pytorch, cpu_plugin, none",
     )
-    val_group.add_argument(
-        "--validate-rtol",
-        type=float,
-        default=1e-5,
-        metavar="TOL",
-        help="Relative tolerance for validation (default: 1e-5)",
-    )
-    val_group.add_argument(
-        "--validate-atol",
-        type=float,
-        default=1e-8,
-        metavar="TOL",
-        help="Absolute tolerance for validation (default: 1e-8)",
+
+    # Suite options
+    suite_group = parser.add_argument_group("Suite Options")
+    suite_group.add_argument(
+        "--plugin-path",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Path to directory containing hipDNN engine plugin .so files",
     )
 
     return parser
-
-
-def parse_args(args=None) -> BenchmarkConfig:
-    """Parse command line arguments and return BenchmarkConfig.
-
-    Args:
-        args: Command line arguments (default: sys.argv).
-
-    Returns:
-        BenchmarkConfig with parsed values.
-
-    Raises:
-        SystemExit: If arguments are invalid.
-    """
-    parser = create_parser()
-    parsed = parser.parse_args(args)
-
-    return BenchmarkConfig(
-        graph_path=parsed.graph,
-        warmup_iters=parsed.warmup,
-        benchmark_iters=parsed.iters,
-        engine_id=parsed.engine_id,
-    )

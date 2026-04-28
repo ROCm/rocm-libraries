@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 ARG BUILD_TYPE=prebuilt
+ARG THEROCK_BASE_IMAGE=rocm/miopen:therock
 
 # ============================================================================
 # Common base image with all dependencies
@@ -217,6 +218,7 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
             -DTHEROCK_ENABLE_ROCGDB=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
+            -DTHEROCK_BUILD_TESTING=OFF \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     fi
 
@@ -232,7 +234,7 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
 # REGULAR: Use the pre-built ROCm image from TheRock to build the rest of
 # the MIOpen environment
 #============================================================================
-FROM rocm/miopen:therock AS prebuilt_therock
+FROM ${THEROCK_BASE_IMAGE} AS prebuilt_therock
 
 # ============================================================================
 # Select which build stage to use

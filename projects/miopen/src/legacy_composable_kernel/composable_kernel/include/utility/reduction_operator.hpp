@@ -231,7 +231,7 @@ struct unary_abs<half_t, hasDividing>
 
     __device__ inline half_t operator()(half_t a) const
     {
-        a = static_cast<half_t>(__habs(a));
+        a = static_cast<half_t>(fabsf(static_cast<float>(a)));
 
         return a * type_convert<half_t>{}(scaler);
     };
@@ -244,7 +244,10 @@ struct unary_abs<half_t, false>
 {
     __device__ unary_abs(const int divider = 1) { (void)divider; };
 
-    __device__ inline half_t operator()(half_t a) const { return static_cast<half_t>(__habs(a)); };
+    __device__ inline half_t operator()(half_t a) const
+    {
+        return static_cast<half_t>(fabsf(static_cast<float>(a)));
+    };
 };
 
 template <class T>
@@ -260,7 +263,10 @@ struct unary_sqrt<half_t>
 {
     __device__ unary_sqrt(const int divider = 1) { (void)divider; };
 
-    __device__ inline half_t operator()(half_t a) const { return static_cast<half_t>(hsqrt(a)); };
+    __device__ inline half_t operator()(half_t a) const
+    {
+        return static_cast<half_t>(sqrtf(static_cast<float>(a)));
+    };
 };
 
 }; // end of namespace reduce

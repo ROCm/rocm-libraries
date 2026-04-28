@@ -37,6 +37,12 @@ pip3 install invoke
 # build the client to the default location with defaults
 invoke build-client
 
+# override the default toolchain with a specific ROCm install
+invoke build-client \
+  --gpu-targets gfx950 \
+  --rocm-path /opt/rocm-7.3.0 \
+  --export-compile-commands
+
 # run an individual test
 Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
 ```
@@ -71,6 +77,18 @@ specialized builds (e.g., Debug builds) and setting the architecture.
 cd rocm-libraries/projects/hipblaslt/tensilelite
 TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- Tensile/Tests -m common
 ```
+
+`invoke build-client` follows the existing `tensilelite` CMake preset by default.
+In this repo, that means `/opt/rocm` compiler settings come from the preset, and
+`CMAKE_EXPORT_COMPILE_COMMANDS` and `HIPBLASLT_BUNDLE_PYTHON_DEPS` are already enabled
+by default.
+
+Use these flags when you want to override or make that behavior explicit:
+
+* `--rocm-path <path>`: Override the compiler toolchain to use `<path>/bin/amdclang` and `<path>/bin/amdclang++`
+* `--export-compile-commands`: Explicitly force `CMAKE_EXPORT_COMPILE_COMMANDS=ON`
+* `--bundle-python-deps`: Explicitly force `HIPBLASLT_BUNDLE_PYTHON_DEPS=ON`
+* `--enable-rocprof`: Sets `TENSILELITE_CLIENT_ENABLE_ROCPROFSDK=ON`
 
 ### Options
 

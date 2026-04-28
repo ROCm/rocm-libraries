@@ -95,4 +95,17 @@ struct PassFeatureConfig {
     DagFeatures dagFeatures;
     PassOrderSnapshotConfig passOrderSnapshot;
 };
+
+/// Assembler capability flags propagated from rocisa asmCaps into stinkytofu.
+///
+/// These are target/toolchain capabilities discovered by probing the assembler
+/// (see `initAsmCaps` in rocisa `hardware_caps.hpp`). They are populated by
+/// the rocisa conversion layer and consumed by stinkytofu passes without
+/// introducing a direct dependency on rocisa headers from the pass layer.
+struct AsmCapsConfig {
+    /// Whether the assembler accepts the 16-bit form of `s_set_vgpr_msb`
+    /// (immediate encodes both the current instruction's MSB in the low byte
+    /// and the previous instruction's MSB in the high byte).
+    bool hasVgprMsb16 = false;
+};
 }  // namespace stinkytofu
