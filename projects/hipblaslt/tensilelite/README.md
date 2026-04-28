@@ -52,14 +52,23 @@ Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
 
 ### Rebuilding rocisa after C++ changes
 
-`invoke rocisa` only needs to be re-run when `pyproject.toml` or `CMakeLists.txt` change.
-For day-to-day C++ source edits, rebuild only the extension:
+The rebuild command depends on how rocisa was installed:
+
+**If installed via `invoke rocisa`** (pip / scikit-build-core manages the build dir):
 
 ```bash
-# default build_tmp location
-cmake --build build_tmp --target _rocisa
+invoke rocisa   # re-runs pip install -e; scikit-build-core does an incremental rebuild
+```
 
-# or a custom build directory
+**If installed via `invoke build-client`** (cmake build dir is `build_tmp`):
+
+```bash
+cmake --build build_tmp --target _rocisa
+```
+
+**If using a custom cmake build directory:**
+
+```bash
 cmake --build <build_dir> --target _rocisa
 ```
 
