@@ -15,16 +15,12 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_data_sdk_tests
     main.cpp
-    flatbuffer_utilities/TestEngineConfigWrapper.cpp
-    flatbuffer_utilities/TestEngineDetailsWrapper.cpp
-    flatbuffer_utilities/TestGraphWrapper.cpp
-    flatbuffer_utilities/TestNodeWrapper.cpp
-    flatbuffer_utilities/TestKnobWrapper.cpp
-    flatbuffer_utilities/TestKnobSettingWrapper.cpp
     types/TestBfloat16.cpp
     types/TestCrossTypeConversion.cpp
     types/TestForwardingFunctions.cpp
     types/TestFp4E2M1.cpp
+    types/TestFp6E2M3.cpp
+    types/TestFp6E3M2.cpp
     types/TestFp8E4M3.cpp
     types/TestFp8E5M2.cpp
     types/TestFp8E8M0.cpp
@@ -34,10 +30,8 @@ add_executable(
     utilities/TestAllocators.cpp
     utilities/TestEngineNames.cpp
     utilities/TestFloats.cpp
-    utilities/TestJson.cpp
     utilities/TestMigratableMemory.cpp
     utilities/TestPlatformUtils.cpp
-    utilities/TestPointwiseValidation.cpp
     utilities/TestScopedResource.cpp
     utilities/TestShallowHostOnlyMigratableMemory.cpp
     utilities/TestShallowTensor.cpp

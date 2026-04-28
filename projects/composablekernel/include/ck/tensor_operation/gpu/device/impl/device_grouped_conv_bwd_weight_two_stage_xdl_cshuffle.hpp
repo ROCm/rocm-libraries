@@ -702,7 +702,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
 
                 // Ensure that k_batch_ does not exceed the maximum value
                 // for the GEMM pipeline.
-                const auto k_batch_max = static_cast<index_t>((gemmK - 1) / KPerBlock);
+                const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
                 k_batch_               = std::max(std::min(k_batch_, k_batch_max), 1);
 
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
@@ -717,6 +717,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
             {
                 k_batch_ = split_k;
             }
+            k_batch_ = clamp_gemm_k_batch(k_batch_);
 
             // Create initial descriptors with hack=false to check compactness
             const auto descs_initial =

@@ -86,10 +86,9 @@ constexpr uint8_t FP4_E2M1_ROUND_ERROR = 0x01;
 /// Rounding threshold for round-to-nearest-even (midpoint of 22-bit remainder)
 constexpr uint32_t FP4_E2M1_ROUND_THRESHOLD = 0x200000;
 
-// NOLINTBEGIN(readability-identifier-naming,readability-implicit-bool-conversion,modernize-use-auto)
-
 // Convert float to FP4 E2M1 bits (OCP MX format: 1 sign, 2 exponent, 1 mantissa)
 // Range: +/- 6, no infinity (saturates to max), no NaN (returns zero)
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline uint8_t float_to_fp4_e2m1_bits(float f) noexcept
 {
     // Handle special values first using std library functions
@@ -131,7 +130,7 @@ inline uint8_t float_to_fp4_e2m1_bits(float f) noexcept
     if(exp <= 0)
     {
         mant |= 0x00800000; // Add implicit 1
-        const uint32_t shift = static_cast<uint32_t>(1 - exp + 22); // 23 - 1 = 22 bits to shift
+        auto shift = static_cast<uint32_t>(1 - exp + 22); // 23 - 1 = 22 bits to shift
         if(shift > 24)
         {
             return static_cast<uint8_t>(sign); // Too small, return zero
@@ -143,7 +142,7 @@ inline uint8_t float_to_fp4_e2m1_bits(float f) noexcept
         mant >>= shift;
 
         // Round to nearest even: round up if above midpoint, or at midpoint with odd result
-        if(remainder > halfPoint || (remainder == halfPoint && (mant & 1)))
+        if(remainder > halfPoint || (remainder == halfPoint && ((mant & 1) != 0)))
         {
             mant++;
             // Check if rounding caused carry into normal range
@@ -163,7 +162,7 @@ inline uint8_t float_to_fp4_e2m1_bits(float f) noexcept
 
     // Round to nearest even
     if(remainder > FP4_E2M1_ROUND_THRESHOLD
-       || (remainder == FP4_E2M1_ROUND_THRESHOLD && (fp4Mant & 1)))
+       || (remainder == FP4_E2M1_ROUND_THRESHOLD && ((fp4Mant & 1) != 0)))
     {
         fp4Mant++;
         if(fp4Mant > 1)
@@ -180,19 +179,18 @@ inline uint8_t float_to_fp4_e2m1_bits(float f) noexcept
     return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 1) | fp4Mant);
 }
 
-/// Convert FP4 E2M1 bits to float using lookup table
+// Convert FP4 E2M1 bits to float using lookup table
+// NOLINTNEXTLINE(readability-identifier-naming)
 inline float fp4_e2m1_bits_to_float(uint8_t bits) noexcept
 {
     // clang-format off
-    static constexpr std::array<float, 16> table = {
+    static constexpr std::array<float, 16> TABLE = {
         0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,
         -0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f
     };
     // clang-format on
-    return table[bits & 0x0F];
+    return TABLE[bits & 0x0F];
 }
-
-// NOLINTEND(readability-identifier-naming,readability-implicit-bool-conversion,modernize-use-auto)
 
 } // namespace detail
 
@@ -237,7 +235,7 @@ inline float fp4_e2m1_bits_to_float(uint8_t bits) noexcept
  * Range: -6.0 to +6.0
  * Rounding: roundTiesToEven (IEEE 754 default)
  * Overflow: Saturates to ±6 (maximum magnitude)
- * Underflow: Values below minimum subnormal (0.25) convert to zero
+ * Underflow: Values with magnitude below 0.25 round to zero
  */
 // NOLINTNEXTLINE(readability-identifier-naming) - lowercase for consistency
 struct fp4_e2m1
@@ -283,7 +281,7 @@ struct fp4_e2m1
     inline explicit fp4_e2m1(half h) noexcept;
 
     // Factory for raw bits
-    // NOLINTNEXTLINE(readability-identifier-naming) - using snake_case for factory function
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr fp4_e2m1 from_bits(uint8_t bits) noexcept
     {
         fp4_e2m1 val;
@@ -388,7 +386,6 @@ inline bool isfinite(fp4_e2m1 /*x*/)
 struct fp4x2_e2m1
 {
     /// Raw bit representation storing 2 packed FP4 values.
-    /// Low nibble = lo element, High nibble = hi element.
     uint8_t data;
 
     // Default constructor - both elements zero

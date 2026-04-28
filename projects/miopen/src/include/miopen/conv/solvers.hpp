@@ -361,11 +361,11 @@ struct MIOPEN_INTERNALS_EXPORT ConvAsm7x7c3h224w224k64u2v2p3q3f1 final : ConvSol
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd11x11 final : ConvSolver
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwd11x11 final : ConvSolver
 {
     const std::string& SolverDbId() const override
     {
-        return GetSolverDbId<ConvOclDirectFwd11x11>();
+        return GetSolverDbId<ConvHipDirectFwd11x11>();
     }
 
     bool IsApplicable(const ExecutionContext&,
@@ -2804,6 +2804,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwd1x1_0_2 final : GemmFwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
 
@@ -2840,6 +2843,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwd1x1_0_1 final : GemmFwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
 
@@ -2857,6 +2863,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwdRest final : GemmFwdBase
                             const miopen::conv::ProblemDescription&) const override;
 
     bool MayNeedWorkspace() const override { return true; }
+
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2888,6 +2897,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwd1x1_stride2 final : GemmBwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
 
@@ -2906,6 +2918,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwd1x1_stride1 final : GemmBwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription& problem) const override;
 
@@ -2923,6 +2938,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwdRest final : GemmBwdBase
                             const miopen::conv::ProblemDescription&) const override;
 
     bool MayNeedWorkspace() const override { return true; }
+
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2948,6 +2966,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmWrw1x1_stride1 final : GemmWrwBase
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<GemmWrw1x1_stride1>(); }
 
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
+
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
 
@@ -2965,6 +2986,9 @@ struct MIOPEN_INTERNALS_EXPORT GemmWrwUniversal final : GemmWrwBase
                             const miopen::conv::ProblemDescription&) const override;
 
     bool MayNeedWorkspace() const override { return true; }
+
+    bool IsSlow(const ExecutionContext& context,
+                const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -4143,162 +4167,11 @@ struct ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC final
                 const PerformanceConfigAsmImplicitGemmGTCFwdDlopsNCHWC&) const override;
 };
 
-struct PerformanceConfigHipImplicitGemmFwdXdlops
-    : PerfConfigBaseCK<PerformanceConfigHipImplicitGemmFwdXdlops>
-{
-    int index             = 0;
-    std::string kernel_id = "";
-    std::vector<std::string> valid_kernels;
-
-    PerformanceConfigHipImplicitGemmFwdXdlops(int idx, std::string kernl_id)
-        : index(idx), kernel_id(kernl_id)
-    {
-    }
-
-    PerformanceConfigHipImplicitGemmFwdXdlops() = default;
-
-    explicit PerformanceConfigHipImplicitGemmFwdXdlops(bool)
-        : PerformanceConfigHipImplicitGemmFwdXdlops(0, "")
-    {
-    }
-    void DefaultKernelFromList(const ExecutionContext& ctx);
-    void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
-    bool IsValidValue() const;
-    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
-    {
-        return IsValid(problem);
-    }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
-    bool operator==(const PerformanceConfigHipImplicitGemmFwdXdlops& other) const;
-
-private:
-    template <typename DataType>
-    void Init(const miopen::conv::ProblemDescription&);
-    template <typename DataType>
-    bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
-};
-
-struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmFwdXdlops final
-    : ConvTunableSolver<PerformanceConfigHipImplicitGemmFwdXdlops>
-{
-    const std::string& SolverDbId() const override
-    {
-        return GetSolverDbId<ConvHipImplicitGemmFwdXdlops>();
-    }
-
-    PerformanceConfigHipImplicitGemmFwdXdlops
-    GetDefaultPerformanceConfig(const ExecutionContext&,
-                                const miopen::conv::ProblemDescription&) const override;
-    bool IsValidPerformanceConfig(const ExecutionContext&,
-                                  const miopen::conv::ProblemDescription&,
-                                  const PerformanceConfigHipImplicitGemmFwdXdlops&) const override;
-    PerformanceConfigHipImplicitGemmFwdXdlops
-    Search(const ExecutionContext&,
-           const miopen::conv::ProblemDescription&,
-           const AnyInvokeParams& invoke_ctx) const override;
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    bool IsDynamic() const override { return true; }
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const PerformanceConfigHipImplicitGemmFwdXdlops&) const override;
-    /// \anchor igemm_get_wti_magic_number
-    // Magic Number Alert:
-    // Naive convolutions have GetWti() that return very small value (0.01f).
-    // This allows MIOpen to use Naive Solvers if no other applicable Solvers
-    // have known WTIs. Right now this means that in case of find-db miss,
-    // the library will try to use Winograd or GEMM (whatever is faster according
-    // to their GetWti's), but if both are not applicable, the library will
-    // use Naive Solver
-    // Since we would like to us CK before naive, and use it instead (because
-    // we do expect that CK is faster than Naive), therefore we use a
-    // value bigger than 0.01f, e.g. 0.02f.
-    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
-    {
-        return 0.02f;
-    };
-
-private:
-    template <typename DataType>
-    bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
-};
-
-struct PerformanceConfigHipImplicitGemmBwdXdlops
-    : PerfConfigBaseCK<PerformanceConfigHipImplicitGemmBwdXdlops>
-{
-    int index             = 0;
-    std::string kernel_id = "";
-    std::vector<std::string> valid_kernels;
-
-    PerformanceConfigHipImplicitGemmBwdXdlops(int idx, std::string kernl_id)
-        : index(idx), kernel_id(kernl_id)
-    {
-    }
-
-    PerformanceConfigHipImplicitGemmBwdXdlops() = default;
-
-    explicit PerformanceConfigHipImplicitGemmBwdXdlops(bool)
-        : PerformanceConfigHipImplicitGemmBwdXdlops(0, "")
-    {
-    }
-    void DefaultKernelFromList(const ExecutionContext& ctx);
-    void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
-    bool IsValidValue() const;
-    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
-    {
-        return IsValid(problem);
-    }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
-    bool operator==(const PerformanceConfigHipImplicitGemmBwdXdlops& other) const;
-
-private:
-    template <typename DataType>
-    void Init(const miopen::conv::ProblemDescription&);
-    template <typename DataType>
-    bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
-};
-
-struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmBwdXdlops final
-    : ConvTunableSolver<PerformanceConfigHipImplicitGemmBwdXdlops>
-{
-    const std::string& SolverDbId() const override
-    {
-        return GetSolverDbId<ConvHipImplicitGemmBwdXdlops>();
-    }
-
-    PerformanceConfigHipImplicitGemmBwdXdlops
-    GetDefaultPerformanceConfig(const ExecutionContext&,
-                                const miopen::conv::ProblemDescription&) const override;
-    bool IsValidPerformanceConfig(const ExecutionContext&,
-                                  const miopen::conv::ProblemDescription&,
-                                  const PerformanceConfigHipImplicitGemmBwdXdlops&) const override;
-    PerformanceConfigHipImplicitGemmBwdXdlops
-    Search(const ExecutionContext&,
-           const miopen::conv::ProblemDescription&,
-           const AnyInvokeParams& invoke_ctx) const override;
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    bool IsDynamic() const override { return true; }
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const PerformanceConfigHipImplicitGemmBwdXdlops&) const override;
-    /// \ref igemm_get_wti_magic_number
-    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
-    {
-        return 0.02f;
-    };
-
-private:
-    template <typename DataType>
-    bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
-};
-
 struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
     : PerfConfigBaseCK<PerformanceConfigHipImplicitGemmGroupFwdXdlops>
 {
     int index             = 0;
+    int split_k           = 0; // not used for FWD, but required for AI heuristics interface
     std::string kernel_id = "";
     std::vector<std::string> valid_kernels;
 
@@ -4330,18 +4203,27 @@ struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
                       const miopen::conv::ProblemDescription& problem) const;
     bool UseTF32() const { return use_tf32; }
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
+    template <typename DataType>
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+#endif
+
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
-    template <typename DataType>
-    bool RunParameterPredictionModel(const ExecutionContext& ctx,
-                                     const miopen::conv::ProblemDescription& problem);
-    void InitHeuristicKernelIDs(const std::string& type);
-    bool ModelApplyToken(int idx, std::string value, const std::string& arch);
+
+    void InitHeuristicKernelIDsKTN(const std::string& type);
+    bool ModelApplyTokenKTN(int idx, std::string value, const std::string& arch);
 #endif
+
+    template <typename DataType, typename ComputeType>
+    void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     void Init(const miopen::conv::ProblemDescription&);
+    void InitValidKernels(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
@@ -4381,10 +4263,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupFwdXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
-
-private:
-    template <typename DataType>
-    bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 };
 
 struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
@@ -4409,21 +4287,17 @@ struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
     void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {
         return IsValid(problem);
     }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemm3DGroupFwdXdlops& other) const;
     bool UseTF32() const { return use_tf32; }
 
 private:
-    template <typename DataType, typename ComputeType = DataType>
-    bool Init(const miopen::conv::ProblemDescription&);
-    template <typename DataType, typename ComputeType = DataType>
-    bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
     mutable bool use_tf32 = false;
 };
@@ -4459,10 +4333,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupFwdXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
-
-private:
-    template <typename DataType, typename ComputeType = DataType>
-    bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 };
 
 struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
@@ -4486,21 +4356,17 @@ struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
     }
     void DefaultKernelFromList(const ExecutionContext& ctx);
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {
         return IsValid(problem);
     }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemm3DGroupWrwXdlops& other) const;
     bool UseTF32() const { return use_tf32; }
 
 private:
-    template <typename DataType, typename ComputeType = DataType>
-    bool Init(const miopen::conv::ProblemDescription&);
-    template <typename DataType, typename ComputeType = DataType>
-    bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
     mutable bool use_tf32 = false;
 };
@@ -4542,11 +4408,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
     bool MayNeedWorkspace() const override { return true; }
 
 private:
-    template <typename DataType, typename ComputeType = DataType>
-    bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
-
-    template <typename DataType, typename ComputeType = DataType>
-    std::size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription&) const;
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
@@ -4570,22 +4431,19 @@ struct PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
     {
     }
     void DefaultKernelFromList(const ExecutionContext& ctx);
-    void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
+                                               const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {
         return IsValid(problem);
     }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemm3DGroupBwdXdlops& other) const;
     bool UseTF32() const { return use_tf32; }
 
 private:
-    template <typename DataType, typename ComputeType = DataType>
-    bool Init(const miopen::conv::ProblemDescription&);
-    template <typename DataType, typename ComputeType = DataType>
-    bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
     mutable bool use_tf32 = false;
 };
@@ -4625,17 +4483,13 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupBwdXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
-
-private:
-    template <typename DataType, typename ComputeType = DataType>
-    bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 };
 
 struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
     : PerfConfigBaseCK<PerformanceConfigHipImplicitGemmGroupBwdXdlops>
 {
-    int index;
-    int split_k;
+    int index   = 0;
+    int split_k = 1;
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
     PerformanceConfigHipImplicitGemmGroupBwdXdlops(int idx, std::string kernl_id)
@@ -4667,21 +4521,30 @@ struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
                       const miopen::conv::ProblemDescription& problem) const;
     bool UseTF32() const { return use_tf32; }
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
+    template <typename DataType>
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+#endif
+
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
-    template <typename DataType>
-    bool RunParameterPredictionModel(const ExecutionContext& ctx,
-                                     const miopen::conv::ProblemDescription& problem);
-    void InitHeuristicKernelIDs();
-    bool ModelApplyToken(int idx,
-                         std::string value,
-                         const std::string& arch,
-                         const miopen::conv::ProblemDescription& problem);
+
+    void InitHeuristicKernelIDsKTN();
+    bool ModelApplyTokenKTN(int idx,
+                            std::string value,
+                            const std::string& arch,
+                            const miopen::conv::ProblemDescription& problem);
 #endif
+
+    template <typename DataType, typename ComputeType>
+    void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     void Init(const miopen::conv::ProblemDescription&);
+    void InitValidKernels(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
@@ -4723,17 +4586,14 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupBwdXdlops final
     bool MayNeedWorkspace() const override { return true; }
 
 private:
-    template <typename DataType>
-    bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
-
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
 struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
     : PerfConfigBaseCK<PerformanceConfigHipImplicitGemmGroupWrwXdlops>
 {
-    int index;
-    int split_k;
+    int index   = 0;
+    int split_k = 1;
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
     PerformanceConfigHipImplicitGemmGroupWrwXdlops(int idx, std::string kernl_id)
@@ -4765,21 +4625,30 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
                       const miopen::conv::ProblemDescription& problem) const;
     bool UseTF32() const { return use_tf32; }
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
+    template <typename DataType>
+    bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
+                                        const miopen::conv::ProblemDescription& problem);
+#endif
+
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
-    template <typename DataType>
-    bool RunParameterPredictionModel(const ExecutionContext& ctx,
-                                     const miopen::conv::ProblemDescription& problem);
-    void InitHeuristicKernelIDs(const std::string& type);
-    bool ModelApplyToken(int idx,
-                         std::string value,
-                         const std::string& arch,
-                         const miopen::conv::ProblemDescription& problem);
+
+    void InitHeuristicKernelIDsKTN(const std::string& type);
+    bool ModelApplyTokenKTN(int idx,
+                            std::string value,
+                            const std::string& arch,
+                            const miopen::conv::ProblemDescription& problem);
 #endif
+
+    template <typename DataType, typename ComputeType>
+    void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     void Init(const miopen::conv::ProblemDescription&);
+    void InitValidKernels(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
@@ -4821,9 +4690,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
     bool MayNeedWorkspace() const override { return true; }
 
 private:
-    template <typename DataType>
-    bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
-
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
@@ -4854,8 +4720,6 @@ private:
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
 #endif
-    template <typename DataType>
-    void Init(const miopen::conv::ProblemDescription&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd2D final
@@ -4892,9 +4756,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd2D final
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigConvDepthwiseFwd2D&) const override;
-
-    uint32_t GetSupportedSolutionCount(const ExecutionContext&,
-                                       const miopen::conv::ProblemDescription&) const;
 };
 /// Common base for ConvWinogradNHWC transposing solvers (tunable and non-tunable).
 /// Provides ConvertFromApiParams, ConvertForInnerSolver, Transpose, and GetTransposes.
@@ -4958,7 +4819,7 @@ struct ConvWinogradNHWCTransposingBase : TransposingSolver<Derived,
         // - For 4D tensors: Automatically interpreted as NCHW (D dimension is implicit/1)
         // - For 5D tensors: Full NCDHW layout for 3D convolutions
         // This makes the transposing solver future-proof for both 2D and 3D convolutions.
-        auto ret = std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 3>{{
+        return std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 3>{{
             {
                 &Problem::GetIn,
                 &InvokeParams::inDesc,
@@ -4984,8 +4845,6 @@ struct ConvWinogradNHWCTransposingBase : TransposingSolver<Derived,
                 is_wrw,  // Fwd/Bwd: output; WrW: input
             },
         }};
-
-        return ret;
     }
 };
 
@@ -5009,19 +4868,17 @@ struct ConvWinogradNHWCTransposingTunableSolver
 {
 };
 
-struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinograd3x3U final
-    : ConvWinogradNHWCTransposingSolver<ConvBinWinograd3x3U>
+struct TransposedConvBinWinograd3x3U final : ConvWinogradNHWCTransposingSolver<ConvBinWinograd3x3U>
 {
     const std::string& SolverDbId() const { return GetSolverDbId<TransposedConvBinWinograd3x3U>(); }
 };
 
-struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinogradRxS final
-    : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxS>
+struct TransposedConvBinWinogradRxS final : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxS>
 {
     const std::string& SolverDbId() const { return GetSolverDbId<TransposedConvBinWinogradRxS>(); }
 };
 
-struct MIOPEN_INTERNALS_EXPORT TransposedConvBinWinogradRxSf2x3g1 final
+struct TransposedConvBinWinogradRxSf2x3g1 final
     : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxSf2x3g1>
 {
     const std::string& SolverDbId() const
@@ -5041,14 +4898,6 @@ struct TransposedConvMPBidirectWinograd final
     }
 };
 
-#ifndef CONV_MP_BIDIRECTIONAL_WINOGRAD_CPP
-extern template struct TransposedConvMPBidirectWinograd<2, 3>;
-extern template struct TransposedConvMPBidirectWinograd<3, 3>;
-extern template struct TransposedConvMPBidirectWinograd<4, 3>;
-extern template struct TransposedConvMPBidirectWinograd<5, 3>;
-extern template struct TransposedConvMPBidirectWinograd<6, 3>;
-#endif
-
 template <int WinoDataH, int WinoFilterH, int WinoDataW = WinoDataH, int WinoFilterW = WinoFilterH>
 struct TransposedConvWinograd3x3MultipassWrW final
     : ConvWinogradNHWCTransposingSolver<
@@ -5063,22 +4912,6 @@ struct TransposedConvWinograd3x3MultipassWrW final
     }
 };
 
-#ifndef CONV_MULTIPASS_WINO3X3WRW_CPP
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 2>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 3>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 4>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 5>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<3, 6>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<7, 2>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<7, 3>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 2>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 3>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<7, 2, 1, 1>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<7, 3, 1, 1>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<5, 3>;
-extern template struct TransposedConvWinograd3x3MultipassWrW<5, 4>;
-#endif
-
 template <uint32_t Winodata, uint32_t Winofilter>
 struct TransposedConvWinoFuryRxS final
     : ConvWinogradNHWCTransposingSolver<ConvWinoFuryRxS<Winodata, Winofilter>>
@@ -5088,10 +4921,6 @@ struct TransposedConvWinoFuryRxS final
         return this->template GetSolverDbId<TransposedConvWinoFuryRxS<Winodata, Winofilter>>();
     }
 };
-
-#ifndef CONV_WINO_FURY_RXS_CPP
-extern template struct TransposedConvWinoFuryRxS<2, 3>;
-#endif
 
 template <uint32_t Winodata, uint32_t Winofilter>
 struct TransposedConvWinoRageRxS final
@@ -5103,10 +4932,6 @@ struct TransposedConvWinoRageRxS final
     }
 };
 
-#ifndef CONV_WINO_RAGE_RXS_CPP
-extern template struct TransposedConvWinoRageRxS<2, 3>;
-#endif
-
 // Tunable transposed Winograd solvers for NHWC layout support
 template <int Winodata, int Winofilter>
 struct TransposedConvBinWinoRxS final
@@ -5117,14 +4942,6 @@ struct TransposedConvBinWinoRxS final
         return this->template GetSolverDbId<TransposedConvBinWinoRxS<Winodata, Winofilter>>();
     }
 };
-
-// Suppress misleading clang warnings
-#ifndef CONV_BIN_WINO_RXS_CPP
-
-extern template struct TransposedConvBinWinoRxS<2, 3>;
-extern template struct TransposedConvBinWinoRxS<3, 2>;
-
-#endif
 
 template <int WinoDataH, int WinoFilterH, int WinoDataW = WinoDataH, int WinoFilterW = WinoFilterH>
 struct TransposedConvMPBidirectWinograd_xdlops final
@@ -5154,13 +4971,31 @@ extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 #pragma clang diagnostic pop
 #endif
 
+/// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
+struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvDepthwiseFwd3D>(); }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return false; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override
+    {
+        return 0;
+    }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 // Test helper functions for metadata validation
 // These functions return all CK kernel TypeStrings without problem-based filtering
 // Declared here but implemented in the respective solver .cpp files
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetAllWrwKernelTypeStrings();
-MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetAllFwdKernelTypeStrings();
-MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetAllBwdKernelTypeStrings();
 #endif
 
 } // namespace conv

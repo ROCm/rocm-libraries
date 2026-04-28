@@ -652,7 +652,7 @@ struct DeviceGroupedConvBwdWeightMultipleD_Wmma_CShuffleV3
 
                 // Ensure that k_batch_ does not exceed the maximum value
                 // for the GEMM pipeline.
-                const auto k_batch_max = math::integer_divide_ceil((gemmK - 1), KPerBlock);
+                const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
                 k_batch_               = std::min(k_batch_, k_batch_max);
 
                 // Cap k_batch_ to 128 to avoid accuracy issues
@@ -670,6 +670,7 @@ struct DeviceGroupedConvBwdWeightMultipleD_Wmma_CShuffleV3
             {
                 k_batch_ = split_k;
             }
+            k_batch_ = clamp_gemm_k_batch(k_batch_);
 
             const auto descs =
                 conv_to_gemm_transformer

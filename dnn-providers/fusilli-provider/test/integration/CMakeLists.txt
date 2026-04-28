@@ -111,6 +111,21 @@ add_fusilli_plugin_test(
 )
 
 add_fusilli_plugin_test(
+  NAME fusilli_plugin_simple_batched_matmul_int4_fp16_test
+  SRCS matmul/simple_batched_matmul_int4_fp16.cpp
+  DEPS
+    GTest::gtest_main
+    hip::host
+    hipdnn_frontend
+    hipdnn_plugin_sdk
+    hipdnn_data_sdk
+    hipdnn_test_sdk
+    Threads::Threads
+  COMPILE_DEFS
+    FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+)
+
+add_fusilli_plugin_test(
   NAME fusilli_plugin_simple_scaled_matmul_accumulate_test
   SRCS matmul/simple_scaled_matmul_accumulate.cpp
   DEPS
@@ -158,6 +173,73 @@ add_fusilli_plugin_test(
 add_fusilli_plugin_test(
   NAME fusilli_plugin_simple_conv_dgrad_test
   SRCS convolution/simple_conv_dgrad.cpp
+  DEPS
+    GTest::gtest_main
+    hip::host
+    hipdnn_frontend
+    hipdnn_plugin_sdk
+    hipdnn_data_sdk
+    hipdnn_test_sdk
+    Threads::Threads
+  COMPILE_DEFS
+    FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+)
+
+if(NOT HIPDNN_ENABLE_SDPA)
+  message(WARNING
+          "hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+          "Skipping Fusilli SDPA integration test. "
+          "Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable it.")
+else()
+  add_fusilli_plugin_test(
+    NAME fusilli_plugin_simple_sdpa_test
+    SRCS sdpa/simple_sdpa.cpp
+    DEPS
+      GTest::gtest_main
+      hip::host
+      hipdnn_frontend
+      hipdnn_plugin_sdk
+      hipdnn_data_sdk
+      hipdnn_test_sdk
+      Threads::Threads
+    COMPILE_DEFS
+      FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+  )
+endif()
+
+add_fusilli_plugin_test(
+  NAME fusilli_plugin_simple_reduction_test
+  SRCS reduction/simple_reduction.cpp
+  DEPS
+    GTest::gtest_main
+    hip::host
+    hipdnn_frontend
+    hipdnn_plugin_sdk
+    hipdnn_data_sdk
+    hipdnn_test_sdk
+    Threads::Threads
+  COMPILE_DEFS
+    FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+)
+
+add_fusilli_plugin_test(
+  NAME fusilli_plugin_simple_custom_op_test
+  SRCS custom_op/simple_custom_op.cpp
+  DEPS
+    GTest::gtest_main
+    hip::host
+    hipdnn_frontend
+    hipdnn_plugin_sdk
+    hipdnn_data_sdk
+    hipdnn_test_sdk
+    Threads::Threads
+  COMPILE_DEFS
+    FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+)
+
+add_fusilli_plugin_test(
+  NAME fusilli_plugin_simple_rmsnorm_test
+  SRCS rmsnorm/simple_rmsnorm.cpp
   DEPS
     GTest::gtest_main
     hip::host

@@ -28,6 +28,7 @@
 
 #include "CSVStackFile.hpp"
 #include "ResultReporter.hpp"
+#include "TimingInstrumentation.hpp"
 
 #ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
@@ -347,6 +348,30 @@ namespace TensileLite
                                        reinterpret_cast<std::complex<double> const*>(data),
                                        tensor,
                                        reinterpret_cast<std::complex<double> const*>(ptrVal));
+#ifdef TENSILE_USE_FP6
+                    else if(tensor.dataType() == rocisa::DataType::Float6)
+                        logTensorTyped(level,
+                                       name,
+                                       reinterpret_cast<Float6x16 const*>(data),
+                                       tensor,
+                                       reinterpret_cast<Float6x16 const*>(ptrVal));
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+                    else if(tensor.dataType() == rocisa::DataType::BFloat6)
+                        logTensorTyped(level,
+                                       name,
+                                       reinterpret_cast<BFloat6x16 const*>(data),
+                                       tensor,
+                                       reinterpret_cast<BFloat6x16 const*>(ptrVal));
+#endif // #ifdef TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+                    else if(tensor.dataType() == rocisa::DataType::Float4)
+                        logTensorTyped(level,
+                                       name,
+                                       reinterpret_cast<Float4x2 const*>(data),
+                                       tensor,
+                                       reinterpret_cast<Float4x2 const*>(ptrVal));
+#endif // #ifdef TENSILE_USE_FP4
                     else
                         throw std::runtime_error(
                             concatenate("Can't log tensor of type ", tensor.dataType()));
@@ -372,6 +397,7 @@ namespace TensileLite
 
             virtual void postSolution() override
             {
+                ScopedTimer timer("post_solution_log");
                 std::unordered_map<std::string, std::string> curRow;
                 m_csvOutput.readCurrentRow(curRow);
                 bool  validation    = !(curRow[ResultKey::Validation] == "FAILED"

@@ -18,6 +18,10 @@
 #include "ck_tile/core/utility/ignore.hpp"
 #include "ck_tile/core/arch/amd_buffer_coherence.hpp"
 
+#define HAS_GLOBAL_ATOMIC_PK_ADD_BUILTIN                        \
+    __has_builtin(__builtin_amdgcn_global_atomic_fadd_v2f16) && \
+        __has_builtin(__builtin_amdgcn_global_atomic_fadd_v2bf16)
+
 using as3_uint32_ptr = uint32_t __attribute__((address_space(3)))*;
 
 namespace ck_tile {
@@ -1315,6 +1319,87 @@ CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
 }
 
+// Flat async load from global memory to LDS using 64-bit global addressing.
+// Bypasses the SRD's 32-bit offset limit; required when the KV cache exceeds
+// INT32_MAX (2GB) byte offset on the SRD voffset path.
+//
+// !!! M0 PRECONDITION — IMPLICIT INPUT NOT VISIBLE IN OPERAND LIST !!!
+//
+//   The LDS destination address is taken from M0 (per AMD CDNA3 ISA §10.3:
+//   `LDS_ADDR = LDSbase + LDSoffset(M0[17:2] * 4) + INST.OFFSET + ThreadID*4`).
+//   M0 does NOT appear as an operand of these instructions or of the inline
+//   asm below — the compiler cannot see the dependency. Caller must:
+//
+//     1. Initialize M0 once before the load loop:
+//          `m0_set_with_memory(amd_wave_read_first_lane(lds_byte_offset));`
+//        M0 is SALU-only — `m0_set_with_memory` uses an "s" constraint to
+//        enforce this. Direct VALU writes to M0 are illegal.
+//
+//     2. Advance M0 between successive issues:
+//          `m0_inc_with_memory(size_per_issue);`
+//        `size_per_issue` MUST be a multiple of 4 — GLOBAL/FLAT LDS path
+//        only honors M0[17:2]*4 (dword-aligned), so low 2 bits are silently
+//        dropped (NOTE: this differs from MUBUF buffer_load_lds which uses
+//        M0[15:0] as a raw byte offset).
+//
+//     3. Never bundle `m0_inc_with_memory` and the next call to this
+//        function into a single inline asm. The compiler auto-inserts a
+//        hazard NOP between an SALU write to M0 and the consuming
+//        `global_load_lds_*`; bundling bypasses that and may read stale M0.
+//
+//   The "memory" clobber on this asm is load-bearing: it prevents the
+//   compiler from reordering this load across other M0-touching helpers
+//   (`m0_set_with_memory` / `m0_inc_with_memory`, also "memory"-clobbered).
+//
+// Verified instruction emission (HIP 6.4 / clang 19, gfx942 + gfx950):
+//   `global_load_lds_dwordx4` is a single instruction (encoding 0xDDF48000
+//   0x007F0000), NOT software-expanded into 4× dword. Same encoding on both
+//   arches. The opcode is undocumented in CDNA3 ISA spec §13.6.2 but
+//   supported by the LLVM AMDGPU backend.
+//
+// Available on gfx940+ (CDNA3: MI300, MI355, MI350 series).
+template <unsigned num_dwords, bool pre_nop = false>
+CK_TILE_DEVICE void
+async_global_load_lds_dwordxn(void* smem, const void* global_addr, bool_constant<pre_nop> = {})
+{
+#if !defined(__gfx94__) && !defined(__gfx950__)
+    static_assert(always_false_v<integral_constant<unsigned, num_dwords>>,
+                  "global_load_lds requires CDNA3+ (gfx940/gfx950). "
+                  "Ensure kKVLoadMode is BUFFER_LOAD on this architecture.");
+#endif
+
+    static_assert(num_dwords == 1 || num_dwords == 4,
+                  "global_load_lds supports num_dwords == 1 or 4 only "
+                  "(2 dwords does not exist on any supported arch; "
+                  "3 dwords only on CDNA4 and unused in FMHA pipeline)");
+
+// Inline asm: only the global address is an explicit operand. The LDS
+// destination is implicit via M0 (see contract above). `"=r"(smem)` is a
+// SSA scheduling anchor only — `smem` is NOT written by this asm; the
+// load goes to LDS at `M0[17:2]*4 + offset:0 + ThreadID*4`.
+#define CK_TILE_GLOBAL_LOAD_LDS_INSTR(instr)                                 \
+    if constexpr(pre_nop)                                                    \
+        asm volatile("s_nop 4\n" instr " %1, off offset:0"                   \
+                     : "=r"(smem) /*scheduling anchor; real LDS dest is M0*/ \
+                     : "v"(global_addr)                                      \
+                     : "memory" /*prevents reorder across m0_{set,inc}*/);   \
+    else                                                                     \
+        asm volatile(instr " %1, off offset:0"                               \
+                     : "=r"(smem) /*scheduling anchor; real LDS dest is M0*/ \
+                     : "v"(global_addr)                                      \
+                     : "memory" /*prevents reorder across m0_{set,inc}*/);
+
+    if constexpr(num_dwords == 1)
+    {
+        CK_TILE_GLOBAL_LOAD_LDS_INSTR("global_load_lds_dword");
+    }
+    else if constexpr(num_dwords == 4)
+    {
+        CK_TILE_GLOBAL_LOAD_LDS_INSTR("global_load_lds_dwordx4");
+    }
+#undef CK_TILE_GLOBAL_LOAD_LDS_INSTR
+}
+
 template <index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
 CK_TILE_DEVICE thread_buffer<int8_t, N>
@@ -1988,27 +2073,11 @@ CK_TILE_DEVICE void amd_buffer_store_impl(const thread_buffer<T, N> src_thread_d
         }
         else if constexpr(N == 8)
         {
-#if 0
-            thread_buffer<fp16_t, 8> tmp{src_thread_data};
-
-            llvm_amdgcn_raw_buffer_store_fp16x4(tmp.template get_as<fp16x4_t>()[number<0>{}],
-                                                dst_wave_buffer_resource,
-                                                dst_thread_addr_offset,
-                                                dst_wave_addr_offset,
-                                                static_cast<index_t>(coherence));
-
-            llvm_amdgcn_raw_buffer_store_fp16x4(tmp.template get_as<fp16x4_t>()[number<1>{}],
-                                                dst_wave_buffer_resource,
-                                                dst_thread_addr_offset,
-                                                dst_wave_addr_offset + 4 * sizeof(fp16_t),
-                                                static_cast<index_t>(coherence));
-#else
             llvm_amdgcn_raw_buffer_store_fp32x4(bit_cast<fp32x4_t>(src_thread_data),
                                                 dst_wave_buffer_resource,
                                                 dst_thread_addr_offset,
                                                 dst_wave_addr_offset,
                                                 static_cast<index_t>(coherence));
-#endif
         }
     }
     else if constexpr(std::is_same<T, bf16_t>::value) // bf16
@@ -2144,6 +2213,33 @@ CK_TILE_DEVICE void amd_buffer_store_raw_impl(const thread_buffer<T, N>& dst_thr
 }
 
 template <typename T, index_t N>
+CK_TILE_DEVICE void
+amd_global_atomic_add_impl([[maybe_unused]] const thread_buffer<T, N>& src_thread_data,
+                           [[maybe_unused]] T* addr)
+{
+    static_assert((std::is_same<T, ck_tile::bf16_t>::value && (N == 2 || N == 4 || N == 8)) ||
+                      (std::is_same<T, ck_tile::fp16_t>::value && (N == 2 || N == 4 || N == 8)),
+                  "wrong! not implemented");
+
+#if HAS_GLOBAL_ATOMIC_PK_ADD_BUILTIN
+    if constexpr(std::is_same<T, ck_tile::bf16_t>::value)
+    {
+        static_for<0, N / 2, 1>{}([&](auto i) {
+            __builtin_amdgcn_global_atomic_fadd_v2bf16(
+                bit_cast<ck_tile::bf16x2_t*>(addr) + i,
+                src_thread_data.template get_as<ck_tile::bf16x2_t>()[i]);
+        });
+    }
+    else
+    {
+        static_assert(false, "Not supported!");
+    }
+#else
+    static_assert(false, "Not supported!");
+#endif
+}
+
+template <typename T, index_t N>
 CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_thread_data,
                                                int32x4_t dst_wave_buffer_resource,
                                                index_t dst_thread_addr_offset,
@@ -2151,8 +2247,11 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
 {
     static_assert((std::is_same<T, float>::value && (N == 1 || N == 2 || N == 4)) ||
                       (std::is_same<T, fp16_t>::value && (N == 2 || N == 4 || N == 8)) ||
-                      (std::is_same<T, bf16_t>::value && (N == 2 || N == 4 || N == 8)) ||
-                      (std::is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4)),
+                      (std::is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4))
+#if defined(__gfx950__)
+                      || (std::is_same<T, bf16_t>::value && (N == 2 || N == 4 || N == 8))
+#endif
+                      ,
                   "wrong! not implemented");
 
     if constexpr(std::is_same<T, float>::value)
@@ -2759,21 +2858,36 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
                                           const bool dst_thread_element_valid,
                                           const index_t dst_element_space_size)
 {
-    const int32x4_t dst_wave_buffer_resource =
-        make_wave_buffer_resource(p_dst_wave, dst_element_space_size * sizeof(T));
+#if defined(__gfx942__)
+    if constexpr(std::is_same<T, bf16_t>::value)
+    {
+        if(dst_thread_element_valid)
+        {
+            amd_global_atomic_add_impl<T, N>(src_thread_data,
+                                             p_dst_wave + dst_thread_element_offset);
+        }
+    }
+    else
+    {
+#endif
+        const int32x4_t dst_wave_buffer_resource =
+            make_wave_buffer_resource(p_dst_wave, dst_element_space_size * sizeof(T));
 
-    index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
+        index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
 
 #if CK_TILE_EXPERIMENTAL_USE_BUFFER_ATOMIC_ADD_OOB_CHECK_OFFSET_TRICK
-    uint32_t dst_addr_shift = dst_thread_element_valid ? 0 : 0x80000000;
+        uint32_t dst_addr_shift = dst_thread_element_valid ? 0 : 0x80000000;
 
-    amd_buffer_atomic_add_impl<T, N>(
-        src_thread_data, dst_wave_buffer_resource, dst_addr_shift + dst_thread_addr_offset, 0);
+        amd_buffer_atomic_add_impl<T, N>(
+            src_thread_data, dst_wave_buffer_resource, dst_addr_shift + dst_thread_addr_offset, 0);
 #else
     if(dst_thread_element_valid)
     {
         amd_buffer_atomic_add_impl<T, N>(
             src_thread_data, dst_wave_buffer_resource, dst_thread_addr_offset, 0);
+    }
+#endif
+#if defined(__gfx942__)
     }
 #endif
 }

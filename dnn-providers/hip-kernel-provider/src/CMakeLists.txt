@@ -9,22 +9,36 @@ add_library(
     HipKernelPluginPublic.cpp
     HipKernelUtils.cpp
     engines/HipKernelEngine.cpp
-    hip/HipProgram.cpp
     hip/HipKernel.cpp
+    hip/HipProgram.cpp
     ${KERNEL_GENERATED_SOURCES}
-    engines/plans/BatchnormPlanBuilder.cpp
-    engines/plans/BatchnormFwdInferencePlan.cpp
-    engines/plans/BatchnormApplicabilityChecks.cpp
+    engines/plans/batchnorm/BatchnormPlanBuilder.cpp
+    engines/plans/batchnorm/BatchnormFwdInferencePlan.cpp
+    engines/plans/batchnorm/BatchnormFwdInferenceWithVariancePlan.cpp
+    engines/plans/batchnorm/BatchnormFwdTrainingPlan.cpp
+    engines/plans/batchnorm/BatchnormApplicabilityChecks.cpp
+    engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
+    engines/plans/RMSnorm/RMSnormFwdPlan.cpp
+    engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
+    engines/plans/RMSnorm/RMSnormBwdPlan.cpp
+    engines/plans/RMSnorm/RMSnormBwdPlanBuilder.cpp
+    engines/plans/layernorm/LayernormApplicabilityChecks.cpp
+    engines/plans/layernorm/LayernormFwdPlan.cpp
+    engines/plans/layernorm/LayernormPlanBuilder.cpp
+    engines/plans/layernorm/LayernormUtilities.cpp
+    engines/plans/ApplicabilityChecks.cpp
 )
-target_compile_definitions(
-    hip_kernel_provider_impl PRIVATE COMPONENT_NAME="hip_kernel_provider"
-)
+if(ENABLE_ASM_SDPA_ENGINE)
+    add_subdirectory(engines/asm_sdpa_engine)
+endif()
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/../include
     ${CMAKE_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/../kernels
 )
-target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
+target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
 target_compile_options(hip_kernel_provider_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(hip_kernel_provider_impl PROPERTIES
@@ -36,14 +50,18 @@ add_clang_tidy_custom_target()
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(hip_kernel_provider_private STATIC $<TARGET_OBJECTS:hip_kernel_provider_impl>)
-target_compile_definitions(hip_kernel_provider_private PRIVATE COMPONENT_NAME="hip_kernel_provider")
-target_include_directories(hip_kernel_provider_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+target_include_directories(hip_kernel_provider_private PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+)
+target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip_kernel_provider_impl)
+if(ENABLE_ASM_SDPA_ENGINE)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
+endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
-target_compile_definitions(hip_kernel_provider PRIVATE COMPONENT_NAME="hip_kernel_provider")
-target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
+target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
 if(NOT WIN32)
     target_link_libraries(hip_kernel_provider PRIVATE "-Xlinker --exclude-libs=ALL")

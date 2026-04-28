@@ -151,6 +151,9 @@ struct SolverInterface : SolverBase
 
     /// Returns the workspace size required by the solver for the given Problem
     virtual size_t GetWorkspaceSize(const Context&, const Problem&) const { return 0; };
+
+    /// Returns true if the solver is expected to be slow for the given problem.
+    virtual bool IsSlow(const Context&, const Problem&) const { return false; };
 };
 
 /// Common interface for non-tunable solvers

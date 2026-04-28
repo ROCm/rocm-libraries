@@ -12,17 +12,33 @@ hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based a
 | Component | Type | Links To | Purpose |
 |-----------|------|----------|---------|
 | **Backend** (`backend/`) | Shared library (C API) | Data SDK | Core engine, plugin loading, graph execution |
-| **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API |
-| **Data SDK** (`data_sdk/`) | Header-only | Third-party deps | Shared data objects, Flatbuffer schemas, logging |
+| **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API (uses Data SDK for types/logging, not FlatBuffers) |
+| **Data SDK** (`data_sdk/`) | Header-only | (none) | Shared data types, logging |
+| **FlatBuffers SDK** (`flatbuffers_sdk/`) | Header-only | FlatBuffers, nlohmann_json | FlatBuffer schemas, generated headers, JSON helpers |
 | **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK | Interfaces for plugin development |
-| **Plugins** (`plugins/`) | Shared libraries | Plugin SDK, Data SDK | Engine implementations (e.g., MIOpen Plugin) |
 | **Test SDK** (`test_sdk/`) | Header-only | Data SDK | Shared test utilities |
 
 ---
 
 ## Building & Testing
 
-### Build Commands
+### Windows Build Environment
+
+On Windows, run `scripts/windows/wheel_build_setup.ps1` to fetch the latest ROCm SDK wheels and set up the build environment:
+
+```powershell
+.\scripts\windows\wheel_build_setup.ps1                         # Latest nightlies
+.\scripts\windows\wheel_build_setup.ps1 -SHA "<commit-sha>"     # Specific S3 staging build
+```
+
+The script creates a Python venv, installs ROCm wheels, initializes the SDK, and prints the CMake variables (`CMAKE_PREFIX_PATH`, `CMAKE_PROGRAM_PATH`) needed for the build.
+
+### Build Approaches
+
+Choose the build approach based on what is being changed:
+
+### 1. hipDNN Only (changes only within `projects/hipdnn/`)
+
 ```bash
 cd <workspace>/projects/hipdnn
 mkdir -p build && cd build
@@ -35,6 +51,50 @@ ninja integration-check  # Integration tests only
 ninja doxygen      # Generate Doxygen docs (output: build/docs/html/)
 ```
 
+### 2. hipDNN + Providers via Superbuild (recommended when building providers)
+
+Use the superbuild when building hipDNN together with one or more providers. See `docs/Superbuild.md` for full details.
+
+```bash
+cd <workspace>
+cmake --preset <preset-name>
+cmake --build build
+```
+
+Available presets (from the repository root `CMakePresets.json`):
+
+| Preset | Components Built |
+|--------|-----------------|
+| `hipdnn` | hipDNN only |
+| `miopen-provider` | hipDNN + miopen-provider |
+| `hipblaslt-provider` | hipDNN + hipblaslt-provider |
+
+Or manually specifying components:
+```bash
+cmake -B build -GNinja -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider;hipblaslt-provider" .
+cmake --build build
+```
+
+In the superbuild, targets are prefixed with the project name (e.g., `hipdnn-check`, `miopen-provider-unit-check`).
+
+### 3. Standalone Provider Build (fallback — provider not in superbuild)
+
+If a provider is not part of the superbuild, build and install hipDNN first, then build the provider with `CMAKE_PREFIX_PATH` pointing to the hipDNN install:
+
+```bash
+# Step 1: Build and install hipDNN
+cd <workspace>/projects/hipdnn
+mkdir -p build && cd build
+cmake -GNinja -DCMAKE_INSTALL_PREFIX=<hipdnn-install-path> ..
+ninja && ninja install
+
+# Step 2: Build the provider against the hipDNN install
+cd <workspace>/dnn-providers/<provider-name>
+mkdir -p build && cd build
+cmake -GNinja -DCMAKE_PREFIX_PATH=<hipdnn-install-path> ..
+ninja
+```
+
 ### Test Binaries in `build/bin/`
 | Binary | Tests | Typical Use |
 |--------|-------|-------------|
@@ -45,8 +105,6 @@ ninja doxygen      # Generate Doxygen docs (output: build/docs/html/)
 | `hipdnn_test_sdk_tests` | Test SDK unit tests | Test utility functions |
 | `hipdnn_public_backend_tests` | Backend API tests | Public C API black-box tests |
 | `hipdnn_public_frontend_tests` | Frontend integration tests | E2E frontend tests |
-| `miopen_plugin_tests` | MIOpen plugin unit tests | Plugin-specific tests |
-| `miopen_plugin_integration_tests` | MIOpen integration tests | GPU-required E2E tests |
 
 ### Running Specific Tests
 Use `--gtest_filter` for fast iteration:
@@ -80,7 +138,24 @@ When requested to build/test:
 - **Avoid implicit casts** — use explicit `static_cast<>`. The codebase compiles with `-Wconversion` and `-Wsign-conversion`
 - Always use braces for if/for/while bodies, even single-line
 - Use CMake for managing C/C++ dependencies
-- Use Flatbuffers for serialization needs
+- Use Flatbuffers for serialization needs (backend/data_sdk only; frontend uses the backend C API)
+
+### RAII & Resource Management
+
+**All owning raw pointers must be wrapped in RAII (smart pointers) immediately after acquisition.** Never rely on manual `delete` — if an assertion, exception, or early return occurs between allocation and `delete`, the resource leaks. This project runs under AddressSanitizer (ASAN) in CI, and any leak fails the build.
+
+**Common patterns and pitfalls:**
+
+| Pattern | Wrong | Right |
+|---------|-------|-------|
+| FlatBuffers Graph unpacking (backend/data_sdk) | `auto obj = graph->UnPack();` (raw `GraphT*`) | `auto obj = UnPackGraph(serialized.ptr);` (returns `unique_ptr<GraphT>`) |
+| FlatBuffers `UnPack()` (backend/data_sdk) | `auto obj = table->UnPack();` (raw `T*`) | `auto obj = std::unique_ptr<T>(table->UnPack());` |
+| `getAttribute()` for tensor arrays | Use raw pointer, forget cleanup | Wrap immediately: `auto owned = std::unique_ptr<HipdnnBackendDescriptor>(rawPtr);` |
+| `createDescriptorPtr<T>()` | Store raw pointer | Use `createDescriptor<T>()` which returns `unique_ptr` |
+
+**FlatBuffers `UnPack()` returns owning raw pointers (backend/data_sdk only).** The generated `Graph::UnPack()`, `Node::UnPack()`, etc. all return `T*` allocated with `new`. Prefer the generated helpers like `UnPackGraph()` which return `std::unique_ptr<T>` directly. For types without helpers, wrap manually: `std::unique_ptr<T>(table->UnPack())`.
+
+**`getAttribute()` with `HIPDNN_TYPE_BACKEND_DESCRIPTOR` allocates new descriptors.** The C API packs shared descriptors into fresh `HipdnnBackendDescriptor*` via `packDescriptor()`. Ownership transfers to the caller — wrap in `std::unique_ptr<HipdnnBackendDescriptor>` immediately after retrieval.
 
 ### Testing
 - Use Google Test (gtest) framework for all C/C++ tests

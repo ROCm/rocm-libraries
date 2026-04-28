@@ -1,12 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cmath>
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::types;
 
 TEST(TestTensor, Swap)
 {
@@ -92,6 +95,34 @@ TEST(TestTensor, FillWithRandomValuesNonPacked)
     }
 }
 
+TEST(TestTensor, BasicNclUsage)
+{
+    Tensor<float> tensor({1, 2, 3}, TensorLayout::NCL);
+
+    // NCL (row-major/channel-first) strides with dims {N=1, C=2, L=3}:
+    // N stride = C*L = 2*3 = 6
+    // C stride = L = 3
+    // L stride = 1 (innermost dimension)
+    EXPECT_EQ(tensor.memory().count(), 6);
+    EXPECT_EQ(tensor.strides()[0], 6);
+    EXPECT_EQ(tensor.strides()[1], 3);
+    EXPECT_EQ(tensor.strides()[2], 1);
+}
+
+TEST(TestTensor, BasicNlcUsage)
+{
+    Tensor<float> tensor({1, 2, 3}, TensorLayout::NLC);
+
+    // NLC (channel-last) strides with dims {N=1, C=2, L=3}:
+    // N stride = L*C = 3*2 = 6
+    // C stride = 1 (innermost dimension)
+    // L stride = C = 2
+    EXPECT_EQ(tensor.memory().count(), 6);
+    EXPECT_EQ(tensor.strides()[0], 6);
+    EXPECT_EQ(tensor.strides()[1], 1);
+    EXPECT_EQ(tensor.strides()[2], 2);
+}
+
 TEST(TestTensor, BasicNhwcUsage)
 {
     Tensor<float> tensor({1, 2, 3, 4}, TensorLayout::NHWC);
@@ -106,6 +137,24 @@ TEST(TestTensor, BasicNhwcUsage)
     EXPECT_EQ(tensor.strides()[1], 1);
     EXPECT_EQ(tensor.strides()[2], 8);
     EXPECT_EQ(tensor.strides()[3], 2);
+}
+
+TEST(TestTensor, GetAndSetHostValueNcl)
+{
+    Tensor<float> tensor({2, 3, 4}, TensorLayout::NCL);
+    tensor.fillWithValue(0.0f);
+    tensor.setHostValue(99.0f, 1, 2, 3);
+
+    EXPECT_FLOAT_EQ(tensor.getHostValue(1, 2, 3), 99.0f);
+}
+
+TEST(TestTensor, GetAndSetHostValueNlc)
+{
+    Tensor<float> tensor({2, 3, 4}, TensorLayout::NLC);
+    tensor.fillWithValue(0.0f);
+    tensor.setHostValue(99.0f, 1, 2, 3);
+
+    EXPECT_FLOAT_EQ(tensor.getHostValue(1, 2, 3), 99.0f);
 }
 
 TEST(TestTensor, GetAndSetHostValueNchw)
@@ -157,6 +206,28 @@ TEST(TestTensor, GetIndex)
     EXPECT_EQ(tensor.getIndex(0, 1), 20);
     const std::vector<int64_t> indices4 = {0, 1};
     EXPECT_EQ(tensor.getIndex(indices4), 20);
+}
+
+TEST(TestTensor, GetIndexNcl)
+{
+    // Strides {12, 4, 1}
+    const Tensor<float> tensor({2, 3, 4}, TensorLayout::NCL);
+
+    // 1*12 + 2*4 + 3*1 = 23
+    EXPECT_EQ(tensor.getIndex(1, 2, 3), 23);
+    const std::vector<int64_t> indices = {1, 2, 3};
+    EXPECT_EQ(tensor.getIndex(indices), 23);
+}
+
+TEST(TestTensor, GetIndexNlc)
+{
+    // Strides {12, 1, 3}
+    const Tensor<float> tensor({2, 3, 4}, TensorLayout::NLC);
+
+    // 1*12 + 2*1 + 3*3 = 23
+    EXPECT_EQ(tensor.getIndex(1, 2, 3), 23);
+    const std::vector<int64_t> indices = {1, 2, 3};
+    EXPECT_EQ(tensor.getIndex(indices), 23);
 }
 
 TEST(TestTensor, GetIndexNhwc)
@@ -354,6 +425,16 @@ TEST(TestTensor, DefaultPackedStridesIndexing)
     EXPECT_EQ(tensor.getIndex(1, 2, 3), 33);
 }
 
+TEST(TestTensor, DefaultPackedStridesCompatibleWithNcl)
+{
+    // Default packed strides should be equivalent to NCL for 3D tensors
+    const std::vector<int64_t> dims = {2, 3, 4};
+    const Tensor<float> tensorDefault(dims);
+    const Tensor<float> tensorNcl(dims, TensorLayout::NCL);
+
+    EXPECT_EQ(tensorDefault.strides(), tensorNcl.strides());
+}
+
 TEST(TestTensor, DefaultPackedStridesCompatibleWithNchw)
 {
     // Default packed strides should be equivalent to NCHW for 4D tensors
@@ -426,6 +507,24 @@ TEST(TestTensor, GetAndSetHostValueNdhwc)
     tensor.setHostValue(99.0f, 0, 1, 2, 3, 4);
 
     EXPECT_FLOAT_EQ(tensor.getHostValue(0, 1, 2, 3, 4), 99.0f);
+}
+
+TEST(TestTensor, ElementAccessOperatorNcl)
+{
+    Tensor<float> tensor({2, 3, 4}, TensorLayout::NCL);
+    tensor.fillWithValue(0.0f);
+    tensor(1, 2, 3) = 79.0f;
+
+    EXPECT_FLOAT_EQ(tensor(1, 2, 3), 79.0f);
+}
+
+TEST(TestTensor, ElementAccessOperatorNlc)
+{
+    Tensor<float> tensor({2, 3, 4}, TensorLayout::NLC);
+    tensor.fillWithValue(0.0f);
+    tensor(1, 2, 3) = 79.0f;
+
+    EXPECT_FLOAT_EQ(tensor(1, 2, 3), 79.0f);
 }
 
 TEST(TestTensor, ElementAccessOperatorNchw)
@@ -605,4 +704,66 @@ TEST(TestTensor, SparseTensorCreationAndUsage)
     EXPECT_EQ(tensor.getIndex(0, 0, 1, 0), 8);
     EXPECT_EQ(tensor.getIndex(0, 0, 0, 1), 16);
     EXPECT_EQ(tensor.getIndex(1, 1, 1, 1), 30);
+}
+
+/* ======== fillWithSentinelValue tests ======== */
+
+template <typename T>
+class TensorSentinel : public ::testing::Test
+{
+};
+
+using SentinelTypes = ::testing::Types<float,
+                                       double,
+                                       half,
+                                       bfloat16,
+                                       hipdnn_data_sdk::types::fp8_e4m3,
+                                       hipdnn_data_sdk::types::fp8_e5m2,
+                                       int8_t,
+                                       uint8_t,
+                                       int32_t>;
+
+TYPED_TEST_SUITE(TensorSentinel, SentinelTypes, );
+
+TYPED_TEST(TensorSentinel, PackedTensorFilled)
+{
+    using hipdnn_data_sdk::types::isnan;
+    Tensor<TypeParam> tensor({2, 3});
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        auto value = *static_cast<TypeParam*>(valuePtr);
+        if constexpr(std::numeric_limits<TypeParam>::has_quiet_NaN)
+        {
+            EXPECT_TRUE(isnan(value));
+        }
+        else
+        {
+            EXPECT_EQ(value, std::numeric_limits<TypeParam>::max());
+        }
+    }
+}
+
+TYPED_TEST(TensorSentinel, StridedTensorFilled)
+{
+    using hipdnn_data_sdk::types::isnan;
+    const std::vector<int64_t> dims = {2, 2, 2};
+    const std::vector<int64_t> strides = {2, 4, 8};
+
+    Tensor<TypeParam> tensor(dims, strides);
+    tensor.fillWithSentinelValue();
+
+    for(auto valuePtr : tensor)
+    {
+        auto value = *static_cast<TypeParam*>(valuePtr);
+        if constexpr(std::numeric_limits<TypeParam>::has_quiet_NaN)
+        {
+            EXPECT_TRUE(isnan(value));
+        }
+        else
+        {
+            EXPECT_EQ(value, std::numeric_limits<TypeParam>::max());
+        }
+    }
 }

@@ -6,8 +6,8 @@
 #include <functional>
 #include <variant>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
@@ -21,16 +21,16 @@ namespace hipdnn_test_sdk::detail
 struct BatchnormBwdParams
 {
     BatchnormBwdParams() = default;
-    BatchnormBwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& dyAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& dxAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& dscaleAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& dbiasAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes* meanAttributes
-                       = nullptr,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes* invVarianceAttributes
-                       = nullptr)
+    BatchnormBwdParams(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dyAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dxAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dscaleAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dbiasAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVarianceAttributes
+        = nullptr)
         : dyTensor(unpackTensorAttributes(dyAttributes))
         , xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
@@ -45,14 +45,15 @@ struct BatchnormBwdParams
         }
     }
 
-    BatchnormBwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& dyAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& meanAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& invVarianceAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& dxAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& dscaleAttributes,
-                       const hipdnn_data_sdk::data_objects::TensorAttributes& dbiasAttributes)
+    BatchnormBwdParams(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dyAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& meanAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& invVarianceAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dxAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dscaleAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dbiasAttributes)
         : dyTensor(unpackTensorAttributes(dyAttributes))
         , xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
@@ -64,14 +65,14 @@ struct BatchnormBwdParams
     {
     }
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT dyTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT scaleTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT dxTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT dscaleTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT dbiasTensor;
-    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> meanTensor;
-    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> invVarianceTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dyTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT xTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT scaleTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dxTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dscaleTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dbiasTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> meanTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> invVarianceTensor;
 };
 
 template <typename DyDataType,
@@ -86,6 +87,11 @@ public:
     BatchnormBwdPlan(BatchnormBwdParams&& params)
         : _params(std::move(params))
     {
+    }
+
+    std::vector<int64_t> getOutputTensorIds() const override
+    {
+        return {_params.dxTensor.uid, _params.dscaleTensor.uid, _params.dbiasTensor.uid};
     }
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
@@ -136,12 +142,12 @@ private:
     BatchnormBwdParams _params;
 };
 
-template <hipdnn_data_sdk::data_objects::DataType DyDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
+template <hipdnn_flatbuffers_sdk::data_objects::DataType DyDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -153,8 +159,9 @@ public:
     using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         if(node.compute_data_type() != ComputeDataTypeEnum)
@@ -203,8 +210,8 @@ public:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-                      const hipdnn_data_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_BatchnormBackwardAttributes();
         if(nodeAttributes == nullptr)
@@ -214,8 +221,8 @@ public:
 
         const auto& tensorMap = graph.getTensorMap();
 
-        const hipdnn_data_sdk::data_objects::TensorAttributes* meanAttr = nullptr;
-        const hipdnn_data_sdk::data_objects::TensorAttributes* invVarAttr = nullptr;
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanAttr = nullptr;
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVarAttr = nullptr;
 
         const bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
         const bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();

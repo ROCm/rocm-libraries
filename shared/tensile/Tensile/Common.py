@@ -246,12 +246,12 @@ globalParameters["NumMergedFiles"] = 1            # The number of files that ker
 
 globalParameters["MaxFileName"] = 64              # If a file name would be longer than this, shorten it with a hash.
 globalParameters["SupportedISA"] = [(8,0,3),
-                                    (9,0,0), (9,0,6), (9,0,8), (9,0,10),
+                                    (9,0,0), (9,0,6), (9,0,8), (9,0,10), (9,0,12),
                                     (9,4,2), (9,5,0),
                                     (10,1,0), (10,1,1), (10,1,2), (10,3,0), (10,3,1), (10,3,2), (10,3,3), (10,3,4), (10,3,5), (10,3,6),
                                     (11,0,0), (11,0,1), (11,0,2), (11,0,3),
                                     (11,5,0), (11,5,1), (11,5,2), (11,5,3),
-                                    (12,0,0), (12,0,1)] # assembly kernels writer supports these architectures
+                                    (12,0,0), (12,0,1), (12,5,0)] # assembly kernels writer supports these architectures
 
 globalParameters["KeepBuildTmp"] = True                           # Do not remove build artifacts during the build process or build_tmp after build completes
 globalParameters["GenerateManifestAndExit"] = False               # Output manifest file with list of expected library objects and exit
@@ -317,7 +317,7 @@ defaultGlobalParameters = deepcopy(globalParameters)
 # Translate GPU targets to filter filenames in Tensile_LOGIC directory
 architectureMap = {
   'all':'_', 'gfx000':'none', 'fallback':'hip',
-  'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10',
+  'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10', 'gfx90c':'vega10',
   'gfx906':'vega20', 'gfx906:xnack+':'vega20', 'gfx906:xnack-':'vega20',
   'gfx908':'arcturus','gfx908:xnack+':'arcturus', 'gfx908:xnack-':'arcturus',
   'gfx90a':'aldebaran', 'gfx90a:xnack+':'aldebaran', 'gfx90a:xnack-':'aldebaran',
@@ -328,7 +328,8 @@ architectureMap = {
   'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33', 'gfx1103':'gfx1103',
   'gfx1150':'strixpoint', 'gfx1151':'strixhalo', 'gfx1152':'gfx1152', 'gfx1153':'gfx1153',
   'gfx1200':'gfx1200',
-  'gfx1201':'gfx1201'
+  'gfx1201':'gfx1201',
+  'gfx1250':'gfx1250'
 }
 
 def getArchitectureName(gfxName: str) -> Optional[str]:

@@ -44,7 +44,7 @@ namespace {
 
 struct TestParams
 {
-    friend std::ostream& operator<<(std::ostream& os, const TestParams& tp)
+    friend std::ostream& operator<<(std::ostream& os, const TestParams& /*tp*/)
     {
         os << "none";
         return os;
@@ -213,7 +213,7 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvAsm5x10u2v2f1",                                   {5,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsm5x10u2v2b1",                                   {6,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsm7x7c3h224w224k64u2v2p3q3f1",                   {7,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclDirectFwd11x11",                               {8,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
+        {"ConvHipDirectFwd11x11",                               {8,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclDirectFwdGen",                                 {9,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclDirectFwd",                                    {11,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclDirectFwd1x1",                                 {13,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
@@ -299,8 +299,6 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC",          {110,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvCkIgemmFwdV6r1DlopsNchw",                         {114,   false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC",          {127,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmFwdXdlops",                        {128,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmBwdXdlops",                        {129,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmGroupFwdXdlops",                   {137,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemm3DGroupFwdXdlops",                 {138,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvWinoFuryRxS<2-3>",                                {139,   true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
@@ -371,51 +369,49 @@ const auto& GetSolverConfigs<BatchNormSolverConfig>()
     return configs;
 }
 
+template <class TestCase>
+const auto GetTestCases()
+{
+    std::vector<TestCase> test_cases;
+    const auto& sinfo   = GetSolversInfo<decltype(std::declval<TestCase>().info)>();
+    const auto& configs = GetSolverConfigs<decltype(std::declval<TestCase>().config)>();
+    test_cases.reserve(sinfo.size());
+    for(const auto& s : sinfo)
+    {
+        const auto& config = configs.find(s.first);
+        if(config == configs.end())
+            test_cases.emplace_back(TestCase{s.first, s.second, {}});
+        else
+            test_cases.emplace_back(TestCase{s.first, s.second, config->second});
+    }
+    return std::move(test_cases);
+}
+
+#if MIOPEN_ENABLE_FIN_INTERFACE
+
 template <class SolverInfo>
 const auto& GetSolverNames()
 {
     static const auto names = [] {
-        std::vector<std::string> names;
+        std::vector<std::string> names_;
         const auto& sinfo = GetSolversInfo<SolverInfo>();
-        names.reserve(sinfo.size());
+        names_.reserve(sinfo.size());
         for(const auto& s : sinfo)
-            names.push_back(s.first);
-        return names;
+            names_.push_back(s.first);
+        return names_;
     }();
     return names;
 }
-
-template <class TestCase>
-const auto& GetTestCases()
-{
-    static const auto test_cases = [] {
-        std::vector<TestCase> test_cases;
-        const auto& sinfo   = GetSolversInfo<decltype(std::declval<TestCase>().info)>();
-        const auto& configs = GetSolverConfigs<decltype(std::declval<TestCase>().config)>();
-        test_cases.reserve(sinfo.size());
-        for(const auto& s : sinfo)
-        {
-            const auto& config = configs.find(s.first);
-            if(config == configs.end())
-                test_cases.emplace_back(TestCase{s.first, s.second, {}});
-            else
-                test_cases.emplace_back(TestCase{s.first, s.second, config->second});
-        }
-        return test_cases;
-    }();
-    return test_cases;
-}
-
-#if MIOPEN_ENABLE_FIN_INTERFACE
 
 // Context
 template <class Problem>
 auto GetContext(miopen::Handle* handle, const Problem& problem);
 
 template <>
-auto GetContext(miopen::Handle* handle, const miopen::conv::ProblemDescription& problem)
+miopen::ExecutionContext GetContext(miopen::Handle* handle,
+                                    const miopen::conv::ProblemDescription& problem)
 {
-    auto tmp = miopen::ExecutionContext{handle};
+    miopen::ExecutionContext tmp{handle};
     problem.SetupFloats(tmp);
     problem.SetupComputeType(tmp);
     return tmp;

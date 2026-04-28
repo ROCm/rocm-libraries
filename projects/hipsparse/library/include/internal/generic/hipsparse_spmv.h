@@ -30,19 +30,19 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpMV_bufferSize computes the required user allocated buffer size needed when computing the
+*  \p hipsparseSpMV_bufferSize computes the user-allocated buffer size required when computing the
 *  sparse matrix multiplication with a dense vector:
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, or COO (AoS) format, \f$x\f$ is
-*  a dense vector of length \f$n\f$ and \f$y\f$ is a dense vector of length \f$m\f$.
+*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, COO (AoS), or SELL format, \f$x\f$ is
+*  a dense vector of length \f$n\f$, and \f$y\f$ is a dense vector of length \f$m\f$.
 *
 *  \p hipsparseSpMV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpMV for a complete
 *  listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle              handle to the hipsparse library context queue.
+*  handle              handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA                 matrix operation type.
 *  @param[in]
@@ -65,7 +65,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p vecX, \p beta, 
-*          \p vecY or \p pBufferSizeInBytes is nullptr, \p opA is invalid, or the matrix 
+*          \p vecY, or \p pBufferSizeInBytes is nullptr, \p opA is invalid, or the matrix 
 *          or vector dimensions are incompatible.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
@@ -102,15 +102,15 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, or COO (AoS) format, \f$x\f$
-*  is a dense vector of length \f$n\f$ and \f$y\f$ is a dense vector of length \f$m\f$. This step is
-*  optional but if used may results in better performance.
+*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, COO (AoS), or SELL format, \f$x\f$
+*  is a dense vector of length \f$n\f$, and \f$y\f$ is a dense vector of length \f$m\f$. This step is
+*  optional but it might result in better performance.
 *
 *  \p hipsparseSpMV_preprocess supports multiple combinations of data types and compute types. See \ref hipsparseSpMV for
 *  a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
@@ -124,15 +124,15 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *  @param[inout]
 *  vecY            vector descriptor.
 *  @param[in]
-*  computeType     floating point precision for the SpMV computation.
+*  computeType     floating-point precision for the SpMV computation.
 *  @param[in]
 *  alg             SpMV algorithm for the SpMV computation.
 *  @param[out]
 *  externalBuffer  temporary storage buffer allocated by the user.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y or
-*               \p externalBuffer pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
+*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y, or
+*               \p externalBuffer pointer is invalid or if \p opA, \p computeType, or \p alg is incorrect.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
@@ -163,11 +163,11 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 #endif
 
 /*! \ingroup generic_module
-*  \brief Compute the sparse matrix multiplication with a dense vector
+*  \brief Compute the sparse matrix multiplication with a dense vector.
 *
 *  \details
 *  \p hipsparseSpMV multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times n\f$ matrix \f$op(A)\f$, defined in CSR,
-*  CSC, COO, or COO (AoS) format, with the dense vector \f$x\f$ and adds the result to the dense vector \f$y\f$
+*  CSC, COO, COO (AoS), or SELL format, with the dense vector \f$x\f$ and adds the result to the dense vector \f$y\f$
 *  that is multiplied by the scalar \f$\beta\f$, such that
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
@@ -183,12 +183,12 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *    \right.
 *  \f]
 *
-*  Performing the above operation involves multiple steps. First the user calls \ref hipsparseSpMV_bufferSize to determine the
+*  Performing the above operation involves multiple steps. First, the user calls \ref hipsparseSpMV_bufferSize to determine the
 *  size of the required temporary storage buffer. The user then allocates this buffer and calls \ref hipsparseSpMV_preprocess.
-*  Depending on the algorithm and sparse matrix format, this will perform analysis on the sparsity pattern of \f$op(A)\f$. Finally
+*  Depending on the algorithm and sparse matrix format, this will perform analysis on the sparsity pattern of \f$op(A)\f$. Finally,
 *  the user completes the operation by calling \p hipsparseSpMV. The buffer size and preprecess routines only need to be called
-*  once for a given sparse matrix \f$op(A)\f$ while the computation can be repeatedly used with different \f$x\f$ and \f$y\f$
-*  vectors. Once all calls to \p hipsparseSpMV are complete, the temporary buffer can be deallocated.
+*  once for a given sparse matrix \f$op(A)\f$, while the computation can be repeatedly used with different \f$x\f$ and \f$y\f$
+*  vectors. After all calls to \p hipsparseSpMV are complete, the temporary buffer can be deallocated.
 *
 *  \p hipsparseSpMV supports multiple different algorithms. These algorithms have different trade offs depending on the sparsity
 *  pattern of the matrix, whether or not the results need to be deterministic, and how many times the sparse-vector product will
@@ -208,6 +208,12 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG2</td>
 *  </table>
 *
+*  <table>
+*  <caption id="spmv_sell_algorithms">SELL Algorithms</caption>
+*  <tr><th>SELL Algorithms
+*  <tr><td>HIPSPARSE_SPMV_SELL_ALG1</td>
+*  </table>
+*
 *  \p hipsparseSpMV supports multiple combinations of data types and compute types. The tables below indicate the currently
 *  supported data types that can be used for the sparse matrix \f$op(A)\f$ and the dense vectors \f$x\f$ and \f$y\f$ and the
 *  compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on memory bandwidth
@@ -223,7 +229,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="spmv_mixed">Mixed Precisions</caption>
 *  <tr><th>A / X      <th>Y          <th>compute_type
@@ -235,7 +241,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  <tr><td>HIP_R_16BF <td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
-*  \par Mixed-regular real precisions
+*  \par Mixed-regular Real Precisions
 *  <table>
 *  <caption id="spmv_mixed_regular_real">Mixed-regular real precisions</caption>
 *  <tr><th>A         <th>X / Y / compute_type
@@ -243,7 +249,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  <tr><td>HIP_C_32F <td>HIP_C_64F
 *  </table>
 *
-*  \par Mixed-regular Complex precisions
+*  \par Mixed-regular Complex Precisions
 *  <table>
 *  <caption id="spmv_mixed_regular_complex">Mixed-regular Complex precisions</caption>
 *  <tr><th>A         <th>X / Y / compute_type
@@ -259,11 +265,11 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \note
 *  The sparse matrix formats currently supported are: \ref HIPSPARSE_FORMAT_COO, \ref HIPSPARSE_FORMAT_COO_AOS,
-*  \ref HIPSPARSE_FORMAT_CSR, and \ref HIPSPARSE_FORMAT_CSC.
+*  \ref HIPSPARSE_FORMAT_CSR, \ref HIPSPARSE_FORMAT_CSC, and \ref HIPSPARSE_FORMAT_SLICED_ELL.
 *
 *  \note
-*  Only the \ref hipsparseSpMV_bufferSize and \ref hipsparseSpMV routines are non blocking and executed asynchronously
-*  with respect to the host. They may return before the actual computation has finished. The \ref hipsparseSpMV_preprocess
+*  Only the \ref hipsparseSpMV_bufferSize and \ref hipsparseSpMV routines are non-blocking and executed asynchronously
+*  with respect to the host. They can return before the actual computation has finished. The \ref hipsparseSpMV_preprocess
 *  routine is blocking with respect to the host.
 *
 *  \note
@@ -271,7 +277,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  The \ref hipsparseSpMV_preprocess stage does not support hipGraph.
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
@@ -292,7 +298,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  externalBuffer  temporary storage buffer allocated by the user.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y or
+*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y, or
 *               \p externalBuffer pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.

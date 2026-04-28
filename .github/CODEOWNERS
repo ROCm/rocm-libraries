@@ -8,16 +8,10 @@
 /.azuredevops/                                      @ROCm/external-ci
 /.github/                                           @ROCm/rocm-libraries-reviewers
 
-# Global documentation ownership
-/**/*.md                                            @ROCm/rocm-documentation
-/**/*.rst                                           @ROCm/rocm-documentation
-**/.readthedocs.yaml                                @ROCm/rocm-documentation
-**/docs/                                            @ROCm/rocm-documentation
-**/library/include/                                 @ROCm/rocm-documentation
-
 # Project-specific ownership
 /dnn-providers/miopen-provider/                     @ROCm/hipdnn-reviewers
 /dnn-providers/hipblaslt-provider/                  @ROCm/hipdnn-reviewers
+/dnn-providers/hip-kernel-provider/                 @ROCm/hipdnn-reviewers
 /dnn-providers/fusilli-provider/                    @ROCm/fusilli-provider-reviewers
 /dnn-providers/integration-tests/                   @ROCm/hipdnn-reviewers
 /projects/composablekernel/                         @ROCm/ck-reviewers
@@ -45,6 +39,7 @@
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
+/shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
 
 # Next CMake-specific ownership
 /projects/hipblas-common/**/*.cmake                 @ROCm/rocm-math-lib-build-infra
@@ -179,11 +174,6 @@
 /projects/rocthrust/**/*.rst                        @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/rocthrust/**/.readthedocs.yaml            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/rocthrust/docs/                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
-
-/projects/composablekernel/**/*.md                  @ROCm/prims-rands-reviewers @ROCm/ck-docs-reviewers
-/projects/composablekernel/**/*.rst                 @ROCm/prims-rands-reviewers @ROCm/ck-docs-reviewers
-/projects/composablekernel/**/.readthedocs.yaml     @ROCm/prims-rands-reviewers @ROCm/ck-docs-reviewers
-/projects/composablekernel/docs/                    @ROCm/prims-rands-reviewers @ROCm/ck-docs-reviewers
 
 /shared/tensile/**/*.md                             @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
 /shared/tensile/**/*.rst                            @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers

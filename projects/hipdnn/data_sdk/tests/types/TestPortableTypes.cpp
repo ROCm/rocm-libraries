@@ -5,7 +5,7 @@
 /// @brief Typed tests for portable floating-point types.
 ///
 /// This file contains two test fixtures:
-/// - PortableFloatTypes: Common tests for all types (bfloat16, half, fp4_e2m1, fp8_e4m3, fp8_e5m2, fp8_e8m0)
+/// - PortableFloatTypes: Common tests for all types
 /// - MathFloatTypes: Arithmetic and math function tests for bfloat16 and half only
 /// Type-specific tests that cannot be generalized remain in their individual test files.
 /// Note: fp8_e8m0 is an unsigned scale format with unique behavior (no zero, no sign bit,
@@ -29,28 +29,26 @@ using namespace hipdnn_data_sdk::types;
 template <typename T>
 struct PortableTypeTraits;
 
-// NOLINTBEGIN(readability-identifier-naming) - traits use snake_case by convention
 template <>
 struct PortableTypeTraits<bfloat16>
 {
-    static constexpr float tolerance = 0.01f;
-    static constexpr float large_tolerance = 0.1f;
-    static constexpr bool has_infinity = true;
-    static constexpr bool has_nan = true;
-    static constexpr uint16_t one_bits = 0x3F80;
-    static constexpr uint16_t neg_one_bits = 0xBF80;
-    static constexpr uint16_t zero_bits = 0x0000;
-    static constexpr uint16_t neg_zero_bits = 0x8000;
-    static constexpr uint16_t nan_bits = 0x7FC0;
-    static constexpr uint16_t inf_bits = 0x7F80;
-    static constexpr uint16_t neg_inf_bits = 0xFF80;
-    using bits_type = uint16_t;
+    static constexpr float TOLERANCE = 0.01f;
+    static constexpr float LARGE_TOLERANCE = 0.1f;
+    static constexpr bool HAS_INFINITY = true;
+    static constexpr bool HAS_NAN = true;
+    static constexpr uint16_t ONE_BITS = 0x3F80;
+    static constexpr uint16_t NEG_ONE_BITS = 0xBF80;
+    static constexpr uint16_t ZERO_BITS = 0x0000;
+    static constexpr uint16_t NEG_ZERO_BITS = 0x8000;
+    static constexpr uint16_t NAN_BITS = 0x7FC0;
+    static constexpr uint16_t INF_BITS = 0x7F80;
+    static constexpr uint16_t NEG_INF_BITS = 0xFF80;
 
-    static bfloat16 from_bits(uint16_t bits)
+    static bfloat16 fromBits(uint16_t bits)
     {
         return bfloat16::from_bits(bits);
     }
-    static uint16_t to_bits(bfloat16 val)
+    static uint16_t toBits(bfloat16 val)
     {
         return val.data;
     }
@@ -59,24 +57,23 @@ struct PortableTypeTraits<bfloat16>
 template <>
 struct PortableTypeTraits<half>
 {
-    static constexpr float tolerance = 0.001f;
-    static constexpr float large_tolerance = 0.01f;
-    static constexpr bool has_infinity = true;
-    static constexpr bool has_nan = true;
-    static constexpr uint16_t one_bits = 0x3C00;
-    static constexpr uint16_t neg_one_bits = 0xBC00;
-    static constexpr uint16_t zero_bits = 0x0000;
-    static constexpr uint16_t neg_zero_bits = 0x8000;
-    static constexpr uint16_t nan_bits = 0x7E00;
-    static constexpr uint16_t inf_bits = 0x7C00;
-    static constexpr uint16_t neg_inf_bits = 0xFC00;
-    using bits_type = uint16_t;
+    static constexpr float TOLERANCE = 0.001f;
+    static constexpr float LARGE_TOLERANCE = 0.01f;
+    static constexpr bool HAS_INFINITY = true;
+    static constexpr bool HAS_NAN = true;
+    static constexpr uint16_t ONE_BITS = 0x3C00;
+    static constexpr uint16_t NEG_ONE_BITS = 0xBC00;
+    static constexpr uint16_t ZERO_BITS = 0x0000;
+    static constexpr uint16_t NEG_ZERO_BITS = 0x8000;
+    static constexpr uint16_t NAN_BITS = 0x7E00;
+    static constexpr uint16_t INF_BITS = 0x7C00;
+    static constexpr uint16_t NEG_INF_BITS = 0xFC00;
 
-    static half from_bits(uint16_t bits)
+    static half fromBits(uint16_t bits)
     {
         return half::from_bits(bits);
     }
-    static uint16_t to_bits(half val)
+    static uint16_t toBits(half val)
     {
         return val.data;
     }
@@ -86,19 +83,60 @@ template <>
 struct PortableTypeTraits<fp4_e2m1>
 {
     // Note: fp4_e2m1 has no NaN or infinity
-    static constexpr bool has_infinity = false;
-    static constexpr bool has_nan = false;
-    static constexpr uint8_t one_bits = 0x02;
-    static constexpr uint8_t neg_one_bits = 0x0A;
-    static constexpr uint8_t zero_bits = 0x00;
-    static constexpr uint8_t neg_zero_bits = 0x08;
-    using bits_type = uint8_t;
+    static constexpr bool HAS_INFINITY = false;
+    static constexpr bool HAS_NAN = false;
+    static constexpr uint8_t ONE_BITS = 0x02;
+    static constexpr uint8_t NEG_ONE_BITS = 0x0A;
+    static constexpr uint8_t ZERO_BITS = 0x00;
+    static constexpr uint8_t NEG_ZERO_BITS = 0x08;
 
-    static fp4_e2m1 from_bits(uint8_t bits)
+    static fp4_e2m1 fromBits(uint8_t bits)
     {
         return fp4_e2m1::from_bits(bits);
     }
-    static uint8_t to_bits(fp4_e2m1 val)
+    static uint8_t toBits(fp4_e2m1 val)
+    {
+        return val.data;
+    }
+};
+
+template <>
+struct PortableTypeTraits<fp6_e2m3>
+{
+    // Note: fp6_e2m3 has no NaN or infinity
+    static constexpr bool HAS_INFINITY = false;
+    static constexpr bool HAS_NAN = false;
+    static constexpr uint8_t ONE_BITS = 0x08;
+    static constexpr uint8_t NEG_ONE_BITS = 0x28;
+    static constexpr uint8_t ZERO_BITS = 0x00;
+    static constexpr uint8_t NEG_ZERO_BITS = 0x20;
+
+    static fp6_e2m3 fromBits(uint8_t bits)
+    {
+        return fp6_e2m3::from_bits(bits);
+    }
+    static uint8_t toBits(fp6_e2m3 val)
+    {
+        return val.data;
+    }
+};
+
+template <>
+struct PortableTypeTraits<fp6_e3m2>
+{
+    // Note: fp6_e3m2 has no NaN or infinity
+    static constexpr bool HAS_INFINITY = false;
+    static constexpr bool HAS_NAN = false;
+    static constexpr uint8_t ONE_BITS = 0x0C;
+    static constexpr uint8_t NEG_ONE_BITS = 0x2C;
+    static constexpr uint8_t ZERO_BITS = 0x00;
+    static constexpr uint8_t NEG_ZERO_BITS = 0x20;
+
+    static fp6_e3m2 fromBits(uint8_t bits)
+    {
+        return fp6_e3m2::from_bits(bits);
+    }
+    static uint8_t toBits(fp6_e3m2 val)
     {
         return val.data;
     }
@@ -108,20 +146,19 @@ template <>
 struct PortableTypeTraits<fp8_e4m3>
 {
     // Note: fp8_e4m3 has no infinity
-    static constexpr bool has_infinity = false;
-    static constexpr bool has_nan = true;
-    static constexpr uint8_t one_bits = 0x38;
-    static constexpr uint8_t neg_one_bits = 0xB8;
-    static constexpr uint8_t zero_bits = 0x00;
-    static constexpr uint8_t neg_zero_bits = 0x80;
-    static constexpr uint8_t nan_bits = 0x7F;
-    using bits_type = uint8_t;
+    static constexpr bool HAS_INFINITY = false;
+    static constexpr bool HAS_NAN = true;
+    static constexpr uint8_t ONE_BITS = 0x38;
+    static constexpr uint8_t NEG_ONE_BITS = 0xB8;
+    static constexpr uint8_t ZERO_BITS = 0x00;
+    static constexpr uint8_t NEG_ZERO_BITS = 0x80;
+    static constexpr uint8_t NAN_BITS = 0x7F;
 
-    static fp8_e4m3 from_bits(uint8_t bits)
+    static fp8_e4m3 fromBits(uint8_t bits)
     {
         return fp8_e4m3::from_bits(bits);
     }
-    static uint8_t to_bits(fp8_e4m3 val)
+    static uint8_t toBits(fp8_e4m3 val)
     {
         return val.data;
     }
@@ -130,22 +167,21 @@ struct PortableTypeTraits<fp8_e4m3>
 template <>
 struct PortableTypeTraits<fp8_e5m2>
 {
-    static constexpr bool has_infinity = true;
-    static constexpr bool has_nan = true;
-    static constexpr uint8_t one_bits = 0x3C;
-    static constexpr uint8_t neg_one_bits = 0xBC;
-    static constexpr uint8_t zero_bits = 0x00;
-    static constexpr uint8_t neg_zero_bits = 0x80;
-    static constexpr uint8_t nan_bits = 0x7F;
-    static constexpr uint8_t inf_bits = 0x7C;
-    static constexpr uint8_t neg_inf_bits = 0xFC;
-    using bits_type = uint8_t;
+    static constexpr bool HAS_INFINITY = true;
+    static constexpr bool HAS_NAN = true;
+    static constexpr uint8_t ONE_BITS = 0x3C;
+    static constexpr uint8_t NEG_ONE_BITS = 0xBC;
+    static constexpr uint8_t ZERO_BITS = 0x00;
+    static constexpr uint8_t NEG_ZERO_BITS = 0x80;
+    static constexpr uint8_t NAN_BITS = 0x7F;
+    static constexpr uint8_t INF_BITS = 0x7C;
+    static constexpr uint8_t NEG_INF_BITS = 0xFC;
 
-    static fp8_e5m2 from_bits(uint8_t bits)
+    static fp8_e5m2 fromBits(uint8_t bits)
     {
         return fp8_e5m2::from_bits(bits);
     }
-    static uint8_t to_bits(fp8_e5m2 val)
+    static uint8_t toBits(fp8_e5m2 val)
     {
         return val.data;
     }
@@ -155,23 +191,20 @@ template <>
 struct PortableTypeTraits<fp8_e8m0>
 {
     // Note: fp8_e8m0 has no zero, negative values, or infinity
-    static constexpr bool has_infinity = false;
-    static constexpr bool has_nan = true;
-    static constexpr uint8_t one_bits = 0x7F; // 2^0 = 1.0
-    static constexpr uint8_t nan_bits = 0xFF;
-    using bits_type = uint8_t;
+    static constexpr bool HAS_INFINITY = false;
+    static constexpr bool HAS_NAN = true;
+    static constexpr uint8_t ONE_BITS = 0x7F; // 2^0 = 1.0
+    static constexpr uint8_t NAN_BITS = 0xFF;
 
-    static fp8_e8m0 from_bits(uint8_t bits)
+    static fp8_e8m0 fromBits(uint8_t bits)
     {
         return fp8_e8m0::from_bits(bits);
     }
-    static uint8_t to_bits(fp8_e8m0 val)
+    static uint8_t toBits(fp8_e8m0 val)
     {
         return val.data;
     }
 };
-
-// NOLINTEND(readability-identifier-naming)
 
 // ============================================================================
 // Test Fixture (bfloat16, half, fp4_e2m1, fp8_e4m3, fp8_e5m2, fp8_e8m0)
@@ -183,7 +216,8 @@ class PortableFloatTypes : public ::testing::Test
 {
 };
 
-using PortableTypes = ::testing::Types<bfloat16, half, fp4_e2m1, fp8_e4m3, fp8_e5m2, fp8_e8m0>;
+using PortableTypes
+    = ::testing::Types<bfloat16, half, fp4_e2m1, fp6_e2m3, fp6_e3m2, fp8_e4m3, fp8_e5m2, fp8_e8m0>;
 TYPED_TEST_SUITE(PortableFloatTypes, PortableTypes, );
 
 // ============================================================================
@@ -197,12 +231,12 @@ class MathFloatTypes : public ::testing::Test
 protected:
     using Traits = PortableTypeTraits<T>;
 
-    static bool nearEqual(float a, float b, float tol = Traits::tolerance)
+    static bool nearEqual(float a, float b, float tol = Traits::TOLERANCE)
     {
         return hipdnn_data_sdk::types::fabs(a - b) <= tol;
     }
 
-    static bool nearEqual(T a, T b, float tol = Traits::tolerance)
+    static bool nearEqual(T a, T b, float tol = Traits::TOLERANCE)
     {
         return nearEqual(static_cast<float>(a), static_cast<float>(b), tol);
     }
@@ -220,11 +254,13 @@ TYPED_TEST(PortableFloatTypes, TypeProperties)
     using T = TypeParam;
 
     // Size check - 16-bit types are 2 bytes, 8-bit types are 1 byte
+    // fp4_e2m1, fp6_e2m3, fp6_e3m2 skipped - sizeof only reflects storage, not bit width
     if constexpr(std::is_same_v<T, bfloat16> || std::is_same_v<T, half>)
     {
         EXPECT_EQ(sizeof(T), 2);
     }
-    else
+    else if constexpr(!std::is_same_v<T, fp4_e2m1> && !std::is_same_v<T, fp6_e2m3>
+                      && !std::is_same_v<T, fp6_e3m2>)
     {
         EXPECT_EQ(sizeof(T), 1);
     }
@@ -292,22 +328,22 @@ TYPED_TEST(PortableFloatTypes, FromBits)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    const T one = Traits::from_bits(Traits::one_bits);
+    const T one = Traits::fromBits(Traits::ONE_BITS);
     EXPECT_EQ(static_cast<float>(one), 1.0f);
 
     // fp8_e8m0 has no negative values or zero
     if constexpr(!std::is_same_v<T, fp8_e8m0>)
     {
-        const T negOne = Traits::from_bits(Traits::neg_one_bits);
+        const T negOne = Traits::fromBits(Traits::NEG_ONE_BITS);
         EXPECT_EQ(static_cast<float>(negOne), -1.0f);
 
-        const T zero = Traits::from_bits(Traits::zero_bits);
+        const T zero = Traits::fromBits(Traits::ZERO_BITS);
         EXPECT_EQ(static_cast<float>(zero), 0.0f);
     }
 
-    if constexpr(Traits::has_nan)
+    if constexpr(Traits::HAS_NAN)
     {
-        const T nan = Traits::from_bits(Traits::nan_bits);
+        const T nan = Traits::fromBits(Traits::NAN_BITS);
         EXPECT_TRUE(isnan(nan));
     }
 }
@@ -319,7 +355,7 @@ TYPED_TEST(PortableFloatTypes, CopyConstruct)
 
     const T a(2.0f);
     const T b(a);
-    EXPECT_EQ(Traits::to_bits(a), Traits::to_bits(b));
+    EXPECT_EQ(Traits::toBits(a), Traits::toBits(b));
     EXPECT_EQ(static_cast<float>(a), static_cast<float>(b));
 }
 
@@ -422,7 +458,7 @@ TYPED_TEST(PortableFloatTypes, UnaryPlus)
 
     const T a(4.0f);
     const T b = +a;
-    EXPECT_EQ(Traits::to_bits(a), Traits::to_bits(b));
+    EXPECT_EQ(Traits::toBits(a), Traits::toBits(b));
 }
 
 // ============================================================================
@@ -571,7 +607,7 @@ TYPED_TEST(PortableFloatTypes, PositiveZero)
     // fp8_e8m0 has no zero representation - tested in type-specific tests
     if constexpr(!std::is_same_v<T, fp8_e8m0>)
     {
-        const T zero = Traits::from_bits(Traits::zero_bits);
+        const T zero = Traits::fromBits(Traits::ZERO_BITS);
         EXPECT_EQ(static_cast<float>(zero), 0.0f);
         EXPECT_FALSE(signbit(zero));
     }
@@ -585,7 +621,7 @@ TYPED_TEST(PortableFloatTypes, NegativeZero)
     // fp8_e8m0 has no negative zero - it's unsigned
     if constexpr(!std::is_same_v<T, fp8_e8m0>)
     {
-        const T negZero = Traits::from_bits(Traits::neg_zero_bits);
+        const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
         EXPECT_EQ(static_cast<float>(negZero), -0.0f);
         EXPECT_TRUE(signbit(negZero));
     }
@@ -596,9 +632,9 @@ TYPED_TEST(PortableFloatTypes, QuietNaN)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    if constexpr(Traits::has_nan)
+    if constexpr(Traits::HAS_NAN)
     {
-        const T nan = Traits::from_bits(Traits::nan_bits);
+        const T nan = Traits::fromBits(Traits::NAN_BITS);
         EXPECT_TRUE(isnan(nan));
     }
 }
@@ -611,9 +647,9 @@ TYPED_TEST(PortableFloatTypes, IsFinite)
     EXPECT_TRUE(isfinite(T(1.0f)));
     EXPECT_TRUE(isfinite(T(0.0f)));
 
-    if constexpr(Traits::has_nan)
+    if constexpr(Traits::HAS_NAN)
     {
-        EXPECT_FALSE(isfinite(Traits::from_bits(Traits::nan_bits)));
+        EXPECT_FALSE(isfinite(Traits::fromBits(Traits::NAN_BITS)));
     }
 }
 
@@ -622,19 +658,18 @@ TYPED_TEST(PortableFloatTypes, InfinityHandling)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    if constexpr(Traits::has_infinity)
+    if constexpr(Traits::HAS_INFINITY)
     {
-        const T inf = Traits::from_bits(Traits::inf_bits);
+        const T inf = Traits::fromBits(Traits::INF_BITS);
         EXPECT_TRUE(isinf(inf));
         EXPECT_FALSE(signbit(inf));
         EXPECT_FALSE(isnan(inf));
 
-        const T negInf = Traits::from_bits(Traits::neg_inf_bits);
+        const T negInf = Traits::fromBits(Traits::NEG_INF_BITS);
         EXPECT_TRUE(isinf(negInf));
         EXPECT_TRUE(signbit(negInf));
         EXPECT_FALSE(isnan(negInf));
     }
-    // fp4_e2m1, fp8_e4m3 and fp8_e8m0 have no infinity - skipped
 }
 
 // ============================================================================
@@ -668,16 +703,116 @@ TYPED_TEST(MathFloatTypes, Max)
     EXPECT_EQ(max(b, a), b);
 }
 
-TYPED_TEST(MathFloatTypes, MaxWithNaN)
+TYPED_TEST(MathFloatTypes, MaxNegative)
+{
+    using T = TypeParam;
+
+    const T a(-1.0f);
+    const T b(-2.0f);
+    EXPECT_EQ(max(a, b), a);
+    EXPECT_EQ(max(b, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, MaxMixed)
+{
+    using T = TypeParam;
+
+    const T neg(-1.0f);
+    const T pos(2.0f);
+    EXPECT_EQ(max(neg, pos), pos);
+    EXPECT_EQ(max(pos, neg), pos);
+}
+
+TYPED_TEST(MathFloatTypes, MaxEqual)
+{
+    using T = TypeParam;
+
+    const T a(2.0f);
+    EXPECT_EQ(max(a, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, MaxWithInfinity)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
     const T a(1.0f);
-    const T nan = Traits::from_bits(Traits::nan_bits);
-    EXPECT_EQ(max(a, nan), a);
-    EXPECT_EQ(max(nan, a), a);
-    EXPECT_TRUE(isnan(max(nan, nan)));
+    const T inf = Traits::fromBits(Traits::INF_BITS);
+    const T negInf = Traits::fromBits(Traits::NEG_INF_BITS);
+
+    EXPECT_EQ(max(a, inf), inf);
+    EXPECT_EQ(max(inf, a), inf);
+    EXPECT_EQ(max(a, negInf), a);
+    EXPECT_EQ(max(negInf, a), a);
+    EXPECT_EQ(max(inf, negInf), inf);
+    EXPECT_EQ(max(negInf, inf), inf);
+}
+
+TYPED_TEST(MathFloatTypes, Fmax)
+{
+    using T = TypeParam;
+
+    const T a(1.0f);
+    const T b(2.0f);
+    EXPECT_EQ(fmax(a, b), b);
+    EXPECT_EQ(fmax(b, a), b);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxNegative)
+{
+    using T = TypeParam;
+
+    const T a(-1.0f);
+    const T b(-2.0f);
+    EXPECT_EQ(fmax(a, b), a);
+    EXPECT_EQ(fmax(b, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxMixed)
+{
+    using T = TypeParam;
+
+    const T neg(-1.0f);
+    const T pos(2.0f);
+    EXPECT_EQ(fmax(neg, pos), pos);
+    EXPECT_EQ(fmax(pos, neg), pos);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxEqual)
+{
+    using T = TypeParam;
+
+    const T a(2.0f);
+    EXPECT_EQ(fmax(a, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxWithInfinity)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T a(1.0f);
+    const T inf = Traits::fromBits(Traits::INF_BITS);
+    const T negInf = Traits::fromBits(Traits::NEG_INF_BITS);
+
+    EXPECT_EQ(fmax(a, inf), inf);
+    EXPECT_EQ(fmax(inf, a), inf);
+    EXPECT_EQ(fmax(a, negInf), a);
+    EXPECT_EQ(fmax(negInf, a), a);
+    EXPECT_EQ(fmax(inf, negInf), inf);
+    EXPECT_EQ(fmax(negInf, inf), inf);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxWithNaN)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T a(1.0f);
+    const T nan = Traits::fromBits(Traits::NAN_BITS);
+    EXPECT_EQ(fmax(a, nan), a);
+    EXPECT_EQ(fmax(nan, a), a);
+    EXPECT_TRUE(isnan(fmax(nan, nan)));
 }
 
 TYPED_TEST(MathFloatTypes, Min)
@@ -690,16 +825,173 @@ TYPED_TEST(MathFloatTypes, Min)
     EXPECT_EQ(min(b, a), a);
 }
 
-TYPED_TEST(MathFloatTypes, MinWithNaN)
+TYPED_TEST(MathFloatTypes, MinNegative)
+{
+    using T = TypeParam;
+
+    const T a(-1.0f);
+    const T b(-2.0f);
+    EXPECT_EQ(min(a, b), b);
+    EXPECT_EQ(min(b, a), b);
+}
+
+TYPED_TEST(MathFloatTypes, MinMixed)
+{
+    using T = TypeParam;
+
+    const T neg(-1.0f);
+    const T pos(2.0f);
+    EXPECT_EQ(min(neg, pos), neg);
+    EXPECT_EQ(min(pos, neg), neg);
+}
+
+TYPED_TEST(MathFloatTypes, MinEqual)
+{
+    using T = TypeParam;
+
+    const T a(2.0f);
+    EXPECT_EQ(min(a, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, MinWithInfinity)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
     const T a(1.0f);
-    const T nan = Traits::from_bits(Traits::nan_bits);
-    EXPECT_EQ(min(a, nan), a);
-    EXPECT_EQ(min(nan, a), a);
-    EXPECT_TRUE(isnan(min(nan, nan)));
+    const T inf = Traits::fromBits(Traits::INF_BITS);
+    const T negInf = Traits::fromBits(Traits::NEG_INF_BITS);
+
+    EXPECT_EQ(min(a, inf), a);
+    EXPECT_EQ(min(inf, a), a);
+    EXPECT_EQ(min(a, negInf), negInf);
+    EXPECT_EQ(min(negInf, a), negInf);
+    EXPECT_EQ(min(inf, negInf), negInf);
+    EXPECT_EQ(min(negInf, inf), negInf);
+}
+
+TYPED_TEST(MathFloatTypes, Fmin)
+{
+    using T = TypeParam;
+
+    const T a(1.0f);
+    const T b(2.0f);
+    EXPECT_EQ(fmin(a, b), a);
+    EXPECT_EQ(fmin(b, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, FminNegative)
+{
+    using T = TypeParam;
+
+    const T a(-1.0f);
+    const T b(-2.0f);
+    EXPECT_EQ(fmin(a, b), b);
+    EXPECT_EQ(fmin(b, a), b);
+}
+
+TYPED_TEST(MathFloatTypes, FminMixed)
+{
+    using T = TypeParam;
+
+    const T neg(-1.0f);
+    const T pos(2.0f);
+    EXPECT_EQ(fmin(neg, pos), neg);
+    EXPECT_EQ(fmin(pos, neg), neg);
+}
+
+TYPED_TEST(MathFloatTypes, FminEqual)
+{
+    using T = TypeParam;
+
+    const T a(2.0f);
+    EXPECT_EQ(fmin(a, a), a);
+}
+
+TYPED_TEST(MathFloatTypes, FminWithInfinity)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T a(1.0f);
+    const T inf = Traits::fromBits(Traits::INF_BITS);
+    const T negInf = Traits::fromBits(Traits::NEG_INF_BITS);
+
+    EXPECT_EQ(fmin(a, inf), a);
+    EXPECT_EQ(fmin(inf, a), a);
+    EXPECT_EQ(fmin(a, negInf), negInf);
+    EXPECT_EQ(fmin(negInf, a), negInf);
+    EXPECT_EQ(fmin(inf, negInf), negInf);
+    EXPECT_EQ(fmin(negInf, inf), negInf);
+}
+
+TYPED_TEST(MathFloatTypes, FminWithNaN)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T a(1.0f);
+    const T nan = Traits::fromBits(Traits::NAN_BITS);
+    EXPECT_EQ(fmin(a, nan), a);
+    EXPECT_EQ(fmin(nan, a), a);
+    EXPECT_TRUE(isnan(fmin(nan, nan)));
+}
+
+// Zero Sign Tests (+0/-0)
+// Documents current implementation behavior. The C++ standard does not require
+// std::fmin/std::fmax to be sensitive to the sign of zero, and std::min/std::max
+// have no special +0/-0 handling specified.
+// NOTE: We compare bit patterns (not values) because +0 == -0 in IEEE 754 comparison.
+TYPED_TEST(MathFloatTypes, MaxZeroSigns)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T posZero = Traits::fromBits(Traits::ZERO_BITS);
+    const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
+
+    // max uses `a < b ? b : a`, so returns first arg when equal
+    EXPECT_EQ(Traits::toBits(max(posZero, negZero)), Traits::ZERO_BITS);
+    EXPECT_EQ(Traits::toBits(max(negZero, posZero)), Traits::NEG_ZERO_BITS);
+}
+
+TYPED_TEST(MathFloatTypes, MinZeroSigns)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T posZero = Traits::fromBits(Traits::ZERO_BITS);
+    const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
+
+    // min uses `b < a ? b : a`, so returns first arg when equal
+    EXPECT_EQ(Traits::toBits(min(posZero, negZero)), Traits::ZERO_BITS);
+    EXPECT_EQ(Traits::toBits(min(negZero, posZero)), Traits::NEG_ZERO_BITS);
+}
+
+TYPED_TEST(MathFloatTypes, FmaxZeroSigns)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T posZero = Traits::fromBits(Traits::ZERO_BITS);
+    const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
+
+    // fmax uses `a > b ? a : b`, so returns second arg when equal
+    EXPECT_EQ(Traits::toBits(fmax(posZero, negZero)), Traits::NEG_ZERO_BITS);
+    EXPECT_EQ(Traits::toBits(fmax(negZero, posZero)), Traits::ZERO_BITS);
+}
+
+TYPED_TEST(MathFloatTypes, FminZeroSigns)
+{
+    using T = TypeParam;
+    using Traits = PortableTypeTraits<T>;
+
+    const T posZero = Traits::fromBits(Traits::ZERO_BITS);
+    const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
+
+    // fmin uses `a < b ? a : b`, so returns second arg when equal
+    EXPECT_EQ(Traits::toBits(fmin(posZero, negZero)), Traits::NEG_ZERO_BITS);
+    EXPECT_EQ(Traits::toBits(fmin(negZero, posZero)), Traits::ZERO_BITS);
 }
 
 TYPED_TEST(MathFloatTypes, Sqrt)
@@ -742,8 +1034,8 @@ TYPED_TEST(MathFloatTypes, Floor)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    EXPECT_TRUE(this->nearEqual(floor(T(2.5f)), T(2.0f), Traits::large_tolerance));
-    EXPECT_TRUE(this->nearEqual(floor(T(-2.5f)), T(-3.0f), Traits::large_tolerance));
+    EXPECT_TRUE(this->nearEqual(floor(T(2.5f)), T(2.0f), Traits::LARGE_TOLERANCE));
+    EXPECT_TRUE(this->nearEqual(floor(T(-2.5f)), T(-3.0f), Traits::LARGE_TOLERANCE));
 }
 
 TYPED_TEST(MathFloatTypes, Ceil)
@@ -751,8 +1043,8 @@ TYPED_TEST(MathFloatTypes, Ceil)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    EXPECT_TRUE(this->nearEqual(ceil(T(2.5f)), T(3.0f), Traits::large_tolerance));
-    EXPECT_TRUE(this->nearEqual(ceil(T(-2.5f)), T(-2.0f), Traits::large_tolerance));
+    EXPECT_TRUE(this->nearEqual(ceil(T(2.5f)), T(3.0f), Traits::LARGE_TOLERANCE));
+    EXPECT_TRUE(this->nearEqual(ceil(T(-2.5f)), T(-2.0f), Traits::LARGE_TOLERANCE));
 }
 
 TYPED_TEST(MathFloatTypes, Round)
@@ -790,8 +1082,8 @@ TYPED_TEST(PortableFloatTypes, NumericLimitsBasic)
     EXPECT_TRUE(std::numeric_limits<T>::is_specialized);
     EXPECT_EQ(std::numeric_limits<T>::is_signed, (!std::is_same_v<T, fp8_e8m0>));
     EXPECT_FALSE(std::numeric_limits<T>::is_integer);
-    EXPECT_EQ(std::numeric_limits<T>::has_infinity, Traits::has_infinity);
-    EXPECT_EQ(std::numeric_limits<T>::has_quiet_NaN, Traits::has_nan);
+    EXPECT_EQ(std::numeric_limits<T>::has_infinity, Traits::HAS_INFINITY);
+    EXPECT_EQ(std::numeric_limits<T>::has_quiet_NaN, Traits::HAS_NAN);
 }
 
 TYPED_TEST(PortableFloatTypes, NumericLimitsNaN)
@@ -799,7 +1091,7 @@ TYPED_TEST(PortableFloatTypes, NumericLimitsNaN)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    if constexpr(Traits::has_nan)
+    if constexpr(Traits::HAS_NAN)
     {
         const T nan = std::numeric_limits<T>::quiet_NaN();
         EXPECT_TRUE(isnan(nan));
@@ -850,7 +1142,7 @@ TYPED_TEST(PortableFloatTypes, NumericLimitsInfinity)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    if constexpr(Traits::has_infinity)
+    if constexpr(Traits::HAS_INFINITY)
     {
         const T inf = std::numeric_limits<T>::infinity();
         EXPECT_TRUE(isinf(inf));
