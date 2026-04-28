@@ -28,10 +28,10 @@ source .venv/bin/activate
 
 # Install ROCm torch (from ROCm nightly index), then the package + PyPI deps.
 pip install -r requirements-rocm.txt
-pip install -e .
+pip install -e . --no-deps
 
 # Install hipDNN Python bindings (from your hipDNN build)
-cd /path/to/hipdnn/python && pip install -e . && cd -
+cd /path/to/hipdnn/python && pip install -e . --no-deps && cd -
 ```
 
 ### For CUDA/NVIDIA GPUs (PyTorch CUDA benchmarking)
@@ -43,7 +43,7 @@ source .venv/bin/activate
 
 # Install CUDA torch + PyPI deps
 pip install -r requirements-cuda.txt
-pip install -e .
+pip install -e . --no-deps
 ```
 
 ### Development Installation
@@ -65,15 +65,26 @@ pip install -e .
 
 ### Basic Benchmarking
 
-```bash
-# Run benchmark on a serialized graph
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --warmup 10 --iters 100
+A single graph and a glob of graphs share the same execution path. By default
+results are printed as a summary table. Use `-v` for the rich per-engine block
+(useful for debugging a single graph or comparing engines).
 
-# With custom engine ID
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --engine-id 1
+```bash
+# Single graph (default summary output)
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --warmup 10 --iters 100
+
+# Single graph, verbose: rich per-engine block
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json -v
+
+# Filter to specific engine(s) — comma-separated
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1,2
+
+# Multiple graphs (glob): same path, default summary table
+python -m dnn_benchmarking --graph 'graphs/*.json' --warmup 10 --iters 100
 
 # With reproducible random seed
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --seed 42
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --seed 42
 ```
 
 ### A/B Testing
@@ -82,15 +93,15 @@ Compare two different plugin/engine configurations and validate accuracy:
 
 ```bash
 # Compare two different engines on the default plugin
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json --AId 1 --BId 2
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
 
 # Compare two different plugins with specific engine IDs
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
   --APath /path/to/pluginA --AId 1 \
   --BPath /path/to/pluginB --BId 2
 
 # With custom tolerance for accuracy comparison
-python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
   --AId 1 --BId 2 --rtol 1e-3 --atol 1e-6
 ```
 
@@ -100,12 +111,32 @@ python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--graph`, `-g` | Path to JSON-serialized hipDNN graph file | Required |
+| `--graph`, `-g` | Path to JSON-serialized hipDNN graph file, or glob pattern | Required |
 | `--warmup`, `-w` | Number of warmup iterations | 10 |
 | `--iters`, `-i` | Number of benchmark iterations | 100 |
-| `--engine-id`, `-e` | Engine ID (1 = MIOpen) | 1 |
-| `--seed` | Random seed for reproducibility | None |
-| `--gpu-backend` | GPU kernel timer backend (`torch`, `auto`, `none`) | auto |
+| `--engine`, `-e` | Engine ID or comma-separated list (e.g. `1` or `1,2,3`); default = all discovered engines | None |
+| `--seed`, `-s` | Random seed for reproducible input data | None |
+| `--backend`, `-b` | Execution backend: `hipdnn` (AMD GPU via hipDNN) or `pytorch` (GPU via PyTorch) | `hipdnn` |
+
+#### Output Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--output`, `-o` | Export benchmark results to JSON file (full SuiteResult; independent of `-v`) | None |
+| `--verbose`, `-v` | Show detailed per-engine block per graph (default: summary table) | False |
+| `--no-kernel-timing` | Disable GPU kernel timing (E2E wall-clock only) | False |
+
+#### Reference Validation Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--validate` | Reference provider for correctness validation: `pytorch`, `cpu_plugin`, or `none` | `none` |
+
+#### Suite Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--plugin-path` | Path to directory containing hipDNN engine plugin `.so` files | None (system default) |
 
 #### A/B Testing Options
 
@@ -115,14 +146,55 @@ python -m dnn_benchmarking --graph ./graphs/conv1_fwd.json \
 | `--AId` | Engine ID for configuration A | Required for A/B |
 | `--BPath` | Plugin path for configuration B | None (default) |
 | `--BId` | Engine ID for configuration B | Required for A/B |
-| `--rtol` | Relative tolerance for accuracy comparison | 1e-5 |
-| `--atol` | Absolute tolerance for accuracy comparison | 1e-8 |
 
 **Note**: A/B testing mode is enabled when both `--AId` and `--BId` are specified.
 
+#### Comparison Options
+
+Used by A/B testing, reference validation, and suite-mode tolerance checks.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--rtol` | Relative tolerance for output comparison | 1e-5 |
+| `--atol` | Absolute tolerance for output comparison | 1e-8 |
+
 ## Output
 
-### Basic Benchmark Output
+### Default Output (summary table)
+
+The default console output is a compact, suite-style summary. One line per
+graph reports the per-engine pass/fail counts, followed by a final summary
+block. JSON output (`--output`) always contains the full per-engine
+`SuiteResult` regardless of console verbosity.
+
+```
+================================================================================
+hipDNN Benchmark Suite: 3 graph(s)
+================================================================================
+
+[1/3] sample_conv_fwd...
+  -> 2 passed, 0 failed, 0 skipped, 0 errored
+[2/3] sample_matmul...
+  -> 2 passed, 0 failed, 0 skipped, 0 errored
+[3/3] sample_relu...
+  -> 1 passed, 1 failed, 0 skipped, 0 errored
+
+--------------------------------------------------------------------------------
+Suite Summary:
+  Graphs:       3
+  Combinations: 6
+  Passed:       5
+  Failed:       1
+  Skipped:      0
+  Errors:       0
+================================================================================
+```
+
+### Verbose Output (`-v`)
+
+`-v` switches to a rich per-engine block per graph (matches the legacy
+single-graph format). Useful when debugging a single graph or comparing engines
+side-by-side.
 
 ```
 ================================================================================
@@ -137,7 +209,7 @@ Benchmark:  100 iterations
 Initialization:
   Graph build time:     45.23 ms
 
-Execution Statistics:
+E2E Execution Statistics:
   Mean:                 1.234 ms
   Std Dev:              0.045 ms
   Min:                  1.156 ms
@@ -145,7 +217,16 @@ Execution Statistics:
   P95:                  1.312 ms
   P99:                  1.398 ms
 
-Validation: SKIPPED (CPU reference not available)
+Kernel Execution Statistics:
+  Mean:                 0.872 ms
+  Std Dev:              0.012 ms
+  Min:                  0.851 ms
+  Max:                  0.921 ms
+  P95:                  0.897 ms
+  P99:                  0.910 ms
+
+Reference Validation: SKIPPED (no reference comparison performed)
+  Provider: none
 ================================================================================
 ```
 

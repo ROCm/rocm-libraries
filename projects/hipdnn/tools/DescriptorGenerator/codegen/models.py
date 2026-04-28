@@ -307,7 +307,7 @@ class DataField:
         """Frontend C++ type for mode/enum fields.
 
         Returns frontend_type if set, falls back to stripping the SDK namespace
-        from cpp_enum (e.g., 'hipdnn_data_sdk::data_objects::ConvMode' -> 'ConvMode').
+        from cpp_enum (e.g., 'hipdnn_flatbuffers_sdk::data_objects::ConvMode' -> 'ConvMode').
         """
         if self.frontend_type:
             return self.frontend_type
@@ -613,7 +613,7 @@ class OperationConfig:
 
     @property
     def fbs_namespace(self) -> str:
-        return "hipdnn_data_sdk::data_objects"
+        return "hipdnn_flatbuffers_sdk::data_objects"
 
     @property
     def fbs_t_type(self) -> str:

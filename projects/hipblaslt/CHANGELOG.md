@@ -2,7 +2,11 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
-## Unreleased
+## hipBLASLt 1.3.0
+
+### Added
+
+* General Batched GEMM support.
 
 ### Changed
 

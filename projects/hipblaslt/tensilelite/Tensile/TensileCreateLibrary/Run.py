@@ -68,7 +68,7 @@ from Tensile.KernelWriterBase import (
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary
 from Tensile.SolutionStructs import Solution
-from Tensile.SolutionStructs.Solution import printTypeMismatchSummary
+from Tensile.SolutionStructs.Solution import mergeTypeMismatchCollector, printTypeMismatchSummary
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
@@ -653,7 +653,8 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     for library in ParallelMap2(
         LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator_unordered"
     ):
-        _, architectureName, _, _, _, newLibrary = library
+        _, architectureName, _, _, _, newLibrary, typeMismatches = library
+        mergeTypeMismatchCollector(typeMismatches)
 
         if architectureName == "":
             continue
@@ -666,7 +667,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
 
     # After all YAML files have been parsed and Solution objects created,
     # print a summary of any type mismatches that were collected.
-    printTypeMismatchSummary()
+    printTypeMismatchSummary(len(logicFiles))
 
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0

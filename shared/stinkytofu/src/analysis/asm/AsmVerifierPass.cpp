@@ -28,7 +28,6 @@
 #include <sstream>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
 char StinkyIRVerifierPass::ID = 0;
@@ -63,6 +62,37 @@ static RegType fieldTypeToRegType(FieldType ft) {
             return RegType::S;
         default:
             return RegType::UNKNOWN;
+    }
+}
+
+static bool isScalarRegType(RegType type) {
+    switch (type) {
+        case RegType::S:
+        case RegType::SCC:
+        case RegType::VCC:
+        case RegType::VCC_LO:
+        case RegType::VCC_HI:
+        case RegType::EXEC:
+        case RegType::EXEC_LO:
+        case RegType::EXEC_HI:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool isExpectedTypeMatch(FieldType fieldType, RegType expectedType, RegType actualType) {
+    if (expectedType == RegType::UNKNOWN) return true;
+
+    switch (fieldType) {
+        case FieldType::sreg:
+        case FieldType::sreg_m0:
+        case FieldType::sgpr:
+        case FieldType::sdst:
+        case FieldType::ssrc:
+            return isScalarRegType(actualType);
+        default:
+            return actualType == expectedType;
     }
 }
 
@@ -126,7 +156,7 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
         // Type check: applies to all fields — a 32-bit VGPR field must still
         // receive a VGPR, not a SGPR (and vice versa).
         RegType expectedType = fieldTypeToRegType(field.fieldType);
-        if (expectedType != RegType::UNKNOWN && reg.reg.type != expectedType) {
+        if (!isExpectedTypeMatch(field.fieldType, expectedType, reg.reg.type)) {
             errors << "Instruction '";
             inst->dump(errors);
             errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "

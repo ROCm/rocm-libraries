@@ -18,7 +18,20 @@ set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hip
 # --- FlatBuffers dependency ---
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
 
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+# Per-library JSON gate. Defaults from the umbrella HIPDNN_SKIP_JSON_LIB when
+# building as part of the top-level project; can be set independently when
+# flatbuffers_sdk is built standalone.
+if(DEFINED HIPDNN_SKIP_JSON_LIB)
+    set(_hipdnn_flatbuffers_sdk_skip_default ${HIPDNN_SKIP_JSON_LIB})
+else()
+    set(_hipdnn_flatbuffers_sdk_skip_default OFF)
+endif()
+option(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+    "Skip nlohmann/json.hpp from flatbuffers_sdk public headers."
+    ${_hipdnn_flatbuffers_sdk_skip_default})
+unset(_hipdnn_flatbuffers_sdk_skip_default)
+
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB AND NOT TARGET nlohmann_json::nlohmann_json)
     hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 endif()
 
@@ -41,11 +54,62 @@ set(HIP_DNN_FLATBUFFERS_SDK_GENERATED_INCLUDE_DIR
 )
 
 # --- Dependency processing ---
-# During the transition period, data_sdk already processes and exports FlatBuffers/nlohmann_json
-# dependencies (aliases, include dirs, local export targets). Re-enable this block once data_sdk
-# no longer provides these dependencies.
 set(_hipdnn_flatbuffers_sdk_local_export_targets)
 set(_hipdnn_flatbuffers_sdk_local_export_includes)
+
+# Function to process flatbuffers_sdk dependencies and populate local export lists.
+# TARGET_NAME - The actual target name (e.g., FlatBuffers)
+# ALIAS_NAME  - The alias target name (e.g., flatbuffers::flatbuffers)
+# INCLUDE_DIR - Optional parent include directory to bundle with the install
+function(_hipdnn_flatbuffers_sdk_process_dependency TARGET_NAME ALIAS_NAME)
+    set(options "")
+    set(oneValueArgs INCLUDE_SUBDIR INCLUDE_DIR)
+    set(multiValueArgs "")
+    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    if(NOT TARGET ${TARGET_NAME})
+        return()
+    endif()
+
+    if(NOT TARGET ${ALIAS_NAME})
+        add_library(${ALIAS_NAME} ALIAS ${TARGET_NAME})
+    endif()
+
+    get_target_property(_is_imported ${TARGET_NAME} IMPORTED)
+    if(NOT _is_imported)
+        list(APPEND _hipdnn_flatbuffers_sdk_local_export_targets ${TARGET_NAME})
+        set(_hipdnn_flatbuffers_sdk_local_export_targets ${_hipdnn_flatbuffers_sdk_local_export_targets} PARENT_SCOPE)
+
+        if(ARG_INCLUDE_DIR)
+            list(APPEND _hipdnn_flatbuffers_sdk_local_export_includes ${ARG_INCLUDE_DIR})
+            set(_hipdnn_flatbuffers_sdk_local_export_includes ${_hipdnn_flatbuffers_sdk_local_export_includes} PARENT_SCOPE)
+        endif()
+    endif()
+endfunction()
+
+if(TARGET FlatBuffers)
+    # Workaround: flatbuffers sets INSTALL_INTERFACE to include/include which resolves incorrectly.
+    # Force it to the correct install path for hipdnn_flatbuffers_sdk.
+    get_target_property(_is_imported FlatBuffers IMPORTED)
+    if(NOT _is_imported)
+        get_target_property(current_includes FlatBuffers INTERFACE_INCLUDE_DIRECTORIES)
+        list(REMOVE_ITEM current_includes "$<INSTALL_INTERFACE:include/include>")
+        list(APPEND current_includes "$<INSTALL_INTERFACE:${HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR}>")
+        set_target_properties(
+            FlatBuffers PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${current_includes}"
+        )
+    endif()
+    _hipdnn_flatbuffers_sdk_process_dependency(
+        FlatBuffers flatbuffers::flatbuffers INCLUDE_DIR ${HIP_DNN_FLATBUFFERS_INCLUDE_DIR}
+        INCLUDE_SUBDIR flatbuffers
+    )
+endif()
+
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
+    _hipdnn_flatbuffers_sdk_process_dependency(
+        nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
+    )
+endif()
 
 # --- Create the library target ---
 add_library(hipdnn_flatbuffers_sdk INTERFACE)
@@ -59,13 +123,17 @@ target_link_libraries(hipdnn_flatbuffers_sdk INTERFACE hipdnn_data_sdk)
 
 # Add FlatBuffers includes
 hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk flatbuffers::flatbuffers)
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
     hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk nlohmann_json::nlohmann_json)
 endif()
 
+# Scope the SKIP_JSON_LIB macro to installed (downstream) consumers only.
+# In-tree consumers (e.g. the backend, which always needs json) must not see it,
+# otherwise flatbuffers_sdk's to_json overloads in utilities/json/*.hpp disappear
+# and the backend fails to build.
 target_compile_definitions(
     hipdnn_flatbuffers_sdk INTERFACE
-    $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB>
+    $<INSTALL_INTERFACE:$<$<BOOL:${HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB}>:HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB>>
 )
 
 target_include_directories(

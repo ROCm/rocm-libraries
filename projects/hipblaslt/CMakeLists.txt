@@ -26,7 +26,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.2.2" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.3.0" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})

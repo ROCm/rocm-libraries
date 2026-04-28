@@ -134,8 +134,13 @@ StinkyAsmModule::findGroupRange(const std::string& groupName) const {
         return std::nullopt;
     }
 
-    return std::make_optional(std::make_pair(pImpl->instructionGroups.at(groupName).begin(),
-                                             pImpl->instructionGroups.at(groupName).end()));
+    const auto& range = pImpl->instructionGroups.at(groupName);
+    // Return nullopt if the group was registered but never populated
+    if (range.first == IntrusiveListIterator<IRBase>()) {
+        return std::nullopt;
+    }
+
+    return std::make_optional(std::make_pair(range.begin(), range.end()));
 }
 
 void StinkyAsmModule::updateInstructionGroups(const std::vector<const std::string*>& groups,
