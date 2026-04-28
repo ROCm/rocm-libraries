@@ -37,6 +37,7 @@
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -86,6 +87,10 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
 
     if (optLevel != OptLevel::O0) {
+        // -- kernel --
+        // strip delay_alu before scheduling
+        pm.addPass(createRemoveDelayAluPass());
+
         PassFeatureConfig passFeatureConfig;
         passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
         passFeatureConfig.loopConfig.unrollGemm = true;
@@ -95,8 +100,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         auto snapshotCollector =
             createPassOrderSnapshotCollector(passFeatureConfig, moduleOptions, module.getName());
 
-        // Combined adapter: loopWithPrefetch + noLoadLoopBody
-        // Process both regions together so the scheduler sees the full CFG.
+        // -- region: loopWithPrefetch + noLoadLoopBody --
+        // process together for full CFG
         {
             PassManager innerPM;
             registerAllAnalyses(innerPM.getAnalysisManager());
