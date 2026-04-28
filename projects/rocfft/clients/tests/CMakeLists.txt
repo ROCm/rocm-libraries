@@ -99,8 +99,10 @@ add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 # rocFFT device code builds with -O3 by default.  rocfft-test
 # contains device code for callback functions, so ensure the device
 # code is built with the same optimization level to minimize chance
-# of a mismatch
-target_compile_options( rocfft-test PRIVATE -Xarch_device -O3 )
+# of a mismatch.
+# rocfft_c.c is plain C and must not receive HIP device flags.
+target_compile_options( rocfft-test PRIVATE
+  $<$<NOT:$<COMPILE_LANGUAGE:C>>:-Xarch_device -O3> )
 
 # callback functions need to be built as relocatable device code
 # (causes failure at link stage on Windows)
