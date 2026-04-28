@@ -29,8 +29,14 @@ if _bi is not None:
 
     _so = Path(_rocisa.__file__)
     _so_mtime = _so.stat().st_mtime
+    # Scan rocisa sources and, while stinkytofu is compiled into _rocisa.so,
+    # stinkytofu sources too. STINKYTOFU_SOURCE_ROOT is removed once rocisa
+    # and stinkytofu are loaded independently.
+    _roots = [Path(_bi.SOURCE_ROOT), Path(_bi.STINKYTOFU_SOURCE_ROOT)]
     _stale = [
-        str(p) for p in Path(_bi.SOURCE_ROOT).rglob("*.[ch]pp")
+        str(p)
+        for _root in _roots
+        for p in _root.rglob("*.[ch]pp")
         if p.stat().st_mtime > _so_mtime
     ]
     if _stale:
@@ -40,4 +46,4 @@ if _bi is not None:
             f"  Modified: {', '.join(_preview)}\n"
             "  Rebuild:  cmake --build <build_dir> --target _rocisa"
         )
-    del _bi, _so, _so_mtime, _stale, Path
+    del _bi, _so, _so_mtime, _stale, _roots, Path
