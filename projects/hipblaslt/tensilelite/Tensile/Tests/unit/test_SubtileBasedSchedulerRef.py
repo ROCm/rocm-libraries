@@ -396,6 +396,67 @@ def test_256x256_bf16_pgr0():
     )
 
 
+def make_256x256_bf16_pgr1():
+    kernel = create_kernel(256, 256, fp4=False, depthU=64)
+    tiA = TileInfo('A', kernel)
+    tiB = TileInfo('B', kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        numPartitionsM=1,
+        numPartitionsN=1,
+        pgr=1,
+        plr=1,
+    )
+
+
+EXPECTED_EMIT_DEP_ORDER_256x256_BF16_PGR1 = """\
+MAINLOOP (dependency paths):
+  Partition 0:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [0-7] <- [5]
+      preMFMA path 0:
+        [ 5] wait_lr    wait_lr
+      path 0:
+        [ 1] lr         LR A  (MT n, subIterK [1]) [0-7]
+        [ 2] lr         LR B  (MT n, subIterK [1]) [0-7]
+      path 1:
+        [ 6] gr_inc     gr_inc(A)
+        [ 3] gr         GR A (MT n+1, subIterK [0,1]) ids [0-7]
+        [ 7] gr_inc     gr_inc(B)
+        [ 4] gr         GR B (MT n+1, subIterK [0,1]) ids [0-7]
+    subIterK=1:
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-7] , B : [0-7] <- [3]
+      preMFMA path 0:
+        [ 3] wait_lr    wait_lr
+      path 0:
+        [ 4] wait_gr    wait_gr(0)
+        [ 5] sync       sync
+        [ 6] lr_inc     lr_inc(A)
+        [ 7] lr_inc     lr_inc(B)
+        [ 1] lr         LR A  (MT n+1, subIterK [0]) [0-7]
+        [ 2] lr         LR B  (MT n+1, subIterK [0]) [0-7]
+"""
+
+
+def test_256x256_bf16_pgr1():
+    """Exact check of emit dependency order for 256x256 BF16, PGR1."""
+    cfg = make_256x256_bf16_pgr1()
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    actual = sched.print_emit_dep_order()
+    assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_BF16_PGR1, (
+        f"Emit dependency order mismatch.\n"
+        f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_BF16_PGR1}\n"
+        f"--- Actual ---\n{actual}"
+    )
+
+
 def make_256x256_fp4():
     kernel = create_kernel(256, 256, fp4=True, depthU=256)
     tiA = TileInfo('A', kernel)
