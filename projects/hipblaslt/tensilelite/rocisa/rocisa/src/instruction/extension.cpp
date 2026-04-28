@@ -98,7 +98,7 @@ void ext_inst(nb::module_ m)
           nb::arg("dst"),
           nb::arg("src"),
           nb::arg("sel"),
-          nb::arg("useSdwaLegacy") = true,
+          nb::arg("halfWordSel") = true,
           nb::arg("comment")       = "");
     m.def("ECvtPkFP8toF32",
           &rocisa::ECvtPkFP8toF32,
