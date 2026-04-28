@@ -205,14 +205,7 @@ public:
             }
             if(bias->get_stride().empty())
             {
-                if(!scale->get_stride().empty())
-                {
-                    bias->set_stride(scale->get_stride());
-                }
-                else
-                {
-                    bias->set_stride(hipdnn_data_sdk::utilities::generateStrides(bias->get_dim()));
-                }
+                bias->set_stride(scale->get_stride());
             }
         }
 
