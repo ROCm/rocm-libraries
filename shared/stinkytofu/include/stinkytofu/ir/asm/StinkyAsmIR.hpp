@@ -537,4 +537,16 @@ inline bool isScalarALU(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SALU);
 }
 
+/// Check if instruction is an XDL WMMA/SWMMAC instruction.
+/// Excludes FP32-input WMMA (v_wmma_f32_16x16x4_f32).
+inline bool isXDLWMMA(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_WMMA_XDL);
+}
+
+/// Check if instruction is a 64-bit transcendental.
+/// Includes v_rcp_f64, v_rsq_f64, v_sqrt_f64.
+inline bool isTrans64(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_Trans64);
+}
+
 }  // namespace stinkytofu
