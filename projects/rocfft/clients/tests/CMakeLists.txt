@@ -87,6 +87,7 @@ set( rocfft-test_source
   buffer_hash_test.cpp
   validate_length_stride.cpp
   random.cpp
+  rocfft_c.c
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
   ../../shared/data_gen_device.cpp
