@@ -26,30 +26,6 @@
 #include <string>
 #include <type_traits>
 
-//
-// To be removed when tests are complete.
-//
-template <typename T>
-void print_array(T* array, int nrows, int ncols, int ld, std::string str = "array = ")
-{
-    std::cout << str << std::endl;
-    for(int i = 0; i < nrows; ++i)
-    {
-        for(int j = 0; j < ncols; ++j)
-        {
-            if(j == ncols - 1)
-            {
-                std::cout << array[i + j * ld] << std::endl;
-            }
-            else
-            {
-                std::cout << array[i + j * ld] << ", ";
-            }
-        }
-        std::cout << std::endl;
-    }
-}
-
 #include "clientcommon.hpp"
 
 static bool test_left_eigenvectors

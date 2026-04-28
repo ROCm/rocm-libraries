@@ -235,16 +235,16 @@ try
     if(!lworkOnDevice || !lworkOnHost)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    *lworkOnDevice = 0;
+    *lworkOnHost   = 0;
+
     // disable left eigenvector computation
     if(jobvl == HIPSOLVER_EIG_MODE_VECTOR)
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
 
-    *lworkOnDevice = 0;
-    *lworkOnHost   = 0;
-
     // ----- GET WORKSPACE SIZES -----
     size_t size_type = 0;
-    size_t size_hA, size_hW, size_hWcopy, size_hVL, size_hVR, size_work, size_rwork;
+    size_t size_hA, size_hW, size_hWcopy, size_hVL, size_hVR, size_hInfo, size_work, size_rwork;
     // sgeev
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
        && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
@@ -308,9 +308,10 @@ try
     else
         return HIPSOLVER_STATUS_INVALID_ENUM;
 
-    size_hA  = size_type * lda * n;
-    size_hVL = (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvl * n);
-    size_hVR = (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvr * n);
+    size_hA    = size_type * lda * n;
+    size_hVL   = (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvl * n);
+    size_hVR   = (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvr * n);
+    size_hInfo = sizeof(int);
 
     // round up sizes to multiple of MIN_CHUNK_SIZE
     size_hA     = ((size_hA + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
@@ -318,10 +319,12 @@ try
     size_hWcopy = ((size_hWcopy + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_hVL    = ((size_hVL + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_hVR    = ((size_hVR + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_hInfo  = ((size_hInfo + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_work   = ((size_work + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_rwork  = ((size_rwork + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
 
-    *lworkOnHost = size_hA + size_hW + size_hWcopy + size_hVL + size_hVR + size_work + size_rwork;
+    *lworkOnHost = size_hA + size_hW + size_hWcopy + size_hVL + size_hVR + size_hInfo + size_work
+                   + size_rwork;
     return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
@@ -388,7 +391,7 @@ try
 
     // ----- GET HOST ARRAY SIZES -----
     size_t size_type = 0;
-    size_t size_hA, size_hW, size_hWcopy, size_hVL, size_hVR, size_rwork;
+    size_t size_hA, size_hW, size_hWcopy, size_hVL, size_hVR, size_hInfo, size_rwork;
     size_t required_bytes_work;
     // sgeev
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
@@ -453,9 +456,10 @@ try
     else
         return HIPSOLVER_STATUS_INVALID_ENUM;
 
-    size_hA  = size_type * lda * n;
-    size_hVL = (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvl * n);
-    size_hVR = (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvr * n);
+    size_hA    = size_type * lda * n;
+    size_hVL   = (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvl * n);
+    size_hVR   = (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 0 : size_type * ldvr * n);
+    size_hInfo = sizeof(int);
 
     // round up sizes to multiple of MIN_CHUNK_SIZE
     size_t rounded_size_hA = ((size_hA + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
@@ -464,10 +468,13 @@ try
         = ((size_hWcopy + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_t rounded_size_hVL = ((size_hVL + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_t rounded_size_hVR = ((size_hVR + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+    size_t rounded_size_hInfo
+        = ((size_hInfo + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_t rounded_size_rwork
         = ((size_rwork + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
     size_t required_bytes = rounded_size_hA + rounded_size_hW + rounded_size_hWcopy
-                            + rounded_size_hVL + rounded_size_hVR + rounded_size_rwork;
+                            + rounded_size_hVL + rounded_size_hVR + rounded_size_hInfo
+                            + rounded_size_rwork;
 
     if(lworkOnHost < required_bytes + required_bytes_work)
         return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -481,7 +488,8 @@ try
     std::byte* hWcopy = hW + rounded_size_hW;
     std::byte* hVL    = hWcopy + rounded_size_hWcopy;
     std::byte* hVR    = hVL + rounded_size_hVL;
-    std::byte* rwork  = hVR + rounded_size_hVR;
+    std::byte* hInfo  = hVR + rounded_size_hVR;
+    std::byte* rwork  = hInfo + rounded_size_hInfo;
     std::byte* work   = rwork + rounded_size_rwork;
 
     hipStream_t stream;
@@ -491,7 +499,6 @@ try
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     // ----- CALL LAPACK -----
-    int  hInfo;
     char jobvlC = (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 'N' : 'V');
     char jobvrC = (jobvr == HIPSOLVER_EIG_MODE_NOVECTOR ? 'N' : 'V');
 
@@ -512,7 +519,7 @@ try
                             (float*)work,
                             (int)lwork_computed,
                             (float*)rwork,
-                            &hInfo);
+                            (int*)hInfo);
     }
     // sgeev with complex W
     else if(dataTypeA == HIP_R_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_R_32F
@@ -531,7 +538,7 @@ try
                             (float*)work,
                             (int)lwork_computed,
                             (float*)rwork,
-                            &hInfo);
+                            (int*)hInfo);
 
         hipFloatComplex* hW_f     = (hipFloatComplex*)hW;
         float*           hWcopy_f = (float*)hWcopy;
@@ -555,7 +562,7 @@ try
                             (double*)work,
                             (int)lwork_computed,
                             (double*)rwork,
-                            &hInfo);
+                            (int*)hInfo);
     }
     // dgeev with complex W
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_R_64F
@@ -574,7 +581,7 @@ try
                             (double*)work,
                             (int)lwork_computed,
                             (double*)rwork,
-                            &hInfo);
+                            (int*)hInfo);
 
         hipDoubleComplex* hW_f     = (hipDoubleComplex*)hW;
         double*           hWcopy_f = (double*)hWcopy;
@@ -598,7 +605,7 @@ try
                             (hipFloatComplex*)work,
                             (int)lwork_computed,
                             (float*)rwork,
-                            &hInfo);
+                            (int*)hInfo);
     }
     // zgeev
     else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_C_64F
@@ -617,7 +624,7 @@ try
                             (hipDoubleComplex*)work,
                             (int)lwork_computed,
                             (double*)rwork,
-                            &hInfo);
+                            (int*)hInfo);
     }
     else
         return HIPSOLVER_STATUS_INVALID_ENUM;
@@ -628,7 +635,7 @@ try
         CHECK_HIP_ERROR(hipMemcpyAsync(VL, hVL, size_hVL, hipMemcpyHostToDevice, stream));
     if(jobvr != HIPSOLVER_EIG_MODE_NOVECTOR)
         CHECK_HIP_ERROR(hipMemcpyAsync(VR, hVR, size_hVR, hipMemcpyHostToDevice, stream));
-    CHECK_HIP_ERROR(hipMemcpyAsync(devInfo, &hInfo, sizeof(int), hipMemcpyHostToDevice, stream));
+    CHECK_HIP_ERROR(hipMemcpyAsync(devInfo, hInfo, size_hInfo, hipMemcpyHostToDevice, stream));
 
     return HIPSOLVER_STATUS_SUCCESS;
 }
