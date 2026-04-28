@@ -466,13 +466,13 @@ def problemSizeParams(problemType, problem, factorDim, macroTile=None):
 
     sizes = list(problem.sizes[:numIndices])
     originalSizes = None
-    # Custom kernels (e.g. AITER MXFP4) require M and N padded to macrotile
-    # boundaries. Save the original sizes so the client can report/validate
-    # against the unpadded region via --original-problem-size.
+    # When a custom kernel declares padProblemSizeToTile: [padM, padN],
+    # pad the requested dimensions to macrotile boundaries.  Save the
+    # original sizes so the client can report/validate the unpadded region.
     if macroTile is not None:
-        mt0, mt1 = macroTile
-        padM = _ceilTo(sizes[0], mt0)
-        padN = _ceilTo(sizes[1], mt1)
+        mt0, mt1, padFlags = macroTile
+        padM = _ceilTo(sizes[0], mt0) if padFlags[0] else sizes[0]
+        padN = _ceilTo(sizes[1], mt1) if padFlags[1] else sizes[1]
         if padM != sizes[0] or padN != sizes[1]:
             originalSizes = list(sizes)
             sizes[0] = padM

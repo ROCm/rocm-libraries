@@ -305,12 +305,16 @@ def writeBenchmarkFiles(
                 for f in codeObjectFiles]
 
         with timing_context("python_benchpost_client_config"):
-            # Extract macrotile dims from the first custom kernel solution so
-            # problemSizeParams() can pad M/N to tile boundaries.
+            # If the custom kernel declares padProblemSizeToTile, extract
+            # the macrotile dims and per-axis flags so problemSizeParams()
+            # can pad M/N to tile boundaries.
             macroTile = None
             for sol in solutions:
                 if "CustomKernel" in sol and sol["CustomKernel"]:
-                    macroTile = (sol["MacroTile0"], sol["MacroTile1"])
+                    ck = sol["CustomKernel"]
+                    padFlags = ck.get("padProblemSizeToTile", None)
+                    if padFlags:
+                        macroTile = (sol["MacroTile0"], sol["MacroTile1"], padFlags)
                     break
 
             if "TileAwareSelection" in problemType and problemType["TileAwareSelection"]:
