@@ -3124,6 +3124,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
         std::shared_ptr<TensileLite::Hardware> hardware;
 
         auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        hardware     = TensileLite::hip::GetDevice(*deviceProp);
 
         if(!library)
         {
@@ -3258,6 +3259,7 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
         std::shared_ptr<TensileLite::Hardware> hardware;
 
         auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        hardware     = TensileLite::hip::GetDevice(*deviceProp);
 
         if(!library)
         {
@@ -3322,6 +3324,7 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
         std::shared_ptr<TensileLite::Hardware> hardware;
 
         auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        hardware     = TensileLite::hip::GetDevice(*deviceProp);
 
         if(!library)
         {
@@ -3443,6 +3446,7 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
         std::shared_ptr<TensileLite::Hardware> hardware;
 
         auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
+        hardware     = TensileLite::hip::GetDevice(*deviceProp);
 
         if(!library)
         {
