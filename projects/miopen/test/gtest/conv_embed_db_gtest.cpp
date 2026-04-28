@@ -59,7 +59,7 @@ struct conv_embed_db_test : public conv2d_test_base<T, TestCase>
 using CPU_ConvEmbedConfig_BFP16 = conv_embed_db_test<bfloat16>;
 using CPU_ConvEmbedConfig_FP16  = conv_embed_db_test<half_float::half>;
 using CPU_ConvEmbedConfig_FP32  = conv_embed_db_test<float>;
-using CPU_ConvEmbedConfig_I8  = conv_embed_db_test<int8_t>;
+using CPU_ConvEmbedConfig_I8    = conv_embed_db_test<int8_t>;
 
 TEST_P(CPU_ConvEmbedConfig_BFP16, TestBFloat16)
 {
@@ -143,29 +143,29 @@ TEST_P(CPU_ConvEmbedConfig_I8, TestInt8)
 #endif // MIOPEN_EMBED_DB
 }
 
-#define INSTANTIATE_ALL_TEST_SUITES(id, ...)                                              \
-    INSTANTIATE_TEST_SUITES(id, CPU_ConvEmbedConfig_BFP16, bfloat16, __VA_ARGS__);        \
-    INSTANTIATE_TEST_SUITES(id, CPU_ConvEmbedConfig_FP16, half_float::half, __VA_ARGS__); \
-    INSTANTIATE_TEST_SUITES(id, CPU_ConvEmbedConfig_FP32, float, __VA_ARGS__);            \
-    INSTANTIATE_TEST_SUITES(id, CPU_ConvEmbedConfig_I8, int8_t, __VA_ARGS__)
+#define INSTANTIATE_ALL_MIOPEN_TEST_SUITES(id, ...)                                              \
+    INSTANTIATE_MIOPEN_TEST_SUITES(id, CPU_ConvEmbedConfig_BFP16, bfloat16, __VA_ARGS__);        \
+    INSTANTIATE_MIOPEN_TEST_SUITES(id, CPU_ConvEmbedConfig_FP16, half_float::half, __VA_ARGS__); \
+    INSTANTIATE_MIOPEN_TEST_SUITES(id, CPU_ConvEmbedConfig_FP32, float, __VA_ARGS__);            \
+    INSTANTIATE_MIOPEN_TEST_SUITES(id, CPU_ConvEmbedConfig_I8, int8_t, __VA_ARGS__)
 
-INSTANTIATE_ALL_TEST_SUITES(0, {128, 128, 28, 28}, {128, 128, 3, 3}, {1, 1, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(1, {128, 256, 56, 56}, {512, 256, 1, 1}, {0, 0, 2, 2, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(2, {128, 3, 230, 230}, {64, 3, 7, 7}, {0, 0, 2, 2, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(3, {128, 64, 56, 56}, {64, 64, 3, 3}, {1, 1, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(4, {128, 256, 14, 14}, {256, 256, 3, 3}, {1, 1, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(5, {128, 512, 7, 7}, {512, 512, 3, 3}, {1, 1, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(6, {128, 1024, 14, 14}, {512, 1024, 1, 1}, {0, 0, 2, 2, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(7, {128, 1024, 14, 14}, {2048, 1024, 1, 1}, {0, 0, 2, 2, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(8, {128, 256, 14, 14}, {1024, 256, 1, 1}, {0, 0, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(9, {128, 512, 28, 28}, {256, 512, 1, 1}, {0, 0, 2, 2, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(10, {128, 1024, 14, 14}, {256, 1024, 1, 1}, {0, 0, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(11, {128, 64, 56, 56}, {256, 64, 1, 1}, {0, 0, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(12, {128, 64, 56, 56}, {64, 64, 1, 1}, {0, 0, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(13, {128, 128, 28, 28}, {512, 128, 1, 1}, {0, 0, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(14, {128, 256, 56, 56}, {128, 256, 1, 1}, {0, 0, 2, 2, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(15, {128, 256, 56, 56}, {64, 256, 1, 1}, {0, 0, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(16, {128, 512, 28, 28}, {1024, 512, 1, 1}, {0, 0, 2, 2, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(17, {128, 512, 28, 28}, {128, 512, 1, 1}, {0, 0, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(18, {128, 512, 7, 7}, {2048, 512, 1, 1}, {0, 0, 1, 1, 1, 1});
-INSTANTIATE_ALL_TEST_SUITES(19, {128, 2048, 7, 7}, {512, 2048, 1, 1}, {0, 0, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(0, {128, 128, 28, 28}, {128, 128, 3, 3}, {1, 1, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(1, {128, 256, 56, 56}, {512, 256, 1, 1}, {0, 0, 2, 2, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(2, {128, 3, 230, 230}, {64, 3, 7, 7}, {0, 0, 2, 2, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(3, {128, 64, 56, 56}, {64, 64, 3, 3}, {1, 1, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(4, {128, 256, 14, 14}, {256, 256, 3, 3}, {1, 1, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(5, {128, 512, 7, 7}, {512, 512, 3, 3}, {1, 1, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(6, {128, 1024, 14, 14}, {512, 1024, 1, 1}, {0, 0, 2, 2, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(7, {128, 1024, 14, 14}, {2048, 1024, 1, 1}, {0, 0, 2, 2, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(8, {128, 256, 14, 14}, {1024, 256, 1, 1}, {0, 0, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(9, {128, 512, 28, 28}, {256, 512, 1, 1}, {0, 0, 2, 2, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(10, {128, 1024, 14, 14}, {256, 1024, 1, 1}, {0, 0, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(11, {128, 64, 56, 56}, {256, 64, 1, 1}, {0, 0, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(12, {128, 64, 56, 56}, {64, 64, 1, 1}, {0, 0, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(13, {128, 128, 28, 28}, {512, 128, 1, 1}, {0, 0, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(14, {128, 256, 56, 56}, {128, 256, 1, 1}, {0, 0, 2, 2, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(15, {128, 256, 56, 56}, {64, 256, 1, 1}, {0, 0, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(16, {128, 512, 28, 28}, {1024, 512, 1, 1}, {0, 0, 2, 2, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(17, {128, 512, 28, 28}, {128, 512, 1, 1}, {0, 0, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(18, {128, 512, 7, 7}, {2048, 512, 1, 1}, {0, 0, 1, 1, 1, 1});
+INSTANTIATE_ALL_MIOPEN_TEST_SUITES(19, {128, 2048, 7, 7}, {512, 2048, 1, 1}, {0, 0, 1, 1, 1, 1});

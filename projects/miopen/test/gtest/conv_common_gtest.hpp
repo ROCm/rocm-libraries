@@ -1825,21 +1825,21 @@ std::vector<T> generate_data_limited(const std::vector<T>& dims,
     }
 }
 
-#define INSTANTIATE_SMOKE_TEST(id, name, data_type, ...)             \
+#define INSTANTIATE_MIOPEN_SMOKE_TEST(id, name, data_type, ...)      \
     INSTANTIATE_TEST_SUITE_P(Smoke_##id,                             \
                              name,                                   \
                              GenCases<data_type>(true, __VA_ARGS__), \
                              DefaultTestNameGenerator<TestCase>{})
 
-#define INSTANTIATE_FULL_TEST(id, name, data_type, ...)               \
+#define INSTANTIATE_MIOPEN_FULL_TEST(id, name, data_type, ...)        \
     INSTANTIATE_TEST_SUITE_P(Full_##id,                               \
                              name,                                    \
                              GenCases<data_type>(false, __VA_ARGS__), \
                              DefaultTestNameGenerator<TestCase>{})
 
-#define INSTANTIATE_TEST_SUITES(id, name, data_type, ...)     \
-    INSTANTIATE_SMOKE_TEST(id, name, data_type, __VA_ARGS__); \
-    INSTANTIATE_FULL_TEST(id, name, data_type, __VA_ARGS__)
+#define INSTANTIATE_MIOPEN_TEST_SUITES(id, name, data_type, ...)     \
+    INSTANTIATE_MIOPEN_SMOKE_TEST(id, name, data_type, __VA_ARGS__); \
+    INSTANTIATE_MIOPEN_FULL_TEST(id, name, data_type, __VA_ARGS__)
 
 template <typename... TParams>
 using ConvTestBaseTestCase = std::tuple<NamedParameter<std::string>, // conv_mode

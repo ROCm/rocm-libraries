@@ -143,23 +143,6 @@ template <typename... T>
 // The 'tensorSizes' collection of std::vector<int>'s is turned into a collection of
 // NamedContainer<std::vector<int>>, and then fed into 'testing::Combine()'.
 //
-// template <typename T>
-//     requires StdString<T>
-// static auto MakeNamedParameterCollectionValues(const std::string& name,
-//                                                const std::ranges::range auto& collection)
-// {
-//     std::vector<NamedParameter<T>> v;
-
-//     v.reserve(collection.size());
-
-//     for(const auto& x : collection)
-//     {
-//         v.emplace_back(name, x, separator);
-//     }
-
-//     return testing::ValuesIn(v);
-// }
-
 template <typename T>
     requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T> &&
              (!StdString<T>)
