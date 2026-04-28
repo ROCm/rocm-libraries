@@ -350,11 +350,11 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorContract(const hiptensorHandle_t han
 //! @param[in] descC Tensor descriptor for C.
 //! @param[in] modeC Array representing tensor C's modes.
 //! @param[in] opC Unary operator applied to each element of C.
-//! @param[in] descD Tensor descriptor for D (bias tensor, must match descE).
+//! @param[in] descD Tensor descriptor for D.
 //! @param[in] modeD Array representing tensor D's modes.
 //! @param[in] opD Unary operator applied to each element of D.
-//! @param[in] descE Tensor descriptor for E (output, must match descD).
-//! @param[in] modeE Array representing tensor E's modes (must match modeD).
+//! @param[in] descE Tensor descriptor for E (output, must match `descD`).
+//! @param[in] modeE Array representing tensor E's modes (must match `modeD`).
 //! @param[in] descCompute Data type used for intermediate computation.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
@@ -394,7 +394,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] beta Scaling factor for D. Pointer to host memory.
 //! @param[in] D Pointer to tensor D data in GPU-accessible memory.
 //! @param[out] E Pointer to tensor E data in GPU-accessible memory.
-//! @param[out] workspace Device memory workspace (must hold at least the intermediate tensor).
+//! @param[in] workspace Device memory workspace (must hold at least the intermediate tensor).
 //! @param[in] workspaceSize Size of the `workspace` array in bytes.
 //! @param[in] stream HIP stream for all computations.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.

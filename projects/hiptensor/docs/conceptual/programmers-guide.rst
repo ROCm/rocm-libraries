@@ -53,15 +53,36 @@ Nomenclature
 Tensor contraction
 ^^^^^^^^^^^^^^^^^^^
 
-In general, a tensor contraction is a multiply-accumulate problem over elements between two multi-dimensional tensors.
+In general, a tensor contraction is a multiply-accumulate problem over elements between two or more multi-dimensional tensors.
 hipTensor uses Einstein notation, where repeated indices are summed and each index appears at most twice in each mathematical term.
 In the process of accumulating over summation dimensions, they are effectively collapsed or contracted.
 
-hipTensor supports both binary contractions of the form
-:math:`D = \alpha \, A \, B + \beta \, C` (scale when :math:`\beta = 0`,
-bilinear otherwise) and trinary contractions of the form
-:math:`E = \alpha \, A \, B \, C + \beta \, D` (scale when :math:`\beta = 0`,
-bilinear otherwise). 
+hipTensor supports the following contraction forms:
+
+* **Binary bilinear contraction**: :math:`D = \alpha \, A \, B + \beta \, C`,
+  where :math:`A`, :math:`B`, :math:`C` are input tensors and :math:`D` is the
+  output tensor. Created with ``hiptensorCreateContraction`` and executed with
+  ``hiptensorContract``.
+
+* **Binary scale contraction**: :math:`D = \alpha \, A \, B`. The scale form is
+  selected by passing a null tensor descriptor (and a null pointer at execution
+  time) for :math:`C`; the bilinear API is reused with the bias term omitted.
+
+* **Trinary bilinear contraction**: :math:`E = \alpha \, A \, B \, C + \beta \, D`,
+  where :math:`A`, :math:`B`, :math:`C` are input tensors, :math:`D` is the
+  bias input, and :math:`E` is the output. Created with
+  ``hiptensorCreateContractionTrinary`` and executed with
+  ``hiptensorContractTrinary``.
+
+* **Trinary scale contraction**: :math:`E = \alpha \, A \, B \, C`. The scale
+  form is selected by passing a null tensor descriptor (and a null pointer at
+  execution time) for :math:`D`; the trinary API is reused with the bias term
+  omitted.
+
+All four contraction forms support per-input-tensor unary element-wise
+operators (for example, ``HIPTENSOR_OP_RELU``, ``HIPTENSOR_OP_EXP``,
+``HIPTENSOR_OP_COS``) applied before the contraction, in addition to the
+default ``HIPTENSOR_OP_IDENTITY``.
 
 Tensor permutation
 ^^^^^^^^^^^^^^^^^^^
