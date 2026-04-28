@@ -54,10 +54,12 @@ Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
 
 The rebuild command depends on how rocisa was installed:
 
-**If installed via `invoke rocisa`** (pip / scikit-build-core manages the build dir):
+**If installed via `invoke rocisa`** (scikit-build-core build dir is `rocisa/build`):
 
 ```bash
 invoke rocisa   # re-runs pip install -e; scikit-build-core does an incremental rebuild
+# or directly:
+cmake --build rocisa/build --target _rocisa
 ```
 
 **If installed via `invoke build-client`** (cmake build dir is `build_tmp`):
