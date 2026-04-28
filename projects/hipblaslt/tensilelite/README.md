@@ -24,17 +24,20 @@ tox -e unit -- Tensile/Tests/unit
 
 ### Build client with invoke and Run a Test (Default Path)
 
-This workflow uses `invoke` to build the client into the default `build_tmp` directory.
+This workflow uses `invoke` to build the C++ client into the default `build_tmp` directory.
 Tensile will search for `tensilelite-client` in `tensilelite/build_tmp` if `--prebuilt-client`
 is not specified.
 
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
 
-# install invoke and rocisa if you haven't already
+# install invoke if you haven't already
 pip3 install invoke
 
-# build the client to the default location with defaults
+# install rocisa as an editable package (once after cloning, or after pyproject.toml changes)
+invoke rocisa
+
+# build the C++ client to the default location
 invoke build-client
 
 # override the default toolchain with a specific ROCm install
@@ -43,9 +46,14 @@ invoke build-client \
   --rocm-path /opt/rocm-7.3.0 \
   --export-compile-commands
 
-# run an individual test
+# run an individual test directly — no wrapper script needed
 Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
 ```
+
+> **Note:** If you modify rocisa C++ sources after `invoke rocisa`, run
+> `cmake --build build_tmp --target _rocisa` to rebuild the bindings.
+> Importing rocisa with stale bindings will raise an `ImportError` with
+> a clear rebuild hint.
 
 **3. Build with CMake (Custom Location) and Run Test with Path Flag**
 
@@ -56,15 +64,18 @@ running a test. Be sure to pass the root directory of the hipblaslt project when
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
 
+# install rocisa (once after cloning)
+invoke rocisa
+
 # configure in a custom directory (e.g., my-custom-build)
 cmake --preset tensilelite -S .. -B my-custom-build
 
 # build
 cmake --build my-custom-build --parallel
 
-# run a test, specifying the custom client path with --prebuilt-client
-./my-custom-build/Tensile.sh Tensile/Tests/pre_checkin/<test>.yaml tensile-out \
-                          --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
+# run a test directly
+Tensile/bin/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out \
+                           --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
 ```
 
 **4. Build with tox (Custom Build Args)**
@@ -94,7 +105,7 @@ Use these flags when you want to override or make that behavior explicit:
 
 * `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
 * `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
-* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts that set PYTHONPATH and trigger rebuilds of rocisa (default: `OFF`)
+* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts (e.g. `Tensile.sh`) for the cmake build tree. **Deprecated** — run `Tensile/bin/Tensile` directly instead (default: `OFF`)
 * `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 

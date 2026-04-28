@@ -1,36 +1,40 @@
-# rocIsa
+# rocisa
 
-This ia a Python module wrapped with Nanobind. Need to install ``nanobind`` before compiling this module.
+A Python/C++ code generator for ROCm ISA, built with nanobind.
 
-## How to install
+## Developer Setup
 
-```
-pip3 install nanobind
-```
+Install rocisa as an editable package using the invoke task from the tensilelite root:
 
-## How to build the module independently
-
-Simple version.
-
-```
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=$ROCM_PATH/bin/amdclang++ ..
+```bash
+cd rocm-libraries/projects/hipblaslt/tensilelite
+invoke rocisa
 ```
 
-If you want to specify a specifif Python executable,
+This compiles the C++ extension and installs it into your active venv so that
+`import rocisa` works from anywhere — no `PYTHONPATH` required.
 
-```
-mkdir build
-cd build
-cmake -DPython_EXECUTABLE=<path to exe> -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=$ROCM_PATH/bin/amdclang++ ..
-make -j8
-```
+## Rebuilding after C++ changes
 
-## How to use the module without installing
+`invoke rocisa` only needs to be re-run when `pyproject.toml` or `CMakeLists.txt`
+change. For C++ source edits, rebuild the extension directly:
 
-```
-export PYTHONPATH=<path-to-build-folder>/lib
+```bash
+cmake --build <build_dir> --target _rocisa
 ```
 
-For more information, please check the doc (on-going).
+Importing rocisa with stale bindings raises an `ImportError` with a clear rebuild
+hint, so you will not silently use an out-of-date extension.
+
+## Building independently (without tensilelite)
+
+```bash
+cd rocisa
+pip install -e .
+```
+
+scikit-build-core handles the cmake configuration and compilation automatically.
+Requires the ROCm SDK (`amdclang++`) and `/opt/rocm` on the default search path,
+or set `ROCM_PATH`.
+
+For more information, see `docs/`.

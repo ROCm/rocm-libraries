@@ -82,7 +82,7 @@ def build_client(
 ):
     """Build the tensilelite-client C++ executable.
 
-    To run Tensile after building, use: python Tensile/bin/Tensile <args>
+    To run Tensile after building, use: Tensile/bin/Tensile <args>
     rocisa must be installed separately via: invoke rocisa
     """
 
