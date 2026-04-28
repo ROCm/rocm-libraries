@@ -806,8 +806,7 @@ class LogicalScheduler:
 
     # ── Place GRs ─────────────────────────────────────────
 
-    def _build_gr_list(self, part_ranges, offsetMT, offsetPartition,
-                             debug=False):
+    def _build_gr_list(self, part_ranges, offsetMT, offsetPartition):
         """Phase 1: Build ordered GR list from placed MFMAs.
 
         For each partition × subIterK, derive target partition/MT from
@@ -875,13 +874,6 @@ class LogicalScheduler:
                    (entry[0], entry[2], entry[3], entry[4], entry[5])
                    not in n2_keys]
 
-        if debug:
-            print(f"Phase 1: {len(gr_list)} GR entries")
-            for i, (t, mt, ts, te, ks, ke, g) in enumerate(gr_list):
-                loads = ((te - ts) // g.mn) * ((ke - ks) // g.k)
-                print(f"  [{i}] {t:2s} {fmt_mt(mt)} tiles[{ts},{te - 1}] k[{ks},{ke - 1}] "
-                      f"gr_gran(mn={g.mn},k={g.k}) loads={loads}")
-
         return gr_list
 
     def _build_gr_slot_bounds(self):
@@ -926,7 +918,7 @@ class LogicalScheduler:
                 return True
         return False
 
-    def _distribute_grs(self, gr_list, gr_slot_bounds, debug=False):
+    def _distribute_grs(self, gr_list, gr_slot_bounds):
         """Phase 2: Distribute GR atoms across partition × subIterK slots.
 
         Explodes GR entries into atomic loads, distributes them into flat
@@ -964,20 +956,6 @@ class LogicalScheduler:
                     break
                 cur += 1
             buckets[cur].append(atom)
-
-        if debug:
-            print(f"Phase 2b: {len(atoms)} atoms, {numSlots} slots, "
-                  f"{loads_per_slot} per slot")
-            for flat, bucket in enumerate(buckets):
-                pi = flat // numK
-                si = flat % numK
-                if bucket:
-                    items = ", ".join(
-                        f"{t} {fmt_mt(mt)} tile[{ts},{te-1}] k[{ks},{ke-1}]"
-                        for t, mt, ts, te, ks, ke in bucket)
-                    print(f"  P{pi} s{si}: {len(bucket)} atoms — {items}")
-                else:
-                    print(f"  P{pi} s{si}: empty")
 
         # 2c. Remerge consecutive atoms and place into partitions
         for flat, bucket in enumerate(buckets):
