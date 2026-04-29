@@ -2189,7 +2189,7 @@ rocfft_plan_t::embarrassingly_parallel_fft::embarrassingly_parallel_fft(
         {
             throw std::invalid_argument("Different I/O locations for operation "
                                         + std::to_string(op_idx) + " detected by "
-                                        + ROCFFT_CURRENT_FUNCTION + +" (not supported).");
+                                        + ROCFFT_CURRENT_FUNCTION + " (not supported).");
         }
 
         if(!ibrick.layout.is_dimensionally_consistent_with(obrick.layout))
@@ -2276,7 +2276,7 @@ std::vector<size_t> rocfft_plan_t::create_plan_items_for(
         std::vector<size_t> item_dependencies;
         for(auto item : antecedents)
         {
-            // The sub-dimensional FFT must not start before ther input data
+            // The sub-dimensional FFT must not start before its input data
             // is ready to read and they mustn't overwrite other items' input
             // data before they've consumed it
             if(multiPlan[item]->WritesToBuffer(fft_operations.input.buffers[i])
@@ -3844,7 +3844,7 @@ bool rocfft_plan_t::BuildMultiDevicePlan()
         sequence_of_sub_ffts.front().set_load_ops(desc.loadOps);
         sequence_of_sub_ffts.back().set_store_ops(desc.storeOps);
 
-        // Create items for the sequende of embarrassingly-parallel FFTs and global transpositions
+        // Create items for the sequence of embarrassingly-parallel FFTs and global transpositions
         const field_view_t* current_field_view = &sequence_of_sub_ffts.front().input;
         std::vector<size_t> antecedents;
         for(const auto& operation : sequence_of_sub_ffts)

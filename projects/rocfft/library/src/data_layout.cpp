@@ -478,8 +478,7 @@ std::string data_layout_t::str() const
 
     if(is_embedded())
     {
-        ret += " embedded within in a " + std::to_string(embedding->size())
-               + "-dimensional data set";
+        ret += " embedded within a " + std::to_string(embedding->size()) + "-dimensional data set";
     }
     return ret;
 }
