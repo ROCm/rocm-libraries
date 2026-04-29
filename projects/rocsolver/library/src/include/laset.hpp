@@ -16,22 +16,6 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-//------------------------------------------------------------------------------
-/// @return ceil( x / y ), for integers x, y.
-template <typename Ix, typename Iy>
-constexpr auto ceildiv( Ix x, Iy y )
-{
-    return (x + y - 1)/y;
-}
-
-//------------------------------------------------------------------------------
-/// @return y * ceil( x / y ), for integers x, y.
-template <typename Ix, typename Iy>
-constexpr auto roundup( Ix x, Iy y )
-{
-    return y * ceildiv( x, y );
-}
-
 // -----------------------------
 // Initialize matrix
 // motivated by xLASET in LAPACK
