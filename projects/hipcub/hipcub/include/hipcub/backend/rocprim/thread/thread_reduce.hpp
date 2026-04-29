@@ -146,6 +146,8 @@ AccumType ThreadReduce(const InputType& input, ReductionOp reduction_op, PrefixT
     return ::hipcub::internal::ThreadReduceSequential<AccumType>(input, reduction_op, prefix);
 }
 
+namespace internal
+{
 template<int Length,
          typename T,
          typename ReductionOp,
@@ -188,6 +190,7 @@ T ThreadReduce(const T*, ReductionOp, PrefixType prefix)
 {
     return prefix;
 }
+} // namespace internal
 
 END_HIPCUB_NAMESPACE
 
