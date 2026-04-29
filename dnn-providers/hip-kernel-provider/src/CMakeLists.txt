@@ -17,6 +17,7 @@ add_library(
     engines/plans/batchnorm/BatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/batchnorm/BatchnormFwdTrainingPlan.cpp
     engines/plans/batchnorm/BatchnormApplicabilityChecks.cpp
+    engines/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.cpp
     engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/RMSnormFwdPlan.cpp
     engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp

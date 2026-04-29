@@ -76,7 +76,16 @@ if(BUILD_FORTRAN_BINDINGS)
   # Create hipSOLVER Fortran module
   add_library(hipsolver_fortran ${hipsolver_f90_source})
   rocm_set_soversion(hipsolver_fortran ${hipsolver_SOVERSION})
-  rocm_install(TARGETS hipsolver_fortran)
+  if(EXPORT_FORTRAN_BINDINGS)
+    rocm_install(TARGETS hipsolver_fortran)
+  else()
+    # Install the shared object without adding it to the
+    # hipsolver-targets export set, so find_package(hipsolver)
+    # does not reference roc::hipsolver_fortran.
+    install(TARGETS hipsolver_fortran
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            COMPONENT runtime)
+  endif()
 endif()
 
 add_library(hipsolver
