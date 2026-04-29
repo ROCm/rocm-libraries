@@ -35,7 +35,7 @@ namespace detail
 {
 
 template<typename Invokable, typename InputT, typename InitT = InputT>
-using accumulator_t = ::cuda::std::__accumulator_t<Invokable, InputT, InitT>;
+using accumulator_t = _HIPCUB_STD::__accumulator_t<Invokable, InputT, InitT>;
 
 } // namespace detail
 
@@ -46,7 +46,7 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to<T> instead.") Equality
     HIPCUB_HOST_DEVICE
     inline constexpr bool operator()(T&& t, U&& u) const
     {
-        return ::cuda::std::forward<T>(t) == ::cuda::std::forward<U>(u);
+        return _HIPCUB_STD::forward<T>(t) == _HIPCUB_STD::forward<U>(u);
     }
 };
 
@@ -57,7 +57,7 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to<T> instead.") Inequ
     HIPCUB_HOST_DEVICE
     inline constexpr bool operator()(T&& t, U&& u) const
     {
-        return ::cuda::std::forward<T>(t) != ::cuda::std::forward<U>(u);
+        return _HIPCUB_STD::forward<T>(t) != _HIPCUB_STD::forward<U>(u);
     }
 };
 
@@ -68,7 +68,7 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::plus<T> instead.") Sum
     HIPCUB_HOST_DEVICE
     inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
     {
-        return ::cuda::std::forward<T>(t) + ::cuda::std::forward<U>(u);
+        return _HIPCUB_STD::forward<T>(t) + _HIPCUB_STD::forward<U>(u);
     }
 };
 
@@ -79,7 +79,7 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::minus<T> instead.") Difference
     HIPCUB_HOST_DEVICE
     inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
     {
-        return ::cuda::std::forward<T>(t) - ::cuda::std::forward<U>(u);
+        return _HIPCUB_STD::forward<T>(t) - _HIPCUB_STD::forward<U>(u);
     }
 };
 
@@ -100,9 +100,9 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum<T> instead.") Max
     template<class T, class U>
     HIPCUB_HOST_DEVICE
     inline constexpr auto operator()(const T& t, const U& u) const ->
-        typename ::cuda::std::common_type<T, U>::type
+        typename _HIPCUB_STD::common_type<T, U>::type
     {
-        using R = typename ::cuda::std::common_type<T, U>::type;
+        using R = typename _HIPCUB_STD::common_type<T, U>::type;
         return (t < u) ? static_cast<R>(u) : static_cast<R>(t);
     }
 };
@@ -113,9 +113,9 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::minimum<T> instead") Min
     template<class T, class U>
     HIPCUB_HOST_DEVICE
     inline constexpr auto operator()(const T& t, const U& u) const ->
-        typename ::cuda::std::common_type<T, U>::type
+        typename _HIPCUB_STD::common_type<T, U>::type
     {
-        using R = typename ::cuda::std::common_type<T, U>::type;
+        using R = typename _HIPCUB_STD::common_type<T, U>::type;
         return (u < t) ? static_cast<R>(u) : static_cast<R>(t);
     }
 };
