@@ -2,9 +2,9 @@ name: "CodeQL Analysis"
 
 on:
     push:
-        branches: [ "main", "gpu_thread" ]
+        branches: [ "develop" ]
     pull_request:
-        branches: [ "main", "gpu_thread" ]
+        branches: [ "develop" ]
 
 jobs:
     analyze:
