@@ -117,12 +117,26 @@ struct ExtendedFloatBinOp
             this->operator()(test_utils::native_bfloat16(a), test_utils::native_bfloat16(b)));
     }
 
-    HIPCUB_HOST_DEVICE float operator()(float a, test_utils::half b) const
+    HIPCUB_HOST_DEVICE
+    float operator()(test_utils::half a, float b) const
+    {
+        return this->operator()(float(a), b);
+    }
+
+    HIPCUB_HOST_DEVICE
+    float operator()(test_utils::bfloat16 a, float b) const
+    {
+        return this->operator()(float(a), b);
+    }
+
+    HIPCUB_HOST_DEVICE
+    float operator()(float a, test_utils::half b) const
     {
         return this->operator()(a, float(b));
     }
 
-    HIPCUB_HOST_DEVICE float operator()(float a, test_utils::bfloat16 b) const
+    HIPCUB_HOST_DEVICE
+    float operator()(float a, test_utils::bfloat16 b) const
     {
         return this->operator()(a, float(b));
     }
