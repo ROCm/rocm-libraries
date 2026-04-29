@@ -589,17 +589,29 @@ class SWait(ValidatorInstruction):
     def _is_valid(self) -> bool:
         return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at.vmfma_index >= -1
 
-    def validate(self) -> Optional[str]:
+    def validate(self):
+        """Stack 1 of jaunty-reddy plan: returns typed Failure or None."""
         if self._is_valid():
             return None
-        return f"SWait at index {self.issued_at.vmfma_index} is invalid: dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}, issued_at={self.issued_at.vmfma_index}."
+        from Tensile.Components.ScheduleCapture import InvalidCounterValueFailure
+        return InvalidCounterValueFailure(
+            swait=self,
+            dscnt=self.dscnt,
+            vlcnt=self.vlcnt,
+            vscnt=self.vscnt,
+        )
 
 @dataclass
 class Barrier(ValidatorInstruction):
     comment: str
 
     def validate(self) -> Optional[str]:
-        return f"Barrier at index {self.issued_at.vmfma_index} is not valid. Must be >= -1." if self.issued_at.vmfma_index < -1 else None
+        # Sentinel range check stays as a defensive guard. No user-facing
+        # Failure type — this fires only on malformed test fixtures.
+        # Returning a string keeps the legacy boundary working.
+        if self.issued_at.vmfma_index < -1:
+            return f"Barrier at index {self.issued_at.vmfma_index} is not valid. Must be >= -1."
+        return None
 
 @dataclass
 class SNop(ValidatorInstruction):
@@ -2583,19 +2595,24 @@ def verify_swaitcnt_counters(timeline: 'Timeline') -> Optional[str]:
             if isinstance(inst.rocisa_inst, GlobalReadInstruction):
                 outstanding_vm += 1
         elif isinstance(inst, SWait):
+            from Tensile.Components.ScheduleCapture import SWaitCountExceedsOutstandingFailure
             if inst.dscnt >= 0:
                 if inst.dscnt > outstanding_ds:
-                    return (
-                        f"SWaitCnt @ idx={inst.issued_at.vmfma_index} has dscnt={inst.dscnt} "
-                        f"but only {outstanding_ds} DS loads are outstanding."
-                    )
+                    return SWaitCountExceedsOutstandingFailure(
+                        swait=inst,
+                        counter_kind="dscnt",
+                        counter_value=inst.dscnt,
+                        outstanding=outstanding_ds,
+                    ).format(capture=None)
                 outstanding_ds = inst.dscnt
             if inst.vlcnt >= 0:
                 if inst.vlcnt > outstanding_vm:
-                    return (
-                        f"SWaitCnt @ idx={inst.issued_at.vmfma_index} has vlcnt={inst.vlcnt} "
-                        f"but only {outstanding_vm} VM loads are outstanding."
-                    )
+                    return SWaitCountExceedsOutstandingFailure(
+                        swait=inst,
+                        counter_kind="vlcnt",
+                        counter_value=inst.vlcnt,
+                        outstanding=outstanding_vm,
+                    ).format(capture=None)
                 outstanding_vm = inst.vlcnt
 
     return None
@@ -2716,19 +2733,37 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
         estimate = estimate_quad_cycles_precomputed(i_instruction, i_needed_by, issue_times)
         instruction.estimated_quad_cycles_before_result_used = estimate
 
+def _failure_to_string(result) -> Optional[str]:
+    """Boundary helper: a rule's validate() may return either a legacy
+    string OR a typed Failure. Normalize to string for the existing
+    isValid contract.
+
+    Stack 1 of plans/then-let-s-work-on-jaunty-reddy.md migrates rules
+    one at a time. Until every rule emits Failures, this helper supports
+    both shapes so the boundary stays stable.
+    """
+    if result is None:
+        return None
+    if isinstance(result, str):
+        return result
+    # Typed Failure (from Tensile.Components.ScheduleCapture).
+    return result.format(capture=None)
+
+
 def validate_timeline(timeline: Timeline) -> Optional[str]:
     """
     Validate the timeline by calling the validate method of each instruction.
-    
+
     Args:
         timeline: The Timeline object to validate.
-    
+
     Returns:
         Error message if validation fails, None if validation passes.
     """
     for loop in timeline.loops:
         for instruction in timeline._timelines[loop]:
-            message = instruction.validate()
+            result = instruction.validate()
+            message = _failure_to_string(result)
             if message is not None:
                 if loop in [NO_GLOBAL_LOAD_LOOP, NO_LOCAL_LOAD_LOOP]:
                     message = f"Loop {loop}: {message}"
@@ -3011,12 +3046,20 @@ def verify_scc_overlap(scheduleInfo, context: 'ValidationContext', code_path: in
         names += ["GRA", "GRB"]
 
     def verifyIndices(grIncData: GRIncData, name: str, indices: list[int]) -> Optional[str]:
+        from Tensile.Components.ScheduleCapture import SCCConflictFailure
         dclIndex = getDeclarationIndex(name)
         dclIndexGrInc = getDeclarationIndex(grIncData.name)
         for v in indices:
             for interval in grIncData.intervals:
                 if inInterval(v,interval, dclIndex<dclIndexGrInc):
-                    return f"{name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
+                    failure = SCCConflictFailure(
+                        conflicting_name=name,
+                        grinc_name=grIncData.name,
+                        conflicting_index=v,
+                        interval_start=interval[0],
+                        interval_end=interval[1],
+                    )
+                    return failure.format(capture=None)
         return None
 
     # SCC-overlap validation is only meaningful when the schedule emits GRIncA and GRIncB.
@@ -3261,6 +3304,7 @@ def verify_ascending_order(scheduleInfo, context: 'ValidationContext', code_path
     not just the 'GRIncA' instructions.
     """
     # TODO: Move this validation into each instructions's validation to allow for custom ordering.
+    from Tensile.Components.ScheduleCapture import OutOfOrderSequenceFailure
     for k in scheduleInfo.optSchedule.keys():
         if k.startswith("Pack"):
             # Packs have their own validation for ordering.
@@ -3268,13 +3312,15 @@ def verify_ascending_order(scheduleInfo, context: 'ValidationContext', code_path
         seq = schedule_get(k, code_path, scheduleInfo)
         for i in range(1, len(seq)):
             if seq[i] < seq[i - 1]:
-                return (
-                    False,
-                    f"Non-descending-order rule failed, "
-                    f"schedule key '{k}', sequence {seq}: "
-                    f"value {seq[i]} at index {i} is less than "
-                    f"{seq[i-1]} at index {i-1}."
+                failure = OutOfOrderSequenceFailure(
+                    kind="sequence",
+                    schedule_key=k,
+                    sequence=seq,
+                    bad_value=seq[i],
+                    bad_index=i,
+                    prev_value=seq[i - 1],
                 )
+                return (False, failure.format(capture=None))
     return True, ""
 
 
