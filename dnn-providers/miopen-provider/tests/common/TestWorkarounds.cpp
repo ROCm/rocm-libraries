@@ -13,27 +13,27 @@
 using ::test_common::workarounds_detail::queryCurrentDeviceArch;
 using ::test_common::workarounds_detail::stripArchFeatureSuffix;
 
-TEST(TestWorkarounds, StripArchFeatureSuffix_NoColon_ReturnsInput)
+TEST(TestWorkarounds, StripArchFeatureSuffixReturnsInputWhenNoColon)
 {
     EXPECT_EQ(stripArchFeatureSuffix("gfx90a"), "gfx90a");
 }
 
-TEST(TestWorkarounds, StripArchFeatureSuffix_WithFeatures_StripsAtFirstColon)
+TEST(TestWorkarounds, StripArchFeatureSuffixStripsAtFirstColon)
 {
     EXPECT_EQ(stripArchFeatureSuffix("gfx90a:sramecc+:xnack-"), "gfx90a");
 }
 
-TEST(TestWorkarounds, StripArchFeatureSuffix_EmptyInput_ReturnsEmpty)
+TEST(TestWorkarounds, StripArchFeatureSuffixReturnsEmptyOnEmptyInput)
 {
     EXPECT_EQ(stripArchFeatureSuffix(""), "");
 }
 
-TEST(TestWorkarounds, StripArchFeatureSuffix_LeadingColon_ReturnsEmpty)
+TEST(TestWorkarounds, StripArchFeatureSuffixReturnsEmptyOnLeadingColon)
 {
     EXPECT_EQ(stripArchFeatureSuffix(":xnack-"), "");
 }
 
-TEST(GpuTestWorkarounds, QueryCurrentDeviceArch_ReturnsValidArchString)
+TEST(TestGpuWorkarounds, QueryCurrentDeviceArchReturnsValidArchString)
 {
     SKIP_IF_NO_DEVICES();
 
