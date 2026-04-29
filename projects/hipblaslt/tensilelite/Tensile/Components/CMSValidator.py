@@ -219,6 +219,15 @@ class ValidationRule(ABC):
 
     Each rule declares which ValidationConcern(s) it covers. isValid uses
     active_concerns() to decide which rules to run for a given kernel.
+
+    The run() method may return either:
+      - None  (validation passed)
+      - str   (legacy: pre-migration rules emit string messages directly)
+      - Failure subclass instance (migrated rules; isValid converts via
+        Failure.format(capture=None) at the boundary)
+
+    Stack 1 of plans/then-let-s-work-on-jaunty-reddy.md migrates rules
+    one at a time; the union return type accommodates the transition.
     """
 
     @abstractmethod
@@ -227,13 +236,19 @@ class ValidationRule(ABC):
         ...
 
     @abstractmethod
-    def run(self, timeline: 'Timeline', ctx: 'ValidationContext') -> Optional[str]:
-        """Execute the rule. Return None if valid, error message string if not."""
+    def run(self, timeline: 'Timeline', ctx: 'ValidationContext'):
+        """Execute the rule. Return None if valid, str OR Failure if not."""
         ...
 
 
 class StructuralRule(ABC):
-    """A composable validation rule that operates on raw schedule data (no Timeline)."""
+    """A composable validation rule that operates on raw schedule data (no Timeline).
+
+    The run() method returns a (bool, str) tuple. Migrated structural rules
+    (e.g. AscendingOrderRule, SCCOverlapRule) construct typed Failures
+    internally and call .format(capture=None) to produce the str — keeping
+    the tuple shape stable for the existing isValid contract.
+    """
 
     @abstractmethod
     def concerns(self) -> set[ValidationConcern]:
@@ -3467,7 +3482,8 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
         for rule in TIMELINE_RULES:
             if not (rule.concerns() & required):
                 continue
-            error = rule.run(timeline, context)
+            result = rule.run(timeline, context)
+            error = _failure_to_string(result)
             if error:
                 scheduleInfo.pretty_print()
                 return False, f"Code path {code_path}: {error}"
