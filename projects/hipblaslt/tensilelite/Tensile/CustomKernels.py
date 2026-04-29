@@ -54,6 +54,8 @@ _METADATA_NAME_TO_SEMANTIC = {
     "AddressScaleB":          "AddressScaleB",
     "AddressScaleC":          "AddressScaleC",
     "AddressScaleD":          "AddressScaleD",
+    "AddressMXScaleA":        "AddressMXScaleA",
+    "AddressMXScaleB":        "AddressMXScaleB",
     "AddressScaleAlphaVec":   "AddressScaleAlphaVec",
     "bias":                   "AddressBias",
     "biasType":               "BiasType",

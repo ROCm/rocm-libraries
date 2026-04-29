@@ -105,6 +105,8 @@ namespace TensileLite
         X_MACRO(AddressScaleB) \
         X_MACRO(AddressScaleC) \
         X_MACRO(AddressScaleD) \
+        X_MACRO(AddressMXScaleA) \
+        X_MACRO(AddressMXScaleB) \
         X_MACRO(AddressScaleAlphaVec) \
         X_MACRO(AddressBias) \
         X_MACRO(AddressAmaxOut) \

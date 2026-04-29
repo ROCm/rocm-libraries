@@ -2031,18 +2031,22 @@ namespace TensileLite
                     rv.args.template append<void const*>("AddressTD", inputs.d);
                     break;
                 case CustomArgSemantic::AddressScaleA:
-                    rv.args.template append<void const*>(
-                        "AddressScaleA", problemType.mxBlockA ? inputs.mxsa : inputs.scaleA);
+                    rv.args.template append<void const*>("AddressScaleA", inputs.scaleA);
                     break;
                 case CustomArgSemantic::AddressScaleB:
-                    rv.args.template append<void const*>(
-                        "AddressScaleB", problemType.mxBlockB ? inputs.mxsb : inputs.scaleB);
+                    rv.args.template append<void const*>("AddressScaleB", inputs.scaleB);
                     break;
                 case CustomArgSemantic::AddressScaleC:
                     rv.args.template append<void const*>("AddressScaleC", inputs.scaleC);
                     break;
                 case CustomArgSemantic::AddressScaleD:
                     rv.args.template append<void const*>("AddressScaleD", inputs.scaleD);
+                    break;
+                case CustomArgSemantic::AddressMXScaleA:
+                    rv.args.template append<void const*>("AddressMXScaleA", inputs.mxsa);
+                    break;
+                case CustomArgSemantic::AddressMXScaleB:
+                    rv.args.template append<void const*>("AddressMXScaleB", inputs.mxsb);
                     break;
                 case CustomArgSemantic::AddressScaleAlphaVec:
                     rv.args.template append<void const*>("AddressScaleAlphaVec", inputs.scaleAlphaVec);
