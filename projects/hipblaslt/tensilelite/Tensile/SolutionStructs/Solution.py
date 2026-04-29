@@ -99,6 +99,31 @@ def resetTypeMismatchCollector():
   _typeMismatchCollector.clear()
 
 
+def getTypeMismatchCollector():
+  """Return a copy of the current collector state.
+
+  Used by worker processes to return their collected mismatch data to the
+  main process after parallel YAML parsing.
+  """
+  return {k: {"count": v["count"], "values": set(v["values"]), "files": set(v["files"])}
+          for k, v in _typeMismatchCollector.items()}
+
+
+def mergeTypeMismatchCollector(data):
+  """Merge mismatch data returned from a worker process into the main collector.
+
+  Args:
+      data: A dict in the same format as ``_typeMismatchCollector``, as
+            returned by ``getTypeMismatchCollector()`` in a worker process.
+  """
+  for key, entry in data.items():
+    if key not in _typeMismatchCollector:
+      _typeMismatchCollector[key] = {"count": 0, "values": set(), "files": set()}
+    _typeMismatchCollector[key]["count"] += entry["count"]
+    _typeMismatchCollector[key]["values"] |= entry["values"]
+    _typeMismatchCollector[key]["files"] |= entry["files"]
+
+
 def validateParameterTypes(state, srcFile=""):
   """Validate that every solution parameter has the correct Python type.
 
@@ -139,18 +164,24 @@ def validateParameterTypes(state, srcFile=""):
         entry["files"].add(srcFile)
 
 
-def printTypeMismatchSummary():
-  """Print a summary of all collected type mismatches to stderr.
+def printTypeMismatchSummary(numFiles=0):
+  """Print a summary of all collected type mismatches.
 
-  If no mismatches have been collected, this function prints nothing and
-  returns 0.  Otherwise it emits a WARNING block to stderr with one line
-  per unique (parameter, actual_type) combination showing the count,
-  observed values, and expected type.
+  If no mismatches have been collected, prints a confirmation message
+  showing how many files were checked cleanly, and returns 0.  Otherwise
+  it emits a WARNING block with one line per unique (parameter,
+  actual_type) combination showing the count, observed values, and
+  expected type.
+
+  Args:
+      numFiles: Total number of YAML logic files that were checked.
 
   Returns:
       int: The total number of individual mismatches (0 if clean).
   """
   if not _typeMismatchCollector:
+    if numFiles > 0:
+      print(f"Checked {numFiles} YAML logic files - no type mismatches found.", flush=True)
     return 0
 
   totalCount = sum(e["count"] for e in _typeMismatchCollector.values())
@@ -174,7 +205,7 @@ def printTypeMismatchSummary():
     valuesStr = ", ".join(sorted(entry["values"]))
     lines.append(
       f"  {paramName}: found {actualType} in {entry['count']} solutions "
-      f"(values: {valuesStr}) — expected {expectedStr}"
+      f"(values: {valuesStr}) - expected {expectedStr}"
     )
 
   lines.append("-----------------------------------------------------------")
@@ -183,7 +214,7 @@ def printTypeMismatchSummary():
   lines.append("  Fix these to prevent future build failures.")
   lines.append("===========================================================")
 
-  print("\n".join(lines), file=sys.stderr)
+  print("\n".join(lines), flush=True)
   return totalCount
 
 
