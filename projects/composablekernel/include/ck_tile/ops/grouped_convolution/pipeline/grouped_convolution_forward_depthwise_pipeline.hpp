@@ -40,7 +40,8 @@ CK_TILE_DEVICE void depthwise_inner_product(const T& a, const T& b, float& c)
     else
     {
         static_assert(
-            false, "depthwise_inner_product: unsupported type, only fp16 and float are supported");
+            false,
+            "depthwise_inner_product: unsupported type, only fp16, bf16 and float are supported");
     }
 }
 
@@ -60,6 +61,10 @@ struct DepthwiseConvFwdPipeline
     using ALayout   = int;
     using BLayout   = int;
     using CLayout   = int;
+
+    static_assert(std::is_same_v<AccDataType, float>,
+                  "DepthwiseConvFwdPipeline requires AccDataType == float: "
+                  "depthwise_inner_product accumulates into a float& accumulator.");
 
     using InVector          = typename Traits::InVector;
     using OutVector         = typename Traits::OutVector;
@@ -513,6 +518,18 @@ struct DepthwiseConvFwdPipeline
         constexpr index_t SubTileInVecs = SubTileInW / InVectorSizeInternal;
         constexpr index_t LdsStrideVecs = LdsStride / InVectorSizeInternal;
         constexpr index_t WoStep        = (StrideW == 1 && SubTileW >= 2) ? 2 : 1;
+
+        // wo * StrideW / 2 computes the InData2 index for each output column wo.
+        // For this index to be exact (no integer-division truncation) every product
+        // wo * StrideW must be even for all wo in [0, SubTileW).
+        // StrideW == 1 is safe because WoStep == 2 forces wo to be even.
+        // Any even StrideW is safe because even * anything is even.
+        // An odd StrideW > 1 with WoStep == 1 would produce odd products for odd wo,
+        // misaligning the InData2 read by one element.
+        static_assert(StrideW == 1 || StrideW % 2 == 0,
+                      "StrideW must be 1 or even: wo * StrideW / 2 requires an exact "
+                      "integer result for every output column step; an odd StrideW > 1 "
+                      "truncates the index and silently misaligns the InData2 read.");
 
         InVectorInternal in_ring[FilterH][SubTileInVecs];
 

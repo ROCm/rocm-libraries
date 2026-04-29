@@ -787,37 +787,51 @@ struct GroupedConvolutionForwardKernel
     {
         static constexpr index_t NBatch = DwTraits::NBatch;
 
+        // NBatch (batches processed per tile) must be a multiple of TilePerWave so that
+        // each wave receives a whole number of batches with no remainder.
         if constexpr(NBatch % DwTraits::TilePerWave != 0)
         {
             return false;
         }
+        // Each sub-tile's input footprint in W (SubTileW * StrideW) must be aligned to
+        // the internal vector load width, otherwise the vectorised load would straddle a
+        // boundary and produce incorrect results.
         if constexpr(DwTraits::SubTileW * DwTraits::StrideW % DwTraits::InVectorSizeInternal != 0)
         {
             return false;
         }
+        // The kernel always pads the LDS tile to simplify boundary handling; a zero
+        // PadW means there is no left padding to absorb and the tiling assumption breaks.
         if constexpr(DwTraits::PadW == 0)
         {
             return false;
         }
+        // The number of threads needed to load one LDS row (LdsTileW / InVectorSize) must
+        // not exceed the block size; otherwise some rows would go unloaded.
         if constexpr(integer_divide_ceil(DwTraits::LdsTileW, DwTraits::InVectorSize) >
                      DwTraits::BlockSize)
         {
             return false;
         }
+        // The pipeline's shared memory requirement must fit within the hardware LDS limit.
         if constexpr(Pipeline_::GetSmemSize() > static_cast<index_t>(get_smem_capacity()))
         {
             return false;
         }
 
+        // Depthwise conv requires K == C == 1 in the weight tensor (one filter per channel).
         if(kargs.wei_g_k_c_xs_lengths[number<1>{}] != 1 ||
            kargs.wei_g_k_c_xs_lengths[number<2>{}] != 1)
             return false;
+        // Filter spatial dimensions must exactly match the compile-time tile specialisation.
         if(kargs.wei_g_k_c_xs_lengths[number<3>{}] != DwTraits::FilterH ||
            kargs.wei_g_k_c_xs_lengths[number<4>{}] != DwTraits::FilterW)
             return false;
+        // Convolution strides must match the compile-time specialisation.
         if(kargs.conv_filter_strides[number<0>{}] != DwTraits::StrideH ||
            kargs.conv_filter_strides[number<1>{}] != DwTraits::StrideW)
             return false;
+        // Dilations must match the compile-time specialisation.
         if(kargs.conv_filter_dilations[number<0>{}] != DwTraits::DilationH ||
            kargs.conv_filter_dilations[number<1>{}] != DwTraits::DilationW)
             return false;
@@ -825,9 +839,13 @@ struct GroupedConvolutionForwardKernel
         if(kargs.input_left_pads[number<0>{}] != DwTraits::PadH ||
            kargs.input_left_pads[number<1>{}] != DwTraits::PadW)
             return false;
+        // Batch count must be divisible by NBatch so work can be evenly partitioned across tiles.
         if(kargs.in_g_n_c_wis_lengths[number<1>{}] % NBatch != 0)
             return false;
 
+        // When multiple output tiles are processed per wave (TilePerWave > 1) the output
+        // spatial dimensions must fit within a single tile; larger outputs need a different
+        // specialisation.
         if constexpr(DwTraits::TilePerWave != 1)
         {
             if(kargs.out_g_n_k_wos_lengths[number<3>{}] > DwTraits::TileOutH ||
