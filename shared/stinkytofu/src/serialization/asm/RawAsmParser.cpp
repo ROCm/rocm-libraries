@@ -779,8 +779,35 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
         if (!line.empty() && line[0] == '#') {
             continue;  // entire line is a comment
         }
+        // Before stripping // comments, check for "// st.token:N,M,..." annotation.
+        // This lets raw .s files carry token group hints without affecting the assembler.
+        std::vector<int> lineTokens;
         for (size_t i = 0; i + 1 < line.size(); ++i) {
             if (line[i] == '/' && line[i + 1] == '/') {
+                std::string comment = line.substr(i + 2);
+                // Search for "st.token:" anywhere in the comment so that other
+                // comment text (e.g. "// load A // st.token:0") is tolerated.
+                size_t tokPos = comment.find("st.token:");
+                if (tokPos != std::string::npos) {
+                    std::string tokenList = comment.substr(tokPos + 9);
+                    // Parse comma-separated integers
+                    size_t p = 0;
+                    while (p < tokenList.size()) {
+                        while (p < tokenList.size() &&
+                               (tokenList[p] == ' ' || tokenList[p] == '\t'))
+                            ++p;
+                        if (p >= tokenList.size()) break;
+                        char* endPtr = nullptr;
+                        long val = std::strtol(tokenList.c_str() + p, &endPtr, 10);
+                        if (endPtr == tokenList.c_str() + p) break;  // not a number
+                        lineTokens.push_back(static_cast<int>(val));
+                        p = static_cast<size_t>(endPtr - tokenList.c_str());
+                        while (p < tokenList.size() &&
+                               (tokenList[p] == ' ' || tokenList[p] == '\t'))
+                            ++p;
+                        if (p < tokenList.size() && tokenList[p] == ',') ++p;
+                    }
+                }
                 line = line.substr(0, i);
                 break;
             }
@@ -881,6 +908,16 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
         // Real instruction
         auto inst = parseInstLine(line, arch, result.diagnostics, lineNo, syms);
         if (inst) {
+            if (!lineTokens.empty()) {
+                // Build "[N,M,...]" string for ModifierSerializer::deserialize
+                std::string tokStr = "[";
+                for (size_t ti = 0; ti < lineTokens.size(); ++ti) {
+                    if (ti) tokStr += ',';
+                    tokStr += std::to_string(lineTokens[ti]);
+                }
+                tokStr += ']';
+                inst->modifiers["mod.memtoken"]["tokens"] = tokStr;
+            }
             block->instructions.push_back(std::move(inst));
         } else {
             // Unknown mnemonic or parse failure → preserve verbatim

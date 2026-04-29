@@ -536,12 +536,16 @@ DEF_T(VAddCoU32Inst, "v_add_co_u32", .format = VOP3, .logical = "VAddCOU32",
 // Vector ALU — VOP3 only (commutative)
 DEF_BATCH(.format = VOP3_COMMUTATIVE,
     VAdd3U32Inst, "v_add3_u32", .logical = "VAdd3U32",
-    VAddNcI32Inst, "v_add_nc_i32", .logical = "VAddI32",
     VFmaF16Inst, "v_fma_f16", .logical = "VFmaF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16}, {S2, .size=16} },
     VFmaF32Inst, "v_fma_f32", .logical = "VFmaF32",
     VFmaF64Inst, "v_fma_f64", .logical = "VFmaF64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64}, {S2, .size=64} },
+)
+
+// Vector ALU — VOP3 only (2 sources, commutative)
+DEF_BATCH(.format = VOP3_2SRC_COMMUTATIVE,
+    VAddNcI32Inst, "v_add_nc_i32", .logical = "VAddI32",
     VMulHiI32Inst, "v_mul_hi_i32", .logical = "VMulHII32",
     VMulHiU32Inst, "v_mul_hi_u32", .logical = "VMulHIU32",
     VMulLoU32Inst, "v_mul_lo_u32", .logical = "VMulLOU32",
@@ -683,8 +687,11 @@ DEF_BATCH(.format = VOP2,
     VSubF16Inst, "v_sub_f16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
     VSubF32Inst, "v_sub_f32", .logical = "VSubF32",
+    // Dual VOP2/VOP3 encoding: allow src1 to be generic src in promoted VOP3 form.
     VSubNcU32Inst, "v_sub_nc_u32", .logical = "VSubU32",
+        .operand_fields = { {S1, .type=src} },
     VSubU32Inst, "v_sub_u32", .logical = "VSubU32",
+        .operand_fields = { {S1, .type=src} },
 )
 
 // Vector ALU — VOP3 only (with carry output)
@@ -1079,7 +1086,7 @@ DEF_BATCH(.format = VOP1,
 )
 
 // Vector Convert (VOP3-only, 2 sources)
-DEF_BATCH(.format = VOP3,
+DEF_BATCH(.format = VOP3_2SRC,
     VCvtPkBf16F32Inst, "v_cvt_pk_bf16_f32", .logical = "VCvtPkF32toBF16",
     VCvtPkF16F32Inst, "v_cvt_pk_f16_f32", .logical = "VCvtPkF32toF16",
     VCvtPkBf8F32Inst, "v_cvt_pk_bf8_f32", .logical = "VCvtPkF32toBF8",
@@ -1090,7 +1097,7 @@ DEF_BATCH(.format = VOP3,
 
 // Vector Convert (VOP3-only, stochastic rounding, D0 is read-write)
 DEF_T(VCvtSrBf8F32Inst, "v_cvt_sr_bf8_f32", .logical = "VCvtSRF32toBF8",
-    .format = VOP3,
+    .format = VOP3_2SRC,
     .operand_fields = {
         {D0, vdst, vgpr, 8, RW},
         {S0, src0, src, 32},
@@ -1098,7 +1105,7 @@ DEF_T(VCvtSrBf8F32Inst, "v_cvt_sr_bf8_f32", .logical = "VCvtSRF32toBF8",
     },
 )
 DEF_T(VCvtSrFp8F32Inst, "v_cvt_sr_fp8_f32", .logical = "VCvtSRF32toFP8",
-    .format = VOP3,
+    .format = VOP3_2SRC,
     .operand_fields = {
         {D0, vdst, vgpr, 8, RW},
         {S0, src0, src, 32},
