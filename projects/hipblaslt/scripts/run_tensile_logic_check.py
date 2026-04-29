@@ -8,7 +8,8 @@
 #   python scripts/run_tensile_logic_check.py [LIBLOGIC_PATH]
 # If the current Python is missing deps (e.g. joblib), the script will re-run itself
 # with .venv/bin/python (Unix) or .venv\Scripts\python.exe (Windows) if that venv exists.
-# Requires: a full build first so build/tensilelite/rocisa/lib exists.
+# Requires: a full build first so rocisa exists under build/tensilelite/rocisa
+# (nanobind package: rocisa/_rocisa*.so) or legacy build/tensilelite/rocisa/lib.
 
 import os
 import sys
@@ -26,22 +27,47 @@ def _find_hipblaslt_root() -> Path:
 
 
 def _ensure_paths(root: Path, build_dir: Path, lib_logic_path: Path) -> None:
-    rocisa_lib = build_dir / "tensilelite" / "rocisa" / "lib"
-    if not rocisa_lib.is_dir():
-        raise SystemExit(
-            f"Error: rocisa not built. Run a full build first so this exists:\n  {rocisa_lib}"
+    """Prepend sys.path entries so `import rocisa` and Tensile resolve.
+
+    CMake places the nanobind module under build/tensilelite/rocisa/rocisa/
+    (_rocisa*.so). The importable package root is build/tensilelite/rocisa.
+    Older trees may only have a single rocisa*.so under rocisa/lib/; prefer
+    the modern layout when both exist so a stale lib/ artifact cannot shadow.
+    """
+    tensilelite = root / "tensilelite"
+    rocisa_build = build_dir / "tensilelite" / "rocisa"
+    rocisa_pkg = rocisa_build / "rocisa"
+    rocisa_lib = rocisa_build / "lib"
+
+    def _has_modern_rocisa() -> bool:
+        if not rocisa_pkg.is_dir():
+            return False
+        return bool(
+            list(rocisa_pkg.glob("_rocisa*.so")) + list(rocisa_pkg.glob("_rocisa*.pyd"))
         )
-    so_files = list(rocisa_lib.glob("rocisa*.so")) + list(rocisa_lib.glob("rocisa*.pyd"))
-    if not so_files:
-        raise SystemExit(
-            f"Error: rocisa module not found in {rocisa_lib} (no .so/.pyd). Run a full build."
+
+    def _has_legacy_rocisa() -> bool:
+        if not rocisa_lib.is_dir():
+            return False
+        return bool(
+            list(rocisa_lib.glob("rocisa*.so")) + list(rocisa_lib.glob("rocisa*.pyd"))
         )
+
+    if _has_modern_rocisa():
+        rocisa_path_entries = [rocisa_build]
+    elif _has_legacy_rocisa():
+        rocisa_path_entries = [rocisa_lib]
+    else:
+        raise SystemExit(
+            "Error: rocisa not built. Run a full build first. Expected either:\n"
+            f"  {rocisa_pkg} with _rocisa*.so or .pyd, or legacy\n"
+            f"  {rocisa_lib} with rocisa*.so or .pyd"
+        )
+
     if not lib_logic_path.exists():
         raise SystemExit(f"Error: Library logic path not found: {lib_logic_path}")
 
-    # Prepend so Tensile can import rocisa and find the Tensile package
-    tensilelite = root / "tensilelite"
-    for path in (rocisa_lib, tensilelite):
+    for path in (*rocisa_path_entries, tensilelite):
         path_str = str(path.resolve())
         if path_str not in sys.path:
             sys.path.insert(0, path_str)

@@ -20,7 +20,7 @@ That’s it. Use whatever Python you have (system, store, or a venv). If that Py
 
 ### One-time setup
 
-1. **Build once** so `build/tensilelite/rocisa/lib` exists (rocisa is built by the normal hipblaslt build).
+1. **Build once** so rocisa is present under `build/tensilelite/rocisa/` (nanobind `_rocisa` next to the `rocisa` package) or the legacy `build/tensilelite/rocisa/lib` layout.
 2. **Python deps** – either:
    - Use the project **.venv**: `python -m venv .venv` then `.venv\Scripts\pip install -r tensilelite/requirements.txt` (Windows) or `.venv/bin/pip install -r tensilelite/requirements.txt` (Unix), or  
    - Install into your current Python: `pip install -r tensilelite/requirements.txt`.
