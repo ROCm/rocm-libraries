@@ -941,7 +941,7 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeADramTileDistribution()
+    CK_TILE_DEVICE static constexpr auto MakeADramTileDistribution()
     {
         constexpr index_t BlockSize = Problem::kBlockSize;
         constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
@@ -979,7 +979,7 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBDramTileDistribution()
+    CK_TILE_DEVICE static constexpr auto MakeBDramTileDistribution()
     {
         constexpr index_t BlockSize = Problem::kBlockSize;
         constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
@@ -1023,7 +1023,7 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeShuffledARegTileDistribution()
+    CK_TILE_DEVICE static constexpr auto MakeShuffledARegTileDistribution()
     {
         using ALayout = remove_cvref_t<
             std::tuple_element_t<number<0>{}, remove_cvref_t<typename Problem::AsLayoutTuple>>>;
@@ -1044,7 +1044,7 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeShuffledBRegTileDistribution()
+    CK_TILE_DEVICE static constexpr auto MakeShuffledBRegTileDistribution()
     {
         using BLayout = remove_cvref_t<
             std::tuple_element_t<number<0>{}, remove_cvref_t<typename Problem::BsLayoutTuple>>>;
@@ -1065,7 +1065,7 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPackA()
+    CK_TILE_DEVICE static constexpr index_t GetSmemPackA()
     {
         using A         = ALdsDataType_<Problem>;
         using BlockGemm = remove_cvref_t<decltype(Derived::template GetBlockGemm<Problem>())>;
@@ -1080,7 +1080,7 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPackB()
+    CK_TILE_DEVICE static constexpr index_t GetSmemPackB()
     {
         using B         = BLdsDataType_<Problem>;
         using BlockGemm = remove_cvref_t<decltype(Derived::template GetBlockGemm<Problem>())>;
@@ -1095,7 +1095,7 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeA()
+    CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
     {
         using ADataType                 = ALdsDataType_<Problem>;
         constexpr index_t PackedSize    = numeric_traits<ADataType>::PackedSize;
@@ -1106,7 +1106,7 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeB()
+    CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
     {
         constexpr bool IsBCastPolicyBeforeLDSWrite = IsBCastPolicyBeforeLDSWrite_v<Problem>;
         using BDataType                            = std::conditional_t<IsBCastPolicyBeforeLDSWrite,
@@ -1120,7 +1120,7 @@ struct UniversalGemmBasePolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
         constexpr index_t smem_size_a = GetSmemSizeA<Problem>();
         constexpr index_t smem_size_b = GetSmemSizeB<Problem>();
@@ -1421,7 +1421,7 @@ struct UniversalGemmPipelineAgBgCrPolicy
     using LdsBDataType = typename Problem::BDataType;
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
+    CK_TILE_DEVICE static constexpr auto GetBlockGemm()
     {
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
