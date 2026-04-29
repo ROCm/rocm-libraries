@@ -76,6 +76,15 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
         if (hasPayload) {
             d->symbol = inst->srcRegs[1].literalValue;
         }
+        // RawAsmParser packs ".set" as srcRegs = {".set", symbol, value}.
+        // The SET emitter branch concatenates "name symbol, value", so the
+        // value MUST be carried through; otherwise lines like
+        // ".set vgprValuMXSA_X0_I0_BASE, vgprMXSBase+0" round-trip as
+        // ".set vgprValuMXSA_X0_I0_BASE" with the assignment dropped.
+        if (inst->srcRegs.size() > 2 &&
+            inst->srcRegs[2].dataType == StinkyRegister::Type::LiteralString) {
+            d->value = inst->srcRegs[2].literalValue;
+        }
         return;
     }
 

@@ -26,11 +26,13 @@
 #include <algorithm>
 #include <cctype>
 #include <climits>
+#include <cstring>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "IRLexer.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -602,7 +604,31 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
     std::array<int, 3> sgprWorkGroup = {1, 1, 1};
     int vgprWorkItem = 0;
     int kernArgsVersion = 2;
-    std::string codeObjectVersion = "COV4";
+    // SignatureCodeMeta::toString() emits the second "- 1" of amdhsa.version
+    // only when codeObjectVersion is "4" or "default"; "COV4" silently
+    // truncates the YAML list to a single entry.
+    std::string codeObjectVersion = "4";
+
+    // Optimization config (parsed from the "Optimizations and Config" comment
+    // block emitted between .end_amdhsa_kernel and .amdgpu_metadata, e.g.
+    //   /* ThreadTile= 32 x 8 */
+    //   /* SubGroup= 2 x 64 */
+    //   /* VectorWidthA=1 */ ... etc.
+    // Without these, SignatureKernelDescriptor regenerates the comment block
+    // with all-zero defaults.
+    std::array<int, 2> threadTile = {0, 0};
+    std::array<int, 2> subGroup = {0, 0};
+    std::array<int, 2> waveGroup = {0, 0};
+    int vectorWidthA = 0;
+    int vectorWidthB = 0;
+    int globalReadVectorWidthA = 0;
+    int globalReadVectorWidthB = 0;
+    bool directToLdsA = false;
+    bool directToLdsB = false;
+    int useSgprForGRO = 0;
+
+    // Verbatim .amdhsa_* lines that the structured fields don't model.
+    std::vector<std::string> extraAmdhsaDirectives;
 
     struct ArgInfo {
         std::string name;
@@ -641,6 +667,25 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
 
         // ── Fields inside .amdhsa_kernel block ───────────────────────────────────
         if (section == Section::AmdhsaKernel) {
+            // Track which directives are consumed by structured fields; any
+            // .amdhsa_* directive not in this set is captured verbatim and
+            // re-emitted by SignatureKernelDescriptor::toString().
+            static const char* const kKnown[] = {
+                ".amdhsa_user_sgpr_kernarg_segment_ptr",
+                ".amdhsa_next_free_vgpr",
+                ".amdhsa_next_free_sgpr",
+                ".amdhsa_group_segment_fixed_size",
+                ".amdhsa_wavefront_size32",
+                ".amdhsa_private_segment_fixed_size",
+                ".amdhsa_system_sgpr_workgroup_id_x",
+                ".amdhsa_system_sgpr_workgroup_id_y",
+                ".amdhsa_system_sgpr_workgroup_id_z",
+                ".amdhsa_system_vgpr_workitem_id",
+                ".amdhsa_float_denorm_mode_32",
+                ".amdhsa_float_denorm_mode_16_64",
+                ".amdhsa_accum_offset",
+            };
+
             if (auto v = parseDirectiveInt(trimmed, ".amdhsa_next_free_vgpr")) totalVgprs = *v;
             if (auto v = parseDirectiveInt(trimmed, ".amdhsa_next_free_sgpr")) totalSgprs = *v;
             if (auto v = parseDirectiveInt(trimmed, ".amdhsa_group_segment_fixed_size"))
@@ -661,6 +706,107 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
             if (trimmed.find(".amdhsa_system_vgpr_workitem_id") != std::string::npos)
                 if (auto v = parseDirectiveInt(trimmed, ".amdhsa_system_vgpr_workitem_id"))
                     vgprWorkItem = *v;
+
+            // If the directive is .amdhsa_* but not consumed above, save it
+            // verbatim for re-emission. Use the original (untrimmed) line so
+            // the original indentation survives.
+            if (trimmed.size() > 8 && trimmed.substr(0, 8) == ".amdhsa_") {
+                bool known = false;
+                for (const char* k : kKnown) {
+                    size_t klen = std::strlen(k);
+                    if (trimmed.size() >= klen && trimmed.compare(0, klen, k) == 0 &&
+                        (trimmed.size() == klen ||
+                         std::isspace(static_cast<unsigned char>(trimmed[klen])))) {
+                        known = true;
+                        break;
+                    }
+                }
+                if (!known) extraAmdhsaDirectives.push_back(stripComment(line));
+            }
+            continue;
+        }
+
+        // ── /* Optimizations and Config */ comment block ─────────────────────────
+        // Recover the optimization config (ThreadTile, SubGroup, VectorWidth*,
+        // GlobalReadVectorWidth*, DirectToLds*, UseSgprForGRO) that
+        // SignatureKernelDescriptor::toString() regenerates from those fields.
+        // Without this the round-trip emits "/* ThreadTile= 0 x 0 */" etc.
+        if (trimmed.size() >= 4 && trimmed.substr(0, 2) == "/*" &&
+            trimmed.substr(trimmed.size() - 2) == "*/") {
+            std::string body = trimmed.substr(2, trimmed.size() - 4);
+            trimStr(body);
+            auto parseTwoInts = [](const std::string& s, std::array<int, 2>& out) {
+                size_t eq = s.find('=');
+                if (eq == std::string::npos) return;
+                std::string rhs = s.substr(eq + 1);
+                size_t x = rhs.find('x');
+                if (x == std::string::npos) return;
+                std::string a = rhs.substr(0, x);
+                std::string b = rhs.substr(x + 1);
+                trimStr(a);
+                trimStr(b);
+                if (auto v = safeAtoiStr(a)) out[0] = *v;
+                if (auto v = safeAtoiStr(b)) out[1] = *v;
+            };
+            auto parseInt = [](const std::string& s, int& out) {
+                size_t eq = s.find('=');
+                if (eq == std::string::npos) return;
+                std::string rhs = s.substr(eq + 1);
+                trimStr(rhs);
+                if (auto v = safeAtoiStr(rhs)) out = *v;
+            };
+            auto parseBool = [](const std::string& s, bool& out) {
+                size_t eq = s.find('=');
+                if (eq == std::string::npos) return;
+                std::string rhs = s.substr(eq + 1);
+                trimStr(rhs);
+                out = (rhs == "True" || rhs == "true" || rhs == "1");
+            };
+            if (body.rfind("ThreadTile=", 0) == 0)
+                parseTwoInts(body, threadTile);
+            else if (body.rfind("SubGroup=", 0) == 0)
+                parseTwoInts(body, subGroup);
+            else if (body.rfind("WaveGroup=", 0) == 0)
+                parseTwoInts(body, waveGroup);
+            else if (body.rfind("VectorWidthA=", 0) == 0)
+                parseInt(body, vectorWidthA);
+            else if (body.rfind("VectorWidthB=", 0) == 0)
+                parseInt(body, vectorWidthB);
+            else if (body.rfind("DirectToLdsA=", 0) == 0)
+                parseBool(body, directToLdsA);
+            else if (body.rfind("DirectToLdsB=", 0) == 0)
+                parseBool(body, directToLdsB);
+            else if (body.rfind("UseSgprForGRO=", 0) == 0) {
+                bool ub = false;
+                parseBool(body, ub);
+                useSgprForGRO = ub ? 1 : 0;
+                // Some emitters write "UseSgprForGRO=N" (integer); honour that too.
+                size_t eq = body.find('=');
+                if (eq != std::string::npos) {
+                    std::string rhs = body.substr(eq + 1);
+                    trimStr(rhs);
+                    if (auto v = safeAtoiStr(rhs)) useSgprForGRO = *v;
+                }
+            } else if (body.rfind("GlobalReadVectorWidthA=", 0) == 0 ||
+                       body.find("GlobalReadVectorWidthA=") != std::string::npos) {
+                // The combined form is "GlobalReadVectorWidthA=N, GlobalReadVectorWidthB=M".
+                size_t pa = body.find("GlobalReadVectorWidthA=");
+                if (pa != std::string::npos) {
+                    std::string rest =
+                        body.substr(pa + std::string("GlobalReadVectorWidthA=").size());
+                    size_t comma = rest.find(',');
+                    std::string a = (comma != std::string::npos) ? rest.substr(0, comma) : rest;
+                    trimStr(a);
+                    if (auto v = safeAtoiStr(a)) globalReadVectorWidthA = *v;
+                }
+                size_t pb = body.find("GlobalReadVectorWidthB=");
+                if (pb != std::string::npos) {
+                    std::string rest =
+                        body.substr(pb + std::string("GlobalReadVectorWidthB=").size());
+                    trimStr(rest);
+                    if (auto v = safeAtoiStr(rest)) globalReadVectorWidthB = *v;
+                }
+            }
             continue;
         }
 
@@ -731,6 +877,20 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
         kernelName, isaVersion, kernArgsVersion, codeObjectVersion, groupSegSize, sgprWorkGroup,
         vgprWorkItem, flatWgSize, wavefrontSize, totalVgprs, /*totalAgprs=*/0, totalSgprs);
 
+    // Restore the optimization-config comment block so the emitter regenerates
+    // the same /* ThreadTile= */ / /* SubGroup= */ / /* VectorWidth* */ /
+    // /* DirectToLds* */ / /* UseSgprForGRO= */ values that were in the source.
+    sig->setOptimizationConfig(threadTile, subGroup, waveGroup, vectorWidthA, vectorWidthB,
+                               globalReadVectorWidthA, globalReadVectorWidthB, directToLdsA,
+                               directToLdsB, useSgprForGRO);
+
+    // Pass-through .amdhsa_* directives (e.g. .amdhsa_user_sgpr_count,
+    // .amdhsa_fp16_overflow, .amdhsa_inst_pref_size,
+    // .amdhsa_user_sgpr_kernarg_preload_*) that the structured fields above
+    // don't model. The signature emitter writes each entry verbatim before
+    // .end_amdhsa_kernel, so the round-trip is lossless.
+    sig->kernelDescriptor.extraKernelDirectives = std::move(extraAmdhsaDirectives);
+
     // Map YAML value_kind → SignatureValueKind and add args
     for (const auto& a : args) {
         SignatureValueKind kind = SignatureValueKind::SIG_VALUE;
@@ -768,16 +928,49 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
     std::string line;
     unsigned lineNo = 0;
 
-    // When a signature was extracted, skip the metadata header and the .macro/.endm blocks
-    // that precede the real kernel body. We detect the end of the header by looking for the
-    // kernel body label line: "<kernelName>:".
+    // When a signature was extracted, skip the metadata header up to the
+    // "<kernelName>:" body label.  .macro/.endm blocks must be preserved
+    // verbatim — both before and after the body label — so that template
+    // lines like "v_mul_hi_u32 v[\vgprDstIdx+1], \dividend, \magicNumber"
+    // (which contain backslash-prefixed macro arguments the instruction
+    // parser cannot decode) round-trip exactly. Inside a macro block every
+    // line is captured as a TEXTBLOCK directive.
     bool headerSkip = result.signature != nullptr;
     const std::string kernelBodyMarker =
         result.signature ? (result.signature->kernelDescriptor.kernelName + ":") : "";
-    bool inMacroBlock = false;  // inside .macro ... .endm
+    bool inMacroBlock = false;
 
     while (std::getline(ss, line)) {
         ++lineNo;
+
+        // .macro / .endm tracking and pass-through. Done BEFORE comment
+        // stripping so the verbatim text is preserved (a macro body is just
+        // text from our perspective). We also do it BEFORE the headerSkip
+        // gate because macros preceding the kernel-body label still need to
+        // be emitted (otherwise the macro definitions are lost).
+        std::string raw = line;
+        {
+            std::string probe = raw;
+            size_t s = probe.find_first_not_of(" \t\r");
+            size_t e = probe.find_last_not_of(" \t\r");
+            if (s != std::string::npos) probe = probe.substr(s, e - s + 1);
+
+            if (probe.size() >= 6 && probe.substr(0, 6) == ".macro" &&
+                (probe.size() == 6 || std::isspace(static_cast<unsigned char>(probe[6])))) {
+                inMacroBlock = true;
+                if (!headerSkip) block->instructions.push_back(makeTextBlock(raw));
+                continue;
+            }
+            if (inMacroBlock) {
+                if (probe == ".endm") {
+                    inMacroBlock = false;
+                    if (!headerSkip) block->instructions.push_back(makeTextBlock(raw));
+                    continue;
+                }
+                if (!headerSkip) block->instructions.push_back(makeTextBlock(raw));
+                continue;
+            }
+        }
 
         // Strip # comments (line starts with #), // comments, and ; comments
         if (!line.empty() && line[0] == '#') {
@@ -829,19 +1022,10 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
 
         if (line.empty()) continue;
 
-        // ── Header / macro skip ──────────────────────────────────────────────────
-        // When a signature was extracted, skip everything up to (and including) the
-        // "<kernelName>:" label line.  Also skip .macro ... .endm blocks.
+        // ── Header skip ──────────────────────────────────────────────────────────
+        // When a signature was extracted, skip everything up to (and including)
+        // the "<kernelName>:" label line.
         if (headerSkip) {
-            if (line.substr(0, 6) == ".macro") {
-                inMacroBlock = true;
-                continue;
-            }
-            if (line == ".endm") {
-                inMacroBlock = false;
-                continue;
-            }
-            if (inMacroBlock) continue;
             // Detect the kernel body start: "KernelName:" or "KernelName:  /// ..."
             if (!kernelBodyMarker.empty() && line.size() >= kernelBodyMarker.size() &&
                 line.substr(0, kernelBodyMarker.size()) == kernelBodyMarker) {
