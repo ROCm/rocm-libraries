@@ -86,7 +86,7 @@ if _bi is not None:
     _build_dir = Path(_bi.BUILD_DIR).resolve()
     _stale = [
         str(p)
-        for _pattern in ("*.[ch]pp", "*.h", "*.def")
+        for _pattern in ("*.[ch]pp", "*.h", "*.def", "*.inc")
         for p in Path(_bi.SOURCE_ROOT).rglob(_pattern)
         if p.stat().st_mtime > _so_mtime and not p.resolve().is_relative_to(_build_dir)
     ]
