@@ -11,8 +11,8 @@
 
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
-#include "TestWorkarounds.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
+#include "tests/common/TestWorkarounds.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_flatbuffers_sdk::data_objects;

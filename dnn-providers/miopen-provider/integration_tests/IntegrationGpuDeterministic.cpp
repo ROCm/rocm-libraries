@@ -14,10 +14,10 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
-#include "../TestWorkarounds.hpp"
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
+#include "../tests/common/TestWorkarounds.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;

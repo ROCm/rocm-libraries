@@ -6,7 +6,7 @@
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
 
-#include "../TestWorkarounds.hpp"
+#include "../tests/common/TestWorkarounds.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;

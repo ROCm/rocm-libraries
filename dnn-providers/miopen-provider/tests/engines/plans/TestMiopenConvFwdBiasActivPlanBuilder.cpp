@@ -14,10 +14,10 @@
 #include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
-#include "TestWorkarounds.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "tests/common/ActivationCommon.hpp"
 #include "tests/common/ConvolutionCommon.hpp"
+#include "tests/common/TestWorkarounds.hpp"
 
 #include <memory>
 #include <unordered_map>

@@ -29,7 +29,7 @@
 
 #include <string>
 
-namespace miopen_plugin::test_workarounds::detail
+namespace test_common::workarounds_detail
 {
 
 // Returns the gcnArchName of device 0, stripped at the first ':' (so
@@ -51,21 +51,20 @@ inline std::string queryCurrentDeviceArch()
     return archStr.substr(0, archStr.find(':'));
 }
 
-} // namespace miopen_plugin::test_workarounds::detail
+} // namespace test_common::workarounds_detail
 
-#define SKIP_IF_WORKAROUND_ISSUE_5409()                                            \
-    do                                                                             \
-    {                                                                              \
-        const auto issue_5409_arch                                                 \
-            = ::miopen_plugin::test_workarounds::detail::queryCurrentDeviceArch(); \
-        if(issue_5409_arch.empty())                                                \
-        {                                                                          \
-            GTEST_SKIP() << "Skipping due to ROCm/rocm-libraries#5409 "            \
-                            "(arch query failed; failing closed)";                 \
-        }                                                                          \
-        if(issue_5409_arch == "gfx90a")                                            \
-        {                                                                          \
-            GTEST_SKIP() << "Skipping due to ROCm/rocm-libraries#5409 "            \
-                            "(MIOpen CBA fusion disabled on gfx90a)";              \
-        }                                                                          \
+#define SKIP_IF_WORKAROUND_ISSUE_5409()                                                           \
+    do                                                                                            \
+    {                                                                                             \
+        const auto issue_5409_arch = ::test_common::workarounds_detail::queryCurrentDeviceArch(); \
+        if(issue_5409_arch.empty())                                                               \
+        {                                                                                         \
+            GTEST_SKIP() << "Skipping due to ROCm/rocm-libraries#5409 "                           \
+                            "(arch query failed; failing closed)";                                \
+        }                                                                                         \
+        if(issue_5409_arch == "gfx90a")                                                           \
+        {                                                                                         \
+            GTEST_SKIP() << "Skipping due to ROCm/rocm-libraries#5409 "                           \
+                            "(MIOpen CBA fusion disabled on gfx90a)";                             \
+        }                                                                                         \
     } while(0)

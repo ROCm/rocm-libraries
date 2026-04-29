@@ -6,7 +6,8 @@
 // Production-side workarounds for known MIOpen-provider issues. Each macro is
 // keyed by the upstream issue number so it is easy to grep and remove once the
 // underlying problem is fixed. Test-side counterparts live in
-// `TestWorkarounds.hpp` (kept separate so production TUs never pull in gtest).
+// `tests/common/TestWorkarounds.hpp` (kept separate so production TUs never
+// pull in gtest).
 //
 // ----------------------------------------------------------------------------
 // ROCm/rocm-libraries#5409 — MIOpen Conv-Bias-Activation (CBA) fusion produces
@@ -20,8 +21,8 @@
 // whose return type is `bool` (or convertible from `false`) since it contains
 // a `return`. Pair with SKIP_IF_WORKAROUND_ISSUE_5409() in test TUs.
 //
-// To remove after the fix: delete this file (and TestWorkarounds.hpp), drop
-// includes, and remove all macro call sites.
+// To remove after the fix: delete this file (and tests/common/TestWorkarounds.
+// hpp), drop includes, and remove all macro call sites.
 // `git grep WORKAROUND_ISSUE_5409` finds them all.
 // ----------------------------------------------------------------------------
 

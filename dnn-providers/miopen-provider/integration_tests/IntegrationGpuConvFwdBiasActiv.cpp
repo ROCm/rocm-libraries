@@ -4,9 +4,9 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "../TestWorkarounds.hpp"
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
+#include "../tests/common/TestWorkarounds.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
