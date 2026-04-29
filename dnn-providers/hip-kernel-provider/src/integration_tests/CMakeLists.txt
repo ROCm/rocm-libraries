@@ -20,6 +20,7 @@ add_executable(
     Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
     Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
     Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
+    Batchnorm/IntegrationGpuBatchnormFwdTrainingActiv.cpp
     RMSnorm/IntegrationGpuRMSnormForward.cpp
     Layernorm/IntegrationGpuLayernormForward.cpp
 )
@@ -53,6 +54,7 @@ if(ENABLE_ASM_SDPA_ENGINE)
     else()
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
+            asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
         )
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE
             AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"

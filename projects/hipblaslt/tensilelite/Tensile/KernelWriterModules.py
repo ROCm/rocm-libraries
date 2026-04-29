@@ -149,7 +149,7 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, 
 
         _barrier = SBarrier(comment=comment)
         if memoryToken != None:
-            _barrier.setMemToken(MemTokenData([memoryToken]))
+            _barrier.setMemToken(MemTokenData(memoryToken))
         imod.add(_barrier)
     else:
         imod.addComment("Skip barrier: NumThreads=%s"%(kernel["NumThreads"]) + \

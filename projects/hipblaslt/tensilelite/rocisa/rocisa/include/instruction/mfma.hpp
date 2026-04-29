@@ -204,6 +204,12 @@ namespace rocisa
 
         std::vector<InstructionInput> getSrcParams() const override
         {
+            if(forceScaledWMMA())
+            {
+                // Keep operand model consistent with emitted assembly:
+                // v_wmma_scale_* requires two explicit scale operands.
+                return {a, b, acc2, 0, 0};
+            }
             return {a, b, acc2};
         }
 
