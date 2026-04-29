@@ -272,7 +272,7 @@ class batch_copy_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "device_batch_copy")
+            .add("algo", "device_batch_copy")
             .add("lvl", "device")
             .add("item_size", ItemSize)
             .add("item_alignment", ItemAlignment)

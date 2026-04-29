@@ -213,7 +213,7 @@ class block_radix_sort_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "block_radix_sort")
+            .add("algo", "block_radix_sort")
             .add("subalgo", Helper::get_algorithm_name(BenchmarkKind))
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())

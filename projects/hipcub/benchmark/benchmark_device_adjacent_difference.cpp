@@ -115,12 +115,12 @@ class device_adjacent_difference_benchmark : public primbench::benchmark_interfa
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "device_adjacent_difference")
+            .add("algo", "device_adjacent_difference")
             .add("lvl", "device")
-            .add("data_type",
-                 primbench::name<T>().add("subalgo",
-                                          "subtract_" + std::string(left ? "left" : "right")
-                                              + std::string(copy ? "_copy" : "")));
+            .add("data_type", primbench::name<T>())
+            .add("subalgo",
+                 "subtract_" + std::string(left ? "left" : "right")
+                     + std::string(copy ? "_copy" : ""));
     }
 
     void run(primbench::state& state) override

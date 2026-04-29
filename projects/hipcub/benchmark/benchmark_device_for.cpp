@@ -56,7 +56,10 @@ class for_each_benchmark : public primbench::benchmark_interface
 {
     primbench::json meta() const override
     {
-        return primbench::json{}.add("name", "for_each").add("lvl", "device").add("data_type", T);
+        return primbench::json{}
+            .add("algo", "for_each")
+            .add("lvl", "device")
+            .add("data_type", primbench::name<T>());
     }
 
     void run(primbench::state& state) override

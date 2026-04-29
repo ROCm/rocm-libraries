@@ -90,14 +90,16 @@ int get_entropy_percents(int entropy_reduction)
 const int entropy_reductions[] = {0, 2, 4, 6};
 
 template<class T, size_t Bins, size_t Scale>
-class even_benchmark : primbench::benchmark_interface
+class even_benchmark : public primbench::benchmark_interface
 {
+public:
     even_benchmark(int entropy_reduction) : m_entropy_reduction(entropy_reduction) {}
 
+private:
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "device_histogram_even")
+            .add("algo", "device_histogram_even")
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("bin_count", Bins)
@@ -111,7 +113,7 @@ class even_benchmark : primbench::benchmark_interface
         const T lower_level = 0;
         // casting for compilation with CUB backend because
         // there is no casting from size_t (aka unsigned long) to __half
-        const T upper_level = static_cast<unsigned long long>(Bins * Scale);
+        const T upper_level = static_cast<T>(Bins * Scale);
 
         const size_t size   = state.size;
         const auto&  stream = state.stream;
@@ -162,8 +164,10 @@ class even_benchmark : primbench::benchmark_interface
 template<class T, unsigned int Channels, unsigned int ActiveChannels, size_t Bins, size_t Scale>
 class multi_even_benchmark : public primbench::benchmark_interface
 {
+public:
     multi_even_benchmark(int entropy_reduction) : m_entropy_reduction(entropy_reduction) {}
 
+private:
     primbench::json meta() const override
     {
         return primbench::json{}
@@ -319,7 +323,7 @@ class multi_range_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "device_histogram_multi_range")
+            .add("algo", "device_histogram_multi_range")
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("channels", Channels)

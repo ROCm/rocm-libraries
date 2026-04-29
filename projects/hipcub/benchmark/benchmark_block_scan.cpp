@@ -45,17 +45,22 @@ struct inclusive_scan
 {
     static const char* get_algorithm_name()
     {
-        switch(Algorithm)
+        if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING)
         {
-            case hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING:
-                return "inclusive_scan(block_scan_raking)";
-            case hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE:
-                return "inclusive_scan(block_scan_raking_memoize)";
-            case hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS:
-                return "inclusive_scan(block_scan_warp_scans)";
+            return "inclusive_scan(block_scan_raking)";
         }
-
-        return "unknown algorithm";
+        else if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE)
+        {
+            return "inclusive_scan(block_scan_raking_memoize)";
+        }
+        else if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS)
+        {
+            return "inclusive_scan(block_scan_warp_scans)";
+        }
+        else
+        {
+            static_assert(false, "unknown algorithm");
+        }
     }
 
     template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
@@ -92,17 +97,22 @@ struct exclusive_scan
 {
     static const char* get_algorithm_name()
     {
-        switch(Algorithm)
+        if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING)
         {
-            case hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING:
-                return "exclusive_scan(block_scan_raking)";
-            case hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE:
-                return "exclusive_scan(block_scan_raking_memoize)";
-            case hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS:
-                return "exclusive_scan(block_scan_warp_scans)";
+            return "exclusive_scan(block_scan_raking)";
         }
-
-        return "unknown algorithm";
+        else if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE)
+        {
+            return "exclusive_scan(block_scan_raking_memoize)";
+        }
+        else if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS)
+        {
+            return "exclusive_scan(block_scan_warp_scans)";
+        }
+        else
+        {
+            static_assert(false, "unknown algorithm");
+        }
     }
 
     template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
@@ -139,7 +149,7 @@ class block_scan_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "block_scan")
+            .add("algo", "block_scan")
             .add("subalgo", Benchmark::get_algorithm_name())
             .add("data_type", primbench::name<T>())
             .add("block_size", BlockSize)
@@ -165,15 +175,14 @@ class block_scan_benchmark : public primbench::benchmark_interface
         state.run(
             [&]
             {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
-                    dim3(size / items_per_block),
-                    dim3(BlockSize),
-                    0,
-                    stream,
-                    d_input,
-                    d_output,
-                    input[0]);
+                hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread>),
+                                   dim3(size / items_per_block),
+                                   dim3(BlockSize),
+                                   0,
+                                   stream,
+                                   d_input,
+                                   d_output,
+                                   input[0]);
             });
 
         state.set_items(items * Trials);
@@ -195,12 +204,6 @@ class block_scan_benchmark : public primbench::benchmark_interface
     CREATE_BENCHMARK(type, block, 11); \
     CREATE_BENCHMARK(type, block, 16)
 // clang-format on
-
-using custom_float2  = benchmark_utils::custom_type<float, float>;
-using custom_double2 = benchmark_utils::custom_type<double, double>;
-
-PRIMBENCH_REGISTER_TYPE(custom_float2, "custom<f32, f32>")
-PRIMBENCH_REGISTER_TYPE(custom_double2, "custom<f64, f64>")
 
 template<class Benchmark>
 void add_benchmarks(primbench::executor& executor)

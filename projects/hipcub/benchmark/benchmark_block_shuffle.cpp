@@ -35,7 +35,7 @@ template<class Runner, class T, unsigned int BlockSize, unsigned int ItemsPerThr
 __global__ __launch_bounds__(BlockSize)
 void kernel(const T* input, T* output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(input, output);
+    Runner::template run<T, BlockSize, ItemsPerThread>(input, output);
 }
 
 struct offset
@@ -182,7 +182,7 @@ class block_shuffle_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "block_shuffle")
+            .add("algo", "block_shuffle")
             .add("subalgo", Benchmark::name)
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())
