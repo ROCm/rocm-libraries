@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
 
-"""Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
-
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-   ies of the Software, and to permit persons to whom the Software is furnished
-   to do so, subject to the following conditions:
-
-   The above copyright notice and this permission notice shall be included in all
-   copies or substantial portions of the Software.
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-   PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-   FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-   COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-   IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-   CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""
-
-from __future__ import annotations
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
 run_tests.py — Parallel rocBLAS test runner
@@ -55,8 +52,16 @@ Resume behaviour
 ----------------
 Interrupted runs (SSH drop, OOM kill, Ctrl+C) are resumed automatically.
   - Jobs whose recorded PID is still alive are waited on (reattached).
-  - Jobs whose recorded PID is dead are reset to "not_started" and re-run.
-  - Failed jobs are always re-run on resume.
+  - Jobs whose recorded PID is dead are reset to "not_started" and re-run;
+    the old log is preserved as a .prev archive.
+  - On re-run, only tests that did not pass in the previous log are
+    re-executed (partial resume).  Passed tests are appended to the GTest
+    filter negative section so they are skipped.  This applies to both
+    interrupted jobs and completed-but-failed jobs.
+  - With --skip-failed, previously failed tests are also skipped (only
+    tests that have not been attempted at all are re-run).
+  - --skip-failed never skips whole jobs; it only affects individual test
+    selection within the partial resume filter.
   - Use --reset to force a completely clean start.
 
 Caveats
@@ -65,6 +70,8 @@ Caveats
   if you suspect PID recycling.
 - Two concurrent script instances in the same output dir will corrupt state.
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -115,6 +122,13 @@ def build_all_groups(output_dir: str) -> Dict[str, List[JobSpec]]:
     ]
 
     # -- L1_BLAS ------------------------------------------------------------
+    # Extra negative clauses for functions whose name is a prefix of another.
+    # Without these, e.g. *rot* matches rotg/rotm/rotmg, *rotm* matches rotmg.
+    l1_extra_neg: Dict[str, str] = {
+        "dot":  "*dotc*",
+        "rot":  "*rotg*:*rotm*",
+        "rotm": "*rotmg*",
+    }
     l1_functions = [
         "asum", "axpy", "copy", "dot", "dotc",
         "iamax", "iamin", "nrm2", "rot", "rotg",
@@ -122,8 +136,9 @@ def build_all_groups(output_dir: str) -> Dict[str, List[JobSpec]]:
     ]
     jobs: List[JobSpec] = []
     for fn in l1_functions:
+        xneg = (":" + l1_extra_neg[fn]) if fn in l1_extra_neg else ""
         jobs.append(make("L1_BLAS", fn,
-                         f"*{fn}*quick*-*_batched*:*_ex*"))
+                         f"*{fn}*quick*-*_batched*:*_ex*{xneg}"))
         jobs.append(make("L1_BLAS", f"{fn}_batched",
                          f"*{fn}_batched*quick*-*_ex*"))
         jobs.append(make("L1_BLAS", f"{fn}_strided_batched",
@@ -143,6 +158,16 @@ def build_all_groups(output_dir: str) -> Dict[str, List[JobSpec]]:
     groups["L1_BLAS_EX"] = jobs
 
     # -- L2_BLAS ------------------------------------------------------------
+    # Extra negative clauses for prefix-ambiguous L2 function names.
+    l2_extra_neg: Dict[str, str] = {
+        "her":  "*her2*",
+        "hpr":  "*hpr2*",
+        "spr":  "*spr2*",
+        "syr":  "*syr2*",
+        "ger":  "*geru*:*gerc*",
+        "trsv": "*tbsv*",
+        "trmv": "*tpmv*:*tbmv*",
+    }
     l2_functions = [
         "trsv", "gbmv", "gemv", "hbmv", "hemv",
         "her", "her2", "hpmv", "hpr", "hpr2",
@@ -152,8 +177,9 @@ def build_all_groups(output_dir: str) -> Dict[str, List[JobSpec]]:
     ]
     jobs = []
     for fn in l2_functions:
+        xneg = (":" + l2_extra_neg[fn]) if fn in l2_extra_neg else ""
         jobs.append(make("L2_BLAS", fn,
-                         f"*{fn}*quick*-*_batched*:*_ex*"))
+                         f"*{fn}*quick*-*_batched*:*_ex*{xneg}"))
         jobs.append(make("L2_BLAS", f"{fn}_batched",
                          f"*{fn}_batched*quick*-*_ex*"))
         jobs.append(make("L2_BLAS", f"{fn}_strided_batched",
@@ -170,11 +196,19 @@ def build_all_groups(output_dir: str) -> Dict[str, List[JobSpec]]:
 @dataclass
 class JobRecord:
     status: str     # "not_started" | "running" | "finished"
-    result: str     # "unknown" | "pass" | "fail"
+    result: str     # "unknown" | "pass" | "fail" | "incomplete"
     pid: Optional[int]
     start_time: Optional[float]
     end_time: Optional[float]
     exit_code: Optional[int]
+    tests_passed: int = 0
+    tests_failed: int = 0
+    tests_total: int = 0           # total tests in this job (sticky max, set once)
+    tests_passed_offset: int = 0   # cumulative passed from all prior interrupted runs
+    tests_failed_offset: int = 0   # cumulative failed from all prior interrupted runs
+    current_test: str = ""         # last [ RUN      ] name seen; runtime-only, not persisted
+    excluded_tests: List[str] = field(default_factory=list)  # cumulative GTest exclusion set
+    prev_log: Optional[str] = None  # path to archived log from most recent interrupted run
 
 
 @dataclass
@@ -197,6 +231,13 @@ def _record_from_dict(d: dict) -> JobRecord:
         start_time=d.get("start_time"),
         end_time=d.get("end_time"),
         exit_code=d.get("exit_code"),
+        tests_passed=d.get("tests_passed", 0),
+        tests_failed=d.get("tests_failed", 0),
+        tests_total=d.get("tests_total", 0),
+        tests_passed_offset=d.get("tests_passed_offset", 0),
+        tests_failed_offset=d.get("tests_failed_offset", 0),
+        excluded_tests=d.get("excluded_tests", []),
+        prev_log=d.get("prev_log"),
     )
 
 
@@ -235,6 +276,13 @@ def save_state(state: RunState, state_path: str, lock: threading.Lock) -> None:
                     "start_time": v.start_time,
                     "end_time": v.end_time,
                     "exit_code": v.exit_code,
+                    "tests_passed": v.tests_passed,
+                    "tests_failed": v.tests_failed,
+                    "tests_total": v.tests_total,
+                    "tests_failed_offset": v.tests_failed_offset,
+                    "tests_passed_offset": v.tests_passed_offset,
+                    "excluded_tests": v.excluded_tests,
+                    "prev_log": v.prev_log,
                 }
                 for k, v in state.records.items()
             },
@@ -245,6 +293,89 @@ def save_state(state: RunState, state_path: str, lock: threading.Lock) -> None:
             os.replace(tmp_path, state_path)
         except OSError as exc:
             print(f"[warn] Could not save state: {exc}", file=sys.stderr)
+
+
+def _archive_log(log_file: str) -> Optional[str]:
+    """Rename log_file to a sequenced .prev path and return the new path.
+
+    Sequence: log.txt -> log.txt.prev -> log.txt.prev.1 -> log.txt.prev.2 ...
+    Returns the archive path, or None if log_file does not exist.
+    """
+    if not os.path.exists(log_file):
+        return None
+    candidate = log_file + ".prev"
+    if not os.path.exists(candidate):
+        try:
+            os.rename(log_file, candidate)
+            return candidate
+        except OSError:
+            return None
+    # Find next free sequence number
+    n = 1
+    while os.path.exists(f"{candidate}.{n}"):
+        n += 1
+    try:
+        os.rename(log_file, f"{candidate}.{n}")
+        return f"{candidate}.{n}"
+    except OSError:
+        return None
+
+
+def _parse_completed_tests(log_file: str) -> tuple:
+    """Parse a GTest log and return (passed_set, failed_set) of test names.
+
+    Looks for lines produced by GTEST_LISTENER=PASS_LINE_IN_LOG:
+      [       OK ] Suite/TestName (X ms)     -> passed
+      [  FAILED  ] Suite/TestName (X ms)     -> failed (test-level, has timing suffix)
+
+    Suite-level lines like '[  FAILED  ] 5 tests.' are skipped (no '(' in them).
+    """
+    passed: set = set()
+    failed: set = set()
+    try:
+        with open(log_file, "r", errors="replace") as f:
+            for line in f:
+                line = line.rstrip()
+                if line.startswith("[       OK ]"):
+                    # "[       OK ] Suite/Test (N ms)"
+                    rest = line[len("[       OK ]"):].strip()
+                    name = rest.split(" (")[0].strip()
+                    if name:
+                        passed.add(name)
+                elif line.startswith("[  FAILED  ]") and " (" in line:
+                    # Test-level failure: "[  FAILED  ] Suite/Test (N ms)"
+                    rest = line[len("[  FAILED  ]"):].strip()
+                    name = rest.split(" (")[0].strip()
+                    if name:
+                        failed.add(name)
+    except OSError:
+        pass
+    return passed, failed
+
+
+def _build_exclusion_filter(original_filter: str, excluded: set) -> Optional[str]:
+    """Return an augmented GTest filter that skips the given test names.
+
+    GTest filter format: positive[-negative]
+    Negative patterns are colon-separated.  Appends fully-qualified test names
+    as exact patterns to the negative section.
+
+    Returns None if excluded is empty (caller should use original_filter as-is).
+    """
+    if not excluded:
+        return None
+
+    dash_pos = original_filter.find("-")
+    if dash_pos == -1:
+        positive = original_filter
+        negative = ""
+    else:
+        positive = original_filter[:dash_pos]
+        negative = original_filter[dash_pos + 1:]
+
+    extra = ":".join(sorted(excluded))
+    new_negative = f"{negative}:{extra}" if negative else extra
+    return f"{positive}-{new_negative}"
 
 
 def recover_interrupted_jobs(
@@ -271,24 +402,84 @@ def recover_interrupted_jobs(
         if alive:
             reattach_list.append((job_id, pid))
         else:
-            # Preserve old log for debugging
+            # Archive old log so _execute can inspect it on resume
             spec = all_jobs.get(job_id)
-            if spec and os.path.exists(spec.log_file):
-                try:
-                    os.rename(spec.log_file, spec.log_file + ".prev")
-                except OSError:
-                    pass
+            prev = None
+            if spec:
+                prev = _archive_log(spec.log_file)
             rec.status = "not_started"
             rec.result = "unknown"
             rec.pid = None
             rec.start_time = None
             rec.end_time = None
             rec.exit_code = None
+            rec.tests_passed = 0
+            rec.prev_log = prev  # may be None if no log existed
 
 
 # ---------------------------------------------------------------------------
 # DISPLAY
 # ---------------------------------------------------------------------------
+
+def _parse_test_counts(log_file: str) -> tuple:
+    """Return (passed, failed, total, current_test) from a GTest log file.
+
+    passed:       authoritative from '[  PASSED  ] N tests.' if present, otherwise
+                  the count of '[       OK ]' lines seen so far (in-progress log).
+    failed:       count of '[  FAILED  ] Suite.Test (N ms)' lines (test-level, with timing).
+    total:        total tests scheduled, from '[==========] Running N tests from'.
+                  0 if the header has not been written yet.
+    current_test: name from the last '[ RUN      ] Suite.Test' line seen; "" if none.
+    """
+    ok_count = 0
+    fail_count = 0
+    passed_final: Optional[int] = None
+    total = 0
+    current_test = ""
+    try:
+        with open(log_file, "r", errors="replace") as f:
+            for line in f:
+                if "[  PASSED  ]" in line:
+                    # "[  PASSED  ] 212 tests."
+                    parts = line.split()
+                    try:
+                        passed_final = int(parts[3])
+                    except (IndexError, ValueError):
+                        pass
+                elif line.startswith("[       OK ]"):
+                    ok_count += 1
+                elif line.startswith("[  FAILED  ]") and "(" in line:
+                    # Test-level failure: "[  FAILED  ] Suite.Test (N ms)"
+                    # Suite-level summary lines have no "(" and are skipped.
+                    fail_count += 1
+                elif line.startswith("[ RUN      ]"):
+                    # "[ RUN      ] Suite.TestName" — prefix is exactly 13 chars
+                    current_test = line[13:].strip()
+                elif "[==========]" in line and " Running " in line and " tests " in line:
+                    # "[==========] Running 149 tests from 53 test cases."
+                    parts = line.split()
+                    # parts: ['[==========]', 'Running', '149', 'tests', ...]
+                    try:
+                        total = int(parts[2])
+                    except (IndexError, ValueError):
+                        pass
+    except OSError:
+        pass
+    passed = passed_final if passed_final is not None else ok_count
+    return passed, fail_count, total, current_test
+
+
+# ANSI color helpers
+_BOLD  = "\033[1m"
+_GREEN = "\033[32m"
+_RED   = "\033[31m"
+_RESET = "\033[0m"
+
+
+def _c(text: str, code: str, use_color: bool) -> str:
+    """Wrap text in an ANSI escape if use_color is True."""
+    return f"{code}{text}{_RESET}" if use_color else text
+
 
 def _fmt_elapsed(seconds: float) -> str:
     s = int(seconds)
@@ -380,26 +571,37 @@ class LiveDisplay:
             f"[running {running_count}/{self._selected_total} jobs]  "
             f"elapsed: {elapsed} ===",
             "",
-            f"  {'Group':<16} {'done/total':>10}  {'pass':>5}  {'fail':>5}  {'running':>8}",
+            _c(f"    {'Group':<16} {'done/total':>10}  {'pass ( tests)':>14}  {'fail ( tests)':>14}  {'running':>8}", _BOLD, True),
         ]
 
         for gid, specs in self._selected_groups.items():
-            done = pass_ = fail = run = 0
+            done = run = 0
+            pass_ = fail = 0
+            tests_pass = tests_fail = 0
             for sp in specs:
                 rec = records.get(sp.job_id)
                 if rec is None:
                     continue
                 if rec.status == "finished":
                     done += 1
+                    tests_pass += rec.tests_passed
+                    tests_fail += rec.tests_failed
                     if rec.result == "pass":
                         pass_ += 1
                     else:
                         fail += 1
                 elif rec.status == "running":
                     run += 1
-            marker = " <<<" if run else ""
+            arrow = "► " if run else "  "
+            pass_raw = f"{pass_} ({tests_pass:>6})"
+            fail_raw = f"{fail} ({tests_fail:>6})"
+            pass_cell = _c(f"{pass_raw:>14}", _GREEN, pass_ > 0 or tests_pass > 0)
+            fail_cell = _c(f"{fail_raw:>14}", _RED,   fail > 0 or tests_fail > 0)
             lines.append(
-                f"  {gid:<16} {done:>4}/{len(specs):<4}   {pass_:>4}   {fail:>4}   {run:>4}{marker}"
+                f"  {arrow}{gid:<16} {f'{done}/{len(specs)}':>10}"
+                f"  {pass_cell}"
+                f"  {fail_cell}"
+                f"  {run:>8}"
             )
 
         # Running now section
@@ -409,14 +611,47 @@ class LiveDisplay:
             if jid in selected_ids and rec.status == "running"
         ]
         if running_jobs:
+            _TEST_COL = 36  # max width for the current test name
+
+            def _fmt_pair(total: int, new: int) -> str:
+                t = str(total) if total else "-"
+                n = str(new)   if new   else "-"
+                return f"{t:>6} ({n:>6})"
+
             lines.append("")
-            lines.append("  Running now:")
+            lines.append(
+                _c(
+                    f"  {'Running now':<36} {'elapsed':>11}"
+                    f"  {'passed (   new)':>16}  {'failed (   new)':>16}  {'total':>8}"
+                    f"  {'current test'}",
+                    _BOLD, True,
+                )
+            )
             for jid, rec in running_jobs[:8]:
-                elapsed_job = ""
-                if rec.start_time:
-                    elapsed_job = f"[{_fmt_elapsed(now_wall - rec.start_time)}]"
+                elapsed_job = (
+                    f"[{_fmt_elapsed(now_wall - rec.start_time)}]"
+                    if rec.start_time else ""
+                )
                 short = jid.split(".", 1)[1] if "." in jid else jid
-                lines.append(f"    {short:<40} {elapsed_job}")
+
+                passed_total = rec.tests_passed
+                passed_new   = rec.tests_passed - rec.tests_passed_offset
+                failed_total = rec.tests_failed_offset + rec.tests_failed
+                failed_new   = rec.tests_failed
+                total_str    = str(rec.tests_total) if rec.tests_total else "-"
+                cur = rec.current_test
+                if len(cur) > _TEST_COL:
+                    cur = "…" + cur[-(_TEST_COL - 1):]
+
+                pass_pair = _c(f"{_fmt_pair(passed_total, passed_new):>16}", _GREEN, passed_total > 0)
+                fail_pair = _c(f"{_fmt_pair(failed_total, failed_new):>16}", _RED,   failed_total > 0)
+                lines.append(
+                    f"    {short:<34} {elapsed_job:>11}"
+                    f"  {pass_pair}"
+                    f"  {fail_pair}"
+                    f"  {total_str:>8}"
+                    f"  {cur}"
+                )
 
         return lines
 
@@ -434,13 +669,17 @@ _active_procs_lock = threading.Lock()
 class JobRunner:
     def __init__(self, state: RunState, all_jobs: Dict[str, JobSpec],
                  state_path: str, state_lock: threading.Lock,
-                 display: LiveDisplay, max_parallel: int) -> None:
+                 display: LiveDisplay, max_parallel: int,
+                 count_interval: int, skip_failed: bool = False) -> None:
         self._state = state
         self._all_jobs = all_jobs
         self._state_path = state_path
         self._state_lock = state_lock
         self._display = display
         self._semaphore = threading.Semaphore(max_parallel)
+        self._count_interval = count_interval
+        self._skip_failed = skip_failed
+        self._poll_stop = threading.Event()
 
     def run_all(self, jobs: List[JobSpec],
                 reattach: List[tuple]) -> None:
@@ -454,10 +693,43 @@ class JobRunner:
                                  args=(job_id, pid), daemon=True)
             threads.append(t)
 
+        poller = threading.Thread(target=self._poll_test_counts, daemon=True)
+        poller.start()
         for t in threads:
             t.start()
         for t in threads:
             t.join()
+        self._poll_stop.set()
+        poller.join(timeout=2)
+
+    def _poll_test_counts(self) -> None:
+        """Periodically re-count tests in running job logs and refresh display."""
+        while not self._poll_stop.wait(timeout=self._count_interval):
+            if shutdown_event.is_set():
+                return
+            with self._state_lock:
+                running = [
+                    (jid, rec)
+                    for jid, rec in self._state.records.items()
+                    if rec.status == "running"
+                ]
+            updated = False
+            for jid, rec in running:
+                spec = self._all_jobs.get(jid)
+                if spec:
+                    current_passed, current_failed, current_total, cur_test = _parse_test_counts(spec.log_file)
+                    with self._state_lock:
+                        offset = rec.tests_passed_offset
+                        rec.tests_passed = current_passed + offset
+                        rec.tests_failed = current_failed
+                        rec.current_test = cur_test
+                        # Only set total if not already known; derive as
+                        # filtered_count + excluded_count ≈ original total.
+                        if rec.tests_total == 0 and current_total > 0:
+                            rec.tests_total = current_total + offset
+                    updated = True
+            if updated:
+                self._display.refresh()
 
     def _run_one(self, spec: JobSpec) -> None:
         if shutdown_event.is_set():
@@ -473,20 +745,89 @@ class JobRunner:
 
     def _execute(self, spec: JobSpec) -> None:
         os.makedirs(os.path.dirname(spec.log_file), exist_ok=True)
-        cmd = [self._state.executable,
-               f"--gtest_filter={spec.gtest_filter}"]
+        env = {**os.environ, "GTEST_LISTENER": "PASS_LINE_IN_LOG", "ROCBLAS_TEST_TIMEOUT": "36000"}
         start = time.time()
 
-        # Update state: running
+        # Read cumulative exclusion state and prev_log atomically, then release
+        # the lock before doing any file I/O.
         with self._state_lock:
             rec = self._state.records[spec.job_id]
+            prev_log = rec.prev_log
+            rec.prev_log = None                        # consumed
+            prev_excluded: set = set(rec.excluded_tests)  # accumulated across all runs
+            prev_passed_offset: int = rec.tests_passed_offset
+            rec.tests_total = 0                        # reset so poll thread reads fresh count
+            prev_failed_offset: int = rec.tests_failed_offset
+
+        # For completed-but-failed jobs, rec.prev_log is None but the log file
+        # still exists — archive it now so we can parse it for partial resume.
+        if prev_log is None and os.path.exists(spec.log_file):
+            prev_log = _archive_log(spec.log_file)
+
+        # Parse new completions from the most-recently-interrupted log and merge
+        # them into the cumulative exclusion set.  This ensures every restart
+        # extends the set rather than replacing it.
+        gtest_filter = spec.gtest_filter
+        preamble_lines: List[str] = []
+        new_passed_count = 0
+        new_failed_count = 0
+        partial_total = 0  # tests GTest ran in prev_log (< original total if filtered)
+
+        if prev_log and os.path.exists(prev_log):
+            new_passed, new_failed = _parse_completed_tests(prev_log)
+            _, _, partial_total, _ = _parse_test_counts(prev_log)
+            new_passed_count = len(new_passed)
+            new_failed_count = len(new_failed)
+            new_excluded = new_passed | (new_failed if self._skip_failed else set())
+            all_excluded = prev_excluded | new_excluded
+        else:
+            all_excluded = prev_excluded
+
+        cumulative_passed = prev_passed_offset + new_passed_count
+        cumulative_failed = prev_failed_offset + new_failed_count
+
+        augmented = _build_exclusion_filter(spec.gtest_filter, all_excluded)
+        if augmented is not None:
+            gtest_filter = augmented
+            n_excluded = len(all_excluded)
+            n_failed_excl = n_excluded - cumulative_passed
+            skip_desc = f"{cumulative_passed} passed" + (
+                f", {n_failed_excl} failed" if n_failed_excl > 0 else ""
+            )
+            preamble_lines = [
+                f"[run_tests.py] PARTIAL RESUME — excluding {n_excluded} tests total "
+                f"({skip_desc} across all runs)",
+                f"[run_tests.py] Filter: {gtest_filter[:200]}"
+                + ("..." if len(gtest_filter) > 200 else ""),
+                "",
+            ]
+
+        cmd = [self._state.executable, f"--gtest_filter={gtest_filter}"]
+
+        # Compute best estimate of the original (unfiltered) test count.
+        # partial_total is what GTest ran under the *previous* exclusion set,
+        # so original = partial_total + len(prev_excluded).
+        estimated_original = partial_total + len(prev_excluded) if partial_total else 0
+
+        # Update state: running — seed cumulative counts and persist exclusion set.
+        with self._state_lock:
             rec.status = "running"
             rec.start_time = start
             rec.result = "unknown"
+            rec.excluded_tests = sorted(all_excluded)
+            rec.tests_passed_offset = cumulative_passed
+            rec.tests_passed = cumulative_passed
+            rec.tests_failed_offset = cumulative_failed
+            rec.tests_failed = 0   # reset; poller will fill with current-run count
+            # tests_total is sticky: only grow it, never shrink it.
+            if estimated_original > rec.tests_total:
+                rec.tests_total = estimated_original
 
         try:
             with open(spec.log_file, "w") as log_fh:
-                proc = Popen(cmd, stdout=log_fh, stderr=STDOUT)
+                for line in preamble_lines:
+                    log_fh.write(line + "\n")
+                proc = Popen(cmd, stdout=log_fh, stderr=STDOUT, env=env)
             with self._state_lock:
                 rec.pid = proc.pid
             save_state(self._state, self._state_path, self._state_lock)
@@ -505,9 +846,15 @@ class JobRunner:
                 _active_procs.pop(spec.job_id, None)
 
         end = time.time()
-        result = "pass" if exit_code == 0 else "fail"
+        _passed, _failed, _total, _ = _parse_test_counts(spec.log_file)
+        if exit_code == 0:
+            result = "pass"
+        elif _failed > 0:
+            result = "fail"
+        else:
+            result = "incomplete"
         self._display.log_plain(
-            f"{'PASS' if result == 'pass' else 'FAIL'}     {spec.job_id}"
+            f"{'PASS' if result == 'pass' else result.upper():<4}     {spec.job_id}"
             f"  exit={exit_code}  log={spec.log_file}"
         )
 
@@ -517,6 +864,11 @@ class JobRunner:
             rec.end_time = end
             rec.exit_code = exit_code
             rec.pid = None
+            offset = rec.tests_passed_offset
+            rec.tests_passed = _passed + offset
+            rec.tests_failed = _failed
+            if rec.tests_total == 0 and _total:
+                rec.tests_total = _total + offset
         save_state(self._state, self._state_path, self._state_lock)
 
     def _reattach_one(self, job_id: str, pid: int) -> None:
@@ -532,9 +884,19 @@ class JobRunner:
             exit_code = -1
 
         end = time.time()
-        result = "pass" if exit_code == 0 else "fail"
+        spec = self._all_jobs.get(job_id)
+        if spec:
+            _passed, _failed, _total, _ = _parse_test_counts(spec.log_file)
+        else:
+            _passed, _failed, _total = 0, 0, 0
+        if exit_code == 0:
+            result = "pass"
+        elif _failed > 0:
+            result = "fail"
+        else:
+            result = "incomplete"
         self._display.log_plain(
-            f"{'PASS' if result == 'pass' else 'FAIL'}     {job_id}"
+            f"{'PASS' if result == 'pass' else result.upper():<4}     {job_id}"
             f"  exit={exit_code}  (reattached)"
         )
         with self._state_lock:
@@ -554,7 +916,10 @@ class JobRunner:
 # ---------------------------------------------------------------------------
 
 def _install_signal_handler(state: RunState, state_path: str,
-                             state_lock: threading.Lock) -> None:
+                             state_lock: threading.Lock,
+                             display: "LiveDisplay",
+                             requested: List["JobSpec"],
+                             skipped_passed: int) -> None:
     def handler(_signum, _frame):
         shutdown_event.set()
         with _active_procs_lock:
@@ -564,6 +929,9 @@ def _install_signal_handler(state: RunState, state_path: str,
                 except OSError:
                     pass
         save_state(state, state_path, state_lock)
+        display.stop()
+        print()
+        print_summary(state, requested, skipped_passed)
         sys.exit(130)
 
     signal.signal(signal.SIGINT, handler)
@@ -601,6 +969,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Print all job IDs grouped by group and exit")
     p.add_argument("--reset", action="store_true",
                    help="Delete existing state file and start fresh")
+    p.add_argument("--count-interval", type=int, default=30, metavar="SECONDS",
+                   help="How often (in seconds) to re-count in-progress test results (default: %(default)s)")
+    p.add_argument("--skip-failed", action="store_true",
+                   help="On partial resume, also skip previously failed tests "
+                        "(re-run only tests that have not been attempted yet)")
     p.add_argument("--no-color", action="store_true",
                    help="Plain output, no ANSI escape codes")
     return p
@@ -649,32 +1022,49 @@ def list_jobs(all_groups: Dict[str, List[JobSpec]]) -> None:
 # ---------------------------------------------------------------------------
 
 def print_summary(state: RunState, all_jobs: List[JobSpec],
-                  skipped_count: int) -> int:
+                  skipped_passed: int) -> int:
+    color = sys.stdout.isatty()
     total = len(all_jobs)
+    _default = JobRecord("", "", None, None, None, None)
     passed = sum(1 for sp in all_jobs
-                 if state.records.get(sp.job_id, JobRecord("", "", None, None, None, None)).result == "pass")
+                 if state.records.get(sp.job_id, _default).result == "pass")
     failed_specs = [
         sp for sp in all_jobs
-        if state.records.get(sp.job_id, JobRecord("", "", None, None, None, None)).result == "fail"
+        if state.records.get(sp.job_id, _default).result == "fail"
+    ]
+    incomplete_specs = [
+        sp for sp in all_jobs
+        if state.records.get(sp.job_id, _default).result == "incomplete"
     ]
     failed = len(failed_specs)
+    incomplete = len(incomplete_specs)
 
-    print("\n=== Summary ===")
-    print(f"Total:    {total} jobs")
-    print(f"Passed:   {passed}")
-    print(f"Failed:   {failed}")
-    if skipped_count:
-        print(f"Skipped:  {skipped_count}  (already passed from previous run)")
+    print(_c("\n=== Summary ===", _BOLD, color))
+    print(f"Total:      {total} jobs")
+    print(f"Passed:     {_c(str(passed),    _GREEN, color and passed > 0)}")
+    print(f"Failed:     {_c(str(failed),    _RED,   color and failed > 0)}")
+    if incomplete:
+        print(f"Incomplete: {_c(str(incomplete), _RED, color)}  "
+              f"(interrupted/crashed before any test failed)")
+    if skipped_passed:
+        print(f"Skipped:    {skipped_passed}  (already passed from previous run)")
 
     if failed_specs:
-        print("\nFailed jobs:")
+        print(_c("\nFailed jobs:", _RED, color))
         for sp in failed_specs:
             rec = state.records[sp.job_id]
             print(f"  {sp.job_id:<45}  exit_code={rec.exit_code}  "
                   f"log: {sp.log_file}")
 
+    if incomplete_specs:
+        print(_c("\nIncomplete jobs (crashed/interrupted, no test failures recorded):", _RED, color))
+        for sp in incomplete_specs:
+            rec = state.records[sp.job_id]
+            print(f"  {sp.job_id:<45}  exit_code={rec.exit_code}  "
+                  f"log: {sp.log_file}")
+
     print(f"\nState file: {os.path.join(state.output_dir, 'run_state.json')}")
-    return 1 if failed else 0
+    return 1 if (failed or incomplete) else 0
 
 
 # ---------------------------------------------------------------------------
@@ -737,6 +1127,19 @@ def main() -> int:
                 pid=None, start_time=None, end_time=None, exit_code=None,
             )
 
+    # Back-fill test counts for finished jobs that were loaded from an older
+    # state file (tests_passed == 0) or run before PASS_LINE_IN_LOG was added.
+    if existing is not None:
+        for job_id, rec in state.records.items():
+            if rec.status == "finished" and rec.tests_passed == 0:
+                spec = all_flat.get(job_id)
+                if spec and os.path.exists(spec.log_file):
+                    passed, failed, total, _ = _parse_test_counts(spec.log_file)
+                    rec.tests_passed = passed
+                    rec.tests_failed = failed
+                    if total:
+                        rec.tests_total = total
+
     # Recover any jobs recorded as "running" from a previous interrupted run
     reattach_list: List[tuple] = []
     if existing is not None:
@@ -745,30 +1148,32 @@ def main() -> int:
     # Determine which jobs to run this session
     requested = select_jobs(all_groups, args.groups, args.jobs)
 
-    # Filter to pending (not yet passed) — skip already-passed jobs
+    # Filter to pending jobs — only skip jobs that have already fully passed.
+    # Failed jobs are always re-run; --skip-failed controls individual test
+    # filtering inside the job (skip previously failed tests), not whole jobs.
     to_run = []
-    skipped = 0
+    skipped_passed = 0
     for sp in requested:
         rec = state.records[sp.job_id]
         if rec.status == "finished" and rec.result == "pass":
-            skipped += 1
+            skipped_passed += 1
         else:
             to_run.append(sp)
 
-    if skipped:
-        print(f"[info] Skipping {skipped} already-passed job(s).  Use --reset to re-run them.")
+    if skipped_passed:
+        print(f"[info] Skipping {skipped_passed} already-passed job(s).  Use --reset to re-run them.")
 
     if not to_run and not reattach_list:
         print("[info] Nothing to do — all selected jobs have already passed.")
-        return print_summary(state, requested, skipped)
+        return print_summary(state, requested, skipped_passed)
 
     save_state(state, state_path, state_lock)
-    _install_signal_handler(state, state_path, state_lock)
 
     tty = sys.stdout.isatty() and not args.no_color
     start_time = time.monotonic()
     display = LiveDisplay(state, all_groups, requested, start_time, tty, state_lock)
     display.start()
+    _install_signal_handler(state, state_path, state_lock, display, requested, skipped_passed)
 
     runner = JobRunner(
         state=state,
@@ -777,6 +1182,8 @@ def main() -> int:
         state_lock=state_lock,
         display=display,
         max_parallel=args.max_parallel,
+        count_interval=args.count_interval,
+        skip_failed=args.skip_failed,
     )
 
     try:
@@ -784,7 +1191,7 @@ def main() -> int:
     finally:
         display.stop()
 
-    return print_summary(state, requested, skipped)
+    return print_summary(state, requested, skipped_passed)
 
 
 if __name__ == "__main__":
