@@ -1489,6 +1489,11 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "Atomic Stream-K requires BufferStore")
         if state["LocalSplitU"] > 1:
           reject(state, printRejectionReason, "Atomic Stream-K not working with LocalSplitU")
+      if state["DebugPersistentKernelLoopForever"] and state["StreamK"] not in (1, 2, 3):
+        # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
+        reject(state, printRejectionReason,
+               "DebugPersistentKernelLoopForever requires StreamK in {1,2,3} (got %d)"
+               % state["StreamK"])
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
         return
@@ -1498,6 +1503,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
+      state["DebugPersistentKernelLoopForever"] = False
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
     state["_WorkspaceSizePerElemC"] = computeBytes
