@@ -335,13 +335,19 @@ namespace hipdnn_frontend::detail
 
     // Unpack mma_core_mode — the packer omits this attribute when NOT_SET because
     // toHipdnnDataType() has no mapping for NOT_SET, so setDescriptorAttrDataType()
-    // would return an error. The attribute is therefore absent when not explicitly set.
+    // would return an error. The attribute is therefore absent when not explicitly
+    // set; absence is silently tolerated, but real backend failures (descriptor
+    // errors, type-conversion failures) still propagate.
     {
-        auto [mmaCoreMode, mmaCoreModeErr] = unpackGraphDataType(
+        auto [mmaCoreModeOpt, mmaCoreModeErr] = unpackOptionalGraphDataType(
             opDesc, HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT, "sdpa mma_core_mode");
-        if(!mmaCoreModeErr.is_bad())
+        if(mmaCoreModeErr.is_bad())
         {
-            attributes.set_mma_core_mode(mmaCoreMode);
+            return mmaCoreModeErr;
+        }
+        if(mmaCoreModeOpt.has_value())
+        {
+            attributes.mma_core_mode = *mmaCoreModeOpt;
         }
     }
 

@@ -275,6 +275,52 @@ template <typename T>
     return fromHipdnnDataType(dt);
 }
 
+/// Unpacks an optional graph-level data type attribute from a backend descriptor.
+/// Distinguishes "attribute absent" (returns ``{std::nullopt, {}}``) from a real
+/// backend failure (returns ``{std::nullopt, err}``). Intended for attributes
+/// that the packer may legitimately omit — typically sentinel-gated DataType
+/// fields such as SDPA's ``mma_core_mode``. Prefer this over
+/// :func:`unpackGraphDataType` when the caller wants to silently tolerate
+/// absence while still propagating genuine descriptor / type-conversion errors.
+///
+/// The "absent" case is detected via ``HIPDNN_STATUS_NOT_SUPPORTED`` from the
+/// initial count query, mirroring :func:`getDescriptorAttrString`.
+[[nodiscard]] inline std::pair<std::optional<DataType>, Error>
+    unpackOptionalGraphDataType(hipdnnBackendDescriptor_t desc,
+                                hipdnnBackendAttributeName_t attrName,
+                                const std::string& errorContext)
+{
+    int64_t count = 0;
+    auto countStatus = hipdnnBackend()->backendGetAttribute(
+        desc, attrName, HIPDNN_TYPE_DATA_TYPE, 0, &count, nullptr);
+    if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED || count == 0)
+    {
+        return {std::nullopt, {}};
+    }
+    if(countStatus != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {std::nullopt,
+                Error{ErrorCode::HIPDNN_BACKEND_ERROR,
+                      "Failed to get count for " + errorContext
+                          + " Backend error: " + backendErrMsg.data()}};
+    }
+
+    hipdnnDataType_t dt{};
+    auto err = getDescriptorAttrScalar(desc, attrName, HIPDNN_TYPE_DATA_TYPE, dt, errorContext);
+    if(err.is_bad())
+    {
+        return {std::nullopt, err};
+    }
+    auto [result, convErr] = fromHipdnnDataType(dt);
+    if(convErr.is_bad())
+    {
+        return {std::nullopt, convErr};
+    }
+    return {result, {}};
+}
+
 /// Extracts TensorAttributes from a backend TensorDescriptor.
 /// The tensor descriptor must already be finalized.
 [[nodiscard]] inline Error unpackTensorAttributes(hipdnnBackendDescriptor_t tensorDesc,
