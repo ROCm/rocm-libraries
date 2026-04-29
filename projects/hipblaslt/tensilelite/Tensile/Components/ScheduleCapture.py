@@ -1486,11 +1486,28 @@ def compare_graphs(reference: DataflowGraph, subject: DataflowGraph,
     if ref_ids != subj_ids:
         only_ref = ref_ids - subj_ids
         only_subj = subj_ids - ref_ids
+        # Categorize the diff by class_tag (LR/LW/GR/MFMA) to make the
+        # error actionable. The full identity tuple list is too long for
+        # a single error string when 16+ identities differ.
+        def _summary_by_class(ids):
+            counts = {}
+            for ident in ids:
+                cls_tag = ident[0] if ident else "?"
+                counts[cls_tag] = counts.get(cls_tag, 0) + 1
+            return counts
         msg_parts = []
         if only_ref:
-            msg_parts.append(f"in reference but not subject: {sorted(only_ref)}")
+            counts = _summary_by_class(only_ref)
+            msg_parts.append(
+                f"in reference but not subject: {len(only_ref)} identities "
+                f"({counts}); first 3: {sorted(only_ref)[:3]}"
+            )
         if only_subj:
-            msg_parts.append(f"in subject but not reference: {sorted(only_subj)}")
+            counts = _summary_by_class(only_subj)
+            msg_parts.append(
+                f"in subject but not reference: {len(only_subj)} identities "
+                f"({counts}); first 3: {sorted(only_subj)[:3]}"
+            )
         raise CaptureConsistencyError(
             "compare_graphs: data-flow node identity sets differ. "
             + "; ".join(msg_parts)
