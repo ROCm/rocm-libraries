@@ -52,9 +52,17 @@ def load_known_bugs(config_path: Optional[Path]) -> FrozenSet[KnownBugKey]:
     Parse known-bugs YAML into a set of (relative_path, solution_index).
 
     If config_path is None or the file is missing, returns an empty frozenset.
+    If a file path is given but PyYAML is not installed, raises RuntimeError.
     """
-    if yaml is None or config_path is None or not config_path.is_file():
+    if config_path is None:
         return frozenset()
+    if not config_path.is_file():
+        return frozenset()
+    if yaml is None:
+        raise RuntimeError(
+            "Known-bugs YAML requires PyYAML. Install with: pip install PyYAML\n"
+            f"  (file was: {config_path})"
+        )
 
     with open(config_path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)

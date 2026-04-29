@@ -76,7 +76,7 @@ def _runChecks(
     keep, total, known_bug_skips = 0, 0, 0
     for file in files:
         if "Experimental" in file.parts:
-            return keep, total, known_bug_skips
+            continue
 
         solutions = []
         data = readYAML(file)
@@ -152,7 +152,7 @@ def _setup():
     if args.Verbose < 2:
         setVerbosity(args.Verbose)
 
-    return jobs, isaInfoMap, logicPath, files, check
+    return jobs, isaInfoMap, logicPath, files, check, args
 
 
 def _progress_loop(stop_event: threading.Event, interval: float = 5.0) -> None:
@@ -173,12 +173,11 @@ def main():
     warnings.filterwarnings("ignore", message=".*timeout.*will not be used.*")
 
     reset_reported_failures()
-    jobs, isaInfoMap, logicPath, files, check = _setup()
-    args = parseArguments()
+    jobs, isaInfoMap, logicPath, files, check, args = _setup()
 
     try:
         known_bugs = load_known_bugs(args.KnownBugs)
-    except ValueError as e:
+    except (ValueError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
         exit(1)
 

@@ -33,6 +33,7 @@
 #define TENSILE_SOLUTION_VALIDATION_HPP
 
 #include <array>
+#include <cstdint>
 #include <string>
 
 namespace TensileLite
@@ -87,7 +88,7 @@ namespace TensileLite
             setReason("WorkGroup dimensions must be positive");
             return false;
         }
-        int product = wg[0] * wg[1] * wg[2];
+        int64_t product = static_cast<int64_t>(wg[0]) * wg[1] * wg[2];
         if(product < 32 || product > 1024)
         {
             setReason("WorkGroup product must be in [32, 1024]");

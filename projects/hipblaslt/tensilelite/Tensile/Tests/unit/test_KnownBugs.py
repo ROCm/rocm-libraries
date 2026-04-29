@@ -62,3 +62,11 @@ def test_load_known_bugs_invalid(tmp_path):
     )
     with pytest.raises(ValueError):
         load_known_bugs(p)
+
+
+def test_load_known_bugs_requires_pyyaml(tmp_path, monkeypatch):
+    p = tmp_path / "kb.yaml"
+    p.write_text("version: 1\nskips: []\n", encoding="utf-8")
+    monkeypatch.setattr(_kb, "yaml", None)
+    with pytest.raises(RuntimeError, match="PyYAML"):
+        load_known_bugs(p)

@@ -62,6 +62,9 @@ endif()
 set(HIPBLASLT_TENSILELOGIC_KNOWN_BUGS
     "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/TensileLogic/known_bugs.yaml"
 )
+# Stamp DEPENDS include known_bugs.yaml but not every library logic YAML (thousands
+# of files; CONFIGURE_DEPENDS globs are costly). After editing logic only, run
+# scripts/run_tensile_logic_check.py or touch the stamp input to force re-validation.
 set(TENSILELOGIC_STAMP "${CMAKE_CURRENT_BINARY_DIR}/TensileLogic.stamp")
 add_custom_command(
     OUTPUT "${TENSILELOGIC_STAMP}"
