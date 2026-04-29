@@ -894,12 +894,29 @@ def _is_sbarrier(inst):
 
 
 def _reg_signature(reg) -> tuple:
-    """Stable hashable tuple summary of a RegisterContainer."""
+    """Stable hashable tuple summary of a RegisterContainer.
+
+    Real CMS schedules use SYMBOLIC register names (regIdx=-1, regName
+    holds the actual identity like 'ValuA_X0_I0'). Including only
+    (regType, regIdx, regNum) would collapse all symbolic registers to
+    the same signature and corrupt graph identity. Include the regName's
+    name + offsets when present so symbolic-named registers are
+    distinguishable.
+    """
     if reg is None:
         return ()
+    name_sig = ()
+    rname = getattr(reg, "regName", None)
+    if rname is not None:
+        try:
+            offs = tuple(rname.getOffsets()) if hasattr(rname, "getOffsets") else ()
+        except Exception:
+            offs = ()
+        name_sig = (getattr(rname, "name", None), offs)
     return (getattr(reg, "regType", None),
             getattr(reg, "regIdx", None),
-            getattr(reg, "regNum", None))
+            getattr(reg, "regNum", None),
+            name_sig)
 
 
 def _get_param(inst, idx, default=None):
@@ -1066,11 +1083,41 @@ def _reads(inst):
 
 
 def _reg_overlaps(read_reg, written_reg) -> bool:
-    """True if `read_reg` overlaps with `written_reg` (vgpr ranges intersect)."""
+    """True if `read_reg` overlaps with `written_reg` (vgpr ranges intersect).
+
+    Handles three cases:
+      - Numeric registers (regIdx >= 0): overlap by numeric range.
+      - Symbolic registers (regIdx == -1, regName set): overlap requires
+        same regName.name AND overlapping range using getTotalIdx() (the
+        offset within the named region).
+      - Mixed numeric + symbolic: NEVER overlap — different naming
+        conventions can't be compared without a name-resolution table.
+    """
     if read_reg is None or written_reg is None:
         return False
     if read_reg.regType != written_reg.regType:
         return False
+
+    a_named = read_reg.regIdx == -1 and getattr(read_reg, "regName", None) is not None
+    b_named = written_reg.regIdx == -1 and getattr(written_reg, "regName", None) is not None
+
+    if a_named != b_named:
+        # Mixed naming convention; can't compare safely.
+        return False
+
+    if a_named:
+        # Both symbolic — must share the same name root, then compare offsets.
+        if read_reg.regName.name != written_reg.regName.name:
+            return False
+        a_off = read_reg.regName.getTotalOffsets() if hasattr(read_reg.regName, "getTotalOffsets") else 0
+        b_off = written_reg.regName.getTotalOffsets() if hasattr(written_reg.regName, "getTotalOffsets") else 0
+        a_lo = a_off
+        a_hi = a_lo + (read_reg.regNum or 1)
+        b_lo = b_off
+        b_hi = b_lo + (written_reg.regNum or 1)
+        return a_lo < b_hi and b_lo < a_hi
+
+    # Both numeric.
     a_lo = read_reg.regIdx
     a_hi = a_lo + (read_reg.regNum or 1)
     b_lo = written_reg.regIdx
