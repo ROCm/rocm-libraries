@@ -8664,7 +8664,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["Sparse"]:
       _reg("address", "AddressMetadata")
     if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
-      _reg("address", "AddressWS")
+      _reg("address", "AddressWorkspace")
       _reg("address", "AddressFlags")
 
     # -- Strides ---------------------------------------------------------------
@@ -8706,7 +8706,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       _reg("uint32", "SKItersPerWG")
       if kernel["StreamK"] >= 2:
         _reg("uint32", "SKGrid")
-        _reg("uint32", "SKTiles")
+        _reg("uint32", "SKTilesAndSplit")
 
     # -- Scale addresses -------------------------------------------------------
     if kernel["ProblemType"]["UseScaleAB"]:

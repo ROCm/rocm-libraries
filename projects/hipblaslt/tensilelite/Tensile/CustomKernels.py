@@ -46,7 +46,7 @@ _METADATA_NAME_TO_SEMANTIC = {
     "B":                      "AddressB",
     "MetaData":               "AddressMetadata",
     "AddressDbg":             "DebugBuffer",
-    "AddressWS":              "AddressWS",
+    "AddressWS":              "AddressWorkspace",
     "AddressFlags":           "AddressFlags",
     "alpha":                  "Alpha",
     "beta":                   "Beta",
@@ -75,7 +75,7 @@ _METADATA_NAME_TO_SEMANTIC = {
     "TotalIters":             "TotalIters",
     "SKItersPerWG":           "SKItersPerWG",
     "skGrid":                 "SKGrid",
-    "skTiles":                "SKTiles",
+    "skTiles":                "SKTilesAndSplit",
 }
 
 _ACTIVATION_ARG_INDEX = {

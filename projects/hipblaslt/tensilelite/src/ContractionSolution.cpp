@@ -2012,11 +2012,8 @@ namespace TensileLite
                 case CustomArgSemantic::AddressMetadata:
                     rv.args.template append<void const*>("AddressMetadata", inputs.metadata);
                     break;
-                case CustomArgSemantic::AddressWS:
-                    rv.args.template append<void const*>("AddressWS", inputs.ws);
-                    break;
                 case CustomArgSemantic::AddressWorkspace:
-                    rv.args.template append<void const*>("AddressWorkspace", inputs.ws);
+                    rv.args.template append<void const*>(toString(arg.semantic), inputs.ws);
                     break;
                 case CustomArgSemantic::AddressFlags:
                     if(sk.reduction == origami::reduction_t::parallel)
@@ -2066,10 +2063,8 @@ namespace TensileLite
                     rv.args.template append<void const*>("AmaxWS", inputs.ws);
                     break;
                 case CustomArgSemantic::AmaxSync:
-                    rv.args.template append<void const*>("AmaxSync", inputs.Synchronizer);
-                    break;
                 case CustomArgSemantic::Synchronizer:
-                    rv.args.template append<void const*>("Synchronizer", inputs.Synchronizer);
+                    rv.args.template append<void const*>(toString(arg.semantic), inputs.Synchronizer);
                     break;
                 case CustomArgSemantic::DebugBuffer:
                     rv.args.template append<void const*>("DebugBuffer", nullptr);
@@ -2134,11 +2129,8 @@ namespace TensileLite
                 case CustomArgSemantic::SKGrid:
                     rv.args.template append<uint32_t>("SKGrid", static_cast<uint32_t>(sk.grid));
                     break;
-                case CustomArgSemantic::SKTiles:
-                    rv.args.template append<uint32_t>("SKTiles", skTotalTiles);
-                    break;
                 case CustomArgSemantic::SKTilesAndSplit:
-                    rv.args.appendCustomType("SKTilesAndSplit", skTotalTiles, arg.type);
+                    rv.args.appendCustomType(toString(arg.semantic), skTotalTiles, arg.type);
                     break;
 
                 // ---- Packed batch dimension divisors ----

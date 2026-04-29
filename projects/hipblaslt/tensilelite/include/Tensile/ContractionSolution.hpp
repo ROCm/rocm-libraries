@@ -96,7 +96,6 @@ namespace TensileLite
         X_MACRO(AddressD) \
         X_MACRO(AddressE) \
         X_MACRO(AddressMetadata) \
-        X_MACRO(AddressWS) \
         X_MACRO(AddressWorkspace) \
         X_MACRO(AddressFlags) \
         X_MACRO(AddressSynchronizer) \
@@ -129,7 +128,6 @@ namespace TensileLite
         X_MACRO(TotalIters) \
         X_MACRO(SKItersPerWG) \
         X_MACRO(SKGrid) \
-        X_MACRO(SKTiles) \
         X_MACRO(SKTilesAndSplit) \
         /* Packed batch dimension divisors */ \
         X_MACRO(MagicNumberSize) \
