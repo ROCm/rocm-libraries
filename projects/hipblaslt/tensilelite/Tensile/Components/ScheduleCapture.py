@@ -30,6 +30,53 @@ discrepancies. See plans/then-let-s-work-on-jaunty-reddy.md for design context.
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Optional
+
+
+# =============================================================================
+# Capture-pipeline exceptions
+# =============================================================================
+# These are raised (not asserted) so they survive `python -O`. They indicate
+# capture/validator-pipeline bugs, NOT user-actionable schedule defects.
+
+class CaptureWiringError(Exception):
+    """A TaggedInstruction has rocisa_inst=None when wiring required it."""
+
+
+class CaptureSMEMError(Exception):
+    """A captured body contains SMEM ops; the dscnt FIFO model can't handle them."""
+
+
+class CaptureFlatError(Exception):
+    """A captured body contains flat ops; they decrement two counters at once."""
+
+
+class CaptureStoreError(Exception):
+    """A captured body contains a vector-memory store; vscnt is not modeled."""
+
+
+class CaptureMfmaCodeShapeError(Exception):
+    """The kernel's mfma_code shape doesn't match the expected MFMA pattern."""
+
+
+class CaptureConsistencyError(Exception):
+    """Default and CMS captures disagree on which instructions exist."""
+
+
+class CaptureIdmapMismatchError(Exception):
+    """idMap and capture disagree on instruction count for some category."""
+
+
+class CaptureUnknownInstructionError(Exception):
+    """build_dataflow_graph encountered an instruction class it can't classify."""
+
+
+class CaptureEmptyBodyError(Exception):
+    """A captured body has zero TaggedInstructions; the body should always be populated."""
+
+
+class UnexplainedMissingEdgeError(Exception):
+    """diagnose_missing_edge couldn't classify a missing edge — classifier or pipeline bug."""
 
 
 SLOT_KIND_PRE_LOOP = "pre_loop"
@@ -104,6 +151,328 @@ class DataflowEdge:
 class DataflowGraph:
     nodes: list
     edges: list
+
+
+# =============================================================================
+# Failure hierarchy — typed scheduling defects with polymorphic formatters
+# =============================================================================
+#
+# Single base class; each concrete subclass owns its formatter via format(capture).
+# Tests assert on type and field, not on string content. The only place wording
+# is asserted is in Tensile/Tests/unit/test_failure_formatters.py.
+#
+# Each Failure carries CMS-side state only — never a reference to the
+# default-side schedule. The user fixes the CMS schedule from the data on
+# the Failure.
+
+def _ordinal(n: int) -> str:
+    """Return '1st', '2nd', '3rd', '4th', ..., 'Nth' for any positive n."""
+    if 10 <= (n % 100) <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def format_position(node, capture=None) -> str:
+    """Render a node's schedule position with optional list-position suffix.
+
+    MFMAs are excluded from the list-position suffix because they aren't
+    user-scheduled (their order is fixed by the underlying instruction loop).
+    Everything else, including MFMAPack (category 'PackA*'/'PackB*'), gets
+    the (Nth entry in list) suffix because the CMS user controls placement.
+
+    The discriminator is the category tag, NOT isinstance — MFMAPack's
+    multiple inheritance from both Pack and MFMA would confuse isinstance.
+    """
+    base = f"@ idx={node.position.vmfma_index}"
+    if capture is None or node.category == "MFMA":
+        return base
+    list_pos = capture.instructions.index(node.tagged_inst)
+    return f"{base} ({_ordinal(list_pos + 1)} entry in list)"
+
+
+@dataclass
+class Failure:
+    """Common base for all reported scheduling problems.
+
+    No body_label field on the base — every concrete subclass carries
+    producer/consumer GraphNode references (or equivalent), and
+    GraphNode.body_label is the source of truth.
+    """
+
+    def format(self, capture=None) -> str:
+        raise NotImplementedError("subclasses must implement format()")
+
+
+# ----------------------------------------------------------------------------
+# 1. OrderInvertedFailure — producer issued after consumer (same body only).
+#    Replaces: GR _validate_must_start_after early-issue branch, Pack early/late.
+#    Emitted by: rules + dataflow comparison classifier.
+# ----------------------------------------------------------------------------
+@dataclass
+class OrderInvertedFailure(Failure):
+    producer: object  # GraphNode or ValidatorInstruction
+    consumer: object
+
+    def format(self, capture=None) -> str:
+        producer_pos = format_position(self.producer, capture)
+        consumer_pos = format_position(self.consumer, capture)
+        return (
+            f"{self.producer.category}[{getattr(self.producer, 'name', '')}] "
+            f"{producer_pos} is issued after its consumer "
+            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
+            f"{consumer_pos}. The producer must complete before the consumer can use it."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 2. MissingWaitFailure — no SWaitCnt covers the producer at all.
+# ----------------------------------------------------------------------------
+@dataclass
+class MissingWaitFailure(Failure):
+    producer: object
+    consumer: object
+    counter_kind: str  # 'dscnt' / 'vlcnt' / 'vscnt'
+
+    def format(self, capture=None) -> str:
+        return (
+            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
+            f"{format_position(self.consumer, capture)} is not guaranteed by any "
+            f"SWaitCnt before its producer {self.producer.category} "
+            f"{format_position(self.producer, capture)}. No SWaitCnt with "
+            f"{self.counter_kind} drain appears between them in the schedule."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 3. WaitOnWrongCounterFailure — SWait exists but on wrong counter.
+# ----------------------------------------------------------------------------
+@dataclass
+class WaitOnWrongCounterFailure(Failure):
+    producer: object
+    consumer: object
+    expected_counter: str
+    wrong_counter_waits: list  # list[GraphNode], in stream order
+
+    def format(self, capture=None) -> str:
+        wait_descriptions = ", ".join(
+            f"SWaitCnt {format_position(w, capture)}"
+            for w in self.wrong_counter_waits
+        )
+        return (
+            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
+            f"{format_position(self.consumer, capture)}'s producer "
+            f"{self.producer.category} {format_position(self.producer, capture)} "
+            f"requires an SWaitCnt with {self.expected_counter} drain. "
+            f"Existing SWaitCnts in the window drain other counters: {wait_descriptions}. "
+            f"Did you mean {self.expected_counter}?"
+        )
+
+
+# ----------------------------------------------------------------------------
+# 4. WaitTooLateFailure — SWait fires at/after the consumer.
+# ----------------------------------------------------------------------------
+@dataclass
+class WaitTooLateFailure(Failure):
+    producer: object
+    consumer: object
+    wait_position: object  # SchedulePosition
+
+    def format(self, capture=None) -> str:
+        return (
+            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
+            f"{format_position(self.consumer, capture)} is guaranteed by an "
+            f"SWaitCnt @ idx={self.wait_position.vmfma_index} which fires at "
+            f"or after the consumer position. Move the wait earlier in the schedule."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 5. WaitInsufficientFailure — wait at correct position but counter value too lax.
+# ----------------------------------------------------------------------------
+@dataclass
+class WaitInsufficientFailure(Failure):
+    producer: object
+    consumer: object
+    wait: object  # GraphNode
+    queue_depth_at_wait: int
+    counter_value: int
+
+    def format(self, capture=None) -> str:
+        return (
+            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
+            f"{format_position(self.consumer, capture)}'s producer "
+            f"{self.producer.category} {format_position(self.producer, capture)} "
+            f"is guaranteed by SWaitCnt {format_position(self.wait, capture)}, "
+            f"but the counter value ({self.counter_value}) leaves "
+            f"{self.queue_depth_at_wait - self.counter_value} ops still pending "
+            f"(queue depth at wait = {self.queue_depth_at_wait}). "
+            f"Tighten the wait's counter value."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 6. MissingBarrierFailure — cross-wave LDS-reuse needs barrier in the window.
+# ----------------------------------------------------------------------------
+@dataclass
+class MissingBarrierFailure(Failure):
+    producer: object
+    consumer: object
+    role: str  # 'must_start_after' | 'needed_by'
+
+    def format(self, capture=None) -> str:
+        if self.role == "must_start_after":
+            order = (
+                f"{self.producer.category} -> SWaitCnt(dscnt=0) -> SBarrier "
+                f"-> {self.consumer.category}"
+            )
+            why = (
+                f"{self.consumer.category} overwrites the LDS slot read by "
+                f"{self.producer.category}. The barrier ensures all waves "
+                f"finished reading before the write."
+            )
+        else:
+            order = (
+                f"{self.producer.category} -> SWaitCnt(vlcnt=0) -> SBarrier "
+                f"-> {self.consumer.category}"
+            )
+            why = (
+                f"{self.consumer.category} reads the LDS slot written by "
+                f"{self.producer.category}. The barrier ensures all waves "
+                f"finished writing before the read."
+            )
+        return (
+            f"{why} Required ordering is {order}. SWaitCnt is present but no "
+            f"SBarrier appears between the SWaitCnt and "
+            f"{self.consumer.category} {format_position(self.consumer, capture)}."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 7. WrongInterleavingFailure — MiddlePack pair-consumer ordering wrong.
+# ----------------------------------------------------------------------------
+@dataclass
+class WrongInterleavingFailure(Failure):
+    pack: object  # MiddlePack
+    expected_next: object  # MiddlePack (pair_consumer)
+    actual_next: object  # MiddlePack (next_scheduled_middle_16)
+
+    def format(self, capture=None) -> str:
+        return (
+            f"{self.pack.name} @ idx={self.pack.issued_at.vmfma_index} has wrong "
+            f"interleaving. Should have been followed by "
+            f"{self.expected_next.name} @ idx={self.expected_next.issued_at.vmfma_index} "
+            f"but was followed by "
+            f"{self.actual_next.name} @ idx={self.actual_next.issued_at.vmfma_index}."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 8. TimingTooCloseFailure — quad-cycle gap too small (Pack timing).
+# ----------------------------------------------------------------------------
+@dataclass
+class TimingTooCloseFailure(Failure):
+    producer: object  # Pack
+    consumer: object  # Pack/MFMA
+    expected_quad_cycles: int
+    actual_quad_cycles: int
+
+    def format(self, capture=None) -> str:
+        return (
+            f"{self.producer.name} @ idx={self.producer.issued_at.vmfma_index} has "
+            f"too little gap between it and {self.consumer.name} @ idx="
+            f"{self.consumer.issued_at.vmfma_index}. Expected at least "
+            f"{self.expected_quad_cycles} quad-cycles but only "
+            f"{self.actual_quad_cycles} passed."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 9. InvalidCounterValueFailure — SWait field range check.
+# ----------------------------------------------------------------------------
+@dataclass
+class InvalidCounterValueFailure(Failure):
+    swait: object  # SWait validator instruction
+    dscnt: int
+    vlcnt: int
+    vscnt: int
+
+    def format(self, capture=None) -> str:
+        return (
+            f"SWaitCnt @ idx={self.swait.issued_at.vmfma_index} is invalid: "
+            f"dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}. "
+            f"All counter fields must be >= -1 (with -1 meaning 'don't care')."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 10. SCCConflictFailure — GRInc SCC overlap window.
+# ----------------------------------------------------------------------------
+@dataclass
+class SCCConflictFailure(Failure):
+    conflicting_name: str
+    grinc_name: str
+    conflicting_index: int
+    interval_start: int
+    interval_end: int
+
+    def format(self, capture=None) -> str:
+        return (
+            f"{self.conflicting_name} at index {self.conflicting_index} can't be "
+            f"between {self.grinc_name} {self.interval_start}-{self.interval_end} "
+            f"due to SCC usage."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 11. SWaitCountExceedsOutstandingFailure — SWait references too many ops.
+# ----------------------------------------------------------------------------
+@dataclass
+class SWaitCountExceedsOutstandingFailure(Failure):
+    swait: object
+    counter_kind: str  # 'dscnt' | 'vlcnt'
+    counter_value: int
+    outstanding: int
+
+    def format(self, capture=None) -> str:
+        load_kind = "DS loads" if self.counter_kind == "dscnt" else "VM loads"
+        return (
+            f"SWaitCnt @ idx={self.swait.issued_at.vmfma_index} has "
+            f"{self.counter_kind}={self.counter_value} but only {self.outstanding} "
+            f"{load_kind} are outstanding."
+        )
+
+
+# ----------------------------------------------------------------------------
+# 12. OutOfOrderSequenceFailure — instruction A came after B that should follow it.
+#     Two detection sites with the same shape: schedule-sequence ordering
+#     (verify_ascending_order) and CVT0/CVT1 pair ordering (CMSValidator.py:1642).
+# ----------------------------------------------------------------------------
+@dataclass
+class OutOfOrderSequenceFailure(Failure):
+    kind: str  # 'sequence' | 'cvt_pair'
+    schedule_key: str  # category name (e.g. 'GRIncA') or pair description
+    sequence: object  # the offending sequence (list) or pair (tuple)
+    bad_value: int
+    bad_index: int
+    prev_value: int
+
+    def format(self, capture=None) -> str:
+        if self.kind == "sequence":
+            return (
+                f"Non-descending-order rule failed, schedule key "
+                f"'{self.schedule_key}', sequence {self.sequence}: value "
+                f"{self.bad_value} at index {self.bad_index} is less than "
+                f"{self.prev_value} at index {self.bad_index - 1}."
+            )
+        else:
+            # cvt_pair
+            return (
+                f"CVT pair ordering violated for {self.schedule_key}: CVT0 ends "
+                f"at issue_index {self.prev_value} but CVT1 starts at issue_index "
+                f"{self.bad_value}. CVT0 must precede CVT1 in the pack chain."
+            )
 
 
 class LoopBodyCaptureBuilder:
