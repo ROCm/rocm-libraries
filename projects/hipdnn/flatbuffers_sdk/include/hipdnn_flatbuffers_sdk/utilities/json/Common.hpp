@@ -106,6 +106,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                                  {DataType::FP6_E2M3, "fp6_e2m3"},
                                  {DataType::FP6_E3M2, "fp6_e3m2"},
                                  {DataType::INT64, "int64"},
+                                 {DataType::BOOLEAN, "boolean"},
                              }
 
 )

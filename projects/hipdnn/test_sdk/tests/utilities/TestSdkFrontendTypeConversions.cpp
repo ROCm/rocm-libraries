@@ -103,6 +103,12 @@ TEST(TestSdkFrontendTypeConversions, DataTypeRoundTripInt64)
               fe::DataType::INT64);
 }
 
+TEST(TestSdkFrontendTypeConversions, DataTypeRoundTripBoolean)
+{
+    EXPECT_EQ(sdkToFrontendDataType(frontendToSdkDataType(fe::DataType::BOOLEAN)),
+              fe::DataType::BOOLEAN);
+}
+
 // ============================================================================
 // DataType default/fallback tests
 // ============================================================================
