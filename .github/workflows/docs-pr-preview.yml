@@ -124,7 +124,7 @@ jobs:
               --silent \
               --header "Authorization: Token $RTD_TOKEN" \
               "https://app.readthedocs.com/api/v3/projects/$project_slug/" \
-              | jq -r '.urls.documentation')
+              | jq --raw-output '.urls.documentation')
 
             # Strip trailing version segment (e.g. ".../en/latest/") to get the base
             doc_base=$(echo "$doc_url" | sed 's|/[^/]*/$||')
