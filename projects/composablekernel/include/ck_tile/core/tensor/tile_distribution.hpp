@@ -118,6 +118,25 @@ struct tile_distribution
         }
     }
 
+    // Returns true if the current thread should participate in tile operations.
+    // When MaxThreadId == -1 (default), all threads are active.
+    // When MaxThreadId >= 0, only threads with tid < MaxThreadId are active.
+    CK_TILE_DEVICE static bool is_thread_active()
+    {
+        constexpr index_t max_tid = DstrEncode::MaxThreadId;
+        if constexpr(max_tid < 0)
+        {
+            return true;
+        }
+        else
+        {
+            if constexpr(NDimP == 2)
+                return (get_warp_id() * 64 + get_lane_id()) < max_tid;
+            else
+                return get_lane_id() < max_tid;
+        }
+    }
+
     CK_TILE_HOST_DEVICE static constexpr auto get_lengths()
     {
 #if 0
@@ -678,7 +697,8 @@ CK_TILE_HOST_DEVICE constexpr auto slice_distribution_from_x(
                                        typename Encoding::Ps2RHssMajor,
                                        typename Encoding::Ps2RHssMinor,
                                        typename Encoding::Ys2RHsMajor,
-                                       typename Encoding::Ys2RHsMinor>{}),
+                                       typename Encoding::Ys2RHsMinor,
+                                       number<Encoding::MaxThreadId>>{}),
         sliced_y_origins,
         sliced_y_lengths);
 }
