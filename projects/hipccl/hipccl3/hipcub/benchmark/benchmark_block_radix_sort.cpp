@@ -158,7 +158,7 @@ void sort_keys_kernel(const T* input, T* output)
     T keys[ItemsPerThread];
     Helper::template load<BlockSize>(lid, input + block_offset, keys);
 
-    _CCCL_PRAGMA_NOUNROLL()
+    HIPCUB_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         Helper::template sort<BlockSize>(keys);
@@ -183,7 +183,7 @@ void sort_pairs_kernel(const T* input, T* output)
         values[i] = keys[i] + T(1);
     }
 
-    _CCCL_PRAGMA_NOUNROLL()
+    HIPCUB_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         Helper::template sort<BlockSize>(keys, values);

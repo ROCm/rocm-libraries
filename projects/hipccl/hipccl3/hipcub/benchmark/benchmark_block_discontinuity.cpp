@@ -59,7 +59,7 @@ struct flag_heads
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
@@ -96,7 +96,7 @@ struct flag_tails
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
@@ -133,7 +133,7 @@ struct flag_heads_and_tails
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
