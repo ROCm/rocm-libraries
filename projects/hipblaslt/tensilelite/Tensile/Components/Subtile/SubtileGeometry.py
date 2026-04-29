@@ -285,8 +285,8 @@ class ABInputGeometry(TileGeometry):
     return (macroTile // self.mmaTileShape[0], depthU // self.mmaTileShape[1])
 
   def localMMATileGrid(self, macroTile: int, depthU: int, waveGroupSize: int) -> Tuple[int, int]:
-    g = self.globalMMATileGrid(macroTile, depthU)
-    return (g[0] // waveGroupSize, g[1])
+    glbl = self.globalMMATileGrid(macroTile, depthU)
+    return (glbl[0] // waveGroupSize, glbl[1])
 
 
 @dataclass(frozen=True)
@@ -340,8 +340,8 @@ class ABGRGeometry(ABInputGeometry):
     return (1, bK)
 
   def globalSubtileGrid(self, macroTile: int, depthU: int) -> Tuple[float, float]:
-    g = self.globalMMATileGrid(macroTile, depthU)
-    return (g[0] / self.blockShape[0], g[1] / self.blockShape[1])
+    glbl = self.globalMMATileGrid(macroTile, depthU)
+    return (glbl[0] / self.blockShape[0], glbl[1] / self.blockShape[1])
 
   def blockSizeBytes(self) -> float:
     """Bytes in one contiguous strip."""
@@ -450,8 +450,8 @@ class ABLRGeometry(ABInputGeometry):
   subtileShape: Tuple[int, int]  = (1, 1)
 
   def globalSubtileGrid(self, macroTile: int, depthU: int) -> Tuple[float, float]:
-    g = self.globalMMATileGrid(macroTile, depthU)
-    return (g[0] / self.subtileShape[0], g[1] / self.subtileShape[1])
+    glbl = self.globalMMATileGrid(macroTile, depthU)
+    return (glbl[0] / self.subtileShape[0], glbl[1] / self.subtileShape[1])
 
   def subtileSizeBytes(self) -> float:
     return self.subtileShape[0] * self.subtileShape[1] * self.mmaTileSize
@@ -540,21 +540,21 @@ class CDTileGeometry(TileGeometry):
 
   def localMMATileGrid(self, macroTile0: int, macroTile1: int,
                        waveGroup: Tuple[int, int]) -> Tuple[int, int]:
-    g = self.globalMMATileGrid(macroTile0, macroTile1)
-    return (g[0] // waveGroup[0], g[1] // waveGroup[1])
+    glbl = self.globalMMATileGrid(macroTile0, macroTile1)
+    return (glbl[0] // waveGroup[0], glbl[1] // waveGroup[1])
 
   def globalSubtileGrid(self, macroTile0: int, macroTile1: int,
                         subtileShape: Tuple[float, float]) -> Tuple[float, float]:
     """Subtile grid over the full macro tile."""
-    g = self.globalMMATileGrid(macroTile0, macroTile1)
-    return (g[0] / subtileShape[0], g[1] / subtileShape[1])
+    glbl = self.globalMMATileGrid(macroTile0, macroTile1)
+    return (glbl[0] / subtileShape[0], glbl[1] / subtileShape[1])
 
   def localSubtileGrid(self, macroTile0: int, macroTile1: int,
                        waveGroup: Tuple[int, int],
                        subtileShape: Tuple[float, float]) -> Tuple[float, float]:
     """Subtile grid per wave (each wave stores its own chunk)."""
-    l = self.localMMATileGrid(macroTile0, macroTile1, waveGroup)
-    return (l[0] / subtileShape[0], l[1] / subtileShape[1])
+    locl = self.localMMATileGrid(macroTile0, macroTile1, waveGroup)
+    return (locl[0] / subtileShape[0], locl[1] / subtileShape[1])
 
   # --- Emit stubs (to be implemented by concrete subclasses) ---
 
@@ -649,8 +649,8 @@ class MXScaleLRGeometry(MXScaleInputGeometry):
   subtileShape: Tuple[int, int] = (2, 2)
 
   def globalSubtileGrid(self, macroTile: int, depthU: int) -> Tuple[float, float]:
-    g = self.globalMMATileGrid(macroTile, depthU)
-    return (g[0] / self.subtileShape[0], g[1] / self.subtileShape[1])
+    glbl = self.globalMMATileGrid(macroTile, depthU)
+    return (glbl[0] / self.subtileShape[0], glbl[1] / self.subtileShape[1])
 
   def subtileSizeBytes(self) -> float:
     return self.subtileShape[0] * self.subtileShape[1] * self.mmaTileSize

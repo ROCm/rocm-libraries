@@ -144,12 +144,11 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
   numRowsPerWave    = wavesize // blockSize
   numRowsPerLDSBanks = ldsRowBankSize // subIterKBytes
 
-  tmpVgpr = writer.vgprPool.checkOut(5)
+  tmpVgpr = writer.vgprPool.checkOut(4)
   colId     = tmpVgpr
   rowId     = tmpVgpr + 1
   waveId    = tmpVgpr + 2
-  rowOffset = tmpVgpr + 3
-  localRow  = tmpVgpr + 4
+  localRow  = tmpVgpr + 3
   tmpSgpr   = writer.sgprPool.checkOut(1, preventOverflow=False)
 
   # --- 1. waveId, laneId, colId, rowId ---
@@ -163,10 +162,9 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
              src=vgpr(localRow), comment=f"{tc}: rowId within wave"))
 
   # --- 2. Swizzle: DPP quad_perm swap colId pairs on even LDS rows ---
-  tmpSwz = writer.vgprPool.checkOut(3)
+  tmpSwz = writer.vgprPool.checkOut(2)
   ldsRowId     = tmpSwz
   swzTmp       = tmpSwz + 1
-  waveRotation = tmpSwz + 2
 
   module.addComment0(f"{tc}: Swizzling")
   module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(blockSize.bit_length()-1),
@@ -191,12 +189,14 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
 
   # --- 4. Inter-wave rotation (when waves cooperate on a subtile) ---
   if waves_coop > 1:
+    waveRotation = writer.vgprPool.checkOut(1)
     module.addComment0(f"{tc}: Inter-wave rotation")
     module.add(VAndB32(dst=vgpr(waveRotation), src0=vgpr(waveId), src1=hex(1)))
     module.add(VLShiftLeftB32(dst=vgpr(waveRotation),
                shiftHex=hex((2*numRowsPerLDSBanks).bit_length() - 1), src=vgpr(waveRotation)))
     module.add(VSubU32(dst=vgpr(waveRotation), src0=vgpr(swzTmp), src1=vgpr(waveRotation)))
     module.add(VAddU32(dst=vgpr(colId), src0=vgpr(waveRotation), src1=vgpr(colId)))
+    writer.vgprPool.checkIn(waveRotation)
   else:
     module.add(VAddU32(dst=vgpr(colId), src0=vgpr(swzTmp), src1=vgpr(colId)))
 
@@ -205,6 +205,7 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
   writer.vgprPool.checkIn(tmpSwz)
 
   # --- 5. Unified wave partition ---
+  rowOffset = writer.vgprPool.checkOut(1)
   partitionStride = ti.mmaTileShape[0] * int(ti.localSubtileGrid[0])
   waves_coop_shift = max(0, waves_coop.bit_length() - 1) if waves_coop > 0 else 0
   module.add(VAndB32(dst=vgpr(localRow), src0=hex(waves_coop - 1), src1=vgpr(waveId),
@@ -276,6 +277,7 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
                    comment=f"{tc}: bake soffset into vgpr"))
       writer.sgprPool.checkIn(stmp)
 
+  writer.vgprPool.checkIn(rowOffset)
   writer.vgprPool.checkIn(tmpVgpr)
   writer.sgprPool.checkIn(tmpSgpr)
   return module
@@ -752,10 +754,9 @@ def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffse
 
 def _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPerLDSBanks,
                             laneId, colIdA, colIdB, waveId):
-  tmpVgpr = writer.vgprPool.checkOut(3)
+  tmpVgpr = writer.vgprPool.checkOut(2)
   ldsRowId = tmpVgpr
   tmp = tmpVgpr + 1
-  waveRotation = tmpVgpr + 2
   module.addComment0("Swizzling")
   module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
   module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(ldsRowId), comment="lds row id"))
@@ -768,6 +769,9 @@ def _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, num
   module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(ldsRowId), comment=""))
   module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(ldsRowId //2) * 2"))
   module.add(VSubU32(dst=vgpr(tmp), src0=hex(blockSize), src1=vgpr(tmp), comment="rotation offset : blockSize - (ldsRowId//2)*2"))
+  needWaveRotation = any(t.loadRatioGR != 0.5 for t, _ in [(tileInfoA, colIdA), (tileInfoB, colIdB)])
+  if needWaveRotation:
+    waveRotation = writer.vgprPool.checkOut(1)
   for tInfo, cId in [(tileInfoA, colIdA), (tileInfoB, colIdB)]:
     if tInfo.loadRatioGR != 0.5:
       module.addComment0("Rotation per wave")
@@ -777,6 +781,8 @@ def _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, num
       module.add(VAddU32(dst=vgpr(cId), src0=vgpr(waveRotation), src1=vgpr(cId), comment=""))
     else:
       module.add(VAddU32(dst=vgpr(cId), src0=vgpr(tmp), src1=vgpr(cId), comment=""))
+  if needWaveRotation:
+    writer.vgprPool.checkIn(waveRotation)
   module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr(colIdA), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
   module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr(colIdB), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
   writer.vgprPool.checkIn(tmpVgpr)
