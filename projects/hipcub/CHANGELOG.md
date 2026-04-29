@@ -13,6 +13,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ### Changed
 
 * Replaced `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `HIPCUB_PRAGMA_UNROLL_FULL()` and `HIPCUB_PRAGMA_NOUNROLL()`.
+* Replaced `_CCCL_SORT_MAYBE_UNROLL()` by `HIPCUB_SORT_MAYBE_UNROLL()`.
 
 ## hipCUB-5.0.0 for ROCm 10.0.0
 
