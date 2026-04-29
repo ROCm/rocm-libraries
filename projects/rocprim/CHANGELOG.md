@@ -7,6 +7,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Added
 
 * Added support for large number of segments and large number of items to `rocprim::device_segmented_radix_sort`.
+* Added fixed-size-segments variant for `rocprim::device_segmented_reduce`.
 
 ## rocPRIM 5.0.0 for ROCm 10.0.0
 
