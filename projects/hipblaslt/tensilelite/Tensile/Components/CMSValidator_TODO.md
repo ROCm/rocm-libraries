@@ -145,3 +145,74 @@ and does not verify NGL/NLL behavior under each codepath. It should:
 - Optionally, flag schedules where code-path 1+ would produce a *different*
   (and possibly better) NGL/NLL body if hardware were available to dispatch
   them — these are missed-optimization opportunities, not correctness bugs.
+
+## Phase 7 — Dataflow graph comparison & typed Failures (in progress)
+
+**Landed (Stack 2 graph machinery, all unit-tested with TDD):**
+
+- Typed `Failure` hierarchy with polymorphic `format(capture)` —
+  12 user-facing subclasses + 10 named `Capture*Error` exceptions.
+  `ScheduleCapture.py`. Pinning tests in `test_failure_formatters.py`.
+- Unified 4-body `DataflowGraph` (single graph, cross-body edges
+  represented natively) with `GraphNode` / `DataflowEdge` /
+  `GraphPosition`. `BODY_LABEL_TO_LOOP_INDEX` maps body labels to
+  `loop_index` so cross-body order is well-defined.
+- `build_dataflow_graph(four_part_capture)` with FIFO drain semantics
+  for `raw_intrawave` edges and SBarrier collectors for the two
+  LDS-reuse patterns (`lr_to_gr_lds_reuse`, `gr_to_lr_lds_reuse`).
+- `compare_graphs` + `diagnose_missing_edge` per the phased classifier:
+  Phase 0 missing-node guard (raise, not assert), Phase 1
+  OrderInverted (same-body only), Phase 2 mutually-exclusive Wait
+  failures + role-aware MissingBarrier with double-report suppression.
+- `LoopBodyCaptureBuilder.finalize()` capture-pipeline guards:
+  `CaptureWiringError` / `CaptureSMEMError` / `CaptureFlatError` /
+  `CaptureStoreError` (all `raise`, not `assert` — survive `python -O`).
+- `assert_idmap_completeness(idmap, capture)` — pure function; checks
+  per-category instruction counts; excludes SYNC/SNOP (CMS adds these
+  freely).
+- Test infrastructure: `dataflow_fixtures.py` synthetic builders
+  (`make_lr`, `make_lw`, `make_gr`, `make_mfma`, `make_swait`,
+  `make_sbarrier`, `make_capture`) bypass production
+  category-resolution so unit tests exercise the units in isolation.
+
+**Test counts:**
+- `test_failure_formatters.py` — 36 tests (formatter wording pinning).
+- `test_dataflow_graph_builder.py` — 18 tests (SWait FIFO semantics,
+  cross-body queue persistence, structural).
+- `test_dataflow_graph_barriers.py` — 9 tests (LR0→GR and GR→LR1
+  patterns, strict-ordering invariant, cross-iteration DTL+LdsBuf).
+- `test_dataflow_graph_comparison.py` — 11 tests (per-Failure-class
+  diagnosis, identity coverage, double-report suppression).
+- `test_capture_pipeline_checks.py` — 12 tests (finalize guards,
+  idMap completeness).
+
+**Remaining work (Stack 1 + Stack 2.10–13):**
+
+- **Stack 1 — linter refactor.** All `validate()` and `verify_*` rule
+  methods still return `Optional[str]`. The typed `Failure` classes
+  exist but are not yet emitted by detection sites. Migration plan:
+  one rule at a time, in the order Barrier → SWait → MFMA →
+  verify_swaitcnt_counters → verify_ascending_order → verify_scc_overlap
+  → Pack → MiddlePack → CVT0/CVT1 → LocalRead → GlobalRead. Each rule's
+  conversion migrates its test file's `expected_message` text-equality
+  assertions to `isinstance(...)` + field assertions. ABCs
+  (`ValidationRule.run`, `StructuralRule.run`) update last; `isValid`
+  formats Failures only at the print/raise boundary.
+- **Stack 2.10–13 — production wiring.**
+  - Activate `_captureDefaultSchedule` automatically when CMS is in
+    use (production-default for CMS kernels).
+  - Wire validation pipeline in `customMainLoopSchedule` with
+    `try/finally` cleanup; consolidate Phase-5 attributes onto a
+    single `CaptureContext` dataclass.
+  - Replace `compare_captures` (the data-movement-totals comparison
+    at `CMSValidator.py:3434-3438`) with `compare_graphs`. Per-edge
+    equality subsumes totals.
+  - Integration tests on real CMS YAMLs
+    (`custom_mainloop_scheduling.yaml`,
+    `custom_mainloop_scheduling_tf32.yaml`).
+- **Pre-existing test failures noted during Stack 2 work:**
+  `TestPhase5DefaultTailCapture::test_n_gl_n_ll_state_resets_after_kernel`
+  and `test_no_false_positive_on_clean_cms_kernel` — both flag
+  `compare_captures` data-movement count mismatches (`default=17 vs
+  cms=16`). Replacing `compare_captures` with `compare_graphs` should
+  resolve or refine these as per-edge Failures.
