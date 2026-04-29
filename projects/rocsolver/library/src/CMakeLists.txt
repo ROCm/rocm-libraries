@@ -64,6 +64,13 @@ set(rocsolver_lapack_source
   lapack/roclapack_posv.cpp
   lapack/roclapack_posv_batched.cpp
   lapack/roclapack_posv_strided_batched.cpp
+  #- symmetric indefinite matrices
+  lapack/roclapack_sytrs.cpp
+  lapack/roclapack_sytrs_batched.cpp
+  lapack/roclapack_sytrs_strided_batched.cpp
+  lapack/roclapack_sytrs2.cpp
+  lapack/roclapack_sytrs2_batched.cpp
+  lapack/roclapack_sytrs2_strided_batched.cpp
   #- block-tridiagonal systems
   lapack/roclapack_geblttrs_npvt.cpp
   lapack/roclapack_geblttrs_npvt_batched.cpp
