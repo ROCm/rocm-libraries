@@ -11,6 +11,7 @@
 
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
+#include "TestWorkarounds.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
 
 using namespace miopen_plugin;
@@ -24,6 +25,7 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        SKIP_IF_WORKAROUND_ISSUE_5409();
         _handle = std::make_unique<HipdnnMiopenHandle>();
     }
 

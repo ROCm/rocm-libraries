@@ -14,6 +14,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
+#include "../TestWorkarounds.hpp"
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
@@ -465,6 +466,7 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
+        SKIP_IF_WORKAROUND_ISSUE_5409();
 
         const auto& [convTestCase, doBias, activTestCase]
             = DeterministicTestBase<FusedConvTestCase>::GetParam();

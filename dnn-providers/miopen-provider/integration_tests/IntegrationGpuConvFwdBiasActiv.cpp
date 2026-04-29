@@ -4,6 +4,7 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "../TestWorkarounds.hpp"
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
@@ -28,6 +29,7 @@ protected:
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
+        SKIP_IF_WORKAROUND_ISSUE_5409();
 
         const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
 
