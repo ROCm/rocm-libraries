@@ -214,6 +214,7 @@ endif()
 set(CK_UNSUPPORTED_GPU_TARGETS "gfx900;gfx906;gfx90c;gfx1010;gfx1011;gfx1012")
 
 #Filter out any targets currently on the unsupported list:
+message(STATUS "Filtering out unsupported targets: ${CK_UNSUPPORTED_GPU_TARGETS}")
 list(REMOVE_ITEM GPU_TARGETS ${CK_UNSUPPORTED_GPU_TARGETS})
 list(REMOVE_ITEM GPU_ARCHS ${CK_UNSUPPORTED_GPU_TARGETS})
 
