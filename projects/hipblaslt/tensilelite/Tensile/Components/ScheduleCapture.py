@@ -982,12 +982,14 @@ def _inst_buffer_offset(inst):
 
 def _inst_mfma_acc(inst):
     """Return MFMA accumulator/c_dst register. Synthetic uses 'c_dst';
-    real rocisa MFMA has 'acc' as a named attr OR as constructor param 4."""
+    real rocisa MFMA's getParams() returns [acc, a, b, acc_or_d, comment]
+    — acc is at index 0, NOT 4 (the param-list contains the input/output
+    registers, not the full constructor args)."""
     for attr in ("c_dst", "acc"):
         v = getattr(inst, attr, None)
         if v is not None:
             return v
-    return _get_param(inst, 4)
+    return _get_param(inst, 0)
 
 
 def _inst_mfma_a(inst):
@@ -995,7 +997,7 @@ def _inst_mfma_a(inst):
         v = getattr(inst, attr, None)
         if v is not None:
             return v
-    return _get_param(inst, 5)
+    return _get_param(inst, 1)
 
 
 def _inst_mfma_b(inst):
@@ -1003,7 +1005,7 @@ def _inst_mfma_b(inst):
         v = getattr(inst, attr, None)
         if v is not None:
             return v
-    return _get_param(inst, 6)
+    return _get_param(inst, 2)
 
 
 def _inst_dsstore_src(inst):
