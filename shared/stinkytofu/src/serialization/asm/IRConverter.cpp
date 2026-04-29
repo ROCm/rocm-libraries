@@ -54,12 +54,10 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
 
     if (inst->opcodeStr == "asm_directive") {
         AsmDirective* d = irBuilder.createIR<AsmDirective>();
-        const bool hasName =
-            !inst->srcRegs.empty() &&
-            inst->srcRegs[0].dataType == StinkyRegister::Type::LiteralString;
-        const bool hasPayload =
-            inst->srcRegs.size() > 1 &&
-            inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString;
+        const bool hasName = !inst->srcRegs.empty() &&
+                             inst->srcRegs[0].dataType == StinkyRegister::Type::LiteralString;
+        const bool hasPayload = inst->srcRegs.size() > 1 &&
+                                inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString;
 
         // RawAsmParser::makeTextBlock encodes pass-through text as
         //   srcRegs[0] = "TEXTBLOCK", srcRegs[1] = raw text (with trailing '\n').
@@ -116,8 +114,7 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
         ModifierSerializer::deserialize(stinkyInst, inst->modifiers);
     }
 
-    if (!inst->comment.empty())
-        stinkyInst->addModifier<CommentData>(CommentData{inst->comment});
+    if (!inst->comment.empty()) stinkyInst->addModifier<CommentData>(CommentData{inst->comment});
 }
 
 StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string& irText,

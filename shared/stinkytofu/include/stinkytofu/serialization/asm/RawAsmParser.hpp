@@ -87,8 +87,8 @@ struct RawAsmParserOptions {
 /// @param arch     Target architecture for instruction lookup.
 /// @param options  Parser options (see RawAsmParserOptions).
 /// @return         RawAsmParseResult with parsed function and any diagnostics.
-STINKYTOFU_EXPORT RawAsmParseResult parseRawAsmString(
-    const std::string& asmText, GfxArchID arch,
-    const RawAsmParserOptions& options = RawAsmParserOptions());
+STINKYTOFU_EXPORT RawAsmParseResult
+parseRawAsmString(const std::string& asmText, GfxArchID arch,
+                  const RawAsmParserOptions& options = RawAsmParserOptions());
 
 }  // namespace stinkytofu
