@@ -121,6 +121,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue,
                                  {TensorValue::Int32Value, "Int32Value"},
                                  {TensorValue::Int64Value, "Int64Value"},
                                  {TensorValue::Float64Value, "Float64Value"},
+                                 {TensorValue::BoolValue, "BoolValue"},
                              }
 
 )
