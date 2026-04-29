@@ -147,6 +147,9 @@ set(PROFILER_EXECUTABLE ckProfiler)
 
 add_executable(${PROFILER_EXECUTABLE} ${PROFILER_SOURCES})
 target_compile_options(${PROFILER_EXECUTABLE} PRIVATE -Wno-global-constructors)
+if(DISABLE_IMPLICIT_GEMM_INSTANCES)
+  target_compile_definitions(${PROFILER_EXECUTABLE} PRIVATE DISABLE_IMPLICIT_GEMM_INSTANCES)
+endif()
 # flags to compress the library
 if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
   message(DEBUG "Adding --offload-compress flag for ${PROFILER_EXECUTABLE}")

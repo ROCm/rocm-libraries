@@ -12,7 +12,7 @@ For the original README, see [`projects/miopen/src/hipconv/README.md`](../../../
 - **Layout**: NHWC input, KYXC weights, NHWK output
 - **Direction**: Fprop (Forward), Dgrad (Backward Data)
 - **Filter**: 3x3, stride 1, dilation 1
-- **Group size**: 4 channels per group
+- **Group size**: 4 or 16 channels per group
 - **Constraint**: input channels == output channels (`c == k`)
 
 The kernel uses MFMA 4x4x4 batch-16 instructions with buffer-load-to-LDS for input staging.
@@ -62,3 +62,22 @@ We want to port the `grouped_4c_fp16_hip_conv_impl.hpp` from pure HIP to use the
 - TileDistribution - `projects/composablekernel/include/ck_tile/core/tensor/tile_distribution.hpp` (mapping between tensor coordinates and data based on TileDistribution encoding).
 - TileWindow - `projects/composablekernel/include/ck_tile/core/tensor/tile_window.hpp` (abstaraction of data load/store using tile distribution).
 - StaticDistributedTensor - `projects/composablekernel/include/ck_tile/core/tensor/static_distributed_tensor.hpp` (thread local data container defined by the TileDistribution). 
+
+## Building
+
+The CK Tile direct convolutions are integrated to the CK Profiler and they are included in the profiling runs. This requires that the CMake flag `D CK_EXPERIMENTAL_BUILDER=ON` is defined. 
+Additionally, it is possible to disable the implicit-GEMM instances from the CK Profiler build 
+by defining an additional CMake flag `-D DISABLE_IMPLICIT_GEMM_INSTANCES` (building the implciti-GEMM instance might take a long time). All in all, if the focus in on the direct convolutions, one can run the followinf CMake configure step
+
+```
+cmake                                                                                             \
+  -D CMAKE_PREFIX_PATH=/opt/rocm                                                                  \
+  -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc                                                       \
+  -D CMAKE_BUILD_TYPE=Release                                                                     \
+  -D GPU_TARGETS="gfx950"                                                                         \
+  -D CK_EXPERIMENTAL_BUILDER=ON                                                                   \
+  -D CMAKE_CXX_STANDARD=20                                                                        \
+  -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                              \
+  -G Ninja                                                                                        \
+  ..
+```
