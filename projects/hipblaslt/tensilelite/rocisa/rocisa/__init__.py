@@ -33,12 +33,13 @@ if _bi is not None:
     # stinkytofu sources too. STINKYTOFU_SOURCE_ROOT is removed once rocisa
     # and stinkytofu are loaded independently.
     _roots = [Path(_bi.SOURCE_ROOT), Path(_bi.STINKYTOFU_SOURCE_ROOT)]
+    _build_dir = Path(_bi.BUILD_DIR).resolve()
     _stale = [
         str(p)
         for _root in _roots
-        for _pattern in ("*.[ch]pp", "*.h")
+        for _pattern in ("*.[ch]pp", "*.h", "*.def")
         for p in _root.rglob(_pattern)
-        if p.stat().st_mtime > _so_mtime
+        if p.stat().st_mtime > _so_mtime and not p.resolve().is_relative_to(_build_dir)
     ]
     if _stale:
         _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
@@ -47,4 +48,4 @@ if _bi is not None:
             f"  Modified: {', '.join(_preview)}\n"
             "  Rebuild:  cmake --build <build_dir> --target _rocisa"
         )
-    del _bi, _so, _so_mtime, _stale, _roots, Path
+    del _bi, _so, _so_mtime, _stale, _roots, _build_dir, Path

@@ -5,3 +5,4 @@
 # Presence of this file indicates a source build (vs a pre-built package).
 SOURCE_ROOT = "@CMAKE_CURRENT_SOURCE_DIR@/rocisa"
 STINKYTOFU_SOURCE_ROOT = "@STINKYTOFU_DIR@"
+BUILD_DIR = "@CMAKE_CURRENT_BINARY_DIR@"

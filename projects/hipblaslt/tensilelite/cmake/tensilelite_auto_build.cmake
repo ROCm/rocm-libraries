@@ -36,8 +36,8 @@ if(DEFINED DEVELOP_MODE)
             set(SCRIPT_NAME ${BIN}.sh)
             file(WRITE "${PROJECT_BINARY_DIR}/${SCRIPT_NAME}"
                  "#!/bin/bash\n"
-                 "echo 'DEPRECATED: ${BIN}.sh will be removed in a future release.' >&2\n"
-                 "echo 'Run directly: ${TENSILE_BIN_ROOT}/${BIN} \"$@\"' >&2\n"
+                 "echo \"DEPRECATED: ${BIN}.sh will be removed in a future release.\" >&2\n"
+                 "echo \"Run directly: ${TENSILE_BIN_ROOT}/${BIN} $@\" >&2\n"
                  "set -euo pipefail\n"
                  "${CMAKE_BUILD_COMMAND}\n"
                  "if [[ \"$\{DEBUGPY_ENABLE:-\}\" == \"1\" ]]; then\n"

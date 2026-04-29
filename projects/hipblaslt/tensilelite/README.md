@@ -154,6 +154,9 @@ Example:
 
 The script will be created in the build folder and will be named in Tensile.bat or Tensile.sh depending on the platform. Then you can then run the script under the ``tensile-out`` folder as usual:
 
+> **Deprecated:** `Tensile.sh` / `Tensile.bat` will be removed in a future release.
+> Run `Tensile/bin/Tensile` directly instead.
+
 ```
 Tensile.sh <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
 ```
