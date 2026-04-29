@@ -350,7 +350,7 @@ Tests:
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
   hardware: [gfx1103]
-  tolm: 100
+  tolm: 5
   filename: [bmwcra_1]
 
 - name: sptrsm_coo_file
