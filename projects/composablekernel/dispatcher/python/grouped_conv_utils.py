@@ -38,7 +38,9 @@ import ctypes
 import json
 import copy
 import subprocess
+import threading
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -1612,18 +1614,28 @@ class GroupedConvCodegenRunner:
 
         generated_headers: List[Optional[Path]] = [None] * len(configs)
 
-        # CRITICAL FIX: ALWAYS run serially to avoid ANY ProcessPoolExecutor usage
-        # ProcessPoolExecutor + GPU causes fork() issues even after executor is closed
-        # Serial codegen in main process (no fork, no GPU context issues)
-        for idx, job in enumerate(gen_jobs):
-            ok, header_path, err = _run_conv_codegen_subprocess(job)
-            if ok and header_path:
-                generated_headers[idx] = Path(header_path)
-                if verbose:
-                    print(f"  OK [{idx}] codegen: {Path(header_path).name}")
-            else:
-                if verbose:
-                    print(f"  FAIL [{idx}] codegen: {err}")
+        # Phase 1 codegen: each worker just calls subprocess.run() to invoke the
+        # codegen script. The wait releases the GIL, so threads give true parallelism
+        # without the fork-after-HIP risk of ProcessPoolExecutor.
+        print_lock = threading.Lock()
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
+            futures = {
+                ex.submit(_run_conv_codegen_subprocess, job): idx
+                for idx, job in enumerate(gen_jobs)
+            }
+            for fut in as_completed(futures):
+                idx = futures[fut]
+                ok, header_path, err = fut.result()
+                if ok and header_path:
+                    generated_headers[idx] = Path(header_path)
+                    if verbose:
+                        with print_lock:
+                            print(f"  OK [{idx}] codegen: {Path(header_path).name}")
+                else:
+                    if verbose:
+                        with print_lock:
+                            print(f"  FAIL [{idx}] codegen: {err}")
 
         if verbose:
             compile_count = sum(1 for h in generated_headers if h is not None)
@@ -1704,28 +1716,35 @@ class GroupedConvCodegenRunner:
 
         results_map: Dict[int, Optional[Path]] = {i: None for i in range(len(configs))}
 
-        # CRITICAL FIX: ALWAYS compile serially to avoid ANY ProcessPoolExecutor usage
-        # ProcessPoolExecutor + GPU causes fork() issues even after executor is closed
-        # Serial compilation in main process (no fork, no GPU context issues)
-        for j, job in enumerate(compile_jobs):
-            idx = compile_to_input_index[j]
-            success, lib_path, err = _run_hipcc_subprocess(job)
-            if success and lib_path:
-                results_map[idx] = Path(lib_path)
-            if verbose:
-                name = (
-                    Path(lib_path).name
-                    if success and lib_path
-                    else compile_jobs[j]["config_name"]
-                )
-                if success:
-                    print(f"  OK {name}")
-                else:
-                    # Print the full multi-line error indented for readability
-                    # so users don't have to monkey-patch to see real compile output.
-                    print(f"  FAIL {name}")
-                    for line in (err or "").splitlines() or [""]:
-                        print(f"    {line}")
+        # Phase 1 compile: workers shell out to hipcc, releasing the GIL while
+        # waiting. Threads give true parallelism here; ProcessPool would risk
+        # fork() corrupting any HIP state the parent might have loaded.
+        with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
+            futures = {
+                ex.submit(_run_hipcc_subprocess, job): j
+                for j, job in enumerate(compile_jobs)
+            }
+            for fut in as_completed(futures):
+                j = futures[fut]
+                idx = compile_to_input_index[j]
+                success, lib_path, err = fut.result()
+                if success and lib_path:
+                    results_map[idx] = Path(lib_path)
+                if verbose:
+                    name = (
+                        Path(lib_path).name
+                        if success and lib_path
+                        else compile_jobs[j]["config_name"]
+                    )
+                    with print_lock:
+                        if success:
+                            print(f"  OK {name}")
+                        else:
+                            # Print the full multi-line error indented for readability
+                            # so users don't have to monkey-patch to see real compile output.
+                            print(f"  FAIL {name}")
+                            for line in (err or "").splitlines() or [""]:
+                                print(f"    {line}")
 
         return [results_map.get(i) for i in range(len(configs))]
 
@@ -1816,11 +1835,10 @@ def setup_multiple_grouped_conv_dispatchers(
       2. Trust the (possibly auto-corrected) config as-is. Knobs such as scheduler,
          num_groups_to_merge, double_smem_buffer, split_image, two_stage are preserved
          exactly as requested -- no remap to a hardcoded "default" set.
-      3. Serial codegen + serial compile (avoids fork/GPU context issues).
+      3. Threaded codegen + threaded compile (workers shell out via subprocess,
+         which releases the GIL; threads avoid the fork-after-HIP risk that
+         ProcessPoolExecutor would have).
       4. Return paths (NOT loaded libraries).
-
-    Note: max_workers parameter is accepted for API compatibility but codegen/compile
-    runs serially to avoid ProcessPoolExecutor + GPU fork() issues.
 
     Returns:
         List of paths to compiled .so files (or None for failed configs)
