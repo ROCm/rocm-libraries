@@ -25,13 +25,12 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
- #pragma once
+#pragma once
 
- #include "lapack/roclapack_gelqf.hpp"
- #include "lapack/roclapack_geqrf.hpp"
- #include "rocblas.hpp"
- #include "rocsolver/rocsolver.h"
- #include "laset.hpp"
+#include "lapack/roclapack_geqrf.hpp"
+#include "rocblas.hpp"
+#include "rocsolver/rocsolver.h"
+#include "laset.hpp"
 
 #include "print_matrix.hpp"
 
