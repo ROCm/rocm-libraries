@@ -226,7 +226,7 @@ try
         return HIPSOLVER_STATUS_INVALID_ENUM;
     if(jobvr != HIPSOLVER_EIG_MODE_NOVECTOR && jobvr != HIPSOLVER_EIG_MODE_VECTOR)
         return HIPSOLVER_STATUS_INVALID_ENUM;
-    if(n < 0 || lda < n)
+    if(n < 0 || lda < std::max<int64_t>(1, n))
         return HIPSOLVER_STATUS_INVALID_VALUE;
     if(ldvl < (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n))
         return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -365,7 +365,7 @@ try
         return HIPSOLVER_STATUS_INVALID_ENUM;
     if(jobvr != HIPSOLVER_EIG_MODE_NOVECTOR && jobvr != HIPSOLVER_EIG_MODE_VECTOR)
         return HIPSOLVER_STATUS_INVALID_ENUM;
-    if(n < 0 || lda < n)
+    if(n < 0 || lda < std::max<int64_t>(1, n))
         return HIPSOLVER_STATUS_INVALID_VALUE;
     if(ldvl < (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 1 : n))
         return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -382,11 +382,11 @@ try
     if(jobvl == HIPSOLVER_EIG_MODE_VECTOR)
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
 
-    if(lda * n > INT_MAX)
+    if(n != 0 && lda > INT_MAX / n)
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
-    if(ldvl * n > INT_MAX)
+    if(n != 0 && ldvl > INT_MAX / n)
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
-    if(ldvr * n > INT_MAX)
+    if(n != 0 && ldvr > INT_MAX / n)
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     // ----- GET HOST ARRAY SIZES -----

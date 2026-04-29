@@ -114,11 +114,8 @@ inline void cpu_geev(char                    jobvl,
     // check for Infs and NaNs
     for(int j = 0; j < n; j++)
         for(int i = 0; i < n; i++)
-            if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
+            if(!std::isfinite(A[i + j * lda]))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
-
-    // void cast unused variable
-    (void)rwork;
 
     sgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
@@ -141,7 +138,7 @@ inline void cpu_geev(char                     jobvl,
     // check for Infs and NaNs
     for(int j = 0; j < n; j++)
         for(int i = 0; i < n; i++)
-            if(std::isinf(A[i + j * lda]) || std::isnan(A[i + j * lda]))
+            if(!std::isfinite(A[i + j * lda]))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
 
     dgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
@@ -169,9 +166,9 @@ inline void cpu_geev(char             jobvl,
         {
             float re = hipCrealf(A[i + j * lda]);
             float im = hipCimagf(A[i + j * lda]);
-            if(std::isinf(re) || std::isnan(re))
+            if(!std::isfinite(re))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
-            if(std::isinf(im) || std::isnan(im))
+            if(!std::isfinite(im))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
         }
     }
@@ -201,9 +198,9 @@ inline void cpu_geev(char              jobvl,
         {
             double re = hipCreal(A[i + j * lda]);
             double im = hipCimag(A[i + j * lda]);
-            if(std::isinf(re) || std::isnan(re))
+            if(!std::isfinite(re))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
-            if(std::isinf(im) || std::isnan(im))
+            if(!std::isfinite(im))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
         }
     }
