@@ -21,7 +21,6 @@ jobs:
   therock-build-windows:
     name: Build (${{ inputs.amdgpu_families }})
     runs-on: azure-windows-scale-rocm
-    if: false  # Temporarily skip build to test notification
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
@@ -174,7 +173,7 @@ jobs:
 
   therock-test-windows:
     name: Test (${{ inputs.amdgpu_families }})
-    # needs: [therock-build-windows]
+    needs: [therock-build-windows]
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}

@@ -21,8 +21,6 @@ permissions:
 
 jobs:
   test_component:
-    # TODO: Remove this condition - temporary for Windows testing only
-    if: ${{ inputs.platform == 'linux' }}
     name: 'Test ${{ fromJSON(inputs.component).job_name }} (shard ${{ matrix.shard }} of ${{ fromJSON(inputs.component).total_shards }})'
     runs-on: ${{ inputs.test_runs_on }}
     timeout-minutes: 210
@@ -107,12 +105,6 @@ jobs:
         timeout-minutes: 3
         run: |
           python ./build_tools/print_driver_gpu_info.py
-
-      - name: Test early failure for Teams notification
-        if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') }}
-        run: |
-          echo "This step intentionally fails to test Teams notification"
-          exit 1
 
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
