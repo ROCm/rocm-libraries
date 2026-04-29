@@ -186,18 +186,46 @@ and does not verify NGL/NLL behavior under each codepath. It should:
 - `test_capture_pipeline_checks.py` — 12 tests (finalize guards,
   idMap completeness).
 
-**Remaining work (Stack 1 + Stack 2.10–13):**
+**Remaining work (Stack 1.3 finish + Stack 2.10–13):**
 
-- **Stack 1 — linter refactor.** All `validate()` and `verify_*` rule
-  methods still return `Optional[str]`. The typed `Failure` classes
-  exist but are not yet emitted by detection sites. Migration plan:
-  one rule at a time, in the order Barrier → SWait → MFMA →
-  verify_swaitcnt_counters → verify_ascending_order → verify_scc_overlap
-  → Pack → MiddlePack → CVT0/CVT1 → LocalRead → GlobalRead. Each rule's
-  conversion migrates its test file's `expected_message` text-equality
-  assertions to `isinstance(...)` + field assertions. ABCs
-  (`ValidationRule.run`, `StructuralRule.run`) update last; `isValid`
-  formats Failures only at the print/raise boundary.
+- **Stack 1 — linter refactor (partial).**
+  Migrated to typed `Failure` emission:
+  - `SWait.validate()` -> `InvalidCounterValueFailure`
+  - `verify_ascending_order()` -> `OutOfOrderSequenceFailure(kind='sequence')`
+  - `verify_scc_overlap.verifyIndices()` -> `SCCConflictFailure`
+  - `verify_swaitcnt_counters()` -> `SWaitCountExceedsOutstandingFailure`
+  - `ValidationRule.run` / `StructuralRule.run` ABCs now accept
+    `Optional[Failure]` in their docstring contract; `isValid` boundary
+    helper `_failure_to_string` normalizes either return shape.
+
+  Still on `Optional[str]`: `LocalRead.validate()`,
+  `GlobalRead._validate_must_start_after()`,
+  `GlobalRead._validate_needed_by()`, `Pack.validate()`,
+  `MiddlePack.validate()`, the CVT0/CVT1 ordering assertion, and the
+  Pack-count rocisa-wiring assertion.
+
+  These rules emit highly contextual error strings (e.g.
+  `"PackA0 @ idx=2 issued too early, must be issued after idx=3
+   (because of LRA0 issued @ idx=0)."`) that ~30 test sites assert on
+  exactly. Full migration requires:
+    1. Adding richer fields to `OrderInvertedFailure` /
+       `WaitTooLateFailure` / `MissingBarrierFailure` (constraint
+       instruction reference, done_idx, name) so the canonical
+       formatter can produce the same level of detail.
+    2. Updating ~30 `self.validate(..., expected_message=...)` call
+       sites in `test_ValidatePack.py`,
+       `test_ValidateLRsCompleteBeforeVMFMA.py`,
+       `test_ValidateGRsCompleteBeforeLr1s.py`,
+       `test_ValidateGRsCompleteBeforeLr3s.py`,
+       `test_LR_Pack_interaction.py` to use `isinstance(failure, X)` +
+       field assertions instead of text-equality.
+    3. Promoting `assert cvt0[-1].issue_index < cvt1[0].issue_index`
+       (CMSValidator.py:1642) to emit
+       `OutOfOrderSequenceFailure(kind='cvt_pair')`.
+    4. Promoting Pack-count rocisa-wiring assert (CMSValidator.py:2270-2277)
+       to `raise CaptureWiringError`.
+
+  Best done in a single focused PR per rule.
 - **Stack 2.10–13 — production wiring.**
   - Activate `_captureDefaultSchedule` automatically when CMS is in
     use (production-default for CMS kernels).
