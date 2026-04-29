@@ -5758,6 +5758,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
                                            signature=fs,
                                            options=stinky_module_options)
+      print2(f"StinkyTofu origin results: EstimateAsmCycles={stModule.getAsmMathClock()}")
       t1a_end = time.perf_counter()
       print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
 
@@ -5766,7 +5767,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       t1b_start = time.perf_counter()
       stModule.runOptimizationPipeline()
       t1b_end = time.perf_counter()
+      passOutputAfter = stModule.getPassResults()
+      kernel["MathClocksUnrolledLoop"] = int(passOutputAfter.get("EstimateAsmCycles", 0))
       print2(f"StinkyTofu (1b) pipeline: {t1b_end - t1b_start:.4f}s")
+      print2(f"StinkyTofu pass results: EstimateAsmCycles={kernel["MathClocksUnrolledLoop"]}")
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")

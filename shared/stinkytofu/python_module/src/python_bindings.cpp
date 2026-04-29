@@ -59,7 +59,19 @@ NB_MODULE(_stinkytofu, m) {
         .def("emitAssembly", &StinkyAsmModule::emitAssembly,
              "Emit the assembly code for all instructions in this module")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
-             "Run the optimization pipeline on this module");
+             "Run the optimization pipeline on this module")
+        .def("getAsmMathClock", &StinkyAsmModule::getAsmMathClock,
+             "Run EstimateAsmCycles pass and return asm math clock")
+        .def(
+            "getPassResults",
+            [](const StinkyAsmModule& module) {
+                nb::dict out;
+                for (const auto& [key, value] : module.getPassResults()) {
+                    std::visit([&](const auto& typedValue) { out[key.c_str()] = typedValue; }, value);
+                }
+                return out;
+            },
+            "Get pass results from the most recent optimization run");
 
     // ========================================================================
     // Register Types

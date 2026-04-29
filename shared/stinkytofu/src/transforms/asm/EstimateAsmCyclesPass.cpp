@@ -228,7 +228,7 @@ namespace
                 // if(bb.getLabel() == "LocalReadDoA_I0" || bb.getLabel() == "LocalReadDoB_I0")
                 // {
                 //     calculateLocalReadBytes(bb, passCtx);
-                    
+
                 // }
                 // else if(bb.getLabel() == "LocalRead")
                 // {
@@ -240,7 +240,7 @@ namespace
                 // }
                 calculateMathClocksInUnrolledLoop(bb, passCtx);
             }
-            std::cout << "[EstimateAsmCycles] Total Asm Cycles: " << totalCycles_ << "\n";
+            // std::cout << "[EstimateAsmCycles] Total Asm Cycles: " << totalCycles_ << "\n";
 
             // Store result in PassContext so callers can retrieve it
             // without needing a raw pointer to this pass instance.
@@ -943,7 +943,7 @@ namespace
                 }
                 // Accumulate issue cycles from each instruction
                 //totalCycles += estimateInstructionCycles(inst, passCtx);
-                
+
                 // Update total cycles
                 if (!isLabel(*inst)) {
                     //inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));

@@ -22,11 +22,44 @@
  * ************************************************************************ */
 #include "stinkytofu/pipeline/Backend.hpp"
 
+#include <any>
+#include <optional>
+
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace stinkytofu {
+namespace {
+std::optional<StinkyAsmModule::PassResultValue> toPassResultValue(const std::any& value) {
+    if (const auto* v = std::any_cast<uint32_t>(&value)) {
+        return static_cast<uint64_t>(*v);
+    }
+    if (const auto* v = std::any_cast<uint64_t>(&value)) {
+        return *v;
+    }
+    if (const auto* v = std::any_cast<int32_t>(&value)) {
+        return static_cast<int64_t>(*v);
+    }
+    if (const auto* v = std::any_cast<int64_t>(&value)) {
+        return *v;
+    }
+    if (const auto* v = std::any_cast<double>(&value)) {
+        return *v;
+    }
+    if (const auto* v = std::any_cast<float>(&value)) {
+        return static_cast<double>(*v);
+    }
+    if (const auto* v = std::any_cast<bool>(&value)) {
+        return *v;
+    }
+    if (const auto* v = std::any_cast<std::string>(&value)) {
+        return *v;
+    }
+    return std::nullopt;
+}
+}  // namespace
+
 Backend::Backend(StinkyAsmModule& module) : module(module) {}
 
 std::array<int, 3> Backend::getArch() const {
@@ -35,13 +68,28 @@ std::array<int, 3> Backend::getArch() const {
 
 bool Backend::runOptimization() {
     auto* pipeline = BackendRegistry::getArchPipeline(module.getArch());
-    if (!pipeline || !pipeline->builder) return true;
+    if (!pipeline || !pipeline->builder) {
+        module.setPassResults({});
+        return true;
+    }
 
     PassManager pm;
-    if (!pipeline->builder(pm, module)) return true;
+    if (!pipeline->builder(pm, module)) {
+        module.setPassResults({});
+        return true;
+    }
 
     configurePassManager(pm);
     pm.run(module.getFunction());
+
+    StinkyAsmModule::PassResults passResults;
+    for (const auto& [key, value] : pm.getPassContext().getAllResults()) {
+        if (auto convertedValue = toPassResultValue(value)) {
+            passResults.emplace(key, std::move(*convertedValue));
+        }
+    }
+    module.setPassResults(std::move(passResults));
+
     return true;
 }
 

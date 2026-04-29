@@ -22,9 +22,12 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
@@ -94,6 +97,9 @@ namespace stinkytofu {
  */
 class STINKYTOFU_EXPORT StinkyAsmModule {
    public:
+    using PassResultValue = std::variant<int64_t, uint64_t, double, bool, std::string>;
+    using PassResults = std::unordered_map<std::string, PassResultValue>;
+
     /**
      * @brief Options for the StinkyAsmModule
      * @note This struct is used to store the information for the StinkyAsmModule
@@ -148,6 +154,12 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      * @brief Run optimization pipeline on the module
      */
     void runOptimizationPipeline();
+
+    /// Run a lightweight pass pipeline and return estimated asm math clock cycles.
+    uint32_t getAsmMathClock();
+
+    /// Retrieve pass results captured from the most recent optimization run.
+    const PassResults& getPassResults() const;
 
     /**
      * @brief Get the underlying Function
@@ -210,6 +222,9 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      * @param moduleOptions ModuleOptions
      */
     void setModuleOptions(const ModuleOptions& moduleOptions);
+
+    /// Internal: update cached pass results for Python/readback APIs.
+    void setPassResults(PassResults passResults);
 
    private:
     struct Impl;

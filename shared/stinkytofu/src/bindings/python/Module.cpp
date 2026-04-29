@@ -25,10 +25,12 @@
 #include <sstream>
 #include <unordered_map>
 
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -60,6 +62,7 @@ struct StinkyAsmModule::Impl {
 
     // This map maintains the defined group names and the range of instructions for each group.
     std::unordered_map<std::string, InstructionGroupRange> instructionGroups;
+    PassResults passResults;
 
     Function function;
 
@@ -115,6 +118,38 @@ std::string StinkyAsmModule::emitAssembly() const {
 void StinkyAsmModule::runOptimizationPipeline() {
     Backend backend(*this);
     backend.runOptimization();
+}
+
+uint32_t StinkyAsmModule::getAsmMathClock() {
+    PassManager pm;
+
+    const auto& opts = getModuleOptions();
+    GemmTileConfig gemmTileConfig;
+    gemmTileConfig.arch = getArch();
+    gemmTileConfig.TileA0 = opts.TileA0;
+    gemmTileConfig.TileB0 = opts.TileB0;
+    gemmTileConfig.TileM0 = opts.TileM0;
+    gemmTileConfig.NumGRA = opts.NumGRA;
+    gemmTileConfig.NumGRB = opts.NumGRB;
+    gemmTileConfig.NumGRM = opts.NumGRM;
+    gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
+    pm.setGemmTileConfig(gemmTileConfig);
+
+    AsmCapsConfig asmCapsConfig;
+    asmCapsConfig.hasVgprMsb16 = opts.HasVgprMSB16;
+    pm.setAsmCapsConfig(asmCapsConfig);
+
+    pm.addPass(createEstimateAsmCyclesPass());
+    pm.run(getFunction());
+
+    const uint32_t cycles =
+        pm.getPassContext().getResult<uint32_t>(kEstimateAsmCyclesKey).value_or(0);
+    pImpl->passResults[kEstimateAsmCyclesKey] = static_cast<uint64_t>(cycles);
+    return cycles;
+}
+
+const StinkyAsmModule::PassResults& StinkyAsmModule::getPassResults() const {
+    return pImpl->passResults;
 }
 
 void StinkyAsmModule::addGroup(const std::string& name) {
@@ -178,6 +213,10 @@ const StinkyAsmModule::ModuleOptions& StinkyAsmModule::getModuleOptions() const 
 
 void StinkyAsmModule::setModuleOptions(const ModuleOptions& moduleOptions) {
     this->moduleOptions = moduleOptions;
+}
+
+void StinkyAsmModule::setPassResults(PassResults passResults) {
+    pImpl->passResults = std::move(passResults);
 }
 
 }  // namespace stinkytofu

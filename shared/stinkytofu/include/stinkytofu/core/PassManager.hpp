@@ -186,6 +186,10 @@ class STINKYTOFU_EXPORT PassContext {
     void clearResults() {
         passResults.clear();
     }
+
+    const std::unordered_map<std::string, std::any>& getAllResults() const {
+        return passResults;
+    }
 };
 
 STINKYTOFU_EXPORT bool isDebugOnlyEnabled(const char* TYPE);

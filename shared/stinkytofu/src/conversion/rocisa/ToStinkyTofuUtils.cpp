@@ -1133,6 +1133,10 @@ void init_stinkytofu(nb::module_ m) {
             module_->runOptimizationPipeline();
         }
 
+        uint32_t getAsmMathClock() {
+            return module_->getAsmMathClock();
+        }
+
         std::string getName() const {
             return module_->getName();
         }
@@ -1151,13 +1155,27 @@ void init_stinkytofu(nb::module_ m) {
         std::shared_ptr<StinkyAsmModule> getModule() const {
             return module_;
         }
+
+        const StinkyAsmModule::PassResults& getPassResults() const {
+            return module_->getPassResults();
+        }
     };
 
     // Bind the wrapper class
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
+        .def("getAsmMathClock", &StinkyAsmModuleWithSignature::getAsmMathClock)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
         .def("getName", &StinkyAsmModuleWithSignature::getName)
+        .def(
+            "getPassResults",
+            [](const StinkyAsmModuleWithSignature& self) {
+                nb::dict out;
+                for (const auto& [key, value] : self.getPassResults()) {
+                    std::visit([&](const auto& typedValue) { out[key.c_str()] = typedValue; }, value);
+                }
+                return out;
+            })
         .def("getModule", &StinkyAsmModuleWithSignature::getModule);
 
     // Bind toStinkyTofuModule with signature support
