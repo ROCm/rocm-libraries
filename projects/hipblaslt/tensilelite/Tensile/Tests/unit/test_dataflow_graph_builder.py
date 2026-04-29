@@ -58,16 +58,22 @@ from dataflow_fixtures import (
 def _wrap(ml_capture, *, ml_prev=None, ngl=None, nll=None):
     """Wrap a single body capture as a FourPartCapture for build_dataflow_graph.
 
-    Bodies that are None get a single-MFMA capture so the builder doesn't
-    barf on empty bodies. ml_prev defaults to the same single-MFMA filler.
+    Bodies that are None get a degenerate single-MFMA capture using register
+    indices in the high range (200+) so the filler doesn't accidentally form
+    edges against producers in `ml_capture`. The test under examination must
+    not place producers/consumers in the high-register range.
     """
-    def _filler():
-        return make_capture(BODY_LABEL_ML, [make_mfma(0, 8, 32, slot=0)])
+    def _filler(label):
+        # Filler MFMA reads from v[200:203] — high enough that real test
+        # producers won't overlap.
+        return make_capture(label, [make_mfma(
+            c_dst_start=200, a_src_start=204, b_src_start=208, slot=0,
+        )])
     return FourPartCapture(
         main_loop={0: ml_capture},
-        main_loop_prev={0: ml_prev if ml_prev is not None else _filler()},
-        n_gl={0: ngl if ngl is not None else _filler()},
-        n_ll={0: nll if nll is not None else _filler()},
+        main_loop_prev={0: ml_prev if ml_prev is not None else _filler(BODY_LABEL_ML_PREV)},
+        n_gl={0: ngl if ngl is not None else _filler(BODY_LABEL_NGL)},
+        n_ll={0: nll if nll is not None else _filler(BODY_LABEL_NLL)},
         num_mfma=1, num_codepaths=1, source="cms",
     )
 

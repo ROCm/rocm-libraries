@@ -348,19 +348,23 @@ class TestDataflowGraphShape:
 
     def test_four_part_capture_seeds_captures_dict(self):
         # Build a minimal FourPartCapture with one MFMA per body so the graph
-        # builder has something to populate captures with.
+        # builder has something to populate captures with. Use the synthetic
+        # _FakeMFMA fixtures so the graph builder can dispatch on it.
         from Tensile.Components.ScheduleCapture import (
             BODY_LABEL_ML, BODY_LABEL_ML_PREV, BODY_LABEL_NGL, BODY_LABEL_NLL,
         )
-        def body_with_mfma():
-            b = LoopBodyCaptureBuilder()
-            b.append(inst="m", category="MFMA", iteration=0, mfma_index=0)
-            return b.finalize()
+        import sys
+        sys.path.insert(0, "Tensile/Tests/unit")
+        from dataflow_fixtures import make_mfma, make_capture
         cap = FourPartCapture(
-            main_loop={0: body_with_mfma()},
-            main_loop_prev={0: body_with_mfma()},
-            n_gl={0: body_with_mfma()},
-            n_ll={0: body_with_mfma()},
+            main_loop={0: make_capture(BODY_LABEL_ML, [
+                make_mfma(0, 8, 32, slot=0)])},
+            main_loop_prev={0: make_capture(BODY_LABEL_ML_PREV, [
+                make_mfma(0, 8, 32, slot=0)])},
+            n_gl={0: make_capture(BODY_LABEL_NGL, [
+                make_mfma(0, 8, 32, slot=0)])},
+            n_ll={0: make_capture(BODY_LABEL_NLL, [
+                make_mfma(0, 8, 32, slot=0)])},
             num_mfma=1, num_codepaths=1, source="cms",
         )
         g = build_dataflow_graph(cap)

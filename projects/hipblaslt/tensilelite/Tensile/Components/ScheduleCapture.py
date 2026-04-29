@@ -709,31 +709,301 @@ def barriers_in_window(capture, start: GraphPosition, end: GraphPosition):
     return out
 
 
+# =============================================================================
+# Per-instruction shape extractors
+# =============================================================================
+# Each function returns enough state for the graph builder to:
+#   1. Build a content-based identity (for cross-graph diff)
+#   2. Discover what registers the instruction reads/writes (for edges)
+#
+# Detection by class-name string keeps this module free of hard rocisa
+# imports — tests use _Fake* stand-ins; production passes real rocisa
+# classes. The class name is the same in both worlds.
+
+# Class names (as returned by type(inst).__name__) recognized by the builder.
+_LR_CLASS_NAMES = {
+    "_FakeLR",
+    # Real rocisa LR classes: DSLoadB32 / DSLoadB64 / DSLoadB128 / DSLoadB256
+    "DSLoadB32", "DSLoadB64", "DSLoadB128", "DSLoadB256",
+    # Generic class umbrella (for isinstance fallback if needed)
+    "DSLoadInstruction",
+}
+_LW_CLASS_NAMES = {
+    "_FakeLW",
+    "DSStoreB8", "DSStoreB16", "DSStoreB32", "DSStoreB64", "DSStoreB128",
+    "DSStoreInstruction",
+}
+_GR_CLASS_NAMES = {
+    "_FakeGR",
+    # rocisa BufferLoad classes
+    "BufferLoadB32", "BufferLoadB64", "BufferLoadB128",
+    "GlobalLoadB32", "GlobalLoadB64", "GlobalLoadB128",
+    "BufferLoadInstruction", "GlobalLoadInstruction",
+    "GlobalReadInstruction",
+}
+_MFMA_CLASS_NAMES = {
+    "_FakeMFMA",
+    "MFMAInstruction",
+}
+_SWAIT_CLASS_NAMES = {
+    "_FakeSWait",
+    "SWaitCnt",
+}
+_SBARRIER_CLASS_NAMES = {
+    "_FakeSBarrier",
+    "SBarrier",
+}
+
+
+def _is_lr(inst):
+    return type(inst).__name__ in _LR_CLASS_NAMES
+
+
+def _is_lw(inst):
+    return type(inst).__name__ in _LW_CLASS_NAMES
+
+
+def _is_gr(inst):
+    return type(inst).__name__ in _GR_CLASS_NAMES
+
+
+def _is_mfma(inst):
+    return type(inst).__name__ in _MFMA_CLASS_NAMES
+
+
+def _is_swait(inst):
+    return type(inst).__name__ in _SWAIT_CLASS_NAMES
+
+
+def _is_sbarrier(inst):
+    return type(inst).__name__ in _SBARRIER_CLASS_NAMES
+
+
+def _reg_signature(reg) -> tuple:
+    """Stable hashable tuple summary of a RegisterContainer."""
+    if reg is None:
+        return ()
+    return (getattr(reg, "regType", None),
+            getattr(reg, "regIdx", None),
+            getattr(reg, "regNum", None))
+
+
+def _identity_for(inst, body_label: str) -> tuple:
+    """Build a content-based identity tuple for an instruction.
+
+    Format: (class_tag, loop_index, signature_tuple).
+
+    class_tag is a stable string (LR/LW/GR/MFMA/etc.) so the identity is
+    invariant across rocisa class variants (DSLoadB128 vs DSLoadB64 still
+    map to 'LR' if both appear in the same role — though typically a given
+    schedule uses one width consistently per category).
+    """
+    loop_idx = BODY_LABEL_TO_LOOP_INDEX[body_label]
+    if _is_lr(inst):
+        return ("LR", loop_idx,
+                _reg_signature(getattr(inst, "dst", None)),
+                getattr(inst, "lds_offset", None))
+    if _is_lw(inst):
+        return ("LW", loop_idx,
+                _reg_signature(getattr(inst, "src", None)),
+                getattr(inst, "lds_offset", None))
+    if _is_gr(inst):
+        return ("GR", loop_idx,
+                _reg_signature(getattr(inst, "dst", None)),
+                _reg_signature(getattr(inst, "srd", None)),
+                getattr(inst, "immediate_offset", None))
+    if _is_mfma(inst):
+        return ("MFMA", loop_idx,
+                _reg_signature(getattr(inst, "c_dst", None)),
+                _reg_signature(getattr(inst, "a_src", None)),
+                _reg_signature(getattr(inst, "b_src", None)))
+    if _is_swait(inst):
+        return ("SWAIT", loop_idx,
+                getattr(inst, "dscnt", -1),
+                getattr(inst, "vlcnt", -1),
+                getattr(inst, "vscnt", -1))
+    if _is_sbarrier(inst):
+        return ("SBARRIER", loop_idx)
+    raise CaptureUnknownInstructionError(
+        f"_identity_for: cannot identify instruction class "
+        f"{type(inst).__name__!r} (body={body_label})."
+    )
+
+
+def _writes(inst):
+    """Registers written by this instruction (returned as a list of RegisterContainers)."""
+    if _is_lr(inst):
+        return [inst.dst]
+    if _is_gr(inst):
+        return [inst.dst]
+    return []
+
+
+def _reads(inst):
+    """Registers read by this instruction."""
+    if _is_lw(inst):
+        return [inst.src]
+    if _is_mfma(inst):
+        return [inst.a_src, inst.b_src, inst.c_dst]
+    return []
+
+
+def _reg_overlaps(read_reg, written_reg) -> bool:
+    """True if `read_reg` overlaps with `written_reg` (vgpr ranges intersect)."""
+    if read_reg is None or written_reg is None:
+        return False
+    if read_reg.regType != written_reg.regType:
+        return False
+    a_lo = read_reg.regIdx
+    a_hi = a_lo + (read_reg.regNum or 1)
+    b_lo = written_reg.regIdx
+    b_hi = b_lo + (written_reg.regNum or 1)
+    return a_lo < b_hi and b_lo < a_hi
+
+
+def _make_node(tagged_inst, body_label: str) -> GraphNode:
+    inst = tagged_inst.inst
+    identity = _identity_for(inst, body_label)
+    position = make_position(body_label, tagged_inst.slot)
+    name = f"{tagged_inst.category}@{position.vmfma_index}.{position.sub_index}"
+    return GraphNode(
+        identity=identity,
+        position=position,
+        category=tagged_inst.category,
+        rocisa_inst=inst,
+        tagged_inst=tagged_inst,
+        body_label=body_label,
+        name=name,
+    )
+
+
+# Body order for graph construction. Cross-body queue state persists in the
+# order ML-1 -> ML -> NGL -> NLL (matching hardware execution order).
+_BODY_BUILD_ORDER = (BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL)
+
+
 def build_dataflow_graph(four_part_capture):
     """Build the unified 4-body register dataflow graph from a FourPartCapture.
 
-    Stub implementation: currently returns an empty graph with all 4 captures
-    populated. The real FIFO drain semantics + barrier collectors land in
-    the next commit (see plan §Stack 2.7-2.8).
+    Walks bodies in execution order (ML-1 -> ML -> NGL -> NLL); the per-counter
+    FIFO queue persists across body boundaries so cross-body raw_intrawave
+    edges form correctly when a producer in body i is drained by a wait in
+    body i+1.
 
-    The captures dict is keyed by body_label ('ML-1', 'ML', 'NGL', 'NLL').
-    For now we only seed main_loop[0] -> 'ML' and main_loop_prev[0] -> 'ML-1'
-    and the n_gl/n_ll bodies; multi-codepath support is a Phase-7 follow-up.
+    Edge-formation rule (raw_intrawave):
+      On producer instruction (LR/LW/GR):
+        append (producer_node, regs_written) to queue[counter_for(producer)]
+      On SWaitCnt with field set (dscnt=N, vlcnt=N):
+        while len(queue[counter]) > N:
+          pop oldest (FIFO drain by op-count, NOT by register)
+          mark its regs as ready_writer[reg] = producer
+      On consumer instruction:
+        for each reg read:
+          if ready_writer[reg]: form an edge
+
+    Raises CaptureUnknownInstructionError when an instruction class isn't
+    one of LR/LW/GR/MFMA/SWait/SBarrier. Raises CaptureEmptyBodyError if
+    any body has zero instructions (capture-pipeline bug; bodies always
+    contain at least the MFMA loop).
     """
     captures = {}
     if four_part_capture is None:
         return DataflowGraph(nodes={}, edges=[], captures=captures)
 
-    if 0 in four_part_capture.main_loop_prev:
-        captures[BODY_LABEL_ML_PREV] = four_part_capture.main_loop_prev[0]
-    if 0 in four_part_capture.main_loop:
-        captures[BODY_LABEL_ML] = four_part_capture.main_loop[0]
-    if 0 in four_part_capture.n_gl:
-        captures[BODY_LABEL_NGL] = four_part_capture.n_gl[0]
-    if 0 in four_part_capture.n_ll:
-        captures[BODY_LABEL_NLL] = four_part_capture.n_ll[0]
+    # Seed captures dict and validate bodies are non-empty.
+    body_sources = (
+        (BODY_LABEL_ML_PREV, four_part_capture.main_loop_prev),
+        (BODY_LABEL_ML, four_part_capture.main_loop),
+        (BODY_LABEL_NGL, four_part_capture.n_gl),
+        (BODY_LABEL_NLL, four_part_capture.n_ll),
+    )
+    for label, by_cp in body_sources:
+        if 0 not in by_cp:
+            continue
+        body = by_cp[0]
+        if not body.instructions:
+            raise CaptureEmptyBodyError(
+                f"Body {label!r} has zero captured instructions; "
+                f"bodies always contain at least the MFMA loop."
+            )
+        captures[label] = body
 
-    return DataflowGraph(nodes={}, edges=[], captures=captures)
+    # Per-counter FIFO queues. Each entry: (producer_node, [regs_written]).
+    # Persist across bodies — hardware preserves SWaitCnt state across labels.
+    queues = {"dscnt": [], "vlcnt": []}
+    # ready_writer[register-key] -> producer GraphNode that's been drained.
+    ready_writer = {}
+
+    nodes_by_identity = {}
+    edges = []
+
+    # Per-body cache of GraphNodes — used by waits_in_window / barriers_in_window
+    # via the LoopBodyCapture._graph_nodes attribute (set below).
+    nodes_per_body = {label: [] for label in _BODY_BUILD_ORDER}
+
+    for label in _BODY_BUILD_ORDER:
+        if label not in captures:
+            continue
+        body = captures[label]
+
+        for tagged_inst in body.instructions:
+            inst = tagged_inst.inst
+            node = _make_node(tagged_inst, label)
+            nodes_by_identity[node.identity] = node
+            nodes_per_body[label].append(node)
+
+            if _is_swait(inst):
+                # Drain each constrained counter to the cap N.
+                for counter in ("dscnt", "vlcnt"):
+                    cap_value = _swait_drains(node, counter)
+                    if cap_value is None:
+                        continue
+                    while len(queues[counter]) > cap_value:
+                        producer, regs = queues[counter].pop(0)
+                        for reg in regs:
+                            ready_writer[_reg_signature(reg)] = (producer, reg)
+                continue
+
+            if _is_sbarrier(inst):
+                # Barriers don't form raw_intrawave edges; handled in step 2.8.
+                continue
+
+            if _is_lr(inst) or _is_lw(inst):
+                regs = _writes(inst)
+                queues["dscnt"].append((node, regs))
+                continue
+
+            if _is_gr(inst):
+                regs = _writes(inst)
+                queues["vlcnt"].append((node, regs))
+                continue
+
+            if _is_mfma(inst):
+                # Consumer — form edges for each register that overlaps a
+                # ready producer's write.
+                for read_reg in _reads(inst):
+                    for writer_sig, (producer, written_reg) in list(ready_writer.items()):
+                        if _reg_overlaps(read_reg, written_reg):
+                            edges.append(DataflowEdge(
+                                producer=producer,
+                                consumer=node,
+                                register=written_reg,
+                                edge_kind="raw_intrawave",
+                            ))
+                continue
+
+            # Unknown class.
+            raise CaptureUnknownInstructionError(
+                f"build_dataflow_graph: instruction class "
+                f"{type(inst).__name__!r} in body {label!r} is not one of "
+                f"LR/LW/GR/MFMA/SWait/SBarrier."
+            )
+
+        # Stash per-body GraphNodes on the LoopBodyCapture for the helpers
+        # (waits_in_window, barriers_in_window) to use without rebuilding.
+        body._graph_nodes = nodes_per_body[label]
+
+    return DataflowGraph(nodes=nodes_by_identity, edges=edges, captures=captures)
 
 
 def compare_captures(default_capture, cms_capture):
