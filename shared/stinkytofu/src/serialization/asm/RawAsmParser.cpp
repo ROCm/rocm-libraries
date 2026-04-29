@@ -173,16 +173,77 @@ inline bool isHexSuffix(std::string_view id) {
     return true;
 }
 
+/// If the token stream starts with an arithmetic operator (`/`, `*`, `+`,
+/// `-`) followed by an int / hex / identifier token, append the chain to
+/// `base` so a bare arithmetic expression like `34816/2`, `vgprBase+0`,
+/// or `NumPersistIters-1` is preserved as a single LiteralString operand.
+///
+/// Two operator-shapes need to be handled because of an asymmetry in the
+/// IRLexer:
+///
+///   * `+`, `*`, `/` emit as Unknown one-character tokens, so the next
+///     token is the rhs operand.
+///   * `-` followed by a digit is special-cased in IRLexer.cpp (`case '-':`)
+///     and emitted as a single signed IntegerLiteral / HexLiteral / Float
+///     literal whose text already begins with `-`. There is no separate
+///     `-` token to detect, so we recognise such a literal as an implicit
+///     `-<num>` continuation and splice its text directly onto `base`.
+///
+/// Without both shapes, an expression like `NumPersistIters-1` would have
+/// `NumPersistIters` recovered as a LiteralString and the signed `-1`
+/// IntegerLiteral silently swallowed by parseModifiers as an "unknown
+/// token", producing `s_cmp_lt_u32 s[...], NumPersistIters` on round-trip.
+inline std::string gatherArithExprSuffix(IRLexer& lexer, std::string base) {
+    auto isArithOp = [](TokenKind k, std::string_view t) {
+        return k == TokenKind::Unknown && t.size() == 1 &&
+               (t[0] == '/' || t[0] == '*' || t[0] == '+' || t[0] == '-');
+    };
+    auto isSignedLiteral = [](TokenKind k, std::string_view t) {
+        return (k == TokenKind::IntegerLiteral || k == TokenKind::HexLiteral ||
+                k == TokenKind::FloatLiteral) &&
+               !t.empty() && t[0] == '-';
+    };
+    while (true) {
+        TokenKind k = lexer.peek().kind;
+        std::string_view tx = lexer.peek().text;
+        if (isArithOp(k, tx)) {
+            std::string opTxt(lexer.consume().text);
+            TokenKind nk = lexer.peek().kind;
+            if (nk != TokenKind::IntegerLiteral && nk != TokenKind::HexLiteral &&
+                nk != TokenKind::Identifier) {
+                // Trailing op with no rhs operand. Keep the op so any
+                // diagnostic still points at the malformed expression
+                // rather than silently swallowing it; further chaining
+                // stops here.
+                base += opTxt;
+                break;
+            }
+            base += opTxt;
+            base += std::string(lexer.consume().text);
+        } else if (isSignedLiteral(k, tx)) {
+            // The literal text already begins with "-"; append verbatim.
+            base += std::string(lexer.consume().text);
+        } else {
+            break;
+        }
+    }
+    return base;
+}
+
 /// Parse a single register operand from the lexer.
 /// Adapted from IRParser::parseRegister().
 std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable& syms,
                                                bool preserveSymbolicNames) {
     TokenKind kind = lexer.peek().kind;
 
-    // Hex immediate: preserve as literal string
+    // Hex immediate: preserve as literal string. Also fold any trailing
+    // arithmetic suffix (e.g. `0xff/2`, `0xff-32`) into the same literal so
+    // it round-trips as one operand. gatherArithExprSuffix is a no-op when
+    // the next token is not an operator or signed-literal continuation.
     if (kind == TokenKind::HexLiteral) {
         const Token& tok = lexer.consume();
-        return StinkyRegister(std::string(tok.text));
+        std::string text = gatherArithExprSuffix(lexer, std::string(tok.text));
+        return StinkyRegister(text);
     }
 
     // Integer literal: numeric immediate
@@ -197,6 +258,15 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
                 return StinkyRegister(std::string("0") + id);
             }
         }
+        // Arithmetic expression on a literal source operand:
+        // e.g. `s_mul_i32 s86, s[sgprWaveId], 34816/2`, `34816-512`,
+        // `2*8704*2+32`. The lexer emits multi-operator chains as
+        // separate tokens (and signed numbers as a single signed literal
+        // — see gatherArithExprSuffix); without folding them back into
+        // a LiteralString the operand loop would only see the leading
+        // int and silently drop the rest.
+        std::string expr = gatherArithExprSuffix(lexer, num);
+        if (expr != num) return StinkyRegister(expr);
         auto val = safeAtoiStr(num);
         if (!val) return std::nullopt;
         return StinkyRegister(*val);
@@ -237,7 +307,15 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
 
     RegType regType = stringToRegType(regTypeStr);
 
-    // Unknown type → not a register, signal caller to stop operand parsing
+    // Unknown type → not a register, signal caller to stop operand parsing.
+    // The caller (parseInstLine) decides whether to:
+    //   * bail to TEXTBLOCK pass-through (when this is the first operand —
+    //     instructions such as `s_delay_alu instid0(VALU_DEP_2)` look like
+    //     "<mnemonic> <unknown-id>(...)" and must round-trip verbatim
+    //     because their custom operand syntax is not parsed here), or
+    //   * preserve the token as a LiteralString operand (when this is a
+    //     later operand — covers `.set` symbols used as immediates such
+    //     as `v_mov_b32 v2, MT0`).
     if (!isValidRegType(regType)) return std::nullopt;
 
     // Format: "v 12" (type and index as separate tokens)
@@ -328,7 +406,17 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
 
 /// Parse trailing modifier tokens into inst.modifiers.
 /// modifier_key is determined by hwInstDesc->microcode and the instruction mnemonic.
-void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* hwInstDesc) {
+///
+/// Returns true if every modifier-shaped token sequence the parser consumed
+/// could be represented in inst.modifiers. Returns false if the parser saw a
+/// trailing token shape it cannot model (currently: a `key:value` where the
+/// value is an Identifier such as `th:TH_LOAD_NT`, or any modifier-bearing
+/// instruction whose microcode format has no modifier namespace mapped here
+/// — e.g. TENSOR-format `tensor_load_to_lds`). The caller (parseInstLine)
+/// uses this signal to bail out to TEXTBLOCK pass-through so the entire
+/// line round-trips verbatim instead of silently dropping the unmodelled
+/// modifier.
+bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* hwInstDesc) {
     using FieldMap = std::unordered_map<std::string, std::string>;
 
     const std::string& mnemonic = inst.opcodeStr;
@@ -367,7 +455,7 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
             lexer.consume();
             inst.modifiers["mod.swaitcnt"]["vlcnt"] = "0";
             inst.modifiers["mod.swaitcnt"]["dscnt"] = "0";
-            return;
+            return true;
         }
     }
 
@@ -377,11 +465,19 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
     if (isDelayAlu) {
         // Leave modifiers empty; the passes that need delay_alu data (e.g. wait-cnt
         // insertion) will re-insert the correct modifier after scheduling.
-        return;
+        return true;
     }
 
     // Collect key→value / key(value) / boolean-flag tokens
     FieldMap fields;
+    // Set when we see syntax we can parse but cannot represent: e.g.
+    // `key:Identifier_value` (`th:TH_LOAD_NT`, `scope:SCOPE_DEV`) or any
+    // modifier whose microcode format isn't mapped above. Tracked
+    // separately from `fields` so that we can still observe "had
+    // modifiers" even when they are all unrepresentable and the field map
+    // ends up empty.
+    bool sawUnrepresentable = false;
+    bool sawAnyModifier = false;
 
     while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
            lexer.peek().kind != TokenKind::Newline) {
@@ -399,11 +495,37 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         std::string tok(lexer.consume().text);
 
         if (lexer.peek().kind == TokenKind::Colon) {
-            // key:value format (e.g. offset:128)
+            // key:value format (e.g. offset:128, th:TH_LOAD_NT,
+            // offset:2*8704*2+32)
             lexer.consume();  // eat ':'
             TokenKind vk = lexer.peek().kind;
             if (vk == TokenKind::IntegerLiteral || vk == TokenKind::HexLiteral) {
-                fields[tok] = std::string(lexer.consume().text);
+                std::string val(lexer.consume().text);
+                // Arithmetic-expression value: e.g. `offset:2*8704*2+32`,
+                // `offset:34816-512`. Downstream consumers parse the
+                // value via `atoi` (see ModifierSerializer's `getInt`),
+                // which would silently truncate to the first integer.
+                // Drain the remainder of the expression so the lexer
+                // stays in sync, mark the line as unrepresentable, and
+                // let the caller fall back to TEXTBLOCK so the source
+                // expression round-trips verbatim. (gatherArithExprSuffix
+                // is a no-op when the next token is not an operator or
+                // signed-literal continuation, so simple `offset:0` /
+                // `offset:32` are unaffected.)
+                std::string folded = gatherArithExprSuffix(lexer, val);
+                if (folded != val) sawUnrepresentable = true;
+                fields[tok] = std::move(folded);
+                sawAnyModifier = true;
+            } else if (vk == TokenKind::Identifier) {
+                // `th:TH_LOAD_NT`, `scope:SCOPE_DEV`, `matrix_a_fmt:MATRIX_FMT_FP8`,
+                // etc. — gfx12+ memory-hint / matrix-format syntax. Not
+                // modelled by any of the existing modifier structs, so
+                // consume the rhs to keep the lexer in sync but signal
+                // that the line cannot be losslessly round-tripped via
+                // inst.modifiers; the caller will route to TEXTBLOCK.
+                lexer.consume();
+                sawUnrepresentable = true;
+                sawAnyModifier = true;
             }
         } else if (lexer.peek().kind == TokenKind::LeftParen) {
             // key(value) format (e.g. vmcnt(0), lgkmcnt(3))
@@ -427,13 +549,22 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
                     inst.modifiers["mod.swaitcnt"]["kmcnt"] = val;
             }
             // Other key(value) tokens (e.g. depctr_*) are currently ignored.
+            sawAnyModifier = true;
         } else {
             // Boolean flag: glc, slc, nt, lds, gds, offen, nv, etc.
             fields[tok] = "true";
+            sawAnyModifier = true;
         }
     }
 
-    if (modKey.empty() || fields.empty()) return;
+    // Modifier-bearing instruction with no modKey to put them into (e.g.
+    // TENSOR-format `tensor_load_to_lds offset:0`). Anything in `fields`
+    // would be silently discarded below at the `modKey.empty()` early-return,
+    // so flag the line as unrepresentable instead and let the caller fall
+    // back to TEXTBLOCK pass-through.
+    if (modKey.empty() && sawAnyModifier) sawUnrepresentable = true;
+
+    if (modKey.empty() || fields.empty()) return !sawUnrepresentable;
 
     // Map generic fields → modifier dict using the appropriate namespace key.
     auto& modFields = inst.modifiers[modKey];
@@ -472,6 +603,8 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         if (fields.count("glc")) modFields["glc"] = "true";
         if (fields.count("nv")) modFields["nv"] = "true";
     }
+
+    return !sawUnrepresentable;
 }
 
 //----------------------------------------------------------------------
@@ -532,13 +665,54 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
             }
             firstOp = false;
 
+            // Snapshot the lookahead so we can recover an unrecognised
+            // identifier as a LiteralString if parseOneRegister fails on a
+            // non-first operand (see recovery block below). For first
+            // operands we still want to fall through to TEXTBLOCK pass-
+            // through so instructions with custom textual syntax (e.g.
+            // `s_delay_alu instid0(VALU_DEP_2)`, `s_wait_alu depctr_va_vdst(0)`)
+            // round-trip verbatim instead of being half-parsed and then
+            // tripping the SDelayAluData/SWaitAluData asserts in the emitter.
+            TokenKind preKind = lexer.isAtEnd() ? TokenKind::Eof : lexer.peek().kind;
+            std::string preText =
+                preKind == TokenKind::Identifier ? std::string(lexer.peek().text) : std::string();
+            TokenKind preNextKind = lexer.peekAhead(1).kind;
+
             auto reg = parseOneRegister(lexer, syms, preserveSymbolicNames);
             if (!reg) {
                 if (opIdx == 0) {
-                    // First operand failed (e.g. symbolic expression like v[sym-768:sym-765]).
-                    // parseOneRegister may have consumed tokens; safest to preserve the
-                    // entire line verbatim.
+                    // First operand failed (e.g. symbolic expression like
+                    // v[sym-768:sym-765] or a custom-syntax mnemonic such as
+                    // s_delay_alu / s_wait_alu). parseOneRegister may have
+                    // consumed tokens; safest to preserve the entire line
+                    // verbatim via TEXTBLOCK pass-through.
                     return nullptr;
+                }
+                // Non-first operand recovery: a `.set` symbol (or any other
+                // bare identifier) used as an immediate source — e.g.
+                // `v_mov_b32 v2, MT0` where `.set MT0, 64` was declared
+                // earlier — would otherwise be silently dropped, since
+                // parseInstLine breaks out of the operand loop on a
+                // nullopt. Preserve the consumed identifier as a
+                // LiteralString so the operand round-trips instead of
+                // truncating to `v_mov_b32 v2`. We restrict recovery to
+                // bare identifiers (no `[`) so malformed register
+                // expressions like `foo[12]` still trigger TEXTBLOCK
+                // fallback rather than getting silently mangled.
+                if (preKind == TokenKind::Identifier && !preText.empty() &&
+                    preNextKind != TokenKind::LeftBracket) {
+                    // Fold a trailing arithmetic suffix (e.g. `vgprBase+0`,
+                    // `MT0/2`) into the same LiteralString so the whole
+                    // expression round-trips as one operand. Same rationale
+                    // as the IntegerLiteral path in parseOneRegister.
+                    std::string text = gatherArithExprSuffix(lexer, preText);
+                    StinkyRegister litReg(text);
+                    if (opIdx < numDest)
+                        inst->destRegs.push_back(litReg);
+                    else
+                        inst->srcRegs.push_back(litReg);
+                    opIdx++;
+                    continue;
                 }
                 // Later operand failed → stop operand parsing, proceed to modifiers.
                 break;
@@ -552,8 +726,15 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
         }
     }
 
-    // Parse any trailing modifier tokens (offset:N, glc, vmcnt(N), etc.)
-    parseModifiers(lexer, *inst, hwInstDesc);
+    // Parse any trailing modifier tokens (offset:N, glc, vmcnt(N), etc.).
+    // If parseModifiers signals that it saw a token shape it cannot
+    // represent (e.g. `th:TH_LOAD_NT` on tensor_load_to_lds, or any
+    // modifier on a microcode format that has no namespace mapped above),
+    // bail to TEXTBLOCK pass-through so the line round-trips verbatim
+    // instead of dropping the unmodelled modifier on emission.
+    if (!parseModifiers(lexer, *inst, hwInstDesc)) {
+        return nullptr;
+    }
 
     return inst;
 }
