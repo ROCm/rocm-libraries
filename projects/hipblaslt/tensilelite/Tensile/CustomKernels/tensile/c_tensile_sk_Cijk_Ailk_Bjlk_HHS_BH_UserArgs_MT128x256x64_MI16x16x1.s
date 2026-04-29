@@ -48,6 +48,78 @@
 custom.config:
   InternalSupportParams:
     KernArgsVersion: 2
+  ProblemType:
+    OperationType: GEMM
+    DataType: h
+    DestDataType: h
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: 0
+    TransposeB: 1
+    UseBeta: True
+    Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
+  CustomKernel:
+    args: [ { type: uint32, semantic: GemmCount },
+            { type: uint32, semantic: TensileInternalArg0 },
+            { type: uint32, semantic: TensileInternalArg1 },
+            { type: uint32, semantic: NumWorkGroups },
+            { type: uint32, semantic: SizeFree0 },
+            { type: uint32, semantic: SizeFree1 },
+            { type: uint32, semantic: SizeFree2 },
+            { type: uint32, semantic: SizeSum },
+            { type: address, semantic: AddressD },
+            { type: address, semantic: AddressC },
+            { type: address, semantic: AddressA },
+            { type: address, semantic: AddressB },
+            { type: address, semantic: AddressWorkspace },
+            { type: address, semantic: AddressSynchronizer },
+            { type: uint32, semantic: StrideD0 },
+            { type: uint32, semantic: StrideD1 },
+            { type: uint32, semantic: StrideC0 },
+            { type: uint32, semantic: StrideC1 },
+            { type: uint32, semantic: StrideA0 },
+            { type: uint32, semantic: StrideA1 },
+            { type: uint32, semantic: StrideB0 },
+            { type: uint32, semantic: StrideB1 },
+            { type: float32, semantic: Alpha },
+            { type: float32, semantic: Beta },
+            { type: uint32, semantic: ItersPerTile },
+            { type: uint32, semantic: MagicNumberItersPerTile },
+            { type: uint32, semantic: MagicShiftItersPerTile },
+            { type: uint32, semantic: TotalIters },
+            { type: uint32, semantic: SKItersPerWG },
+            { type: uint32, semantic: SKGrid },
+            { type: uint32, semantic: SKTilesAndSplit } ]
+    macrotile: [128, 256, 64]
+    threads: [256, 1, 1]
+    grid: [TilesXYBatch, One, One]
+    workspaceType: StreamK
+    workspaceSizePerElemC: 4
+    workspaceSizePerElemBias: 4
+  MatrixInstruction: [16, 16, 16, 1]
+  EnableMatrixInstruction: True
+  EnableF32XdlMathOp: False
+  MFMA_BF16_1K: False
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstK: 16
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [1, 4]
+  MIWaveTile: [8, 4]
+  ThreadTile: [16, 8]
+  WorkGroup: [8, 32, 1]
+  DepthU: 64
+  WavefrontSize: 64
 amdhsa.version:
   - 1
   - 1
