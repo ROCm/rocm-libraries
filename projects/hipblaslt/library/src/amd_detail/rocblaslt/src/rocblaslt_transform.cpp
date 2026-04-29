@@ -64,7 +64,7 @@ namespace
                 archName = archName.substr(0, colonPos);
 
             auto perArchPath = rocblaslt_find_library_relative_path(
-                std::filesystem::path(archName) / "hipblasltTransform.hsaco");
+                std::filesystem::path("hipblasltTransform_" + archName + ".hsaco"));
             if(perArchPath)
                 return *perArchPath;
         }
