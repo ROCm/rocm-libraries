@@ -6,14 +6,14 @@
  * @brief PaddingMode enumeration for hipDNN backend operations
  *
  * Defines the PaddingMode used when setting the
- * HIPDNN_ATTR_POOLING_PADDING_MODE_EXT attribute on PoolingFwd descriptors.
+ * HIPDNN_ATTR_RESAMPLE_PADDING_MODE attribute on ResampleFwd descriptors.
  */
 
 #pragma once
 
 /**
  * @enum hipdnnPaddingMode_t
- * @brief PaddingMode for backend PoolingFwd operations
+ * @brief PaddingMode for backend ResampleFwd operations
  */
 typedef enum
 {

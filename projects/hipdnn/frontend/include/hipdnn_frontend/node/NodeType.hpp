@@ -29,7 +29,7 @@ enum class NodeType
     BLOCK_SCALE_DEQUANTIZE = 15,
     CUSTOM_OP = 16,
     REDUCTION = 17,
-    POOLING_FWD = 18
+    RESAMPLE_FWD = 18
 };
 
 } // namespace hipdnn_frontend::graph

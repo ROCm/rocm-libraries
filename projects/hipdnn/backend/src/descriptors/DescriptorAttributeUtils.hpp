@@ -20,8 +20,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/pooling_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/resample_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <memory>
 #include <string>
@@ -636,18 +636,18 @@ void getConvolutionAttribute(const DataT& data,
     }
 }
 
-void setPoolingMode(hipdnn_flatbuffers_sdk::data_objects::PoolingMode& target,
-                    hipdnnBackendAttributeType_t attributeType,
-                    int64_t elementCount,
-                    const void* arrayOfElements,
-                    const char* errorPrefix);
+void setResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode& target,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* errorPrefix);
 
-void getPoolingMode(hipdnn_flatbuffers_sdk::data_objects::PoolingMode source,
-                    hipdnnBackendAttributeType_t attributeType,
-                    int64_t requestedElementCount,
-                    int64_t* elementCount,
-                    void* arrayOfElements,
-                    const char* errorPrefix);
+void getResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode source,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* errorPrefix);
 
 void setPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode& target,
                     hipdnnBackendAttributeType_t attributeType,

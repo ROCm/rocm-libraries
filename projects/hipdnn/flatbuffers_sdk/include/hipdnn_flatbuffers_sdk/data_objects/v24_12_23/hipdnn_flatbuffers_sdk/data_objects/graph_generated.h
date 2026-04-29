@@ -25,7 +25,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 24 && FLATBUFFERS_VERSION_MINOR == 12
 #include "layernorm_attributes_generated.h"
 #include "matmul_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
-#include "pooling_fwd_attributes_generated.h"
+#include "resample_fwd_attributes_generated.h"
 #include "reduction_attributes_generated.h"
 #include "rmsnorm_attributes_generated.h"
 #include "rmsnorm_backward_attributes_generated.h"
@@ -72,9 +72,9 @@ enum class NodeAttributes : uint8_t
     CustomOpAttributes = 16,
     RMSNormBackwardAttributes = 17,
     ReductionAttributes = 18,
-    PoolingFwdAttributes = 19,
+    ResampleFwdAttributes = 19,
     MIN = NONE,
-    MAX = PoolingFwdAttributes
+    MAX = ResampleFwdAttributes
 };
 
 inline const NodeAttributes (&EnumValuesNodeAttributes())[20]
@@ -98,7 +98,7 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[20]
                                             NodeAttributes::CustomOpAttributes,
                                             NodeAttributes::RMSNormBackwardAttributes,
                                             NodeAttributes::ReductionAttributes,
-                                            NodeAttributes::PoolingFwdAttributes};
+                                            NodeAttributes::ResampleFwdAttributes};
     return values;
 }
 
@@ -123,14 +123,14 @@ inline const char* const* EnumNamesNodeAttributes()
                                           "CustomOpAttributes",
                                           "RMSNormBackwardAttributes",
                                           "ReductionAttributes",
-                                          "PoolingFwdAttributes",
+                                          "ResampleFwdAttributes",
                                           nullptr};
     return names;
 }
 
 inline const char* EnumNameNodeAttributes(NodeAttributes e)
 {
-    if(::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::PoolingFwdAttributes))
+    if(::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::ResampleFwdAttributes))
         return "";
     const size_t index = static_cast<size_t>(e);
     return EnumNamesNodeAttributes()[index];
@@ -252,9 +252,9 @@ struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::ReductionAttri
 };
 
 template <>
-struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributes>
+struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes>
 {
-    static const NodeAttributes enum_value = NodeAttributes::PoolingFwdAttributes;
+    static const NodeAttributes enum_value = NodeAttributes::ResampleFwdAttributes;
 };
 
 template <typename T>
@@ -374,9 +374,9 @@ struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::Reduction
 };
 
 template <>
-struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT>
+struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT>
 {
-    static const NodeAttributes enum_value = NodeAttributes::PoolingFwdAttributes;
+    static const NodeAttributes enum_value = NodeAttributes::ResampleFwdAttributes;
 };
 
 struct NodeAttributesUnion
@@ -691,16 +691,16 @@ struct NodeAttributesUnion
                          value)
                    : nullptr;
     }
-    hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT* AsPoolingFwdAttributes()
+    hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT* AsResampleFwdAttributes()
     {
-        return type == NodeAttributes::PoolingFwdAttributes
-                   ? reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT*>(value)
+        return type == NodeAttributes::ResampleFwdAttributes
+                   ? reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT*>(value)
                    : nullptr;
     }
-    const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT* AsPoolingFwdAttributes() const
+    const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT* AsResampleFwdAttributes() const
     {
-        return type == NodeAttributes::PoolingFwdAttributes
-                   ? reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT*>(
+        return type == NodeAttributes::ResampleFwdAttributes
+                   ? reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT*>(
                          value)
                    : nullptr;
     }
@@ -847,11 +847,11 @@ inline bool operator==(const NodeAttributesUnion& lhs, const NodeAttributesUnion
                == *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ReductionAttributesT*>(
                    rhs.value));
     }
-    case NodeAttributes::PoolingFwdAttributes:
+    case NodeAttributes::ResampleFwdAttributes:
     {
-        return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT*>(
+        return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT*>(
                    lhs.value))
-               == *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT*>(
+               == *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT*>(
                    rhs.value));
     }
     default:
@@ -1082,12 +1082,12 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
                          attributes())
                    : nullptr;
     }
-    const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributes*
-        attributes_as_PoolingFwdAttributes() const
+    const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes*
+        attributes_as_ResampleFwdAttributes() const
     {
         return attributes_type()
-                       == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PoolingFwdAttributes
-                   ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributes*>(
+                       == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes
+                   ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes*>(
                          attributes())
                    : nullptr;
     }
@@ -1241,10 +1241,10 @@ inline const hipdnn_flatbuffers_sdk::data_objects::ReductionAttributes*
 }
 
 template <>
-inline const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributes*
-    Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributes>() const
+inline const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes*
+    Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes>() const
 {
-    return attributes_as_PoolingFwdAttributes();
+    return attributes_as_ResampleFwdAttributes();
 }
 
 struct NodeBuilder
@@ -1951,10 +1951,10 @@ inline bool
         auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ReductionAttributes*>(obj);
         return verifier.VerifyTable(ptr);
     }
-    case NodeAttributes::PoolingFwdAttributes:
+    case NodeAttributes::ResampleFwdAttributes:
     {
         auto ptr
-            = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributes*>(obj);
+            = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes*>(obj);
         return verifier.VerifyTable(ptr);
     }
     default:
@@ -2092,10 +2092,10 @@ inline void* NodeAttributesUnion::UnPack(const void* obj,
         auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ReductionAttributes*>(obj);
         return ptr->UnPack(resolver);
     }
-    case NodeAttributes::PoolingFwdAttributes:
+    case NodeAttributes::ResampleFwdAttributes:
     {
         auto ptr
-            = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributes*>(obj);
+            = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes*>(obj);
         return ptr->UnPack(resolver);
     }
     default:
@@ -2223,11 +2223,11 @@ inline ::flatbuffers::Offset<void>
             = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ReductionAttributesT*>(value);
         return CreateReductionAttributes(_fbb, ptr, _rehasher).Union();
     }
-    case NodeAttributes::PoolingFwdAttributes:
+    case NodeAttributes::ResampleFwdAttributes:
     {
         auto ptr
-            = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT*>(value);
-        return CreatePoolingFwdAttributes(_fbb, ptr, _rehasher).Union();
+            = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT*>(value);
+        return CreateResampleFwdAttributes(_fbb, ptr, _rehasher).Union();
     }
     default:
         return 0;
@@ -2353,10 +2353,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion& u)
             *reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::ReductionAttributesT*>(u.value));
         break;
     }
-    case NodeAttributes::PoolingFwdAttributes:
+    case NodeAttributes::ResampleFwdAttributes:
     {
-        value = new hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT(
-            *reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT*>(u.value));
+        value = new hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT(
+            *reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT*>(u.value));
         break;
     }
     default:
@@ -2486,9 +2486,9 @@ inline void NodeAttributesUnion::Reset()
         delete ptr;
         break;
     }
-    case NodeAttributes::PoolingFwdAttributes:
+    case NodeAttributes::ResampleFwdAttributes:
     {
-        auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::PoolingFwdAttributesT*>(value);
+        auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributesT*>(value);
         delete ptr;
         break;
     }

@@ -55,8 +55,8 @@
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
 #include "HipdnnPaddingMode.h"
-#include "HipdnnPoolingMode.h"
 #include "HipdnnReduceTensorOp.h"
+#include "HipdnnResampleMode.h"
 #include "HipdnnStatus.h"
 
 // NOLINTBEGIN

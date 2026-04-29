@@ -40,5 +40,5 @@ typedef enum
     HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE_EXT = 15, ///< Block scale dequantization
     HIPDNN_OPERATION_TYPE_CUSTOM_OP_EXT = 16, ///< Custom operation
     HIPDNN_OPERATION_TYPE_REDUCTION_EXT = 17, ///< Reduction operation
-    HIPDNN_OPERATION_TYPE_POOLING_FORWARD = 18, ///< Pooling forward operation
+    HIPDNN_OPERATION_TYPE_RESAMPLE_FWD = 18, ///< Resample forward operation
 } hipdnnOperationType_ext_t;

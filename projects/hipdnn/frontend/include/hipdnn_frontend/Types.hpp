@@ -33,8 +33,8 @@
 #include <HipdnnNormFwdPhase.h>
 #include <HipdnnPaddingMode.h>
 #include <HipdnnPointwiseMode.h>
-#include <HipdnnPoolingMode.h>
 #include <HipdnnReduceTensorOp.h>
+#include <HipdnnResampleMode.h>
 #include <hipdnn_data_sdk/types.hpp>
 
 #include <hipdnn_frontend/Error.hpp>
@@ -151,21 +151,21 @@ enum class ReductionMode
 typedef ReductionMode ReductionMode_t; ///< @brief Type alias for ReductionMode
 
 /**
- * @enum PoolingMode
- * @brief Specifies the pooling operation mode
+ * @enum ResampleMode
+ * @brief Specifies the resample operation mode
  */
-enum class PoolingMode
+enum class ResampleMode
 {
-    NOT_SET = 0, ///< Pooling mode not specified
-    MAX = 1, ///< Maximum pooling
-    AVERAGE = 2, ///< Average pooling (excludes padding)
-    AVERAGE_INCLUSIVE = 3 ///< Average pooling (includes padding)
+    NOT_SET = 0, ///< Resample mode not specified
+    MAXPOOL = 1, ///< Maximum pooling
+    AVGPOOL_EXCLUDE_PADDING = 2, ///< Average pooling (excludes padding from divisor)
+    AVGPOOL_INCLUDE_PADDING = 3 ///< Average pooling (includes padding in divisor)
 };
-typedef PoolingMode PoolingMode_t; ///< @brief Type alias for PoolingMode
+typedef ResampleMode ResampleMode_t; ///< @brief Type alias for ResampleMode
 
 /**
  * @enum PaddingMode
- * @brief Specifies the padding mode for pooling operations
+ * @brief Specifies the padding mode for resample operations
  */
 enum class PaddingMode
 {
@@ -1370,40 +1370,40 @@ inline bool isTernaryPointwiseMode(PointwiseMode mode)
 }
 
 /**
- * @brief Convert frontend PoolingMode to backend hipdnnPoolingMode_t
+ * @brief Convert frontend ResampleMode to backend hipdnnResampleMode_t
  */
-inline std::optional<hipdnnPoolingMode_t> toBackendPoolingMode(const PoolingMode& type)
+inline std::optional<hipdnnResampleMode_t> toBackendResampleMode(const ResampleMode& type)
 {
     switch(type)
     {
-    case PoolingMode::MAX:
-        return HIPDNN_POOLING_MODE_MAX;
-    case PoolingMode::AVERAGE:
-        return HIPDNN_POOLING_MODE_AVERAGE;
-    case PoolingMode::AVERAGE_INCLUSIVE:
-        return HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE;
+    case ResampleMode::MAXPOOL:
+        return HIPDNN_RESAMPLE_MAXPOOL;
+    case ResampleMode::AVGPOOL_EXCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING;
+    case ResampleMode::AVGPOOL_INCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING;
     default:
         return std::nullopt;
     }
 }
 
 /**
- * @brief Convert backend hipdnnPoolingMode_t to frontend PoolingMode
+ * @brief Convert backend hipdnnResampleMode_t to frontend ResampleMode
  */
-inline std::pair<PoolingMode, Error> fromHipdnnPoolingMode(hipdnnPoolingMode_t mode)
+inline std::pair<ResampleMode, Error> fromHipdnnResampleMode(hipdnnResampleMode_t mode)
 {
     switch(mode)
     {
-    case HIPDNN_POOLING_MODE_MAX:
-        return {PoolingMode::MAX, {}};
-    case HIPDNN_POOLING_MODE_AVERAGE:
-        return {PoolingMode::AVERAGE, {}};
-    case HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE:
-        return {PoolingMode::AVERAGE_INCLUSIVE, {}};
+    case HIPDNN_RESAMPLE_MAXPOOL:
+        return {ResampleMode::MAXPOOL, {}};
+    case HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING:
+        return {ResampleMode::AVGPOOL_EXCLUDE_PADDING, {}};
+    case HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING:
+        return {ResampleMode::AVGPOOL_INCLUDE_PADDING, {}};
     default:
-        return {PoolingMode::NOT_SET,
+        return {ResampleMode::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
-                 "Unknown hipdnnPoolingMode_t value: " + std::to_string(static_cast<int>(mode))}};
+                 "Unknown hipdnnResampleMode_t value: " + std::to_string(static_cast<int>(mode))}};
     }
 }
 

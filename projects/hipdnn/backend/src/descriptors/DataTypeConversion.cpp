@@ -519,37 +519,37 @@ hipdnnReduceTensorOp_t
     }
 }
 
-hipdnn_flatbuffers_sdk::data_objects::PoolingMode toSdkPoolingMode(hipdnnPoolingMode_t mode)
+hipdnn_flatbuffers_sdk::data_objects::ResampleMode toSdkResampleMode(hipdnnResampleMode_t mode)
 {
-    using hipdnn_flatbuffers_sdk::data_objects::PoolingMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ResampleMode;
 
     switch(mode)
     {
-    case HIPDNN_POOLING_MODE_MAX:
-        return PoolingMode::MAX_POOLING;
-    case HIPDNN_POOLING_MODE_AVERAGE:
-        return PoolingMode::AVERAGE;
-    case HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE:
-        return PoolingMode::AVERAGE_INCLUSIVE;
+    case HIPDNN_RESAMPLE_MAXPOOL:
+        return ResampleMode::MAXPOOL;
+    case HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING:
+        return ResampleMode::AVGPOOL_EXCLUDE_PADDING;
+    case HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING:
+        return ResampleMode::AVGPOOL_INCLUDE_PADDING;
     default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnPoolingMode_t value");
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnResampleMode_t value");
     }
 }
 
-hipdnnPoolingMode_t fromSdkPoolingMode(hipdnn_flatbuffers_sdk::data_objects::PoolingMode mode)
+hipdnnResampleMode_t fromSdkResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode mode)
 {
-    using hipdnn_flatbuffers_sdk::data_objects::PoolingMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ResampleMode;
 
     switch(mode)
     {
-    case PoolingMode::MAX_POOLING:
-        return HIPDNN_POOLING_MODE_MAX;
-    case PoolingMode::AVERAGE:
-        return HIPDNN_POOLING_MODE_AVERAGE;
-    case PoolingMode::AVERAGE_INCLUSIVE:
-        return HIPDNN_POOLING_MODE_AVERAGE_INCLUSIVE;
+    case ResampleMode::MAXPOOL:
+        return HIPDNN_RESAMPLE_MAXPOOL;
+    case ResampleMode::AVGPOOL_EXCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING;
+    case ResampleMode::AVGPOOL_INCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING;
     default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK PoolingMode value");
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK ResampleMode value");
     }
 }
 

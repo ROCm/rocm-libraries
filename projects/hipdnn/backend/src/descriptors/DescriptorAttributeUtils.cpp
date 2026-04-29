@@ -856,29 +856,29 @@ void getKnobValueUnion(const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnio
     }
 }
 
-void setPoolingMode(hipdnn_flatbuffers_sdk::data_objects::PoolingMode& target,
-                    hipdnnBackendAttributeType_t attributeType,
-                    int64_t elementCount,
-                    const void* arrayOfElements,
-                    const char* errorPrefix)
+void setResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode& target,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_POOLING_MODE, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(HIPDNN_TYPE_RESAMPLE_MODE, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
-    hipdnnPoolingMode_t tmp;
+    hipdnnResampleMode_t tmp;
     std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
-    target = toSdkPoolingMode(tmp);
+    target = toSdkResampleMode(tmp);
 }
 
-void getPoolingMode(hipdnn_flatbuffers_sdk::data_objects::PoolingMode source,
-                    hipdnnBackendAttributeType_t attributeType,
-                    int64_t requestedElementCount,
-                    int64_t* elementCount,
-                    void* arrayOfElements,
-                    const char* errorPrefix)
+void getResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode source,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_POOLING_MODE, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_RESAMPLE_MODE, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -892,7 +892,7 @@ void getPoolingMode(hipdnn_flatbuffers_sdk::data_objects::PoolingMode source,
     THROW_IF_FALSE(requestedElementCount >= 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": requestedElementCount < 1");
-    auto tmp = fromSdkPoolingMode(source);
+    auto tmp = fromSdkResampleMode(source);
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
     if(elementCount != nullptr)
     {

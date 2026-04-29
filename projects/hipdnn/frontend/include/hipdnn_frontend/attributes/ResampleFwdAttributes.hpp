@@ -14,10 +14,10 @@
 namespace hipdnn_frontend::graph
 {
 
-class PoolingFwdAttributes : public Attributes<PoolingFwdAttributes>
+class ResampleFwdAttributes : public Attributes<ResampleFwdAttributes>
 {
 public:
-    PoolingFwdAttributes() = default;
+    ResampleFwdAttributes() = default;
 
     /// Input tensor identifiers
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -31,7 +31,7 @@ public:
     enum class output_names
     {
         Y = 0, ///< Output tensor
-        INDEX = 1, ///< Optional index tensor (for max pooling)
+        INDEX = 1, ///< Optional index tensor (for max resample)
     };
 
     std::unordered_map<input_names, std::shared_ptr<TensorAttributes>> inputs; ///< Input tensors
@@ -42,7 +42,7 @@ public:
     std::vector<int64_t> post_padding;
     std::vector<int64_t> stride;
     std::vector<int64_t> window;
-    PoolingMode pooling_mode = PoolingMode::NOT_SET;
+    ResampleMode resample_mode = ResampleMode::NOT_SET;
     PaddingMode padding_mode = PaddingMode::NOT_SET;
     std::optional<bool> generate_index = std::nullopt;
     // NOLINTEND(readability-identifier-naming)
@@ -66,37 +66,37 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_x(const std::shared_ptr<TensorAttributes>& x)
+    ResampleFwdAttributes& set_x(const std::shared_ptr<TensorAttributes>& x)
     {
         return setInput(input_names::X, x);
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_x(std::shared_ptr<TensorAttributes>&& x)
+    ResampleFwdAttributes& set_x(std::shared_ptr<TensorAttributes>&& x)
     {
         return setInput(input_names::X, std::move(x));
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_y(const std::shared_ptr<TensorAttributes>& y)
+    ResampleFwdAttributes& set_y(const std::shared_ptr<TensorAttributes>& y)
     {
         return setOutput(output_names::Y, y);
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_y(std::shared_ptr<TensorAttributes>&& y)
+    ResampleFwdAttributes& set_y(std::shared_ptr<TensorAttributes>&& y)
     {
         return setOutput(output_names::Y, std::move(y));
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_index(const std::shared_ptr<TensorAttributes>& idx)
+    ResampleFwdAttributes& set_index(const std::shared_ptr<TensorAttributes>& idx)
     {
         return setOutput(output_names::INDEX, idx);
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_index(std::shared_ptr<TensorAttributes>&& idx)
+    ResampleFwdAttributes& set_index(std::shared_ptr<TensorAttributes>&& idx)
     {
         return setOutput(output_names::INDEX, std::move(idx));
     }
@@ -108,7 +108,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_pre_padding(std::vector<int64_t> value)
+    ResampleFwdAttributes& set_pre_padding(std::vector<int64_t> value)
     {
         pre_padding = std::move(value);
         return *this;
@@ -121,7 +121,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_post_padding(std::vector<int64_t> value)
+    ResampleFwdAttributes& set_post_padding(std::vector<int64_t> value)
     {
         post_padding = std::move(value);
         return *this;
@@ -134,7 +134,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_stride(std::vector<int64_t> value)
+    ResampleFwdAttributes& set_stride(std::vector<int64_t> value)
     {
         stride = std::move(value);
         return *this;
@@ -147,22 +147,22 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_window(std::vector<int64_t> value)
+    ResampleFwdAttributes& set_window(std::vector<int64_t> value)
     {
         window = std::move(value);
         return *this;
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingMode get_pooling_mode() const
+    ResampleMode get_resample_mode() const
     {
-        return pooling_mode;
+        return resample_mode;
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_pooling_mode(PoolingMode value)
+    ResampleFwdAttributes& set_resample_mode(ResampleMode value)
     {
-        pooling_mode = value;
+        resample_mode = value;
         return *this;
     }
 
@@ -173,7 +173,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_padding_mode(PaddingMode value)
+    ResampleFwdAttributes& set_padding_mode(PaddingMode value)
     {
         padding_mode = value;
         return *this;
@@ -186,13 +186,13 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PoolingFwdAttributes& set_generate_index(bool value)
+    ResampleFwdAttributes& set_generate_index(bool value)
     {
         generate_index = value;
         return *this;
     }
 };
 
-typedef PoolingFwdAttributes Pooling_fwd_attributes; // NOLINT(readability-identifier-naming)
+typedef ResampleFwdAttributes Resample_fwd_attributes; // NOLINT(readability-identifier-naming)
 
 } // namespace hipdnn_frontend::graph

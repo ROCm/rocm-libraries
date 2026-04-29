@@ -3,11 +3,11 @@
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-enum PoolingMode : byte {
-    UNSET = 0,
-    MAX_POOLING = 1,
-    AVERAGE = 2,
-    AVERAGE_INCLUSIVE = 3
+enum ResampleMode : byte {
+    NOT_SET = 0,
+    MAXPOOL = 1,
+    AVGPOOL_EXCLUDE_PADDING = 2,
+    AVGPOOL_INCLUDE_PADDING = 3
 }
 
 enum PaddingMode : byte {
