@@ -28,13 +28,13 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 #ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
 #endif
 
 #include <Tensile/DistinctType.hpp>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {

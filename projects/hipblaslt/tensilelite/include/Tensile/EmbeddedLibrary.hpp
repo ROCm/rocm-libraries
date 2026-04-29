@@ -28,12 +28,12 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 #ifdef TENSILE_DEFAULT_SERIALIZATION
 
 #include <Tensile/Singleton.hpp>
 #include <Tensile/Tensile.hpp>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -103,6 +103,6 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-#endif
-
 TENSILE_HIDDEN_END
+
+#endif

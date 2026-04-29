@@ -31,13 +31,13 @@
 #include <string>
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 #ifdef Tensile_ENABLE_MARKER
 #include <roctracer/roctx.h>
 #endif
 
 #include <Tensile/Singleton.hpp>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {

@@ -28,8 +28,6 @@
 
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 #ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
 #endif
@@ -40,6 +38,8 @@ TENSILE_HIDDEN_BEGIN
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {

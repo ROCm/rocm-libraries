@@ -31,8 +31,6 @@
 // is taken for all non-gfx950/gfx1250 device targets.
 #include <Tensile/Macros.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 #if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx950__) || defined(__gfx1250__)) && !defined(WIN32) && !defined(_WIN32)
 #define TENSILE_USE_FP4
 #endif
@@ -48,6 +46,8 @@ TENSILE_HIDDEN_BEGIN
 #define HIP_DEVICE __device__
 
 #include <hip/hip_ext_ocp.h>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -154,6 +154,6 @@ namespace std
     }
 } // namespace std
 
-#endif // TENSILE_USE_FP4
-
 TENSILE_HIDDEN_END
+
+#endif // TENSILE_USE_FP4
