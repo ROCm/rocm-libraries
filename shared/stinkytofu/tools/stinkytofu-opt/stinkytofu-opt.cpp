@@ -461,31 +461,6 @@ int main(int argc, char** argv) {
         schedBlock->blockId = "entry";
         for (int idx = fromIdx; idx <= toIdx; ++idx)
             schedBlock->instructions.push_back(std::move(originalInsts[idx]));
-        // Check for unrecognized instructions in the scheduling region.
-        // These become text blocks and won't be scheduled — likely a bug.
-        {
-            constexpr int kMaxErrors = 8;
-            int errorCount = 0;
-            for (const auto& inst : schedBlock->instructions) {
-                if (!inst->isLabel && inst->opcodeStr == "asm_directive" &&
-                    !inst->srcRegs.empty() && inst->srcRegs[0].getLiteralString() == "TEXTBLOCK") {
-                    if (errorCount < kMaxErrors) {
-                        std::cerr << "error: unrecognized instruction in region " << fromLabel
-                                  << ".." << toLabel << ": " << inst->srcRegs[1].getLiteralString();
-                    }
-                    errorCount++;
-                }
-            }
-            if (errorCount > kMaxErrors) {
-                std::cerr << "... and " << (errorCount - kMaxErrors)
-                          << " more unrecognized instructions\n";
-            }
-            if (errorCount > 0) {
-                stinkytofu::report_fatal_error(std::to_string(errorCount) +
-                                               " unrecognized instruction(s) in scheduling region");
-            }
-        }
-
         schedFunc->blocks.push_back(std::move(schedBlock));
         parsed.functions[0] = std::move(schedFunc);
 
