@@ -12,12 +12,11 @@
 //==================================================================================================
 
 #include "hitable.h"
+#include "sphere.h"
 
-
-class hittable_list: public hittable  {
+class hittable_list  {
     public:
-        hittable_list() {}
-        hittable_list(hittable **l, int n) { list = l; list_size = n; }
+        hittable_list(sphere **l, int n) { list = l; list_size = n; }
         hittable_list(hittable_list &&other)
             : list(other.list), list_size(other.list_size) {
             other.list = nullptr;
@@ -40,8 +39,8 @@ class hittable_list: public hittable  {
             }
             delete [] list;
         }
-        virtual bool hit(const ray& r, float tmin, float tmax, hit_record& rec) const;
-        hittable **list;
+        bool hit(const ray& r, float tmin, float tmax, hit_record& rec) const;
+        sphere **list;
         int list_size;
 };
 

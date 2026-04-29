@@ -20,7 +20,7 @@
 #include "random.h"
 #include "sphere.h"
 
-vec3 color(const ray& r, const hittable &world, int depth) {
+vec3 color(const ray& r, const hittable_list &world, int depth) {
     hit_record rec;
     if (world.hit(r, 0.001, MAXFLOAT, rec)) {
         ray scattered;
@@ -40,9 +40,9 @@ vec3 color(const ray& r, const hittable &world, int depth) {
 }
 
 
-hittable *random_scene() {
+hittable_list random_scene() {
     int n = 500;
-    hittable **list = new hittable*[n+1];
+    sphere **list = new sphere*[n+1];
     list[0] =  new sphere(vec3(0,-1000,0), 1000, new lambertian(vec3(0.5, 0.5, 0.5)));
     int i = 1;
     for (int a = -11; a < 11; a++) {
@@ -78,7 +78,7 @@ hittable *random_scene() {
     list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
     list[i++] = new sphere(vec3(4, 1, 0), 1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
 
-    return new hittable_list(list,i);
+    return hittable_list(list,i);
 }
 
 
@@ -98,7 +98,7 @@ int main() {
     int nx = 1200;
     int ny = 800;
     int ns = 10;
-    hittable *world = random_scene();
+    hittable_list world = random_scene();
 
     vec3 lookfrom(13,2,3);
     vec3 lookat(0,0,0);
@@ -119,7 +119,7 @@ int main() {
                         float u = float(i + random_double()) / float(nx);
                         float v = float(j + random_double()) / float(ny);
                         ray r = cam.get_ray(u, v);
-                        col += color(r, *world, 0);
+                        col += color(r, world, 0);
                     }
                     col /= float(ns);
                     col = vec3( sqrt(col[0]), sqrt(col[1]), sqrt(col[2]) );
