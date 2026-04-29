@@ -75,8 +75,7 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
             StinkyIRConverter::populateFunctionFromString(irText, func, passCtx, arch);
         if (result != StinkyErrorCode::SUCCESS) {
             if (result == StinkyErrorCode::PASSCTX_EMPTY) {
-                std::cerr << "No PassContext available. Call convertToIRList first."
-                          << "\n";
+                std::cerr << "No PassContext available. Call convertToIRList first.\n";
             } else {
                 std::cerr << "Error: Failed to populate IRList from string. Error code: "
                           << static_cast<int>(result) << "\n";
