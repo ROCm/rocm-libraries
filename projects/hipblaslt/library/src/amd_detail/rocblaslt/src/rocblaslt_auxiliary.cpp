@@ -1943,8 +1943,11 @@ rocblaslt_status
                                       prob,
                                       tensile_data,
                                       &heuristicResultsArray[0].algo,
-                                      &heuristicResultsArray[0].workspaceSize))                    
+                                      &heuristicResultsArray[0].workspaceSize))
+            {
+                *returnAlgoCount = 1;
                 return rocblaslt_status_success;    
+            }
         }
         if(requestedAlgoCount > 0)
         {
