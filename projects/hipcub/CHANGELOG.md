@@ -7,6 +7,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ### Added
 
 * Added support for large number of segments and large number of items to `hipcub::DeviceSegmentedRadixSort::*`.
+* Added new `hipcub::WarpReduce` overloadings `hipcub::WarpReduce::Sum`, `hipcub::WarpReduce::Max` and `hipcub::WarpReduce::Min`.
 
 ## hipCUB-5.0.0 for ROCm 10.0.0
 
