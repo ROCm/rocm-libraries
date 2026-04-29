@@ -97,9 +97,8 @@ void ext_inst(nb::module_ m)
           &rocisa::ECvtF32toF16,
           nb::arg("dst"),
           nb::arg("src"),
-          nb::arg("sel"),
-          nb::arg("halfWordSel") = true,
-          nb::arg("comment")       = "");
+          nb::arg("sel")     = nb::none(),
+          nb::arg("comment") = "");
     m.def("ECvtPkFP8toF32",
           &rocisa::ECvtPkFP8toF32,
           nb::arg("dst"),

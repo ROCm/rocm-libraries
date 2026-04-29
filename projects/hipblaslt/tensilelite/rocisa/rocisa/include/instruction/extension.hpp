@@ -407,39 +407,39 @@ namespace rocisa
     }
 
     /**
-     * Convert F32->F16, placing result in dst half-word selected by `sel`.
-     * When `halfWordSel` is false a plain VCvtF32toF16 is emitted without any
-     * half-word modifier (no true16 suffix on NoSDWA targets, no SDWA dst_sel
-     * on legacy targets). Use this for simple F32->F16 conversions where the
-     * caller does not need to pack into a specific half of the destination.
+     * Convert F32->F16 with optional half-word packing.
+     *
+     * @param sel  std::nullopt -> plain VCvtF32toF16, no half-word modifier.
+     *             HighBitSel::LOW / HIGH -> pack result into the selected
+     *             half-word via op_sel (NoSDWA / true16) or SDWA dst_sel
+     *             (legacy).
      */
     inline std::shared_ptr<Item>
         ECvtF32toF16(const std::shared_ptr<RegisterContainer>& dst,
                      const InstructionInput&                   src,
-                     HighBitSel                                sel,
-                     bool                                      halfWordSel = true,
-                     const std::string&                        comment     = "")
+                     std::optional<HighBitSel>                 sel     = std::nullopt,
+                     const std::string&                        comment = "")
     {
-        rocIsa& instance = rocIsa::getInstance();
-        if(!halfWordSel)
+        if(!sel.has_value())
         {
             return std::make_shared<VCvtF32toF16>(
                 dst, src, std::nullopt, std::vector<int>{}, comment);
         }
 
+        rocIsa& instance = rocIsa::getInstance();
         if(instance.getArchCaps()["NoSDWA"])
         {
             return std::make_shared<VCvtF32toF16>(
                 dst,
                 src,
                 std::nullopt,
-                std::vector<int>{static_cast<int>(sel)},
+                std::vector<int>{static_cast<int>(*sel)},
                 comment);
         }
 
         SDWAModifiers sdwa;
-        sdwa.dst_sel = (sel == HighBitSel::HIGH) ? SelectBit::WORD_1
-                                                 : SelectBit::WORD_0;
+        sdwa.dst_sel = (*sel == HighBitSel::HIGH) ? SelectBit::WORD_1
+                                                  : SelectBit::WORD_0;
         return std::make_shared<VCvtF32toF16>(
             dst, src, sdwa, std::vector<int>{}, comment);
     }

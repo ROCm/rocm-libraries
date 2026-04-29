@@ -23,7 +23,7 @@
 from rocisa import rocIsa
 from rocisa.code import Module
 from rocisa.container import vgpr, sgpr,SDWAModifiers, VOP3PModifiers
-from rocisa.enum import DataTypeEnum, HighBitSel, SelectBit, UnusedBit, SaturateCastType
+from rocisa.enum import DataTypeEnum, SelectBit, UnusedBit, SaturateCastType
 from rocisa.instruction import VAdd3U32, VCvtF32toF16, VLShiftRightB32, \
                             VCmpUF32, VCndMaskB32, VCvtPkF32toFP8, VCvtPkF32toBF8, \
                             VCmpClassF32, VOrB32, VPackF16toB32, \
@@ -49,7 +49,7 @@ class PackData_F16(PackData):
         ti = rocIsa.getInstance()
         if gwvw == 1:
             formatVgpr = formatting(elementSumIdx, inputPrefix, prefixOffset)
-            module.add(ECvtF32toF16(dst=vgpr(destIdx), src=vgpr(formatVgpr), sel=HighBitSel.LOW, halfWordSel=False, comment="convert C to fp16"))
+            module.add(ECvtF32toF16(dst=vgpr(destIdx), src=vgpr(formatVgpr), comment="convert C to fp16"))
             return module
 
         assert (gwvw % 2 == 0)
@@ -70,7 +70,7 @@ class PackData_F16(PackData):
                     d = destIdx + vi//2
                     module.add(VCvtPkF32toF16(dst=vgpr(d), src0=vgpr(formatVgpr_1), src1=vgpr(formatVgpr), comment="convert C to fp16 and pack with neighbor"))
             else:
-                module.add(ECvtF32toF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), sel=HighBitSel.LOW, halfWordSel=False, comment="convert C to fp16"))
+                module.add(ECvtF32toF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), comment="convert C to fp16"))
                 if vi%2 == 1:
                     d = destIdx + vi//2
                     module.add(VPackF16toB32(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \
