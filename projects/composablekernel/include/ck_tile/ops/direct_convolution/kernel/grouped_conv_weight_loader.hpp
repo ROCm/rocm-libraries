@@ -15,9 +15,9 @@ namespace direct_conv {
 // Supports multi-pass loading when the weight buffer exceeds one block_size.
 //
 // TC must provide:
-//   TC::Weight::MakeDramDescriptor()
-//   TC::Weight::MakeDramDistribution()
-//   TC::Weight::MakeLdsStoreDescriptor()
+//   TC::Weight::MakeDramReadDescriptor()
+//   TC::Weight::MakeDramReadTileDistribution()
+//   TC::Weight::MakeLdsWriteDescriptor()
 //   TC::Weight::NUM_WEIGHT_PASSES
 //   TC::GROUP_SIZE
 //
@@ -28,7 +28,7 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
                                    uint4* weight_lds,
                                    const _Float16* __restrict__ wei)
 {
-    constexpr auto weight_dram_desc = TC::Weight::MakeDramDescriptor();
+    constexpr auto weight_dram_desc = TC::Weight::MakeDramReadDescriptor();
     auto weight_dram_buf = ck_tile::make_buffer_view<ck_tile::address_space_enum::global>(
         wei + static_cast<size_t>(bc.block_k) * cfg.kh * cfg.kw * TC::GROUP_SIZE,
         static_cast<ck_tile::index_t>(weight_dram_desc.get_element_space_size()));
@@ -37,14 +37,14 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
                             remove_cvref_t<decltype(weight_dram_desc)>>{
             weight_dram_buf, weight_dram_desc};
 
-    constexpr auto weight_dram_dist = TC::Weight::MakeDramDistribution();
+    constexpr auto weight_dram_dist = TC::Weight::MakeDramReadTileDistribution();
     auto weight_dram_window = ck_tile::make_tile_window(
         weight_dram_view,
         ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
         {0, 0},
         weight_dram_dist);
 
-    constexpr auto weight_lds_desc = TC::Weight::MakeLdsStoreDescriptor();
+    constexpr auto weight_lds_desc = TC::Weight::MakeLdsWriteDescriptor();
     auto weight_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
         reinterpret_cast<_Float16*>(weight_lds), weight_lds_desc);
     auto weight_lds_window = ck_tile::make_tile_window(

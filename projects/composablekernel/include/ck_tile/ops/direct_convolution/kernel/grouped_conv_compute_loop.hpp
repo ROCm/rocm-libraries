@@ -233,8 +233,12 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     }
 
     // --- Tail flush: output rows not flushed by the main/remainder loops ---
+    // The __syncthreads() before each flush separates the previous iteration's
+    // LDS reads from this iteration's LDS writes (WAR hazard). 
+    // For the first iteration, it is harmless (previous sync already issued by the main/remainder loop).
     for(int p_out = hi - cfg.kh + 1 + py; p_out < ho; p_out++)
     {
+        __syncthreads();
         int p_idx = (p_out - py + cfg.kh) % cfg.kh;
         fp32x4_t slot;
         dispatch<cfg.kh>(p_idx,

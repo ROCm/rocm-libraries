@@ -351,7 +351,7 @@ struct TileConstants
     // -----------------------------------------------------------------------
     struct Mfma
     {
-        static constexpr auto MakeDistribution()
+        static constexpr auto MakeAccTileDistribution()
         {
             // RH-major indices: 0=R(empty), 1=X0(Q), 2=X1(C4), 3=X2(c_sub)
             //
@@ -389,14 +389,14 @@ struct TileConstants
     {
         using Shared = SharedDescriptors<TileConstants<cfg>>::Input;
 
-        static CK_TILE_DEVICE auto MakeDramDescriptor(int hi, int wi, int C_total, int px)
+        static CK_TILE_DEVICE auto MakeDramReadDescriptor(int hi, int wi, int C_total, int px)
         {
-            return Shared::MakeDramDescriptor(hi, wi, C_total, px);
+            return Shared::MakeDramReadDescriptor(hi, wi, C_total, px);
         }
 
-        static constexpr auto MakeDramDistribution() { return Shared::MakeDramDistribution(); }
+        static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
 
-        static constexpr auto MakeLdsStoreDescriptor() { return Shared::MakeLdsStoreDescriptor(); }
+        static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
 
         static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
     };
@@ -409,7 +409,7 @@ struct TileConstants
     //          in NUM_WEIGHT_PASSES passes (one block_size chunk per pass).
     //   LDS:   2D [WEIGHT_LDS_PADDED_UINT4, 8] in fp16 — staging buffer.
     //   Regs:  1D array [kh*kw] of fp16x4 — MFMA B operand.
-    //          Fprop reads via MakeLdsReadDistribution.
+    //          Fprop reads via MakeLdsReadTileDistribution.
     //          Dgrad reads via TransposeLDSLayout (ds_read_b64_tr_b16).
     // -----------------------------------------------------------------------
     struct Weight
@@ -425,14 +425,14 @@ struct TileConstants
         static constexpr int WEIGHT_LDS_PADDED_UINT4 = NUM_WEIGHT_PASSES * cfg.block_size();
         static constexpr int WEIGHT_LDS_READ_K = cfg.block_c();
 
-        static constexpr auto MakeDramDescriptor() { return Shared::MakeDramDescriptor(); }
-        static constexpr auto MakeDramDistribution() { return Shared::MakeDramDistribution(); }
-        static constexpr auto MakeLdsStoreDescriptor() { return Shared::MakeLdsStoreDescriptor(); }
+        static constexpr auto MakeDramReadDescriptor() { return Shared::MakeDramReadDescriptor(); }
+        static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
+        static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
         static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
 
         // Tile distribution for weight LDS reads (Fprop only).
         // R = [waves_q4]: all Q-waves read the same weights (replication).
-        static constexpr auto MakeLdsReadDistribution()
+        static constexpr auto MakeLdsReadTileDistribution()
         {
             // RH-major indices: 0=R, 1=X0(K-channel), 2=X1(filter pos), 3=X2(sub-channel)
             //
@@ -464,11 +464,11 @@ struct TileConstants
     //
     // Memory stages:
     //   Regs:  Distributed fp32x4 accumulators in the MFMA layout
-    //          (mapped to/from fp16x4 via Mfma::MakeDistribution).
+    //          (mapped to/from fp16x4 via Mfma::MakeAccTileDistribution).
     //   LDS:   3D [block_q, BLOCK_C4, 4] in fp16 — staging buffer for the
     //          LDS epilogue path (RegistersToLdsToGlobalMemory).
     //   DRAM:  4D [ho, wo_padded, BLOCK_C4, 4] in fp16 — final output.
-    //          MakeDramDistribution is also used to read back from LDS before
+    //          MakeDramWriteTileDistributionNarrow is also used to read back from LDS before
     //          the coalesced DRAM store (both use the same thread mapping).
     // -----------------------------------------------------------------------
     struct Output
@@ -478,16 +478,52 @@ struct TileConstants
         static constexpr int OUTPUT_LDS_BUFFER_SIZE = BLOCK_C8 * BLOCK_Q;
 
         static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
-        static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
 
-        static CK_TILE_DEVICE auto MakeDramDescriptor(int ho, int wo, int C)
+        static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrow(int ho, int wo, int C)
         {
-            return Shared::MakeDramDescriptor(ho, wo, C);
+            return Shared::MakeDramWriteDescriptorNarrow(ho, wo, C);
+        }
+
+        // Store distribution for wider LDS reads and DRAM stores.
+        // Maps all block_size threads to [STORE_Q, BLOCK_C8, 8] positions.
+        // Only STORE_VECS threads are active (Q < BLOCK_Q).
+        //
+        // Thread decomposition:
+        //   P0 (warp_id, NUM_WAVES) → X0 factor 0 (Q warp group)
+        //   P1 (lane_id = 64, merge {LANES_PER_ROW, BLOCK_C8}):
+        //     factor 0 (LANES_PER_ROW) → X0 factor 1 (Q within warp)
+        //     factor 1 (BLOCK_C8) → X1 (C8)
+        //   Y0 (length 8) → X2 (vectorization)
+        static constexpr auto MakeDramWriteTileDistributionWide()
+        {
+            return ck_tile::make_static_tile_distribution(
+                ck_tile::tile_distribution_encoding<
+                    ck_tile::sequence<>,
+                    ck_tile::tuple<ck_tile::sequence<NUM_WAVES, LANES_PER_ROW>,
+                                   ck_tile::sequence<BLOCK_C8>,
+                                   ck_tile::sequence<8>>,
+                    ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
+                    ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0>>,
+                    ck_tile::sequence<3>,
+                    ck_tile::sequence<0>,
+                    ck_tile::number<STORE_VECS>>{});
+        }
+
+        static constexpr int STORE_Q = TOTAL_SPATIAL;
+
+        static constexpr auto MakeLdsReadDescriptorWide()
+        {
+            return Shared::template MakeLdsReadDescriptorWide<STORE_Q>();
+        }
+
+        static CK_TILE_DEVICE auto MakeDramWriteDescriptorWide(int wo, int C)
+        {
+            return Shared::MakeDramWriteDescriptorWide(wo, C);
         }
 
         // Tile distribution for DRAM output writes (variant-specific wave decomposition).
         // 4D tile: [1, block_q, BLOCK_C4, 4]
-        static constexpr auto MakeDramDistribution()
+        static constexpr auto MakeDramWriteTileDistributionNarrow()
         {
             // RH-major indices: 0=R(empty), 1=X0(row), 2=X1(Q), 3=X2(C_group), 4=X3(C_sub)
             //
@@ -602,7 +638,7 @@ struct WeightLoader
                 ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
                     reinterpret_cast<_Float16*>(weight_lds), weight_lds_read_desc);
 
-            constexpr auto weight_lds_read_dist = TC::Weight::MakeLdsReadDistribution();
+            constexpr auto weight_lds_read_dist = TC::Weight::MakeLdsReadTileDistribution();
             auto weight_lds_read_window         = ck_tile::make_tile_window(
                 weight_lds_view,
                 ck_tile::make_tuple(ck_tile::number<TC::Weight::WEIGHT_LDS_READ_K>{},

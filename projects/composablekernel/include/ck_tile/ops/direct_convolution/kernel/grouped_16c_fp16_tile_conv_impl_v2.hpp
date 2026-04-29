@@ -390,7 +390,7 @@ struct TileConstants
     // -----------------------------------------------------------------------
     struct Mfma
     {
-        static constexpr auto MakeDistribution()
+        static constexpr auto MakeAccTileDistribution()
         {
             // P0 (warp_id = NUM_WAVES):
             //   → X1 factor 0 → major=2, minor=0
@@ -423,14 +423,14 @@ struct TileConstants
     {
         using Shared = SharedDescriptors<TileConstants<cfg>>::Input;
 
-        static CK_TILE_DEVICE auto MakeDramDescriptor(int hi, int wi, int C_total, int px)
+        static CK_TILE_DEVICE auto MakeDramReadDescriptor(int hi, int wi, int C_total, int px)
         {
-            return Shared::MakeDramDescriptor(hi, wi, C_total, px);
+            return Shared::MakeDramReadDescriptor(hi, wi, C_total, px);
         }
 
-        static constexpr auto MakeDramDistribution() { return Shared::MakeDramDistribution(); }
+        static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
 
-        static constexpr auto MakeLdsStoreDescriptor() { return Shared::MakeLdsStoreDescriptor(); }
+        static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
 
         static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
     };
@@ -456,9 +456,9 @@ struct TileConstants
         static constexpr int WEIGHT_LDS_PADDED_UINT4 = NUM_WEIGHT_PASSES * cfg.block_size();
         static constexpr int WEIGHT_LDS_READ_K = cfg.block_c();
 
-        static constexpr auto MakeDramDescriptor() { return Shared::MakeDramDescriptor(); }
-        static constexpr auto MakeDramDistribution() { return Shared::MakeDramDistribution(); }
-        static constexpr auto MakeLdsStoreDescriptor() { return Shared::MakeLdsStoreDescriptor(); }
+        static constexpr auto MakeDramReadDescriptor() { return Shared::MakeDramReadDescriptor(); }
+        static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
+        static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
         static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
 
         // Tile distribution for weight LDS reads (Fprop).
@@ -481,7 +481,7 @@ struct TileConstants
         //   factor 1 = lane%16 (range 0-15) → X0 factor 1 (16 elements)
         //
         // No R dimension — all Q positions come from within a single wave.
-        static constexpr auto MakeLdsReadDistribution()
+        static constexpr auto MakeLdsReadTileDistribution()
         {
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<
@@ -506,11 +506,47 @@ struct TileConstants
         static constexpr int OUTPUT_LDS_BUFFER_SIZE = BLOCK_C8 * BLOCK_Q;
 
         static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
-        static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
 
-        static CK_TILE_DEVICE auto MakeDramDescriptor(int ho, int wo, int C)
+        static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrow(int ho, int wo, int C)
         {
-            return Shared::MakeDramDescriptor(ho, wo, C);
+            return Shared::MakeDramWriteDescriptorNarrow(ho, wo, C);
+        }
+
+        // Store distribution for wider LDS reads and DRAM stores.
+        // Maps all block_size threads to [STORE_Q, BLOCK_C8, 8] positions.
+        // Only STORE_VECS threads are active (Q < BLOCK_Q).
+        //
+        // Thread decomposition:
+        //   P0 (warp_id, NUM_WAVES) → X0 factor 0 (Q warp group)
+        //   P1 (lane_id = 64, merge {LANES_PER_ROW, BLOCK_C8}):
+        //     factor 0 (LANES_PER_ROW) → X0 factor 1 (Q within warp)
+        //     factor 1 (BLOCK_C8) → X1 (C8)
+        //   Y0 (length 8) → X2 (vectorization)
+        static constexpr auto MakeDramWriteTileDistributionWide()
+        {
+            return ck_tile::make_static_tile_distribution(
+                ck_tile::tile_distribution_encoding<
+                    ck_tile::sequence<>,
+                    ck_tile::tuple<ck_tile::sequence<NUM_WAVES, LANES_PER_ROW>,
+                                   ck_tile::sequence<BLOCK_C8>,
+                                   ck_tile::sequence<8>>,
+                    ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
+                    ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0>>,
+                    ck_tile::sequence<3>,
+                    ck_tile::sequence<0>,
+                    ck_tile::number<STORE_VECS>>{});
+        }
+
+        static constexpr int STORE_Q = TOTAL_SPATIAL;
+
+        static constexpr auto MakeLdsReadDescriptorWide()
+        {
+            return Shared::template MakeLdsReadDescriptorWide<STORE_Q>();
+        }
+
+        static CK_TILE_DEVICE auto MakeDramWriteDescriptorWide(int wo, int C)
+        {
+            return Shared::MakeDramWriteDescriptorWide(wo, C);
         }
 
         // Tile distribution for DRAM output writes (variant-specific wave decomposition).
@@ -519,7 +555,7 @@ struct TileConstants
         //   X1 = 16 (Q) → P1
         //   X2 = BLOCK_C4 [waves_per_wg, 4] → P0, P1
         //   X3 = 4 → Y1
-        static constexpr auto MakeDramDistribution()
+        static constexpr auto MakeDramWriteTileDistributionNarrow()
         {
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<
@@ -623,7 +659,7 @@ struct WeightLoader
                 ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
                     reinterpret_cast<_Float16*>(weight_lds), weight_lds_read_desc);
 
-            constexpr auto weight_lds_read_dist = TC::Weight::MakeLdsReadDistribution();
+            constexpr auto weight_lds_read_dist = TC::Weight::MakeLdsReadTileDistribution();
             auto weight_lds_read_window = ck_tile::make_tile_window(
                 weight_lds_view,
                 ck_tile::make_tuple(ck_tile::number<TC::Weight::WEIGHT_LDS_READ_K>{},

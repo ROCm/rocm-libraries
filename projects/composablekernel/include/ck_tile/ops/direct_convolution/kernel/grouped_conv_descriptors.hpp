@@ -24,8 +24,8 @@ struct SharedDescriptors
     // ===================================================================
     struct Input
     {
-        // DRAM descriptor: [hi, wi_padded, BLOCK_C8, 8] with optional XOR.
-        static CK_TILE_DEVICE auto MakeDramDescriptor(int hi, int wi, int C_total, int px)
+        // DRAM read descriptor: [hi, wi_padded, BLOCK_C8, 8] with optional XOR.
+        static CK_TILE_DEVICE auto MakeDramReadDescriptor(int hi, int wi, int C_total, int px)
         {
             constexpr int right_pad_w = TC::KW - 1;
 
@@ -86,7 +86,7 @@ struct SharedDescriptors
         }
 
         // Tile distribution for DRAM async loads: [1, {NUM_WAVES, LANES_PER_ROW}, BLOCK_C8, 8].
-        static constexpr auto MakeDramDistribution()
+        static constexpr auto MakeDramReadTileDistribution()
         {
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<
@@ -101,8 +101,8 @@ struct SharedDescriptors
                     ck_tile::sequence<0, 0>>{});
         }
 
-        // LDS store descriptor: [1, BLOCK_W, BLOCK_C8, 8] contiguous.
-        static constexpr auto MakeLdsStoreDescriptor()
+        // LDS write descriptor: [1, BLOCK_W, BLOCK_C8, 8] contiguous.
+        static constexpr auto MakeLdsWriteDescriptor()
         {
             return ck_tile::make_naive_tensor_descriptor(
                 ck_tile::make_tuple(ck_tile::number<1>{},
@@ -190,8 +190,8 @@ struct SharedDescriptors
     // ===================================================================
     struct Weight
     {
-        // DRAM descriptor: [WEIGHT_LDS_SIZE_UINT4, 8] padded to [WEIGHT_LDS_PADDED_UINT4, 8].
-        static constexpr auto MakeDramDescriptor()
+        // DRAM read descriptor: [WEIGHT_LDS_SIZE_UINT4, 8] padded to [WEIGHT_LDS_PADDED_UINT4, 8].
+        static constexpr auto MakeDramReadDescriptor()
         {
             constexpr auto desc_raw = ck_tile::make_naive_tensor_descriptor(
                 ck_tile::make_tuple(ck_tile::number<TC::Weight::WEIGHT_LDS_SIZE_UINT4>{},
@@ -214,7 +214,7 @@ struct SharedDescriptors
         }
 
         // Tile distribution for weight async loads: linear tid → row.
-        static constexpr auto MakeDramDistribution()
+        static constexpr auto MakeDramReadTileDistribution()
         {
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<
@@ -227,8 +227,8 @@ struct SharedDescriptors
                     ck_tile::sequence<0>>{});
         }
 
-        // LDS store descriptor: [WEIGHT_LDS_PADDED_UINT4, 8] contiguous.
-        static constexpr auto MakeLdsStoreDescriptor()
+        // LDS write descriptor: [WEIGHT_LDS_PADDED_UINT4, 8] contiguous.
+        static constexpr auto MakeLdsWriteDescriptor()
         {
             return ck_tile::make_naive_tensor_descriptor(
                 ck_tile::make_tuple(ck_tile::number<TC::Weight::WEIGHT_LDS_PADDED_UINT4>{},
@@ -325,93 +325,85 @@ struct SharedDescriptors
             }
         }
 
-        // LDS read descriptor: [1, BLOCK_Q, BLOCK_C4, 4] with optional swizzle on (Q, C8).
-        // Both write and read use the SAME swizzle (cyclic_shift / xor) because they
-        // both map logical (q, c8) → the same physical LDS position. The input LDS path
-        // uses inverse_cyclic_shift for reads because its LDS is written contiguously
-        // (no swizzle in store descriptor), but here both descriptors apply the swizzle.
-        static constexpr auto MakeLdsReadDescriptor()
+        // LDS read descriptor (wide): [StoreQ, BLOCK_C8, 8] with optional swizzle.
+        // StoreQ covers the full thread distribution range (typically 2 * BLOCK_Q).
+        // Only threads with Q < BLOCK_Q read valid data; threads with Q >= BLOCK_Q
+        // are inactive (guarded by is_thread_active() from the distribution).
+        template <int StoreQ>
+        static constexpr auto MakeLdsReadDescriptorWide()
         {
             constexpr auto desc_raw = ck_tile::make_naive_tensor_descriptor(
-                ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
+                ck_tile::make_tuple(ck_tile::number<StoreQ>{},
                                     ck_tile::number<TC::BLOCK_C8>{},
                                     ck_tile::number<8>{}),
                 ck_tile::make_tuple(ck_tile::number<TC::BLOCK_C8 * 8>{},
                                     ck_tile::number<8>{},
                                     ck_tile::number<1>{}),
-                ck_tile::number<4>{},
+                ck_tile::number<8>{},
                 ck_tile::number<1>{});
-
-            auto make_desc = [](auto desc_3d) constexpr {
-                constexpr auto desc_merged = ck_tile::transform_tensor_descriptor(
-                    desc_3d,
-                    ck_tile::make_tuple(
-                        ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_Q>{}),
-                        ck_tile::make_merge_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_C8>{},
-                                                ck_tile::number<8>{}))),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
-
-                constexpr auto desc_3d_out = ck_tile::transform_tensor_descriptor(
-                    desc_merged,
-                    ck_tile::make_tuple(
-                        ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_Q>{}),
-                        ck_tile::make_unmerge_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_C4>{},
-                                                ck_tile::number<4>{}))),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}));
-
-                // Wrap with row dimension: [Q, C4, 4] → [1, Q, C4, 4]
-                return ck_tile::transform_tensor_descriptor(
-                    desc_3d_out,
-                    ck_tile::make_tuple(
-                        ck_tile::make_unmerge_transform(
-                            ck_tile::make_tuple(ck_tile::number<1>{},
-                                                ck_tile::number<TC::BLOCK_Q>{})),
-                        ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_C4>{}),
-                        ck_tile::make_pass_through_transform(ck_tile::number<4>{})),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                        ck_tile::sequence<2>{}),
-                    ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{},
-                                        ck_tile::sequence<3>{}));
-            };
 
             if constexpr(TC::SWIZZLE_TYPE == SwizzleType::XOR)
             {
-                constexpr auto desc_xor = ck_tile::transform_tensor_descriptor(
+                return ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
                         ck_tile::make_xor_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
+                            ck_tile::make_tuple(ck_tile::number<StoreQ>{},
                                                 ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
-                return make_desc(desc_xor);
             }
-            else if constexpr (TC::SWIZZLE_TYPE == SwizzleType::CyclicShift)
+            else if constexpr(TC::SWIZZLE_TYPE == SwizzleType::CyclicShift)
             {
-                constexpr auto desc_cs = ck_tile::transform_tensor_descriptor(
+                return ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
                         ck_tile::make_cyclic_shift_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
+                            ck_tile::make_tuple(ck_tile::number<StoreQ>{},
                                                 ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
-                return make_desc(desc_cs);
             }
             else
             {
-                return make_desc(desc_raw);
+                return desc_raw;
             }
         }
 
-        // DRAM descriptor: [ho, wo_padded, BLOCK_C4, 4].
-        static CK_TILE_DEVICE auto MakeDramDescriptor(int ho, int wo, int C)
+        // DRAM write descriptor (wide): [wo_padded, BLOCK_C8, 8].
+        // Uses C8-aligned addressing (8 fp16 per uint4) for 16B stores.
+        // The row dimension (ho) is handled externally via p_out * row_stride_elems.
+        static CK_TILE_DEVICE auto MakeDramWriteDescriptorWide(int wo, int C)
+        {
+            const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
+                ck_tile::make_tuple(wo,
+                                    ck_tile::number<TC::BLOCK_C8>{},
+                                    ck_tile::number<8>{}),
+                ck_tile::make_tuple(C,
+                                    ck_tile::number<8>{},
+                                    ck_tile::number<1>{}),
+                ck_tile::number<8>{},
+                ck_tile::number<1>{});
+
+            constexpr int right_pad_w = TC::BLOCK_Q;
+            return ck_tile::transform_tensor_descriptor(
+                desc_raw,
+                ck_tile::make_tuple(
+                    ck_tile::make_pad_transform(wo, 0, right_pad_w),
+                    ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_C8>{}),
+                    ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{},
+                    ck_tile::sequence<1>{}, ck_tile::sequence<2>{}),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{},
+                    ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
+        }
+
+        // DRAM write descriptor (narrow): [ho, wo_padded, BLOCK_C4, 4].
+        static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrow(int ho, int wo, int C)
         {
             const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
                 ck_tile::make_tuple(ho, wo,

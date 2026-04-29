@@ -20,11 +20,11 @@ namespace direct_conv {
 //   cfg — Config value providing kw and other kernel parameters.
 //
 // TC must provide:
-//   TC::Input::MakeDramDescriptor(hi, wi, C_total, px)  — px = left padding
-//   TC::Input::MakeDramDistribution()
-//   TC::Input::MakeLdsStoreDescriptor()
+//   TC::Input::MakeDramReadDescriptor(hi, wi, C_total, px)  — px = left padding
+//   TC::Input::MakeDramReadTileDistribution()
+//   TC::Input::MakeLdsWriteDescriptor()
 //   TC::Input::MakeLdsReadDescriptor()
-//   TC::Mfma::MakeDistribution()
+//   TC::Mfma::MakeAccTileDistribution()
 //   TC::TOTAL_SPATIAL, TC::BLOCK_W, TC::BLOCK_C8, TC::BLOCK_C4, TC::BLOCK_Q
 //   TC::INPUT_LDS_BUFFER_SIZE_C8, TC::INPUT_LDS_BUFFER_SIZE_FP16
 template <typename TC, auto cfg>
@@ -34,14 +34,14 @@ struct InputLoader
     using InputDramWindowType = decltype(ck_tile::make_tile_window(
         ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
             static_cast<const _Float16*>(nullptr),
-            TC::Input::MakeDramDescriptor(int{}, int{}, int{}, int{})),
+            TC::Input::MakeDramReadDescriptor(int{}, int{}, int{}, int{})),
         ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
                             ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
         ck_tile::multi_index<4>{},
-        TC::Input::MakeDramDistribution()));
+        TC::Input::MakeDramReadTileDistribution()));
 
     static constexpr auto mfma_desc = TC::Input::MakeLdsReadDescriptor();
-    static constexpr auto mfma_dist = TC::Mfma::MakeDistribution();
+    static constexpr auto mfma_dist = TC::Mfma::MakeAccTileDistribution();
 
     using MfmaBuf      = ck_tile::buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>;
     using MfmaViewType = ck_tile::tensor_view<MfmaBuf, ck_tile::remove_cvref_t<decltype(mfma_desc)>>;
@@ -74,12 +74,12 @@ struct InputLoader
                 : input_lds_ptr(input_lds)
     {
         // Create temporary DRAM tile_window to extract per-thread offsets.
-        const auto input_dram_desc = TC::Input::MakeDramDescriptor(hi, wi, bc.C, px);
+        const auto input_dram_desc = TC::Input::MakeDramReadDescriptor(hi, wi, bc.C, px);
         const _Float16* input_base = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k;
         const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
             input_base, input_dram_desc);
 
-        constexpr auto input_dram_dist = TC::Input::MakeDramDistribution();
+        constexpr auto input_dram_dist = TC::Input::MakeDramReadTileDistribution();
         {
             auto tmp_dram_window = ck_tile::make_tile_window(
                 input_dram_view,
@@ -105,7 +105,7 @@ struct InputLoader
             // indices (row, spatial, c8, c), which we map through the LDS store
             // descriptor to get the LDS element offset. This correctly decouples the
             // LDS layout from DRAM descriptor transforms (pad, XOR, etc.).
-            constexpr auto lds_store_desc = TC::Input::MakeLdsStoreDescriptor();
+            constexpr auto lds_store_desc = TC::Input::MakeLdsWriteDescriptor();
             auto warp_adaptor_bottom_idx =
                 tmp_dram_window.pre_computed_warp_coords_[ck_tile::number<0>{}]
                                                          [ck_tile::number<0>{}].get_bottom_index();
