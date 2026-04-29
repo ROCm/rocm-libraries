@@ -1175,15 +1175,15 @@ def test_renameFallbacksPerArch_perArchKeysDiverge():
     keys_1101 = set(masters["gfx1101"].lazyLibraries.keys())
     # Buggy code (no rename) leaves both as {base}; patched code must
     # produce {base + "_<arch>"} per arch with no overlap.
-    assert keys_1100 == {base + "_gfx1100"}, (
-        "gfx1100 lazy key not arch-suffixed; legacy unrouted name still present"
-    )
-    assert keys_1101 == {base + "_gfx1101"}, (
-        "gfx1101 lazy key not arch-suffixed; legacy unrouted name still present"
-    )
-    assert keys_1100.isdisjoint(keys_1101), (
-        "per-arch lazy keys must not collide on a shared fallback filename"
-    )
+    assert keys_1100 == {
+        base + "_gfx1100"
+    }, "gfx1100 lazy key not arch-suffixed; legacy unrouted name still present"
+    assert keys_1101 == {
+        base + "_gfx1101"
+    }, "gfx1101 lazy key not arch-suffixed; legacy unrouted name still present"
+    assert keys_1100.isdisjoint(
+        keys_1101
+    ), "per-arch lazy keys must not collide on a shared fallback filename"
 
 
 def test_renameFallbacksPerArch_placeholderInTreeMatchesLazyKey():
@@ -1199,9 +1199,7 @@ def test_renameFallbacksPerArch_placeholderInTreeMatchesLazyKey():
     masters = {"gfx1100": _makeMasterWithFallbackPlaceholder(base)}
     tcl.renameFallbacksPerArch(masters)
 
-    placeholder = (
-        masters["gfx1100"].library.rows[0]["library"].mapping["opId"]
-    )
+    placeholder = masters["gfx1100"].library.rows[0]["library"].mapping["opId"]
     lazyKey = next(iter(masters["gfx1100"].lazyLibraries.keys()))
     assert placeholder.filenamePrefix == base + "_gfx1100", (
         "placeholder filenamePrefix not arch-suffixed — runtime would load "
@@ -1227,17 +1225,15 @@ def test_renameFallbacksPerArch_aliasedFallbackIsDeepCopied():
     masters = {"gfx1100": shared, "gfx1101": shared}
     tcl.renameFallbacksPerArch(masters)
 
-    assert masters["gfx1100"] is not masters["gfx1101"], (
-        "per-arch masters still alias the same object — rename leaks across arches"
-    )
+    assert (
+        masters["gfx1100"] is not masters["gfx1101"]
+    ), "per-arch masters still alias the same object — rename leaks across arches"
     # Each placeholder must hold its own arch's name.
     ph_1100 = masters["gfx1100"].library.rows[0]["library"].mapping["opId"]
     ph_1101 = masters["gfx1101"].library.rows[0]["library"].mapping["opId"]
-    assert ph_1100.filenamePrefix.endswith("_gfx1100"), (
-        "gfx1100 placeholder not arch-correct after rename"
-    )
-    assert ph_1101.filenamePrefix.endswith("_gfx1101"), (
-        "gfx1101 placeholder not arch-correct after rename"
-    )
-
-
+    assert ph_1100.filenamePrefix.endswith(
+        "_gfx1100"
+    ), "gfx1100 placeholder not arch-correct after rename"
+    assert ph_1101.filenamePrefix.endswith(
+        "_gfx1101"
+    ), "gfx1101 placeholder not arch-correct after rename"
