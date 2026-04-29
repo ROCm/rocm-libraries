@@ -101,7 +101,6 @@ class PlaceholderLibrary:
             "covering the same (Hardware, OperationID, Metric, typed-Predicate) "
             "tuple. The dropped library will not be reachable through the "
             "master at runtime.",
-            file=sys.stderr,
             flush=True,
         )
 
