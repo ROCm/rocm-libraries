@@ -283,14 +283,14 @@ class batch_memcpy_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "device_batch_memcpy")
+            .add("algo", "device_batch_memcpy")
             .add("data_type", primbench::name<BufferSizeType>())
             .add("lvl", "device")
             .add("item_size", ItemSize)
             .add("item_alignment", ItemAlignment)
-            .add("number_of_tlev")
-            .add("number_of_wlev")
-            .add("number_of_blev");
+            .add("number_of_tlev", NumTlevBuffers)
+            .add("number_of_wlev", NumWlevBuffers)
+            .add("number_of_blev", NumBlevBuffers);
     }
 
     void run(primbench::state& state) override

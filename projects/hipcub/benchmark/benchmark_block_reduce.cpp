@@ -38,7 +38,7 @@ template<class Runner, class T, unsigned int BlockSize, unsigned int ItemsPerThr
 __global__ __launch_bounds__(BlockSize)
 void kernel(const T* input, T* output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(input, output);
+    Runner::template run<T, BlockSize, ItemsPerThread>(input, output);
 }
 
 template<hipcub::BlockReduceAlgorithm algorithm>
@@ -55,7 +55,7 @@ struct reduce
                 return "block_reduce_warp_reductions";
         }
 
-        return "unknown algorithm;"
+        return "unknown algorithm";
     }
 
     template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
@@ -94,7 +94,7 @@ class block_reduce_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "block_reduce")
+            .add("algo", "block_reduce")
             .add("subalgo", Benchmark::get_algorithm_name())
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())

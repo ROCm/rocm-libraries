@@ -110,7 +110,7 @@ class block_histogram_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "histogram")
+            .add("algo", "histogram")
             .add("subalgo", histogram_algorithm_name<Benchmark>::value)
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())

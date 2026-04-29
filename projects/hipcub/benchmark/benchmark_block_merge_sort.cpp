@@ -112,7 +112,7 @@ class merge_sort_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "block_merge_sort")
+            .add("algo", "block_merge_sort")
             .add("subalgo", get_algorithm_name(BenchmarkKind))
             .add("data_type", primbench::name<T>())
             .add("block_size", BlockSize)

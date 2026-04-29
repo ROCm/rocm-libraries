@@ -94,11 +94,7 @@ struct flag_tails
 {
     static constexpr const char* name = "flag_tails";
 
-    template<class T,
-             unsigned int BlockSize,
-             unsigned int ItemsPerThread,
-             bool         WithTile,
-             unsigned int Trials>
+    template<class T, unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile>
     __device__
     static void run(const T* d_input, T* d_output)
     {
@@ -187,7 +183,7 @@ class block_discontinuity_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "block_discontinuity")
+            .add("algo", "block_discontinuity")
             .add("subalgo", Benchmark::name)
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())

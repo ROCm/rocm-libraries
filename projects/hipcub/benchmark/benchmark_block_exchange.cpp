@@ -213,7 +213,7 @@ class block_exchange_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "block_exchange")
+            .add("algo", "block_exchange")
             .add("subalgo", Benchmark::name)
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())
@@ -284,12 +284,6 @@ class block_exchange_benchmark : public primbench::benchmark_interface
     CREATE_BENCHMARK(type, block, 1), CREATE_BENCHMARK(type, block, 2),     \
         CREATE_BENCHMARK(type, block, 3), CREATE_BENCHMARK(type, block, 4), \
         CREATE_BENCHMARK(type, block, 7), CREATE_BENCHMARK(type, block, 8)
-
-using custom_float2  = benchmark_utils::custom_type<float, float>;
-using custom_double2 = benchmark_utils::custom_type<double, double>;
-
-PRIMBENCH_REGISTER_TYPE(custom_float2, "custom<f32, f32>");
-PRIMBENCH_REGISTER_TYPE(custom_double2, "custom<f64, f64>");
 
 template<class Benchmark>
 void add_benchmarks(primbench::executor& executor)

@@ -62,7 +62,7 @@ struct subtract_left
 
     template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
     __device__
-    static void run(const T* d_input, T* d_output, unsigned int trials)
+    static void run(const T* d_input, T* d_output)
     {
         const unsigned int lid          = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
@@ -73,7 +73,7 @@ struct subtract_left
         hipcub::BlockAdjacentDifference<T, BlockSize> adjacent_difference;
 
 #pragma nounroll
-        for(unsigned int trial = 0; trial < trials; trial++)
+        for(unsigned int trial = 0; trial < Trials; trial++)
         {
             T output[ItemsPerThread];
             if(WithTile)
@@ -103,7 +103,7 @@ struct subtract_left_partial_tile
 
     template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
     __device__
-    static void run(const T* d_input, const int* tile_sizes, T* d_output, unsigned int trials)
+    static void run(const T* d_input, const int* tile_sizes, T* d_output)
     {
         const unsigned int lid          = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
@@ -116,10 +116,10 @@ struct subtract_left_partial_tile
         int tile_size = tile_sizes[blockIdx.x];
 
         // Try to evenly distribute the length of tile_sizes between all the trials
-        const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
+        const auto tile_size_diff = (BlockSize * ItemsPerThread) / Trials + 1;
 
 #pragma nounroll
-        for(unsigned int trial = 0; trial < trials; trial++)
+        for(unsigned int trial = 0; trial < Trials; trial++)
         {
             T output[ItemsPerThread];
 
@@ -156,7 +156,7 @@ struct subtract_right
 
     template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
     __device__
-    static void run(const T* d_input, T* d_output, unsigned int trials)
+    static void run(const T* d_input, T* d_output)
     {
         const unsigned int lid          = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
@@ -167,7 +167,7 @@ struct subtract_right
         hipcub::BlockAdjacentDifference<T, BlockSize> adjacent_difference;
 
 #pragma nounroll
-        for(unsigned int trial = 0; trial < trials; trial++)
+        for(unsigned int trial = 0; trial < Trials; trial++)
         {
             T output[ItemsPerThread];
             if(WithTile)
@@ -197,7 +197,7 @@ struct subtract_right_partial_tile
 
     template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
     __device__
-    static void run(const T* d_input, const int* tile_sizes, T* d_output, unsigned int trials)
+    static void run(const T* d_input, const int* tile_sizes, T* d_output)
     {
         const unsigned int lid          = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
@@ -210,10 +210,10 @@ struct subtract_right_partial_tile
         int tile_size = tile_sizes[blockIdx.x];
 
         // Try to evenly distribute the length of tile_sizes between all the trials
-        const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
+        const auto tile_size_diff = (BlockSize * ItemsPerThread) / Trials + 1;
 
 #pragma nounroll
-        for(unsigned int trial = 0; trial < trials; trial++)
+        for(unsigned int trial = 0; trial < Trials; trial++)
         {
             T output[ItemsPerThread];
 
@@ -282,8 +282,7 @@ class block_adjacent_difference_benchmark : public primbench::benchmark_interfac
                     0,
                     stream,
                     d_input,
-                    d_output,
-                    Trials);
+                    d_output);
             });
 
         state.set_items(items);
@@ -304,7 +303,7 @@ class block_adjacent_difference_partial_tile_benchmark : public primbench::bench
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", Benchmark::name)
+            .add("algo", Benchmark::name)
             .add("subalgo", "adjacent_difference_partial_tile")
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())
@@ -367,9 +366,12 @@ class block_adjacent_difference_partial_tile_benchmark : public primbench::bench
     }
 };
 
-#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE) \
-    executor.queue<                             \
-        block_adjacent_difference_partial_tile_benchmark<Benchmark, T, BS, IPT, WITH_TILE>>()
+// or use block_adjacent_difference_partial_tile_benchmark
+#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                             \
+    executor.queue<std::conditional_t<                                                      \
+        is_partial,                                                                         \
+        block_adjacent_difference_partial_tile_benchmark<Benchmark, T, BS, IPT, WITH_TILE>, \
+        block_adjacent_difference_benchmark<Benchmark, T, BS, IPT, WITH_TILE>>>()
 
 #define BENCHMARK_TYPE(type, block, with_tile)                                                    \
     CREATE_BENCHMARK(type, block, 1, with_tile), CREATE_BENCHMARK(type, block, 3, with_tile),     \
@@ -379,6 +381,9 @@ class block_adjacent_difference_partial_tile_benchmark : public primbench::bench
 template<class Benchmark>
 void add_benchmarks(primbench::executor& executor)
 {
+    constexpr bool is_partial = std::is_same<Benchmark, subtract_left_partial_tile>::value
+                                || std::is_same<Benchmark, subtract_right_partial_tile>::value;
+
     BENCHMARK_TYPE(int, 256, false);
     BENCHMARK_TYPE(float, 256, false);
     BENCHMARK_TYPE(int8_t, 256, false);

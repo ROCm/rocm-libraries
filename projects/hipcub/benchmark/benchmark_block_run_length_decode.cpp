@@ -94,7 +94,7 @@ class block_run_length_decode_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "block_run_length_decode")
+            .add("algo", "block_run_length_decode")
             .add("lvl", "block")
             .add("item_type", primbench::name<ItemT>())
             .add("offset_type", primbench::name<OffsetT>())
@@ -172,7 +172,7 @@ class block_run_length_decode_benchmark : public primbench::benchmark_interface
             });
 
         state.set_items(Trials * output_length);
-        state.add_writes<T>(Trials * output_length);
+        state.add_writes<ItemT>(Trials * output_length);
     }
 };
 
