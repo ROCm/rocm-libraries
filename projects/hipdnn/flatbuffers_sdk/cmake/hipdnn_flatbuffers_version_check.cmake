@@ -42,10 +42,7 @@ function(hipdnn_check_flatbuffers_version)
 
     if(DEFINED flatbuffers_VERSION)
         if(NOT flatbuffers_VERSION VERSION_EQUAL "${_ARG_EXPECTED}")
-            set(_msg
-                "${_ARG_CONTEXT}: FlatBuffers version mismatch — expected "
-                "${_ARG_EXPECTED} but found ${flatbuffers_VERSION}"
-            )
+            set(_msg "${_ARG_CONTEXT}: FlatBuffers version mismatch — expected ${_ARG_EXPECTED} but found ${flatbuffers_VERSION}")
             if(DEFINED flatbuffers_DIR)
                 string(APPEND _msg " (via ${flatbuffers_DIR})")
             endif()
