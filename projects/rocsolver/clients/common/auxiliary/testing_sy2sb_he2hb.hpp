@@ -318,7 +318,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
     // get arguments
     rocblas_local_handle handle;
     rocblas_int n = argus.get<rocblas_int>("n");
-    rocblas_int kd = argus.get<rocblas_int>("k", 1);  // todo: add kd arg
+    rocblas_int kd = argus.get<rocblas_int>("kd", 1);
     rocblas_int nb = argus.get<rocblas_int>("nb", kd);
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     // rocSolver 2nd stage needs 3*kd. LAPACK needs kd+1.
