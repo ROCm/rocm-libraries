@@ -761,14 +761,23 @@ namespace TensileLite
                                   size_t                  totalElements,
                                   hipMemcpyKind           kind)
         {
+            // First, fill entire buffer with NaN/Inf sentinels from "bad" buffer
             HIP_CHECK_EXC(
                 hipMemcpy(dst,
-                          src,
+                          bad,
                           multiplyElementSize(totalElements,
                                               DataTypeInfo::Get(descriptor.dataType()).elementSize),
                           kind));
+            // Then, copy valid data to middle section, overwriting NaN padding
             ptrdiff_t dPadding = totalElements - descriptor.totalAllocatedElements();
             dPadding           = multiplyElementSize(dPadding, descriptor.elementBytes());
+
+            // Ensure dPadding/2 is aligned to element boundaries
+            // Round to even multiple of elementBytes so division by 2 stays aligned
+            size_t elementBytes = static_cast<size_t>(descriptor.elementBytes());
+            size_t doubleElement = 2 * elementBytes;
+            dPadding = (dPadding / doubleElement) * doubleElement;
+
             void* dstOffset    = (void*)((uint8_t*)dst + dPadding / 2);
             TensileLite::hip::CopyTensorVoid(dstOffset, src, descriptor, kind);
             return dstOffset;
@@ -2027,24 +2036,52 @@ namespace TensileLite
                 if(it != m_vdata[i].pristine.end())
                 {
                     auto& p = it->second;
-                    if(kind == hipMemcpyHostToHost)
-                        ptr = copyInputBuffers(desc,
-                                               p.cpuInput.current.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
-                    else if(kind == hipMemcpyHostToDevice)
-                        ptr = copyInputBuffers(desc,
-                                               p.gpuInput.current.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
-                    else if(kind == hipMemcpyDeviceToDevice)
-                        ptr = copyInputBuffers(desc,
-                                               p.gpuInput.current.get(),
-                                               p.gpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
+                    // For output tensors with NaN bounds checking, initialize buffer with NaN sentinels
+                    if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.cpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.cpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.cpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.gpuInput.valid.get(),
+                                                      p.gpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                    }
+                    else
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyInputBuffers(desc,
+                                                   p.cpuInput.current.get(),
+                                                   p.cpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyInputBuffers(desc,
+                                                   p.gpuInput.current.get(),
+                                                   p.cpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyInputBuffers(desc,
+                                                   p.gpuInput.current.get(),
+                                                   p.gpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                    }
                     if(ptr == nullptr)
                     {
                         std::runtime_error("output ptr is null when copy input");
