@@ -188,7 +188,7 @@ void testing_sytrs_bad_arg()
         CHECK_HIP_ERROR(dIpiv.memcheck());
         CHECK_HIP_ERROR(dInfo.memcheck());
 
-        SIZE size_dW, size_hW;
+        SIZE bytes_dW, bytes_hW;
         hipsolver_sytrs_bufferSize(API,
                                    handle,
                                    uplo,
@@ -199,10 +199,13 @@ void testing_sytrs_bad_arg()
                                    dIpiv.data(),
                                    dB.data(),
                                    ldb,
-                                   &size_dW,
-                                   &size_hW);
-        host_strided_batch_vector<uint8_t>   hWork(size_hW, 1, size_hW, 1);
-        device_strided_batch_vector<uint8_t> dWork(size_dW, 1, size_dW, 1);
+                                   &bytes_dW,
+                                   &bytes_hW);
+        SIZE size_dW = (bytes_dW + sizeof(T) - 1) / sizeof(T);
+        SIZE size_hW = (bytes_hW + sizeof(T) - 1) / sizeof(T);
+
+        host_strided_batch_vector<T>   hWork(size_hW, 1, size_hW, 1);
+        device_strided_batch_vector<T> dWork(size_dW, 1, size_dW, 1);
         if(size_dW)
             CHECK_HIP_ERROR(dWork.memcheck());
 
@@ -216,10 +219,10 @@ void testing_sytrs_bad_arg()
                                 dIpiv.data(),
                                 dB.data(),
                                 ldb,
-                                (void*)dWork.data(),
-                                size_dW,
-                                (void*)hWork.data(),
-                                size_hW,
+                                dWork.data(),
+                                bytes_dW,
+                                hWork.data(),
+                                bytes_hW,
                                 dInfo.data(),
                                 bc);
     }
@@ -275,9 +278,7 @@ void sytrs_initData(const hipsolverHandle_t   handle,
             {
                 for(I j = 0; j < n; j++)
                 {
-                    tmp                        = hA[b][i + j * lda];
-                    hA[b][i + j * lda]         = hA[b][n - 1 - i + j * lda];
-                    hA[b][n - 1 - i + j * lda] = tmp;
+                    std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
                 }
             }
 
@@ -591,7 +592,7 @@ void testing_sytrs(Arguments& argus)
     }
 
     // memory size query is necessary
-    SIZE size_dW, size_hW;
+    SIZE bytes_dW, bytes_hW;
     hipsolver_sytrs_bufferSize(API,
                                handle,
                                uplo,
@@ -602,12 +603,14 @@ void testing_sytrs(Arguments& argus)
                                (I*)nullptr,
                                (T*)nullptr,
                                ldb,
-                               &size_dW,
-                               &size_hW);
+                               &bytes_dW,
+                               &bytes_hW);
+    SIZE size_dW = (bytes_dW + sizeof(T) - 1) / sizeof(T);
+    SIZE size_hW = (bytes_hW + sizeof(T) - 1) / sizeof(T);
 
     if(argus.mem_query)
     {
-        rocsolver_bench_inform(inform_mem_query, size_dW);
+        rocsolver_bench_inform(inform_mem_query, bytes_dW);
         return;
     }
 
@@ -619,19 +622,19 @@ void testing_sytrs(Arguments& argus)
     else
     {
         // memory allocations
-        host_strided_batch_vector<T>         hA(size_A, 1, size_A, bc);
-        host_strided_batch_vector<T>         hB(size_B, 1, size_B, bc);
-        host_strided_batch_vector<T>         hBRes(size_BRes, 1, size_BRes, bc);
-        host_strided_batch_vector<I>         hIpiv(size_P, 1, size_P, bc);
-        host_strided_batch_vector<int>       hIpiv_cpu(size_P, 1, size_P, bc);
-        host_strided_batch_vector<int>       hInfo(1, 1, 1, bc);
-        host_strided_batch_vector<int>       hInfoRes(1, 1, 1, bc);
-        host_strided_batch_vector<uint8_t>   hWork(size_hW, 1, size_hW, 1);
-        device_strided_batch_vector<T>       dA(size_A, 1, size_A, bc);
-        device_strided_batch_vector<T>       dB(size_B, 1, size_B, bc);
-        device_strided_batch_vector<I>       dIpiv(size_P, 1, size_P, bc);
-        device_strided_batch_vector<int>     dInfo(1, 1, 1, bc);
-        device_strided_batch_vector<uint8_t> dWork(size_dW, 1, size_dW, 1);
+        host_strided_batch_vector<T>     hA(size_A, 1, size_A, bc);
+        host_strided_batch_vector<T>     hB(size_B, 1, size_B, bc);
+        host_strided_batch_vector<T>     hBRes(size_BRes, 1, size_BRes, bc);
+        host_strided_batch_vector<I>     hIpiv(size_P, 1, size_P, bc);
+        host_strided_batch_vector<int>   hIpiv_cpu(size_P, 1, size_P, bc);
+        host_strided_batch_vector<int>   hInfo(1, 1, 1, bc);
+        host_strided_batch_vector<int>   hInfoRes(1, 1, 1, bc);
+        host_strided_batch_vector<T>     hWork(size_hW, 1, size_hW, 1);
+        device_strided_batch_vector<T>   dA(size_A, 1, size_A, bc);
+        device_strided_batch_vector<T>   dB(size_B, 1, size_B, bc);
+        device_strided_batch_vector<I>   dIpiv(size_P, 1, size_P, bc);
+        device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
+        device_strided_batch_vector<T>   dWork(size_dW, 1, size_dW, 1);
         if(size_A)
             CHECK_HIP_ERROR(dA.memcheck());
         if(size_B)
@@ -653,10 +656,10 @@ void testing_sytrs(Arguments& argus)
                                    dIpiv,
                                    dB,
                                    ldb,
-                                   (void*)dWork.data(),
-                                   size_dW,
-                                   (void*)hWork.data(),
-                                   size_hW,
+                                   dWork.data(),
+                                   bytes_dW,
+                                   hWork.data(),
+                                   bytes_hW,
                                    dInfo,
                                    bc,
                                    hA,
@@ -679,10 +682,10 @@ void testing_sytrs(Arguments& argus)
                                       dIpiv,
                                       dB,
                                       ldb,
-                                      (void*)dWork.data(),
-                                      size_dW,
-                                      (void*)hWork.data(),
-                                      size_hW,
+                                      dWork.data(),
+                                      bytes_dW,
+                                      hWork.data(),
+                                      bytes_hW,
                                       dInfo,
                                       bc,
                                       hA,
