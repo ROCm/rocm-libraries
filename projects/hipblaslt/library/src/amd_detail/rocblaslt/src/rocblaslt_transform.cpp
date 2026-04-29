@@ -76,6 +76,12 @@ namespace
         return std::filesystem::path(DEFAULT_CO_PATH);
     }
 
+    const std::string& transformCodeObjectFileName()
+    {
+        static const std::string name = transformCodeObjectPath().filename().string();
+        return name;
+    }
+
     TensileLite::hip::SolutionAdapter& transformAdapter()
     {
         using AdapterPtr     = std::unique_ptr<TensileLite::hip::SolutionAdapter>;
@@ -205,7 +211,7 @@ namespace
 
         constexpr auto                NUM_WORKITEMS{NumThreadsM * NumThreadsN};
         TensileLite::KernelInvocation invocation{kernelName,
-                                                 "hipblasltTransform.hsaco",
+                                                 transformCodeObjectFileName(),
                                                  false,
                                                  {NUM_WORKITEMS, 1, 1},
                                                  {numWg, 1, batchSize},
