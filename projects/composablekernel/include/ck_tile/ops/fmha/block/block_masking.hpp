@@ -247,8 +247,8 @@ struct GenericAttentionMask
         //   i_x < i_y + x    : the column is not in the masked-out future of the
         //                      window (= < x_end modulo the min with x_total);
         //                      without this, queries <= sink-1 would be allowed
-        //                      to look at later sink rows than they should under
-        //                      causality / right-window.
+        //                      to look at later sink columns/positions than they
+        //                      should under causality / right-window.
         //   y < y_total      : the local window doesn't already span everything
         //                      (otherwise sink un-mask is meaningless).
         //   i_y < x_total    : the query row is in-range vs. the key sequence
