@@ -1,0 +1,65 @@
+# Tensile Test Categories Configuration
+# Aligned with Math CI and pytest markers in pytest.ini
+
+test_categories:
+  quick:
+    description: "Fast unit tests (target: < 5 min)"
+    pytest_markers:
+      - "unit"
+    exclude_markers:
+      - "disabled"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "unit"
+
+  standard:
+    description: "Pre-checkin validation (target: < 30 min)"
+    pytest_markers:
+      - "pre_checkin"
+    exclude_markers:
+      - "disabled"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+      - "pre_checkin"
+
+  comprehensive:
+    description: "Extended/nightly tests (target: < 4 hours)"
+    pytest_markers:
+      - "extended"
+      - "nightly"
+    exclude_markers:
+      - "disabled"
+      - "weekly"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete test suite including weekly"
+    pytest_markers:
+      - "pre_checkin"
+      - "extended"
+      - "nightly"
+      - "weekly"
+    exclude_markers:
+      - "disabled"
+    labels:
+      - "full"
+      - "weekly"
+
+execution_settings:
+  default_timeout: 300  # per-test timeout in seconds
+  timeout_multiplier: 1
+  parallel_workers: 4   # --numprocesses for pytest-xdist
+  category_timeouts:
+    quick: 300       # 5 minutes total
+    standard: 1800   # 30 minutes total
+    comprehensive: 14400  # 4 hours total
+    full: 28800      # 8 hours total
+  environment:
+    # Environment variables for test execution
+    TENSILE_ROCM_ASSEMBLER_PATH: "{ROCM_PATH}/bin/clang++"
