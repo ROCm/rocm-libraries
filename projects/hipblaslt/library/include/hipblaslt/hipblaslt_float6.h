@@ -86,50 +86,38 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
                                              = hip_f6_rounding_mode::standard,
                                              uint32_t rng = 0)
     {
+        __amd_fp16x32_storage_t fp16x32{};
+        fp16x32[0]  = v0;
+        fp16x32[1]  = v1;
+        fp16x32[2]  = v2;
+        fp16x32[3]  = v3;
+        fp16x32[4]  = v4;
+        fp16x32[5]  = v5;
+        fp16x32[6]  = v6;
+        fp16x32[7]  = v7;
+        fp16x32[8]  = v8;
+        fp16x32[9]  = v9;
+        fp16x32[10] = v10;
+        fp16x32[11] = v11;
+        fp16x32[12] = v12;
+        fp16x32[13] = v13;
+        fp16x32[14] = v14;
+        fp16x32[15] = v15;
+
         union
         {
-            hipblaslt_f6x16_storage real;
-            __amd_fp6x16_storage_t  tmp;
-        } cvt;
-        __amd_fp16x16_storage_t fp16x16;
-
-        fp16x16[0]  = v0;
-        fp16x16[1]  = v1;
-        fp16x16[2]  = v2;
-        fp16x16[3]  = v3;
-        fp16x16[4]  = v4;
-        fp16x16[5]  = v5;
-        fp16x16[6]  = v6;
-        fp16x16[7]  = v7;
-        fp16x16[8]  = v8;
-        fp16x16[9]  = v9;
-        fp16x16[10] = v10;
-        fp16x16[11] = v11;
-        fp16x16[12] = v12;
-        fp16x16[13] = v13;
-        fp16x16[14] = v14;
-        fp16x16[15] = v15;
+            hipblaslt_f6x16_storage real[2];
+            __amd_fp6x32_storage_t  fp6x32;
+        } out = {};
 
         if(rm == hip_f6_rounding_mode::standard)
         {
-            cvt.tmp = __amd_cvt_fp16x16_to_fp6x16_scale(fp16x16, __AMD_OCP_E2M3, 0);
-            data    = cvt.real;
+            out.fp6x32 = __amd_cvt_fp16x32_to_fp6x32_scale(fp16x32, __AMD_OCP_E2M3, 0);
+            data       = out.real[0];
         }
         else
         {
-            // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_fp16x16_to_fp6x16_sr_scale
-            union
-            {
-                __amd_fp16x32_storage_t fp16x32;
-                __amd_fp16x16_storage_t fp16x16[2];
-            } in = {};
-            union
-            {
-                hipblaslt_f6x16_storage real[2];
-                __amd_fp6x32_storage_t  fp6x32;
-            } out = {};
-            in.fp16x16[0] = fp16x16;
-            out.fp6x32 = __amd_cvt_fp16x32_to_fp6x32_sr_scale(in.fp16x32, __AMD_OCP_E2M3, rng, 0);
+            out.fp6x32 = __amd_cvt_fp16x32_to_fp6x32_sr_scale(fp16x32, __AMD_OCP_E2M3, rng, 0);
             data       = out.real[0];
         }
     }
@@ -154,11 +142,6 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
                                              = hip_f6_rounding_mode::standard,
                                              uint32_t rng = 0)
     {
-        union
-        {
-            hipblaslt_f6x16_storage real;
-            __amd_fp6x16_storage_t  tmp;
-        } cvt;
         __amd_floatx16_storage_t fp32x16;
 
         fp32x16[0]  = v0;
@@ -178,25 +161,25 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
         fp32x16[14] = v14;
         fp32x16[15] = v15;
 
+        union
+        {
+            __amd_floatx32_storage_t fp32x32;
+            __amd_floatx16_storage_t fp32x16[2];
+        } in = {};
+        union
+        {
+            hipblaslt_f6x16_storage real[2];
+            __amd_fp6x32_storage_t  fp6x32;
+        } out = {};
+        in.fp32x16[0] = fp32x16;
+
         if(rm == hip_f6_rounding_mode::standard)
         {
-            cvt.tmp = __amd_cvt_floatx16_to_fp6x16_scale(fp32x16, __AMD_OCP_E2M3, 0);
-            data    = cvt.real;
+            out.fp6x32 = __amd_cvt_floatx32_to_fp6x32_scale(in.fp32x32, __AMD_OCP_E2M3, 0);
+            data       = out.real[0];
         }
         else
         {
-            // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_floatx16_to_fp6x16_sr_scale
-            union
-            {
-                __amd_floatx32_storage_t fp32x32;
-                __amd_floatx16_storage_t fp32x16[2];
-            } in = {};
-            union
-            {
-                hipblaslt_f6x16_storage real[2];
-                __amd_fp6x32_storage_t  fp6x32;
-            } out = {};
-            in.fp32x16[0] = fp32x16;
             out.fp6x32 = __amd_cvt_floatx32_to_fp6x32_sr_scale(in.fp32x32, __AMD_OCP_E2M3, rng, 0);
             data       = out.real[0];
         }
@@ -222,11 +205,6 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
                                              = hip_f6_rounding_mode::standard,
                                              uint32_t rng = 0)
     {
-        union
-        {
-            hipblaslt_f6x16_storage real;
-            __amd_fp6x16_storage_t  tmp;
-        } cvt;
         __amd_floatx16_storage_t fp32x16;
 
         fp32x16[0]  = static_cast<float>(v0);
@@ -246,25 +224,25 @@ struct HIPBLASLT_EXPORT hipblaslt_f6x16
         fp32x16[14] = static_cast<float>(v14);
         fp32x16[15] = static_cast<float>(v15);
 
+        union
+        {
+            __amd_floatx32_storage_t fp32x32;
+            __amd_floatx16_storage_t fp32x16[2];
+        } in = {};
+        union
+        {
+            hipblaslt_f6x16_storage real[2];
+            __amd_fp6x32_storage_t  fp6x32;
+        } out = {};
+        in.fp32x16[0] = fp32x16;
+
         if(rm == hip_f6_rounding_mode::standard)
         {
-            cvt.tmp = __amd_cvt_floatx16_to_fp6x16_scale(fp32x16, __AMD_OCP_E2M3, 0);
-            data    = cvt.real;
+            out.fp6x32 = __amd_cvt_floatx32_to_fp6x32_scale(in.fp32x32, __AMD_OCP_E2M3, 0);
+            data       = out.real[0];
         }
         else
         {
-            // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_floatx16_to_fp6x16_sr_scale
-            union
-            {
-                __amd_floatx32_storage_t fp32x32;
-                __amd_floatx16_storage_t fp32x16[2];
-            } in = {};
-            union
-            {
-                hipblaslt_f6x16_storage real[2];
-                __amd_fp6x32_storage_t  fp6x32;
-            } out = {};
-            in.fp32x16[0] = fp32x16;
             out.fp6x32 = __amd_cvt_floatx32_to_fp6x32_sr_scale(in.fp32x32, __AMD_OCP_E2M3, rng, 0);
             data       = out.real[0];
         }

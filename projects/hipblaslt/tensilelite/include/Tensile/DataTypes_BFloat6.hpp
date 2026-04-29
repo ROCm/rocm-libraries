@@ -85,11 +85,6 @@ namespace TensileLite
                                             = hip_bf6_rounding_mode::standard,
                                             uint32_t rng = 0)
         {
-            union
-            {
-                BFloat6x16_Storage     real;
-                __amd_fp6x16_storage_t tmp;
-            } cvt;
             __amd_floatx16_storage_t f32x16;
 
             for(int i = 0; i < packed_size; i++)
@@ -97,12 +92,23 @@ namespace TensileLite
 
             if(rm == hip_bf6_rounding_mode::standard)
             {
-                cvt.tmp = __amd_cvt_floatx16_to_fp6x16_scale(f32x16, __AMD_OCP_E3M2, 0);
-                data    = cvt.real;
+                union
+                {
+                    __amd_floatx32_storage_t fp32x32;
+                    __amd_floatx16_storage_t fp32x16[2];
+                } in;
+                union
+                {
+                    BFloat6x16_Storage     real[2];
+                    __amd_fp6x32_storage_t fp6x32;
+                } out;
+                in.fp32x16[0] = f32x16;
+                out.fp6x32
+                    = __amd_cvt_floatx32_to_fp6x32_scale(in.fp32x32, __AMD_OCP_E3M2, 0);
+                data = out.real[0];
             }
             else
             {
-                // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_floatx16_to_fp6x16_sr_scale
                 union
                 {
                     __amd_floatx32_storage_t fp32x32;
@@ -141,11 +147,6 @@ namespace TensileLite
                                             = hip_bf6_rounding_mode::standard,
                                             uint32_t rng = 0)
         {
-            union
-            {
-                BFloat6x16_Storage     real;
-                __amd_fp6x16_storage_t tmp;
-            } cvt;
             __amd_floatx16_storage_t f32x16;
 
             f32x16[0]  = v0;
@@ -167,12 +168,23 @@ namespace TensileLite
 
             if(rm == hip_bf6_rounding_mode::standard)
             {
-                cvt.tmp = __amd_cvt_floatx16_to_fp6x16_scale(f32x16, __AMD_OCP_E3M2, 0);
-                data    = cvt.real;
+                union
+                {
+                    __amd_floatx32_storage_t fp32x32;
+                    __amd_floatx16_storage_t fp32x16[2];
+                } in;
+                union
+                {
+                    BFloat6x16_Storage     real[2];
+                    __amd_fp6x32_storage_t fp6x32;
+                } out;
+                in.fp32x16[0] = f32x16;
+                out.fp6x32
+                    = __amd_cvt_floatx32_to_fp6x32_scale(in.fp32x32, __AMD_OCP_E3M2, 0);
+                data = out.real[0];
             }
             else
             {
-                // TODO: update below code if hip_ext_ocp.h supports __amd_cvt_floatx16_to_fp6x16_sr_scale
                 union
                 {
                     __amd_floatx32_storage_t fp32x32;
