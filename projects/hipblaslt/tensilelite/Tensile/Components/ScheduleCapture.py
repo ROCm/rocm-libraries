@@ -304,10 +304,31 @@ class Failure:
     No body_label field on the base — every concrete subclass carries
     producer/consumer GraphNode references (or equivalent), and
     GraphNode.body_label is the source of truth.
+
+    `_legacy_msg`: when set, format() returns it verbatim regardless of
+    subclass formatter logic. Used during Stack 1.3 migration to preserve
+    rule-specific legacy wording (e.g. LR's
+    "issued too late, must be guaranteed before X but only guaranteed @ Y")
+    while the rule emits a typed Failure for downstream consumers. New
+    code (Stack 2 graph comparison) leaves _legacy_msg=None so the
+    canonical subclass formatter is used.
     """
+    _legacy_msg: Optional[str] = field(default=None, init=False, repr=False, compare=False)
 
     def format(self, capture=None) -> str:
-        raise NotImplementedError("subclasses must implement format()")
+        """Stable boundary method. Returns the legacy override if set,
+        otherwise the canonical subclass formatter."""
+        if self._legacy_msg is not None:
+            return self._legacy_msg
+        return self._format_canonical(capture)
+
+    def _format_canonical(self, capture=None) -> str:
+        raise NotImplementedError("subclasses must implement _format_canonical()")
+
+    def with_legacy_msg(self, msg: str) -> "Failure":
+        """Set the legacy override message. Returns self for chaining."""
+        self._legacy_msg = msg
+        return self
 
 
 # ----------------------------------------------------------------------------
@@ -320,7 +341,7 @@ class OrderInvertedFailure(Failure):
     producer: object  # GraphNode or ValidatorInstruction
     consumer: object
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         producer_pos = format_position(self.producer, capture)
         consumer_pos = format_position(self.consumer, capture)
         return (
@@ -340,7 +361,7 @@ class MissingWaitFailure(Failure):
     consumer: object
     counter_kind: str  # 'dscnt' / 'vlcnt' / 'vscnt'
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         return (
             f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
             f"{format_position(self.consumer, capture)} is not guaranteed by any "
@@ -360,7 +381,7 @@ class WaitOnWrongCounterFailure(Failure):
     expected_counter: str
     wrong_counter_waits: list  # list[GraphNode], in stream order
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         wait_descriptions = ", ".join(
             f"SWaitCnt {format_position(w, capture)}"
             for w in self.wrong_counter_waits
@@ -384,7 +405,7 @@ class WaitTooLateFailure(Failure):
     consumer: object
     wait_position: object  # SchedulePosition
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         return (
             f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
             f"{format_position(self.consumer, capture)} is guaranteed by an "
@@ -404,7 +425,7 @@ class WaitInsufficientFailure(Failure):
     queue_depth_at_wait: int
     counter_value: int
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         return (
             f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
             f"{format_position(self.consumer, capture)}'s producer "
@@ -426,7 +447,7 @@ class MissingBarrierFailure(Failure):
     consumer: object
     role: str  # 'must_start_after' | 'needed_by'
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         if self.role == "must_start_after":
             order = (
                 f"{self.producer.category} -> SWaitCnt(dscnt=0) -> SBarrier "
@@ -463,7 +484,7 @@ class WrongInterleavingFailure(Failure):
     expected_next: object  # MiddlePack (pair_consumer)
     actual_next: object  # MiddlePack (next_scheduled_middle_16)
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         return (
             f"{self.pack.name} @ idx={self.pack.issued_at.vmfma_index} has wrong "
             f"interleaving. Should have been followed by "
@@ -483,7 +504,7 @@ class TimingTooCloseFailure(Failure):
     expected_quad_cycles: int
     actual_quad_cycles: int
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         return (
             f"{self.producer.name} @ idx={self.producer.issued_at.vmfma_index} has "
             f"too little gap between it and {self.consumer.name} @ idx="
@@ -503,7 +524,7 @@ class InvalidCounterValueFailure(Failure):
     vlcnt: int
     vscnt: int
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         return (
             f"SWaitCnt @ idx={self.swait.issued_at.vmfma_index} is invalid: "
             f"dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}. "
@@ -522,7 +543,7 @@ class SCCConflictFailure(Failure):
     interval_start: int
     interval_end: int
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         return (
             f"{self.conflicting_name} at index {self.conflicting_index} can't be "
             f"between {self.grinc_name} {self.interval_start}-{self.interval_end} "
@@ -540,7 +561,7 @@ class SWaitCountExceedsOutstandingFailure(Failure):
     counter_value: int
     outstanding: int
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         load_kind = "DS loads" if self.counter_kind == "dscnt" else "VM loads"
         return (
             f"SWaitCnt @ idx={self.swait.issued_at.vmfma_index} has "
@@ -563,7 +584,7 @@ class OutOfOrderSequenceFailure(Failure):
     bad_index: int
     prev_value: int
 
-    def format(self, capture=None) -> str:
+    def _format_canonical(self, capture=None) -> str:
         if self.kind == "sequence":
             return (
                 f"Non-descending-order rule failed, schedule key "

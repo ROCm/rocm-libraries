@@ -351,7 +351,13 @@ class LocalRead(ValidatorInstruction):
     def done_idx(self) -> SchedulePosition:
         return self.guaranteed_by
 
-    def validate(self) -> Optional[str]:
+    def validate(self):
+        """Stack 1.3 of jaunty-reddy plan: returns typed Failure or None.
+        Legacy wording preserved via _legacy_msg so existing tests pass."""
+        from Tensile.Components.ScheduleCapture import (
+            MissingWaitFailure, WaitTooLateFailure,
+        )
+
         # For when local reads are not being guaranteed by a particular pass.
         if self.needed_by.issued_at == POSITION_INF:
             return None
@@ -363,8 +369,13 @@ class LocalRead(ValidatorInstruction):
 
         issued_at = self.issued_at.vmfma_index
         needed_by = self.needed_by.issued_at.vmfma_index
+
         if self.guaranteed_by == POSITION_INF:
-            return f"{self.name} @ idx={issued_at} is not valid. There are no guarantees on when it will be done."
+            legacy = (f"{self.name} @ idx={issued_at} is not valid. "
+                      f"There are no guarantees on when it will be done.")
+            return MissingWaitFailure(
+                producer=self, consumer=self.needed_by, counter_kind="dscnt",
+            ).with_legacy_msg(legacy)
 
         guaranteed_by = self.guaranteed_by.vmfma_index
 
@@ -372,7 +383,12 @@ class LocalRead(ValidatorInstruction):
         if self.needed_by.issued_at.loop_index > self.issued_at.loop_index:
             context_str = " (of next iteration)"
 
-        return f"{self.name} @ idx={issued_at} issued too late, must be guaranteed before {self.needed_by.name} @ idx={needed_by}{context_str} but only guaranteed @ idx={guaranteed_by}."
+        legacy = (f"{self.name} @ idx={issued_at} issued too late, must be "
+                  f"guaranteed before {self.needed_by.name} @ idx={needed_by}"
+                  f"{context_str} but only guaranteed @ idx={guaranteed_by}.")
+        return WaitTooLateFailure(
+            producer=self, consumer=self.needed_by, wait_position=self.guaranteed_by,
+        ).with_legacy_msg(legacy)
 
 @dataclass
 class MFMA(ValidatorInstruction):
@@ -402,7 +418,12 @@ class Pack(ValidatorInstruction):
     # This is a lower bound estimate (does not account for most stalls and such).
     estimated_quad_cycles_before_result_used: int = 0
 
-    def validate(self) -> Optional[str]:
+    def validate(self):
+        """Stack 1.3: returns typed Failure or None. Legacy wording
+        preserved via _legacy_msg."""
+        from Tensile.Components.ScheduleCapture import (
+            OrderInvertedFailure, TimingTooCloseFailure,
+        )
         issued_at = self.issued_at.vmfma_index
 
         # Collapse must_start_after list to the single latest constraint
@@ -416,19 +437,41 @@ class Pack(ValidatorInstruction):
             # Issued too early
             must_start_after_at = effective_must_start_after.done_idx().vmfma_index
             must_start_after_issued_at = effective_must_start_after.issued_at.vmfma_index
-            return f"{self.name} @ idx={issued_at} issued too early, must be issued after idx={must_start_after_at} (because of {effective_must_start_after.name} issued @ idx={must_start_after_issued_at})."
+            legacy = (f"{self.name} @ idx={issued_at} issued too early, "
+                      f"must be issued after idx={must_start_after_at} "
+                      f"(because of {effective_must_start_after.name} "
+                      f"issued @ idx={must_start_after_issued_at}).")
+            return OrderInvertedFailure(
+                producer=effective_must_start_after, consumer=self,
+            ).with_legacy_msg(legacy)
         elif self.issued_at >= self.needed_by.issued_at:
             # Issued too late
             needed_by_at = self.needed_by.issued_at.vmfma_index
-            return f"{self.name} @ idx={issued_at} issued too late, must be issued before {self.needed_by.name} @ idx={needed_by_at}."
+            legacy = (f"{self.name} @ idx={issued_at} issued too late, "
+                      f"must be issued before {self.needed_by.name} "
+                      f"@ idx={needed_by_at}.")
+            return OrderInvertedFailure(
+                producer=self, consumer=self.needed_by,
+            ).with_legacy_msg(legacy)
         else:
+            # Generic fallback — defensive guard, should not fire on valid
+            # rule logic. Stays as a string return (no semantic Failure type).
             return f"{self.name} at index {issued_at} is not valid."
 
         # Timing check (only fires when min > 0, i.e. when _handle_min_pack_quad_cycles has set a constraint)
         if self.min_quad_cycles_before_result_used > 0:
             if self.estimated_quad_cycles_before_result_used < self.min_quad_cycles_before_result_used:
                 needed_by_at = self.needed_by.issued_at.vmfma_index
-                return f"{self.name} @ idx={issued_at} has too little gap between it and {self.needed_by.name} @ idx={needed_by_at}. Expected at least {self.min_quad_cycles_before_result_used} quad-cycles but only {self.estimated_quad_cycles_before_result_used} passed."
+                legacy = (f"{self.name} @ idx={issued_at} has too little gap "
+                          f"between it and {self.needed_by.name} @ idx={needed_by_at}. "
+                          f"Expected at least {self.min_quad_cycles_before_result_used} "
+                          f"quad-cycles but only "
+                          f"{self.estimated_quad_cycles_before_result_used} passed.")
+                return TimingTooCloseFailure(
+                    producer=self, consumer=self.needed_by,
+                    expected_quad_cycles=self.min_quad_cycles_before_result_used,
+                    actual_quad_cycles=self.estimated_quad_cycles_before_result_used,
+                ).with_legacy_msg(legacy)
 
         return None
 
@@ -443,7 +486,9 @@ class MiddlePack(Pack):
     pair_consumer: Optional['MiddlePack'] = None
     next_scheduled_middle_16: Optional['MiddlePack'] = None
 
-    def validate(self) -> Optional[str]:
+    def validate(self):
+        """Stack 1.3: returns typed Failure or None."""
+        from Tensile.Components.ScheduleCapture import WrongInterleavingFailure
         error = super().validate()
         if error:
             return error
@@ -453,7 +498,15 @@ class MiddlePack(Pack):
                 issued_at = self.issued_at.vmfma_index
                 next_issued_at = self.next_scheduled_middle_16.issued_at.vmfma_index
                 pair_issued_at = self.pair_consumer.issued_at.vmfma_index
-                return f"{self.name} @ idx={issued_at} has wrong interleaving. Should have been followed by {self.pair_consumer.name} @ idx={pair_issued_at} but was followed by {self.next_scheduled_middle_16.name} @ idx={next_issued_at}."
+                legacy = (f"{self.name} @ idx={issued_at} has wrong interleaving. "
+                          f"Should have been followed by {self.pair_consumer.name} "
+                          f"@ idx={pair_issued_at} but was followed by "
+                          f"{self.next_scheduled_middle_16.name} @ idx={next_issued_at}.")
+                return WrongInterleavingFailure(
+                    pack=self,
+                    expected_next=self.pair_consumer,
+                    actual_next=self.next_scheduled_middle_16,
+                ).with_legacy_msg(legacy)
         return None
 
 @dataclass
@@ -497,7 +550,9 @@ class GlobalRead(ValidatorInstruction):
     def done_idx(self) -> SchedulePosition:
         return self.guaranteed_by
 
-    def validate(self) -> Optional[str]:
+    def validate(self):
+        """Stack 1.3: returns typed Failure or None (legacy str also accepted
+        for the residual defensive-fallback branches)."""
         # Check must_start_after constraint (GR must start after LR0s are done)
         must_start_after_error = self._validate_must_start_after()
         if must_start_after_error:
@@ -510,8 +565,11 @@ class GlobalRead(ValidatorInstruction):
 
         return None
 
-    def _validate_must_start_after(self) -> Optional[str]:
-        """Validate all must_start_after constraints."""
+    def _validate_must_start_after(self):
+        """Validate all must_start_after constraints. Returns Failure or None."""
+        from Tensile.Components.ScheduleCapture import (
+            OrderInvertedFailure, MissingBarrierFailure,
+        )
         for constraint in self.must_start_after:
             if constraint.done_idx() == POSITION_NEG_INF:
                 continue
@@ -525,28 +583,38 @@ class GlobalRead(ValidatorInstruction):
                 context_str = ""
                 if constraint_done.loop_index > self.issued_at.loop_index:
                     context_str = " (of next iteration)"
-                return (
+                legacy = (
                     f"{name} @ idx={issued_at} is issued too early. "
                     f"Must be issued after idx={constraint_done.vmfma_index}{context_str}, "
                     f"which is when {constraint.name} is guaranteed done."
                 )
+                return OrderInvertedFailure(
+                    producer=constraint, consumer=self,
+                ).with_legacy_msg(legacy)
 
             # 2. LocalRead constraints require an SBarrier (cross-wave LDS sync)
             if isinstance(constraint, LocalRead):
                 if not any(constraint_done < b < self.issued_at
                            for b in self.must_start_after_barriered_at):
-                    return (
+                    legacy = (
                         f"There is an SBarrier missing between the SWaitCnt "
                         f"@ idx={constraint_done.vmfma_index} (which guarantees "
                         f"{constraint.name} from idx={constraint.issued_at.vmfma_index} "
                         f"to done) and the {name} @ idx={issued_at}. "
                         f"Order must be {constraint.name} -> SWait -> SBarrier -> {name}."
                     )
+                    return MissingBarrierFailure(
+                        producer=constraint, consumer=self, role="must_start_after",
+                    ).with_legacy_msg(legacy)
 
         return None
 
-    def _validate_needed_by(self) -> Optional[str]:
-        """Validate: GR -> SWait -> SBarrier -> LR1"""
+    def _validate_needed_by(self):
+        """Validate: GR -> SWait -> SBarrier -> LR1. Returns Failure or None."""
+        from Tensile.Components.ScheduleCapture import (
+            MissingWaitFailure, MissingBarrierFailure, WaitTooLateFailure,
+        )
+
         # If needed_by is at inf, the constraint is not active (e.g. no LR1s).
         if self.needed_by.issued_at == POSITION_INF:
             return None
@@ -562,25 +630,48 @@ class GlobalRead(ValidatorInstruction):
 
         # 1. No SWait
         if self.guaranteed_by == POSITION_INF:
-            return f"{name} @ idx={issued_at} is not valid. There are no guarantees on when it will be done."
+            legacy = (f"{name} @ idx={issued_at} is not valid. "
+                      f"There are no guarantees on when it will be done.")
+            return MissingWaitFailure(
+                producer=self, consumer=self.needed_by, counter_kind="vlcnt",
+            ).with_legacy_msg(legacy)
 
         # NOTE: Must do it after the check above to guard against infinity.
         guaranteed_by = self.guaranteed_by.vmfma_index
 
         # 2. No Barrier
         if len(self.barriered_at) == 0:
-            return f"{name} @ idx={issued_at} is not valid. There is no SBarrier acting on it."
+            legacy = (f"{name} @ idx={issued_at} is not valid. "
+                      f"There is no SBarrier acting on it.")
+            return MissingBarrierFailure(
+                producer=self, consumer=self.needed_by, role="needed_by",
+            ).with_legacy_msg(legacy)
 
         # 3. Guaranteed after needed
         if self.guaranteed_by > self.needed_by.issued_at:
-            return f"{name} @ idx={issued_at} is not valid. It is guaranteed by the SWait @ idx={guaranteed_by} which is after the first corresponding {self.needed_by.name} @ idx={needed_by}. Order must be {name} -> SWait -> SBarrier -> {self.needed_by.name}."
+            legacy = (f"{name} @ idx={issued_at} is not valid. It is guaranteed "
+                      f"by the SWait @ idx={guaranteed_by} which is after the "
+                      f"first corresponding {self.needed_by.name} @ idx={needed_by}. "
+                      f"Order must be {name} -> SWait -> SBarrier -> {self.needed_by.name}.")
+            return WaitTooLateFailure(
+                producer=self, consumer=self.needed_by, wait_position=self.guaranteed_by,
+            ).with_legacy_msg(legacy)
 
         # 4. No Barrier between SWait and LR1
         if not any(self.guaranteed_by < barriered_at < self.needed_by.issued_at for barriered_at in self.barriered_at):
-            return f"{name} @ idx={issued_at} is not valid. No SBarrier between SWait @ idx={guaranteed_by} and {self.needed_by.name} @ idx={needed_by}. Order must be {name} -> SWait -> SBarrier -> {self.needed_by.name}."
+            legacy = (f"{name} @ idx={issued_at} is not valid. No SBarrier "
+                      f"between SWait @ idx={guaranteed_by} and {self.needed_by.name} "
+                      f"@ idx={needed_by}. Order must be {name} -> SWait -> SBarrier "
+                      f"-> {self.needed_by.name}.")
+            return MissingBarrierFailure(
+                producer=self, consumer=self.needed_by, role="needed_by",
+            ).with_legacy_msg(legacy)
 
-        # TODO: Did we miss a case and will we ever end up here?
-        return f"{name} @ idx={issued_at} is not valid. issued @ idx={issued_at}, guaranteed @ idx={guaranteed_by}, barriered @ idx={[b.vmfma_index for b in self.barriered_at]}, needed @ idx={needed_by} is not valid."
+        # Defensive fallback — string return; should not fire on valid logic.
+        return (f"{name} @ idx={issued_at} is not valid. issued @ idx={issued_at}, "
+                f"guaranteed @ idx={guaranteed_by}, "
+                f"barriered @ idx={[b.vmfma_index for b in self.barriered_at]}, "
+                f"needed @ idx={needed_by} is not valid.")
 
     def _name(self) -> str:
         name = self.name
