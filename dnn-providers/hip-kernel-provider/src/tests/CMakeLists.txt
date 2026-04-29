@@ -5,8 +5,14 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-find_package(hipdnn_test_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+# hipdnn SDK dependencies - use targets directly if available (superbuild),
+# otherwise find installed packages (true standalone)
+if(NOT TARGET hipdnn_test_sdk)
+    find_package(hipdnn_test_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 add_executable(
     hip_kernel_provider_tests
@@ -18,9 +24,11 @@ add_executable(
     TestHipKernelPluginPublic.cpp
     engines/TestHipKernelEngine.cpp
     engines/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
+    engines/plans/Batchnorm/TestBatchnormFwdTrainingActivPlanBuilder.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp
     engines/plans/Batchnorm/TestBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/Batchnorm/TestBatchnormFwdTrainingPlan.cpp
+    engines/plans/Batchnorm/TestBatchnormFwdTrainingActivPlan.cpp
     engines/plans/Batchnorm/TestBatchnormCommon.cpp
     engines/plans/Batchnorm/TestBatchnormApplicabilityChecks.cpp
     engines/plans/Layernorm/TestLayernormPlanBuilder.cpp

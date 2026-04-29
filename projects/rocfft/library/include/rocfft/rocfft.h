@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -279,6 +279,7 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_scale_factor(
  *  Offset, stride, and distance for either input or output provided
  *  here is ignored if a field is set for the corresponding input or
  *  output.
+ *  @note Non-zero offsets are not supported yet.
  * 
  *  @param[in, out] description description handle
  *  @param[in] in_array_type array type of input buffer
