@@ -234,6 +234,27 @@ END_HIPCUB_NAMESPACE
     #endif
 #endif // HIPCUB_ROCPRIM_API
 
+/// \brief Wrapper macro for C++20 'requires'.
+///
+/// Currently, HIP's backend does not support C++20, so the HIPCUB_REQUIRES is just
+/// a wrapper around the 'std::enable_if' construction that enforces the requirement.
+#ifndef HIPCUB_REQUIRES
+    #if defined(__HIP_PLATFORM_NVIDIA__)
+        #include <cuda/std/__concepts/concept_macros.h>
+        #define HIPCUB_REQUIRES(...) _CCCL_REQUIRES(__VA_ARGS__)
+    #else
+        #define HIPCUB_REQUIRES(...) typename std::enable_if<(__VA_ARGS__)>::type* = nullptr
+    #endif
+#endif // HIPCUB_REQUIRES
+
+#ifndef HIPCUB_TRAIT
+    #if defined(__HIP_PLATFORM_NVIDIA__)
+        #define HIPCUB_TRAIT(__TRAIT, ...) _CCCL_TRAIT(__TRAIT, __VA_ARGS__)
+    #else
+        #define HIPCUB_TRAIT(__TRAIT, ...) __TRAIT##_v<__VA_ARGS__>
+    #endif
+#endif // HIPCUB_TRAIT
+
 // This API needs to be deprecated once libhipcxx is available.
 #if !defined(_CCCL_PRAGMA_UNROLL_FULL)
     #define _CCCL_PRAGMA_UNROLL_FULL() _Pragma("unroll")
