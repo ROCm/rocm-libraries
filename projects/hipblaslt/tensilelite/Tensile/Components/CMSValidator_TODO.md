@@ -262,13 +262,72 @@ specific kernel — diagnosis classifier reaches a fall-through that
 hints at either a register-extraction bug for some real-rocisa class
 or a graph-builder gap. Tracked as a follow-up.
 
-**Remaining work:**
+**F32X TF32 integration diagnostic findings:**
+
+Running `compare_graphs` on the integration kernel (MI=16,16,32 /
+MT=128x128 / DU=32, F32XdlMathOp=X, DTL=1, PLR=1, PGR=2) reveals
+TWO categories of issues, one fixed and one outstanding:
+
+**Fixed in this session:**
+1. `_reg_signature` was ignoring the symbolic `regName`, collapsing all
+   named registers (regIdx=-1) to ('vgpr', -1, N). Fixed by including
+   `(regName.name, regName.getOffsets())` in the signature when
+   regIdx == -1.
+2. `_inst_mfma_acc/_a/_b` was reading `getParams()` indices 4/5/6
+   assuming the full constructor arg list. Real
+   `MFMAInstruction.getParams()` returns `[acc, a, b, acc_or_d, comment]`
+   (5 entries). Fixed to read indices 0/1/2.
+3. `compare_graphs` identity-mismatch error message was unreadable when
+   16+ identities differed. Now emits a class-tag breakdown
+   (`{'MFMA': 16}`) plus the first 3 full identities for investigation.
+
+**Outstanding — Phase 5 capture mechanism issues:**
+
+Running with the above fixes, compare_graphs surfaces 16 MFMA
+identities in the CMS capture but missing from default. Their
+register signatures suggest these are F32X TF32 emulation
+`v_mfma_f32_4x4x4_16b_bf16` operations:
+
+  ('MFMA', 0, ('v', -1, 4, ('ValuA_T0_I0', (0,))),
+              ('v', 74, 2, ()),
+              ('v', -1, 2, ('ValuA_X0_I0', (0,))))
+
+Diagnostic counts (main_loop[0] only):
+  DEFAULT MFMAInstruction class total: 56
+  CMS MFMAInstruction class total:     64    (+8)
+  DEFAULT VCvtPkF32toBF16 total:        32
+  CMS VCvtPkF32toBF16 total:            64    (+32)
+
+DEFAULT category distribution shows a tagging gap:
+  UNKNOWN: 66  (28 VCvtPkF32toBF16, 16 DSLoadB128, scalar arith)
+  Plus 4 MFMAInstruction-class entries in LRB0, 1 each in LRA3/LRB3/GR.
+
+Root causes (require Phase-5 investigation):
+
+1. **Symbolic-vs-numeric register naming gap**: the missing 16 MFMAs
+   have one symbolic input (e.g. ValuA_T0_I0) and one NUMERIC input
+   (e.g. v[74:75]). The numeric input is allocated at codegen time and
+   may differ between SIA3 and CMS even for the same logical MFMA.
+   For dataflow comparison to be authoritative, both paths must use
+   the same register-naming convention.
+2. **Tagging-coverage gap in `_buildCaptureIdentityMap`**: 28
+   VCvtPkF32toBF16 and 16 DSLoadB128 land in UNKNOWN because the
+   tagger's submodule-name lookups (`LocalReadDoA_I{iui}`,
+   `packA_I{iui}`) miss the F32X-specific module structure. (Names
+   match in source but the items don't end up where the tagger looks.)
+3. **MFMA-class-in-LR-bucket on default side**: SIA3's path puts some
+   MFMAInstruction-class items into LRB0/LRA3/LRB3/GR buckets,
+   suggesting these MFMAs are scheduled INSIDE LR/GR submodules. The
+   tagger then categorizes them as LR/GR, not MFMA — but their identity
+   is still ("MFMA", ...) per `_identity_for`'s class-based dispatch.
+
+Until these are fixed, `compare_graphs` is opt-in observability; the
+legacy `compare_captures` continues to gate assertions. The wiring at
+`KernelWriter.kernelBody:5050+` runs both checks.
 
 - **Replace legacy `compare_captures` with `compare_graphs`.** Currently
-  both run; legacy gates assertions. To make per-edge graph comparison
-  authoritative, the unexplained-missing-edge fall-through on real
-  captures must first be diagnosed and either fixed or downgraded to
-  a non-fatal warning.
+  both run; legacy gates assertions. Blocked on the Phase-5 capture-
+  mechanism issues above.
 - **`_captureDefaultSchedule` auto-activation under CMS.** Today it's
   test-only; production kernels don't capture by default. Plan called
   for production-default; deferred until graph-comparison is reliable
