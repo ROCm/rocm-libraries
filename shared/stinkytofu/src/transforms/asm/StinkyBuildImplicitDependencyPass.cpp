@@ -24,8 +24,10 @@
 
 #include <cassert>
 #include <iostream>
+#include <unordered_set>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/LoopAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -119,7 +121,38 @@ static const char* memTokenCandidateKind(const StinkyInstruction& inst) {
     return "unknown";
 }
 
-static void checkConsistentMemTokens(const BasicBlock& bb) {
+static std::unordered_set<const BasicBlock*> collectOptLevel3MemTokenCheckBlocks(
+    const std::vector<Loop>& loops) {
+    std::unordered_set<const BasicBlock*> checkBlocks;
+
+    for (const Loop& loop : loops) {
+        // loop BBs
+        for (const BasicBlock* bodyBB : loop.bodyBBs) {
+            checkBlocks.insert(bodyBB);
+        }
+
+        // preloop BBs: predecessors of loop header that are outside loop body.
+        if (loop.headerBB) {
+            for (const BasicBlock* pred : loop.headerBB->getPredecessors()) {
+                if (!loop.contains(pred)) checkBlocks.insert(pred);
+            }
+        }
+
+        // postloop BBs: successors of loop body that are outside loop body.
+        for (const BasicBlock* bodyBB : loop.bodyBBs) {
+            for (const BasicBlock* succ : bodyBB->getSuccessors()) {
+                if (succ && !loop.contains(succ)) checkBlocks.insert(succ);
+            }
+        }
+    }
+
+    return checkBlocks;
+}
+
+static void checkConsistentMemTokens(const BasicBlock& bb,
+                                     const std::unordered_set<const BasicBlock*>& checkBlocks) {
+    if (!checkBlocks.count(&bb)) return;
+
     bool hasWithToken = false;
     bool hasWithoutToken = false;
 
@@ -152,14 +185,15 @@ static void checkConsistentMemTokens(const BasicBlock& bb) {
     assert(false && "inconsistent MemTokenData across ds_load/ds_store/tensor_load in basic block");
 }
 
-void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
+void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
+                               const std::unordered_set<const BasicBlock*>& checkBlocks) {
     if (!passCtx.getPassFeatureConfig().barrierConfig.unrollMovableBarrier) {
         PASS_DEBUG(std::cerr << "[BuildImplicitDep] skip BB label=\"" << bb.getLabel()
                              << "\" (unrollMovableBarrier=false)\n");
         return;
     }
 
-    checkConsistentMemTokens(bb);
+    checkConsistentMemTokens(bb, checkBlocks);
 
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -194,9 +228,20 @@ class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
         return &StinkyBuildImplicitDependencyPass::ID;
     }
 
-    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
+        const auto& loops = AM.getResult<LoopAnalysis>(func);
+        const auto checkBlocks = collectOptLevel3MemTokenCheckBlocks(loops);
+
+        PASS_DEBUG(std::cerr << "[BuildImplicitDep] mem-token consistency checks on "
+                             << checkBlocks.size() << " BBs (preloop/loop/postloop derived)\n");
+        PASS_DEBUG(for (const BasicBlock* bb
+                        : checkBlocks) {
+            if (bb) std::cerr << "  [BuildImplicitDep] check BB: " << bb->getLabel() << "\n";
+        });
+
         for (BasicBlock& bb : func) {
-            if (passCtx.shouldProcessBasicBlock(bb)) setPseudoRegistersInBlock(bb, passCtx);
+            if (passCtx.shouldProcessBasicBlock(bb))
+                setPseudoRegistersInBlock(bb, passCtx, checkBlocks);
         }
         return preserveCFGAnalyses();
     }
