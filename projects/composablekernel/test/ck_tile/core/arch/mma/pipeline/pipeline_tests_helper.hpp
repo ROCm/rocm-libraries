@@ -28,6 +28,25 @@ using namespace ck_tile::core::arch;
 using namespace ck_tile::core::arch::mma;
 using namespace ck_tile::core::arch::testing;
 
+inline bool hipTargetMatchesCmakeTargets(amdgcn_target_id arch)
+{
+    const auto cmake_targets = getCMakeGpuTargetIds();
+    if(cmake_targets.count(arch) == 0)
+    {
+        // gfx12-generic and gfx11-generic make no difference with the specialized archs.
+        // Some CI pipelines make use of that and configure the project with the generic
+        // flags besides compiling for (f.e.) gfx1201.
+        if(arch >= amdgcn_target_id::GFX1200 && arch <= amdgcn_target_id::GFX12_GENERIC)
+        {
+            return (cmake_targets.count(amdgcn_target_id::GFX12_GENERIC) > 0);
+        }
+        else if(arch >= amdgcn_target_id::GFX1100 && arch <= amdgcn_target_id::GFX11_GENERIC)
+        {
+            return (cmake_targets.count(amdgcn_target_id::GFX11_GENERIC) > 0);
+        }
+    }
+    return true;
+}
 template <typename CType, typename AType, typename BType>
 void reference_matmul(std::vector<CType>& C,
                       const std::vector<AType>& A,
@@ -424,9 +443,9 @@ void run_pipeline_matrix_test(uint32_t M,
                      << static_cast<int>(currentArchId) << ") not supported. Skipping test.";
     }
 
-    if(getCMakeGpuTargetIds().count(currentArchId) == 0)
+    if(!hipTargetMatchesCmakeTargets(currentArchId))
     {
-        std::cout << "The GPU targets exposed by CMake are:";
+        std::cout << "The GPU targets exposed by CMake are: ";
         for(const auto& target : getCMakeGpuTargetIds())
         {
             std::cout << "(0x" << std::hex << static_cast<int>(target) << ")\n";
