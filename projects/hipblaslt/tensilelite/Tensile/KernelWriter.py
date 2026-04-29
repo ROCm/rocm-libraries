@@ -5872,7 +5872,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
               )
               ref_graph = build_dataflow_graph(self._last_default_capture)
               subj_graph = build_dataflow_graph(self._last_cms_capture)
-              graph_failures = compare_graphs(ref_graph, subj_graph)
+              # Soft mode: unclassified missing edges become synthetic
+              # Failures rather than raising. Production observability
+              # logs them as WARN so they're visible without breaking
+              # the build.
+              graph_failures = compare_graphs(
+                ref_graph, subj_graph, raise_on_unexplained=False,
+              )
               if graph_failures:
                 summary = "\n  ".join(
                   f.format(self._last_cms_capture.main_loop.get(0))

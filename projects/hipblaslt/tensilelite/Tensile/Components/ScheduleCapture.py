@@ -289,11 +289,20 @@ def format_position(node, capture=None) -> str:
 
     The discriminator is the category tag, NOT isinstance — MFMAPack's
     multiple inheritance from both Pack and MFMA would confuse isinstance.
+
+    If the node's tagged_inst isn't in the given capture (e.g. when the
+    node is from a different body in the unified 4-body graph), the
+    list-position suffix is silently omitted.
     """
     base = f"@ idx={node.position.vmfma_index}"
     if capture is None or node.category == "MFMA":
         return base
-    list_pos = capture.instructions.index(node.tagged_inst)
+    if node.tagged_inst is None:
+        return base
+    try:
+        list_pos = capture.instructions.index(node.tagged_inst)
+    except ValueError:
+        return base
     return f"{base} ({_ordinal(list_pos + 1)} entry in list)"
 
 
@@ -1398,7 +1407,8 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
 # CaptureConsistencyError BEFORE comparison runs.
 
 
-def compare_graphs(reference: DataflowGraph, subject: DataflowGraph) -> list:
+def compare_graphs(reference: DataflowGraph, subject: DataflowGraph,
+                   *, raise_on_unexplained=True) -> list:
     """Compare two dataflow graphs as edge sets keyed on
     (producer.identity, consumer.identity, register, edge_kind).
 
@@ -1406,8 +1416,12 @@ def compare_graphs(reference: DataflowGraph, subject: DataflowGraph) -> list:
     routed through diagnose_missing_edge.
 
     Raises CaptureConsistencyError BEFORE comparison if the two graphs'
-    node identity sets differ — a capture-pipeline bug, not a CMS schedule
-    defect.
+    DATA-FLOW node identity sets differ — a capture-pipeline bug, not a
+    CMS schedule defect.
+
+    `raise_on_unexplained` propagates to diagnose_missing_edge — soft mode
+    (False) is intended for production observability so unclassified
+    misses don't crash the build.
     """
     # Identity-coverage check at entry, restricted to DATA-FLOW nodes
     # (LR/LW/GR/MFMA). CMS legitimately adds/removes scheduling control
@@ -1447,11 +1461,14 @@ def compare_graphs(reference: DataflowGraph, subject: DataflowGraph) -> list:
     }
     for key in missing_keys:
         ref_edge = ref_edges_by_key[key]
-        failures.extend(diagnose_missing_edge(ref_edge, subject))
+        failures.extend(diagnose_missing_edge(
+            ref_edge, subject, raise_on_unexplained=raise_on_unexplained,
+        ))
     return failures
 
 
-def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph) -> list:
+def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
+                          *, raise_on_unexplained=True) -> list:
     """Classify why a reference edge is absent from the CMS subject graph.
 
     See plan §"Comparison and diagnosis" for the phased classifier:
@@ -1461,6 +1478,12 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph) -> 
                WaitInsufficientFailure (mutually exclusive); plus
                MissingBarrierFailure when a wait covers but no barrier
                sits in the post-wait window (LDS-reuse edges only).
+
+    `raise_on_unexplained=True` (default) raises UnexplainedMissingEdgeError
+    when the classifier reaches a fall-through — used in unit tests to
+    catch classifier regressions. `raise_on_unexplained=False` is used
+    by production observability paths that prefer a soft Failure return
+    over a hard exception.
     """
     p_id = ref_edge.producer.identity
     c_id = ref_edge.consumer.identity
@@ -1559,12 +1582,20 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph) -> 
 
     if not failures:
         # Couldn't classify — capture pipeline bug or classifier bug.
-        raise UnexplainedMissingEdgeError(
+        msg = (
             f"diagnose_missing_edge could not classify missing edge "
             f"{p_id} -> {c_id} (kind={ref_edge.edge_kind}). "
             f"This indicates either a classifier bug or a capture-pipeline "
             f"bug that bypassed earlier sanity checks."
         )
+        if raise_on_unexplained:
+            raise UnexplainedMissingEdgeError(msg)
+        # Soft-mode: return a synthetic Failure so production observability
+        # logs the issue without crashing the build.
+        unexplained = MissingWaitFailure(
+            producer=p_node, consumer=c_node, counter_kind="unknown",
+        ).with_legacy_msg(f"[unclassified] {msg}")
+        return [unexplained]
     return failures
 
 
