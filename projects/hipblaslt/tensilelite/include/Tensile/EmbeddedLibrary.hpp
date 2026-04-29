@@ -26,6 +26,10 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 #ifdef TENSILE_DEFAULT_SERIALIZATION
 
 #include <Tensile/Singleton.hpp>
@@ -100,3 +104,5 @@ namespace TensileLite
 } // namespace TensileLite
 
 #endif
+
+TENSILE_HIDDEN_END

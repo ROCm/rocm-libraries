@@ -29,6 +29,10 @@
 #include <cstdlib>
 #include <set>
 #include <string>
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 #ifdef Tensile_ENABLE_MARKER
 #include <roctracer/roctx.h>
 #endif
@@ -146,3 +150,5 @@ namespace TensileLite
         Debug();
     };
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

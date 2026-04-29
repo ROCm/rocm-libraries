@@ -26,6 +26,10 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 #ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
 #endif
@@ -62,3 +66,5 @@ namespace std
         return std::to_string(static_cast<float>(val));
     }
 } // namespace std
+
+TENSILE_HIDDEN_END

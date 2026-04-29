@@ -26,6 +26,10 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 #ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
 #endif
@@ -49,3 +53,5 @@ namespace std
         return stream << static_cast<int32_t>(val);
     }
 } // namespace std
+
+TENSILE_HIDDEN_END
