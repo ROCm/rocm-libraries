@@ -52,13 +52,28 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
 
     if (inst->opcodeStr == "asm_directive") {
         AsmDirective* d = irBuilder.createIR<AsmDirective>();
-        if (!inst->srcRegs.empty() &&
-            inst->srcRegs[0].dataType == StinkyRegister::Type::LiteralString) {
+        const bool hasName =
+            !inst->srcRegs.empty() &&
+            inst->srcRegs[0].dataType == StinkyRegister::Type::LiteralString;
+        const bool hasPayload =
+            inst->srcRegs.size() > 1 &&
+            inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString;
+
+        // RawAsmParser::makeTextBlock encodes pass-through text as
+        //   srcRegs[0] = "TEXTBLOCK", srcRegs[1] = raw text (with trailing '\n').
+        // The "TEXTBLOCK" sentinel is not part of the directive name; route the
+        // raw text into AsmDirective::value so the emitter prints it verbatim.
+        if (hasName && inst->srcRegs[0].literalValue == "TEXTBLOCK") {
+            d->kind = AsmDirectiveKind::TEXTBLOCK;
+            if (hasPayload) d->value = inst->srcRegs[1].literalValue;
+            return;
+        }
+
+        if (hasName) {
             d->name = inst->srcRegs[0].literalValue;
             if (d->name == ".set") d->kind = AsmDirectiveKind::SET;
         }
-        if (inst->srcRegs.size() > 1 &&
-            inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString) {
+        if (hasPayload) {
             d->symbol = inst->srcRegs[1].literalValue;
         }
         return;
