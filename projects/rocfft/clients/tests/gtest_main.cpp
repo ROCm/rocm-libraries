@@ -36,6 +36,9 @@
 #include <initializer_list>
 #include <list>
 
+// C++20 STL feature test
+#include <list>
+
 #include "../../shared/CLI11.hpp"
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
@@ -640,6 +643,10 @@ int main(int argc, char* argv[])
         std::cout << "rocFFT version: " << v << std::endl;
     }
 
+    // C++20 feature that we actually compile
+    std::string s = std::format("Hello, {}! You have {} messages.", "Alice", 5);
+    std::cout << s << std::endl;
+    
 #ifdef FFTW_MULTITHREAD
     fftw_init_threads();
     fftwf_init_threads();
