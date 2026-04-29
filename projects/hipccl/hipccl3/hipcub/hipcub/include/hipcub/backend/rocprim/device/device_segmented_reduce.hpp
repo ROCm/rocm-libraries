@@ -246,6 +246,55 @@ struct DeviceSegmentedReduce
                       stream);
     }
 
+    template<typename InputIteratorT, typename OutputIteratorT, typename ReductionOp, typename T>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Reduce(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             _HIPCUB_STD::int32_t num_segments,
+                             _HIPCUB_STD::int32_t segment_size,
+                             ReductionOp          reduction_op,
+                             T                    initial_value,
+                             hipStream_t          stream = 0)
+    {
+        return ::rocprim::segmented_reduce(
+            d_temp_storage,
+            temp_storage_bytes,
+            d_in,
+            d_out,
+            num_segments,
+            segment_size,
+            ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(reduction_op),
+            initial_value,
+            stream);
+    }
+
+    template<typename InputIteratorT, typename OutputIteratorT, typename ReductionOp, typename T>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Reduce(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             _HIPCUB_STD::int32_t num_segments,
+                             _HIPCUB_STD::int32_t segment_size,
+                             ReductionOp          reduction_op,
+                             T                    initial_value,
+                             hipStream_t          stream,
+                             bool                 debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return Reduce(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_out,
+                      num_segments,
+                      segment_size,
+                      reduction_op,
+                      initial_value,
+                      stream);
+    }
+
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t Sum(void*                d_temp_storage,
