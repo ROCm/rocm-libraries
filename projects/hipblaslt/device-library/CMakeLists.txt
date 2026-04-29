@@ -59,6 +59,9 @@ endif()
 # Pre-build gate: validate all library logic YAMLs (WorkGroup, MatrixInstruction,
 # WorkGroupMappingXCC vs CU count, etc.) before generating .dat files. Fails build
 # if any solution fails validation so bad logic is never compiled.
+set(HIPBLASLT_TENSILELOGIC_KNOWN_BUGS
+    "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/TensileLogic/known_bugs.yaml"
+)
 set(TENSILELOGIC_STAMP "${CMAKE_CURRENT_BINARY_DIR}/TensileLogic.stamp")
 add_custom_command(
     OUTPUT "${TENSILELOGIC_STAMP}"
@@ -66,9 +69,11 @@ add_custom_command(
     COMMAND ${HIPBLASLT_PYTHON_COMMAND}
         "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/bin/TensileLogic"
         "${HIPBLASLT_LIBLOGIC_PATH}"
+        --known-bugs
+        "${HIPBLASLT_TENSILELOGIC_KNOWN_BUGS}"
         --check-all
     COMMAND ${CMAKE_COMMAND} -E touch "${TENSILELOGIC_STAMP}"
-    DEPENDS ${HIPBLASLT_PYTHON_DEPS}
+    DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${HIPBLASLT_TENSILELOGIC_KNOWN_BUGS}"
     VERBATIM
     USES_TERMINAL
 )

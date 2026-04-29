@@ -31,6 +31,10 @@ That’s it. Use whatever Python you have (system, store, or a venv). If that Py
 python scripts/run_tensile_logic_check.py library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/navi33/GridBased
 ```
 
+### Known-bugs list (ROCM-2963 / validation exceptions)
+
+If `tensilelite/Tensile/TensileLogic/known_bugs.yaml` exists, this script passes **`--known-bugs`** to TensileLogic automatically so specific `(logic file path, SolutionIndex)` pairs are skipped (same as the CMake pre-build gate). Paths in that YAML are relative to the library logic root (`library/`), with optional `#` comments and an optional `ticket:` field for Jira keys. Override or disable by passing your own `--known-bugs` path on the command line.
+
 ### Exit code
 
 - **0** – All solutions passed (Reject = 0).

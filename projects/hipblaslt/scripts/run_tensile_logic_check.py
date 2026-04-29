@@ -64,6 +64,14 @@ def _parse_argv(root: Path):
                 i += 1
         elif a == "--check-all":
             i += 1  # we add it below
+        elif a == "--known-bugs":
+            passthrough.append(a)
+            i += 1
+            if i < len(args) and not args[i].startswith("-"):
+                passthrough.append(args[i])
+                i += 1
+            else:
+                raise SystemExit("Error: --known-bugs requires a file path")
         elif not a.startswith("-"):
             lib_path = Path(a)
             i += 1
@@ -80,6 +88,12 @@ def main() -> None:
     build_dir = root / "build"
     lib_logic_path, passthrough = _parse_argv(root)
     _ensure_paths(root, build_dir, lib_logic_path)
+
+    default_known_bugs = (
+        root / "tensilelite" / "Tensile" / "TensileLogic" / "known_bugs.yaml"
+    )
+    if default_known_bugs.is_file() and "--known-bugs" not in passthrough:
+        passthrough = ["--known-bugs", str(default_known_bugs)] + passthrough
 
     # TensileLogic: LOGIC_PATH [options] --check-all
     sys.argv = ["TensileLogic", str(lib_logic_path.resolve())] + passthrough + ["--check-all"]
