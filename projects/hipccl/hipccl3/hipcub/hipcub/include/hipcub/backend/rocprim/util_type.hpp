@@ -1004,6 +1004,9 @@ struct is_fixed_size_random_access_range<T, void_t<decltype(std::declval<T&>()[0
 template<typename T>
 using is_fixed_size_random_access_range_t = typename is_fixed_size_random_access_range<T>::type;
 
+template<typename T>
+constexpr bool is_fixed_size_random_access_range_v = is_fixed_size_random_access_range_t<T>::value;
+
 template<typename T, typename = void>
 struct static_size
 {
