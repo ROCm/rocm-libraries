@@ -48,6 +48,10 @@ struct ParsedInstruction {
     int latencyCycles;
     ParsedModifierDict modifiers;  // mod.X = { field = value, ... }
     bool isLabel;                  // true if this represents a label
+    /// Trailing source-level comment captured from the original line
+    /// (text after "//" or ";", with the marker stripped). Empty when no
+    /// comment was present or the parser was not asked to capture them.
+    std::string comment;
 
     ParsedInstruction(const std::string& opcode, bool label = false)
         : opcodeStr(opcode), issueCycles(0), latencyCycles(0), isLabel(label) {}

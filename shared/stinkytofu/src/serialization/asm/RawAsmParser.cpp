@@ -175,7 +175,8 @@ inline bool isHexSuffix(std::string_view id) {
 
 /// Parse a single register operand from the lexer.
 /// Adapted from IRParser::parseRegister().
-std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable& syms) {
+std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable& syms,
+                                               bool preserveSymbolicNames) {
     TokenKind kind = lexer.peek().kind;
 
     // Hex immediate: preserve as literal string
@@ -300,10 +301,18 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
 
         if (si >= 0 && ei >= si) {
             int regNum = ei - si + 1;
-            // Store the symbolic name alongside the numeric index (matches rocisa flow).
+            // Store the symbolic name alongside the numeric index (matches rocisa flow)
+            // only when the caller asked for it via RawAsmParserOptions. Optimisation
+            // passes generally see only the numeric index, so omitting it by default
+            // avoids stale symbolic names surviving register rewrites.
+            //
+            // The emitter prepends regTypeStr + '[' and appends ']' itself, so we
+            // store ONLY the inner content (e.g. "vgprSerial-512" or
+            // "vgprFoo+0:vgprFoo+3"), not the wrapped "v[...]" form. Storing the
+            // wrapped form would double-wrap the output to "v[v[vgprSerial-512]]".
             StinkyRegister reg(regType, static_cast<uint32_t>(si), static_cast<uint16_t>(regNum),
                                offset);
-            reg.setSymbolicName(regTypeStr + "[" + bracketContent + "]");
+            if (preserveSymbolicNames) reg.setSymbolicName(bracketContent);
             return reg;
         }
     }
@@ -473,7 +482,8 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
 /// Returns nullptr for unknown mnemonics (caller stores as TEXTBLOCK).
 std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArchID arch,
                                                  std::vector<Diagnostic>& diags, unsigned lineNo,
-                                                 const SymbolTable& syms) {
+                                                 const SymbolTable& syms,
+                                                 bool preserveSymbolicNames) {
     IRLexer lexer(line);
     lexer.lex();
 
@@ -522,7 +532,7 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
             }
             firstOp = false;
 
-            auto reg = parseOneRegister(lexer, syms);
+            auto reg = parseOneRegister(lexer, syms, preserveSymbolicNames);
             if (!reg) {
                 if (opIdx == 0) {
                     // First operand failed (e.g. symbolic expression like v[sym-768:sym-765]).
@@ -644,6 +654,11 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
     enum class Section { None, AmdhsaKernel, AmdgpuMetadata };
     Section section = Section::None;
     bool inArgEntry = false;
+    // Track whether we have entered the YAML `.args:` block. Without this gate
+    // the kernel-level `  - .name: <kernelName>` line (the first entry under
+    // `amdhsa.kernels:`, BEFORE the args block) gets misidentified as an arg
+    // and ends up duplicated at the head of the regenerated arg list.
+    bool inArgsList = false;
     ArgInfo curArg;
 
     while (std::getline(ss, line)) {
@@ -821,6 +836,7 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
                 args.push_back(curArg);
                 inArgEntry = false;
             }
+            inArgsList = false;
             section = Section::None;
             continue;
         }
@@ -840,8 +856,18 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
         }
 
         // ── Arg list parsing (simple YAML block) ─────────────────────────────────
-        // Each arg starts with "- .name:"
-        if (trimmed.substr(0, 8) == "- .name:") {
+        // The `.args:` line marks the boundary between the kernel-level YAML
+        // entry (which carries `.name`, `.symbol`, `.language`, `.args`, etc.)
+        // and the args block itself. Only after this boundary should `- .name:`
+        // be interpreted as an arg start; otherwise the kernel-level
+        // `  - .name: <kernelName>` line is mis-parsed as the first arg.
+        if (trimmed == ".args:" || trimmed.substr(0, 6) == ".args:") {
+            inArgsList = true;
+            continue;
+        }
+
+        // Each arg starts with "- .name:" — only when we are inside `.args:`.
+        if (inArgsList && trimmed.substr(0, 8) == "- .name:") {
             if (inArgEntry && !curArg.name.empty()) {
                 args.push_back(curArg);
             }
@@ -907,7 +933,8 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
 // Public API
 //----------------------------------------------------------------------
 
-RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) {
+RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
+                                    const RawAsmParserOptions& options) {
     RawAsmParseResult result;
 
     // Try to extract the kernel metadata header (SignatureBase).
@@ -972,13 +999,48 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
             }
         }
 
-        // Strip # comments (line starts with #), // comments, and ; comments
+        // Strip # comments (line starts with #), // comments, and ; comments.
+        // When the option is set, capture the trailing "// ..." or ";" comment
+        // first so we can re-attach it to the parsed instruction/directive.
         if (!line.empty() && line[0] == '#') {
             continue;  // entire line is a comment
         }
         // Before stripping // comments, check for "// st.token:N,M,..." annotation.
         // This lets raw .s files carry token group hints without affecting the assembler.
         std::vector<int> lineTokens;
+
+        // When preserveComments is enabled, capture a trailing "// ..." or ";"
+        // comment so we can re-attach it to the parsed instruction/directive.
+        // Note: if the comment turns out to be a "st.token:" annotation we
+        // discard lineComment below (after the token parser populates
+        // lineTokens) so that hidden annotations are not echoed as comments.
+        std::string lineComment;
+        if (options.preserveComments) {
+            size_t pos = std::string::npos;
+            size_t skip = 0;
+            for (size_t i = 0; i + 1 < line.size(); ++i) {
+                if (line[i] == '/' && line[i + 1] == '/') {
+                    pos = i;
+                    skip = 2;
+                    break;
+                }
+            }
+            size_t semi = line.find(';');
+            if (semi != std::string::npos && (pos == std::string::npos || semi < pos)) {
+                pos = semi;
+                skip = 1;
+            }
+            if (pos != std::string::npos) {
+                lineComment = line.substr(pos + skip);
+                size_t f = lineComment.find_first_not_of(" \t");
+                if (f == std::string::npos)
+                    lineComment.clear();
+                else
+                    lineComment.erase(0, f);
+                size_t l = lineComment.find_last_not_of(" \t\r\n");
+                if (l != std::string::npos) lineComment.resize(l + 1);
+            }
+        }
         for (size_t i = 0; i + 1 < line.size(); ++i) {
             if (line[i] == '/' && line[i + 1] == '/') {
                 std::string comment = line.substr(i + 2);
@@ -1027,16 +1089,26 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
         // the "<kernelName>:" label line.
         if (headerSkip) {
             // Detect the kernel body start: "KernelName:" or "KernelName:  /// ..."
+            // The kernel body label is intentionally NOT pushed into the IR
+            // here: SignatureCodeMeta::toString() ends its emission with
+            // "<kernelName>:\n", so the signature header itself provides the
+            // label. Pushing it again as a ParsedInstruction would duplicate
+            // it in the round-trip output (signature emits the label, then
+            // the function emit prints the same label).
             if (!kernelBodyMarker.empty() && line.size() >= kernelBodyMarker.size() &&
                 line.substr(0, kernelBodyMarker.size()) == kernelBodyMarker) {
                 headerSkip = false;
-                // Emit the kernel label as a ParsedInstruction label.
-                auto labelInst = std::make_unique<ParsedInstruction>(
-                    result.signature->kernelDescriptor.kernelName, true);
-                block->instructions.push_back(std::move(labelInst));
             }
             continue;
         }
+
+        // Helper: turn a stripped line back into a verbatim text-block, re-
+        // appending the captured trailing comment so non-`.set` directives
+        // (e.g. `.long X // hi`) and unparsable instructions still round-trip.
+        auto textBlockWithComment = [&](const std::string& base) {
+            if (lineComment.empty()) return makeTextBlock(base);
+            return makeTextBlock(base + "  // " + lineComment);
+        };
 
         // Directives: lines starting with '.'
         if (line[0] == '.') {
@@ -1063,9 +1135,10 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
                     if (f != std::string::npos) sym = sym.substr(f);
                     inst->srcRegs.push_back(StinkyRegister(sym));
                 }
+                inst->comment = lineComment;
                 block->instructions.push_back(std::move(inst));
             } else {
-                block->instructions.push_back(makeTextBlock(line));
+                block->instructions.push_back(textBlockWithComment(line));
             }
             continue;
         }
@@ -1086,6 +1159,7 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
                     if (labelOnly) {
                         std::string labelName(first.text);
                         auto labelInst = std::make_unique<ParsedInstruction>(labelName, true);
+                        labelInst->comment = lineComment;
                         block->instructions.push_back(std::move(labelInst));
                         continue;
                     }
@@ -1094,7 +1168,8 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
         }
 
         // Real instruction
-        auto inst = parseInstLine(line, arch, result.diagnostics, lineNo, syms);
+        auto inst = parseInstLine(line, arch, result.diagnostics, lineNo, syms,
+                                  options.preserveSymbolicNames);
         if (inst) {
             if (!lineTokens.empty()) {
                 // Build "[N,M,...]" string for ModifierSerializer::deserialize
@@ -1106,12 +1181,17 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
                 tokStr += ']';
                 inst->modifiers["mod.memtoken"]["tokens"] = tokStr;
             }
+            // If the captured comment is a pure "st.token:" annotation, drop
+            // it so the hidden token hint does not get echoed back as a
+            // user-visible comment by the emitter.
+            if (lineComment.compare(0, 9, "st.token:") == 0) lineComment.clear();
+            inst->comment = lineComment;
             block->instructions.push_back(std::move(inst));
         } else {
             // Unknown mnemonic or parse failure → preserve verbatim
             DEBUG_WITH_TYPE("RawAsmParser", std::cerr << "[RawAsmParser] line " << lineNo
                                                       << ": text block: " << line << "\n");
-            block->instructions.push_back(makeTextBlock(line));
+            block->instructions.push_back(textBlockWithComment(line));
         }
     }
 

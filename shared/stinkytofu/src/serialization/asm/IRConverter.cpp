@@ -39,7 +39,9 @@ StinkyIRConverter::StinkyIRConverter(const std::array<int, 3>& targetArch) : arc
 static void convertInstruction(AsmIRBuilder& irBuilder,
                                const std::unique_ptr<ParsedInstruction>& inst, GfxArchID arch) {
     if (inst->isLabel) {
-        irBuilder.createLabel(inst->opcodeStr);
+        StinkyInstruction* labelInst = irBuilder.createLabel(inst->opcodeStr);
+        if (labelInst && !inst->comment.empty())
+            labelInst->addModifier<CommentData>(CommentData{inst->comment});
         return;
     }
 
@@ -85,6 +87,7 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
             inst->srcRegs[2].dataType == StinkyRegister::Type::LiteralString) {
             d->value = inst->srcRegs[2].literalValue;
         }
+        if (!inst->comment.empty()) d->comment = inst->comment;
         return;
     }
 
@@ -112,6 +115,9 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
     if (!inst->modifiers.empty()) {
         ModifierSerializer::deserialize(stinkyInst, inst->modifiers);
     }
+
+    if (!inst->comment.empty())
+        stinkyInst->addModifier<CommentData>(CommentData{inst->comment});
 }
 
 StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string& irText,
