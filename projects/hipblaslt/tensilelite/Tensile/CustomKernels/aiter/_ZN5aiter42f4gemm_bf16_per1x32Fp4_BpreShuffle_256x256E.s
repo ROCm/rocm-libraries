@@ -3444,6 +3444,68 @@ label_19CC:
 // ===== AMDGPU Metadata =====
 .amdgpu_metadata
 ---
+custom.config:
+  Source:
+    Origin: aiter
+  Version: 1.0.0
+  Features:
+    SupportsUserArgs: false
+    SupportsBias: false
+    SupportsActivation: false
+    SupportsScaleAlpha: false
+    SupportsGSU: false
+  InternalSupportParams:
+    KernArgsVersion: 0
+  ProblemType:
+    OperationType: GEMM
+    DataType: F4
+    DestDataType: b
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: 1
+    TransposeB: 0
+    UseBeta: True
+    Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
+    SwizzleTensorA: True
+    SwizzleTensorB: False
+    MXBlockA: 32
+    MXBlockB: 32
+  CustomKernel:
+    args: [ { type: address, semantic: AddressD, padding: 8 },
+            { type: address, semantic: AddressC, padding: 8 },
+            { type: address, semantic: AddressB, padding: 8 },
+            { type: address, semantic: AddressA, padding: 8 },
+            { type: float32, semantic: Alpha, padding: 12 },
+            { type: float32, semantic: Beta, padding: 12 },
+            { type: uint32, semantic: StrideD0, padding: 12 },
+            { type: uint32, semantic: StrideD1, padding: 12 },
+            { type: uint32, semantic: StrideC0, padding: 12 },
+            { type: uint32, semantic: StrideC1, padding: 12 },
+            { type: uint32, semantic: StrideB0, padding: 12 },
+            { type: uint32, semantic: StrideB1, padding: 12 },
+            { type: uint32, semantic: StrideA0, padding: 12 },
+            { type: uint32, semantic: StrideA1, padding: 12 },
+            { type: uint32, semantic: SizeFree1, padding: 12 },
+            { type: uint32, semantic: SizeFree0, padding: 12 },
+            { type: uint32, semantic: SizeSum, padding: 12 },
+            { type: address, semantic: AddressScaleB, padding: 8 },
+            { type: address, semantic: AddressScaleA, padding: 8 },
+            { type: uint32, semantic: StrideScaleB0, padding: 12 },
+            { type: uint32, semantic: StrideScaleB1, padding: 12 },
+            { type: uint32, semantic: StrideScaleA0, padding: 12 },
+            { type: uint32, semantic: StrideScaleA1, padding: 12 },
+            { type: uint32, semantic: SplitK, padding: 12 } ]
+    macrotile: [256, 256, 256]
+    padProblemSizeToTile: [true, true]
+    threads: [256, 1, 1]
+    grid: [TilesX, TilesY, One]
+  MatrixInstruction: [16, 16, 128, 1]
+  EnableMatrixInstruction: True
+  MIWaveTile: [8, 8]
+  WavefrontSize: 64
 amdhsa.kernels:
   - .args:
       - .actual_access:  read_write

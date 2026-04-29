@@ -9,13 +9,10 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeA: 3
   DataInitTypeB: 3
-  NewClient: 2
   CSVExportWinner: 1
   CSVMergeSameProblemID: 1
   Device: 0
-  PrintSolutionRejectionReason: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
+  ValidateMetadata: True
 
 BenchmarkProblems:
   -

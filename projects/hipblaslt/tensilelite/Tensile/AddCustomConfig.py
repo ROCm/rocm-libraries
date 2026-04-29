@@ -124,9 +124,30 @@ def _parse_tensile_yaml(path, kernel_name=None):
     return config
 
 
+def _fmt_yaml_scalar(value):
+    """Format a scalar for the compact YAML style used in custom.config."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    if value is None:
+        return "null"
+    return str(value)
+
+
+def _fmt_yaml_inline(value):
+    """Format simple YAML values inline without quoting strings."""
+    if isinstance(value, list):
+        return "[" + ", ".join(_fmt_yaml_inline(v) for v in value) + "]"
+    if isinstance(value, dict):
+        pairs = ", ".join(
+            f"{k}: {_fmt_yaml_inline(v)}" for k, v in value.items()
+        )
+        return "{ " + pairs + " }"
+    return _fmt_yaml_scalar(value)
+
+
 def _fmt_yaml_list(values):
     """Format a list as a YAML inline sequence without quoting strings."""
-    return "[" + ", ".join(str(v) for v in values) + "]"
+    return _fmt_yaml_inline(values)
 
 
 def _fmt_yaml_args(args, indent=4):
@@ -142,7 +163,9 @@ def _fmt_yaml_args(args, indent=4):
     continuation = " " * len(prefix)
     formatted = []
     for arg in args:
-        pairs = ", ".join(f"{k}: {v}" for k, v in arg.items())
+        pairs = ", ".join(
+            f"{k}: {_fmt_yaml_inline(v)}" for k, v in arg.items()
+        )
         formatted.append("{ " + pairs + " }")
     if len(formatted) == 1:
         return prefix + "[ " + formatted[0] + " ]"
@@ -193,14 +216,11 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
     if config and "CustomKernel" in config:
         ck = config["CustomKernel"]
         lines.append("  CustomKernel:")
-        if "args" in ck:
-            lines.append(_fmt_yaml_args(ck["args"]))
-        if "macrotile" in ck:
-            lines.append(f"    macrotile: {_fmt_yaml_list(ck['macrotile'])}")
-        if "threads" in ck:
-            lines.append(f"    threads: {_fmt_yaml_list(ck['threads'])}")
-        if "grid" in ck:
-            lines.append(f"    grid: {_fmt_yaml_list(ck['grid'])}")
+        for key, value in ck.items():
+            if key == "args":
+                lines.append(_fmt_yaml_args(value))
+            else:
+                lines.append(f"    {key}: {_fmt_yaml_inline(value)}")
 
     if config and "MatrixInstruction" in config:
         mi = config["MatrixInstruction"]
