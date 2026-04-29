@@ -271,7 +271,7 @@ static void RunningPrefixKernel(T* d_input, T* d_output)
 
     prefix_type prefix(T(), ScanOp{});
 
-    _CCCL_PRAGMA_UNROLL_FULL()
+    HIPCUB_PRAGMA_UNROLL_FULL()
     for(int i = 0; i < num_items; ++i)
     {
         T value            = d_input[i];

@@ -57,7 +57,7 @@ struct inclusive_scan
         using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
         __shared__ typename bscan_t::TempStorage storage;
 
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bscan_t(storage).InclusiveScan(values, values, benchmark_utils::plus{});
@@ -87,7 +87,7 @@ struct exclusive_scan
         using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
         __shared__ typename bscan_t::TempStorage storage;
 
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bscan_t(storage).ExclusiveScan(values, values, init, benchmark_utils::plus{});
