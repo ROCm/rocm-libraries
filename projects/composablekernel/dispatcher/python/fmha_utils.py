@@ -333,14 +333,19 @@ class FmhaKernelConfig:
 
 
 def cpu_attention_fwd(
-    Q: np.ndarray, K: np.ndarray, V: np.ndarray, scale: float
+    Q: np.ndarray,
+    K: np.ndarray,
+    V: np.ndarray,
+    scale: float,
+    mask_type: int = 0,
 ) -> np.ndarray:
-    """CPU reference: scaled dot-product attention (supports GQA).
+    """CPU reference: scaled dot-product attention (supports GQA and causal mask).
 
     Args:
         Q: [batch, nhead_q, seqlen_q, hdim_q]  float32
         K: [batch, nhead_k, seqlen_k, hdim_q]  float32
         V: [batch, nhead_k, seqlen_k, hdim_v]  float32
+        mask_type: 0=no mask, 1=causal top-left, 2=causal bottom-right
 
     Returns:
         O: [batch, nhead_q, seqlen_q, hdim_v]  float32
@@ -352,6 +357,15 @@ def cpu_attention_fwd(
         K = np.repeat(K, ratio, axis=1)
         V = np.repeat(V, ratio, axis=1)
     S = np.matmul(Q, K.transpose(0, 1, 3, 2)) * scale
+    if mask_type in (1, 2):
+        sq, sk = S.shape[-2], S.shape[-1]
+        row = np.arange(sq).reshape(sq, 1)
+        col = np.arange(sk).reshape(1, sk)
+        if mask_type == 1:  # top-left causal
+            causal_mask = col <= row
+        else:  # bottom-right causal
+            causal_mask = col <= (row + sk - sq)
+        S = np.where(causal_mask, S, -1e9)
     S_max = S.max(axis=-1, keepdims=True)
     S_exp = np.exp(S - S_max)
     P = S_exp / S_exp.sum(axis=-1, keepdims=True)

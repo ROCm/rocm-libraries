@@ -31,6 +31,7 @@ sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
 
 from fmha_utils import (  # noqa: E402
     FmhaProblem,
+    FmhaRunner,
     cpu_attention_fwd,
     detect_gpu_arch,
     setup_multiple_fmha_dispatchers,
@@ -160,6 +161,15 @@ def main():
     failed = len(all_configs) - built
     print(f"\n  Built {built}/{len(all_configs)} in {jit_time:.0f}s ({failed} failed)")
 
+    # Load runners for successfully compiled kernels
+    for setup in setups:
+        if setup.success and setup.library_path and setup.runner is None:
+            try:
+                setup.runner = FmhaRunner.from_library(setup.library_path, args.arch)
+            except Exception as e:
+                print(f"  Warning: Failed to load runner: {e}")
+                setup.success = False
+                
     if args.compile_only:
         print(f"\n{'=' * 70}")
         print(f"  Compile-only mode. {built} kernels ready.")
@@ -183,10 +193,14 @@ def main():
 
     for prob_idx, prob in enumerate(problems):
         first_dtype = all_configs[0].data_type if all_configs else "fp16"
+        first_mask = all_configs[0].mask if all_configs else "no"
         np_dtype = dtype_map.get(first_dtype, np.float16)
         Q = (np.random.randn(*prob.q_shape()) * 0.1).astype(np_dtype)
         K = (np.random.randn(*prob.k_shape()) * 0.1).astype(np_dtype)
         V = (np.random.randn(*prob.v_shape()) * 0.1).astype(np_dtype)
+
+        _MASK_INT = {"no": 0, "top_left": 1, "bottom_right": 2, "generic": 3}
+        first_mask_int = _MASK_INT.get(first_mask, 0)
 
         ref = None
         if args.verify:
@@ -195,6 +209,7 @@ def main():
                 K.astype(np.float32),
                 V.astype(np.float32),
                 prob.scale,
+                mask_type=first_mask_int,
             )
 
         prob_str = f"B={prob.batch} H={prob.nhead_q} S={prob.seqlen_q} D={prob.hdim_q}"
@@ -205,13 +220,45 @@ def main():
         )
         print(f"  {'-' * 90}")
 
+        _BIAS_INT = {"no": 0, "bias": 1, "alibi": 2}
+
         for config, setup in zip(all_configs, setups):
             if not setup.success or setup.runner is None:
                 continue
 
-            result = setup.runner.run(Q, K, V, prob)
+            # Skip kernels whose hdim doesn't match the problem
+            if config.hdim_q != prob.hdim_q or config.hdim_v != prob.hdim_v:
+                continue
+
+            mask_int = _MASK_INT.get(config.mask, 0)
+            # Causal masks need window_right=0 (no future tokens visible)
+            is_causal = config.mask in ("top_left", "bottom_right")
+            is_group = config.mode == "group"
+
+            result = setup.runner.run(
+                Q, K, V, prob,
+                mask_type=mask_int,
+                bias_type=_BIAS_INT.get(config.bias, 0),
+                has_lse=int(config.lse),
+                has_dropout=int(config.dropout),
+                has_logits=int(config.logits),
+                has_sink=int(config.sink),
+                data_type=config.data_type,
+                is_group_mode=int(is_group),
+                is_v_rowmajor=int(config.vlayout == "r"),
+                api_family=config.family,
+                window_left=-1,
+                window_right=0 if is_causal else -1,
+            )
             if not result.success:
                 continue
+
+            # Adjust TFLOPS for causal mask (~half the ops)
+            tflops = result.tflops
+            if is_causal and result.time_ms > 0:
+                sq, sk = prob.seqlen_q, prob.seqlen_k
+                causal_ratio = (min(sq, sk) + 1) / (2.0 * sk)
+                tflops = prob.num_ops * causal_ratio / (result.time_ms * 1e-3) / 1e12
 
             max_err = 0.0
             status = "OK"
@@ -221,7 +268,7 @@ def main():
 
             print(
                 f"  {config.name:<50} {result.time_ms:>10.3f}"
-                f" {result.tflops:>10.2f} {max_err:>10.2e} {status:>6}"
+                f" {tflops:>10.2f} {max_err:>10.2e} {status:>6}"
             )
 
             all_results.append(
@@ -237,7 +284,7 @@ def main():
                         "hdim_q": prob.hdim_q,
                     },
                     "latency_ms": result.time_ms,
-                    "tflops": result.tflops,
+                    "tflops": tflops,
                     "max_err": max_err,
                 }
             )

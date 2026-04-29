@@ -583,13 +583,7 @@ class GroupedConvDispatcher
         return select_kernel(problem);
     }
 
-    /// Enable or disable GPU benchmarking (timing).
-    /// When disabled, kernels execute once with no timing overhead.
-    void set_benchmarking(bool enable) { benchmarking_ = enable; }
-    [[nodiscard]] bool benchmarking_enabled() const { return benchmarking_; }
-
     private:
-    bool benchmarking_ = true;
     const GroupedConvKernelInstance* select_heuristic(const GroupedConvProblem& problem) const
     {
         if(!heuristic_)
