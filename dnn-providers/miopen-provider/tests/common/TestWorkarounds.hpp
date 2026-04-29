@@ -28,12 +28,21 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <string_view>
 
 namespace test_common::workarounds_detail
 {
 
-// Returns the gcnArchName of device 0, stripped at the first ':' (so
-// "gfx90a:sramecc+:xnack-" becomes "gfx90a"). Empty string on failure.
+// Strips the feature suffix from a gcnArchName (so "gfx90a:sramecc+:xnack-"
+// becomes "gfx90a"). Returns an empty string when the input is empty or
+// begins with ':'. Pure string logic; covered by TestWorkarounds.cpp.
+inline std::string stripArchFeatureSuffix(std::string_view archName)
+{
+    return std::string{archName.substr(0, archName.find(':'))};
+}
+
+// Returns the gcnArchName of device 0, stripped of any feature suffix.
+// Empty string on HIP failure.
 //
 // Device 0 is intentional: tests in this provider don't switch devices, and
 // avoiding hipStreamGetDevice() keeps this header free of the MiopenUtils
@@ -47,8 +56,7 @@ inline std::string queryCurrentDeviceArch()
     {
         return {};
     }
-    std::string archStr(props.gcnArchName);
-    return archStr.substr(0, archStr.find(':'));
+    return stripArchFeatureSuffix(props.gcnArchName);
 }
 
 } // namespace test_common::workarounds_detail
