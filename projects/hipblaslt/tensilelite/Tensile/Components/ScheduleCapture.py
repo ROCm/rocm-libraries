@@ -580,11 +580,43 @@ class OutOfOrderSequenceFailure(Failure):
             )
 
 
+# Class-name lists for finalize() guards. Class-name matching (not isinstance)
+# keeps this module free of hard rocisa imports — the same names work for
+# real rocisa classes and for synthetic test stand-ins.
+
+_SMEM_CLASS_NAMES = {
+    "SLoadB32", "SLoadB64", "SLoadB128", "SLoadB256", "SLoadB512",
+    "SStoreB32", "SStoreB64", "SStoreB128",
+    "SMemLoadInstruction", "SMemStoreInstruction",
+}
+
+_FLAT_CLASS_NAMES = {
+    "FlatLoadB8", "FlatLoadB16", "FlatLoadB32", "FlatLoadB64", "FlatLoadB128",
+    "FlatStoreB8", "FlatStoreB16", "FlatStoreB32", "FlatStoreB64", "FlatStoreB128",
+    "FLATReadInstruction", "FLATStoreInstruction",
+}
+
+_VECTOR_STORE_CLASS_NAMES = {
+    "BufferStoreB32", "BufferStoreB64", "BufferStoreB128",
+    "GlobalStoreB32", "GlobalStoreB64", "GlobalStoreB128",
+    "BufferStoreInstruction", "GlobalStoreInstruction",
+}
+
+
 class LoopBodyCaptureBuilder:
     """Accumulates TaggedInstructions across multiple emission calls.
 
     Owns a `sequence` counter that increments per-append within the same
     (iteration, slot_kind, mfma_index) triple to produce deterministic SlotKeys.
+
+    finalize() runs capture-pipeline guards before returning the capture:
+      - rocisa wiring: every TaggedInstruction.inst is non-None
+      - SMEM guard:    no SLoad*/SStore* in the body (would desync dscnt FIFO)
+      - flat guard:    no Flat* in the body (decrement two counters at once)
+      - store guard:   no vector-memory stores (vscnt is not modeled)
+
+    These checks raise named exceptions (NOT bare assert) so they survive
+    `python -O` and propagate diagnostic context.
     """
 
     def __init__(self):
@@ -604,7 +636,59 @@ class LoopBodyCaptureBuilder:
         self._instructions.append(TaggedInstruction(inst=inst, category=category, slot=slot))
 
     def finalize(self):
+        for ti in self._instructions:
+            inst = ti.inst
+            if inst is None:
+                raise CaptureWiringError(
+                    f"LoopBodyCaptureBuilder.finalize: TaggedInstruction "
+                    f"in category {ti.category!r} at slot "
+                    f"mfma_index={ti.slot.mfma_index} has inst=None. "
+                    f"rocisa wiring failed during capture."
+                )
+            cls_name = type(inst).__name__
+            if cls_name in _SMEM_CLASS_NAMES:
+                raise CaptureSMEMError(
+                    f"LoopBodyCaptureBuilder.finalize: SMEM op "
+                    f"{cls_name} in category {ti.category!r}. "
+                    f"SMEM also decrements dscnt and would desync the "
+                    f"per-counter FIFO model used by build_dataflow_graph."
+                )
+            if cls_name in _FLAT_CLASS_NAMES:
+                raise CaptureFlatError(
+                    f"LoopBodyCaptureBuilder.finalize: flat op "
+                    f"{cls_name} in category {ti.category!r}. "
+                    f"Flat ops decrement both vmcnt and dscnt simultaneously, "
+                    f"which the per-counter queue model doesn't handle."
+                )
+            if cls_name in _VECTOR_STORE_CLASS_NAMES:
+                raise CaptureStoreError(
+                    f"LoopBodyCaptureBuilder.finalize: vector-memory store "
+                    f"{cls_name} in category {ti.category!r}. "
+                    f"vscnt is not tracked; no current CMS body emits stores."
+                )
         return LoopBodyCapture(instructions=list(self._instructions))
+
+
+def assert_idmap_completeness(idmap, capture):
+    """Verify per-category instruction counts match between idMap and capture.
+
+    Excludes SYNC and SNOP categories: CMS lets the user specify arbitrary
+    numbers of waits and snops, so count parity isn't a coverage property.
+
+    Raises CaptureIdmapMismatchError if any other category's count differs.
+    """
+    captured_by_cat = {}
+    for ti in capture.instructions:
+        captured_by_cat.setdefault(ti.category, []).append(ti)
+    for cat, idmap_insts in idmap.items():
+        if cat in ("SYNC", "SNOP"):
+            continue
+        captured = captured_by_cat.get(cat, [])
+        if len(idmap_insts) != len(captured):
+            raise CaptureIdmapMismatchError(
+                f"Category {cat}: idMap declares {len(idmap_insts)} "
+                f"instructions, capture has {len(captured)}."
+            )
 
 
 # =============================================================================
