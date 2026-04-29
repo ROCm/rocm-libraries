@@ -1426,22 +1426,29 @@ struct UniversalGemmPipelineAgBgCrPolicy
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
 
+        constexpr bool is_load_tr = is_a_load_tr<Problem> || is_b_load_tr<Problem>;
 #if defined(__gfx950__)
         constexpr index_t vector_size =
             DS_READ_TR_SIZE() / sizeof(typename Problem::AComputeDataType);
+#else
+        constexpr index_t vector_size = DS_READ_TR_SIZE() / sizeof(typename Problem::ADataType);
+#endif
         constexpr index_t thread_elements = WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size();
         constexpr auto wg_attr_num_access =
-            !(is_a_load_tr<Problem> || is_b_load_tr<Problem>) ? WGAttrNumAccessEnum::Single
-            : vector_size == thread_elements                  ? WGAttrNumAccessEnum::Single
-            : vector_size * 2 == thread_elements              ? WGAttrNumAccessEnum::Double
-            : vector_size * 4 == thread_elements              ? WGAttrNumAccessEnum::Quad
-                                                              : WGAttrNumAccessEnum::Invalid;
-#else
-        constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Default;
-#endif
-
+            !(is_load_tr)                        ? WGAttrNumAccessEnum::Single
+            : vector_size == thread_elements     ? WGAttrNumAccessEnum::Single
+            : vector_size * 2 == thread_elements ? WGAttrNumAccessEnum::Double
+            : vector_size * 4 == thread_elements ? WGAttrNumAccessEnum::Quad
+                                                 : WGAttrNumAccessEnum::Invalid;
         using ATypeToUse = typename Problem::AComputeDataType;
         using BTypeToUse = typename Problem::BComputeDataType;
+
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType = remove_cvref_t<typename Problem::BDataType>;
+
+        // Use the packed data access when the data types have different sizes to make their data
+        // access patterns compatible when using transposed load.
+        constexpr bool use_pack_num_access = sizeof(ADataType) != sizeof(BDataType) && is_load_tr;
 
         using WarpGemm = WarpGemmDispatcher<typename Problem::AComputeDataType,
                                             typename Problem::BComputeDataType,
@@ -1452,7 +1459,10 @@ struct UniversalGemmPipelineAgBgCrPolicy
                                             Problem::TransposeC,
                                             false,
                                             Problem::UseStructuredSparsity,
-                                            wg_attr_num_access>;
+                                            wg_attr_num_access,
+                                            wg_attr_num_access,
+                                            false,
+                                            use_pack_num_access>;
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ATypeToUse,
                                                                       BTypeToUse,
