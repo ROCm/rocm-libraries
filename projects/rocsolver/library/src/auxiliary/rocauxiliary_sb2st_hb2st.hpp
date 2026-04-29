@@ -313,9 +313,9 @@ __device__ void sb2st_hb2st_task(
     rocblas_int task,
     T* Aband,
     rocblas_int ldab,
+    S* E,
     T* V,
     rocblas_int ldv,
-    S* E,
     T* s_housev,
     T* s_work)
 {
@@ -495,11 +495,11 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     rocblas_stride shiftA,
     rocblas_int ldab,
     rocblas_stride strideA,
+    S* EE,
+    rocblas_stride strideE,
     T* VV,
     rocblas_int ldv,
-    rocblas_stride strideV,
-    S* EE,
-    rocblas_stride strideE)
+    rocblas_stride strideV )
 {
     const rocblas_int xid = threadIdx.x;
     const rocblas_int yid = threadIdx.y;
@@ -531,7 +531,7 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
 
     // execute sweep task
     sb2st_hb2st_task<T, S>(
-        xid, yid, n, kd, sweep, task, Aband, ldab, V, ldv, E,
+        xid, yid, n, kd, sweep, task, Aband, ldab, E, V, ldv,
         s_housev, s_work );
 }
 
@@ -615,13 +615,13 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     const rocblas_stride shiftA,
     const rocblas_int ldab,
     const rocblas_stride strideA,
-    U V,
-    const rocblas_int ldv,
-    const rocblas_stride strideV,
     S* D,
     const rocblas_stride strideD,
     S* E,
     const rocblas_stride strideE,
+    U V,
+    const rocblas_int ldv,
+    const rocblas_stride strideV,
     const rocblas_int batch_count)
 {
     ROCSOLVER_ENTER( "sb2st_hb2st", "n:", n, "kd:", kd, "shiftA:", shiftA,
@@ -688,8 +688,8 @@ rocblas_status rocsolver_sb2st_hb2st_template(
                 dim3( DIMX, DIMY, 1 ), s_mem_size, stream,
                 n, kd, round,
                 Aband, shiftA, ldab, strideA,
-                V, ldv, strideV,
-                E, strideE );
+                E, strideE,
+                V, ldv, strideV );
         }
         if (round == sweep_begin_finishes)
         {
@@ -707,7 +707,8 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     ROCSOLVER_LAUNCH_KERNEL(
         (sb2st_hb2st_copy_diag<T>),
         dim3( copyblocks, 1, batch_count ), dim3( BS1 ), 0, stream,
-        n, Aband, shiftA + idiag, ldab, strideA, D, strideD );
+        n, Aband, shiftA + idiag, ldab, strideA,
+        D, strideD );
 
     // rocblas_set_pointer_mode( handle, old_mode );
 

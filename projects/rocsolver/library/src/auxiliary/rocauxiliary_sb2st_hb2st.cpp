@@ -96,9 +96,9 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
     return rocsolver_sb2st_hb2st_template<false, false, T>(
         handle, n, kd,
         Aband, shiftA, ldab, strideA,
-        V, ldv, strideV,
         D, strideD,
         E, strideE,
+        V, ldv, strideV,
         batch_count );
 }
 

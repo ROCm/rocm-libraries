@@ -141,10 +141,10 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
                           const rocblas_int kd,
                           Ud& dAband,
                           const rocblas_int ldab,
-                          Ud& dV,
-                          const rocblas_int ldv,
                           Td& dD,
                           Td& dE,
+                          Ud& dV,
+                          const rocblas_int ldv,
                           Uh& hAband,
                           Uh& hAbandRes,
                           Th& hDRes,
@@ -167,8 +167,8 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
         rocsolver_sb2st_hb2st(
             handle, uplo, n, kd,
             dAband.data(), ldab,
-            dV.data(), ldv,
-            dD.data(), dE.data() ) );
+            dD.data(), dE.data(),
+            dV.data(), ldv ) );
     CHECK_HIP_ERROR( hAbandRes.transfer_from( dAband ) );
     CHECK_HIP_ERROR( hDRes.transfer_from( dD ) );
     CHECK_HIP_ERROR( hERes.transfer_from( dE ) );
@@ -231,10 +231,10 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                              const rocblas_int kd,
                              Ud& dAband,
                              const rocblas_int ldab,
-                             Ud& dV,
-                             const rocblas_int ldv,
                              Td& dD,
                              Td& dE,
+                             Ud& dV,
+                             const rocblas_int ldv,
                              Uh& hAband,
                              double* gpu_time_used,
                              double* cpu_time_used,
@@ -262,8 +262,8 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
             rocsolver_sb2st_hb2st(
                 handle, uplo, n, kd,
                 dAband.data(), ldab,
-                dV.data(), ldv,
-                dD.data(), dE.data() ) );
+                dD.data(), dE.data(),
+                dV.data(), ldv ) );
     }
 
     // gpu-lapack performance
@@ -291,8 +291,8 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
             rocsolver_sb2st_hb2st(
                 handle, uplo, n, kd,
                 dAband.data(), ldab,
-                dV.data(), ldv,
-                dD.data(), dE.data() ) );
+                dD.data(), dE.data(),
+                dV.data(), ldv ) );
         *gpu_time_used += get_time_us_sync( stream ) - start;
         // todo: print time
     }
@@ -342,8 +342,8 @@ void testing_sb2st_hb2st( Arguments& argus )
             rocsolver_sb2st_hb2st(
                 handle, uplo, n, kd,
                 (T*)nullptr, ldab,
-                (T*)nullptr, ldv,
-                (S*)nullptr, (S*)nullptr ),
+                (S*)nullptr, (S*)nullptr,
+                (T*)nullptr, ldv ),
             rocblas_status_invalid_size );
 
         if ( argus.timing )
@@ -362,8 +362,8 @@ void testing_sb2st_hb2st( Arguments& argus )
             rocsolver_sb2st_hb2st(
                 handle, uplo, n, kd,
                 (T*)nullptr, ldab,
-                (T*)nullptr, ldv,
-                (S*)nullptr, (S*)nullptr ) );
+                (S*)nullptr, (S*)nullptr,
+                (T*)nullptr, ldv ) );
 
         size_t size;
         CHECK_ROCBLAS_ERROR(
@@ -382,8 +382,8 @@ void testing_sb2st_hb2st( Arguments& argus )
 
     device_strided_batch_vector<T> dAband( size_Aband, 1, size_Aband, 1 );
     device_strided_batch_vector<T> dV( size_V, 1, size_V, 1 );
-    device_strided_batch_vector<S> dD( size_Aband, 1, size_D, 1 );
-    device_strided_batch_vector<S> dE( size_Aband, 1, size_E, 1 );
+    device_strided_batch_vector<S> dD( size_D, 1, size_D, 1 );
+    device_strided_batch_vector<S> dE( size_E, 1, size_E, 1 );
 
     if (size_Aband)
         CHECK_HIP_ERROR( dAband.memcheck() );
@@ -401,8 +401,8 @@ void testing_sb2st_hb2st( Arguments& argus )
             rocsolver_sb2st_hb2st(
                 handle, uplo, n, kd,
                 dAband.data(), ldab,
-                dV.data(), ldv,
-                dD.data(), dE.data() ),
+                dD.data(), dE.data(),
+                dV.data(), ldv ),
             rocblas_status_success );
         if (argus.timing)
             rocsolver_bench_inform( inform_quick_return );
@@ -414,7 +414,9 @@ void testing_sb2st_hb2st( Arguments& argus )
     {
         sb2st_hb2st_getError<T>(
             handle, uplo, n, kd,
-            dAband, ldab, dV, ldv, dD, dE,
+            dAband, ldab,
+            dD, dE,
+            dV, ldv,
             hAband, hAbandRes, hDRes, hERes, hW,
             &max_error );
     }
@@ -425,8 +427,8 @@ void testing_sb2st_hb2st( Arguments& argus )
         sb2st_hb2st_getPerfData<T>(
             handle, uplo, n, kd,
             dAband, ldab,
-            dV, ldv,
             dD, dE,
+            dV, ldv,
             hAband,
             &gpu_time_used, &cpu_time_used,
             hot_calls, argus.profile, argus.profile_kernels, argus.perf );
