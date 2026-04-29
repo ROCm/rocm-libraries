@@ -1167,15 +1167,15 @@ void init_stinkytofu(nb::module_ m) {
         .def("getAsmMathClock", &StinkyAsmModuleWithSignature::getAsmMathClock)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
         .def("getName", &StinkyAsmModuleWithSignature::getName)
-        .def(
-            "getPassResults",
-            [](const StinkyAsmModuleWithSignature& self) {
-                nb::dict out;
-                for (const auto& [key, value] : self.getPassResults()) {
-                    std::visit([&](const auto& typedValue) { out[key.c_str()] = typedValue; }, value);
-                }
-                return out;
-            })
+        .def("getPassResults",
+             [](const StinkyAsmModuleWithSignature& self) {
+                 nb::dict out;
+                 for (const auto& [key, value] : self.getPassResults()) {
+                     std::visit([&](const auto& typedValue) { out[key.c_str()] = typedValue; },
+                                value);
+                 }
+                 return out;
+             })
         .def("getModule", &StinkyAsmModuleWithSignature::getModule);
 
     // Bind toStinkyTofuModule with signature support

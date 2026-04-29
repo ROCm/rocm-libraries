@@ -22,32 +22,31 @@
  * ************************************************************************ */
 
 #include <gtest/gtest.h>
+
 #include <string>
 
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
-#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 
 using namespace stinkytofu;
 
 // Helper class to build test IR and run pass
-class EstimateAsmCyclesTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        arch               = getGfxArchID(12, 5, 0); // GFX1250
+class EstimateAsmCyclesTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
+        arch = getGfxArchID(12, 5, 0);  // GFX1250
         gemmConfig.arch[0] = 12;
         gemmConfig.arch[1] = 5;
         gemmConfig.arch[2] = 0;
-        gemmConfig.TileA0  = 16;
-        gemmConfig.TileB0  = 16;
-        gemmConfig.TileM0  = 16;
-        gemmConfig.NumGRA  = 4;
-        gemmConfig.NumGRB  = 4;
-        gemmConfig.NumGRM  = 4;
+        gemmConfig.TileA0 = 16;
+        gemmConfig.TileB0 = 16;
+        gemmConfig.TileM0 = 16;
+        gemmConfig.NumGRA = 4;
+        gemmConfig.NumGRB = 4;
+        gemmConfig.NumGRM = 4;
         gemmConfig.NumWaves = 4;
 
         // Create a Function with a BasicBlock for testing
@@ -55,32 +54,27 @@ protected:
         loopBB = func->createBasicBlock("label_LoopBeginL");
     }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         // Clean up Function (which will clean up BasicBlocks and IR)
         func.reset();
         loopBB = nullptr;
     }
 
     // Create IRBuilder for building test instructions
-    AsmIRBuilder getIRBuilder()
-    {
+    AsmIRBuilder getIRBuilder() {
         return AsmIRBuilder(*loopBB, arch);
     }
 
     // Helper to create a v_add_f32 instruction with issueCycles
-    void createLabel(const std::string& label)
-    {
-        auto               builder = getIRBuilder();
+    void createLabel(const std::string& label) {
+        auto builder = getIRBuilder();
         builder.createLabel(label);
     }
 
     // Helper to create a v_add_f32 instruction with issueCycles
-    StinkyInstruction* createVAddF32(int destReg, int src0Reg, int src1Reg, int issueCycles = 1)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+    StinkyInstruction* createVAddF32(int destReg, int src0Reg, int src1Reg, int issueCycles = 1) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -90,11 +84,9 @@ protected:
     }
 
     // Helper to create a v_mul_f32 instruction with issueCycles
-    StinkyInstruction* createVMulF32(int destReg, int src0Reg, int src1Reg, int issueCycles = 1)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
+    StinkyInstruction* createVMulF32(int destReg, int src0Reg, int src1Reg, int issueCycles = 1) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -104,11 +96,10 @@ protected:
     }
 
     // Helper to create a v_fma_f32 instruction with issueCycles
-    StinkyInstruction* createVFmaF32(int destReg, int src0Reg, int src1Reg, int src2Reg, int issueCycles = 1)
-    {
-        auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
+    StinkyInstruction* createVFmaF32(int destReg, int src0Reg, int src1Reg, int src2Reg,
+                                     int issueCycles = 1) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
 
         inst->addDestReg(StinkyRegister("v", destReg, 1));
         inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
@@ -119,8 +110,7 @@ protected:
     }
 
     // Helper to run the pass and get the result
-    unsigned int runPassAndGetResult()
-    {
+    unsigned int runPassAndGetResult() {
         PassManager passManager;
         passManager.setGemmTileConfig(gemmConfig);
         passManager.setPassFeatureConfig(PassFeatureConfig());
@@ -130,27 +120,24 @@ protected:
         passManager.run(*func);
 
         // Retrieve result from PassContext (stored by the pass during run())
-        auto cycles = passManager.getPassContext()
-                          .getResult<uint32_t>(kEstimateAsmCyclesKey);
+        auto cycles = passManager.getPassContext().getResult<uint32_t>(kEstimateAsmCyclesKey);
         return cycles.value_or(0);
     }
 
-    GemmTileConfig            gemmConfig;
-    GfxArchID                 arch;
+    GemmTileConfig gemmConfig;
+    GfxArchID arch;
     std::unique_ptr<Function> func;
-    BasicBlock*               loopBB;
+    BasicBlock* loopBB;
 };
 
 // Test with empty BasicBlock
-TEST_F(EstimateAsmCyclesTest, EmptyBasicBlock)
-{
+TEST_F(EstimateAsmCyclesTest, EmptyBasicBlock) {
     unsigned int cycles = runPassAndGetResult();
     EXPECT_EQ(cycles, 0);
 }
 
 // Test with instructions that have zero issueCycles
-TEST_F(EstimateAsmCyclesTest, ZeroIssueCycles)
-{
+TEST_F(EstimateAsmCyclesTest, ZeroIssueCycles) {
     createLabel("label_LoopBeginL");
     createVMulF32(3, 4, 5, 0);
 
@@ -159,12 +146,11 @@ TEST_F(EstimateAsmCyclesTest, ZeroIssueCycles)
 }
 
 // Test that only instructions after "label_LoopBeginL" are processed
-TEST_F(EstimateAsmCyclesTest, OnlyProcessLabelLoopBeginL)
-{
+TEST_F(EstimateAsmCyclesTest, OnlyProcessLabelLoopBeginL) {
     // Use a non-loop-named basic block so pass logic starts counting only
     // after it sees an explicit internal label "label_LoopBeginL".
     BasicBlock* testBB = func->createBasicBlock("loop_body");
-    loopBB             = testBB;
+    loopBB = testBB;
 
     // Put a non-loop instruction before the label in the same basic block.
     createVAddF32(0, 1, 2, 10);
@@ -179,15 +165,13 @@ TEST_F(EstimateAsmCyclesTest, OnlyProcessLabelLoopBeginL)
 }
 
 // Test with many instructions
-TEST_F(EstimateAsmCyclesTest, ManyInstructions)
-{
+TEST_F(EstimateAsmCyclesTest, ManyInstructions) {
     const int numInstructions = 100;
-    const int cyclesPerInst    = 2;
+    const int cyclesPerInst = 2;
     unsigned int expectedCycles = 0;
 
     createLabel("label_LoopBeginL");
-    for(int i = 0; i < numInstructions; ++i)
-    {
+    for (int i = 0; i < numInstructions; ++i) {
         createVAddF32(i, i + 1, i + 2, cyclesPerInst);
         expectedCycles += cyclesPerInst;
     }
@@ -198,9 +182,8 @@ TEST_F(EstimateAsmCyclesTest, ManyInstructions)
 
 // Test for gfx1250: two basic blocks "LocalRead" (exact content from lr.s) and
 // "loopBody" (label_LoopBeginL, exact content from loop.s converted to Stinky IR).
-TEST_F(EstimateAsmCyclesTest, Gfx1250LocalReadAndLoopBody)
-{
-    arch               = getGfxArchID(12, 5, 0);
+TEST_F(EstimateAsmCyclesTest, Gfx1250LocalReadAndLoopBody) {
+    arch = getGfxArchID(12, 5, 0);
     gemmConfig.arch[0] = 12;
     gemmConfig.arch[1] = 5;
     gemmConfig.arch[2] = 0;
@@ -313,7 +296,8 @@ v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[28:35], v[20:27], v[80:87]) { issueCy
     return;
 
     // Stinky IR: LocalRead block = exact same instructions as lr.s with original symbols preserved.
-    // Symbols: vgprSerial (input), vgprLocalReadAddrA, vgprLocalReadAddrB, vgprLocalReadAddrB+0, vgprLocalReadAddrB+1
+    // Symbols: vgprSerial (input), vgprLocalReadAddrA, vgprLocalReadAddrB, vgprLocalReadAddrB+0,
+    // vgprLocalReadAddrB+1
     const char* localReadIR = R"(
 ^LocalRead:
 v9 = "st.v_and_b32"(63, v[vgprSerial]) { issueCycles = 4, latencyCycles = 4 }
@@ -352,7 +336,8 @@ v[0:3] = "st.ds_read_b128"(v[vgprLocalReadAddrA]) { issueCycles = 4, latencyCycl
 v[4:7] = "st.ds_read_b128"(v[vgprLocalReadAddrB]) { issueCycles = 4, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false } }
 )";
 
-    // Loop body = exact same instruction sequence as loop.s (converted to Stinky IR, gfx950 v_smfmac)
+    // Loop body = exact same instruction sequence as loop.s (converted to Stinky IR, gfx950
+    // v_smfmac)
     std::string loopBodyIR = R"loopbody(
 ^label_LoopBeginL:
 "st.s_waitcnt"() { issueCycles = 4, latencyCycles = 4, mod.swaitcnt = { vlcnt = 0, vscnt = -1, dlcnt = 0, dscnt = 0, kmcnt = -1 } }
@@ -578,24 +563,22 @@ acc[236:239] = "st.v_smfmac_f32_16x16x32_bf16"(v[1444:1447], v[1448:1451], acc[2
 "st.s_cbranch_scc0"(label_LoopBeginL) { issueCycles = 1, latencyCycles = 1 }
 )loopbody";
 
-    std::string fullIR = std::string("st.func @gfx1250_localread_loop() {") + localReadIR + loopBodyIR + "\n}\n";
+    std::string fullIR =
+        std::string("st.func @gfx1250_localread_loop() {") + localReadIR + loopBodyIR + "\n}\n";
     func = std::make_unique<Function>("gfx1250_localread_loop");
     PassManager pm;
     pm.setGemmTileConfig(gemmConfig);
     pm.setPassFeatureConfig(PassFeatureConfig());
     pm.setBasicBlockFilter(BasicBlockFilterBuilder::all());
 
-    StinkyErrorCode err = StinkyIRConverter::populateFunctionFromString(
-        fullIR, *func, pm.getPassContext(), arch);
+    StinkyErrorCode err =
+        StinkyIRConverter::populateFunctionFromString(fullIR, *func, pm.getPassContext(), arch);
     ASSERT_EQ(err, StinkyErrorCode::SUCCESS) << "Failed to parse LocalRead + loopBody IR";
 
     loopBB = func->getEntryBlock();
-    if(loopBB->getLabel() != "label_LoopBeginL")
-    {
-        for(BasicBlock& bb : *func)
-        {
-            if(bb.getLabel() == "label_LoopBeginL")
-            {
+    if (loopBB->getLabel() != "label_LoopBeginL") {
+        for (BasicBlock& bb : *func) {
+            if (bb.getLabel() == "label_LoopBeginL") {
                 loopBB = &bb;
                 break;
             }
@@ -607,8 +590,7 @@ acc[236:239] = "st.v_smfmac_f32_16x16x32_bf16"(v[1444:1447], v[1448:1451], acc[2
 }
 
 // gfx1250: loop450.s full-body STIR (regen: tests/unit/asm/data/loop450_asm_to_stir.py).
-TEST_F(EstimateAsmCyclesTest, Gfx1250LoopBodyFromLoop450)
-{
+TEST_F(EstimateAsmCyclesTest, Gfx1250LoopBodyFromLoop450) {
     static const char kGfx1250Loop450Stir[] = R"__L450_STIR__(^label_LoopBeginL:
 "st.s_wait_dscnt"(12) { issueCycles = 1, latencyCycles = 1 }
 "st.s_set_vgpr_msb"(9) { issueCycles = 1, latencyCycles = 1 }
@@ -1113,30 +1095,28 @@ SCC0 = "st.s_cmp_eq_i32"(s[12], 0x2) { issueCycles = 1, latencyCycles = 1 }
 "st.s_cbranch_scc0"(label_LoopBeginL) { issueCycles = 1, latencyCycles = 1 }
 "st.s_setreg_IMM32_b32"(0, 0) { issueCycles = 1, latencyCycles = 1 })__L450_STIR__";
 
-    arch               = getGfxArchID(12, 5, 0);
+    arch = getGfxArchID(12, 5, 0);
     gemmConfig.arch[0] = 12;
     gemmConfig.arch[1] = 5;
     gemmConfig.arch[2] = 0;
 
-    const std::string fullIR = std::string("st.func @gfx1250_loop450_full() {\n")
-                               + kGfx1250Loop450Stir + "}\n";
+    const std::string fullIR =
+        std::string("st.func @gfx1250_loop450_full() {\n") + kGfx1250Loop450Stir + "}\n";
     func = std::make_unique<Function>("gfx1250_loop450_full");
     PassManager pm;
     pm.setGemmTileConfig(gemmConfig);
     pm.setPassFeatureConfig(PassFeatureConfig());
     pm.setBasicBlockFilter(BasicBlockFilterBuilder::all());
 
-    StinkyErrorCode err = StinkyIRConverter::populateFunctionFromString(
-        fullIR, *func, pm.getPassContext(), arch);
-    ASSERT_EQ(err, StinkyErrorCode::SUCCESS) << "Failed to parse gfx1250 loop body IR from loop450.s";
+    StinkyErrorCode err =
+        StinkyIRConverter::populateFunctionFromString(fullIR, *func, pm.getPassContext(), arch);
+    ASSERT_EQ(err, StinkyErrorCode::SUCCESS)
+        << "Failed to parse gfx1250 loop body IR from loop450.s";
 
     loopBB = func->getEntryBlock();
-    if(loopBB->getLabel() != "label_LoopBeginL")
-    {
-        for(BasicBlock& bb : *func)
-        {
-            if(bb.getLabel() == "label_LoopBeginL")
-            {
+    if (loopBB->getLabel() != "label_LoopBeginL") {
+        for (BasicBlock& bb : *func) {
+            if (bb.getLabel() == "label_LoopBeginL") {
                 loopBB = &bb;
                 break;
             }

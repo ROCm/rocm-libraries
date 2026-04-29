@@ -25,24 +25,23 @@
 #include <memory>
 #include <string>
 
-namespace stinkytofu
-{
-    class Pass;
-    class Function;
-    class PassContext;
+namespace stinkytofu {
+class Pass;
+class Function;
+class PassContext;
 
-    /// Well-known key for retrieving EstimateAsmCycles result from PassContext.
-    ///
-    /// After the pass runs, the result (uint32_t) is stored in PassContext under this key.
-    /// Usage:
-    ///   auto cycles = passCtx.getResult<uint32_t>(kEstimateAsmCyclesKey);
-    inline const std::string kEstimateAsmCyclesKey = "EstimateAsmCycles";
+/// Well-known key for retrieving EstimateAsmCycles result from PassContext.
+///
+/// After the pass runs, the result (uint32_t) is stored in PassContext under this key.
+/// Usage:
+///   auto cycles = passCtx.getResult<uint32_t>(kEstimateAsmCyclesKey);
+inline const std::string kEstimateAsmCyclesKey = "EstimateAsmCycles";
 
-    std::unique_ptr<Pass> createEstimateAsmCyclesPass();
+std::unique_ptr<Pass> createEstimateAsmCyclesPass();
 
-    /// Calculate estimate asm cycles for a function
-    /// @param func The function to analyze
-    /// @param passCtx The pass context
-    /// @return The total estimated cycles
-    unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx);
-} // namespace stinkytofu
+/// Calculate estimate asm cycles for a function
+/// @param func The function to analyze
+/// @param passCtx The pass context
+/// @return The total estimated cycles
+unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx);
+}  // namespace stinkytofu

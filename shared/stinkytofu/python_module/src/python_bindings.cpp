@@ -67,7 +67,8 @@ NB_MODULE(_stinkytofu, m) {
             [](const StinkyAsmModule& module) {
                 nb::dict out;
                 for (const auto& [key, value] : module.getPassResults()) {
-                    std::visit([&](const auto& typedValue) { out[key.c_str()] = typedValue; }, value);
+                    std::visit([&](const auto& typedValue) { out[key.c_str()] = typedValue; },
+                               value);
                 }
                 return out;
             },
