@@ -676,7 +676,7 @@ TEST_F(TestGraph, RMSNormNodeCreation)
     x->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 64, 1, 1}).set_stride({64, 1, 1, 1}).set_data_type(DataType::FLOAT);
+    scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
 
@@ -707,10 +707,10 @@ TEST_F(TestGraph, RMSNormNodeCreationWithBias)
     x->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 64, 1, 1}).set_stride({64, 1, 1, 1}).set_data_type(DataType::FLOAT);
+    scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_dim({1, 64, 1, 1}).set_stride({64, 1, 1, 1}).set_data_type(DataType::FLOAT);
+    bias->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
 
@@ -4856,6 +4856,7 @@ TEST_F(TestGraph, EngineOverrideConfigMatchesConvFpropTensors)
 // Test 3: loading a JSON config from an in-memory string and matching against
 // conv_fprop tensors.  This exercises the full loadFromContent() → matchOperation()
 // path with the same shapes that the graph presents during build_operation_graph().
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
 {
     using namespace hipdnn_frontend::engine_override;
@@ -4894,6 +4895,7 @@ TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
     x8->set_dim({8, 3, 32, 32}).set_data_type(DataType::FLOAT);
     EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
 }
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 #ifdef HIPDNN_ENABLE_SDPA
 TEST_F(TestGraph, SdpaFwdNodeCreation)

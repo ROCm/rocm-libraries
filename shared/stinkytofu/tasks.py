@@ -195,6 +195,12 @@ def build(
     if sys.platform == "win32":
         _setup_msvc_env()
 
+        sep = os.pathsep
+        rocm_bin_dirs = [f"{rocm_s}/bin", f"{rocm_s}/lib/llvm/bin"]
+        os.environ["PATH"] = sep.join(rocm_bin_dirs) + sep + os.environ.get("PATH", "")
+        os.environ["ROCM_PATH"] = rocm_s
+        os.environ["HIP_PATH"] = rocm_s
+
         _cxx = shutil.which("amdclang++") or shutil.which("amdclang++.exe")
         _cc = shutil.which("amdclang") or shutil.which("amdclang.exe")
         if not _cxx or not _cc:
@@ -217,12 +223,6 @@ def build(
         rc = shutil.which("rc") or shutil.which("rc.exe")
         if rc:
             compiler_opts.append(f'"-DCMAKE_RC_COMPILER={_normalized(rc)}"')
-
-        sep = os.pathsep
-        rocm_bin_dirs = [f"{rocm_s}/bin", f"{rocm_s}/lib/llvm/bin"]
-        os.environ["PATH"] = sep.join(rocm_bin_dirs) + sep + os.environ.get("PATH", "")
-        os.environ["ROCM_PATH"] = rocm_s
-        os.environ["HIP_PATH"] = rocm_s
 
         # CMake's default ar-style archiver syntax (qc flags) is incompatible
         # with lib.exe. Generate a toolchain file that overrides the archive
