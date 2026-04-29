@@ -1553,8 +1553,8 @@ class GroupedConvCodegenRunner:
 
         if verbose:
             print(
-                f"Generating {len(configs)} grouped-conv kernels serially "
-                f"(avoiding fork/GPU issues)..."
+                f"Generating {len(configs)} grouped-conv kernels with "
+                f"{self.max_workers} threads (out-of-order)..."
             )
 
         gen_jobs: List[Dict[str, Any]] = []
@@ -1639,7 +1639,10 @@ class GroupedConvCodegenRunner:
 
         if verbose:
             compile_count = sum(1 for h in generated_headers if h is not None)
-            print(f"Compiling {compile_count} grouped-conv libraries serially...")
+            print(
+                f"Compiling {compile_count} grouped-conv libraries with "
+                f"{self.max_workers} threads (out-of-order)..."
+            )
 
         compile_jobs: List[Dict[str, Any]] = []
         compile_to_input_index: Dict[int, int] = {}
