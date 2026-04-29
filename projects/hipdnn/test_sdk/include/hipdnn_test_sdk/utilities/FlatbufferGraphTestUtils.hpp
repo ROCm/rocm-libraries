@@ -1597,6 +1597,7 @@ inline flatbuffers::FlatBufferBuilder
 inline flatbuffers::FlatBufferBuilder
     createValidLayernormBwdGraph(const std::vector<int64_t>& strides = {588, 196, 14, 1},
                                  const std::vector<int64_t>& dims = {1, 3, 14, 14},
+                                 bool hasOptionalAttributes = true,
                                  hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
                                  = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
 {
@@ -1626,30 +1627,36 @@ inline flatbuffers::FlatBufferBuilder
         builder, 4, "scale", inputDataType, &normalizedStrides, &normalizedDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 5, "mean", inputDataType, &statStrides, &statDims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 6, "inv_variance", inputDataType, &statStrides, &statDims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 7, "dscale", inputDataType, &normalizedStrides, &normalizedDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 8, "dbias", inputDataType, &normalizedStrides, &normalizedDims));
 
-    // Epsilon (pass-by-value)
-    const std::vector<int64_t> passByValueDims = {1};
-    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        9,
-        "epsilon",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &passByValueDims,
-        &passByValueDims,
-        false,
-        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
-        builder.CreateStruct(epsilonVal).Union()));
+    if(hasOptionalAttributes)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder, 5, "mean", inputDataType, &statStrides, &statDims));
+
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder, 6, "inv_variance", inputDataType, &statStrides, &statDims));
+
+        // Epsilon (pass-by-value)
+        const std::vector<int64_t> passByValueDims = {1};
+        const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                9,
+                "epsilon",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &passByValueDims,
+                &passByValueDims,
+                false,
+                hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
+                builder.CreateStruct(epsilonVal).Union()));
+    }
 
     auto layernormBackwardAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormBackwardAttributes(
@@ -1657,9 +1664,12 @@ inline flatbuffers::FlatBufferBuilder
             1, // dy tensor uid
             2, // x tensor uid
             4, // scale tensor uid
-            5, // mean tensor uid
-            6, // rstd tensor uid
-            9, // epsilon tensor uid
+            hasOptionalAttributes ? flatbuffers::Optional<int64_t>(5)
+                                  : flatbuffers::nullopt, // mean tensor uid
+            hasOptionalAttributes ? flatbuffers::Optional<int64_t>(6)
+                                  : flatbuffers::nullopt, // rstd tensor uid
+            hasOptionalAttributes ? flatbuffers::Optional<int64_t>(9)
+                                  : flatbuffers::nullopt, // epsilon tensor uid
             3, // dx tensor uid
             7, // dscale tensor uid
             8, // dbias tensor uid
