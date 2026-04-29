@@ -10,6 +10,10 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added new `hipcub::WarpReduce` overloadings `hipcub::WarpReduce::Sum`, `hipcub::WarpReduce::Max` and `hipcub::WarpReduce::Min`.
 * Added fixed-size-segments variant for `hipcub::DeviceSegmentedReduce`.
 
+### Changed
+
+* Replaced `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `HIPCUB_PRAGMA_UNROLL_FULL()` and `HIPCUB_PRAGMA_NOUNROLL()`.
+
 ## hipCUB-5.0.0 for ROCm 10.0.0
 
 ### Added

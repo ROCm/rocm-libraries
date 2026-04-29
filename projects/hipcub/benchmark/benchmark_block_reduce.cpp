@@ -57,7 +57,7 @@ struct reduce
         using breduce_t = hipcub::BlockReduce<T, BlockSize, algorithm>;
         __shared__ typename breduce_t::TempStorage storage;
 
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             reduced_value = breduce_t(storage).Reduce(values, benchmark_utils::plus{});
