@@ -893,6 +893,102 @@ def _reg_signature(reg) -> tuple:
             getattr(reg, "regNum", None))
 
 
+def _get_param(inst, idx, default=None):
+    """Read positional constructor param `idx` from a rocisa instruction.
+
+    Real rocisa instances expose constructor args via getParams() (an
+    InstructionInputVector) rather than as named attributes. This helper
+    bridges the synthetic-fixture and real-rocisa shapes.
+    """
+    if not hasattr(inst, "getParams"):
+        return default
+    try:
+        params = inst.getParams()
+    except Exception:
+        return default
+    try:
+        return params[idx]
+    except (IndexError, TypeError):
+        return default
+
+
+def _inst_dst(inst):
+    """Return the destination register for LR/LW/GR — try named attr first,
+    then positional constructor param 0 (matches DSLoad*/BufferLoad*/
+    GlobalLoad*/DSStore* constructors)."""
+    dst = getattr(inst, "dst", None)
+    if dst is not None:
+        return dst
+    return _get_param(inst, 0)
+
+
+def _inst_lds_offset(inst):
+    """Return the LDS offset for LR/LW. Synthetic fixture exposes
+    `lds_offset`; real rocisa stores it inside DSModifiers (the 3rd
+    constructor arg for DSLoad*). For the identity tuple we use
+    str(modifier) so two LDS-ops with identical offsets get equal sigs."""
+    off = getattr(inst, "lds_offset", None)
+    if off is not None:
+        return off
+    ds_mods = _get_param(inst, 2)
+    if ds_mods is None:
+        return None
+    return str(ds_mods)
+
+
+def _inst_buffer_srd(inst):
+    """Return the SRD sgpr for a BufferLoad — synthetic 'srd' attr or
+    constructor param 2 (saddr)."""
+    srd = getattr(inst, "srd", None)
+    if srd is not None:
+        return srd
+    return _get_param(inst, 2)
+
+
+def _inst_buffer_offset(inst):
+    """Return the immediate offset for a BufferLoad — synthetic
+    'immediate_offset' attr or constructor param 3 (soffset)."""
+    off = getattr(inst, "immediate_offset", None)
+    if off is not None:
+        return off
+    return _get_param(inst, 3)
+
+
+def _inst_mfma_acc(inst):
+    """Return MFMA accumulator/c_dst register. Synthetic uses 'c_dst';
+    real rocisa MFMA has 'acc' as a named attr OR as constructor param 4."""
+    for attr in ("c_dst", "acc"):
+        v = getattr(inst, attr, None)
+        if v is not None:
+            return v
+    return _get_param(inst, 4)
+
+
+def _inst_mfma_a(inst):
+    for attr in ("a_src", "a"):
+        v = getattr(inst, attr, None)
+        if v is not None:
+            return v
+    return _get_param(inst, 5)
+
+
+def _inst_mfma_b(inst):
+    for attr in ("b_src", "b"):
+        v = getattr(inst, attr, None)
+        if v is not None:
+            return v
+    return _get_param(inst, 6)
+
+
+def _inst_dsstore_src(inst):
+    """LW (DSStore) source — synthetic 'src' or constructor param 1
+    (DSStore signature is (dst_lds, src_vgpr, ds_mods, comment))."""
+    src = getattr(inst, "src", None)
+    if src is not None:
+        return src
+    return _get_param(inst, 1)
+
+
 def _identity_for(inst, body_label: str) -> tuple:
     """Build a content-based identity tuple for an instruction.
 
@@ -906,22 +1002,22 @@ def _identity_for(inst, body_label: str) -> tuple:
     loop_idx = BODY_LABEL_TO_LOOP_INDEX[body_label]
     if _is_lr(inst):
         return ("LR", loop_idx,
-                _reg_signature(getattr(inst, "dst", None)),
-                getattr(inst, "lds_offset", None))
+                _reg_signature(_inst_dst(inst)),
+                _inst_lds_offset(inst))
     if _is_lw(inst):
         return ("LW", loop_idx,
-                _reg_signature(getattr(inst, "src", None)),
-                getattr(inst, "lds_offset", None))
+                _reg_signature(_inst_dsstore_src(inst)),
+                _inst_lds_offset(inst))
     if _is_gr(inst):
         return ("GR", loop_idx,
-                _reg_signature(getattr(inst, "dst", None)),
-                _reg_signature(getattr(inst, "srd", None)),
-                getattr(inst, "immediate_offset", None))
+                _reg_signature(_inst_dst(inst)),
+                _reg_signature(_inst_buffer_srd(inst)),
+                _inst_buffer_offset(inst))
     if _is_mfma(inst):
         return ("MFMA", loop_idx,
-                _reg_signature(getattr(inst, "c_dst", None)),
-                _reg_signature(getattr(inst, "a_src", None)),
-                _reg_signature(getattr(inst, "b_src", None)))
+                _reg_signature(_inst_mfma_acc(inst)),
+                _reg_signature(_inst_mfma_a(inst)),
+                _reg_signature(_inst_mfma_b(inst)))
     if _is_swait(inst):
         return ("SWAIT", loop_idx,
                 getattr(inst, "dscnt", -1),
@@ -938,18 +1034,25 @@ def _identity_for(inst, body_label: str) -> tuple:
 def _writes(inst):
     """Registers written by this instruction (returned as a list of RegisterContainers)."""
     if _is_lr(inst):
-        return [inst.dst]
+        dst = _inst_dst(inst)
+        return [dst] if dst is not None else []
     if _is_gr(inst):
-        return [inst.dst]
+        dst = _inst_dst(inst)
+        return [dst] if dst is not None else []
     return []
 
 
 def _reads(inst):
     """Registers read by this instruction."""
     if _is_lw(inst):
-        return [inst.src]
+        src = _inst_dsstore_src(inst)
+        return [src] if src is not None else []
     if _is_mfma(inst):
-        return [inst.a_src, inst.b_src, inst.c_dst]
+        out = []
+        for v in (_inst_mfma_a(inst), _inst_mfma_b(inst), _inst_mfma_acc(inst)):
+            if v is not None:
+                out.append(v)
+        return out
     return []
 
 
@@ -987,7 +1090,7 @@ def _make_node(tagged_inst, body_label: str) -> GraphNode:
 _BODY_BUILD_ORDER = (BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL)
 
 
-def build_dataflow_graph(four_part_capture):
+def build_dataflow_graph(four_part_capture, *, strict_unknown_instructions=False):
     """Build the unified 4-body register dataflow graph from a FourPartCapture.
 
     Walks bodies in execution order (ML-1 -> ML -> NGL -> NLL); the per-counter
@@ -1006,10 +1109,16 @@ def build_dataflow_graph(four_part_capture):
         for each reg read:
           if ready_writer[reg]: form an edge
 
-    Raises CaptureUnknownInstructionError when an instruction class isn't
-    one of LR/LW/GR/MFMA/SWait/SBarrier. Raises CaptureEmptyBodyError if
-    any body has zero instructions (capture-pipeline bug; bodies always
-    contain at least the MFMA loop).
+    `strict_unknown_instructions=True` causes the builder to raise
+    CaptureUnknownInstructionError on any instruction whose class isn't
+    one of LR/LW/GR/MFMA/SWait/SBarrier. Used by unit tests to catch
+    fixture mistakes. Default is lenient: unknown instructions (scalar
+    arith for GRInc, packing ops, etc.) are skipped — they don't
+    participate in the dataflow model.
+
+    Always raises CaptureEmptyBodyError if any body has zero
+    instructions (capture-pipeline bug; bodies always contain at least
+    the MFMA loop).
     """
     captures = {}
     if four_part_capture is None:
@@ -1053,6 +1162,18 @@ def build_dataflow_graph(four_part_capture):
 
         for tagged_inst in body.instructions:
             inst = tagged_inst.inst
+            # Lenient mode: skip instructions we don't model (scalar arith,
+            # pack ops, etc.). Strict mode: surface them as a fixture bug.
+            if not (_is_lr(inst) or _is_lw(inst) or _is_gr(inst)
+                    or _is_mfma(inst) or _is_swait(inst) or _is_sbarrier(inst)):
+                if strict_unknown_instructions:
+                    raise CaptureUnknownInstructionError(
+                        f"build_dataflow_graph: instruction class "
+                        f"{type(inst).__name__!r} in body {label!r} is not "
+                        f"one of LR/LW/GR/MFMA/SWait/SBarrier."
+                    )
+                continue
+
             node = _make_node(tagged_inst, label)
             nodes_by_identity[node.identity] = node
             nodes_per_body[label].append(node)
@@ -1097,12 +1218,8 @@ def build_dataflow_graph(four_part_capture):
                             ))
                 continue
 
-            # Unknown class.
-            raise CaptureUnknownInstructionError(
-                f"build_dataflow_graph: instruction class "
-                f"{type(inst).__name__!r} in body {label!r} is not one of "
-                f"LR/LW/GR/MFMA/SWait/SBarrier."
-            )
+            # Unreachable: the strict-vs-lenient guard above already handled
+            # any instruction not in LR/LW/GR/MFMA/SWait/SBarrier.
 
         # Stash per-body GraphNodes on the LoopBodyCapture for the helpers
         # (waits_in_window, barriers_in_window) to use without rebuilding.

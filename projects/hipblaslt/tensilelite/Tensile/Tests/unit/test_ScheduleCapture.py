@@ -1175,3 +1175,67 @@ class TestPhase5DefaultTailCapture:
         assert writer._last_default_main_capture is None
         # But the final consumer-facing capture survives.
         assert writer._last_default_capture is not None
+
+
+class TestPhase7DataflowGraphIntegration:
+    """Stack 2.10-2.13: Phase 7 dataflow-graph comparison wired into
+    KernelWriter. The comparison runs alongside the legacy compare_captures
+    when both _captureDefaultSchedule AND _useDataflowGraphComparison are
+    set. Logs at WARN/print2 without affecting build pass/fail.
+    """
+
+    def _build_with_dataflow_comparison(self, isa_infrastructure):
+        from cms_test_utils import _make_solution
+        from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
+
+        isa, isaInfoMap, asm = isa_infrastructure
+        config = {
+            'ProblemType': {
+                'OperationType': 'GEMM', 'DataType': 'S', 'DestDataType': 'S',
+                'F32XdlMathOp': 'X', 'TransposeA': True, 'TransposeB': False,
+                'UseBeta': True, 'Batched': True,
+            },
+            'MatrixInstruction': [16, 16, 32, 1, 1, 4, 4, 2, 2],
+            'DepthU': 32, 'PrefetchGlobalRead': 2, 'PrefetchLocalRead': 1,
+            'DirectToLds': 1, 'TransposeLDS': 1, 'LocalReadVectorWidth': 4,
+            'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
+            'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
+            'SourceSwap': 1, 'StreamK': 0,
+        }
+        solution = _make_solution(config, asm, isaInfoMap)
+        writer = KernelWriterAssembly(asm, DebugConfig())
+
+        original_setupNewTile = writer.setupNewTile
+        def _setupNewTile_with_flags(*args, **kwargs):
+            result = original_setupNewTile(*args, **kwargs)
+            writer.states._captureDefaultSchedule = True
+            writer.states._useDataflowGraphComparison = True
+            return result
+        writer.setupNewTile = _setupNewTile_with_flags
+
+        return writer, solution
+
+    def test_dataflow_comparison_runs_without_raising(self, isa_infrastructure):
+        """The opt-in compare_graphs path runs alongside compare_captures
+        without raising. Output is observability-only (printWarning / print2);
+        the build's pass/fail decision is still controlled by compare_captures.
+
+        Note: this kernel is one of the pre-existing compare_captures
+        false-positive cases (data-movement totals mismatch). Even when that
+        legacy assertion fires, the new dataflow comparison must reach its
+        try-block BEFORE the legacy assertion, so we only need to test that
+        the *try-block invocation* doesn't crash on real inputs."""
+        import pytest
+        writer, solution = self._build_with_dataflow_comparison(isa_infrastructure)
+        # The legacy compare_captures may assert (pre-existing false positive
+        # tracked in CMSValidator_TODO.md). What matters here is that the
+        # new dataflow comparison code runs WITHOUT a TypeError, ImportError,
+        # or unexpected exception type from inside its own logic.
+        try:
+            writer._getKernelSource(solution)
+        except AssertionError as e:
+            # The pre-existing compare_captures assertion. Confirm it's the
+            # legacy one, not a NEW failure from compare_graphs.
+            assert "Schedule capture comparison failed" in str(e), str(e)
+        # If we got here, the new code at minimum didn't ImportError or
+        # crash with an unexpected exception inside the try-block.

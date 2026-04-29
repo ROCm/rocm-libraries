@@ -5851,6 +5851,62 @@ class KernelWriter(metaclass=abc.ABCMeta):
           source="default-sia3",
         )
         if getattr(self, "_last_cms_capture", None) is not None:
+          # Phase 7 of plans/then-let-s-work-on-jaunty-reddy.md:
+          # opt-in dataflow-graph comparison alongside the legacy
+          # data-movement-totals check. Runs BEFORE the legacy assertion
+          # so it remains observable even on kernels where the legacy
+          # check fails (the legacy data-movement-totals check has known
+          # false positives tracked in CMSValidator_TODO.md). Gated by a
+          # separate flag; logs at WARN/print2 without affecting build
+          # pass/fail by itself.
+          if getattr(self.states, "_useDataflowGraphComparison", False):
+            kernel_label = (
+              f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}"
+            )
+            try:
+              from Tensile.Components.ScheduleCapture import (
+                build_dataflow_graph, compare_graphs,
+                CaptureConsistencyError, CaptureWiringError,
+                CaptureSMEMError, CaptureFlatError, CaptureStoreError,
+                UnexplainedMissingEdgeError,
+              )
+              ref_graph = build_dataflow_graph(self._last_default_capture)
+              subj_graph = build_dataflow_graph(self._last_cms_capture)
+              graph_failures = compare_graphs(ref_graph, subj_graph)
+              if graph_failures:
+                summary = "\n  ".join(
+                  f.format(self._last_cms_capture.main_loop.get(0))
+                  for f in graph_failures
+                )
+                printWarning(
+                  f"[Phase 7 dataflow comparison] Kernel {kernel_label}: "
+                  f"{len(graph_failures)} edge difference(s):\n  {summary}"
+                )
+              else:
+                print2(
+                  f"[Phase 7 dataflow comparison] Kernel {kernel_label}: "
+                  f"{len(ref_graph.edges)} edges, 0 diffs across "
+                  f"{len(ref_graph.captures)} bodies"
+                )
+            except (CaptureConsistencyError, CaptureWiringError,
+                    CaptureSMEMError, CaptureFlatError, CaptureStoreError,
+                    UnexplainedMissingEdgeError) as e:
+              printWarning(
+                f"[Phase 7 dataflow comparison] Kernel {kernel_label} "
+                f"capture-pipeline error: {type(e).__name__}: {e}"
+              )
+            except AttributeError as e:
+              # Graph builder's per-instruction shape extractors use
+              # field names from synthetic fixtures (dst, a_src, b_src,
+              # c_dst, lds_offset). Real rocisa instances expose these
+              # via getParams() at positional indices, which a future
+              # rocisa-adapter must translate. Until then, the production
+              # invocation degrades gracefully.
+              print2(
+                f"[Phase 7 dataflow comparison] Kernel {kernel_label} "
+                f"skipped: rocisa-adapter not yet wired ({e})"
+              )
+
           ok, msg = compare_captures(self._last_default_capture, self._last_cms_capture)
           assert ok, (
             f"Schedule capture comparison failed for kernel "

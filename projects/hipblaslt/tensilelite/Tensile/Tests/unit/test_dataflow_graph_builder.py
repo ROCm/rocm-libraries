@@ -364,9 +364,10 @@ class TestStructuralProperties:
         assert len(ids_b) == 1
         assert ids_a[0] == ids_b[0]
 
-    def test_unknown_instruction_class_raises(self):
+    def test_unknown_instruction_class_raises_in_strict_mode(self):
         """An instruction whose rocisa class is none of LR/LW/GR/MFMA/SWait/
-        SBarrier should cause build_dataflow_graph to raise."""
+        SBarrier raises in strict mode (used to catch fixture mistakes).
+        Lenient mode (default for production) skips them."""
         from dataclasses import dataclass
 
         @dataclass
@@ -383,8 +384,12 @@ class TestStructuralProperties:
                          mfma_index=0, sequence=0),
         )
         cap = make_capture(BODY_LABEL_ML, [ti])
+        # Strict: raises.
         with pytest.raises(CaptureUnknownInstructionError):
-            build_dataflow_graph(_wrap(cap))
+            build_dataflow_graph(_wrap(cap), strict_unknown_instructions=True)
+        # Lenient (default): silently skips the unknown instruction.
+        g = build_dataflow_graph(_wrap(cap))
+        assert g.edges == []
 
     def test_empty_body_raises(self):
         """A captured body with zero TaggedInstructions is a capture-pipeline
