@@ -33,7 +33,7 @@ TEST(TestWorkarounds, StripArchFeatureSuffixReturnsEmptyOnLeadingColon)
     EXPECT_EQ(stripArchFeatureSuffix(":xnack-"), "");
 }
 
-TEST(TestGpuWorkarounds, QueryCurrentDeviceArchReturnsValidArchString)
+TEST(GpuTestWorkarounds, QueryCurrentDeviceArchReturnsValidArchString)
 {
     SKIP_IF_NO_DEVICES();
 
