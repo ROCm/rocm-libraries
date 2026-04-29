@@ -121,6 +121,9 @@ struct tile_distribution
     // Returns true if the current thread should participate in tile operations.
     // When MaxThreadId == -1 (default), all threads are active.
     // When MaxThreadId >= 0, only threads with tid < MaxThreadId are active.
+    // Uses get_thread_id() (threadIdx.x) directly to avoid SGPR/VGPR mixing
+    // from get_warp_id()'s amd_wave_read_first_lane, matching HIP conv's
+    // `tid < threshold` pattern.
     CK_TILE_DEVICE static bool is_thread_active()
     {
         constexpr index_t max_tid = DstrEncode::MaxThreadId;
@@ -130,10 +133,7 @@ struct tile_distribution
         }
         else
         {
-            if constexpr(NDimP == 2)
-                return (get_warp_id() * 64 + get_lane_id()) < max_tid;
-            else
-                return get_lane_id() < max_tid;
+            return get_thread_id() < max_tid;
         }
     }
 
