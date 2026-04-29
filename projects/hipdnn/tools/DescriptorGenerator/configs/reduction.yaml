@@ -58,7 +58,7 @@ operation:
       fbs_field: "mode"
       attr_name: "HIPDNN_ATTR_REDUCTION_OPERATOR"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::ReductionMode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::ReductionMode"
       frontend_type: "ReductionMode"
       required: true
       default_value: "ReductionMode::NOT_SET"
@@ -101,10 +101,12 @@ operation:
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_REDUCTION_COMP_TYPE"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_REDUCTION"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_REDUCTION_EXT"
 
   test_data:
-    tensor_uids: { x: 90, y: 91 }
+    constants_include: "ReductionConstants"
+    tensor_const_prefix: "K_REDUCTION_"
+    tensor_uids: { x: 1700, y: 1701 }
     tensor_configs:
       x: { dims: [2, 3, 4, 4], strides: [48, 16, 4, 1] }
       y: { dims: [2, 3, 1, 1], strides: [3, 1, 1, 1] }

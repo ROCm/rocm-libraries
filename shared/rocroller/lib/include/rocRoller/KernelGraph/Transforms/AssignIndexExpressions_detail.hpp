@@ -168,5 +168,15 @@ namespace rocRoller::KernelGraph
                        ContextPtr                context,
                        CommandPtr                command);
 
+        /**
+         * @brief Detect if a LoadLDSTile candidate's index path contains
+         * a non-affine LDS swizzle edge and extract the unroll coordinate
+         * and its compile-time value from the upstream SetCoordinate.
+         *
+         * @param kgraph The kernel graph
+         * @param candidate Control graph tag of the candidate operation
+         * @return (unrollCoord, unrollValue) or (-1, -1) if not applicable
+         */
+        std::pair<int, int> GetInlineUnrollInfo(KernelGraph const& kgraph, int candidate);
     } // namespace AssignIndexExpressionsDetail
 } // namespace rocRoller::KernelGraph

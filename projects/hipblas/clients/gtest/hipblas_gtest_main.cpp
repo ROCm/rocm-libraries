@@ -344,5 +344,17 @@ int main(int argc, char** argv)
 
     hipblas_print_args(args);
 
+    // Tear down HIP context before CRT/static destructors (matches
+    // hipsparse_gtest_main.cpp). Avoids intermittent Windows post-main failures
+    // where dependent DLLs (e.g. amd_comgr) fault during process exit.
+    (void)hipDeviceSynchronize();
+    (void)hipDeviceReset();
+
+#ifdef WIN32
+    // Use quick_exit() to bypass C++ static destructors and atexit() handlers.
+    // Post-main cleanup in linked DLLs (HIP runtime) crash in comgr
+    std::quick_exit(status);
+#else
     return status;
+#endif
 }

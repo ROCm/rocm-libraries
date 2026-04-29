@@ -82,7 +82,7 @@ operation:
       fbs_field: "operation"
       attr_name: "HIPDNN_ATTR_POINTWISE_MODE"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::PointwiseMode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::PointwiseMode"
       frontend_type: "PointwiseMode"
       required: true
       default_value: "PointwiseMode::NOT_SET"
@@ -105,7 +105,7 @@ operation:
           - { name: "NOT_SET", value: 0, sentinel: true }
           - { name: "ABS", value: 1, description: "Absolute value: |x|" }
           - { name: "ADD", value: 2, description: "Addition: x + y" }
-          - { name: "ADD_SQUARE", value: 3, description: "Add and square: (x + y)^2" }
+          - { name: "ADD_SQUARE", value: 3, description: "Add x to y squared: x + y^2" }
           - { name: "BINARY_SELECT", value: 4, description: "Ternary select based on condition" }
           - { name: "CEIL", value: 5, description: "Ceiling function" }
           - { name: "CMP_EQ", value: 6, description: "Compare equal: x == y" }
@@ -205,11 +205,12 @@ operation:
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_POINTWISE_MATH_PREC"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_POINTWISE"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_POINTWISE_EXT"
 
   test_data:
     constants_include: "PointwiseConstants"
-    tensor_uids: { in_0: 40, out_0: 41, in_1: 3, in_2: 4 }
+    tensor_const_prefix: "K_PW_"
+    tensor_uids: { in_0: 1300, out_0: 1301, in_1: 1302, in_2: 1303 }
     tensor_configs:
       in_0: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
       out_0: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }

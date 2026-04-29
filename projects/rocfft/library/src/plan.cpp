@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -734,17 +734,16 @@ NodeMetaData
                                                      const rocfft_location_t& exec_plan_location)
 {
     NodeMetaData root_plan(nullptr);
-    root_plan.dimension    = desc.rank();
-    root_plan.batch        = desc.batch();
-    root_plan.precision    = precision;
-    root_plan.direction    = ((transformType == rocfft_transform_type_complex_forward)
+    root_plan.dimension         = desc.rank();
+    root_plan.batch             = desc.batch();
+    root_plan.precision         = precision;
+    root_plan.direction         = ((transformType == rocfft_transform_type_complex_forward)
                            || (transformType == rocfft_transform_type_real_forward))
-                                 ? -1
-                                 : 1;
-    root_plan.inArrayType  = desc.inArrayType;
-    root_plan.outArrayType = desc.outArrayType;
-    root_plan.rootIsC2C    = (root_plan.inArrayType != rocfft_array_type_real)
-                          && (root_plan.outArrayType != rocfft_array_type_real);
+                                      ? -1
+                                      : 1;
+    root_plan.inArrayType       = desc.inArrayType;
+    root_plan.outArrayType      = desc.outArrayType;
+    root_plan.rootTransformType = transformType;
     // root plan's data layouts and placement may be different than the calling plan's
     std::optional<data_layout_t> root_plan_input_layout, root_plan_output_layout;
     if(desc.has_undistributed_io_on_current_location()
@@ -1361,6 +1360,24 @@ rocfft_status
                                         + ROCFFT_CURRENT_FUNCTION);
         }
     }
+
+    // Non-zero offsets are not supported yet, actually.
+    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+    {
+        const auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
+        if(!io_fields.empty())
+            continue; // offsets are ignored if fields are used
+        const auto& io_offsets    = io == io_data_label::INPUT ? inOffset : outOffset;
+        const auto  io_array_type = io == io_data_label::INPUT ? inArrayType : outArrayType;
+        if(io_offsets[0] != 0 || (array_type_is_planar(io_array_type) && io_offsets[1] != 0))
+        {
+            if(LOG_PLAN_ENABLED())
+                *LogSingleton::GetInstance().GetPlanOS()
+                    << "Non-zero offsets are not supported yet" << std::endl;
+            return rocfft_status_invalid_offset;
+        }
+    }
+
     // -----------------------------------------
     //        In-place specific validations
     // -----------------------------------------
@@ -2119,12 +2136,13 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&                 plan,
                                  : 1;
     rootPlanData.placement
         = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
-    rootPlanData.precision     = plan.precision;
-    rootPlanData.inArrayType   = rocfft_array_type_complex_interleaved;
-    rootPlanData.outArrayType  = rocfft_array_type_complex_interleaved;
-    rootPlanData.deviceProp    = get_curr_device_prop();
-    rootPlanData.input_buffer  = input;
-    rootPlanData.output_buffer = output;
+    rootPlanData.precision         = plan.precision;
+    rootPlanData.inArrayType       = rocfft_array_type_complex_interleaved;
+    rootPlanData.outArrayType      = rocfft_array_type_complex_interleaved;
+    rootPlanData.rootTransformType = plan.transformType;
+    rootPlanData.deviceProp        = get_curr_device_prop();
+    rootPlanData.input_buffer      = input;
+    rootPlanData.output_buffer     = output;
 
     auto singlePlan = BuildSingleDevicePlan(rootPlanData,
                                             plan.desc.get_local_comm_rank(),
@@ -4223,7 +4241,7 @@ void TreeNode::RefreshTree()
         // input/output even if their first/last child treats the
         // real data as complex
         const bool isRealEvenNode = scheme == CS_REAL_TRANSFORM_EVEN || scheme == CS_REAL_2D_EVEN
-                                    || scheme == CS_REAL_3D_EVEN;
+                                    || scheme == CS_REAL_3D_EVEN || scheme == CS_REAL_3D_PP;
         if(isRealEvenNode && direction == -1)
             this->inArrayType = rocfft_array_type_real;
         else
@@ -4571,7 +4589,7 @@ void TreeNode::RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& new
     }
 }
 
-TreeNode* TreeNode::GetPlanRoot()
+const TreeNode* TreeNode::GetPlanRoot() const
 {
     if(isRootNode())
         return this;
@@ -4598,7 +4616,7 @@ TreeNode* TreeNode::GetRealEvenAncestor()
     // If parent is directly an even-length plan, then that's what
     // we're looking for
     if(parent->scheme == CS_REAL_TRANSFORM_EVEN || parent->scheme == CS_REAL_2D_EVEN
-       || parent->scheme == CS_REAL_3D_EVEN)
+       || parent->scheme == CS_REAL_3D_EVEN || parent->scheme == CS_REAL_3D_PP)
         return parent;
 
     // Otherwise keep looking up the tree
@@ -4610,17 +4628,47 @@ TreeNode* TreeNode::GetPartialPassAncestor() const
     if(!parent)
         return nullptr;
 
-    if(parent->scheme == CS_3D_PP)
+    if(parent->scheme == CS_3D_PP || parent->scheme == CS_REAL_3D_PP)
         return parent;
 
     return parent->GetPartialPassAncestor();
 }
 
-bool TreeNode::IsRootPlanC2CTransform()
+bool TreeNode::IsRootPlanC2CTransform() const
 {
     auto root = GetPlanRoot();
     return (root->inArrayType != rocfft_array_type_real)
            && (root->outArrayType != rocfft_array_type_real);
+}
+
+bool TreeNode::IsRootPlanR2CTransform() const
+{
+    auto root = GetPlanRoot();
+    return (root->inArrayType == rocfft_array_type_real)
+           && (root->outArrayType != rocfft_array_type_real);
+}
+
+bool TreeNode::IsRootPlanC2RTransform() const
+{
+    auto root = GetPlanRoot();
+    return (root->inArrayType != rocfft_array_type_real)
+           && (root->outArrayType == rocfft_array_type_real);
+}
+
+rocfft_transform_type TreeNode::GetRootPlanTransformType() const
+{
+    const auto root = GetPlanRoot();
+
+    if(IsRootPlanC2CTransform() && root->direction == -1)
+        return rocfft_transform_type_complex_forward;
+    else if(IsRootPlanC2CTransform() && root->direction == 1)
+        return rocfft_transform_type_complex_inverse;
+    else if(IsRootPlanR2CTransform())
+        return rocfft_transform_type_real_forward;
+    else if(IsRootPlanC2RTransform())
+        return rocfft_transform_type_real_inverse;
+    else
+        throw std::runtime_error("Unknown root plan transform type");
 }
 
 // remove a leaf node from the plan completely - plan optimization

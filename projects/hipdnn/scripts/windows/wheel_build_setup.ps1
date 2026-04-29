@@ -28,7 +28,7 @@
 
 .PARAMETER GpuTarget
     GPU architecture target for the CMake example.
-    Default: gfx1103
+    Default: gfx1151
 
 .EXAMPLE
     .\wheel_build_setup.ps1
@@ -39,7 +39,7 @@
     Installs specific wheels from S3 staging.
 
 .EXAMPLE
-    .\wheel_build_setup.ps1 -VenvPath "C:\my_venv" -ClangPath "C:\clang\bin" -GpuTarget "gfx1100"
+    .\wheel_build_setup.ps1 -VenvPath "C:\my_venv" -ClangPath "C:\clang\bin" -GpuTarget "gfx1151"
     Installs from nightlies with custom paths and GPU target.
 #>
 
@@ -47,10 +47,31 @@ param(
     [string]$SHA = "",
     [string]$VenvPath = "D:\develop\latest_wheels",
     [string]$ClangPath = "D:\develop\dist\clang\bin",
-    [string]$GpuTarget = "gfx1103"
+    [string]$GpuTarget = "gfx1151"
 )
 
 $ErrorActionPreference = "Stop"
+$OriginalPath = $env:PATH
+$OriginalVirtualEnv = $env:VIRTUAL_ENV
+$OriginalVirtualEnvPrompt = $env:VIRTUAL_ENV_PROMPT
+
+function Resolve-RocmArtifactGroup {
+    param([string]$Target)
+
+    switch -Regex ($Target.ToLower()) {
+        "^gfx(120[0-9]|110[0-9]|103[0-9]|90[0-9])-all$" { return $Target }
+        "^gfx(120[0-9]|110[0-9]|103[0-9]|90[0-9])$" { return "$Target-all" }
+        "^gfx115[0-9]$" { return $Target }
+        default { return $Target }
+    }
+}
+
+$RocmArtifactGroup = Resolve-RocmArtifactGroup -Target $GpuTarget
+$LibrariesWheelTarget = $RocmArtifactGroup.ToLower().Replace('-', '_')
+$VerifiedGpuTarget = $GpuTarget.ToLower() -match "^(gfx115[0-9]|gfx(120[0-9]|110[0-9]|103[0-9]|90[0-9])(-all)?)$"
+if (-not $VerifiedGpuTarget) {
+    Write-Warning "GPU target '$GpuTarget' is not in the verified list (gfx115x, gfx120x[-all], gfx110x[-all], gfx103x[-all], gfx90x[-all]). Wheel install may not work."
+}
 
 # --- Display configuration ---
 
@@ -64,6 +85,7 @@ if ($SHA) {
 Write-Host "  Venv Path:  $VenvPath"
 Write-Host "  Clang Path: $ClangPath"
 Write-Host "  GPU Target: $GpuTarget"
+Write-Host "  Wheel Group: $RocmArtifactGroup"
 Write-Host ""
 
 # --- Create or reuse virtual environment ---
@@ -99,17 +121,17 @@ if (-not $SkipInstall) {
     Write-Host "Installing ROCm wheels..." -ForegroundColor Yellow
 
     if ($SHA) {
-        $BaseUrl = "https://therock-dev-python.s3.amazonaws.com/v2-staging/gfx110X-all"
+        $BaseUrl = "https://therock-dev-python.s3.amazonaws.com/v2-staging/$RocmArtifactGroup"
 
-        Write-Host "  Source: S3 staging (SHA: $SHA)" -ForegroundColor Yellow
+        Write-Host "  Source: S3 staging (SHA: $SHA, group: $RocmArtifactGroup)" -ForegroundColor Yellow
         pip install `
             "$BaseUrl/rocm-7.12.0.dev0%2B$SHA.tar.gz" `
             "$BaseUrl/rocm_sdk_core-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl" `
-            "$BaseUrl/rocm_sdk_libraries_gfx110x_all-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl" `
+            "$BaseUrl/rocm_sdk_libraries_$LibrariesWheelTarget-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl" `
             "$BaseUrl/rocm_sdk_devel-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl"
     } else {
-        Write-Host "  Source: ROCm nightlies" -ForegroundColor Yellow
-        pip install --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ "rocm[libraries,devel]"
+        Write-Host "  Source: ROCm nightlies (group: $RocmArtifactGroup)" -ForegroundColor Yellow
+        pip install --index-url "https://rocm.nightlies.amd.com/v2/$RocmArtifactGroup/" "rocm[libraries,devel]"
     }
 
     if ($LASTEXITCODE -ne 0) {
@@ -153,3 +175,43 @@ Write-Host "=== Sample CMake command for hipDNN ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "cmake -GNinja -DGPU_TARGETS=$GpuTarget -DCMAKE_PREFIX_PATH=$RocmDevelUnix -DCMAKE_PROGRAM_PATH=$ClangPathUnix .." -ForegroundColor White
 Write-Host ""
+Write-Host "=== Sample CMake command for rocm-libraries superbuild ===" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "# Run from the rocm-libraries repository root" -ForegroundColor DarkGray
+Write-Host "cmake --preset miopen-provider -DROCM_PATH=$RocmDevelUnix -DCMAKE_PROGRAM_PATH=$ClangPathUnix" -ForegroundColor White
+Write-Host "cmake --build build" -ForegroundColor White
+Write-Host ""
+
+# --- Deactivate venv for this shell session ---
+
+Write-Host "Deactivating Python virtual environment for this session..." -ForegroundColor Yellow
+if (Get-Command deactivate -ErrorAction SilentlyContinue) {
+    deactivate
+} else {
+    Write-Warning "Could not find 'deactivate' function; restoring pre-activation environment variables."
+    $env:PATH = $OriginalPath
+    if ($null -eq $OriginalVirtualEnv) {
+        Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+    } else {
+        $env:VIRTUAL_ENV = $OriginalVirtualEnv
+    }
+
+    if ($null -eq $OriginalVirtualEnvPrompt) {
+        Remove-Item Env:VIRTUAL_ENV_PROMPT -ErrorAction SilentlyContinue
+    } else {
+        $env:VIRTUAL_ENV_PROMPT = $OriginalVirtualEnvPrompt
+    }
+}
+
+# Keep ROCm bin available in this terminal session after deactivation.
+$CurrentPathParts = $env:PATH -split ';'
+$HasRocmBinInCurrentPath = $false
+foreach ($pathEntry in $CurrentPathParts) {
+    if ($pathEntry.Trim() -eq $RocmBin) {
+        $HasRocmBinInCurrentPath = $true
+        break
+    }
+}
+if (-not $HasRocmBinInCurrentPath) {
+    $env:PATH = "$RocmBin;$env:PATH"
+}

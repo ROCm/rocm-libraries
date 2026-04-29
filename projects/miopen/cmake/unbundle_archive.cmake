@@ -60,7 +60,11 @@ foreach(obj IN LISTS obj_files)
         ERROR_QUIET)
 
     if(NOT extract_result EQUAL 0)
-        # No .hip_fatbin section — not a HIP object, skip
+        # No .hip_fatbin section — pure host code (e.g. sharded instantiation
+        # callers).  Include as-is since it contains no device code to unbundle.
+        set(thin_obj "${work_dir}/thin_${obj_name}")
+        file(COPY_FILE "${obj}" "${thin_obj}")
+        list(APPEND thin_objs "${thin_obj}")
         continue()
     endif()
 
@@ -148,7 +152,6 @@ foreach(obj IN LISTS obj_files)
             "  exit code: ${unbundle_result}\n"
             "  stderr: ${unbundle_error}\n"
             "  stdout: ${unbundle_output}")
-        continue()
     endif()
 
     # Re-bundle with only host + target arch, compressed
@@ -170,7 +173,6 @@ foreach(obj IN LISTS obj_files)
             "  exit code: ${rebundle_result}\n"
             "  stderr: ${rebundle_error}\n"
             "  stdout: ${rebundle_output}")
-        continue()
     endif()
 
     # Replace the .hip_fatbin section with the single-arch fatbin.

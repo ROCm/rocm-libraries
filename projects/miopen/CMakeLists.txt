@@ -251,7 +251,11 @@ option(MIOPEN_USE_COMPOSABLEKERNEL "Enable MIOpen to use composable kernels for 
 if(MIOPEN_BACKEND_OPENCL)
     set(MIOPEN_USE_COMPOSABLEKERNEL OFF)
 endif()
+option(MIOPEN_CK_UNBUNDLE_PER_ARCH
+    "Generate per-architecture CK static archives for MIOpenCKGroupedConv_<arch> shared libraries"
+    OFF)
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
+message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 
 set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT (NOT DEFINED MIOPEN_BACKEND_OPENCL) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_USE_COMGR "Use comgr to build kernels instead of offline tools" ${MIOPEN_USE_COMGR_DEFAULT})
@@ -342,8 +346,8 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         set(${OUT_VAR} "${_r}" PARENT_SCOPE)
     endfunction()
 
-    # --- Per-architecture CK conv library unbundling ---
-    if(MIOPEN_USE_COMPOSABLEKERNEL)
+    # --- Optional per-architecture CK archive unbundling ---
+    if(MIOPEN_USE_COMPOSABLEKERNEL AND MIOPEN_CK_UNBUNDLE_PER_ARCH)
         # Unbundle the fat libdevice_conv_operations.a into per-arch .a files
         # so each per-target MIOpen .so can link only the CK code it needs.
 
@@ -403,7 +407,7 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             add_dependencies(${target_name} ${target_name}_unbundle)
 
         endforeach()
-    endif() # per-arch CK unbundling
+    endif() # optional per-arch CK unbundling
 
     if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         set(MIOPEN_MODE_NOGPU 1)
@@ -779,6 +783,7 @@ enable_clang_tidy(
         "\.hpp$"
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
+        -D__builtin_elementwise_exp10=__builtin_elementwise_exp
 )
 
 include(CppCheck)
@@ -812,6 +817,9 @@ enable_cppcheck(
         *:*src/sqlite/*.cpp
         *:*.cl
         *:*src/kernels/*.h
+        # MIOpenConvFwd_LxL_11.cpp is a HIP kernel file compiled at runtime with -D defines;
+        # cppcheck evaluates undefined macros as 0, causing false array-size errors.
+        *:*src/kernels/MIOpenConvFwd_LxL_11.cpp
         knownConditionTrueFalse:*src/kernels/static_composable_kernel/*/*
         redundantAssignment:*src/kernels/static_composable_kernel/*/*
         unreadVariable:*src/kernels/static_composable_kernel/*/*

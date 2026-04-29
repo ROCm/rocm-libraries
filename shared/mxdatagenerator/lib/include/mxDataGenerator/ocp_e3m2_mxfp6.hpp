@@ -3,7 +3,6 @@
 
 #pragma once
 
-
 namespace DGen
 {
     struct OCP_E3M2_MXFP6_DATA
@@ -26,8 +25,8 @@ namespace DGen
 
     struct ocp_e3m2_mxfp6
     {
-        static constexpr OCP_E3M2_MXFP6_DATA dataInfo{};
-        static constexpr E8M0_SCALE_INFO     scaleInfo{};
+        static constexpr OCP_E3M2_MXFP6_DATA        dataInfo{};
+        static constexpr ScaleInfo<ScaleType::E8M0> scaleInfo{};
 
         static constexpr uint8_t dataMaxPositiveNormalMask = 0b011111;
         static constexpr uint8_t dataMaxNegativeNormalMask = 0b111111;

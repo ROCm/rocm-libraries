@@ -34,10 +34,11 @@
 #include <miopen/solver/problem_description_interpreter.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/heuristics/ai_candidate_selection.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #endif
-#include <miopen/solver/implicitgemm_ck_util.hpp>
-#include <miopen/solver/implicitgemm_util.hpp>
-#include <miopen/solver/ck_grouped_conv_lib_loader.hpp>
+#include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
@@ -48,8 +49,29 @@ namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
+namespace {
+
+// ============================================================================
+// Solver Configuration for BWD 2D Grouped Convolution
+// ============================================================================
+
+// clang-format off
+constexpr SolverHeuristicConfig k2DBwdSolverConfig = {
+    /* solver_name                 */ "ConvHipImplicitGemmGroupBwdXdlops",
+    /* solver_name_ktn             */ "ConvHipIgemmGroupXdlops",
+    /* spatial_dims                */ 2,
+    /* uses_split_k                */ true,
+    /* split_k_min                 */ 1,
+    /* split_k_max                 */ 128,
+    /* supports_split_k_autodeduce */ false,
+    /* supports_ktn                */ true,
+};
+// clang-format on
+
+} // namespace
+
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDs()
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDsKTN()
 {
     for(int i = 0; i < valid_kernels.size(); i++)
     {
@@ -57,12 +79,12 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDs()
            std::string::npos)
         {
             heuristic_indexes.push_back(i);
-            heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
+            heuristic_kernels[i] = GetKernelAsTokens2D(valid_kernels[i]);
         }
     }
 }
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
+bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyTokenKTN(
     int idx, std::string value, const std::string& arch, const ProblemDescription& /*problem*/)
 {
     if(arch == "gfx90a")
@@ -96,7 +118,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
 }
 
 static std::vector<float>
-GetFeatures(const ProblemDescription& problem, std::size_t /*num_cu*/, const std::string& arch)
+GetFeaturesKTN(const ProblemDescription& problem, std::size_t /*num_cu*/, const std::string& arch)
 {
     if(arch == "gfx90a")
     {
@@ -152,36 +174,35 @@ GetFeatures(const ProblemDescription& problem, std::size_t /*num_cu*/, const std
     return features;
 }
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModel(
+template <typename DataType>
+bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModelKTN(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    const auto& loader =
-        miopen::solver::CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return false;
 
     auto data_type = problem.GetInDataType();
     use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
 
-    valid_kernels =
-        loader.FillValidKernelsWithTf32Fallback(CKConvDirection::Bwd, problem, data_type, use_tf32);
+    valid_kernels = loader.FillValidKernelsWithTf32Fallback(
+        CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
     if(valid_kernels.empty())
         return false;
 
-    InitHeuristicKernelIDs();
-    const auto arch    = ctx.GetStream().GetDeviceName();
-    std::string solver = "ConvHipIgemmGroupBwdXdlops";
-    if(arch == "gfx90a")
-        solver = "ConvHipIgemmGroupXdlops";
-    std::vector<float> features = GetFeatures(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+    InitHeuristicKernelIDsKTN();
+    const auto arch          = ctx.GetStream().GetDeviceName();
+    const std::string solver = k2DBwdSolverConfig.GetSolverNameForArch(arch);
+    std::vector<float> features =
+        GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
     if(ai::tuning::ModelSetParams(
            arch, solver, problem.GetDirection(), features, true, [&](int idx, std::string value) {
-               return this->ModelApplyToken(idx, value, arch, problem);
+               return this->ModelApplyTokenKTN(idx, value, arch, problem);
            }))
     {
         index     = heuristic_indexes[0];
         kernel_id = valid_kernels[index] + "+1";
-        MIOPEN_LOG_I("Params set by AI: " << ToString());
+        MIOPEN_LOG_I("Params set by KTN: " << ToString());
         return true;
     }
     return false;
@@ -224,30 +245,35 @@ std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 3
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static const std::vector<std::tuple<std::string, int>> ranked_gemm_grp_bwd_navi = {
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Filter1x1Stride1Pad0, 8, 8, 2>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 1, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<256, 128, 64, 64, Filter1x1Stride1Pad0, 8, 8, 2>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 8, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 32, 64, 8, 8, Default, 16, 16, 4, 1, 8, 4, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Default, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<256, 128, 64, 64, Default, 8, 8, 2>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<64, 64, 64, 64, Default, 8, 8, 8>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Stride1Pad0, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 4, 4, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<64, 32, 64, 64, Default, 8, 8, 8>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 1, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Default, 8, 8, 2>", 1),
 std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 128, 32, 8, 8, Default, 16, 16, 8, 2, 8, 4, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 64, 64, 8, 8, Default, 16, 16, 8, 1, 8, 4, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<256, 128, 256, 64, Default, 8, 8, 8>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 2, 4, 4, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Default, 8, 8, 2>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Stride1Pad0, 8, 1, 1>", 1),
 std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 2, 1, 1, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 8, 1, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 8, 1, 1>", 1),
-std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 32, 32, 8, 8, Default, 16, 16, 4, 1, 8, 1, 1, 1>", 1)
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>", 1)
 };
 // clang-format on
+
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitValidKernels(
+    const ProblemDescription& problem)
+{
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    if(!loader.IsLoaded())
+        return;
+
+    auto data_type = problem.GetInDataType();
+    use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
+
+    valid_kernels = loader.FillValidKernelsWithTf32Fallback(
+        CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
+
+    if(!valid_kernels.empty())
+    {
+        index     = 0;
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+    }
+}
 
 void PerformanceConfigHipImplicitGemmGroupBwdXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
@@ -277,54 +303,59 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::DefaultKernelFromList(
 }
 
 void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem)
+    const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    split_k   = 1;
-    index     = 0;
-    kernel_id = "";
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.Reset(k2DBwdSolverConfig.uses_split_k);
 
-    const auto& loader =
-        miopen::solver::CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return;
 
     const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
+    // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(IsModelApplicable(ctx, problem))
+    if(&ctx != &GetDummyCtx() &&
+       !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR))
     {
-        if(RunParameterPredictionModel(ctx, problem))
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
+
+        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
+            return loader.FillValidKernels(
+                CKSolverType::GrpConvBwd, p, p.GetInDataType(), try_tf32);
+        };
+
+        auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
+            return RunKTNGeneric(*this, c, p);
+        };
+
+        auto ck_val_creator = MakeCKValidatorCreator(
+            loader, CKSolverType::GrpConvBwd, problem.GetInDataType(), mode_use_tf32);
+
+        if(RunAIHeuristics(k2DBwdSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           is_deterministic,
+                           fill_valid_kernels,
+                           ktn_runner,
+                           ck_val_creator,
+                           mode_use_tf32))
         {
-            // Enforce split_k == 1 for deterministic mode
-            if(is_deterministic && split_k != 1)
-            {
-                MIOPEN_LOG_I("Deterministic mode: Overriding AI-predicted split_k="
-                             << split_k << " to split_k=1");
-                split_k = 1;
-                if(!valid_kernels.empty())
-                    kernel_id = valid_kernels[index] + "+1";
-            }
             return;
         }
     }
 #endif
 
-    auto data_type = problem.GetInDataType();
-    use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
-
-    valid_kernels =
-        loader.FillValidKernelsWithTf32Fallback(CKConvDirection::Bwd, problem, data_type, use_tf32);
-
+    // Fallback to default initialization
+    InitValidKernels(problem);
     if(!valid_kernels.empty())
     {
-        index     = 0;
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+        if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
+            DefaultKernelFromList(ctx);
+        state.SetResult(index, split_k, k2DBwdSolverConfig.uses_split_k);
     }
-
-    if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-        DefaultKernelFromList(ctx);
 
     // Invariant: split_k must always be 1 in deterministic mode
     assert(!is_deterministic || split_k == 1);
@@ -334,7 +365,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = miopen::solver::CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+        const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
         if(!loader.IsLoaded())
             return false;
 
@@ -342,7 +373,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
         use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
 
         valid_kernels = loader.FillValidKernelsWithTf32Fallback(
-            CKConvDirection::Bwd, problem, data_type, use_tf32);
+            CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
 
         if(valid_kernels.empty())
             return false;
@@ -398,12 +429,13 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
 
-    const auto& loader = miopen::solver::CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
     auto data_type = problem.GetInDataType();
-    return loader.IsArgsSupported(CKConvDirection::Bwd, problem, kernel_id, data_type, use_tf32);
+    return loader.IsArgsSupported(
+        CKSolverType::GrpConvBwd, problem, kernel_id, data_type, use_tf32);
 }
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::operator==(
@@ -432,13 +464,13 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsValidPerformanceConfig(
 size_t
 ConvHipImplicitGemmGroupBwdXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(GetCurrentDeviceName());
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return 0;
 
     auto data_type = problem.GetInDataType();
     bool use_tf32  = (data_type == miopenFloat) && problem.UseTF32();
-    return loader.GetWorkspaceSize(CKConvDirection::Bwd, problem, data_type, use_tf32);
+    return loader.GetWorkspaceSize(CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
 }
 
 size_t ConvHipImplicitGemmGroupBwdXdlops::GetWorkspaceSize(const ExecutionContext&,
@@ -478,12 +510,12 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
 
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return false;
 
     return loader.IsApplicable(
-        CKConvDirection::Bwd, problem, problem.GetInDataType(), problem.UseTF32());
+        CKSolverType::GrpConvBwd, problem, problem.GetInDataType(), problem.UseTF32());
 }
 
 ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
@@ -491,12 +523,12 @@ ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
     [[maybe_unused]] const ProblemDescription& problem,
     [[maybe_unused]] const PerformanceConfigHipImplicitGemmGroupBwdXdlops& config) const
 {
-    const auto& loader = CKGroupedConvLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
-        return {};
+        return ConvSolution{miopenStatusInternalError};
 
     return loader.GetSolution(
-        CKConvDirection::Bwd, ctx, problem, config.kernel_id, config.UseTF32());
+        CKSolverType::GrpConvBwd, ctx, problem, config.kernel_id, config.UseTF32());
 }
 
 } // namespace conv

@@ -19,7 +19,7 @@ class EnumValue:
 
     Attributes:
         name: Backend C-API suffix appended to ``EnumDef.backend_prefix``
-            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION``).
+            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CROSS_CORRELATION``).
         value: Numeric value in the backend C-API enum typedef.
         sentinel: If True, this value (typically UNSET/NOT_SET) is excluded from the
             backend C-API enum but appears as ``NOT_SET = 0`` in the frontend enum class.
@@ -307,7 +307,7 @@ class DataField:
         """Frontend C++ type for mode/enum fields.
 
         Returns frontend_type if set, falls back to stripping the SDK namespace
-        from cpp_enum (e.g., 'hipdnn_data_sdk::data_objects::ConvMode' -> 'ConvMode').
+        from cpp_enum (e.g., 'hipdnn_flatbuffers_sdk::data_objects::ConvMode' -> 'ConvMode').
         """
         if self.frontend_type:
             return self.frontend_type
@@ -329,6 +329,20 @@ class DataField:
                 return "set_" + base[4:]
             return base
         return f"set_{self.name}"
+
+
+@dataclass
+class DataFieldsHelper:
+    """Configuration for shared data field packing/unpacking helpers.
+
+    When set on an OperationConfig, the packer and unpacker templates call
+    the named helper functions instead of emitting per-field inline code.
+    """
+
+    pack_function: str = ""
+    unpack_function: str = ""
+    include: str = ""
+    label: str = ""
 
 
 @dataclass
@@ -365,6 +379,7 @@ class TestData:
     tensor_configs: dict[str, TensorConfig] = field(default_factory=dict)
     field_values: dict[str, list] = field(default_factory=dict)
     constants_include: str = ""
+    tensor_const_prefix: Optional[str] = None
 
 
 @dataclass
@@ -533,6 +548,8 @@ class OperationConfig:
     data_fields: list[DataField] = field(default_factory=list)
     tensor_array_fields: list[TensorArrayField] = field(default_factory=list)
 
+    data_fields_helper: Optional[DataFieldsHelper] = None
+
     has_compute_data_type: bool = True
     compute_data_type_attr: str = ""
     compute_data_type_shared: bool = False
@@ -596,7 +613,7 @@ class OperationConfig:
 
     @property
     def fbs_namespace(self) -> str:
-        return "hipdnn_data_sdk::data_objects"
+        return "hipdnn_flatbuffers_sdk::data_objects"
 
     @property
     def fbs_t_type(self) -> str:
@@ -896,9 +913,12 @@ class OperationConfig:
     def tensor_const_prefix(self) -> str:
         """Prefix for tensor constant names.
 
-        Returns 'K_' for pre-existing constants headers (backward compatible),
+        Returns the explicit override from test_data if set, otherwise
+        'K_' for pre-existing constants headers (backward compatible),
         'K_{NAME}_' for new operations (avoids collisions).
         """
+        if self.test_data and self.test_data.tensor_const_prefix:
+            return self.test_data.tensor_const_prefix
         if self.test_data and self.test_data.constants_include:
             return "K_"
         return f"K_{self.name.upper()}_"

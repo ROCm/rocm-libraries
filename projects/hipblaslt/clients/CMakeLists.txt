@@ -26,6 +26,7 @@ target_link_libraries(hipblaslt-clients-common
         ${LAPACK_LIBRARIES}
     PRIVATE
         hip::device
+        tensilelite::tensilelite-host
 )
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
@@ -95,7 +96,7 @@ if(HIPBLASLT_ENABLE_YAML)
     target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
 endif()
 if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
-    find_package(GTest REQUIRED)
+    find_package(GTest CONFIG REQUIRED)
     add_executable(hipblaslt-test)
     if(amd_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE amd_smi)
@@ -112,9 +113,9 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
+
     add_subdirectory(tests)
 endif()
-
 if(HIPBLASLT_ENABLE_SAMPLES)
     add_subdirectory(samples)
 endif()

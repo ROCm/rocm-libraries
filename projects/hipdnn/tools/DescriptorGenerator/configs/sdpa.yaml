@@ -1,25 +1,25 @@
 operation:
-  name: "SdpaFprop"
-  class_name: "SdpaFpropOperationDescriptor"
+  name: "SdpaFwd"
+  class_name: "SdpaFwdOperationDescriptor"
   fbs_table: "SdpaAttributes"
   fbs_generated_header: "sdpa_attributes_generated.h"
 
   descriptor_type:
-    enum_name: "HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT"
+    enum_name: "HIPDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR"
 
-  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_SDPA_FPROP"
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_SDPA_FWD"
 
   error_label: "sdpa"
   packer_operation_label: "SDPA forward"
   packer_finalize_label: "SDPA"
-  test_params_method_name: "setSdpaFpropParams"
+  test_params_method_name: "setSdpaFwdParams"
   data_fields_section_label: "SDPA Parameters"
   build_node_attrs_var: "sdpaAttrs"
 
   frontend:
-    packer_function: "createSdpaFpropOperation"
-    unpacker_function: "unpackSdpaFpropOperation"
-    node_class: "SdpaFpropNode"
+    packer_function: "createSdpaFwdOperation"
+    unpacker_function: "unpackSdpaFwdOperation"
+    node_class: "SdpaFwdNode"
     attributes_class: "SdpaAttributes"
 
     inputs:
@@ -203,32 +203,32 @@ operation:
     graph_return_type: "array"
     graph_return_outputs:
       - "o"
-    node_type_enum: "NodeType::SDPA_FPROP"
+    node_type_enum: "NodeType::SDPA_FWD"
     node_attributes_union_type: "SdpaAttributes"
 
   # Required tensor fields (Q, K, V, O)
   tensor_fields:
     - name: "q"
       fbs_field: "q_tensor_uid"
-      attr_suffix: "Q_EXT"
+      attr_suffix: "QDESC"
       required: true
       frontend_getter: "get_q()"
 
     - name: "k"
       fbs_field: "k_tensor_uid"
-      attr_suffix: "K_EXT"
+      attr_suffix: "KDESC"
       required: true
       frontend_getter: "get_k()"
 
     - name: "v"
       fbs_field: "v_tensor_uid"
-      attr_suffix: "V_EXT"
+      attr_suffix: "VDESC"
       required: true
       frontend_getter: "get_v()"
 
     - name: "o"
       fbs_field: "o_tensor_uid"
-      attr_suffix: "O_EXT"
+      attr_suffix: "ODESC"
       required: true
       frontend_getter: "get_o()"
 
@@ -241,19 +241,19 @@ operation:
 
     - name: "scale"
       fbs_field: "scale_tensor_uid"
-      attr_suffix: "SCALE_EXT"
+      attr_suffix: "SCALEDESC"
       required: false
       frontend_getter: "get_attn_scale()"
 
     - name: "seq_len_q"
       fbs_field: "seq_len_q_tensor_uid"
-      attr_suffix: "SEQ_LEN_Q_EXT"
+      attr_suffix: "SEQ_LEN_QDESC"
       required: false
       frontend_getter: "get_seq_len_q()"
 
     - name: "seq_len_kv"
       fbs_field: "seq_len_kv_tensor_uid"
-      attr_suffix: "SEQ_LEN_KV_EXT"
+      attr_suffix: "SEQ_LEN_KVDESC"
       required: false
       frontend_getter: "get_seq_len_kv()"
 
@@ -283,19 +283,19 @@ operation:
 
     - name: "page_table_k"
       fbs_field: "page_table_k_tensor_uid"
-      attr_suffix: "PAGE_TABLE_K_EXT"
+      attr_suffix: "PAGE_TABLE_KDESC"
       required: false
       frontend_getter: "get_page_table_k()"
 
     - name: "page_table_v"
       fbs_field: "page_table_v_tensor_uid"
-      attr_suffix: "PAGE_TABLE_V_EXT"
+      attr_suffix: "PAGE_TABLE_VDESC"
       required: false
       frontend_getter: "get_page_table_v()"
 
     - name: "block_mask"
       fbs_field: "block_mask_tensor_uid"
-      attr_suffix: "BLOCK_MASK_EXT"
+      attr_suffix: "BLOCK_MASK_DESC"
       required: false
       frontend_getter: "get_block_mask()"
 
@@ -345,7 +345,7 @@ operation:
     # Optional output tensors
     - name: "stats"
       fbs_field: "stats_tensor_uid"
-      attr_suffix: "STATS_EXT"
+      attr_suffix: "STATSDESC"
       required: false
       frontend_getter: "get_stats()"
 
@@ -384,7 +384,7 @@ operation:
     # Boolean flags
     - name: "generate_stats"
       fbs_field: "generate_stats"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_GENERATE_STATS_EXT"
       type: "bool"
       required: false
       fbs_optional: true
@@ -392,28 +392,28 @@ operation:
 
     - name: "alibi_mask"
       fbs_field: "alibi_mask"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_ALIBI_MASK_EXT"
       type: "bool"
       required: false
       frontend_getter: "get_alibi_mask()"
 
     - name: "padding_mask"
       fbs_field: "padding_mask"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_PADDING_MASK_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_PADDING_MASK_EXT"
       type: "bool"
       required: false
       frontend_getter: "get_padding_mask()"
 
     - name: "causal_mask"
       fbs_field: "causal_mask"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_CAUSAL_MASK_EXT"
       type: "bool"
       required: false
       frontend_getter: "get_causal_mask()"
 
     - name: "causal_mask_bottom_right"
       fbs_field: "causal_mask_bottom_right"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_CAUSAL_MASK_BOTTOM_RIGHT_EXT"
       type: "bool"
       required: false
       frontend_getter: "get_causal_mask_bottom_right()"
@@ -421,35 +421,35 @@ operation:
     # Scalar attributes
     - name: "dropout_probability"
       fbs_field: "dropout_probability"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_DROPOUT_PROBABILITY_EXT"
       type: "scalar_float"
       required: false
       frontend_getter: "get_dropout()"
 
     - name: "attn_scale_value"
       fbs_field: "attn_scale_value"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_ATTN_SCALE_VALUE_EXT"
       type: "scalar_float"
       required: false
       frontend_getter: "get_attn_scale_value()"
 
     - name: "left_bound"
       fbs_field: "left_bound"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_LEFT_BOUND_EXT"
       type: "scalar_int64"
       required: false
       frontend_getter: "get_left_bound()"
 
     - name: "right_bound"
       fbs_field: "right_bound"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_RIGHT_BOUND_EXT"
       type: "scalar_int64"
       required: false
       frontend_getter: "get_right_bound()"
 
     - name: "max_seq_len_kv"
       fbs_field: "max_seq_len_kv"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_MAX_SEQ_LEN_KV_EXT"
       type: "scalar_int64"
       required: false
       frontend_getter: "get_max_seq_len_kv()"
@@ -457,9 +457,9 @@ operation:
     # Enum attributes (mode type)
     - name: "diagonal_alignment"
       fbs_field: "diagonal_alignment"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::DiagonalAlignment"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment"
       frontend_type: "DiagonalAlignment"
       required: false
       default_value: "DiagonalAlignment::TOP_LEFT"
@@ -468,7 +468,7 @@ operation:
       backend_getter: "getDiagonalAlignment"
       backend_converter: "toBackendDiagonalAlignment"
       frontend_inverse_converter: "fromHipdnnDiagonalAlignment"
-      backend_type_name: "HIPDNN_TYPE_DIAGONAL_ALIGNMENT"
+      backend_type_name: "HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT"
       test_enum_value: "TOP_LEFT"
       test_alt_enum_value: "BOTTOM_RIGHT"
       test_backend_value: "HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT"
@@ -484,9 +484,9 @@ operation:
 
     - name: "implementation"
       fbs_field: "implementation"
-      attr_name: "HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT"
+      attr_name: "HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::AttentionImplementation"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation"
       frontend_type: "AttentionImplementation"
       required: false
       default_value: "AttentionImplementation::AUTO"
@@ -495,7 +495,7 @@ operation:
       backend_getter: "getAttentionImplementation"
       backend_converter: "toBackendAttentionImplementation"
       frontend_inverse_converter: "fromHipdnnAttentionImplementation"
-      backend_type_name: "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION"
+      backend_type_name: "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT"
       test_enum_value: "AUTO"
       test_alt_enum_value: "COMPOSITE"
       test_backend_value: "HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT"
@@ -513,39 +513,40 @@ operation:
   tensor_array_fields: []
 
   has_compute_data_type: true
-  compute_data_type_attr: "HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT"
+  compute_data_type_attr: "HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT"
 
   test_data:
-    constants_include: "SdpaFpropConstants"
+    constants_include: "SdpaFwdConstants"
+    tensor_const_prefix: "K_SDPA_"
     tensor_uids:
-      q: 60
-      k: 61
-      v: 62
-      o: 63
-      attn_mask: 64
-      scale: 65
-      seq_len_q: 66
-      seq_len_kv: 67
-      seed: 68
-      offset: 69
-      dropout_mask: 70
-      dropout_scale: 71
-      page_table_k: 72
-      page_table_v: 73
-      block_mask: 74
-      sink_token: 75
-      descale_q: 76
-      descale_k: 77
-      descale_v: 78
-      descale_s: 79
-      scale_s: 80
-      scale_o: 81
-      stats: 82
-      max_output: 83
-      sum_exp: 84
-      rng_dump: 85
-      amax_s: 86
-      amax_o: 87
+      q: 1800
+      k: 1801
+      v: 1802
+      o: 1803
+      attn_mask: 1804
+      scale: 1805
+      seq_len_q: 1806
+      seq_len_kv: 1807
+      seed: 1808
+      offset: 1809
+      dropout_mask: 1810
+      dropout_scale: 1811
+      page_table_k: 1812
+      page_table_v: 1813
+      block_mask: 1814
+      sink_token: 1815
+      descale_q: 1816
+      descale_k: 1817
+      descale_v: 1818
+      descale_s: 1819
+      scale_s: 1820
+      scale_o: 1821
+      stats: 1822
+      max_output: 1823
+      sum_exp: 1824
+      rng_dump: 1825
+      amax_s: 1826
+      amax_o: 1827
     tensor_configs:
       q: { dims: [1, 8, 128, 64], strides: [65536, 8192, 64, 1] }
       k: { dims: [1, 8, 128, 64], strides: [65536, 8192, 64, 1] }

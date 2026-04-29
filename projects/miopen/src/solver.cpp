@@ -301,7 +301,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     RegisterWithSolver(registry, ++id, conv::ConvAsm5x10u2v2b1{}, miopenConvolutionAlgoDirect);
     RegisterWithSolver(
         registry, ++id, conv::ConvAsm7x7c3h224w224k64u2v2p3q3f1{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd11x11{}, miopenConvolutionAlgoDirect);
+    RegisterWithSolver(registry, ++id, conv::ConvHipDirectFwd11x11{}, miopenConvolutionAlgoDirect);
     RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwdGen{}, miopenConvolutionAlgoDirect);
     ++id; // removed ConvOclDirectFwd3x3
     RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd{}, miopenConvolutionAlgoDirect);
@@ -682,7 +682,11 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
 
     RegisterWithSolver(
         registry, ++id, conv::ConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
-    ++id; // Removed ConvWinoRageRxSFused solver
+    Register(registry,
+             ++id,
+             Primitive::Fusion,
+             fusion::ConvWinoRageRxSFused<2, 3>{}.SolverDbId(),
+             miopenConvolutionAlgoWinograd);
     Register(registry,
              ++id,
              Primitive::Fusion,
@@ -708,8 +712,9 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     // Transposed non-tunable Winograd solvers
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvWinoFuryRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
-    RegisterWithSolver(
-        registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
+    ++id; // RegisterWithSolver(
+          //     registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{},
+          //     miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry,
                        ++id,
                        conv::TransposedConvMPBidirectWinograd<2, 3>{},
@@ -807,6 +812,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        ++id,
                        conv::TransposedConvMPBidirectWinograd_xdlops<6, 3>{},
                        miopenConvolutionAlgoWinograd);
+
+    RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd3D{}, miopenConvolutionAlgoDirect);
     //  IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     //  space between this comment and the newly registered solver(s)!
 }

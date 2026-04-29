@@ -77,14 +77,15 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvAsm5x10u2v2f1,
                                            miopen::solver::conv::ConvAsm7x7c3h224w224k64u2v2p3q3f1,
                                            miopen::solver::conv::ConvAsm5x10u2v2b1,
-                                           miopen::solver::conv::ConvOclDirectFwd11x11,
+                                           miopen::solver::conv::ConvHipDirectFwd11x11,
                                            miopen::solver::conv::ConvOclDirectFwdGen,
                                            miopen::solver::conv::ConvOclDirectFwd1x1,
                                            miopen::solver::conv::ConvOclDirectFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw,
-                                           miopen::solver::conv::ConvDepthwiseFwd2D>{};
+                                           miopen::solver::conv::ConvDepthwiseFwd2D,
+                                           miopen::solver::conv::ConvDepthwiseFwd3D>{};
 }
 
 static auto GetImplicitGemmSolvers()

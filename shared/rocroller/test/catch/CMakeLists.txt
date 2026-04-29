@@ -7,7 +7,7 @@ if(NOT Catch2_FOUND)
         FetchContent_Declare(
             Catch2
             GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-            GIT_TAG devel
+            GIT_TAG v3.13.0
         )
         FetchContent_MakeAvailable(Catch2)
     else()
@@ -45,6 +45,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/CommandTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConnectWorkgroupsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ControlFlowRWTracerTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ControlGraphTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConvertPropagationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomAssertionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomAssertions.cpp"
@@ -52,13 +53,14 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Direct2LDSTileCopyTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ErrorTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ExecuteMaskGeneratorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionContainsSubExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionIdenticalTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionSerializationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionToStringTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTreeOrderingTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTransformationTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTreeOrderingTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FastArithmeticTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FastDivisionTransformationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FuseLoopsTest.cpp"
@@ -69,24 +71,26 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/HypergraphTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IdentifyParallelDimensionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InstructionTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/KernelOptionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelArgumentsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphColouringTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphConstraintsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphRemoveDuplicatesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphSimplifyTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphUtilsTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelOptionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSAllocationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSModelTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LDSSwizzleTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LargerLDSTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LoadPackedTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MEMObserverTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ModelAddressesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MFMACoexecObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ModelAddressesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MultipleLDSAllocationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/NaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/NodeSchedulingUtilsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/OrderMultiplyNodesTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PrefetchScaleTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberGenerationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegisterTagManagerTest.cpp"
