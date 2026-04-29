@@ -22,6 +22,9 @@
 
 #include "common_test_header.hpp"
 
+// Thread operators fixes for extended float types
+#include "test_utils_thread_operators.hpp"
+
 #include <hipcub/warp/warp_reduce.hpp>
 #include <type_traits>
 
@@ -425,6 +428,235 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
     }
+}
+
+template<class T,
+         unsigned int BlockSize,
+         class ReductionOp            = test_utils::plus,
+         unsigned int LogicalWarpSize = 0>
+__global__ __launch_bounds__(BlockSize)
+void warp_reduce_op_kernel(T* device_input, T* device_output)
+{
+    if constexpr(!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>)
+    {
+        // This point should never be actually reached; tests are filtered out at runtime
+        // if the device does not support the LogicalWarpSize
+        return;
+    }
+
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
+    const unsigned int     warp_id  = test_utils::logical_warp_id<LogicalWarpSize>();
+    unsigned int           index    = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
+
+    T value = device_input[index];
+
+    using wreduce_t = hipcub::WarpReduce<T, LogicalWarpSize>;
+    __shared__
+    typename wreduce_t::TempStorage storage[warps_no];
+
+    // 2. Compile-time dispatch based on ReductionOp type
+    if constexpr(std::is_same_v<ReductionOp, test_utils::plus>)
+    {
+        value = wreduce_t(storage[warp_id]).Sum(value);
+    }
+    else if constexpr(std::is_same_v<ReductionOp, test_utils::maximum>)
+    {
+        value = wreduce_t(storage[warp_id]).Max(value);
+    }
+    else if constexpr(std::is_same_v<ReductionOp, test_utils::minimum>)
+    {
+        value = wreduce_t(storage[warp_id]).Min(value);
+    }
+
+    if(hipThreadIdx_x % LogicalWarpSize == 0)
+    {
+        device_output[index / LogicalWarpSize] = value;
+    }
+}
+
+template<typename T,
+         typename AccT,
+         size_t LogicalWarpSize,
+         typename ReductionOp,
+         typename HostReductionOp>
+void warp_reduce_op_test()
+{
+    constexpr size_t logical_warp_size = LogicalWarpSize;
+
+    HostReductionOp host_op{};
+
+    // The different warp sizes
+    constexpr size_t ws32 = size_t(HIPCUB_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(HIPCUB_WARP_SIZE_64);
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws32 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
+
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
+
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    unsigned int grid_size  = 4;
+    const size_t size       = block_size * grid_size;
+
+    // Check if warp size is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only WarpSize 32 and 64 is supported
+    {
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
+        GTEST_SKIP();
+    }
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> output(size / logical_warp_size);
+        std::vector<T> expected(output.size());
+
+        // Calculate expected results on host
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            size_t warp_offset = i * logical_warp_size;
+            AccT   value       = static_cast<AccT>(input[warp_offset]);
+
+            for(size_t j = 1; j < logical_warp_size; j++)
+            {
+                auto idx = warp_offset + j;
+                value    = host_op(input[idx], value);
+            }
+            expected[i] = static_cast<T>(value);
+        }
+
+        // Writing to device memory
+        T* device_input;
+        HIP_CHECK(test_common_utils::hipMallocHelper(
+            &device_input,
+            input.size() * sizeof(typename decltype(input)::value_type)));
+        T* device_output;
+        HIP_CHECK(test_common_utils::hipMallocHelper(
+            &device_output,
+            output.size() * sizeof(typename decltype(output)::value_type)));
+
+        HIP_CHECK(
+            hipMemcpy(device_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+
+        // Launching kernel
+        if(current_device_warp_size == ws32)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    warp_reduce_op_kernel<T, block_size_ws32, ReductionOp, LogicalWarpSize>),
+                dim3(grid_size),
+                dim3(block_size_ws32),
+                0,
+                0,
+                device_input,
+                device_output);
+            HIP_CHECK(hipGetLastError());
+        }
+        else if(current_device_warp_size == ws64)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    warp_reduce_op_kernel<T, block_size_ws64, ReductionOp, LogicalWarpSize>),
+                dim3(grid_size),
+                dim3(block_size_ws64),
+                0,
+                0,
+                device_input,
+                device_output);
+        }
+
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        HIP_CHECK(hipMemcpy(output.data(),
+                            device_output,
+                            output.size() * sizeof(T),
+                            hipMemcpyDeviceToHost));
+
+        test_utils::assert_near(output,
+                                expected,
+                                test_utils::precision<T>::value * logical_warp_size);
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_output));
+    }
+}
+
+TYPED_TEST(HipcubWarpReduceTests, ReduceSum)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T                 = typename TestFixture::type;
+    using AccT              = typename std::conditional<std::is_same_v<T, test_utils::bfloat16>
+                                                            || std::is_same_v<T, test_utils::half>,
+                                                        float,
+                                                        T>::type;
+    using reduction_op      = test_utils::plus;
+    using host_reduction_op = typename AlgebraicSelector<reduction_op, T, AccT>::type;
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+
+    warp_reduce_op_test<T, AccT, logical_warp_size, reduction_op, host_reduction_op>();
+}
+
+TYPED_TEST(HipcubWarpReduceTests, ReduceMax)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T                 = typename TestFixture::type;
+    using AccT              = typename std::conditional<std::is_same_v<T, test_utils::bfloat16>
+                                                            || std::is_same_v<T, test_utils::half>,
+                                                        float,
+                                                        T>::type;
+    using reduction_op      = test_utils::maximum;
+    using host_reduction_op = typename MaxSelector<T, AccT>::type;
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+
+    warp_reduce_op_test<T, AccT, logical_warp_size, reduction_op, host_reduction_op>();
+}
+
+TYPED_TEST(HipcubWarpReduceTests, ReduceMin)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T                 = typename TestFixture::type;
+    using AccT              = typename std::conditional<std::is_same_v<T, test_utils::bfloat16>
+                                                            || std::is_same_v<T, test_utils::half>,
+                                                        float,
+                                                        T>::type;
+    using reduction_op      = test_utils::minimum;
+    using host_reduction_op = typename MinSelector<T, AccT>::type;
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+
+    warp_reduce_op_test<T, AccT, logical_warp_size, reduction_op, host_reduction_op>();
 }
 
 template<class T, class Flag, unsigned int BlockSize, unsigned int LogicalWarpSize>
