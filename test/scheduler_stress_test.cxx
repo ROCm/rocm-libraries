@@ -1,3 +1,11 @@
+// scheduler_stress_test.cxx -- Race condition hunting under extreme scale.
+//
+// Pushes the scheduler past the work queue's capacity, mixes host- and
+// device-spawned tasks across both queues simultaneously, and rapidly cycles
+// the persistent kernel start/stop path. Any rare ordering bug in tryPop /
+// tryPop_cpuSafe, the cpuWorkQueue/mainWorkQueue priority logic, or the
+// notify/prep handshake would surface here as a counter mismatch.
+
 #include "hip/thread"
 #include "hip/hip_runtime.h"
 #include <cassert>
@@ -14,6 +22,14 @@
         }                                                                                          \
     }
 
+// 16384 tasks (4x the queue size), all from the host, each doing one
+// atomicAdd. The host-side waitForSpaceInCPUQueue loop has to cycle at least
+// 4 times, waiting for the GPU to drain slots before pushing more. With
+// 16384 tasks all racing through getWork() and invokeNext(), this maximizes
+// contention on popCount and pushCount atomics. Any rare race condition in
+// tryPop or tryPop_cpuSafe -- like two vcores both succeeding on the same
+// slot, or a work node getting overwritten before it's read -- would show up
+// as a counter mismatch.
 static void test_maximum_throughput() {
     constexpr unsigned int N = 1 << 14;
     int *d_counter;
@@ -39,6 +55,16 @@ static void test_maximum_throughput() {
     ::std::cerr << "test_maximum_throughput passed (" << N << " tasks)\n";
 }
 
+// The most chaotic test across all 7 files. Simultaneously submits 1024
+// simple host tasks (into cpuWorkQueue) AND 256 spawner tasks that each
+// create 4 children from the device (into mainWorkQueue). Spawner tasks also
+// increment the counter themselves. Expected total:
+// 1024 + 256 + (256 * 4) = 2304. Combines everything: host-to-device path,
+// device-to-device path, queue priority logic in getWork(), device-side
+// join() spin-waiting, and the cpuWorkQueue/mainWorkQueue interaction all
+// happening concurrently. If any of these paths had a subtle ordering bug
+// that only manifests under heavy concurrent access, this is where it would
+// show up.
 static void test_mixed_storm() {
     constexpr unsigned int HOST_TASKS = 1024;
     constexpr unsigned int DEVICE_SPAWNERS = 256;
@@ -86,6 +112,16 @@ static void test_mixed_storm() {
     ::std::cerr << "test_mixed_storm passed (" << EXPECTED << " total tasks)\n";
 }
 
+// 2000 iterations of create-one-thread-and-immediately-join. Each iteration
+// hammers the host-side path: prepDeviceForWork (increment counter, possibly
+// relaunch kernel), sendToGPU (allocate work node, memcpy to device,
+// hipStreamWriteValue64 into queue slot), join (poll link_to_self via
+// hipMemcpyAsync), destructor (decrement counter, possibly notify). Doing
+// this 2000 times in a tight loop stresses the interaction between the
+// enqueuing stream, the main stream, and the persistent kernel's
+// startup/shutdown timing. If there were a race between
+// notifyDeviceThereMightNotBeAnyMoreWork and the next prepDeviceForWork, it
+// would eventually surface over 2000 repetitions.
 static void test_rapid_single_thread_cycles() {
     constexpr int ITERATIONS = 2000;
     int *d_counter;

@@ -1,3 +1,10 @@
+// scheduler_fairness_test.cxx -- Work distribution across vcores.
+//
+// Verifies that the scheduler spreads work across many vcores rather than
+// funneling everything through a small number of them, and that multiple
+// vcores execute work concurrently rather than being serialized through a
+// single vcore by the activeVcoreCount gating in threading_main.
+
 #include "hip/thread"
 #include "hip/hip_runtime.h"
 #include <cassert>
@@ -14,6 +21,17 @@
         }                                                                                          \
     }
 
+// Submits 4 * hardware_concurrency() tasks. Each task records which vcore it
+// ran on via atomicExch(&d_seen[blockIdx.x], 1) and then spins for 10000
+// iterations to stay alive long enough for other vcores to pick up work.
+// After all tasks complete, counts how many distinct vcores were used and
+// asserts > 50%.
+//
+// Proves work spreads across the GPU and isn't funneling through a small
+// number of vcores. If getWork() had a bias where only a few blocks ever
+// successfully popped from the queue, the count would be much lower. Not all
+// vcores are expected to be used (tasks complete quickly, so some vcores
+// never get a chance), but the majority should participate.
 static void test_vcore_distribution() {
     const unsigned int hwc = hip::thread::hardware_concurrency();
     const unsigned int N = hwc * 4;
@@ -57,6 +75,16 @@ static void test_vcore_distribution() {
                 << " vcores utilized\n";
 }
 
+// 256 tasks, each atomically increments an active counter on entry, updates a
+// high-water mark via atomicCAS, spins for 10000 iterations, then decrements
+// the active counter on exit. Asserts that the peak active count is > 1 and
+// that the final active count is 0.
+//
+// Proves the scheduler runs work in parallel across multiple vcores
+// simultaneously, not serializing everything through one. If threading_main
+// had a bug where activeVcoreCount gating prevented concurrent execution, the
+// peak would be 1. The final-count-is-0 check proves every task that
+// incremented also decremented -- no task was abandoned mid-execution.
 static void test_multiple_vcores_active() {
     int *d_max_active;
     CHECK(hipMalloc(&d_max_active, sizeof(int)));

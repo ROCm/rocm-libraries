@@ -1,3 +1,12 @@
+// scheduler_nested_spawn_test.cxx -- Device-to-device thread creation.
+//
+// Verifies that hip::thread(lambda) called from device code correctly
+// allocates a WorkNode via device malloc, constructs it with make_worknode,
+// pushes it into mainWorkQueue via insertIntoMainQueue(), and that
+// device-side join() works (the parent spins on isSchedulerDoneWith() until
+// each child finishes). Also covers serial dependency chains and many
+// parents simultaneously blocked in device-side join().
+
 #include "hip/thread"
 #include "hip/hip_runtime.h"
 #include <cassert>
@@ -14,6 +23,13 @@
         }                                                                                          \
     }
 
+// 64 parent threads from the host. Each parent, running on the GPU, creates
+// 16 children (also on the GPU) and joins them all. Expected counter:
+// 64 * 16 = 1024. Proves that hip::thread(lambda) called from device code
+// correctly allocates a WorkNode via device malloc, constructs it with
+// make_worknode, and pushes it into mainWorkQueue via insertIntoMainQueue().
+// Also proves device-side join() works (the parent spins on
+// isSchedulerDoneWith() until each child finishes).
 static void test_two_level_fanout() {
     constexpr unsigned int N_PARENTS = 64;
     constexpr unsigned int M_CHILDREN = 16;
@@ -60,26 +76,18 @@ __device__ void chain_link(uint32_t *seq, unsigned int level, unsigned int max_d
     }
 }
 
-marsavic@daniel-ubuntu-desktop:~/gpulib$ ./build/bin/scheduler_nested_spawn_test 
-test_two_level_fanout passed
-test_chain_spawn passed
-test_fork_join passed
-marsavic@daniel-ubuntu-desktop:~/gpulib$ ./build/bin/scheduler_nested_spawn_test 
-test_two_level_fanout passed
-test_chain_spawn passed
-test_fork_join passed
-marsavic@daniel-ubuntu-desktop:~/gpulib$ ./build/bin/scheduler_nested_spawn_test 
-test_two_level_fanout passed
-test_chain_spawn passed
-test_fork_join passed
-marsavic@daniel-ubuntu-desktop:~/gpulib$ ./build/bin/scheduler_nested_spawn_test 
-test_two_level_fanout passed
-test_chain_spawn passed
-test_fork_join passed
-marsavic@daniel-ubuntu-desktop:~/gpulib$ ./build/bin/scheduler_nested_spawn_test 
-test_two_level_fanout passed
-test_chain_spawn passed
-test_fork_join passedstatic void test_chain_spawn() {
+// A single thread spawns a child, that child spawns another child, and so on,
+// 8 levels deep. Each level writes level + 1 to d_sequence[level]. The
+// verifier checks d_sequence = {1, 2, 3, 4, 5, 6, 7, 8}. This is a serial
+// dependency chain -- level 3 can't start until level 2 finishes spawning it.
+// Tests that the scheduler doesn't deadlock when a thread on one vcore joins
+// a child that might need to run on the same vcore (since the parent is
+// blocked in join() spinning, the scheduler needs some other vcore to pick up
+// the child). Also tests that 8 sequential round-trips through
+// insertIntoMainQueue -> getWork -> invokeNext -> join all work correctly.
+// Implemented as a __device__ function chain_link to avoid reference captures
+// across vcores.
+static void test_chain_spawn() {
     constexpr unsigned int DEPTH = 8;
 
     uint32_t *d_sequence;
@@ -99,6 +107,14 @@ test_fork_join passedstatic void test_chain_spawn() {
     ::std::cerr << "test_chain_spawn passed\n";
 }
 
+// 128 parents from the host, each forks 8 children on the device and joins
+// all 8. Expected counter: 128 * 8 = 1024. Similar to test_two_level_fanout
+// but with more parents (128 vs 64) and fewer children each (8 vs 16). The
+// higher parent count means more concurrent contention on mainWorkQueue's
+// pushCount atomic, and up to 128 parents simultaneously in device-side
+// join() spin-waiting, testing that activeVcoreCount bookkeeping handles the
+// case where many vcores are "active" but actually blocked waiting for
+// children.
 static void test_fork_join() {
     constexpr unsigned int N_PARENTS = 128;
     constexpr unsigned int K_CHILDREN = 8;

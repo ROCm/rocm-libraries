@@ -1,3 +1,10 @@
+// scheduler_completeness_test.cxx -- Liveness and exactly-once execution.
+//
+// Verifies that every task the scheduler picks up from the work queue actually
+// runs, runs exactly once, and that the width parameter path in the wrapper()
+// function in worknode.h (where `if (threadIdx.x < width)` controls which
+// lanes execute the callable) is exercised correctly for full-warp tasks.
+
 #include "hip/thread"
 #include "hip/hip_runtime.h"
 #include <cassert>
@@ -14,6 +21,12 @@
         }                                                                                          \
     }
 
+// Creates 8192 hip::threads from the host, each doing atomicAdd(d_counter, 1).
+// After all joined, a verifier thread checks d_counter == 8192. Proves
+// liveness: every single task the scheduler picked up from the work queue
+// actually ran and completed. If threading_main had a bug where getWork()
+// sometimes returned null when work existed, or invokeNext() silently dropped
+// a work node, the counter would be less than 8192.
 static void test_fanout() {
     constexpr unsigned int N = 8192;
     int *d_counter;
@@ -39,6 +52,13 @@ static void test_fanout() {
     ::std::cerr << "test_fanout passed\n";
 }
 
+// Same 8192 threads, but each writes to its own unique slot: thread i does
+// atomicAdd(&d_slots[i], 1). The verifier checks every slot equals exactly 1.
+// Proves exactly-once execution: no task was skipped (slot would be 0) and no
+// task ran twice (slot would be 2). Catches a different class of bug than the
+// counter test -- if WorkQueue::tryPop had a race where two vcores both popped
+// the same work node, the counter test might still pass (counter still gets
+// incremented) but this test would fail (one slot would be 2, another 0).
 static void test_unique_ids() {
     constexpr unsigned int N = 8192;
     uint32_t *d_slots;
@@ -66,6 +86,12 @@ static void test_unique_ids() {
     ::std::cerr << "test_unique_ids passed\n";
 }
 
+// 4096 threads created with hip::thread::max_width() (width=32, full warp).
+// Inside each, only fiber 0 (get_fiber_id() == 0) increments the counter.
+// Verifier checks d_counter == 4096. Proves the scheduler correctly handles
+// full-warp tasks, not just single-lane tasks. Exercises the width parameter
+// path in the wrapper() function in worknode.h where `if (threadIdx.x < width)`
+// controls which lanes execute the callable.
 static void test_varying_widths() {
     constexpr unsigned int N = 4096;
     int *d_counter;
