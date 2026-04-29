@@ -83,11 +83,12 @@ if _bi is not None:
 
     _so = Path(_stinkytofu.__file__)
     _so_mtime = _so.stat().st_mtime
+    _build_dir = Path(_bi.BUILD_DIR).resolve()
     _stale = [
         str(p)
-        for _pattern in ("*.[ch]pp", "*.h")
+        for _pattern in ("*.[ch]pp", "*.h", "*.def")
         for p in Path(_bi.SOURCE_ROOT).rglob(_pattern)
-        if p.stat().st_mtime > _so_mtime
+        if p.stat().st_mtime > _so_mtime and not p.resolve().is_relative_to(_build_dir)
     ]
     if _stale:
         _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
@@ -96,4 +97,4 @@ if _bi is not None:
             f"  Modified: {', '.join(_preview)}\n"
             "  Rebuild:  cmake --build <build_dir> --target stinkytofu_python"
         )
-    del _bi, _so, _so_mtime, _stale, Path
+    del _bi, _so, _so_mtime, _stale, _build_dir, Path
