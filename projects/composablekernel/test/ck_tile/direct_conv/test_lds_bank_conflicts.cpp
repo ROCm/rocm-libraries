@@ -44,7 +44,7 @@ __global__ void capture_lds_read_offsets_kernel(int* offsets, int kw_slice)
 
     // Create the MFMA distribution.
     // This doesn't contain swizzle.
-    constexpr auto dist = TC::Mfma::MakeDistribution();
+    constexpr auto dist = TC::Mfma::MakeAccTileDistribution();
 
     // Calculate the X-space index for this (warp_id, lane_id).
     const auto xs_idx = dist.calculate_index(
