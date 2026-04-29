@@ -86,6 +86,7 @@
 #include <cub/thread/thread_reduce.cuh> // IWYU pragma: export
 #include <cub/thread/thread_scan.cuh> // IWYU pragma: export
 #include <cub/thread/thread_search.cuh> // IWYU pragma: export
+#include <cub/thread/thread_simd.cuh> // IWYU pragma: export
 #include <cub/thread/thread_sort.cuh> // IWYU pragma: export
 #include <cub/thread/thread_store.cuh> // IWYU pragma: export
 
