@@ -49,7 +49,7 @@ auto warp_store_benchmark_device_fn(T* d_output)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     T thread_data[ItemsPerThread];
-    _CCCL_PRAGMA_UNROLL_FULL()
+    HIPCUB_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         thread_data[i] = static_cast<T>(i);
