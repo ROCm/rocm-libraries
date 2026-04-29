@@ -72,7 +72,7 @@ Then, install Tensile from source in a virtual environment:
   source .venv/bin/activate
   pip3 install .
 
-You can now run Tensile's Python applications (``Tensile``, ``TensileCreateLibrary``, etc.)
+You can now run Tensile's Python applications, such as ``Tensile``, ``TensileCreateLibrary``, and others.
 
 Running benchmark
 ===================
