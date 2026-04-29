@@ -57,6 +57,32 @@ using GateUpProblemFP8 = WarpDecodeGateUpProblem<fp8_t,
                                                  element_wise::Silu,
                                                  kVectorFP8>;
 using GateUpKernelFP8 = WarpDecodeGateUpKernel<GateUpProblemFP8, WarpDecodePolicy>;
+using GateUpLdsXKernelFP8 = WarpDecodeGateUpLdsXKernel<GateUpProblemFP8, WarpDecodePolicy>;
+using GateUpProblemFP8Dot2 = WarpDecodeGateUpProblem<fp8_t,
+                                                     fp8_t,
+                                                     float,
+                                                     bf16_t,
+                                                     float,
+                                                     float,
+                                                     XScaleLayoutFP8,
+                                                     WScaleLayoutAll,
+                                                     element_wise::Silu,
+                                                     kVectorFP8,
+                                                     true>;
+using GateUpKernelFP8Dot2 = WarpDecodeGateUpKernel<GateUpProblemFP8Dot2, WarpDecodePolicy>;
+using GateUpProblemFP8PkF32 = WarpDecodeGateUpProblem<fp8_t,
+                                                      fp8_t,
+                                                      float,
+                                                      bf16_t,
+                                                      float,
+                                                      float,
+                                                      XScaleLayoutFP8,
+                                                      WScaleLayoutAll,
+                                                      element_wise::Silu,
+                                                      kVectorFP8,
+                                                      false,
+                                                      true>;
+using GateUpKernelFP8PkF32 = WarpDecodeGateUpKernel<GateUpProblemFP8PkF32, WarpDecodePolicy>;
 
 using GateUpProblemBF16 = WarpDecodeGateUpProblem<bf16_t,
                                                   fp8_t,
@@ -69,6 +95,32 @@ using GateUpProblemBF16 = WarpDecodeGateUpProblem<bf16_t,
                                                   element_wise::Silu,
                                                   kVectorDefault>;
 using GateUpKernelBF16 = WarpDecodeGateUpKernel<GateUpProblemBF16, WarpDecodePolicy>;
+using GateUpLdsXKernelBF16 = WarpDecodeGateUpLdsXKernel<GateUpProblemBF16, WarpDecodePolicy>;
+using GateUpProblemBF16Dot2 = WarpDecodeGateUpProblem<bf16_t,
+                                                      fp8_t,
+                                                      float,
+                                                      bf16_t,
+                                                      float,
+                                                      float,
+                                                      XScaleLayoutBF16,
+                                                      WScaleLayoutAll,
+                                                      element_wise::Silu,
+                                                      kVectorDefault,
+                                                      true>;
+using GateUpKernelBF16Dot2 = WarpDecodeGateUpKernel<GateUpProblemBF16Dot2, WarpDecodePolicy>;
+using GateUpProblemBF16PkF32 = WarpDecodeGateUpProblem<bf16_t,
+                                                       fp8_t,
+                                                       float,
+                                                       bf16_t,
+                                                       float,
+                                                       float,
+                                                       XScaleLayoutBF16,
+                                                       WScaleLayoutAll,
+                                                       element_wise::Silu,
+                                                       kVectorDefault,
+                                                       false,
+                                                       true>;
+using GateUpKernelBF16PkF32 = WarpDecodeGateUpKernel<GateUpProblemBF16PkF32, WarpDecodePolicy>;
 
 using DownProblemDefault = WarpDecodeDownReduceProblem<bf16_t,
                                                        fp8_t,
@@ -78,6 +130,27 @@ using DownProblemDefault = WarpDecodeDownReduceProblem<bf16_t,
                                                        WScaleLayoutAll,
                                                        kVectorDefault>;
 using DownKernelDefault = WarpDecodeDownReduceKernel<DownProblemDefault, WarpDecodePolicy>;
+using DownLdsInterKernelDefault =
+    WarpDecodeDownReduceLdsInterKernel<DownProblemDefault, WarpDecodePolicy>;
+using DownProblemDefaultDot2 = WarpDecodeDownReduceProblem<bf16_t,
+                                                           fp8_t,
+                                                           float,
+                                                           bf16_t,
+                                                           float,
+                                                           WScaleLayoutAll,
+                                                           kVectorDefault,
+                                                           true>;
+using DownKernelDefaultDot2 = WarpDecodeDownReduceKernel<DownProblemDefaultDot2, WarpDecodePolicy>;
+using DownProblemDefaultPkF32 = WarpDecodeDownReduceProblem<bf16_t,
+                                                            fp8_t,
+                                                            float,
+                                                            bf16_t,
+                                                            float,
+                                                            WScaleLayoutAll,
+                                                            kVectorDefault,
+                                                            false,
+                                                            true>;
+using DownKernelDefaultPkF32 = WarpDecodeDownReduceKernel<DownProblemDefaultPkF32, WarpDecodePolicy>;
 
 using DownProblemFP8 = WarpDecodeDownReduceProblem<bf16_t,
                                                   fp8_t,
@@ -87,6 +160,26 @@ using DownProblemFP8 = WarpDecodeDownReduceProblem<bf16_t,
                                                   WScaleLayoutAll,
                                                   kVectorFP8>;
 using DownKernelFP8 = WarpDecodeDownReduceKernel<DownProblemFP8, WarpDecodePolicy>;
+using DownLdsInterKernelFP8 = WarpDecodeDownReduceLdsInterKernel<DownProblemFP8, WarpDecodePolicy>;
+using DownProblemFP8Dot2 = WarpDecodeDownReduceProblem<bf16_t,
+                                                       fp8_t,
+                                                       float,
+                                                       bf16_t,
+                                                       float,
+                                                       WScaleLayoutAll,
+                                                       kVectorFP8,
+                                                       true>;
+using DownKernelFP8Dot2 = WarpDecodeDownReduceKernel<DownProblemFP8Dot2, WarpDecodePolicy>;
+using DownProblemFP8PkF32 = WarpDecodeDownReduceProblem<bf16_t,
+                                                        fp8_t,
+                                                        float,
+                                                        bf16_t,
+                                                        float,
+                                                        WScaleLayoutAll,
+                                                        kVectorFP8,
+                                                        false,
+                                                        true>;
+using DownKernelFP8PkF32 = WarpDecodeDownReduceKernel<DownProblemFP8PkF32, WarpDecodePolicy>;
 
 struct Shape
 {
@@ -388,6 +481,78 @@ void bench_shape(const Shape& shape,
             print_row(shape.name, B, "gate_up_fp8",  make_perf(ms, flops, bytes));
         }
 
+        // ---- Gate/up FP8, BF16 dot2 accumulation ----
+        {
+            GateUpKernelFP8Dot2::Kargs kargs{
+                x_fp8_dev.GetDeviceBuffer(),
+                x_scale_fp8_dev.GetDeviceBuffer(),
+                w_gate_dev.GetDeviceBuffer(),
+                w_gate_scale_dev.GetDeviceBuffer(),
+                w_up_dev.GetDeviceBuffer(),
+                w_up_scale_dev.GetDeviceBuffer(),
+                static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                inter_dev.GetDeviceBuffer(),
+                B, HIDDEN, INTER, TOPK, E,
+                HIDDEN, HIDDEN, HIDDEN, INTER};
+
+            const float ms =
+                launch_warp_decode_gate_up<GateUpKernelFP8Dot2>(kargs, cfg);
+            const double flops = gate_up_flops(B, HIDDEN, INTER, TOPK);
+            const double bytes = gate_up_bytes(B, HIDDEN, INTER, TOPK,
+                                               element_bytes<fp8_t>(),
+                                               element_bytes<fp8_t>(),
+                                               element_bytes<bf16_t>());
+            print_row(shape.name, B, "gate_fp8_d2",  make_perf(ms, flops, bytes));
+        }
+
+        // ---- Gate/up FP8, packed FP8->FP32 + packed FP32 FMA ----
+        {
+            GateUpKernelFP8PkF32::Kargs kargs{
+                x_fp8_dev.GetDeviceBuffer(),
+                x_scale_fp8_dev.GetDeviceBuffer(),
+                w_gate_dev.GetDeviceBuffer(),
+                w_gate_scale_dev.GetDeviceBuffer(),
+                w_up_dev.GetDeviceBuffer(),
+                w_up_scale_dev.GetDeviceBuffer(),
+                static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                inter_dev.GetDeviceBuffer(),
+                B, HIDDEN, INTER, TOPK, E,
+                HIDDEN, HIDDEN, HIDDEN, INTER};
+
+            const float ms =
+                launch_warp_decode_gate_up<GateUpKernelFP8PkF32>(kargs, cfg);
+            const double flops = gate_up_flops(B, HIDDEN, INTER, TOPK);
+            const double bytes = gate_up_bytes(B, HIDDEN, INTER, TOPK,
+                                               element_bytes<fp8_t>(),
+                                               element_bytes<fp8_t>(),
+                                               element_bytes<bf16_t>());
+            print_row(shape.name, B, "gate_fp8_pkf", make_perf(ms, flops, bytes));
+        }
+
+        // ---- Gate/up FP8, multi-warp LDS-staged X ----
+        {
+            GateUpLdsXKernelFP8::Kargs kargs{
+                x_fp8_dev.GetDeviceBuffer(),
+                x_scale_fp8_dev.GetDeviceBuffer(),
+                w_gate_dev.GetDeviceBuffer(),
+                w_gate_scale_dev.GetDeviceBuffer(),
+                w_up_dev.GetDeviceBuffer(),
+                w_up_scale_dev.GetDeviceBuffer(),
+                static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                inter_dev.GetDeviceBuffer(),
+                B, HIDDEN, INTER, TOPK, E,
+                HIDDEN, HIDDEN, HIDDEN, INTER};
+
+            const float ms =
+                launch_warp_decode_gate_up<GateUpLdsXKernelFP8>(kargs, cfg);
+            const double flops = gate_up_flops(B, HIDDEN, INTER, TOPK);
+            const double bytes = gate_up_bytes(B, HIDDEN, INTER, TOPK,
+                                               element_bytes<fp8_t>(),
+                                               element_bytes<fp8_t>(),
+                                               element_bytes<bf16_t>());
+            print_row(shape.name, B, "gate_fp8_lds", make_perf(ms, flops, bytes));
+        }
+
         // ---- Gate/up BF16 ----
         {
             GateUpKernelBF16::Kargs kargs{
@@ -410,6 +575,78 @@ void bench_shape(const Shape& shape,
                                                element_bytes<fp8_t>(),
                                                element_bytes<bf16_t>());
             print_row(shape.name, B, "gate_up_bf16", make_perf(ms, flops, bytes));
+        }
+
+        // ---- Gate/up BF16, BF16 dot2 accumulation ----
+        {
+            GateUpKernelBF16Dot2::Kargs kargs{
+                x_bf16_dev.GetDeviceBuffer(),
+                nullptr,
+                w_gate_dev.GetDeviceBuffer(),
+                w_gate_scale_dev.GetDeviceBuffer(),
+                w_up_dev.GetDeviceBuffer(),
+                w_up_scale_dev.GetDeviceBuffer(),
+                static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                inter_dev.GetDeviceBuffer(),
+                B, HIDDEN, INTER, TOPK, E,
+                HIDDEN, HIDDEN, HIDDEN, INTER};
+
+            const float ms =
+                launch_warp_decode_gate_up<GateUpKernelBF16Dot2>(kargs, cfg);
+            const double flops = gate_up_flops(B, HIDDEN, INTER, TOPK);
+            const double bytes = gate_up_bytes(B, HIDDEN, INTER, TOPK,
+                                               element_bytes<bf16_t>(),
+                                               element_bytes<fp8_t>(),
+                                               element_bytes<bf16_t>());
+            print_row(shape.name, B, "gate_bf16_d2", make_perf(ms, flops, bytes));
+        }
+
+        // ---- Gate/up BF16, packed FP8->FP32 + packed FP32 FMA ----
+        {
+            GateUpKernelBF16PkF32::Kargs kargs{
+                x_bf16_dev.GetDeviceBuffer(),
+                nullptr,
+                w_gate_dev.GetDeviceBuffer(),
+                w_gate_scale_dev.GetDeviceBuffer(),
+                w_up_dev.GetDeviceBuffer(),
+                w_up_scale_dev.GetDeviceBuffer(),
+                static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                inter_dev.GetDeviceBuffer(),
+                B, HIDDEN, INTER, TOPK, E,
+                HIDDEN, HIDDEN, HIDDEN, INTER};
+
+            const float ms =
+                launch_warp_decode_gate_up<GateUpKernelBF16PkF32>(kargs, cfg);
+            const double flops = gate_up_flops(B, HIDDEN, INTER, TOPK);
+            const double bytes = gate_up_bytes(B, HIDDEN, INTER, TOPK,
+                                               element_bytes<bf16_t>(),
+                                               element_bytes<fp8_t>(),
+                                               element_bytes<bf16_t>());
+            print_row(shape.name, B, "gate_bf16_pkf", make_perf(ms, flops, bytes));
+        }
+
+        // ---- Gate/up BF16, multi-warp LDS-staged X ----
+        {
+            GateUpLdsXKernelBF16::Kargs kargs{
+                x_bf16_dev.GetDeviceBuffer(),
+                nullptr,
+                w_gate_dev.GetDeviceBuffer(),
+                w_gate_scale_dev.GetDeviceBuffer(),
+                w_up_dev.GetDeviceBuffer(),
+                w_up_scale_dev.GetDeviceBuffer(),
+                static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                inter_dev.GetDeviceBuffer(),
+                B, HIDDEN, INTER, TOPK, E,
+                HIDDEN, HIDDEN, HIDDEN, INTER};
+
+            const float ms =
+                launch_warp_decode_gate_up<GateUpLdsXKernelBF16>(kargs, cfg);
+            const double flops = gate_up_flops(B, HIDDEN, INTER, TOPK);
+            const double bytes = gate_up_bytes(B, HIDDEN, INTER, TOPK,
+                                               element_bytes<bf16_t>(),
+                                               element_bytes<fp8_t>(),
+                                               element_bytes<bf16_t>());
+            print_row(shape.name, B, "gate_bf16_lds", make_perf(ms, flops, bytes));
         }
 
         // ---- Down/reduce (shared) ----
@@ -448,6 +685,120 @@ void bench_shape(const Shape& shape,
                                             element_bytes<fp8_t>(),
                                             element_bytes<bf16_t>());
             print_row(shape.name, B, "down_reduce",  make_perf(ms, flops, bytes));
+        }
+
+        // ---- Down/reduce, BF16 dot2 accumulation ----
+        {
+            const bool use_kvector_fp8 = (INTER % (kWaveSize * kVectorFP8)) == 0;
+            float ms = 0.0f;
+            if(use_kvector_fp8)
+            {
+                DownKernelFP8Dot2::Kargs kargs{
+                    inter_dev.GetDeviceBuffer(),
+                    w_down_dev.GetDeviceBuffer(),
+                    w_down_scale_dev.GetDeviceBuffer(),
+                    static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                    static_cast<const float*>(router_wts_dev.GetDeviceBuffer()),
+                    y_dev.GetDeviceBuffer(),
+                    B, HIDDEN, INTER, TOPK, E,
+                    INTER, INTER, HIDDEN};
+                ms = launch_warp_decode_down_reduce<DownKernelFP8Dot2>(kargs, cfg);
+            }
+            else
+            {
+                DownKernelDefaultDot2::Kargs kargs{
+                    inter_dev.GetDeviceBuffer(),
+                    w_down_dev.GetDeviceBuffer(),
+                    w_down_scale_dev.GetDeviceBuffer(),
+                    static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                    static_cast<const float*>(router_wts_dev.GetDeviceBuffer()),
+                    y_dev.GetDeviceBuffer(),
+                    B, HIDDEN, INTER, TOPK, E,
+                    INTER, INTER, HIDDEN};
+                ms = launch_warp_decode_down_reduce<DownKernelDefaultDot2>(kargs, cfg);
+            }
+            const double flops = down_flops(B, HIDDEN, INTER, TOPK);
+            const double bytes = down_bytes(B, HIDDEN, INTER, TOPK,
+                                            element_bytes<bf16_t>(),
+                                            element_bytes<fp8_t>(),
+                                            element_bytes<bf16_t>());
+            print_row(shape.name, B, "down_d2",  make_perf(ms, flops, bytes));
+        }
+
+        // ---- Down/reduce, packed FP8->FP32 + packed FP32 FMA ----
+        {
+            const bool use_kvector_fp8 = (INTER % (kWaveSize * kVectorFP8)) == 0;
+            float ms = 0.0f;
+            if(use_kvector_fp8)
+            {
+                DownKernelFP8PkF32::Kargs kargs{
+                    inter_dev.GetDeviceBuffer(),
+                    w_down_dev.GetDeviceBuffer(),
+                    w_down_scale_dev.GetDeviceBuffer(),
+                    static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                    static_cast<const float*>(router_wts_dev.GetDeviceBuffer()),
+                    y_dev.GetDeviceBuffer(),
+                    B, HIDDEN, INTER, TOPK, E,
+                    INTER, INTER, HIDDEN};
+                ms = launch_warp_decode_down_reduce<DownKernelFP8PkF32>(kargs, cfg);
+            }
+            else
+            {
+                DownKernelDefaultPkF32::Kargs kargs{
+                    inter_dev.GetDeviceBuffer(),
+                    w_down_dev.GetDeviceBuffer(),
+                    w_down_scale_dev.GetDeviceBuffer(),
+                    static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                    static_cast<const float*>(router_wts_dev.GetDeviceBuffer()),
+                    y_dev.GetDeviceBuffer(),
+                    B, HIDDEN, INTER, TOPK, E,
+                    INTER, INTER, HIDDEN};
+                ms = launch_warp_decode_down_reduce<DownKernelDefaultPkF32>(kargs, cfg);
+            }
+            const double flops = down_flops(B, HIDDEN, INTER, TOPK);
+            const double bytes = down_bytes(B, HIDDEN, INTER, TOPK,
+                                            element_bytes<bf16_t>(),
+                                            element_bytes<fp8_t>(),
+                                            element_bytes<bf16_t>());
+            print_row(shape.name, B, "down_pkf", make_perf(ms, flops, bytes));
+        }
+
+        // ---- Down/reduce, multi-warp LDS-staged intermediate ----
+        {
+            const bool use_kvector_fp8 = (INTER % (kWaveSize * kVectorFP8)) == 0;
+            float ms = 0.0f;
+            if(use_kvector_fp8)
+            {
+                DownLdsInterKernelFP8::Kargs kargs{
+                    inter_dev.GetDeviceBuffer(),
+                    w_down_dev.GetDeviceBuffer(),
+                    w_down_scale_dev.GetDeviceBuffer(),
+                    static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                    static_cast<const float*>(router_wts_dev.GetDeviceBuffer()),
+                    y_dev.GetDeviceBuffer(),
+                    B, HIDDEN, INTER, TOPK, E,
+                    INTER, INTER, HIDDEN};
+                ms = launch_warp_decode_down_reduce<DownLdsInterKernelFP8>(kargs, cfg);
+            }
+            else
+            {
+                DownLdsInterKernelDefault::Kargs kargs{
+                    inter_dev.GetDeviceBuffer(),
+                    w_down_dev.GetDeviceBuffer(),
+                    w_down_scale_dev.GetDeviceBuffer(),
+                    static_cast<const int32_t*>(router_ids_dev.GetDeviceBuffer()),
+                    static_cast<const float*>(router_wts_dev.GetDeviceBuffer()),
+                    y_dev.GetDeviceBuffer(),
+                    B, HIDDEN, INTER, TOPK, E,
+                    INTER, INTER, HIDDEN};
+                ms = launch_warp_decode_down_reduce<DownLdsInterKernelDefault>(kargs, cfg);
+            }
+            const double flops = down_flops(B, HIDDEN, INTER, TOPK);
+            const double bytes = down_bytes(B, HIDDEN, INTER, TOPK,
+                                            element_bytes<bf16_t>(),
+                                            element_bytes<fp8_t>(),
+                                            element_bytes<bf16_t>());
+            print_row(shape.name, B, "down_lds",  make_perf(ms, flops, bytes));
         }
     }
 }

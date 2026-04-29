@@ -44,7 +44,9 @@ template <typename XDataType_,
           typename XScaleLayout_ = WarpDecodeScaleLayout::PerTensor,
           typename WScaleLayout_ = WarpDecodeScaleLayout::PerTensor,
           typename Activation_ = ck_tile::element_wise::Silu,
-          index_t kVector_ = 1>
+          index_t kVector_ = 1,
+          bool kUseDot2_ = false,
+          bool kUsePackedFp32_ = false>
 struct WarpDecodeGateUpProblem
 {
     using XDataType            = remove_cvref_t<XDataType_>;
@@ -59,6 +61,8 @@ struct WarpDecodeGateUpProblem
 
     static constexpr index_t kBlockSize = get_warp_size();
     static constexpr index_t kVector    = kVector_;
+    static constexpr bool kUseDot2      = kUseDot2_;
+    static constexpr bool kUsePackedFp32 = kUsePackedFp32_;
 };
 
 template <typename IntermediateDataType_,
@@ -67,7 +71,9 @@ template <typename IntermediateDataType_,
           typename YDataType_,
           typename WScaleDataType_ = float,
           typename WScaleLayout_ = WarpDecodeScaleLayout::PerTensor,
-          index_t kVector_ = 1>
+          index_t kVector_ = 1,
+          bool kUseDot2_ = false,
+          bool kUsePackedFp32_ = false>
 struct WarpDecodeDownReduceProblem
 {
     using IntermediateDataType = remove_cvref_t<IntermediateDataType_>;
@@ -79,6 +85,8 @@ struct WarpDecodeDownReduceProblem
 
     static constexpr index_t kBlockSize = get_warp_size();
     static constexpr index_t kVector    = kVector_;
+    static constexpr bool kUseDot2      = kUseDot2_;
+    static constexpr bool kUsePackedFp32 = kUsePackedFp32_;
 };
 
 } // namespace ck_tile
