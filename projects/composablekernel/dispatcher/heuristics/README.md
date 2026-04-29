@@ -408,8 +408,8 @@ python convert_csv_to_parquet.py --input train.csv --output train.parquet
 # 3. Train model: LightGBM with cross-validation
 python train.py --operation grouped_conv --direction forward --dtype bf16
 
-# 4. Validate: Test on unseen shapes
-python validation/grouped_conv/validate_generalization.py
+# 4. Validate: Sanity-check on training shapes
+python validation/grouped_conv/validate_training_shapes.py
 ```
 
 ### Validation Framework
@@ -417,7 +417,6 @@ python validation/grouped_conv/validate_generalization.py
 | Test | Purpose | Shapes | Runtime | Target |
 |------|---------|--------|---------|--------|
 | `validate_training_shapes.py` | Sanity check on training data | 5 | 5-10 min | >95% efficiency |
-| `validate_generalization.py` | **Gold standard** unseen shapes | 10 | 30-60 min | >90% efficiency |
 | `validate_backward_models.py` | Backward pass prediction quality | 7 | <1 min | Reasonable predictions |
 
 ### File Structure (Grouped Conv)
@@ -438,7 +437,6 @@ dispatcher/heuristics/
     ├── validate_ml_heuristic.py       # GEMM validation
     └── grouped_conv/
         ├── validate_training_shapes.py
-        ├── validate_generalization.py
         └── validate_backward_models.py
 
 tile_engine/ops/grouped_conv/
