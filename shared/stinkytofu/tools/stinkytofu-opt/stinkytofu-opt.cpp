@@ -40,7 +40,6 @@
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 
 using namespace stinkytofu;
