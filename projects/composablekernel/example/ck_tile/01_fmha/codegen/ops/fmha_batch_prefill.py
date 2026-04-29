@@ -715,6 +715,11 @@ class KernelComponentFactory:
                 SUPPORTED_KV_MEMORY_LAYOUT,
                 SUPPORTED_KV_LOOKUP_TABLE,
             ):
+                # sink tokens are only meaningful when masking is enabled;
+                # skip the sink="t" + nomask combinations to avoid emitting
+                # kernels that can never be dispatched.
+                if sink == "t" and mask in ("no", "s_no"):
+                    continue
                 pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, sink, kv_memory_layout, kv_lookup_table))  # fmt: skip
         elif dtype in ["fp8bf16"]:
             # no need lse/dropout kernels (sink is supported via kHasSink)
@@ -735,6 +740,11 @@ class KernelComponentFactory:
                 SUPPORTED_KV_MEMORY_LAYOUT,
                 SUPPORTED_KV_LOOKUP_TABLE,
             ):
+                # sink tokens are only meaningful when masking is enabled;
+                # skip the sink="t" + nomask combinations to avoid emitting
+                # kernels that can never be dispatched.
+                if sink == "t" and mask in ("no", "s_no"):
+                    continue
                 pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, sink, kv_memory_layout, kv_lookup_table))  # fmt: skip
         else:
             assert False
