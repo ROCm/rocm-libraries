@@ -397,7 +397,7 @@ float calculateBatchnormInferenceTolerance(double xMin,
  * @param xMax            Maximum value in input tensor x
  * @param meanMin         Minimum value in mean tensor
  * @param meanMax         Maximum value in mean tensor
- * @param varianceMin     Minimum value in variance tensor
+ * @param varianceMax     Maximum value in variance tensor (unused — bound depends only on varianceMin)
  * @param varianceMax     Maximum value in variance tensor
  * @param scaleMin        Minimum value in scale tensor
  * @param scaleMax        Maximum value in scale tensor
