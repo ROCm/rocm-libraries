@@ -20,7 +20,7 @@
 #include "random.h"
 #include "sphere.h"
 
-vec3 color(const ray& r, const hittable &world) {
+vec3 color(const ray& r, const hittable_list &world) {
     ray cur_ray = r;
     vec3 cur_attenuation = vec3(1.0, 1.0, 1.0);
     for(int i = 0; i < 50; i++) {
@@ -47,9 +47,9 @@ vec3 color(const ray& r, const hittable &world) {
 }
 
 
-hittable *random_scene() {
+hittable_list random_scene() {
     int n = 500;
-    hittable **list = new hittable*[n+1];
+    sphere **list = new sphere*[n+1];
     list[0] =  new sphere(vec3(0,-1000,0), 1000, new lambertian(vec3(0.5, 0.5, 0.5)));
     int i = 1;
     for (int a = -11; a < 11; a++) {
@@ -85,7 +85,7 @@ hittable *random_scene() {
     list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
     list[i++] = new sphere(vec3(4, 1, 0), 1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
 
-    return new hittable_list(list,i);
+    return hittable_list(list,i);
 }
 
 
@@ -113,7 +113,7 @@ int main() {
     const int tiles_y = (ny + ty - 1) / ty; // Number of tiles in Y dimension
     const int total_tiles = tiles_x * tiles_y;
 
-    hittable *world = random_scene();
+    hittable_list world = random_scene();
 
     vec3 lookfrom(13,2,3);
     vec3 lookat(0,0,0);
@@ -144,7 +144,7 @@ int main() {
                             float u = float(i + random_double()) / float(nx);
                             float v = float(j + random_double()) / float(ny);
                             ray r = cam.get_ray(u, v);
-                            col += color(r, *world);
+                            col += color(r, world);
                         }
                         col /= float(ns);
                         col = vec3( sqrt(col[0]), sqrt(col[1]), sqrt(col[2]) );
