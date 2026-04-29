@@ -90,18 +90,20 @@ class ChannelRouter:
             return False
 
         # Legacy Office 365 webhook format
-        office365_pattern = r'^https://[a-zA-Z0-9-]+\.webhook\.office\.com/webhookb2/.*'
+        office365_pattern = r"^https://[a-zA-Z0-9-]+\.webhook\.office\.com/webhookb2/.*"
 
         # Power Automate workflow format
-        power_automate_pattern = r'^https://[a-zA-Z0-9-]+\.[\w.]*\.api\.powerplatform\.com(:\d+)?/powerautomate/.*'
+        power_automate_pattern = r"^https://[a-zA-Z0-9-]+\.[\w.]*\.api\.powerplatform\.com(:\d+)?/powerautomate/.*"
 
-        return bool(re.match(office365_pattern, url) or re.match(power_automate_pattern, url))
+        return bool(
+            re.match(office365_pattern, url) or re.match(power_automate_pattern, url)
+        )
 
     @staticmethod
     def sanitize_pr_title(title: str) -> str:
         """Sanitize PR title to prevent injection attacks"""
         # Remove potentially dangerous characters while preserving readability
-        return re.sub(r'[<>&"\']', '', title)
+        return re.sub(r'[<>&"\']', "", title)
 
     def _get_matching_projects_from_title(self, pr_title: str) -> List[str]:
         """Extract all matching project names from PR title tags.
@@ -137,7 +139,9 @@ class ChannelRouter:
                     return project
         return None
 
-    def determine_target_channel(self, pr_title: str, component_name: str) -> Optional[str]:
+    def determine_target_channel(
+        self, pr_title: str, component_name: str
+    ) -> Optional[str]:
         """Determine which channel to notify based on PR title and component.
 
         Routing logic:
@@ -163,17 +167,23 @@ class ChannelRouter:
 
         if len(title_matches) > 1:
             # Multiple tags - use component to disambiguate
-            logger.info(f"Multiple project tags found in PR title: {title_matches}. "
-                        f"Using component '{component_name}' to disambiguate.")
+            logger.info(
+                f"Multiple project tags found in PR title: {title_matches}. "
+                f"Using component '{component_name}' to disambiguate."
+            )
             component_project = self._get_project_from_component(component_name)
             if component_project and component_project in title_matches:
-                logger.info(f"Matched project '{component_project}' via component disambiguation")
+                logger.info(
+                    f"Matched project '{component_project}' via component disambiguation"
+                )
                 return component_project
             else:
                 # Component doesn't match any tagged project - use first tag
                 project = title_matches[0]
-                logger.warning(f"Component '{component_name}' doesn't match any tagged project. "
-                              f"Falling back to first tag: '{project}'")
+                logger.warning(
+                    f"Component '{component_name}' doesn't match any tagged project. "
+                    f"Falling back to first tag: '{project}'"
+                )
                 return project
 
         # No tags found - fall back to component matching
@@ -183,8 +193,10 @@ class ChannelRouter:
             return component_project
 
         # No match found
-        logger.info(f"No matching project found for PR title '{pr_title}' and component '{component_name}'. "
-                    f"Supported projects: {', '.join(self.PROJECT_CONFIG.keys())}. Skipping notification.")
+        logger.info(
+            f"No matching project found for PR title '{pr_title}' and component '{component_name}'. "
+            f"Supported projects: {', '.join(self.PROJECT_CONFIG.keys())}. Skipping notification."
+        )
         return None
 
 
@@ -498,10 +510,7 @@ class TeamsNotifier:
 
 def main():
     # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(levelname)s: %(message)s'
-    )
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
     parser = argparse.ArgumentParser(
         description="Send Microsoft Teams notifications for CI failures"
@@ -509,7 +518,7 @@ def main():
     parser.add_argument(
         "--project",
         default="",
-        help="Project name (e.g., miopen, rocblas). Optional if using --webhook-urls with auto-routing."
+        help="Project name (e.g., miopen, rocblas). Optional if using --webhook-urls with auto-routing.",
     )
     parser.add_argument(
         "--failure-stage",
@@ -526,24 +535,22 @@ def main():
     parser.add_argument(
         "--webhook-urls",
         default="",
-        help="JSON object mapping project names to webhook URLs (e.g., '{\"miopen\": \"url1\", \"hipdnn\": \"url2\"}')"
+        help="JSON object mapping project names to webhook URLs (e.g., '{\"miopen\": \"url1\", \"hipdnn\": \"url2\"}')",
     )
     # Legacy: single webhook URL (for backwards compatibility)
     parser.add_argument(
         "--webhook-url",
         default="",
-        help="Microsoft Teams webhook URL (legacy, use --webhook-urls for multi-project support)"
+        help="Microsoft Teams webhook URL (legacy, use --webhook-urls for multi-project support)",
     )
-    parser.add_argument(
-        "--pr-number", required=True, help="Pull request number"
-    )
+    parser.add_argument("--pr-number", required=True, help="Pull request number")
     parser.add_argument(
         "--pr-title", nargs="*", default=[], help="Pull request title (optional)"
     )
     parser.add_argument(
         "--component-name",
         default="",
-        help="Component/job name for routing fallback when using --webhook-urls"
+        help="Component/job name for routing fallback when using --webhook-urls",
     )
     parser.add_argument(
         "--job-name", default="", help="Job/test name (optional, for test failures)"
@@ -583,7 +590,9 @@ def main():
 
         # Check if webhook URL exists for the matched project
         if target_project not in webhook_urls:
-            logger.warning(f"Project '{target_project}' matched but no webhook URL provided in --webhook-urls")
+            logger.warning(
+                f"Project '{target_project}' matched but no webhook URL provided in --webhook-urls"
+            )
             sys.exit(0)  # Exit with success
 
         webhook_url = webhook_urls[target_project]
@@ -591,14 +600,18 @@ def main():
 
         # Check for empty webhook URL (secret not set)
         if not webhook_url or not webhook_url.strip():
-            logger.warning(f"Webhook URL for project '{target_project}' is empty (secret may not be set)")
+            logger.warning(
+                f"Webhook URL for project '{target_project}' is empty (secret may not be set)"
+            )
             sys.exit(0)  # Exit with success
 
         # Validate webhook URL format
         if not ChannelRouter.validate_webhook_url(webhook_url):
-            logger.error(f"Invalid Teams webhook URL format for project '{target_project}'. "
-                         f"Expected: https://<tenant>.webhook.office.com/webhookb2/... or "
-                         f"https://<id>.environment.api.powerplatform.com/powerautomate/...")
+            logger.error(
+                f"Invalid Teams webhook URL format for project '{target_project}'. "
+                f"Expected: https://<tenant>.webhook.office.com/webhookb2/... or "
+                f"https://<id>.environment.api.powerplatform.com/powerautomate/..."
+            )
             sys.exit(1)
 
     elif args.webhook_url:
