@@ -101,36 +101,6 @@ namespace rocsparse
         }
     }
 
-    typedef rocsparse_status (*conjugate_batched_kernel_launch_t)(
-        rocsparse_handle, int64_t, int64_t, void**, int64_t);
-
-    rocsparse::conjugate_batched_kernel_launch_t
-        find_conjugate_batched_kernel_launch(rocsparse_datatype datatype)
-    {
-        switch(datatype)
-        {
-        case rocsparse_datatype_f32_r:
-        {
-            return conjugate_batched_kernel_launch<float>;
-        }
-        case rocsparse_datatype_f64_r:
-        {
-            return conjugate_batched_kernel_launch<double>;
-        }
-        case rocsparse_datatype_f32_c:
-        {
-            return conjugate_batched_kernel_launch<rocsparse_float_complex>;
-        }
-        case rocsparse_datatype_f64_c:
-        {
-            return conjugate_batched_kernel_launch<rocsparse_double_complex>;
-        }
-        default:
-        {
-            return nullptr;
-        }
-        }
-    }
 }
 
 rocsparse_status rocsparse::conjugate_strided_batched(rocsparse_handle   handle,
