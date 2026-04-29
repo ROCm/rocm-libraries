@@ -646,7 +646,7 @@ int main(int argc, char* argv[])
     // C++20 feature that we actually compile
     std::string s = std::format("Hello, {}! You have {} messages.", "Alice", 5);
     std::cout << s << std::endl;
-    
+
 #ifdef FFTW_MULTITHREAD
     fftw_init_threads();
     fftwf_init_threads();
