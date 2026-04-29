@@ -1003,7 +1003,157 @@ def build_dataflow_graph(four_part_capture):
         # (waits_in_window, barriers_in_window) to use without rebuilding.
         body._graph_nodes = nodes_per_body[label]
 
+    # =========================================================================
+    # SBarrier-edge collectors (cross-wave LDS-reuse)
+    # =========================================================================
+    # Two patterns mirror CMSValidator.apply_must_start_after_barriers (line 1216)
+    # and apply_barriers (line 1195):
+    #
+    #   lr_to_gr_lds_reuse  (must_start_after):
+    #     Producer LR0/LR1 -> SWaitCnt(dscnt drain) -> SBarrier -> Consumer GR
+    #
+    #   gr_to_lr_lds_reuse  (needed_by):
+    #     Producer GR -> SWaitCnt(vlcnt drain) -> SBarrier -> Consumer LR1/LR3
+    #
+    # Both demand strict ordering: the SWait must precede the SBarrier; SWait
+    # alone (no barrier) means cross-wave coherence isn't established; SBarrier
+    # alone (no wait) means the in-wave counter never drained.
+    #
+    # We collect across the unified node stream (all bodies in execution order)
+    # so cross-body patterns (DTL+LdsBuf: LR0 in ML-1 + GR in ML) form
+    # naturally — the producer's body_label and consumer's body_label may
+    # differ on the resulting DataflowEdge.
+
+    all_nodes_in_order = []
+    for label in _BODY_BUILD_ORDER:
+        all_nodes_in_order.extend(nodes_per_body[label])
+
+    barrier_edges = _collect_barrier_edges(all_nodes_in_order)
+    edges.extend(barrier_edges)
+
     return DataflowGraph(nodes=nodes_by_identity, edges=edges, captures=captures)
+
+
+def _collect_barrier_edges(nodes_in_order):
+    """Walk the unified node stream once and emit SBarrier-pattern edges.
+
+    Returns a list of DataflowEdges with edge_kind in
+    {'lr_to_gr_lds_reuse', 'gr_to_lr_lds_reuse'}.
+
+    Algorithm: for each pair (producer_kind, counter, consumer_kind, edge_kind):
+      For each producer node (in stream order):
+        Walk forward looking for SWaitCnt that drains `counter`.
+        Once found, walk further forward looking for SBarrier.
+        Once both found in correct order, every consumer node of `consumer_kind`
+        appearing after the SBarrier (until a NEW producer of producer_kind is
+        seen, which restarts the pattern) becomes the edge target.
+    """
+    out = []
+
+    # Build per-kind node lists.
+    lr_categories = {"LRA0", "LRA1", "LRA3", "LRB0", "LRB1", "LRB3"}
+    gr_categories = {"GRA", "GRB", "GR"}
+
+    # ---------- Pattern 1: LR -> SWait(dscnt) -> SBarrier -> GR ----------
+    out.extend(_collect_pattern(
+        nodes_in_order,
+        producer_categories=lr_categories,
+        consumer_categories=gr_categories,
+        counter="dscnt",
+        edge_kind="lr_to_gr_lds_reuse",
+    ))
+
+    # ---------- Pattern 2: GR -> SWait(vlcnt) -> SBarrier -> LR ----------
+    # Consumer is LR (any LR* category — typically LR1 or LR3 in CMS).
+    out.extend(_collect_pattern(
+        nodes_in_order,
+        producer_categories=gr_categories,
+        consumer_categories=lr_categories,
+        counter="vlcnt",
+        edge_kind="gr_to_lr_lds_reuse",
+    ))
+
+    return out
+
+
+def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories,
+                     counter, edge_kind):
+    """Sweep nodes_in_order and emit edges where the producer/SWait/SBarrier/
+    consumer ordering invariant holds.
+
+    State machine per producer:
+      0. Producer seen -> remember it.
+      1. Find SWaitCnt with `counter` drain after the producer.
+      2. Find SBarrier strictly after the SWait.
+      3. Every consumer of `consumer_categories` strictly after the SBarrier
+         becomes an edge target — until either:
+           - a new producer of `producer_categories` resets the pattern
+             (its own pending edges will be collected on the next iteration),
+           - or stream ends.
+    """
+    edges = []
+
+    # We do an O(N^2) sweep — for each producer, scan forward. Body sizes are
+    # at most a few hundred instructions; this is comfortably fast.
+    for i, producer in enumerate(nodes_in_order):
+        if producer.category not in producer_categories:
+            continue
+
+        wait_idx = None
+        barrier_idx = None
+        for j in range(i + 1, len(nodes_in_order)):
+            node = nodes_in_order[j]
+
+            # If we hit another producer of the same kind before completing
+            # the pattern, this producer's pattern remains unfinished — but
+            # the new producer's pattern will be collected on its own iteration.
+            # We don't break (the new producer can still share the wait/barrier
+            # if they appear after both producers).
+
+            if wait_idx is None:
+                if node.category == SWAIT_CATEGORY and \
+                        _swait_drains(node, counter) is not None:
+                    wait_idx = j
+                continue
+
+            if barrier_idx is None:
+                if node.category == SBARRIER_CATEGORY:
+                    barrier_idx = j
+                # If a new SWait appears, prefer the latest (more aggressive
+                # drain). Don't change wait_idx because a later wait still
+                # drains earlier producers — but the FIRST wait/barrier pair
+                # already establishes the invariant.
+                continue
+
+            # We have both wait_idx and barrier_idx. Now any consumer of
+            # consumer_categories at j > barrier_idx becomes an edge.
+            if node.category in consumer_categories:
+                # Determine which register the producer "passed" to the consumer.
+                # For LDS-reuse patterns, the resource is an LDS slot; we
+                # represent it via the producer's written register signature
+                # (or the GR's destination, which IS the LDS slot under DTL).
+                if edge_kind == "lr_to_gr_lds_reuse":
+                    # Producer LR -> destination vgpr; consumer GR -> destination
+                    # vgpr (under DTL=1, that vgpr is bound to the same LDS slot).
+                    # We tag the edge with the producer's destination register
+                    # since that's the resource pin.
+                    register = getattr(producer.rocisa_inst, "dst", None)
+                else:  # gr_to_lr_lds_reuse
+                    register = getattr(producer.rocisa_inst, "dst", None)
+
+                edges.append(DataflowEdge(
+                    producer=producer,
+                    consumer=node,
+                    register=register,
+                    edge_kind=edge_kind,
+                ))
+
+            # Pattern reset: a NEW producer of producer_categories ends this
+            # producer's "passing window". The new producer starts fresh.
+            if node.category in producer_categories:
+                break
+
+    return edges
 
 
 def compare_captures(default_capture, cms_capture):
