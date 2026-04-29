@@ -28,13 +28,6 @@ bool RMSnormPlanBuilder::isApplicable(
     auto anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
-                return node->computeDataType() == hipdnn_data_sdk::data_objects::DataType::FLOAT;
-            });
-    };
-
-    auto anyNodeIsNotF32Compute = [&]() {
-        return !std::all_of(
-            opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
                 return node->computeDataType()
                        == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
             });

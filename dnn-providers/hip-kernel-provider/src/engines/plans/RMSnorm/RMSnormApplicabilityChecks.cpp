@@ -76,7 +76,7 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
 
     for(const auto ioTensorId : ioTensorIds)
     {
-        const auto& tensorAttr = hip_kernel_utils::findTensorAttributes(tensorMap, ioTensorId);
+        const auto& tensorAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, ioTensorId);
         validateDataTypeIsSupported(tensorAttr.data_type(),
                                     allowedIOTypes,
                                     "RMSnorm implementation supports only FLOAT, HALF, and "
@@ -84,8 +84,8 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
     }
 
     // Only fp32 compute type is supported for now
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> allowedComputeTypes{
-        hipdnn_data_sdk::data_objects::DataType::FLOAT
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedComputeTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
 
     };
     validateConsistentDataTypes(affineTensorIds,
@@ -93,13 +93,12 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
                                 "RMSnorm affine tensors use unsupported data type.",
                                 "All affine tensors for RMSnorm must have the same data type.");
 
-    std::unordered_set<hipdnn_data_sdk::data_objects::DataType> allowedStatTypes{
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
-        hipdnn_data_sdk::data_objects::DataType::HALF};
+    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedStatTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF};
 
     validateConsistentDataTypes(statTensorIds,
-                                tensorMap,
                                 allowedStatTypes,
                                 "RMSnorm stat tensors use unsupported data type.",
                                 "All stat tensors for RMSnorm must have the same data type.");
