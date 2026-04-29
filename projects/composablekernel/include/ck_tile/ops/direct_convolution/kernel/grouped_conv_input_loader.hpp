@@ -169,7 +169,7 @@ struct InputLoader
         } // mfma_window_tmp goes out of scope — no persistent VGPR cost
     }
 
-    __device__ void fetch_tile_to_lds(int lds_buffer_index)
+    __device__ __forceinline__ void fetch_tile_to_lds(int lds_buffer_index)
     {
         if(load_active)
         {
@@ -178,7 +178,7 @@ struct InputLoader
         prefetch_tile_to_lds(lds_buffer_index);
     }
 
-    __device__ void prefetch_tile_to_lds(int lds_buffer_index)
+    __device__ __forceinline__ void prefetch_tile_to_lds(int lds_buffer_index)
     {
         if(load_active)
         {
@@ -202,14 +202,13 @@ struct InputLoader
     }
 
     // Read a given kw slice for this thread from LDS into registers.
-    // Uses precomputed element offsets — no tile_window state needed.
-    __device__ void read_from_lds(ck_tile::fp16x4_t& input_reg, int slice, int lds_buffer_index) const
+    // Uses precomputed element offsets and direct memcpy load
+    // (no buffer_view overhead).
+    __device__ __forceinline__ void read_from_lds(ck_tile::fp16x4_t& input_reg, int slice, int lds_buffer_index) const
     {
         const _Float16* base = reinterpret_cast<const _Float16*>(input_lds_ptr)
                                + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
-        auto buf = MfmaBuf{const_cast<_Float16*>(base),
-                           static_cast<ck_tile::index_t>(TC::INPUT_LDS_BUFFER_SIZE_FP16)};
-        input_reg = buf.template get<ck_tile::fp16x4_t>(mfma_lds_offsets[slice], 0, true);
+        __builtin_memcpy(&input_reg, base + mfma_lds_offsets[slice], sizeof(input_reg));
     }
 };
 

@@ -613,7 +613,7 @@ struct WeightLoader
             auto output_lds_fp16 = ck_tile::buffer_view<
                 ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
                 reinterpret_cast<_Float16*>(weight_lds),
-                static_cast<ck_tile::index_t>(TC::Weight::WEIGHT_LDS_PADDED_UINT4 *
+                static_cast<ck_tile::index_t>(TC::Weight::WEIGHT_LDS_SIZE_UINT4 *
                                               (sizeof(uint4) / sizeof(_Float16)))};
 
             using TransposeLayout = TransposeLDSLayout<4, 4, 16>;

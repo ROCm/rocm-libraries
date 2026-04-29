@@ -86,7 +86,7 @@ struct OutputWriter
     }
 
     // Convert fp32x4 accumulator to fp16x4 and write directly to global memory.
-    __device__ void flush(fp32x4_t acc_val, int p_out)
+    __device__ __forceinline__ void flush(fp32x4_t acc_val, int p_out)
     {
         // 1. Convert fp32→fp16.
         __half2 halves[2];
@@ -129,7 +129,7 @@ struct OutputWriter
 //   TC::Output::MakeDramWriteDescriptorWide(wo, C)
 //   TC::Output::OUTPUT_LDS_BUFFER_SIZE
 //   TC::Output::STORE_Q
-//   TC::Weight::WEIGHT_LDS_PADDED_UINT4
+//   TC::Weight::WEIGHT_LDS_SIZE_UINT4
 //   TC::BLOCK_Q, TC::BLOCK_C4, TC::BLOCK_C8
 template <typename TC>
 struct OutputWriterLds
@@ -182,7 +182,7 @@ struct OutputWriterLds
         lds_base = reinterpret_cast<_Float16*>(output_lds);
         row_stride_elems = wo * bc.C;
         lds_buf_size = static_cast<ck_tile::index_t>(
-            ck_tile::max(TC::Weight::WEIGHT_LDS_PADDED_UINT4, TC::Output::OUTPUT_LDS_BUFFER_SIZE) *
+            ck_tile::max(TC::Weight::WEIGHT_LDS_SIZE_UINT4, TC::Output::OUTPUT_LDS_BUFFER_SIZE) *
             (sizeof(uint4) / sizeof(_Float16)));
 
         // LDS write offset (MFMA distribution → swizzled LDS layout).
@@ -250,7 +250,7 @@ struct OutputWriterLds
     }
 
     // Convert fp32x4 accumulator to fp16x4 and write through LDS to global memory.
-    __device__ void flush(fp32x4_t acc_val, int p_out)
+    __device__ __forceinline__ void flush(fp32x4_t acc_val, int p_out)
     {
         // 1. Convert fp32→fp16.
         __half2 halves[2];

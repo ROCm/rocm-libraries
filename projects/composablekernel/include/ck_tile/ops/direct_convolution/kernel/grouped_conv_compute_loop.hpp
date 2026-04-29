@@ -52,7 +52,12 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     constexpr bool use_lds_epilogue = (cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory);
 
     static constexpr int INPUT_TOTAL = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8;
-    static constexpr int WEIGHT_LDS  = TC::Weight::WEIGHT_LDS_PADDED_UINT4;
+    // The weight loader's LDS write descriptor uses WEIGHT_LDS_PADDED_UINT4
+    // (rounded up to block_size for multi-pass tile distribution loading).
+    // But the __shared__ allocation only needs WEIGHT_LDS_SIZE_UINT4 because
+    // the DRAM pad transform marks padding rows as OOB, and the hardware
+    // suppresses LDS writes for OOB buffer_load_lds lanes.
+    static constexpr int WEIGHT_LDS  = TC::Weight::WEIGHT_LDS_SIZE_UINT4;
     static constexpr int IO_LDS      = use_lds_epilogue
                                             ? INPUT_TOTAL + TC::Output::OUTPUT_LDS_BUFFER_SIZE
                                             : INPUT_TOTAL;
