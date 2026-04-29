@@ -96,12 +96,12 @@ void cpu_hbadd(
     T* C, rocblas_int ldc )
 {
     using foo::conjugate;  // todo: fix
+    using std::imag;
 
-    assert( m >= 0 );
     assert( n >= 0 );
     assert( kd >= 0 );
     assert( ldab >= kd+1 );
-    assert( ldc >= m );
+    assert( ldc >= n );
     assert( uplo == rocblas_fill_lower || uplo == rocblas_fill_upper );
 
     // Quick return
@@ -117,8 +117,9 @@ void cpu_hbadd(
                 T Aij = Aband[ i-j + j*ldab ];
                 if (i == j)
                     assert( imag( Aij ) == 0 );
-                C[i + j*ldc] = alpha*Aij         + beta*C[i + j*ldc];
-                C[j + i*ldc] = alpha*conjugate( Aij ) + beta*C[j + i*ldc];
+                C[i + j*ldc] = alpha*Aij + beta*C[i + j*ldc];
+                if (i != j)
+                    C[j + i*ldc] = alpha*conjugate( Aij ) + beta*C[j + i*ldc];
             }
         }
     }
@@ -131,8 +132,9 @@ void cpu_hbadd(
                 T Aij = Aband[ kd-(i-j) + j*ldab ];
                 if (i == j)
                     assert( imag( Aij ) == 0 );
-                C[i + j*ldc] = alpha*Aij         + beta*C[i + j*ldc];
-                C[j + i*ldc] = alpha*conjugate( Aij ) + beta*C[j + i*ldc];
+                C[i + j*ldc] = alpha*Aij + beta*C[i + j*ldc];
+                if (i != j)
+                    C[j + i*ldc] = alpha*conjugate( Aij ) + beta*C[j + i*ldc];
             }
         }
     }

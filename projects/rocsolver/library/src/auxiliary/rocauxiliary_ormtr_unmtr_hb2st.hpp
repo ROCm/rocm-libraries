@@ -32,273 +32,370 @@
 
 #pragma once
 
+#include "auxiliary/rocauxiliary_larft.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
+#include "laset.hpp"  // todo: just for ceildiv
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+//------------------------------------------------------------------------------
 template <bool BATCHED, typename T>
-void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
-                                               const rocblas_operation trans,
-                                               const rocblas_int m,
-                                               const rocblas_int n,
-                                               const rocblas_int kd,
-                                               const rocblas_int batch_count,
-                                               size_t* size_scalars,
-                                               size_t* size_work,
-                                               size_t* size_workArr)
-{
-    // if quick return no workspace needed
-    if(m == 0 || n == 0 || kd == 0 || batch_count == 0)
-    {
-        *size_scalars = 0;
-        *size_work = 0;
-        *size_workArr = 0;
-        return;
-    }
-
-    // TODO: calculate memory requirements
-    *size_scalars = 0;
-    *size_work = 0;
-    *size_workArr = 0;
-}
-
-template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
-                                               const rocblas_operation trans,
-                                               const rocblas_int m,
-                                               const rocblas_int n,
-                                               const rocblas_int kd,
-                                               const rocblas_int batch_count,
-                                               size_t* size_scalars,
-                                               size_t* size_work,
-                                               size_t* size_work2,
-                                               size_t* size_work3,
-                                               size_t* size_work4,
-                                               size_t* size_workArr,
-                                               bool* optim_mem)
+void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const rocblas_int m,
+    const rocblas_int n,
+    const rocblas_int kd,
+    const rocblas_int batch_count,
+    size_t* size_scalars,
+    size_t* size_T,
+    size_t* size_W,
+    size_t* size_Z,
+    size_t* size_work,
+    size_t* size_workArr)
 {
     *size_scalars = 0;
+    *size_T = 0;
+    *size_W = 0;
+    *size_Z = 0;
     *size_work = 0;
-    *size_work2 = 0;
-    *size_work3 = 0;
-    *size_work4 = 0;
     *size_workArr = 0;
-    *optim_mem = true;
 
     // if quick return no workspace needed
     if(m == 0 || n == 0 || kd == 0 || batch_count == 0)
-    {
         return;
-    }
 
-    // TODO: calculate memory requirements
+    rocblas_int nz = (side == rocblas_side_left ? n : m);
+    *size_Z = sizeof(T) * kd * nz * batch_count;
+    *size_T = sizeof(T) * kd * kd * batch_count;
+    *size_W = sizeof(T) * 2*kd * kd * batch_count;
+    *size_workArr = BATCHED ? sizeof(T*) * 2 * batch_count : 0;
+printf( "getMemSize1 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
+        *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
+
+    // extra space for larft calls
+    size_t w, wa;
+    rocsolver_larft_getMemorySize<BATCHED, T>(2*kd, kd, batch_count, size_scalars, &w, &wa);
+    *size_work = std::max(*size_work, w);
+    *size_workArr = std::max(*size_workArr, wa);
+
+printf( "getMemSize2 scalars %lu, T %lu, W %lu, Z %lu, work %lu, workArr %lu\n",
+        *size_scalars, *size_T, *size_W, *size_Z, *size_work, *size_workArr );
 }
 
+//------------------------------------------------------------------------------
 template <bool COMPLEX, typename T, typename U>
-rocblas_status rocsolver_ormtr_hb2st_argCheck(rocblas_handle handle,
-                                              const rocblas_side side,
-                                              const rocblas_operation trans,
-                                              const rocblas_int m,
-                                              const rocblas_int n,
-                                              const rocblas_int kd,
-                                              T V,
-                                              const rocblas_int ldv,
-                                              U tau,  // why U? claude put last
-                                              T C,
-                                              const rocblas_int ldc)
+rocblas_status rocsolver_ormtr_hb2st_argCheck(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const rocblas_int m,
+    const rocblas_int n,
+    const rocblas_int kd,
+    T V,
+    const rocblas_int ldv,
+    U tau,  // why U? claude put last
+    T C,
+    const rocblas_int ldc)
 {
     // order is important for unit tests:
 
     // 1. invalid/non-supported values
     if(side != rocblas_side_left && side != rocblas_side_right)
+    {
+        std::cout << "side invalid: " << side << "\n";
         return rocblas_status_invalid_value;
+    }
+
     // rocblas_operation_conjugate_transpose ok for both real and complex.
     if(COMPLEX && trans == rocblas_operation_transpose)
+    {
+        std::cout << "trans invalid: " << trans << "\n";
         return rocblas_status_invalid_value;
+    }
+
     if(trans != rocblas_operation_none
        && trans != rocblas_operation_transpose
        && trans != rocblas_operation_conjugate_transpose)
+    {
+        std::cout << "trans invalid: " << trans << "\n";
         return rocblas_status_invalid_value;
+    }
 
     // 2. invalid size
-    // todo: fix ldv validation
-    if(m < 0 || n < 0 || kd < 0 || ldv < m || ldc < m)
+    if(m < 0 || n < 0 || kd < 0 || ldv < 3*kd - 1 || ldc < m)
+    {
+        std::cout << "size invalid"
+                   << ", m < 0: " << (m < 0)
+                   << ", n < 0: " << (n < 0)
+                   << ", kd < 0: " << (kd < 0)
+                   << ", ldv < 3*kd - 1: " << (ldv < 3*kd - 1)
+                   << ", ldc < m: " << (ldc < m)
+                   << "\n";
         return rocblas_status_invalid_size;
+    }
 
     // skip pointer check if querying memory size
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_status_continue;
 
     // 3. invalid pointers
-    // todo: if (m > 0 && n > 0 && kd > 0 && (!V || !tau || !C))
-    if((m > 0 && n > 0 && !V) || (kd > 0 && !tau) || (m && n && !C))
+    if(m > 0 && n > 0 && kd > 0 && (!V || !tau || !C))
+    {
+        std::cout << "ptr invalid"
+                  << ", V: " << V
+                  << ", tau: " << tau
+                  << ", C: " << C
+                  << "\n";
         return rocblas_status_invalid_pointer;
+    }
 
     return rocblas_status_continue;
 }
 
-// todo: why are there 2 templates?
-template <bool BATCHED, bool STRIDED, typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
-rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
-                                                    const rocblas_side side,
-                                                    const rocblas_operation trans,
-                                                    const rocblas_int m,
-                                                    const rocblas_int n,
-                                                    const rocblas_int kd,
-                                                    U V,
-                                                    const rocblas_int shiftV,
-                                                    const rocblas_int ldv,
-                                                    const rocblas_stride strideV,
-                                                    T* tau,
-                                                    const rocblas_stride strideT,
-                                                    U C,
-                                                    const rocblas_int shiftC,
-                                                    const rocblas_int ldc,
-                                                    const rocblas_stride strideC,
-                                                    const rocblas_int batch_count,
-                                                    T* scalars,
-                                                    T* work,
-                                                    T** workArr)
+//------------------------------------------------------------------------------
+template <bool BATCHED, bool STRIDED, typename T, typename U>
+rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const rocblas_int m,
+    const rocblas_int n,
+    const rocblas_int kd,
+    U V,
+    const rocblas_int shiftV,  // todo
+    const rocblas_int ldv,
+    const rocblas_stride strideV,
+    T* tau,
+    const rocblas_stride strideTau,
+    U C,
+    const rocblas_int shiftC,  // todo
+    const rocblas_int ldc,
+    const rocblas_stride strideC,
+    const rocblas_int batch_count,
+    T* scalars,
+    T* Tr, const rocblas_int ldt,
+    T* W,  const rocblas_int ldw,
+    T* Z,  const rocblas_int ldz,
+    T* work,
+    T** workArr)
 {
     ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans,
                     "m:", m, "n:", n, "kd:", kd, "shiftV:", shiftV,
                     "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc,
                     "bc:", batch_count);
 
+    const T zero = 0;
+    const T one = 1;
+    const T negone = -1;
+
     // quick return
-    // todo: x == 0 instead of !x ?
-    if(!m || !n || !kd || !batch_count)
+    if(m == 0 || n == 0 || kd == 0 || batch_count == 0)
         return rocblas_status_success;
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // TODO: implement the main logic
-    // This will involve applying the Householder reflectors stored in V
-    // to the matrix C
+    rocblas_int nz = (side == rocblas_side_left ? n : m);  // cols in Z
+    rocblas_int mq = (side == rocblas_side_left ? m : n);  // rows in Q
+    rocblas_int nt = ceildiv( mq - 1, kd );  // block cols in A, excluding last column
+
+    rocblas_stride strideTr = ldt*kd;
+    rocblas_stride strideW  = ldw*kd;
+    rocblas_stride strideZ  = ldz*nz;
+printf( "unmtr_hb2st side %d, trans %d, m %d, n %d, kd %d, mq %d, nz %d, nt %d\n",
+        int(side), int(trans), m, n, kd, mq, nz, nt );
+
+    // k loop goes over sets of Vs that can be done in parallel.
+    // j loop goes over columns within each set.
+    // For instance, k = 0; j = 0, 1, 2 applies the (3) parallelograms k = 0 in
+    // the "k sets" figure, which can be done in parallel.
+    //
+    // |'.                              |'.
+    // | 0 '.      k sets               | 0 '.     storage order, r
+    // |'.  |'.                         |'.  |'.
+    // |-1'.| 1 '.                      | 1'.| 5 '.
+    // |'.  |'.   |'.                   |'.  |'.   |'.
+    // |-2'.| 0 '.| 2 '.                | 2'.| 6 '.| 9 '.
+    // |'.  |'.   |'.   |'.             |'.  |'.   |'.   |'.
+    // |-3'.|-1 '.| 1 '.| 3 '.          | 3'.| 7 '.|10 '.|12 '.
+    // |'.  |'.   |'.   |'.   |'.       |'.  |'.   |'.   |'.   |'.
+    // |-4'.|-2 '.| 0 '.| 2 '.| 4 '.    | 4'.| 8 '.|11 '.|13 '.|14 '.
+    //
+    // V stored with explicit 1's and 0's as:
+    //
+    // k =   0    -1    -2    -3    -4     1     0    -1    -2     2     1     0     3     2     4
+    // j =   0     0     0     0     0     1     1     1     1     2     2     2     3     3     4
+    //     |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.
+    // r = | 0 '.| 1 '.| 2 '.| 3 '.| 4 '.| 5 '.| 6 '.| 7 '.| 8 '.| 9 '.|10 '.|11 '.|12 '.|13 '.|14 '.
+    //      '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  |
+    //        '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|
+    //
+    //--------------------
+    // todo: should storage order be the same as application order?
+    // May be easier to do batches.
+    //
+    // |'.
+    // | 6 '.     storage order, r
+    // |'.  |'.
+    // | 9'.| 4 '.
+    // |'.  |'.   |'.
+    // |11'.| 7 '.| 2 '.
+    // |'.  |'.   |'.   |'.
+    // |13'.|10 '.|5  '.|1  '.
+    // |'.  |'.   |'.   |'.   |'.
+    // |14'.|12 '.|8  '.|3  '.|0 '.
+    //
+    // k = ( 4 ) ( 3 ) ( 2     2 ) ( 1     1 ) ( 0     0     0 ) (-1    -1 ) (-2    -2 ) (-3 ) (-4 )
+    // j = ( 4 ) ( 3 ) ( 2     3 ) ( 1     2 ) ( 0     1     2 ) ( 0     1 ) ( 0     1 ) ( 0 ) ( 0 )
+    //     |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.   |'.
+    // r = | 0 '.| 1 '.| 2 '.| 3 '.| 4 '.| 5 '.| 6 '.| 7 '.| 8 '.| 9 '.|10 '.|11 '.|12 '.|13 '.|14 '.
+    //      '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  | '.  |
+    //        '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|   '.|
+    //--------------------
+    //
+    // Apply backward (right to left) or forward (left to right)?
+    // hmm... is this opposite direction in larft?
+    bool left = (side == rocblas_side_left);
+    bool backward = left == (trans == rocblas_operation_none);
+    rocblas_int k_begin, k_end, k_step;
+    if (backward)
+    {
+        // left no-trans OR right (conj-)trans
+        k_begin = nt - 1;
+        k_end   = -nt;
+        k_step  = -1;
+    }
+    else
+    {
+        // left (conj-)trans OR right no-trans
+        k_begin = -(nt - 1);
+        k_end   = nt;
+        k_step  = 1;
+    }
+printf( "backward %d, k = %d:%d:%d\n",
+        backward, k_begin, k_end, k_step );
+
+    for (rocblas_int k = k_begin; k != k_end; k += k_step)
+    {
+        // i, j are block indices of V blocks
+        rocblas_int j_begin = std::max( 0, k );
+        rocblas_int j_end   = ceildiv( nt + k, 2 );
+        printf( "k = %d, j = %d:%d\n", k, j_begin, j_end );
+        for (rocblas_int j = j_begin; j < j_end; ++j)
+        {
+            rocblas_int i = 2*j - k;
+            rocblas_int r = i - j + j*nt - j*(j-1)/2;
+            printf( "k = %d, j = %d, i = %d, r = %d\n",
+                    k, j, i, r );
+
+            // For side = left,  ii is top row of C block.
+            // for side = right, ii is left col of C block.
+            rocblas_int ii = i*kd + 1;  // top row of V and C block
+
+            // V block is dim: (mv x kv)
+            rocblas_int mv = std::min( 2*kd - 1, mq - ii );
+            rocblas_int kv = std::min( mv, kd );
+
+            // jp indexes T, W, Z arrays for operations in parallel.
+            // T, W are block cols; Z is block rows.
+            // T = [ T0, T1, ... ]
+            // W = [ W0, W1, ... ]
+            // Z = [ Z0  ]
+            //     [ Z1  ]
+            //     [ ... ]
+            rocblas_int jp = 0;  // (j - j_begin)*kd;
+
+            // Generate T, dim: (kv x kv)
+            rocsolver_larft_template<T>(
+                handle, rocblas_forward_direction, rocblas_column_wise,
+                mv, kv,
+                V, r*kd*ldv, ldv, strideV,
+                &tau[ r*kd ], strideTau,
+                &Tr[ jp*ldt ], ldt, strideTr,
+                batch_count, scalars, work, workArr );
+
+            // Rest of code is equivalent to larfb to apply a block reflector,
+            // but using gemm instead of trmm.
+            // W = V * op(T), dim: (mv x kv) = (mv x kv) (kv x kv)
+            auto opT = backward ? rocblas_operation_none
+                                : rocblas_operation_conjugate_transpose;
+            rocsolver_gemm(
+                handle, rocblas_operation_none, opT,
+                mv, kv, kv,
+                &one,  V,  r*kd*ldv, ldv, strideV,
+                       Tr, jp*ldt,   ldt, strideTr,
+                &zero, W,  jp*ldw,   ldw, strideW,
+                batch_count, workArr );
+
+            if (left)
+            {
+                printf( "left\n" );
+                // Update block row Ci.
+                // Ci = op(Q) Ci = (I - V op(T) V^H) Ci
+                //    = Ci - (V op(T)) (V^H Ci)
+                //    = Ci - W Z
+
+                // Z = V^H Ci  (kv x n) = (mv x kv)^H (mv x n)
+                rocsolver_gemm(
+                    handle,
+                    rocblas_operation_conjugate_transpose,
+                    rocblas_operation_none,
+                    kv, n, mv,
+                    &one,  V, r*kd*ldv, ldv, strideV,
+                           C, ii,       ldc, strideC,
+                    &zero, Z, jp,       ldz, strideZ,
+                    batch_count, workArr );
+
+                // Ci -= W Z  (mv x n) = (mv x kv) (kv x n)
+                rocsolver_gemm(
+                    handle,
+                    rocblas_operation_none,
+                    rocblas_operation_none,
+                    mv, n, kv,
+                    &negone, W, jp*ldw, ldw, strideW,
+                             Z, jp,     ldz, strideZ,
+                    &one,    C, ii,     ldc, strideC,
+                    batch_count, workArr );
+            }
+            else // right
+            {
+                printf( "right\n" );
+                // Update block col Ci.
+                // Ci = Ci op(Q) = Ci (I - V op(T) V^H)
+                //    = Ci - (Ci V) (op(T) V^H)
+                //    = Ci - Z^H W^H
+                // W = V op(T)^H, above.
+
+                // Z = V^H Ci^H, dim: (kv x m) = (mv x kv)^H (m x mv)^H
+                // todo: perhaps different opA, opB would be better performance,
+                // but less important since side = right is not used in heev*.
+                rocsolver_gemm(
+                    handle,
+                    rocblas_operation_conjugate_transpose,
+                    rocblas_operation_conjugate_transpose,
+                    kv, n, mv,
+                    &one,  V, r*kd*ldv, ldv, strideV,
+                           C, ii,       ldc, strideC,
+                    &zero, Z, jp,       ldz, strideZ,
+                    batch_count, workArr );
+
+                // Ci -= Z^H W^H, dim: (m x mv) = (kv x m)^H (mv x kv)^H
+                rocsolver_gemm(
+                    handle,
+                    rocblas_operation_conjugate_transpose,
+                    rocblas_operation_conjugate_transpose,
+                    m, mv, kv,
+                    &negone, W, jp*ldw, ldw, strideW,
+                             Z, jp,     ldz, strideZ,
+                    &one,    C, ii,     ldc, strideC,
+                    batch_count, workArr );
+            }
+        }
+    }
 
     return rocblas_status_success;
-}
-
-template <bool BATCHED, bool STRIDED, typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
-rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
-                                                    const rocblas_side side,
-                                                    const rocblas_operation trans,
-                                                    const rocblas_int m,
-                                                    const rocblas_int n,
-                                                    const rocblas_int kd,
-                                                    U V,
-                                                    const rocblas_int shiftV,
-                                                    const rocblas_int ldv,
-                                                    const rocblas_stride strideV,
-                                                    T* tau,
-                                                    const rocblas_stride strideT,
-                                                    U C,
-                                                    const rocblas_int shiftC,
-                                                    const rocblas_int ldc,
-                                                    const rocblas_stride strideC,
-                                                    const rocblas_int batch_count,
-                                                    T* scalars,
-                                                    T* work,
-                                                    void* work2,
-                                                    void* work3,
-                                                    void* work4,
-                                                    T** workArr,
-                                                    bool optim_mem)
-{
-    ROCSOLVER_ENTER("ormtr_unmtr_hb2st", "side:", side, "trans:", trans,
-                    "m:", m, "n:", n, "kd:", kd, "shiftV:", shiftV,
-                    "ldv:", ldv, "shiftC:", shiftC, "ldc:", ldc,
-                    "bc:", batch_count);
-
-    // quick return
-    if(!m || !n || !kd || !batch_count)
-        return rocblas_status_success;
-
-    hipStream_t stream;
-    rocblas_get_stream(handle, &stream);
-
-    // TODO: implement the main logic
-    // This will involve applying the Householder reflectors stored in V
-    // to the matrix C
-
-    return rocblas_status_success;
-}
-
-/** Adapts V and C to be of the same type **/
-template <bool BATCHED, bool STRIDED, typename T>
-rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
-                                                    const rocblas_side side,
-                                                    const rocblas_operation trans,
-                                                    const rocblas_int m,
-                                                    const rocblas_int n,
-                                                    const rocblas_int kd,
-                                                    T* const V[],
-                                                    const rocblas_int shiftV,
-                                                    const rocblas_int ldv,
-                                                    const rocblas_stride strideV,
-                                                    T* tau,
-                                                    const rocblas_stride strideT,
-                                                    T* C,
-                                                    const rocblas_int shiftC,
-                                                    const rocblas_int ldc,
-                                                    const rocblas_stride strideC,
-                                                    const rocblas_int batch_count,
-                                                    T* scalars,
-                                                    T* work,
-                                                    T** workArr)
-{
-    hipStream_t stream;
-    rocblas_get_stream(handle, &stream);
-
-    rocblas_int blocks = (batch_count - 1) / 256 + 1;
-    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, workArr, C, strideC,
-                            batch_count);
-
-    return rocsolver_ormtr_unmtr_hb2st_template<BATCHED, STRIDED>(
-        handle, side, trans, m, n, kd, V, shiftV, ldv, strideV, tau, strideT,
-        cast2constType(workArr), shiftC, ldc, strideC, batch_count, scalars, work,
-        workArr + batch_count);
-}
-
-template <bool BATCHED, bool STRIDED, typename T>
-rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
-                                                    const rocblas_side side,
-                                                    const rocblas_operation trans,
-                                                    const rocblas_int m,
-                                                    const rocblas_int n,
-                                                    const rocblas_int kd,
-                                                    T* const V[],
-                                                    const rocblas_int shiftV,
-                                                    const rocblas_int ldv,
-                                                    const rocblas_stride strideV,
-                                                    T* tau,
-                                                    const rocblas_stride strideT,
-                                                    T* C,
-                                                    const rocblas_int shiftC,
-                                                    const rocblas_int ldc,
-                                                    const rocblas_stride strideC,
-                                                    const rocblas_int batch_count,
-                                                    T* scalars,
-                                                    T* work,
-                                                    void* work2,
-                                                    void* work3,
-                                                    void* work4,
-                                                    T** workArr,
-                                                    bool optim_mem)
-{
-    hipStream_t stream;
-    rocblas_get_stream(handle, &stream);
-
-    rocblas_int blocks = (batch_count - 1) / 256 + 1;
-    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, workArr, C, strideC,
-                            batch_count);
-
-    return rocsolver_ormtr_unmtr_hb2st_template<BATCHED, STRIDED>(
-        handle, side, trans, m, n, kd, V, shiftV, ldv, strideV, tau, strideT,
-        cast2constType(workArr), shiftC, ldc, strideC, batch_count, scalars, work, work2, work3,
-        work4, workArr + batch_count, optim_mem);
 }
 
 ROCSOLVER_END_NAMESPACE

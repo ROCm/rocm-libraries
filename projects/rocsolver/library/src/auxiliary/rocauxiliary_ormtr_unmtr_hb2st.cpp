@@ -67,47 +67,49 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
     rocblas_int batch_count = 1;
 
     // memory workspace sizes:
-    bool optim_mem;
     size_t size_scalars;
-    size_t size_work, size_work2, size_work3, size_work4;
-    size_t size_workArr;
-    rocsolver_ormtr_unmtr_hb2st_getMemorySize<false, false, T>(
+    size_t size_Tr, size_W, size_Z;
+    size_t size_work, size_workArr;
+    rocsolver_ormtr_unmtr_hb2st_getMemorySize<false, T>(
         side, trans, m, n, kd, batch_count,
-        &size_scalars, &size_work, &size_work2, &size_work3,
-        &size_work4, &size_workArr, &optim_mem);
+        &size_scalars, &size_Tr, &size_W, &size_Z,
+        &size_work, &size_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
     {
         return rocblas_set_optimal_device_memory_size(
-            handle, size_scalars, size_work, size_work2,
-            size_work3, size_work4, size_workArr);
+            handle, size_scalars, size_Tr, size_W, size_Z,
+            size_work, size_workArr);
     }
 
     // memory workspace allocation
-    void *scalars, *work, *work2, *work3, *work4, *workArr;
+    T *scalars, *Tr, *W, *Z, *work, **workArr;
     rocblas_device_malloc mem(
-        handle, size_scalars, size_work, size_work2, size_work3, size_work4,
-        size_workArr);
+        handle, size_scalars, size_Tr, size_W, size_Z, size_work, size_workArr);
     if(!mem)
         return rocblas_status_memory_error;
 
-    scalars = mem[0];
-    work = mem[1];
-    work2 = mem[2];
-    work3 = mem[3];
-    work4 = mem[4];
-    workArr = mem[5];
+    scalars = (T*) mem[0];
+    Tr      = (T*) mem[1];
+    W       = (T*) mem[2];
+    Z       = (T*) mem[3];
+    work    = (T*) mem[4];
+    workArr = (T**) mem[5];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
     // execution
+    // todo: these ld should come from getMemorySize.
+    rocblas_int ldt = kd;
+    rocblas_int ldw = 2*kd;
+    rocblas_int ldz = kd;
     return rocsolver_ormtr_unmtr_hb2st_template<false, false, T>(
         handle, side, trans, m, n, kd,
         V, shiftV, ldv, strideV,
         tau, strideT,
         C, shiftC, ldc, strideC,
         batch_count,
-        (T*)scalars, (T*)work, work2, work3, work4, (T**)workArr, optim_mem);
+        scalars, Tr, ldt, W, ldw, Z, ldz, work, workArr);
 }
 
 ROCSOLVER_END_NAMESPACE
