@@ -326,6 +326,155 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     }
 }
 
+TYPED_TEST(RocprimDeviceSegmentedReduce, ReduceFixedSize)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using Config
+        = algo_config_t<TestFixture::params::algo, TestFixture::params::use_default_config>;
+
+    using input_type                          = typename TestFixture::params::input_type;
+    using output_type                         = typename TestFixture::params::output_type;
+    using reduce_op_type                      = typename TestFixture::params::reduce_op_type;
+    using offset_type                         = unsigned int;
+    constexpr unsigned int min_segment_length = TestFixture::params::min_segment_length + 1;
+    constexpr unsigned int max_segment_length = TestFixture::params::max_segment_length;
+
+    reduce_op_type reduce_op;
+
+    constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;
+
+    const input_type init              = input_type{TestFixture::params::init};
+    const bool       debug_synchronous = false;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        std::default_random_engine                     gen(seed_value);
+        common::uniform_int_distribution<unsigned int> segment_length_dis(min_segment_length,
+                                                                          max_segment_length);
+        const unsigned int                             segment_length = segment_length_dis(gen);
+        SCOPED_TRACE(testing::Message() << "with segment_length = " << segment_length);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            const unsigned int segments_count
+                = ::rocprim::detail::ceiling_div(size, segment_length);
+            size = segments_count * segment_length;
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            hipStream_t stream = 0; // default
+            if(TestFixture::params::use_graphs)
+            {
+                // Default stream does not support hipGraph stream capture, so create one
+                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            }
+
+            // Generate data and calculate expected results
+            std::vector<input_type> values_input
+                = test_utils::get_random_data_wrapped<input_type>(size, 0, 100, seed_value);
+
+            std::vector<output_type> aggregates_expected;
+            for(size_t offset = 0; offset < size; offset += segment_length)
+            {
+                output_type  aggregate = init;
+                const size_t end       = offset + segment_length;
+                for(size_t i = offset; i < end; i++)
+                {
+                    aggregate = reduce_op(aggregate, values_input[i]);
+                }
+                aggregates_expected.push_back(aggregate);
+            }
+
+            // intermediate results for segmented reduce are stored as output_type,
+            // but reduced by the reduce_op_type operation,
+            // however that opeartion uses the same output_type for all tests
+            const float precision = test_utils::is_plus_operator<reduce_op_type>::value
+                                        ? test_utils::precision<output_type> * segment_length
+                                        : 0;
+            if(precision > 0.5)
+            {
+                std::cout << "Test is skipped from size " << size
+                          << " on, potential error of summation is more than 0.5 of the result "
+                             "with current or larger size"
+                          << std::endl;
+                continue;
+            }
+
+            common::device_ptr<input_type>  d_values_input(values_input);
+            common::device_ptr<output_type> d_aggregates_output(segments_count);
+
+            size_t temp_storage_bytes;
+
+            HIP_CHECK(rocprim::segmented_reduce<Config>(nullptr,
+                                                        temp_storage_bytes,
+                                                        d_values_input.get(),
+                                                        d_aggregates_output.get(),
+                                                        segments_count,
+                                                        segment_length,
+                                                        reduce_op,
+                                                        init,
+                                                        stream,
+                                                        debug_synchronous));
+
+            ASSERT_GT(temp_storage_bytes, 0);
+
+            common::device_ptr<void> d_temp_storage(temp_storage_bytes);
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            HIP_CHECK(rocprim::segmented_reduce<Config>(
+                d_temp_storage.get(),
+                temp_storage_bytes,
+                d_values_input.get(),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(
+                    d_aggregates_output.get()),
+                segments_count,
+                segment_length,
+                reduce_op,
+                init,
+                stream,
+                debug_synchronous));
+
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
+
+            const auto aggregates_output = d_aggregates_output.load();
+
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
+
+            if(size > 0)
+            {
+                const float single_op_precision = precision / segment_length;
+
+                for(size_t i = 0; i < aggregates_output.size(); ++i)
+                {
+                    ASSERT_NO_FATAL_FAILURE(
+                        test_utils::assert_near(aggregates_output[i],
+                                                aggregates_expected[i],
+                                                single_op_precision * (segment_length - 1)));
+                }
+            }
+        }
+    }
+}
+
 template<bool use_graphs = false>
 void testLargeIndices()
 {
