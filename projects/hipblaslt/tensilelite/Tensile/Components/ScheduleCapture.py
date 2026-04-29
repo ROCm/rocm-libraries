@@ -1156,6 +1156,284 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
     return edges
 
 
+# =============================================================================
+# Cross-graph comparison + diagnostic classifier
+# =============================================================================
+#
+# compare_graphs takes the default-side (reference) and CMS-side (subject)
+# graphs and returns a list of typed Failures explaining every reference
+# edge that's missing from the subject graph.
+#
+# diagnose_missing_edge classifies a single missing edge into one of:
+#   OrderInvertedFailure       — same-body producer position > consumer position
+#   MissingWaitFailure         — no SWait on the right counter in the window
+#   WaitOnWrongCounterFailure  — SWait exists but drains the wrong counter
+#   WaitInsufficientFailure    — SWait counter value too lax
+#   MissingBarrierFailure      — wait covers but no barrier in window (LDS-reuse only)
+#
+# The classifier emits Failures the user fixes by editing their CMS schedule;
+# capture-pipeline bugs (missing nodes, identity mismatches) are caught as
+# CaptureConsistencyError BEFORE comparison runs.
+
+
+def compare_graphs(reference: DataflowGraph, subject: DataflowGraph) -> list:
+    """Compare two dataflow graphs as edge sets keyed on
+    (producer.identity, consumer.identity, register, edge_kind).
+
+    Returns a list of Failure objects — one or more per missing edge,
+    routed through diagnose_missing_edge.
+
+    Raises CaptureConsistencyError BEFORE comparison if the two graphs'
+    node identity sets differ — a capture-pipeline bug, not a CMS schedule
+    defect.
+    """
+    # Identity-coverage check at entry, restricted to DATA-FLOW nodes
+    # (LR/LW/GR/MFMA). CMS legitimately adds/removes scheduling control
+    # flow (SWait, SBarrier, SNop) — those identity differences are NOT
+    # capture-pipeline bugs. The check guards against the only true
+    # capture-pipeline failure mode: a producer or consumer present in
+    # one capture but missing from the other.
+    _DATA_FLOW_KINDS = ("LR", "LW", "GR", "MFMA")
+
+    def _data_flow_ids(graph):
+        return {k for k in graph.nodes.keys() if k and k[0] in _DATA_FLOW_KINDS}
+
+    ref_ids = _data_flow_ids(reference)
+    subj_ids = _data_flow_ids(subject)
+    if ref_ids != subj_ids:
+        only_ref = ref_ids - subj_ids
+        only_subj = subj_ids - ref_ids
+        msg_parts = []
+        if only_ref:
+            msg_parts.append(f"in reference but not subject: {sorted(only_ref)}")
+        if only_subj:
+            msg_parts.append(f"in subject but not reference: {sorted(only_subj)}")
+        raise CaptureConsistencyError(
+            "compare_graphs: data-flow node identity sets differ. "
+            + "; ".join(msg_parts)
+        )
+
+    ref_keys = reference.edge_keys()
+    subj_keys = subject.edge_keys()
+    missing_keys = ref_keys - subj_keys
+
+    # Map missing keys back to reference edge objects for diagnosis.
+    failures = []
+    ref_edges_by_key = {
+        (e.producer.identity, e.consumer.identity, e.register, e.edge_kind): e
+        for e in reference.edges
+    }
+    for key in missing_keys:
+        ref_edge = ref_edges_by_key[key]
+        failures.extend(diagnose_missing_edge(ref_edge, subject))
+    return failures
+
+
+def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph) -> list:
+    """Classify why a reference edge is absent from the CMS subject graph.
+
+    See plan §"Comparison and diagnosis" for the phased classifier:
+      Phase 0: identity lookup (gating — missing nodes raise).
+      Phase 1: OrderInvertedFailure (same-body only — gating for Phase 2).
+      Phase 2: MissingWaitFailure / WaitOnWrongCounterFailure /
+               WaitInsufficientFailure (mutually exclusive); plus
+               MissingBarrierFailure when a wait covers but no barrier
+               sits in the post-wait window (LDS-reuse edges only).
+    """
+    p_id = ref_edge.producer.identity
+    c_id = ref_edge.consumer.identity
+    p_node = subj_graph.nodes.get(p_id)
+    c_node = subj_graph.nodes.get(c_id)
+
+    # Phase 0 — gating. Missing nodes: raise (not assert; survive python -O).
+    if p_node is None or c_node is None:
+        raise CaptureConsistencyError(
+            f"diagnose_missing_edge invoked with missing node — "
+            f"identity-coverage check at compare_graphs entry was bypassed. "
+            f"p_id={p_id} (found={p_node is not None}), "
+            f"c_id={c_id} (found={c_node is not None})."
+        )
+
+    # Phase 1 — gating: order check (same-body only).
+    if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
+        return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
+
+    # Phase 2 — independent checks. Run all; collect failures.
+    failures: list = []
+    capture = subj_graph.captures[c_node.body_label]
+
+    # Determine the counter that the producer requires.
+    expected_counter = counter_for(p_node)
+
+    # Look at SWaits in the window between producer.position and consumer.position.
+    waits = waits_in_window(capture, p_node.position, c_node.position,
+                            counter=expected_counter)
+    waits_other = waits_in_window(capture, p_node.position, c_node.position,
+                                  exclude_counter=expected_counter)
+
+    wait_failure_emitted = False
+
+    if not waits:
+        # No SWait on the expected counter at all in the window.
+        if waits_other:
+            failures.append(WaitOnWrongCounterFailure(
+                producer=p_node,
+                consumer=c_node,
+                expected_counter=expected_counter,
+                wrong_counter_waits=waits_other,
+            ))
+        else:
+            failures.append(MissingWaitFailure(
+                producer=p_node,
+                consumer=c_node,
+                counter_kind=expected_counter,
+            ))
+        wait_failure_emitted = True
+    else:
+        # At least one wait on the right counter. Check if any drains the producer.
+        if not _any_drains(waits, p_node, capture):
+            insufficient = _first_insufficient(waits, p_node, capture)
+            if insufficient is not None:
+                # Compute queue depth at the wait's position for diagnostic.
+                depth = _queue_depth_at(insufficient, p_node, capture)
+                cv = _swait_drains(insufficient, expected_counter)
+                failures.append(WaitInsufficientFailure(
+                    producer=p_node,
+                    consumer=c_node,
+                    wait=insufficient,
+                    queue_depth_at_wait=depth,
+                    counter_value=cv if cv is not None else 0,
+                ))
+                wait_failure_emitted = True
+            else:
+                # waits exist on the right counter but none drains the producer.
+                # Treat as MissingWait — every wait fired before the producer
+                # entered the queue (or the producer is positioned after every
+                # wait we found).
+                failures.append(MissingWaitFailure(
+                    producer=p_node,
+                    consumer=c_node,
+                    counter_kind=expected_counter,
+                ))
+                wait_failure_emitted = True
+
+    # Barrier check is meaningful ONLY when a covering wait actually drains
+    # the producer. If wait_failure_emitted, suppress MissingBarrier — the
+    # user's wait fix will cascade-restore barrier semantics on the next build.
+    if (ref_edge.edge_kind in ("lr_to_gr_lds_reuse", "gr_to_lr_lds_reuse")
+            and not wait_failure_emitted):
+        last_drain = _last_drain(waits, p_node, capture)
+        if last_drain is not None:
+            barriers = barriers_in_window(capture,
+                                          start=last_drain.position,
+                                          end=c_node.position)
+            if not barriers:
+                role = ("must_start_after"
+                        if ref_edge.edge_kind == "lr_to_gr_lds_reuse"
+                        else "needed_by")
+                failures.append(MissingBarrierFailure(
+                    producer=p_node, consumer=c_node, role=role,
+                ))
+
+    if not failures:
+        # Couldn't classify — capture pipeline bug or classifier bug.
+        raise UnexplainedMissingEdgeError(
+            f"diagnose_missing_edge could not classify missing edge "
+            f"{p_id} -> {c_id} (kind={ref_edge.edge_kind}). "
+            f"This indicates either a classifier bug or a capture-pipeline "
+            f"bug that bypassed earlier sanity checks."
+        )
+    return failures
+
+
+def _queue_depth_at(wait_node, producer, capture) -> int:
+    """Replay the per-counter FIFO from start of body to wait_node.position
+    and return the queue depth at the wait's moment for the producer's counter."""
+    counter = counter_for(producer)
+    depth = 0
+    for n in capture._graph_nodes:
+        if n.position >= wait_node.position:
+            break
+        if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
+            depth += 1
+        elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
+            depth += 1
+        elif n.category == SWAIT_CATEGORY:
+            cap_value = _swait_drains(n, counter)
+            if cap_value is not None and depth > cap_value:
+                # Drain to cap; same as build_dataflow_graph semantics.
+                depth = cap_value
+    return depth
+
+
+def _producer_queue_position(producer, capture) -> int:
+    """Return the producer's position in the per-counter FIFO at the moment
+    it joined (zero-indexed from the queue head AT THAT MOMENT)."""
+    counter = counter_for(producer)
+    queue_size = 0
+    for n in capture._graph_nodes:
+        if n is producer:
+            return queue_size  # producer enters at this index
+        if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
+            queue_size += 1
+        elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
+            queue_size += 1
+        elif n.category == SWAIT_CATEGORY:
+            cap_value = _swait_drains(n, counter)
+            if cap_value is not None and queue_size > cap_value:
+                queue_size = cap_value
+    return queue_size
+
+
+def _wait_drains_producer(wait_node, producer, capture) -> bool:
+    """True if `wait_node` drains `producer` — i.e. the wait's counter cap
+    is low enough that the producer's slot in the FIFO falls inside the
+    drained range at the wait's moment."""
+    counter = counter_for(producer)
+    cap_value = _swait_drains(wait_node, counter)
+    if cap_value is None:
+        return False
+    # Walk the stream up to (and including) wait_node, simulating the FIFO.
+    # Track drained producers by id() since GraphNode is mutable (not hashable).
+    queue = []        # list of producer GraphNodes
+    drained_ids = set()
+    target_id = id(producer)
+    for n in capture._graph_nodes:
+        if n.position > wait_node.position:
+            break
+        if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
+            queue.append(n)
+        elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
+            queue.append(n)
+        elif n.category == SWAIT_CATEGORY:
+            cv = _swait_drains(n, counter)
+            if cv is not None:
+                while len(queue) > cv:
+                    drained_ids.add(id(queue.pop(0)))
+    return target_id in drained_ids
+
+
+def _any_drains(waits, producer, capture) -> bool:
+    return any(_wait_drains_producer(w, producer, capture) for w in waits)
+
+
+def _first_insufficient(waits, producer, capture):
+    """Return the first wait (in stream order) that does NOT drain the producer
+    despite drainable counter. None if every wait drains, or no wait applies."""
+    for w in waits:
+        if not _wait_drains_producer(w, producer, capture):
+            return w
+    return None
+
+
+def _last_drain(waits, producer, capture):
+    """Return the latest wait that drained the producer, else None."""
+    drainers = [w for w in waits if _wait_drains_producer(w, producer, capture)]
+    if not drainers:
+        return None
+    return max(drainers, key=lambda w: w.position)
+
+
 def compare_captures(default_capture, cms_capture):
     """Initial data-movement-totals comparison rule.
 
