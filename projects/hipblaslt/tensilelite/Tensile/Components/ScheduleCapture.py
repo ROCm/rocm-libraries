@@ -139,18 +139,123 @@ class FourPartCapture:
     source: str  # 'cms' or 'default-sia3'
 
 
+# =============================================================================
+# Body labels — one entry per loop body in a FourPartCapture
+# =============================================================================
+# Stable string labels used in GraphNode.body_label and as keys in
+# DataflowGraph.captures. The numeric loop_index inside SchedulePosition is
+# derived via BODY_LABEL_TO_LOOP_INDEX so cross-body order is well-defined
+# (ML-1 < ML < NGL < NLL by construction).
+
+BODY_LABEL_ML_PREV = "ML-1"
+BODY_LABEL_ML = "ML"
+BODY_LABEL_NGL = "NGL"
+BODY_LABEL_NLL = "NLL"
+
+BODY_LABEL_TO_LOOP_INDEX = {
+    BODY_LABEL_ML_PREV: 0,
+    BODY_LABEL_ML: 1,
+    BODY_LABEL_NGL: 2,
+    BODY_LABEL_NLL: 3,
+}
+
+
+@dataclass(frozen=True)
+class GraphPosition:
+    """Like CMSValidator.SchedulePosition but defined here to keep the graph
+    builder free of a hard CMSValidator import.
+
+    Fields ordered for tuple-style comparison (loop_index, vmfma_index, sub_index).
+    """
+    loop_index: int
+    vmfma_index: int
+    sub_index: int
+
+    def __lt__(self, other) -> bool:
+        return (self.loop_index, self.vmfma_index, self.sub_index) < \
+               (other.loop_index, other.vmfma_index, other.sub_index)
+
+    def __le__(self, other) -> bool:
+        return (self.loop_index, self.vmfma_index, self.sub_index) <= \
+               (other.loop_index, other.vmfma_index, other.sub_index)
+
+    def __gt__(self, other) -> bool:
+        return (self.loop_index, self.vmfma_index, self.sub_index) > \
+               (other.loop_index, other.vmfma_index, other.sub_index)
+
+    def __ge__(self, other) -> bool:
+        return (self.loop_index, self.vmfma_index, self.sub_index) >= \
+               (other.loop_index, other.vmfma_index, other.sub_index)
+
+
+def make_position(body_label, slot) -> GraphPosition:
+    """Construct a GraphPosition from a TaggedInstruction.slot SlotKey.
+
+    The body_label maps to loop_index via BODY_LABEL_TO_LOOP_INDEX so cross-body
+    ordering is well-defined.
+    """
+    return GraphPosition(
+        loop_index=BODY_LABEL_TO_LOOP_INDEX[body_label],
+        vmfma_index=slot.mfma_index,
+        sub_index=slot.sequence,
+    )
+
+
+@dataclass
+class GraphNode:
+    """A node in the unified 4-body dataflow graph.
+
+    identity is the canonical key for cross-graph comparison: position-independent
+    (survives CMS reordering) and content-based (same producer in default and CMS
+    captures gets the same identity even if its stream position differs).
+
+    position lives in graph-builder space (loop_index spans bodies); the
+    underlying TaggedInstruction.slot is preserved on tagged_inst.
+    """
+    identity: tuple                     # (rocisa_class_name, loop_index, signature_tuple)
+    position: GraphPosition
+    category: str                       # propagated from TaggedInstruction
+    rocisa_inst: object                 # back-reference to the rocisa instruction
+    tagged_inst: TaggedInstruction      # back-reference for stream-position lookup
+    body_label: str                     # 'ML-1' | 'ML' | 'NGL' | 'NLL'
+    name: str = ""                      # human-readable label (e.g. 'LRA0[2]')
+
+
 @dataclass
 class DataflowEdge:
-    src: TaggedInstruction
-    dst: TaggedInstruction
-    register: object  # RegisterContainer; opaque here to avoid hard rocisa import
-    kind: str  # 'raw', 'wait', 'barrier'
+    """A register-flow edge in the dataflow graph.
+
+    edge_kind discriminates the three kinds of dataflow this graph models:
+      raw_intrawave        — producer SWait drains the in-wave counter
+      lr_to_gr_lds_reuse   — LR0 -> SWait -> SBarrier -> GR (write reuses LDS slot)
+      gr_to_lr_lds_reuse   — GR -> SWait -> SBarrier -> LR1 (read of just-written LDS)
+    """
+    producer: GraphNode
+    consumer: GraphNode
+    register: object                    # RegisterContainer (opaque to avoid hard rocisa import)
+    edge_kind: str                      # 'raw_intrawave' | 'lr_to_gr_lds_reuse' | 'gr_to_lr_lds_reuse'
 
 
 @dataclass
 class DataflowGraph:
-    nodes: list
-    edges: list
+    """Unified graph spanning all 4 captured bodies.
+
+    Single graph (not one per body) so cross-body edges (e.g. DTL+LdsBuf
+    previous-iteration LR0 -> current GR) are represented natively as edges
+    between nodes whose body_labels differ.
+
+    nodes is keyed by identity; the comparison rule iterates the top-level
+    edges list. Per-node adjacency is intentionally NOT stored — the
+    diagnostic classifier walks captures[body_label].instructions instead.
+    """
+    nodes: dict                         # identity -> GraphNode
+    edges: list                         # list[DataflowEdge]
+    captures: dict                      # body_label -> LoopBodyCapture
+
+    def edge_keys(self):
+        """Edge-equality keys for cross-graph diff: (p_id, c_id, register, kind)."""
+        return {(e.producer.identity, e.consumer.identity, e.register, e.edge_kind)
+                for e in self.edges}
 
 
 # =============================================================================
@@ -502,18 +607,133 @@ class LoopBodyCaptureBuilder:
         return LoopBodyCapture(instructions=list(self._instructions))
 
 
-def build_dataflow_graph(body, prev=None):
-    """Walk prev.instructions + body.instructions and build the register dataflow graph.
+# =============================================================================
+# Module-level helpers used by the graph builder, edge collectors, and classifier
+# =============================================================================
+# Defined as free functions (not methods on DataflowGraph or LoopBodyCapture)
+# so they're testable in isolation with synthetic fixtures.
 
-    Currently a skeleton that returns an empty graph. Real edge construction
-    lands in a later phase (see plan §4); the node list is populated so other
-    code can rely on the data structure shape.
+
+PRODUCER_CATEGORIES_LDS = ("LRA0", "LRA1", "LRA3", "LRB0", "LRB1", "LRB3",
+                           "LWA", "LWB", "LW")
+PRODUCER_CATEGORIES_GLOBAL = ("GRA", "GRB", "GR")
+SWAIT_CATEGORY = "SYNC"
+SBARRIER_CATEGORY = "BARRIER"
+
+
+def counter_for(node_or_category) -> str:
+    """Return the SWaitCnt counter that gates the given producer.
+
+    'dscnt' for LR/LW (LDS ops); 'vlcnt' for GR (vector-memory loads).
+
+    Raises CaptureUnknownInstructionError if asked about a category that
+    isn't one of the recognized producer kinds — graph builder should
+    never have created a node whose category is unknown.
     """
-    nodes = []
-    if prev is not None:
-        nodes.extend(prev.instructions)
-    nodes.extend(body.instructions)
-    return DataflowGraph(nodes=nodes, edges=[])
+    cat = node_or_category if isinstance(node_or_category, str) else node_or_category.category
+    if cat in PRODUCER_CATEGORIES_LDS:
+        return "dscnt"
+    if cat in PRODUCER_CATEGORIES_GLOBAL:
+        return "vlcnt"
+    raise CaptureUnknownInstructionError(
+        f"counter_for: category {cat!r} is not a recognized producer kind. "
+        f"Expected one of LR*/LW* (dscnt) or GR* (vlcnt)."
+    )
+
+
+def _swait_drains(swait_node, counter: str):
+    """Return the counter value the SWait imposes on `counter`, or None if it
+    doesn't constrain that counter.
+
+    A SWaitCnt's field is set to -1 when the counter is unconstrained
+    ('don't care'); a value >= 0 caps outstanding ops at that count.
+    """
+    inst = swait_node.rocisa_inst
+    if inst is None:
+        return None
+    if counter == "dscnt":
+        v = getattr(inst, "dscnt", -1)
+    elif counter == "vlcnt":
+        v = getattr(inst, "vlcnt", -1)
+    elif counter == "vscnt":
+        v = getattr(inst, "vscnt", -1)
+    else:
+        return None
+    if v is None or v < 0:
+        return None
+    return v
+
+
+def waits_in_window(capture, start: GraphPosition, end: GraphPosition,
+                    *, counter=None, exclude_counter=None):
+    """Return SWaitCnt nodes (as GraphNodes) whose position is in [start, end)
+    and whose counter field constrains the requested counter.
+
+    Either `counter` or `exclude_counter` may be passed, not both. If both
+    are None, returns all SWaits in the window regardless of counter.
+
+    Note: this helper takes a `capture` argument that is ALREADY a
+    LoopBodyCapture and a list of GraphNodes built over it; in practice
+    we walk the graph's nodes filtered by body. Implementation lives in
+    the graph builder's per-body cache.
+    """
+    if counter is not None and exclude_counter is not None:
+        raise ValueError("counter and exclude_counter are mutually exclusive")
+    out = []
+    for node in capture._graph_nodes if hasattr(capture, "_graph_nodes") else []:
+        if node.category != SWAIT_CATEGORY:
+            continue
+        if not (start <= node.position < end):
+            continue
+        if counter is not None:
+            if _swait_drains(node, counter) is None:
+                continue
+        if exclude_counter is not None:
+            if _swait_drains(node, exclude_counter) is not None:
+                # The wait DOES constrain the excluded counter — skip.
+                continue
+        out.append(node)
+    return out
+
+
+def barriers_in_window(capture, start: GraphPosition, end: GraphPosition):
+    """Return SBarrier nodes whose position is in (start, end) — exclusive on
+    both ends. A barrier at the producer's position doesn't cover the producer;
+    a barrier at the consumer's position doesn't precede the consumer."""
+    out = []
+    for node in capture._graph_nodes if hasattr(capture, "_graph_nodes") else []:
+        if node.category != SBARRIER_CATEGORY:
+            continue
+        if start < node.position < end:
+            out.append(node)
+    return out
+
+
+def build_dataflow_graph(four_part_capture):
+    """Build the unified 4-body register dataflow graph from a FourPartCapture.
+
+    Stub implementation: currently returns an empty graph with all 4 captures
+    populated. The real FIFO drain semantics + barrier collectors land in
+    the next commit (see plan §Stack 2.7-2.8).
+
+    The captures dict is keyed by body_label ('ML-1', 'ML', 'NGL', 'NLL').
+    For now we only seed main_loop[0] -> 'ML' and main_loop_prev[0] -> 'ML-1'
+    and the n_gl/n_ll bodies; multi-codepath support is a Phase-7 follow-up.
+    """
+    captures = {}
+    if four_part_capture is None:
+        return DataflowGraph(nodes={}, edges=[], captures=captures)
+
+    if 0 in four_part_capture.main_loop_prev:
+        captures[BODY_LABEL_ML_PREV] = four_part_capture.main_loop_prev[0]
+    if 0 in four_part_capture.main_loop:
+        captures[BODY_LABEL_ML] = four_part_capture.main_loop[0]
+    if 0 in four_part_capture.n_gl:
+        captures[BODY_LABEL_NGL] = four_part_capture.n_gl[0]
+    if 0 in four_part_capture.n_ll:
+        captures[BODY_LABEL_NLL] = four_part_capture.n_ll[0]
+
+    return DataflowGraph(nodes={}, edges=[], captures=captures)
 
 
 def compare_captures(default_capture, cms_capture):

@@ -331,58 +331,72 @@ class TestCompareCaptures:
 
 
 # =============================================================================
-# build_dataflow_graph (skeleton)
+# build_dataflow_graph (stub) and DataflowEdge/DataflowGraph dataclass shape
 # =============================================================================
+#
+# These are minimal shape tests — the real graph-builder semantics are
+# exercised in test_dataflow_graph_builder.py / test_dataflow_graph_barriers.py
+# / test_dataflow_graph_comparison.py against synthetic LoopBodyCapture
+# fixtures.
 
-class TestBuildDataflowGraphSkeleton:
-    def test_empty_body_no_prev(self):
-        body = LoopBodyCaptureBuilder().finalize()
-        g = build_dataflow_graph(body)
-        assert g.nodes == []
+class TestDataflowGraphShape:
+    def test_empty_capture_returns_empty_graph(self):
+        g = build_dataflow_graph(None)
+        assert g.nodes == {}
         assert g.edges == []
+        assert g.captures == {}
 
-    def test_nodes_include_prev_first_then_body(self):
-        prev_b = LoopBodyCaptureBuilder()
-        prev_b.append(inst="prev0", category="LRA0", iteration=0, mfma_index=0)
-        prev = prev_b.finalize()
-        body_b = LoopBodyCaptureBuilder()
-        body_b.append(inst="body0", category="LRA0", iteration=0, mfma_index=0)
-        body = body_b.finalize()
-        g = build_dataflow_graph(body, prev=prev)
-        assert [n.inst for n in g.nodes] == ["prev0", "body0"]
+    def test_four_part_capture_seeds_captures_dict(self):
+        # Build a minimal FourPartCapture with one MFMA per body so the graph
+        # builder has something to populate captures with.
+        from Tensile.Components.ScheduleCapture import (
+            BODY_LABEL_ML, BODY_LABEL_ML_PREV, BODY_LABEL_NGL, BODY_LABEL_NLL,
+        )
+        def body_with_mfma():
+            b = LoopBodyCaptureBuilder()
+            b.append(inst="m", category="MFMA", iteration=0, mfma_index=0)
+            return b.finalize()
+        cap = FourPartCapture(
+            main_loop={0: body_with_mfma()},
+            main_loop_prev={0: body_with_mfma()},
+            n_gl={0: body_with_mfma()},
+            n_ll={0: body_with_mfma()},
+            num_mfma=1, num_codepaths=1, source="cms",
+        )
+        g = build_dataflow_graph(cap)
+        assert set(g.captures.keys()) == {
+            BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL
+        }
 
-    def test_edges_empty_in_skeleton(self):
-        body_b = LoopBodyCaptureBuilder()
-        body_b.append(inst="x", category="LRA0", iteration=0, mfma_index=0)
-        body_b.append(inst="y", category="MFMA", iteration=0, mfma_index=0)
-        g = build_dataflow_graph(body_b.finalize())
-        assert g.edges == []
-
-
-# =============================================================================
-# DataflowEdge / DataflowGraph dataclasses
-# =============================================================================
 
 class TestDataflowDataclasses:
     def test_edge_construction(self):
-        b = LoopBodyCaptureBuilder()
-        b.append(inst="src", category="LRA0", iteration=0, mfma_index=0)
-        b.append(inst="dst", category="MFMA", iteration=0, mfma_index=0)
-        body = b.finalize()
-        edge = DataflowEdge(
-            src=body.instructions[0],
-            dst=body.instructions[1],
-            register=vgpr(7),
-            kind="raw",
+        from Tensile.Components.ScheduleCapture import (
+            GraphNode, GraphPosition, BODY_LABEL_ML,
         )
-        assert edge.src.inst == "src"
-        assert edge.dst.inst == "dst"
-        assert edge.kind == "raw"
+        producer = GraphNode(
+            identity=("LRA0", 1, ()), position=GraphPosition(1, 0, 0),
+            category="LRA0", rocisa_inst=None, tagged_inst=None,
+            body_label=BODY_LABEL_ML, name="LRA0[0]",
+        )
+        consumer = GraphNode(
+            identity=("MFMA", 1, ()), position=GraphPosition(1, 1, 0),
+            category="MFMA", rocisa_inst=None, tagged_inst=None,
+            body_label=BODY_LABEL_ML, name="MFMA[1]",
+        )
+        edge = DataflowEdge(
+            producer=producer, consumer=consumer,
+            register=vgpr(7), edge_kind="raw_intrawave",
+        )
+        assert edge.producer.identity == ("LRA0", 1, ())
+        assert edge.consumer.identity == ("MFMA", 1, ())
+        assert edge.edge_kind == "raw_intrawave"
 
     def test_graph_construction(self):
-        g = DataflowGraph(nodes=[], edges=[])
-        assert g.nodes == []
+        g = DataflowGraph(nodes={}, edges=[], captures={})
+        assert g.nodes == {}
         assert g.edges == []
+        assert g.captures == {}
 
 
 # =============================================================================
