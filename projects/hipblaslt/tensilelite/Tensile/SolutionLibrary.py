@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+import sys
+
 from typing import Dict
 
 from . import Properties
@@ -57,6 +59,11 @@ class IndexSolutionLibrary(SingleSolutionLibrary):
 class PlaceholderLibrary:
     Tag = 'Placeholder'
 
+    # Accumulates every distinct collision so the build can report the full
+    # set in one pass instead of crashing on the first one.
+    # Each entry: (kept_filenamePrefix, dropped_filenamePrefix).
+    _collisions = []
+
     def __init__(self, name):
         self.filenamePrefix = name
 
@@ -71,7 +78,34 @@ class PlaceholderLibrary:
         pass
 
     def merge(self, other):
-        pass
+        # Two PlaceholderLibrary leaves landing on the same dispatch slot is
+        # an input invariant violation: it means two source logic YAMLs cover
+        # the same (Hardware, OperationID, Metric, typed-Predicate) tuple but
+        # produce different per-file .dat names (typically because their
+        # DeviceNames lists differ). Whichever YAML reached this leaf first
+        # wins by virtue of `self` being preserved; the other is silently
+        # dropped from the master library.
+        #
+        # Not raising yet because we want to surface every such collision in a
+        # single build, not stop at the first one.
+        if not isinstance(other, PlaceholderLibrary):
+            return
+        if other.filenamePrefix == self.filenamePrefix:
+            return
+        PlaceholderLibrary._collisions.append(
+            (self.filenamePrefix, other.filenamePrefix))
+        print(
+            "[PlaceholderLibrary.merge] COLLISION: two source YAMLs produced "
+            "different per-file libraries for the same dispatch slot.\n"
+            f"  kept:    {self.filenamePrefix}\n"
+            f"  dropped: {other.filenamePrefix}\n"
+            "  Likely cause: duplicate DeviceNames declarations or two YAMLs "
+            "covering the same (Hardware, OperationID, Metric, typed-Predicate) "
+            "tuple. The dropped library will not be reachable through the "
+            "master at runtime.",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 class MatchingLibrary:
