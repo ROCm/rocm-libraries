@@ -598,7 +598,9 @@ class TestBuildAllGroups:
     def test_l1_ex_plain_variants_exclude_batched(self, groups):
         """L1_BLAS_EX plain _ex variants must exclude _batched."""
         for sp in groups["L1_BLAS_EX"]:
-            if sp.job_id.endswith("_ex"):
+            # plain variants end in exactly _ex (not _batched_ex or _strided_batched_ex)
+            fn = sp.job_id.split(".", 1)[1]
+            if fn.endswith("_ex") and "_batched_" not in fn:
                 assert "*_batched*" in sp.gtest_filter
 
     def test_l1_ex_batched_and_strided_no_extra_exclusion(self, groups):
@@ -667,7 +669,18 @@ class TestRecordFromDict:
 # recover_interrupted_jobs
 # ---------------------------------------------------------------------------
 
-def _make_state(job_ids: list, status: str = "running", pid: int = 99999) -> RunState:
+def _dead_pid() -> int:
+    """Return a PID that is guaranteed not to exist by starting and immediately
+    waiting on a subprocess, then returning its (now-released) PID."""
+    import subprocess
+    p = subprocess.Popen(["true"])
+    p.wait()
+    return p.pid
+
+
+def _make_state(job_ids: list, status: str = "running", pid=None) -> RunState:
+    if pid is None:
+        pid = _dead_pid()
     records = {
         jid: JobRecord(
             status=status, result="unknown", pid=pid,
@@ -693,7 +706,7 @@ def _make_all_jobs(tmp_path, job_ids: list) -> dict:
 class TestRecoverInterruptedJobs:
     def test_dead_pid_resets_to_not_started(self, tmp_path):
         """A job with a dead PID is reset so it will be re-run."""
-        state = _make_state(["G.job1"], pid=1)  # PID 1 is init — not our child
+        state = _make_state(["G.job1"])  # uses a guaranteed-dead PID
         all_jobs = _make_all_jobs(tmp_path, ["G.job1"])
         reattach = []
         recover_interrupted_jobs(state, all_jobs, reattach)
@@ -705,7 +718,7 @@ class TestRecoverInterruptedJobs:
 
     def test_dead_pid_archives_existing_log(self, tmp_path):
         """The old log is renamed to .prev before the job is re-run."""
-        state = _make_state(["G.job1"], pid=1)
+        state = _make_state(["G.job1"], pid=_dead_pid())
         all_jobs = _make_all_jobs(tmp_path, ["G.job1"])
         log = tmp_path / "G.job1.txt"
         log.write_text("old output")
@@ -717,7 +730,7 @@ class TestRecoverInterruptedJobs:
 
     def test_dead_pid_no_log_prev_log_is_none(self, tmp_path):
         """If there is no log file, prev_log stays None."""
-        state = _make_state(["G.job1"], pid=1)
+        state = _make_state(["G.job1"], pid=_dead_pid())
         all_jobs = _make_all_jobs(tmp_path, ["G.job1"])
         reattach = []
         recover_interrupted_jobs(state, all_jobs, reattach)
@@ -725,7 +738,7 @@ class TestRecoverInterruptedJobs:
 
     def test_not_running_jobs_are_ignored(self, tmp_path):
         """Jobs not in 'running' status are left untouched."""
-        state = _make_state(["G.job1"], status="finished", pid=1)
+        state = _make_state(["G.job1"], status="finished", pid=_dead_pid())
         all_jobs = _make_all_jobs(tmp_path, ["G.job1"])
         reattach = []
         recover_interrupted_jobs(state, all_jobs, reattach)
@@ -734,7 +747,11 @@ class TestRecoverInterruptedJobs:
 
     def test_pid_none_treated_as_dead(self, tmp_path):
         """A running job with pid=None (should not normally happen) is reset."""
-        state = _make_state(["G.job1"], pid=None)
+        state = RunState(version=1, executable="", output_dir="", max_parallel=4,
+                         records={"G.job1": JobRecord(
+                             status="running", result="unknown", pid=None,
+                             start_time=1000.0, end_time=None, exit_code=None,
+                         )})
         all_jobs = _make_all_jobs(tmp_path, ["G.job1"])
         reattach = []
         recover_interrupted_jobs(state, all_jobs, reattach)
@@ -743,7 +760,7 @@ class TestRecoverInterruptedJobs:
 
     def test_mixed_dead_and_not_running(self, tmp_path):
         """Only running jobs with dead PIDs are reset; others unchanged."""
-        state = _make_state(["G.a", "G.b"], pid=1)
+        state = _make_state(["G.a", "G.b"], pid=_dead_pid())
         state.records["G.b"].status = "finished"
         state.records["G.b"].result = "pass"
         all_jobs = _make_all_jobs(tmp_path, ["G.a", "G.b"])
