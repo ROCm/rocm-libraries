@@ -22,8 +22,6 @@
 #
 ################################################################################
 
-import sys
-
 from typing import Dict
 
 from . import Properties
