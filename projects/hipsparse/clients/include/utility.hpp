@@ -7528,9 +7528,9 @@ void host_spvv(I                    nnz,
     {
         for(I i = 0; i < nnz; ++i)
         {
-            *result = *result
-                      + testing_mult(static_cast<T>(x_val[i]),
-                                     static_cast<T>(y[x_ind[i] - idx_base]));
+            *result
+                = *result
+                  + testing_mult(static_cast<T>(x_val[i]), static_cast<T>(y[x_ind[i] - idx_base]));
         }
     }
 }
