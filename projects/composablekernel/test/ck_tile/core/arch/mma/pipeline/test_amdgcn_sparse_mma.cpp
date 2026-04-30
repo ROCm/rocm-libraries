@@ -560,163 +560,93 @@ const auto should_skip = [](amdgcn_target_id currentArchId) {
 };
 } // namespace
 
-template <typename Target>
-struct SparsePipelineFactory_16x16x32
+template <typename AType,
+          typename BType,
+          typename CType,
+          uint32_t WaveTileM,
+          uint32_t WaveTileN,
+          uint32_t WaveTileK,
+          MmaAccumPolicy AccumPolicy>
+struct SparsePipelineFactory
 {
-    using type =
-        SparseMmaPipeline<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::ROW_MAJOR, Target>;
+    template <typename Target>
+    struct Create
+    {
+        using type = SparseMmaPipeline<AType,
+                                       BType,
+                                       CType,
+                                       WaveTileM,
+                                       WaveTileN,
+                                       WaveTileK,
+                                       AccumPolicy,
+                                       Target>;
+    };
 };
 
-template <typename Target>
-struct SparsePipelineFactory_16x16x64
+template <typename AType,
+          typename BType,
+          typename CType,
+          uint32_t WaveTileM,
+          uint32_t WaveTileN,
+          uint32_t WaveTileK,
+          MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR>
+void SparsePipeline_Real_impl()
 {
-    using type =
-        SparseMmaPipeline<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::ROW_MAJOR, Target>;
-};
+    using Factory =
+        SparsePipelineFactory<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, AccumPolicy>;
+    using Kernel =
+        SparsePipelineKernel<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, AccumPolicy>;
 
-template <typename Target>
-struct SparsePipelineFactory_16x16x32_ColMajor
-{
-    using type =
-        SparseMmaPipeline<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::COL_MAJOR, Target>;
-};
-
-template <typename Target>
-struct SparsePipelineFactory_16x16x64_ColMajor
-{
-    using type =
-        SparseMmaPipeline<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::COL_MAJOR, Target>;
-};
-
-template <typename Target>
-struct SparsePipelineFactory_16x16x128
-{
-    using type = SparseMmaPipeline<fp16_t,
-                                   fp16_t,
-                                   fp32_t,
-                                   16u,
-                                   16u,
-                                   128u,
-                                   MmaAccumPolicy::ROW_MAJOR,
-                                   Target>;
-};
-
-template <typename Target>
-struct SparsePipelineFactory_16x16x256
-{
-    using type = SparseMmaPipeline<fp16_t,
-                                   fp16_t,
-                                   fp32_t,
-                                   16u,
-                                   16u,
-                                   256u,
-                                   MmaAccumPolicy::ROW_MAJOR,
-                                   Target>;
-};
-
-template <typename Target>
-struct SparsePipelineFactory_16x16x128_ColMajor
-{
-    using type = SparseMmaPipeline<fp16_t,
-                                   fp16_t,
-                                   fp32_t,
-                                   16u,
-                                   16u,
-                                   128u,
-                                   MmaAccumPolicy::COL_MAJOR,
-                                   Target>;
-};
-
-template <typename Target>
-struct SparsePipelineFactory_16x16x256_ColMajor
-{
-    using type = SparseMmaPipeline<fp16_t,
-                                   fp16_t,
-                                   fp32_t,
-                                   16u,
-                                   16u,
-                                   256u,
-                                   MmaAccumPolicy::COL_MAJOR,
-                                   Target>;
-};
+    mma_pipeline_test::
+        run_pipeline_matrix_test<Factory::template Create, Kernel, AType, BType, CType>(
+            WaveTileM, WaveTileN, WaveTileK, should_skip, Kernel{}, /*isSparse=*/true);
+}
 
 // Full matrix verification: 16x16x32 single-fragment sparse pipeline (ROW_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x32)
 {
-    using Kernel =
-        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::ROW_MAJOR>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x32>(
-        16u, 16u, 32u, should_skip, Kernel{}, /*isSparse=*/true);
+    SparsePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u>();
 }
 
 // Multi-fragment K: 16x16x64 -> 2 K fragments, tests internal K iteration (ROW_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x64)
 {
-    using Kernel =
-        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::ROW_MAJOR>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x64>(
-        16u, 16u, 64u, should_skip, Kernel{}, true);
+    SparsePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u>();
 }
 
 // Full matrix verification: 16x16x32 single-fragment sparse pipeline (COL_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x32_ColMajor)
 {
-    using Kernel =
-        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::COL_MAJOR>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x32_ColMajor>(
-        16u, 16u, 32u, should_skip, Kernel{}, true);
+    SparsePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::COL_MAJOR>();
 }
 
 // Multi-fragment K: 16x16x64 -> 2 K fragments, tests internal K iteration (COL_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x64_ColMajor)
 {
-    using Kernel =
-        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::COL_MAJOR>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x64_ColMajor>(
-        16u, 16u, 64u, should_skip, Kernel{}, true);
+    SparsePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 64u, MmaAccumPolicy::COL_MAJOR>();
 }
 
 // Multi-fragment K: 16x16x128 -> 4 K fragments, exercises multi-word SparseIdxPack (ROW_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x128)
 {
-    using Kernel =
-        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 128u, MmaAccumPolicy::ROW_MAJOR>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x128>(
-        16u, 16u, 128u, should_skip, Kernel{}, true);
+    SparsePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 128u>();
 }
 
 // Multi-fragment K: 16x16x256 -> 8 K fragments, exercises larger multi-word SparseIdxPack
 // (ROW_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x256)
 {
-    using Kernel =
-        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 256u, MmaAccumPolicy::ROW_MAJOR>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x256>(
-        16u, 16u, 256u, should_skip, Kernel{}, true);
+    SparsePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 256u>();
 }
 
 // Multi-fragment K: 16x16x128 -> 4 K fragments (COL_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x128_ColMajor)
 {
-    using Kernel =
-        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 128u, MmaAccumPolicy::COL_MAJOR>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x128_ColMajor>(
-        16u, 16u, 128u, should_skip, Kernel{}, true);
+    SparsePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 128u, MmaAccumPolicy::COL_MAJOR>();
 }
 
 // Multi-fragment K: 16x16x256 -> 8 K fragments (COL_MAJOR)
 TEST(SparseMmaPipeline, FullMatrixVerify_16x16x256_ColMajor)
 {
-    using Kernel =
-        SparsePipelineKernel<fp16_t, fp16_t, fp32_t, 16u, 16u, 256u, MmaAccumPolicy::COL_MAJOR>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<SparsePipelineFactory_16x16x256_ColMajor>(
-        16u, 16u, 256u, should_skip, Kernel{}, true);
+    SparsePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 256u, MmaAccumPolicy::COL_MAJOR>();
 }

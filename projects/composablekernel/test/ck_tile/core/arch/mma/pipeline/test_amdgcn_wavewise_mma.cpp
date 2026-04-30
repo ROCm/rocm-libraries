@@ -77,92 +77,93 @@ const auto should_skip = [](amdgcn_target_id currentArchId) {
 };
 } // namespace
 
-template <typename Target>
-struct WaveWisePipelineFactory_16x16x32
+template <typename AType,
+          typename BType,
+          typename CType,
+          uint32_t WaveTileM,
+          uint32_t WaveTileN,
+          uint32_t WaveTileK,
+          MmaAccumPolicy AccumPolicy>
+struct WaveWisePipelineFactory
 {
-    using type = WaveWiseMmaPipeline<fp16_t,
-                                     fp16_t,
-                                     fp32_t,
-                                     16u,
-                                     16u,
-                                     32u,
-                                     MmaOpFamily::DENSE,
-                                     MmaAccumPolicy::ROW_MAJOR,
-                                     false,
-                                     Target>;
+    template <typename Target>
+    struct Create
+    {
+        using type = WaveWiseMmaPipeline<AType,
+                                         BType,
+                                         CType,
+                                         WaveTileM,
+                                         WaveTileN,
+                                         WaveTileK,
+                                         MmaOpFamily::DENSE,
+                                         AccumPolicy,
+                                         false,
+                                         Target>;
+    };
 };
 
-template <typename Target>
-struct WaveWisePipelineFactory_16x16x32_ColMajor
+template <typename AType,
+          typename BType,
+          typename CType,
+          uint32_t WaveTileM,
+          uint32_t WaveTileN,
+          uint32_t WaveTileK,
+          MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
+          bool TransposeC            = false>
+void WaveWisePipeline_Real_impl()
 {
-    using type = WaveWiseMmaPipeline<fp16_t,
-                                     fp16_t,
-                                     fp32_t,
-                                     16u,
-                                     16u,
-                                     32u,
-                                     MmaOpFamily::DENSE,
-                                     MmaAccumPolicy::COL_MAJOR,
-                                     false,
-                                     Target>;
-};
+    using Factory =
+        WaveWisePipelineFactory<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK, AccumPolicy>;
+    using Kernel = WaveWisePipelineKernel<AType,
+                                          BType,
+                                          CType,
+                                          WaveTileM,
+                                          WaveTileN,
+                                          WaveTileK,
+                                          AccumPolicy,
+                                          TransposeC>;
+
+    mma_pipeline_test::
+        run_pipeline_matrix_test<Factory::template Create, Kernel, AType, BType, CType>(
+            WaveTileM,
+            WaveTileN,
+            WaveTileK,
+            should_skip,
+            Kernel{},
+            /*isSparse=*/false,
+            /*transposeExpected=*/TransposeC);
+}
 
 TEST(WaveWiseMmaPipeline, FullMatrixVerify_16x16x32)
 {
-    using Kernel = WaveWisePipelineKernel<fp16_t,
-                                          fp16_t,
-                                          fp32_t,
-                                          16u,
-                                          16u,
-                                          32u,
-                                          MmaAccumPolicy::ROW_MAJOR,
-                                          false>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<WaveWisePipelineFactory_16x16x32>(
-        16u, 16u, 32u, should_skip, Kernel{});
+    WaveWisePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u>();
 }
 
 TEST(WaveWiseMmaPipeline, FullMatrixVerify_16x16x32_SwapAB)
 {
-    using Kernel = WaveWisePipelineKernel<fp16_t,
-                                          fp16_t,
-                                          fp32_t,
-                                          16u,
-                                          16u,
-                                          32u,
-                                          MmaAccumPolicy::ROW_MAJOR,
-                                          true>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<WaveWisePipelineFactory_16x16x32>(
-        16u, 16u, 32u, should_skip, Kernel{}, /*isSparse=*/false, /*transposeExpected=*/true);
+    WaveWisePipeline_Real_impl<fp16_t,
+                               fp16_t,
+                               fp32_t,
+                               16u,
+                               16u,
+                               32u,
+                               MmaAccumPolicy::ROW_MAJOR,
+                               true>();
 }
 
 TEST(WaveWiseMmaPipeline, FullMatrixVerify_16x16x32_ColMajor)
 {
-    using Kernel = WaveWisePipelineKernel<fp16_t,
-                                          fp16_t,
-                                          fp32_t,
-                                          16u,
-                                          16u,
-                                          32u,
-                                          MmaAccumPolicy::COL_MAJOR,
-                                          false>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<WaveWisePipelineFactory_16x16x32_ColMajor>(
-        16u, 16u, 32u, should_skip, Kernel{});
+    WaveWisePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, MmaAccumPolicy::COL_MAJOR>();
 }
 
 TEST(WaveWiseMmaPipeline, FullMatrixVerify_16x16x32_ColMajor_TransposeC)
 {
-    using Kernel = WaveWisePipelineKernel<fp16_t,
-                                          fp16_t,
-                                          fp32_t,
-                                          16u,
-                                          16u,
-                                          32u,
-                                          MmaAccumPolicy::COL_MAJOR,
-                                          true>;
-
-    mma_pipeline_test::run_pipeline_matrix_test<WaveWisePipelineFactory_16x16x32_ColMajor>(
-        16u, 16u, 32u, should_skip, Kernel{}, /*isSparse=*/false, /*transposeExpected=*/true);
+    WaveWisePipeline_Real_impl<fp16_t,
+                               fp16_t,
+                               fp32_t,
+                               16u,
+                               16u,
+                               32u,
+                               MmaAccumPolicy::COL_MAJOR,
+                               true>();
 }
