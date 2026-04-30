@@ -1288,7 +1288,55 @@ def _class_tag(inst) -> str:
     )
 
 
-def _identity_for(inst, body_label: str) -> tuple:
+def _class_tag_from_category(category, inst) -> str:
+    """Like _class_tag(inst) but consults TaggedInstruction.category first.
+
+    The pure isinstance path is wrong for instructions whose Python class
+    doesn't reflect their scheduler role: F32X TF32 emulation MFMAs in the
+    pack path are real MFMAInstruction objects but are categorized as
+    PackA{u}/PackB{u}. Treating them as cls='MFMA' in the identity tuple
+    causes them to appear as missing main-loop MFMAs in compare_graphs
+    when the two captures see different counts of pack-MFMAs.
+
+    Maps categories to scheduler-role tags so cross-capture comparison
+    discriminates pack-MFMAs from real MFMAs.
+
+    Falls back to _class_tag(inst) when category is None or unrecognized
+    so test sites that pass bare insts (no TaggedInstruction wrapping)
+    keep working.
+    """
+    if category is None:
+        return _class_tag(inst)
+    # Per-tensor / per-iteration suffixes -> scheduler-role tag.
+    if category.startswith(("LRA", "LRB", "LRMXSA", "LRMXSB", "LRMetadata")):
+        return "LR"
+    if category.startswith("LRS"):
+        return "LRS"
+    if category.startswith("LWS"):
+        return "LWS"
+    if category.startswith("LW"):
+        return "LW"
+    if category.startswith("GRInc"):
+        return "GRINC"
+    if category.startswith("GR"):
+        return "GR"
+    if category.startswith("Pack"):
+        return "PACK"
+    if category == "LCC":
+        return "LCC"
+    if category == "SYNC":
+        return "SWAIT"
+    if category == "SNOP":
+        return "SNOP"
+    if category == "BARRIER":
+        return "SBARRIER"
+    if category == "MFMA":
+        return "MFMA"
+    # Unrecognized category (e.g. UNKNOWN) -> fall back to isinstance.
+    return _class_tag(inst)
+
+
+def _identity_for(inst, body_label: str, category=None) -> tuple:
     """Build a content-based identity tuple for an instruction.
 
     Format: (class_tag, loop_index, canonical_render).
@@ -1302,15 +1350,22 @@ def _identity_for(inst, body_label: str) -> tuple:
     rendered assembly is what the GPU sees, and that's what we compare
     on.
 
-    class_tag (LR/LW/GR/MFMA/SWAIT/SBARRIER) is preserved as the first
-    element so the identity-mismatch diagnostic in compare_graphs can
+    class_tag (LR/LW/GR/MFMA/SWAIT/SBARRIER/PACK/...) is preserved as the
+    first element so the identity-mismatch diagnostic in compare_graphs can
     still categorize differences by kind.
 
+    `category` (TaggedInstruction.category) is consulted first when
+    provided; this prevents pack-MFMAs (TF32 emulation MFMAInstruction
+    objects categorized as PackA{u}/PackB{u}) from masquerading as
+    main-loop MFMAs in the identity tuple. When omitted, falls back to
+    pure isinstance-based classification — preserves existing test sites
+    that synthesize bare insts.
+
     Raises CaptureUnknownInstructionError when an instruction class
-    isn't one of the recognized kinds.
+    isn't one of the recognized kinds AND category is None.
     """
     loop_idx = BODY_LABEL_TO_LOOP_INDEX[body_label]
-    cls_tag = _class_tag(inst)
+    cls_tag = _class_tag_from_category(category, inst)
     return (cls_tag, loop_idx, _canonical_render(inst))
 
 
@@ -1384,7 +1439,7 @@ def _reg_overlaps(read_reg, written_reg) -> bool:
 
 def _make_node(tagged_inst, body_label: str) -> GraphNode:
     inst = tagged_inst.inst
-    identity = _identity_for(inst, body_label)
+    identity = _identity_for(inst, body_label, category=tagged_inst.category)
     position = make_position(body_label, tagged_inst.slot)
     name = f"{tagged_inst.category}@{position.vmfma_index}.{position.sub_index}"
     return GraphNode(

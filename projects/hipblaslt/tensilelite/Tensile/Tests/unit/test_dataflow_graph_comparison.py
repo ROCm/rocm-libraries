@@ -414,6 +414,49 @@ class TestRenderStringIdentity:
         # use case emerges.
         assert _canonical_render(sym) != _canonical_render(num)
 
+    def test_category_overrides_isinstance_class_tag(self):
+        """A pack-categorized MFMAInstruction (TF32 bf16-emulation pattern)
+        must not get cls_tag='MFMA' in the identity tuple — that confuses
+        compare_graphs into reporting it as a missing main-loop MFMA when
+        the two captures see different counts of pack-MFMAs.
+
+        With category provided, _identity_for must use the category as the
+        discriminator: PackA{u}/PackB{u} -> 'PACK', LRA{u} -> 'LR', etc.
+        """
+        from Tensile.Components.ScheduleCapture import (
+            _identity_for, _class_tag_from_category,
+        )
+        from rocisa.instruction import MFMAInstruction
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+
+        pack_mfma = MFMAInstruction(
+            instType=InstType.INST_BF16, accType=InstType.INST_F32,
+            variant=[4, 4, 4, 16], mfma1k=False,
+            acc=vgpr("ValuA_T0_I0", 4),
+            a=vgpr(74, 2),
+            b=vgpr("ValuA_X0_I0", 2),
+        )
+        # Without category -> isinstance fallback says 'MFMA'.
+        assert _identity_for(pack_mfma, BODY_LABEL_ML)[0] == "MFMA"
+        # With pack category -> 'PACK'.
+        assert _identity_for(pack_mfma, BODY_LABEL_ML, category="PackA0")[0] == "PACK"
+        assert _identity_for(pack_mfma, BODY_LABEL_ML, category="PackB3")[0] == "PACK"
+        # Sanity-check the underlying mapping for the other categories.
+        assert _class_tag_from_category("LRA0", pack_mfma) == "LR"
+        assert _class_tag_from_category("LRB3", pack_mfma) == "LR"
+        assert _class_tag_from_category("LWA",  pack_mfma) == "LW"
+        assert _class_tag_from_category("GRA",  pack_mfma) == "GR"
+        assert _class_tag_from_category("GRIncA", pack_mfma) == "GRINC"
+        assert _class_tag_from_category("LRSA", pack_mfma) == "LRS"
+        assert _class_tag_from_category("LWSA", pack_mfma) == "LWS"
+        assert _class_tag_from_category("LCC",  pack_mfma) == "LCC"
+        assert _class_tag_from_category("SYNC", pack_mfma) == "SWAIT"
+        assert _class_tag_from_category("BARRIER", pack_mfma) == "SBARRIER"
+        # Unrecognized category falls back to isinstance.
+        assert _class_tag_from_category("UNKNOWN", pack_mfma) == "MFMA"
+        assert _class_tag_from_category(None, pack_mfma) == "MFMA"
+
 
 # =============================================================================
 # Phase-0 missing-node defense in diagnose_missing_edge
