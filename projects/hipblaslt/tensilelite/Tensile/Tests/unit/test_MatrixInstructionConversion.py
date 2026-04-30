@@ -104,7 +104,7 @@ WorkGroup: [16, 16, 1]
     assert outputConf["EnableF32XdlMathOp"] == False
     assert outputConf["MFMA_BF16_1K"] == False
 
-    solution = defaultSolution
+    solution = dict(defaultSolution)
     solution.update(input_conf)
     solution.update(outputConf)
 
@@ -206,7 +206,7 @@ custom.config:
     assert outputConf["EnableF32XdlMathOp"] == False
     assert outputConf["MFMA_BF16_1K"] == False
 
-    solution = defaultSolution
+    solution = dict(defaultSolution)
     solution.update(inputConf)
     solution.update(outputConf)
 
