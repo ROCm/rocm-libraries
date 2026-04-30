@@ -26,11 +26,15 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
 #ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
 #endif
 
 #include <Tensile/DistinctType.hpp>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -49,3 +53,5 @@ namespace std
         return stream << static_cast<int32_t>(val);
     }
 } // namespace std
+
+TENSILE_HIDDEN_END

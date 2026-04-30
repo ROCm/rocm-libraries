@@ -38,6 +38,8 @@
 #include <Tensile/DataTypes_BFloat16.hpp>
 #include <rocisa/include/enum.hpp>
 // Using hip header for both NANOO and OCP data types
+#include <Tensile/Macros.hpp>
+
 #if defined(__HIPCC__)
 #include <hip/hip_fp8.h>
 #endif
@@ -52,6 +54,8 @@
 #include <Tensile/DataTypes_Float4.hpp>
 #include <Tensile/DataTypes_E8.hpp>
 #include <Tensile/DataTypes_E5M3.hpp>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace rocisa
 {
@@ -421,3 +425,5 @@ namespace TensileLite
  * @}
  */
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END
