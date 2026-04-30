@@ -689,6 +689,10 @@ class Solution(collections.abc.Mapping):
         if bytesLoaded < numBytesMXSB:
           reject(state, printRejectionReason, "Unable to load MXSB scales using one load per wave")
 
+      if state["PrefetchGlobalRead"] not in [0, 2]:
+        reject(state, printRejectionReason,
+               "UseSubtileImpl=1 requires PrefetchGlobalRead 0 or 2, got %d" % state["PrefetchGlobalRead"])
+
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
@@ -1392,6 +1396,12 @@ class Solution(collections.abc.Mapping):
       if not state["MIWaveTile"] or len(state["MIWaveTile"]) != 2:
         reject(state, printRejectionReason, "invalid MIWaveTile")
         return
+      if state["UseSubtileImpl"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
+        if state["MIWaveTile"][0] % 2 != 0 or state["MIWaveTile"][1] % 2 != 0:
+          reject(state, printRejectionReason,
+                 "UseSubtileImpl=1 with MX datatype requires even MIWaveTile, got [%d, %d]"
+                 % (state["MIWaveTile"][0], state["MIWaveTile"][1]))
+          return
       if isaInfoMap[isa].asmCaps["HasMFMA"]:
         if not state["ProblemType"]["HighPrecisionAccumulate"] \
            and state["ProblemType"]["DataType"].numRegisters() < 1 \
