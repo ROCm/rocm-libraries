@@ -302,6 +302,34 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
 }
 
+void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr)
+{
+    if(bnAttr.peer_stats_tensor_uid() != nullptr && !bnAttr.peer_stats_tensor_uid()->empty())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training does not support peer statistics");
+    }
+
+    std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
+    std::vector<int64_t> affineTensorIds = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
+    std::vector<int64_t> statTensorIds;
+    if(bnAttr.mean_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(bnAttr.mean_tensor_uid().value());
+    }
+    if(bnAttr.inv_variance_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
+    }
+    std::vector<int64_t> intermediateTensorIds = {bnAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
+
+    checkTensorConfigSupported(
+        ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
+}
+
 // --- Activation Mode Validators ---
 
 namespace

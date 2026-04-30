@@ -430,8 +430,8 @@ void handleMFMAModifiers(StinkyInstruction* stinkyInst, const rocisa::MFMAInstru
     // Extract neg_lo/neg_hi modifiers
     auto [negStr, hasNegLo, hasNegHi] = extractNegModifiers(instString);
 
+    // TODO: deprecated, remove this after all callers are updated to provide scaleStr
     std::string scaleStr;
-    if (mfmaInst->forceScaledWMMA()) scaleStr = ", 0, 0";
 
     MFMAModifiers mfmaModifiers(inputPermuteStr, scaleStr, negStr, false, false, hasNegLo,
                                 hasNegHi);

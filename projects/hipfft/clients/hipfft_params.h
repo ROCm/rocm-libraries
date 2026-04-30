@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -846,10 +846,10 @@ public:
     }
 
     // call the hipFFT APIs to distribute data to multiple GPUs
-    void multi_gpu_prepare(std::vector<hostbuf>& /* unused */,
-                           std::vector<gpubuf>& ibuffer,
-                           std::vector<void*>&  pibuffer,
-                           std::vector<void*>&  pobuffer) override
+    void multi_gpu_prepare(const std::vector<hostbuf>& /* unused */,
+                           const std::vector<gpubuf>& ibuffer,
+                           std::vector<void*>&        pibuffer,
+                           std::vector<void*>&        pobuffer) override
     {
         if(multiGPU <= 1)
             return;
