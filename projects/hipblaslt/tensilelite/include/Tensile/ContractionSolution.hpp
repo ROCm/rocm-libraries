@@ -211,6 +211,11 @@ namespace TensileLite
         CustomWorkspaceType workspaceType;
         size_t workspaceSizePerElemC;
         size_t workspaceSizePerElemBias;
+        // True when this CustomKernel was auto-populated for a Tensile-generated
+        // kernel (vs. a hand-written custom kernel).  Generated kernels still
+        // rely on sizeMapping for workspace/Stream-K decisions, so several code
+        // paths must treat them like the legacy non-custom case.
+        bool generated = false;
     };
 
     template <typename TAct>

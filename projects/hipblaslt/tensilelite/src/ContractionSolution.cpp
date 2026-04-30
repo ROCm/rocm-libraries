@@ -918,8 +918,9 @@ namespace TensileLite
             args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
             args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
 
-            // Custom kernels still use totalIters
-            if(!customKernel.name.empty())
+            // Hand-written custom kernels still use totalIters; Tensile-generated
+            // kernels follow the legacy non-custom layout.
+            if(!customKernel.name.empty() && !customKernel.generated)
             {
                 args.template append<uint32_t>("totalIters", totalIters);
             }
@@ -1796,6 +1797,27 @@ namespace TensileLite
         uint32_t debugPattern = 0xDB000001;
         bool appendedInternalArgs = false;
 
+        // For multi-buffer GSU and Stream-K parallel reduction, the kernel
+        // writes to the GSU/SK workspace and expects strides derived from
+        // d.sizes() (matching the legacy `strideW_D`/`strideW_C` layout used
+        // in singleCallArgs on develop).  Outside those modes the regular
+        // tensor strides apply.
+        bool gsuWSStride
+            = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
+        bool skWSStride
+            = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
+        bool useWSStride = gsuWSStride || skWSStride;
+        size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
+
+        auto wsStrideForIdx = [&](size_t idx) -> size_t {
+            // Mirrors the develop accumulator: stride[startStrideCD] = sizes[0],
+            // and each subsequent stride multiplies in the next size.
+            size_t s = startStrideCD ? problem.d().sizes()[0] : 1;
+            for(size_t i = startStrideCD; i < idx; ++i)
+                s *= problem.d().sizes()[i];
+            return s;
+        };
+
         if(T_Debug)
             std::cout << "Custom call arguments:" << std::endl;
 
@@ -1847,22 +1869,34 @@ namespace TensileLite
                     rv.args.appendCustomType("StrideB2", problem.b().strides()[3], arg.type);
                     break;
                 case CustomArgSemantic::StrideC0:
-                    rv.args.appendCustomType("StrideC0", problem.c().strides()[1], arg.type);
+                    rv.args.appendCustomType("StrideC0",
+                        useWSStride ? wsStrideForIdx(1) : problem.c().strides()[1],
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideC1:
-                    rv.args.appendCustomType("StrideC1", problem.c().strides()[2], arg.type);
+                    rv.args.appendCustomType("StrideC1",
+                        useWSStride ? wsStrideForIdx(2) : problem.c().strides()[2],
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideC2:
-                    rv.args.appendCustomType("StrideC2", problem.c().strides()[3], arg.type);
+                    rv.args.appendCustomType("StrideC2",
+                        useWSStride ? wsStrideForIdx(3) : problem.c().strides()[3],
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideD0:
-                    rv.args.appendCustomType("StrideD0", problem.d().strides()[1], arg.type);
+                    rv.args.appendCustomType("StrideD0",
+                        useWSStride ? wsStrideForIdx(1) : problem.d().strides()[1],
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideD1:
-                    rv.args.appendCustomType("StrideD1", problem.d().strides()[2], arg.type);
+                    rv.args.appendCustomType("StrideD1",
+                        useWSStride ? wsStrideForIdx(2) : problem.d().strides()[2],
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideD2:
-                    rv.args.appendCustomType("StrideD2", problem.d().strides()[3], arg.type);
+                    rv.args.appendCustomType("StrideD2",
+                        useWSStride ? wsStrideForIdx(3) : problem.d().strides()[3],
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideE0:
                     rv.args.appendCustomType("StrideE0", problem.tensor(ContractionProblemGemm::TENSOR::E).strides()[1], arg.type);
@@ -2074,7 +2108,15 @@ namespace TensileLite
                 case CustomArgSemantic::GemmInfo:
                 {
                     uint32_t gemmCount = 1;
-                    gemmCount = gemmCount & 0x3FFFFFFF;
+                    // Encode argType (high 2 bits) so the kernel can distinguish
+                    // single/strided-batched (0) from general-batched POINTER_ARRAY (3).
+                    // Matches the legacy generateSingleCall encoding used by the
+                    // assembly kernel's ArgType branch (cf. KernelWriterAssembly.py).
+                    uint32_t argType = (problem.batchMode()
+                                        == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
+                                           ? 3u
+                                           : static_cast<uint32_t>(KERNELARGTYPE::NORMAL);
+                    gemmCount = (gemmCount & 0x3FFFFFFF) | (argType << 30);
                     rv.args.template append<uint32_t>("gemm_count", gemmCount);
                     break;
                 }
@@ -3475,7 +3517,7 @@ namespace TensileLite
         {
             sk.reduction         = getSKReduction(problem, hardware);
             size_t tiles         =  0;
-            if (customKernel.name.empty())
+            if (customKernel.name.empty() || customKernel.generated)
                 tiles = problem.getNumTiles(sizeMapping, 1);
             else
             {
@@ -3885,14 +3927,30 @@ namespace TensileLite
         size_t gsu
             = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : sizeMapping.globalSplitU;
 
+        // Tensile-generated kernels populate `customKernel` for codegen
+        // metadata only; their workspace decisions still come from sizeMapping
+        // (matches the legacy single-branch behavior on develop).  Some
+        // handwritten kernels do not carry workspace metadata but can still be
+        // selected for non-grouped GSU>1 multi-buffer runs.  Treat those as
+        // SplitK for workspace sizing only; keep grouped GEMM on its existing
+        // path to avoid changing grouped solution selection/host-arg sizing.
+        bool useLegacyWorkspaceLogic = customKernel.name.empty() || customKernel.generated;
+        bool inferSplitKWorkspaceForCustom = !useLegacyWorkspaceLogic
+                                             && !problem.groupedGemm()
+                                             && customKernel.workspaceType == CustomWorkspaceType::None
+                                             && customKernel.workspaceSizePerElemC == 0
+                                             && sizeMapping.globalAccumulation != 0
+                                             && sizeMapping.streamK == 0;
         CustomWorkspaceType workspaceType = CustomWorkspaceType::None;
-        if(customKernel.name.empty())
+        if(useLegacyWorkspaceLogic)
         {
             if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
                 workspaceType = CustomWorkspaceType::StreamKWithReduction;
             else
                 workspaceType = CustomWorkspaceType::SplitK;
         }
+        else if(inferSplitKWorkspaceForCustom)
+            workspaceType = CustomWorkspaceType::SplitK;
         else
             workspaceType = customKernel.workspaceType;
 
@@ -3907,7 +3965,7 @@ namespace TensileLite
             }
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             size_t tiles = 0;
-            if (customKernel.name.empty())
+            if (useLegacyWorkspaceLogic)
                 tiles = problem.getNumTiles(sizeMapping, 1);
             else
             {
@@ -3962,7 +4020,21 @@ namespace TensileLite
         size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
         size_t tileSize      = 0;
         size_t workspaceSizePerElemBias = 0;
-        if(customKernel.name.empty())
+        bool inferWorkspaceSizeForCustom = !problem.groupedGemm()
+                                           && !customKernel.name.empty()
+                                           && !customKernel.generated
+                                           && customKernel.workspaceType == CustomWorkspaceType::None
+                                           && customKernel.workspaceSizePerElemC == 0
+                                           && sizeMapping.globalAccumulation != 0
+                                           && sizeMapping.streamK == 0;
+        if(inferWorkspaceSizeForCustom)
+        {
+            tileSize = customKernel.macrotile.x * customKernel.macrotile.y
+                       * problem.computeTypeElementSize();
+            workspaceSizePerElemBias = 0;
+        }
+        // Generated kernels still rely on sizeMapping for workspace sizing.
+        else if(customKernel.name.empty() || customKernel.generated)
         {
             tileSize = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
             workspaceSizePerElemBias = sizeMapping.workspaceSizePerElemBias;

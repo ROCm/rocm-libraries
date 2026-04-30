@@ -614,7 +614,8 @@ class CustomKernel:
                  'grid',
                  'workspaceType',
                  'workspaceSizePerElemC',
-                 'workspaceSizePerElemBias']
+                 'workspaceSizePerElemBias',
+                 'generated']
 
     @classmethod
     def FromOriginalState(cls, d):
@@ -625,7 +626,8 @@ class CustomKernel:
                    grid=d['grid'],
                    workspaceType=d.get('workspaceType', 'None'),
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
-                   workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0))
+                   workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
+                   generated=d.get('generated', False))
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):

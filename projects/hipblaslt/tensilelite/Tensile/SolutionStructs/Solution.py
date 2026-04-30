@@ -1154,7 +1154,21 @@ class Solution(collections.abc.Mapping):
     state["MacroTile1"] = ck["macrotile"][1]
     state["DepthU"]     = ck["macrotile"][2]
 
+    # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
+    # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
+    # solutions.  Without this the legacy beta-only kernel
+    # (`Cijk_<dT>_BiasS`) was launched and not found in the library.
     state["_GlobalAccumulation"]    = None
+    if state.get("StreamK", 0) > 0 and state.get("StreamKAtomic", 0) == 0:
+      state["_GlobalAccumulation"] = 'PartialsBuffer'
+    elif state.get("GlobalSplitUAlgorithm", "") == 'SingleBuffer':
+      computeName = state["ProblemType"]["ComputeDataType"].toName()
+      if computeName != state["ProblemType"]["DestDataType"].toName():
+        state["_GlobalAccumulation"] = 'SingleBuffer'
+    elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBuffer':
+      state["_GlobalAccumulation"] = 'MultipleBuffer'
+    elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBufferSingleKernel':
+      state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
     state["CUOccupancy"]            = -1
     state["MathClocksUnrolledLoop"] = 0
     state["PackedC0IndicesX"] = []
