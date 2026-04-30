@@ -16,8 +16,8 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
-using namespace hip_kernel_provider;
-using namespace hip_kernel_provider::batchnorm;
+namespace hip_kernel_provider::batchnorm::test
+{
 
 // ============================================================================
 // BatchnormFwdTrainingParams - construction from valid graph data
@@ -455,3 +455,5 @@ TEST(TestBatchnormFwdTrainingPlan, HasNoSaveStatsSetsCorrectDefines)
 
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_SAVE_MEAN_VARIANCE=0"));
 }
+
+} // namespace hip_kernel_provider::batchnorm::test
