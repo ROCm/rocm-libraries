@@ -154,9 +154,13 @@ jobs:
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |
-          version_url="https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
+          declare version_url="https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
+          
+          declare -i MAXIMUM_NUMBER_OF_POLLS=20
+          declare -i SLEEP_BETWEEN_POLLS_SECONDS=15
+          
           echo "Polling for version to appear: $version_url"
-          for i in $(seq 1 20); do
+          for i in $(seq 1 ${MAXIMUM_NUMBER_OF_POLLS}); do
             status=$(curl --silent --output /dev/null --write-out "%{http_code}" \
               --header "Authorization: Token $RTD_TOKEN" \
               "$version_url")
@@ -165,7 +169,7 @@ jobs:
               exit 0
             fi
             echo "Attempt $i: version not yet registered (HTTP $status), waiting 15s..."
-            sleep 15
+            sleep ${SLEEP_BETWEEN_POLLS_SECONDS}
           done
           echo "Timed out waiting for RTD to register version."
           exit 1
