@@ -163,7 +163,7 @@ template <typename AType,
           std::uint32_t WaveTileK>
 struct ScalePipelineKernel
 {
-    static constexpr int kBlockSize = 64;
+    static constexpr int kBlockSize = mma_pipeline_test::getCMakeWaveSize();
 
     __device__ void
     operator()(const void* a_per_lane, const void* b_per_lane, void* c_per_lane) const
@@ -315,7 +315,7 @@ template <typename AType,
           MmaAccumPolicy AccumPolicy>
 struct ScaleWaveWisePipelineKernel
 {
-    static constexpr int kBlockSize = 64;
+    static constexpr int kBlockSize = mma_pipeline_test::getCMakeWaveSize();
 
     __device__ void
     operator()(const void* a_per_lane, const void* b_per_lane, void* c_per_lane) const
