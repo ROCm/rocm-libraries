@@ -74,6 +74,25 @@ struct ExtractElementWiseValues<TensorDataType, NumTensor, std::index_sequence<I
     }
 };
 
+CK_TILE_HOST std::size_t decode_strided_offset(const std::vector<std::size_t>& strides,
+                                               ck_tile::index_t flat_idx,
+                                               const std::vector<ck_tile::index_t>& dim_sizes,
+                                               ck_tile::index_t stride_offset = 0)
+{
+    std::size_t offset        = 0;
+    ck_tile::index_t temp     = flat_idx;
+    const auto num_dims       = static_cast<ck_tile::index_t>(dim_sizes.size());
+
+    for(ck_tile::index_t i = num_dims; i > 0; --i)
+    {
+        const ck_tile::index_t dim = i - 1;
+        offset += (temp % dim_sizes[dim]) * strides[stride_offset + dim];
+        temp /= dim_sizes[dim];
+    }
+
+    return offset;
+}
+
 template <typename ADataType,
           typename BDataType,
           typename DDataType,
@@ -115,103 +134,30 @@ void compute_reference_batched_contraction(
     const ck_tile::index_t num_g_dims = G_dims.size();
     const ck_tile::index_t num_m_dims = M_dims.size();
     const ck_tile::index_t num_n_dims = N_dims.size();
-    const ck_tile::index_t num_k_dims = K_dims.size();
 
     // Helper lambda to compute linear index from flat indices using strides
     auto compute_a_offset = [&](ck_tile::index_t g_flat,
                                 ck_tile::index_t m_flat,
                                 ck_tile::index_t k_flat) -> std::size_t {
-        std::size_t offset = 0;
-
-        // Decode G dimensions
-        ck_tile::index_t temp = g_flat;
-        for(int i = num_g_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % G_dims[i]) * a_strides[i];
-            temp /= G_dims[i];
-        }
-
-        // Decode M dimensions
-        temp = m_flat;
-        for(int i = num_m_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % M_dims[i]) * a_strides[num_g_dims + i];
-            temp /= M_dims[i];
-        }
-
-        // Decode K dimensions
-        temp = k_flat;
-        for(int i = num_k_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % K_dims[i]) * a_strides[num_g_dims + num_m_dims + i];
-            temp /= K_dims[i];
-        }
-
-        return offset;
+        return decode_strided_offset(a_strides, g_flat, G_dims) +
+               decode_strided_offset(a_strides, m_flat, M_dims, num_g_dims) +
+               decode_strided_offset(a_strides, k_flat, K_dims, num_g_dims + num_m_dims);
     };
 
     auto compute_b_offset = [&](ck_tile::index_t g_flat,
                                 ck_tile::index_t n_flat,
                                 ck_tile::index_t k_flat) -> std::size_t {
-        std::size_t offset = 0;
-
-        // Decode G dimensions
-        ck_tile::index_t temp = g_flat;
-        for(int i = num_g_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % G_dims[i]) * b_strides[i];
-            temp /= G_dims[i];
-        }
-
-        // Decode N dimensions
-        temp = n_flat;
-        for(int i = num_n_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % N_dims[i]) * b_strides[num_g_dims + i];
-            temp /= N_dims[i];
-        }
-
-        // Decode K dimensions
-        temp = k_flat;
-        for(int i = num_k_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % K_dims[i]) * b_strides[num_g_dims + num_n_dims + i];
-            temp /= K_dims[i];
-        }
-
-        return offset;
+        return decode_strided_offset(b_strides, g_flat, G_dims) +
+               decode_strided_offset(b_strides, n_flat, N_dims, num_g_dims) +
+               decode_strided_offset(b_strides, k_flat, K_dims, num_g_dims + num_n_dims);
     };
 
     auto compute_e_offset = [&](ck_tile::index_t g_flat,
                                 ck_tile::index_t m_flat,
                                 ck_tile::index_t n_flat) -> std::size_t {
-        std::size_t offset = 0;
-
-        // Decode G dimensions
-        ck_tile::index_t temp = g_flat;
-        for(int i = num_g_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % G_dims[i]) * e_strides[i];
-            temp /= G_dims[i];
-        }
-
-        // Decode M dimensions
-        temp = m_flat;
-        for(int i = num_m_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % M_dims[i]) * e_strides[num_g_dims + i];
-            temp /= M_dims[i];
-        }
-
-        // Decode N dimensions
-        temp = n_flat;
-        for(int i = num_n_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % N_dims[i]) * e_strides[num_g_dims + num_m_dims + i];
-            temp /= N_dims[i];
-        }
-
-        return offset;
+        return decode_strided_offset(e_strides, g_flat, G_dims) +
+               decode_strided_offset(e_strides, m_flat, M_dims, num_g_dims) +
+               decode_strided_offset(e_strides, n_flat, N_dims, num_g_dims + num_m_dims);
     };
 
     // Helper to compute D tensor offset (D tensors have same shape as E: [G, M, N])
@@ -219,34 +165,10 @@ void compute_reference_batched_contraction(
                                 ck_tile::index_t m_flat,
                                 ck_tile::index_t n_flat,
                                 ck_tile::index_t d_idx) -> std::size_t {
-        std::size_t offset    = 0;
         const auto& d_strides = ds_strides[d_idx];
-
-        // Decode G dimensions
-        ck_tile::index_t temp = g_flat;
-        for(int i = num_g_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % G_dims[i]) * d_strides[i];
-            temp /= G_dims[i];
-        }
-
-        // Decode M dimensions
-        temp = m_flat;
-        for(int i = num_m_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % M_dims[i]) * d_strides[num_g_dims + i];
-            temp /= M_dims[i];
-        }
-
-        // Decode N dimensions
-        temp = n_flat;
-        for(int i = num_n_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % N_dims[i]) * d_strides[num_g_dims + num_m_dims + i];
-            temp /= N_dims[i];
-        }
-
-        return offset;
+        return decode_strided_offset(d_strides, g_flat, G_dims) +
+               decode_strided_offset(d_strides, m_flat, M_dims, num_g_dims) +
+               decode_strided_offset(d_strides, n_flat, N_dims, num_g_dims + num_m_dims);
     };
 
     // Parallel computation over G and M dimensions
@@ -353,34 +275,16 @@ void compute_reference_batched_contraction_multi_abd(
     const ck_tile::index_t num_g_dims = G_dims.size();
     const ck_tile::index_t num_m_dims = M_dims.size();
     const ck_tile::index_t num_n_dims = N_dims.size();
-    const ck_tile::index_t num_k_dims = K_dims.size();
 
     // Offset computation for A tensor (layout: [G, M, K])
     auto compute_a_offset = [&](ck_tile::index_t tensor_idx,
                                 ck_tile::index_t g_flat,
                                 ck_tile::index_t m_flat,
                                 ck_tile::index_t k_flat) -> std::size_t {
-        std::size_t offset    = 0;
-        const auto& strides   = as_strides[tensor_idx];
-        ck_tile::index_t temp = g_flat;
-        for(int i = num_g_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % G_dims[i]) * strides[i];
-            temp /= G_dims[i];
-        }
-        temp = m_flat;
-        for(int i = num_m_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % M_dims[i]) * strides[num_g_dims + i];
-            temp /= M_dims[i];
-        }
-        temp = k_flat;
-        for(int i = num_k_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % K_dims[i]) * strides[num_g_dims + num_m_dims + i];
-            temp /= K_dims[i];
-        }
-        return offset;
+        const auto& strides = as_strides[tensor_idx];
+        return decode_strided_offset(strides, g_flat, G_dims) +
+               decode_strided_offset(strides, m_flat, M_dims, num_g_dims) +
+               decode_strided_offset(strides, k_flat, K_dims, num_g_dims + num_m_dims);
     };
 
     // Offset computation for B tensor (layout: [G, N, K])
@@ -388,27 +292,10 @@ void compute_reference_batched_contraction_multi_abd(
                                 ck_tile::index_t g_flat,
                                 ck_tile::index_t n_flat,
                                 ck_tile::index_t k_flat) -> std::size_t {
-        std::size_t offset    = 0;
-        const auto& strides   = bs_strides[tensor_idx];
-        ck_tile::index_t temp = g_flat;
-        for(int i = num_g_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % G_dims[i]) * strides[i];
-            temp /= G_dims[i];
-        }
-        temp = n_flat;
-        for(int i = num_n_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % N_dims[i]) * strides[num_g_dims + i];
-            temp /= N_dims[i];
-        }
-        temp = k_flat;
-        for(int i = num_k_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % K_dims[i]) * strides[num_g_dims + num_n_dims + i];
-            temp /= K_dims[i];
-        }
-        return offset;
+        const auto& strides = bs_strides[tensor_idx];
+        return decode_strided_offset(strides, g_flat, G_dims) +
+               decode_strided_offset(strides, n_flat, N_dims, num_g_dims) +
+               decode_strided_offset(strides, k_flat, K_dims, num_g_dims + num_n_dims);
     };
 
     // Offset computation for E/D tensor (layout: [G, M, N])
@@ -416,26 +303,9 @@ void compute_reference_batched_contraction_multi_abd(
                                 ck_tile::index_t g_flat,
                                 ck_tile::index_t m_flat,
                                 ck_tile::index_t n_flat) -> std::size_t {
-        std::size_t offset    = 0;
-        ck_tile::index_t temp = g_flat;
-        for(int i = num_g_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % G_dims[i]) * strides[i];
-            temp /= G_dims[i];
-        }
-        temp = m_flat;
-        for(int i = num_m_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % M_dims[i]) * strides[num_g_dims + i];
-            temp /= M_dims[i];
-        }
-        temp = n_flat;
-        for(int i = num_n_dims - 1; i >= 0; --i)
-        {
-            offset += (temp % N_dims[i]) * strides[num_g_dims + num_m_dims + i];
-            temp /= N_dims[i];
-        }
-        return offset;
+        return decode_strided_offset(strides, g_flat, G_dims) +
+               decode_strided_offset(strides, m_flat, M_dims, num_g_dims) +
+               decode_strided_offset(strides, n_flat, N_dims, num_g_dims + num_m_dims);
     };
 
     auto f_gm = [&](auto g_flat, auto m_flat) {
