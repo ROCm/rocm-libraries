@@ -16,10 +16,6 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/common/utils.hpp"
 
-// Re-export the canonical ck_tile::DataTypeTraits so consumers can use it
-// unqualified across all tile_engine benchmarks.
-using ck_tile::DataTypeTraits;
-
 // Helper function to determine if a layout is row-major
 template <typename Layout>
 constexpr auto is_row_major(Layout)
@@ -113,9 +109,7 @@ struct Settings
     bool json_output;
 };
 
-// Superset trait carrier: covers GEMM/grouped/streamk (which use `persistent`)
-// and contraction (where `persistent` is just unused).
-struct KernelTraits
+struct ContractionKernelTraits
 {
     std::string pipeline  = "compv3";    // compv3, compv4, mem
     std::string scheduler = "intrawave"; // intrawave, interwave
@@ -123,7 +117,11 @@ struct KernelTraits
     bool pad_m            = false;
     bool pad_n            = false;
     bool pad_k            = false;
-    bool persistent       = false;
+};
+
+struct GemmKernelTraits : ContractionKernelTraits
+{
+    bool persistent = false;
 };
 
 inline std::string get_rocm_version()

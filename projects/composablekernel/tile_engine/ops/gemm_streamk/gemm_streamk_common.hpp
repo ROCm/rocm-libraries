@@ -11,9 +11,9 @@
 #include "common/utils.hpp"
 
 // Helper to extract traits from kernel name
-inline KernelTraits extract_traits_from_name(const std::string& kernel_name)
+inline GemmKernelTraits extract_traits_from_name(const std::string& kernel_name)
 {
-    KernelTraits traits;
+    GemmKernelTraits traits;
 
     // Extract pipeline
     if(kernel_name.find("compv3") != std::string::npos)

@@ -12,8 +12,22 @@
 #include "common/utils.hpp"
 #include "contraction_multi_abd_common.hpp"
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-seggestions"
+namespace contraction_multi_abd_detail {
+
+inline void
+print_dims(std::ostream& os, const std::string& name, const std::vector<ck_tile::index_t>& dims)
+{
+    os << "   \"" << name << "\":[";
+    for(size_t i = 0; i < dims.size(); ++i)
+    {
+        os << dims[i];
+        if(i < dims.size() - 1)
+            os << ",";
+    }
+    os << "]";
+}
+
+} // namespace contraction_multi_abd_detail
 
 struct ContractionMultiABDProblem
 {
@@ -29,26 +43,14 @@ struct ContractionMultiABDProblem
 
     friend std::ostream& operator<<(std::ostream& os, const ContractionMultiABDProblem& p)
     {
-        auto print_dims = [&os](const std::string& name,
-                                const std::vector<ck_tile::index_t>& dims) {
-            os << "   \"" << name << "\":[";
-            for(size_t i = 0; i < dims.size(); ++i)
-            {
-                os << dims[i];
-                if(i < dims.size() - 1)
-                    os << ",";
-            }
-            os << "]";
-        };
-
         os << "{\n";
-        print_dims("g_dims", p.g_dims_);
+        contraction_multi_abd_detail::print_dims(os, "g_dims", p.g_dims_);
         os << ",\n";
-        print_dims("m_dims", p.m_dims_);
+        contraction_multi_abd_detail::print_dims(os, "m_dims", p.m_dims_);
         os << ",\n";
-        print_dims("n_dims", p.n_dims_);
+        contraction_multi_abd_detail::print_dims(os, "n_dims", p.n_dims_);
         os << ",\n";
-        print_dims("k_dims", p.k_dims_);
+        contraction_multi_abd_detail::print_dims(os, "k_dims", p.k_dims_);
         os << ",\n"
            << "   \"g_total\":" << p.g_total_ << ",\n"
            << "   \"m_total\":" << p.m_total_ << ",\n"
@@ -58,5 +60,3 @@ struct ContractionMultiABDProblem
         return os;
     }
 };
-
-#pragma clang diagnostic pop
