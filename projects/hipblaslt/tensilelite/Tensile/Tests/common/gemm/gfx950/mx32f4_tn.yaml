@@ -104,6 +104,7 @@ BenchmarkProblems:
 #        - NumElementsPerBatchStore: [0]
 #        - StorePriorityOpt: [0]
 #        - StaggerU: [0]
+        - StreamK: [0,3]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

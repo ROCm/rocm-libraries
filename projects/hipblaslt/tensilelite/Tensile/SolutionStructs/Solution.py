@@ -701,6 +701,10 @@ class Solution(collections.abc.Mapping):
                "UseSubtileImpl=1 requires PrefetchGlobalRead 0 or 2, got %d" % state["PrefetchGlobalRead"])
       if not (state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16):
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires MatrixInst 16x16")
+      if state["ScheduleIterAlg"] == 1 or state["ScheduleIterAlg"] == 2:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
+      if state["StreamK"] == 0:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
