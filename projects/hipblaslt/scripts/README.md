@@ -40,7 +40,7 @@ If `tensilelite/Tensile/TensileLogic/known_bugs.yaml` exists, this script passes
 - **0** – All solutions passed (Reject = 0).
 - **1** – One or more failed; errors are printed.
 
-The full tree (~2246 files) can take several minutes; passing a subdirectory is useful for quick checks. To tune parallelism: `python scripts/run_tensile_logic_check.py -j 16` (default is 48 workers, capped by CPU count).
+The full tree (~2246 files) can take several minutes, so passing a subdirectory is useful for quick checks. To tune parallelism: `python scripts/run_tensile_logic_check.py -j 16` (default is 48 workers, capped by CPU count).
 
 ### run_tensile_logic_check.sh (Unix only)
 
