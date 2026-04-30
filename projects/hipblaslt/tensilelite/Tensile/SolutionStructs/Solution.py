@@ -692,6 +692,8 @@ class Solution(collections.abc.Mapping):
       if state["PrefetchGlobalRead"] not in [0, 2]:
         reject(state, printRejectionReason,
                "UseSubtileImpl=1 requires PrefetchGlobalRead 0 or 2, got %d" % state["PrefetchGlobalRead"])
+      if not (state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16):
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires MatrixInst 16x16")
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -2025,9 +2027,6 @@ class Solution(collections.abc.Mapping):
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
     backup_UsePLRPack = state["UsePLRPack"]
-    # UseSubtileImpl has its own main loop scheduler; CMS is not compatible.
-    if state["UseSubtileImpl"]:
-      state["UseCustomMainLoopSchedule"] = 0
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       # initialize CMS related config parameters (for CMS only)
@@ -2042,6 +2041,9 @@ class Solution(collections.abc.Mapping):
       if state["TailloopInNll"] and state["UseCustomMainLoopSchedule"] == 1:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with TailloopInNll=True")
         return
+    # UseSubtileImpl has its own main loop scheduler; CMS is not compatible.
+    if state["UseSubtileImpl"] and state["UseCustomMainLoopSchedule"] == 1:
+        reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with UseSubtileImpl")
 
     # additional setting for non CMS
     if state["UseCustomMainLoopSchedule"] == 0:
