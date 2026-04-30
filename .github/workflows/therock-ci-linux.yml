@@ -13,6 +13,8 @@ on:
         type: string
       test_runs_on:
         type: string
+      build_runs_on:
+        type: string
 
 permissions:
   contents: read
@@ -20,7 +22,7 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build (${{ inputs.amdgpu_families }})
-    runs-on: azure-linux-scale-rocm
+    runs-on: ${{ inputs.build_runs_on }}
     permissions:
       id-token: write
     container:
@@ -43,7 +45,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
+          ref: 8ae8745cbbf8d8607b41619f01de1c8e4326291b # 2026-04-29
 
       - name: Install python deps
         run: |

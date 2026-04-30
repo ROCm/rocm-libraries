@@ -10,7 +10,7 @@ import json
 import logging
 import subprocess
 from pathlib import Path
-import sys
+import random
 from therock_matrix import subtree_to_project_map, collect_projects_to_run
 import time
 from typing import Mapping, Optional, Iterable, List
@@ -148,6 +148,62 @@ def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     return matched_subtrees
 
 
+"""
+CPU builder runner selection
+As we slowly migrate from Azure to AWS, this is a temporary measure to distribute load
+"""
+
+BUILD_RUNNER_LABELS = {
+    "linux": {
+        "default": [
+            {"label": "azure-linux-scale-rocm", "weight": 0.90},
+            {"label": "aws-linux-scale-rocm", "weight": 0.10},
+        ],
+    },
+    "windows": {
+        "default": [
+            {"label": "azure-windows-scale-rocm", "weight": 1.0},
+        ],
+    },
+}
+
+
+def select_weighted_label(labels_config: list[dict], context_name: str) -> str:
+    """Select a runner label based on weighted random selection."""
+    rand_val = random.random()
+    cumulative = 0.0
+    for config in labels_config:
+        cumulative += config["weight"]
+        if rand_val < cumulative:
+            print(
+                f"  {context_name}: selected runner (weight={config['weight']}): "
+                f"{config['label']}"
+            )
+            return config["label"]
+    # Fallback to last label if rounding errors
+    selected = labels_config[-1]
+    print(
+        f"  {context_name}: selected runner (weight={selected['weight']}): "
+        f"{selected['label']}"
+    )
+    return selected["label"]
+
+
+def select_build_runner(platform: str) -> str:
+    """Select a build runner label based on platform and build variant."""
+    if platform not in BUILD_RUNNER_LABELS:
+        # Platform not configured for weighted selection, return default
+        print(f"  No build runner config for platform {platform}, using default")
+        return ""
+
+    platform_config = BUILD_RUNNER_LABELS[platform]
+
+    labels_config = platform_config["default"]
+    context_name = f"build-runner ({platform})"
+
+    return select_weighted_label(labels_config, context_name)
+
+
 def retrieve_projects(args):
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
@@ -203,8 +259,13 @@ def retrieve_projects(args):
 def run(args):
     platform = args.get("platform")
     project_to_run, test_type = retrieve_projects(args)
+    build_runs_on = select_build_runner(platform)
     set_github_output(
-        {f"{platform}_projects": json.dumps(project_to_run), "test_type": test_type}
+        {
+            f"{platform}_projects": json.dumps(project_to_run),
+            "test_type": test_type,
+            "build_runs_on": build_runs_on,
+        }
     )
 
 
