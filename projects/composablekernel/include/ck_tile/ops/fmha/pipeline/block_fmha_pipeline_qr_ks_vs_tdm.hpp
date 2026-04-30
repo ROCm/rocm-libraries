@@ -84,6 +84,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
     }();
 
+    static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
+    // Required by fmha_fwd_kernel.hpp's qr_async_trload-style branch (the one we
+    // dispatch into via `kPipelineName != "qr_async_trload" && != "qr_tdm"`).
+    // Mirrors block_fmha_pipeline_qr_ks_vs_async_trload.hpp:90.
     static constexpr index_t kAlignmentOacc = Policy::template GetAlignmentO<Problem>();
 
     static constexpr index_t kAlignmentBias =
@@ -129,7 +133,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         return Policy::template GetSmemSize<Problem>();
     }
 
-    // Decode
+    // Decode (single shared-memory buffer)
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -137,15 +141,15 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
-    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
-               const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
-               const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
-               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
-               LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
-               FmhaMask mask,
-               PositionEncoding position_encoding,
-               float scale_s,
-               void* smem_ptr) const
+    run(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
+        const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
+        const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
+        const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
+        LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
+        FmhaMask mask,
+        PositionEncoding position_encoding,
+        float scale_s,
+        void* smem_ptr) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -630,18 +634,18 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
-    operator()(const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
-               const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
-               const VDramBlockWindowTmp& __restrict__ v_dram_block_window_tmp,       // N1*K1 tile
-               const BiasDramBlockWindowTmp& __restrict__ bias_dram_block_window_tmp, // M0*N0 tile
-               LSEaccDramBlockWindowTmp& __restrict__ lse_acc_dram_window_tmp,        // M0*1 tile
-               FmhaMask mask,
-               PositionEncoding position_encoding,
-               float scale_s,
-               void* __restrict__ smem_ptrk0,
-               void* __restrict__ smem_ptrk1,
-               void* __restrict__ smem_ptrv0,
-               void* __restrict__ smem_ptrv1) const
+    run(const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
+        const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
+        const VDramBlockWindowTmp& __restrict__ v_dram_block_window_tmp,       // N1*K1 tile
+        const BiasDramBlockWindowTmp& __restrict__ bias_dram_block_window_tmp, // M0*N0 tile
+        LSEaccDramBlockWindowTmp& __restrict__ lse_acc_dram_window_tmp,        // M0*1 tile
+        FmhaMask mask,
+        PositionEncoding position_encoding,
+        float scale_s,
+        void* __restrict__ smem_ptrk0,
+        void* __restrict__ smem_ptrk1,
+        void* __restrict__ smem_ptrv0,
+        void* __restrict__ smem_ptrv1) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -1154,6 +1158,71 @@ struct BlockFmhaPipelineQRKSVSTdm
         });
 
         return o_acc;
+    }
+
+    // Matches the call signature used by fmha_fwd_kernel.hpp's qr_async_trload-style
+    // dispatch branch (single-buffer, decode path; PrefillCase = (kM0 > 64) is false
+    // for our gfx1250 d128 instances since codegen uses kM0 = 64).
+    // Mirrors block_fmha_pipeline_qr_ks_vs_async_trload.hpp:136-152 single-buffer
+    // operator() exactly, so the kernel's else-branch call site type-checks.
+    // smem_ptr is a single allocation; for prefill (kM0 > 64) it is split into 4
+    // sub-regions via pointer arithmetic and forwarded to the double-buffer run()
+    // overload (kept inside the body for forward-compatibility, unused at v1).
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding>
+    CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+                                        const KDramBlockWindowTmp& k_dram_block_window_tmp,
+                                        const VDramBlockWindowTmp& v_dram_block_window_tmp,
+                                        const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+                                        LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
+                                        FmhaMask mask,
+                                        PositionEncoding position_encoding,
+                                        float scale_s,
+                                        void* smem_ptr,
+                                        float /*sink_v*/) const
+    {
+        if constexpr(kM0 > 64)
+        {
+            // Prefill: split the single buffer into 4 sub-regions.
+            // Layout: [k0 | k1 | v0 | v1]  (mirrors qr_async_trload kernel allocations)
+            constexpr index_t k_size = Policy::template GetSmemSizeK<Problem>();
+            constexpr index_t v_size = Policy::template GetSmemSizeV<Problem>();
+
+            void* smem_ptrk0 = smem_ptr;
+            void* smem_ptrk1 = static_cast<char*>(smem_ptr) + k_size;
+            void* smem_ptrv0 = static_cast<char*>(smem_ptr) + 2 * k_size;
+            void* smem_ptrv1 = static_cast<char*>(smem_ptr) + 2 * k_size + v_size;
+
+            return run(q_dram_block_window_tmp,
+                       k_dram_block_window_tmp,
+                       v_dram_block_window_tmp,
+                       bias_dram_block_window_tmp,
+                       lse_acc_dram_window_tmp,
+                       mask,
+                       position_encoding,
+                       scale_s,
+                       smem_ptrk0,
+                       smem_ptrk1,
+                       smem_ptrv0,
+                       smem_ptrv1);
+        }
+        else
+        {
+            // Decode: single buffer is sufficient.
+            return run(q_dram_block_window_tmp,
+                       k_dram_block_window_tmp,
+                       v_dram_block_window_tmp,
+                       bias_dram_block_window_tmp,
+                       lse_acc_dram_window_tmp,
+                       mask,
+                       position_encoding,
+                       scale_s,
+                       smem_ptr);
+        }
     }
 };
 

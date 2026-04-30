@@ -1509,7 +1509,12 @@ struct FmhaFwdKernel
 
     CK_TILE_DEVICE void run_(Kargs kargs) const
     {
-        if constexpr(kPipelineName != "qr_async_trload")
+        // qr_tdm shares the same V dram layout convention as qr_async_trload
+        // (V window shape = (kK1, kN1) = (seqlen, hdim_v), no explicit dram
+        // transpose) — its pipeline expects the else-branch layout. Without
+        // this guard, qr_tdm wrongly fell into the standard transposed path
+        // and PV computed garbage (case A: output ~-4.7 vs ref ~0.5).
+        if constexpr(kPipelineName != "qr_async_trload" && kPipelineName != "qr_tdm")
         {
             // allocate LDS
             __shared__ char smem_ptr[GetSmemSize()];

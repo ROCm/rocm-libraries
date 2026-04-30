@@ -17,12 +17,12 @@ namespace ck_tile {
 // This pipeline is qkv all located in LDS, targeting gfx1250
 struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     : BlockFmhaPipelineQXKSVSCustomPolicy</* QLoadOnce = */ true,
-                                          /* AsyncCopy = */ false,
+                                          /* AsyncCopy = */ true,
                                           /* NumPrefetchK = */ 1,
                                           /* NumPrefetchV = */ 1>
 {
     using BasePolicy = BlockFmhaPipelineQXKSVSCustomPolicy</* QLoadOnce = */ true,
-                                                           /* AsyncCopy = */ false,
+                                                           /* AsyncCopy = */ true,
                                                            /* NumPrefetchK = */ 1,
                                                            /* NumPrefetchV = */ 1>;
 
@@ -52,29 +52,29 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentK()
     {
-        constexpr index_t kBlockSize = Problem::kBlockSize;
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kSubQKHeaddim;
-
-        constexpr index_t MaxVectorSize = 16 / sizeof(typename Problem::KDataType);
-
-        constexpr index_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
-        static_assert(0 < ElemPerThread);
-        return min(ElemPerThread, MaxVectorSize);
+        // gfx1250 wave32 + d>=128 needs KVector >= 4 to satisfy
+        // base async distribution static_assert (WarpSize*KVector >= kKPerBlock).
+        // Choose b128 (dwordx4) as starting point; b64 fallback if perf problems.
+        using KDataType = remove_cvref_t<typename Problem::KDataType>;
+#if defined(__gfx125__)
+        constexpr index_t MaxLoadSizeInBytes = 16; // dwordx4 = b128
+#else
+        constexpr index_t MaxLoadSizeInBytes = 4; // dword (matches base async default)
+#endif
+        return MaxLoadSizeInBytes * numeric_traits<KDataType>::PackedSize / sizeof(KDataType);
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentV()
     {
-        constexpr index_t kBlockSize = Problem::kBlockSize;
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kN0;
-
-        constexpr index_t MaxVectorSize = 16 / sizeof(typename Problem::VDataType);
-
-        constexpr index_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
-        static_assert(0 < ElemPerThread);
-        return min(ElemPerThread, MaxVectorSize);
+        // Same rationale as GetAlignmentK; V is loaded with async copy too.
+        using VDataType = remove_cvref_t<typename Problem::VDataType>;
+#if defined(__gfx125__)
+        constexpr index_t MaxLoadSizeInBytes = 16; // dwordx4 = b128
+#else
+        constexpr index_t MaxLoadSizeInBytes = 4; // dword
+#endif
+        return MaxLoadSizeInBytes * numeric_traits<VDataType>::PackedSize / sizeof(VDataType);
     }
 
     template <typename Problem, bool BypassLDS = false>
@@ -139,6 +139,16 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         }
     }
 
+    // P5 fix (Step B1 trial7): MUST override K dram dist here. The previous
+    // assumption ("base policy's AsyncCopy K dist matches our naive 2D K LDS")
+    // was wrong — base K dist (qx_ks_vs_custom_policy.hpp:860+) implies a
+    // warp-padded 5D LDS layout (NumIssues × NumWarps × LaneGroups × LanesPerK
+    // × KVector + kPad), but our LDS view is naive 2D (kN, kK).
+    // async_trload_policy faces the same naive-2D LDS situation and explicitly
+    // provides this matching <N0,N1,N2,K0,K1> dist
+    // (block_fmha_pipeline_qr_ks_vs_async_trload_policy.hpp:142-168) — copying
+    // it here makes our dram dist's thread access pattern align with naive 2D
+    // LDS row-major footprint.
     template <typename Problem, bool LoadOnce = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
@@ -606,6 +616,8 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         return k_block_dstr;
     }
 
+    // P5 fix (Step B1 trial7): same rationale as MakeKDramTileDistribution above.
+    // Mirrors block_fmha_pipeline_qr_ks_vs_async_trload_policy.hpp:615-641.
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeVDramTileDistribution()
     {
@@ -807,8 +819,19 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return max(GetSmemSizeQ<Problem>(),
-                   GetSmemSizeK<Problem>() + GetSmemSizeS<Problem>() + GetSmemSizeV<Problem>());
+        constexpr ck_tile::index_t kM0 = Problem::BlockFmhaShape::kM0;
+        if constexpr(kM0 > 64)
+        {
+            // Prefill: same layout as qr_async_trload kernel allocations.
+            // Two K buffers (ping/pong) + two V buffers (ping/pong).
+            return 2 * GetSmemSizeK<Problem>() + 2 * GetSmemSizeV<Problem>();
+        }
+        else
+        {
+            // Decode: single buffer; Q, K, S, V laid out sequentially.
+            return max(GetSmemSizeQ<Problem>(),
+                       GetSmemSizeK<Problem>() + GetSmemSizeS<Problem>() + GetSmemSizeV<Problem>());
+        }
     }
 };
 
