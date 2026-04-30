@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -61,12 +62,15 @@ class ContractionMultiABDProfiler
         const auto total_b = g_total * n_total * k_total;
         const auto total_e = g_total * m_total * n_total;
 
-        // Allocate host tensors -- use flat 1D descriptors for simplicity
-        ck_tile::HostTensor<EDataType> a0_host({total_a});
-        ck_tile::HostTensor<EDataType> a1_host({total_a});
-        ck_tile::HostTensor<EDataType> b0_host({total_b});
-        ck_tile::HostTensor<EDataType> d0_host({total_e});
-        ck_tile::HostTensor<EDataType> e_host_dev_result({total_e});
+        const auto a_desc = ck_tile::HostTensorDescriptor(a_dims);
+        const auto b_desc = ck_tile::HostTensorDescriptor(b_dims);
+        const auto e_desc = ck_tile::HostTensorDescriptor(e_dims);
+
+        ck_tile::HostTensor<EDataType> a0_host(a_desc);
+        ck_tile::HostTensor<EDataType> a1_host(a_desc);
+        ck_tile::HostTensor<EDataType> b0_host(b_desc);
+        ck_tile::HostTensor<EDataType> d0_host(e_desc);
+        ck_tile::HostTensor<EDataType> e_host_dev_result(e_desc);
 
         ck_tile::FillUniformDistribution<EDataType>{-5.f, 5.f}(a0_host);
         ck_tile::FillUniformDistribution<EDataType>{-5.f, 5.f}(a1_host);
@@ -160,17 +164,46 @@ class ContractionMultiABDProfiler
         {
             e_dev.FromDevice(e_host_dev_result.mData.data());
 
-            // Simplified verification -- just check for NaN/Inf
-            bool pass = true;
-            for(auto val : e_host_dev_result.mData)
-            {
-                float fv = ck_tile::type_convert<float>(val);
-                if(std::isnan(fv) || std::isinf(fv))
-                {
-                    pass = false;
-                    break;
-                }
-            }
+            ck_tile::HostTensor<EDataType> e_ref_host(e_desc);
+            e_ref_host.SetZero();
+
+            ck_tile::compute_reference_batched_contraction_multi_abd<AsDataType,
+                                                                     BsDataType,
+                                                                     DsDataType,
+                                                                     AccDataType,
+                                                                     EDataType,
+                                                                     AElementWise,
+                                                                     BElementWise,
+                                                                     CDEElementWise>(
+                {a0_host, a1_host},
+                {b0_host},
+                {d0_host},
+                e_ref_host,
+                g_total,
+                m_total,
+                n_total,
+                k_total,
+                AElementWise{},
+                BElementWise{},
+                CDEElementWise{},
+                g_dims,
+                m_dims,
+                n_dims,
+                k_dims);
+
+            using ADataType = ck_tile::remove_cvref_t<std::tuple_element_t<0, AsDataType>>;
+            using BDataType = ck_tile::remove_cvref_t<std::tuple_element_t<0, BsDataType>>;
+            const float max_accumulated_value =
+                *std::max_element(e_ref_host.mData.begin(), e_ref_host.mData.end());
+            const auto rtol_atol =
+                calculate_rtol_atol<ADataType, BDataType, AccDataType, EDataType>(
+                    k_total, 1, max_accumulated_value);
+
+            const bool pass = ck_tile::check_err(e_host_dev_result,
+                                                 e_ref_host,
+                                                 "Contraction multi-ABD: incorrect results!",
+                                                 rtol_atol.at(ck_tile::number<0>{}),
+                                                 rtol_atol.at(ck_tile::number<1>{}));
 
             if(!pass)
             {

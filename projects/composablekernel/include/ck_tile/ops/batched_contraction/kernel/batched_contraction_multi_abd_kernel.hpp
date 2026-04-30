@@ -498,7 +498,7 @@ struct BatchedContractionMultiABDKernel
                 host_args.As_dims[a], host_args.As_strides[a]);
             for(ck_tile::index_t i = 0; i < NumDimG; ++i)
                 kargs.batch_strides_As[a][i] = host_args.As_strides[a][i];
-            kargs.stride_As[a] = kargs.K_total;
+            kargs.stride_As[a] = host_args.As_strides[a][NumDimG + NumDimM - 1];
         }
 
         for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
@@ -507,14 +507,14 @@ struct BatchedContractionMultiABDKernel
                 host_args.Bs_dims[b], host_args.Bs_strides[b]);
             for(ck_tile::index_t i = 0; i < NumDimG; ++i)
                 kargs.batch_strides_Bs[b][i] = host_args.Bs_strides[b][i];
-            kargs.stride_Bs[b] = kargs.K_total;
+            kargs.stride_Bs[b] = host_args.Bs_strides[b][NumDimG + NumDimN - 1];
         }
 
         kargs.e_grid_desc_m_n =
             DescriptorUtils::Make_E_GridDescriptor_M_N(host_args.E_dims, host_args.E_strides);
         for(ck_tile::index_t i = 0; i < NumDimG; ++i)
             kargs.batch_strides_E[i] = host_args.E_strides[i];
-        kargs.stride_E = kargs.N_total;
+        kargs.stride_E = host_args.E_strides[NumDimG + NumDimM - 1];
 
         for(ck_tile::index_t d = 0; d < NumDTensor; ++d)
         {
@@ -527,7 +527,7 @@ struct BatchedContractionMultiABDKernel
                 host_args.Ds_dims[d], host_args.Ds_strides[d]);
             for(ck_tile::index_t i = 0; i < NumDimG; ++i)
                 kargs.batch_strides_Ds[d][i] = host_args.Ds_strides[d][i];
-            kargs.stride_Ds[d] = kargs.N_total;
+            kargs.stride_Ds[d] = host_args.Ds_strides[d][NumDimG + NumDimM - 1];
         }
 
         return kargs;
@@ -572,6 +572,8 @@ struct BatchedContractionMultiABDKernel
             ds_batch_ptr[i] = static_cast<const DiDataType*>(kargs.ds_ptr[i]) + batch_offset;
         });
 
+        static_assert(GetSmemSize() > 0,
+                      "BatchedContractionMultiABDKernel requires constexpr non-zero LDS size");
         __shared__ char smem_ptr[GetSmemSize()];
 
         RunGemm(as_batch_ptr,
