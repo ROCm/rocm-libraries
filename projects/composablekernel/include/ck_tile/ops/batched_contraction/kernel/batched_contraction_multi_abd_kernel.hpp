@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <utility>
+
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/batched_contraction/pipeline/batched_contraction_multi_abd_problem.hpp"
 #include "ck_tile/ops/batched_contraction/utils/tensor_descriptor_utils.hpp"
@@ -117,39 +119,23 @@ struct BatchedContractionMultiABDKernelArgs
     ck_tile::index_t K_total;
 
     // Per-tensor descriptors (type depends on NumDimG/M/N/K + VectorSize, not runtime strides)
-    using AGridDesc_M_K_ =
-        decltype(TensorDescriptorUtils<NumDimG,
-                                       NumDimM,
-                                       NumDimN,
-                                       NumDimK,
-                                       VectorSizeA,
-                                       VectorSizeB,
-                                       VectorSizeE>::
-                     Make_A_GridDescriptor_M_K(
-                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{},
-                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{}));
-    using BGridDesc_N_K_ =
-        decltype(TensorDescriptorUtils<NumDimG,
-                                       NumDimM,
-                                       NumDimN,
-                                       NumDimK,
-                                       VectorSizeA,
-                                       VectorSizeB,
-                                       VectorSizeE>::
-                     Make_B_GridDescriptor_N_K(
-                         std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{},
-                         std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{}));
-    using EGridDesc_M_N_ =
-        decltype(TensorDescriptorUtils<NumDimG,
-                                       NumDimM,
-                                       NumDimN,
-                                       NumDimK,
-                                       VectorSizeA,
-                                       VectorSizeB,
-                                       VectorSizeE>::
-                     Make_E_GridDescriptor_M_N(
-                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{},
-                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{}));
+    using Utils = TensorDescriptorUtils<NumDimG,
+                                        NumDimM,
+                                        NumDimN,
+                                        NumDimK,
+                                        VectorSizeA,
+                                        VectorSizeB,
+                                        VectorSizeE>;
+    using ADims = std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>;
+    using BDims = std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>;
+    using EDims = std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>;
+
+    using AGridDesc_M_K_ = decltype(Utils::Make_A_GridDescriptor_M_K(std::declval<const ADims&>(),
+                                                                     std::declval<const ADims&>()));
+    using BGridDesc_N_K_ = decltype(Utils::Make_B_GridDescriptor_N_K(std::declval<const BDims&>(),
+                                                                     std::declval<const BDims&>()));
+    using EGridDesc_M_N_ = decltype(Utils::Make_E_GridDescriptor_M_N(std::declval<const EDims&>(),
+                                                                     std::declval<const EDims&>()));
 
     std::array<AGridDesc_M_K_, NumATensor> as_grid_desc_m_k;
     std::array<BGridDesc_N_K_, NumBTensor> bs_grid_desc_n_k;

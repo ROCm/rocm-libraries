@@ -205,7 +205,7 @@ message(VERBOSE "CONTRACTION_MULTI_ABD_LAYOUT: ${CONTRACTION_MULTI_ABD_LAYOUT}")
 message(VERBOSE "SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 
 set(CONTRACTION_MULTI_ABD_GPU_TARGETS_INDIVIDUAL "")
-set(DESIRED_TARGETS "gfx90a;gfx942;gfx950")
+set(DESIRED_TARGETS "gfx942;gfx950;gfx12-generic")
 
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     if(target IN_LIST DESIRED_TARGETS)
@@ -215,7 +215,7 @@ foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
 endforeach()
 
 if(NOT CONTRACTION_MULTI_ABD_GPU_TARGETS_INDIVIDUAL)
-    message(WARNING "Skipping Tile Engine Contraction Multi ABD build: No supported GPU targets (gfx90a, gfx942, gfx950) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+    message(WARNING "Skipping Tile Engine Contraction Multi ABD build: No supported GPU targets (gfx942, gfx950, gfx12-generic) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 else()
     message(VERBOSE "Building individual Contraction Multi ABD targets for GPU targets: ${CONTRACTION_MULTI_ABD_GPU_TARGETS_INDIVIDUAL}")
 
