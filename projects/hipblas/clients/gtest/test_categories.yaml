@@ -9,10 +9,6 @@ test_categories:
       - "*quick*"
     exclude:
       - "*known_bug*"
-      # TODO remove bewlow exclusions after theRock corrects their reference libraries
-      - "_/getrs*"
-      - "_/getri_batched.solver*"
-      - "_/gels_batched.solver*"
     labels:
       - "smoke"
       - "quick"
@@ -24,9 +20,6 @@ test_categories:
       - "*pre_checkin*"
     exclude:
       - "*known_bug*"
-      - "_/getrs*"
-      - "_/getri_batched.solver*"
-      - "_/gels_batched.solver*"
     labels:
       - "standard"
       - "pr"
@@ -39,9 +32,6 @@ test_categories:
       - "*pre_checkin*"
     exclude:
       - "*known_bug*"
-      - "_/getrs*"
-      - "_/getri_batched.solver*"
-      - "_/gels_batched.solver*"
     labels:
       - "comprehensive"
       - "nightly"
@@ -54,11 +44,8 @@ test_categories:
       - "*pre_checkin*"
     exclude:
       - "*known_bug*"
-      - "_/getrs*"
-      - "_/getri_batched.solver*"
-      - "_/gels_batched.solver*"
     labels:
-      # TODO theRock lacks real stress test run, this is just standard compbined comprehensive for now
+      # TODO TheRock lacks real stress test run, this is just standard compbined comprehensive for now
       - "stress"
       - "weekly"
       - "full"
@@ -77,6 +64,6 @@ execution_settings:
     OMP_NUM_THREADS: "48"
   category_timeouts:
     quick: 300    # 5 mins (quick suite can exceed 300s on some systems)
-    standard: 1800    # 30 mins (standard can take over an hour)
+    standard: 1800    # 30 mins
     comprehensive: 7200   # 2 hours
     full: 86400       # 24 hours
