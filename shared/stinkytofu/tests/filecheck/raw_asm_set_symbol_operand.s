@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --emit-asm
+# RUN: %stinkytofu-opt --arch gfx1250 %s --emit-asm --preserve-symbolic-regs
 #
 # Regression: a `.set` symbol used as an instruction source operand must
 # survive the parse → IR → emit round-trip.
