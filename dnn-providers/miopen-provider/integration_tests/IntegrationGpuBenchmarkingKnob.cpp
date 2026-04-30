@@ -6,6 +6,7 @@
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
 
+#include "../tests/common/TestWorkarounds.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
@@ -34,6 +35,11 @@ class IntegrationGpuBenchmarkingKnob
 /// Single parameterized test that runs for all operations
 TEST_P(IntegrationGpuBenchmarkingKnob, ExecutesSuccessfully)
 {
+    if(GetParam() == OperationType::CONV_FWD_BIAS_ACTIV)
+    {
+        SKIP_IF_WORKAROUND_ISSUE_5409();
+    }
+
     auto graph = FrontendGraphFactory::create(GetParam());
 
     std::vector<KnobSetting> knobSettings;
