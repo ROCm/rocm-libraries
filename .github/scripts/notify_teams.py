@@ -535,7 +535,7 @@ def main():
     parser.add_argument(
         "--webhook-urls",
         default="",
-        help='JSON object mapping project names to webhook URLs (e.g., \'{\"miopen\": \"url1\", \"hipdnn\": \"url2\"}\')',
+        help='JSON object mapping project names to webhook URLs (e.g., \'{"miopen": "url1", "hipdnn": "url2"}\')',
     )
     # Legacy: single webhook URL (for backwards compatibility)
     parser.add_argument(
