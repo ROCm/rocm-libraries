@@ -10,7 +10,7 @@
 #include "EnginePlugin.hpp"
 #include "HipdnnException.hpp"
 #include "PluginCore.hpp"
-#include <hipdnn_backend/version.h>
+#include <hipdnn_plugin_sdk/engine_api_version.h>
 
 namespace hipdnn_backend::plugin
 {
@@ -28,13 +28,20 @@ protected:
     void validateBeforeAdding(const EnginePlugin& plugin) override
     {
         using hipdnn_data_sdk::utilities::Version;
-        if(Version{plugin.apiVersion()}.major != HIPDNN_BACKEND_VERSION_MAJOR)
+
+        // Validate engine C ABI major version against the engine API version
+        // (RFC 0008: engine plugin API has independent versioning from backend,
+        // mirroring the heuristic plugin pattern from RFC 0007).
+        if(Version{plugin.apiVersion()}.major != HIPDNN_ENGINE_API_VERSION_MAJOR)
         {
             throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
-                                  "Plugin " + std::string(plugin.name()) + "'s major API version ("
-                                      + plugin.apiVersion().data()
-                                      + ") does not match backend major version ("
-                                      + std::to_string(HIPDNN_BACKEND_VERSION_MAJOR) + ")");
+                                  "ERROR: ENGINE PLUGIN ABI VALIDATION FAILED\n"
+                                  "Plugin "
+                                      + std::string(plugin.name()) + "'s major API version ("
+                                      + std::string(plugin.apiVersion())
+                                      + ") does not match expected engine API major version ("
+                                      + std::to_string(HIPDNN_ENGINE_API_VERSION_MAJOR) + ")\n"
+                                      + "Expected API version: " HIPDNN_ENGINE_API_VERSION);
         }
 
         auto engineIds = plugin.getAllEngineIds();
