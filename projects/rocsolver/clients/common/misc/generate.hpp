@@ -41,8 +41,118 @@ void gerand( rocblas_int m, rocblas_int n, T* A, rocblas_int lda )
     {
         for (rocblas_int i = 0; i < m; ++i)
         {
-            // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
             A[i + j*lda] = rand_value<T>( dist );
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+// Fill in n-by-n Hermitian matrix A with random uniform values on unit square.
+// In complex, the diagonal is real.
+// If uplo == rocblas_fill_lower, only lower triangle is set;
+// if uplo == rocblas_fill_upper, only upper triangle is set;
+// if uplo == rocblas_fill_full, both lower and upper triangles are set.
+//
+// todo: pass dist into routine, with default = uniform [-1, 1]?
+//
+template <typename T>
+void herand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
+{
+    using S = decltype( std::real( T{} ) );
+    std::uniform_real_distribution<S> dist( S(-1), S(1) );
+
+    using foo::conjugate;  // todo
+
+    assert( n >= 0 );
+    assert( lda >= n );
+
+    if (uplo == rocblas_fill_lower)
+    {
+        for (rocblas_int j = 0; j < n; ++j)
+        {
+            A[ j + j*lda ] = rand_value<S>( dist );  // diagonal real
+            for (rocblas_int i = j+1; i < n; ++i)  // strictly lower
+            {
+                A[i + j*lda] = rand_value<T>( dist );
+            }
+        }
+    }
+    else if (uplo == rocblas_fill_upper)
+    {
+        for (rocblas_int j = 0; j < n; ++j)
+        {
+            for (rocblas_int i = 0; i < j; ++i)  // strictly upper
+            {
+                A[i + j*lda] = rand_value<T>( dist );
+            }
+            A[ j + j*lda ] = rand_value<S>( dist );  // diagonal real
+        }
+    }
+    else if (uplo == rocblas_fill_full)
+    {
+        for (rocblas_int j = 0; j < n; ++j)
+        {
+            A[ j + j*lda ] = rand_value<S>( dist );  // diagonal real
+            for (rocblas_int i = j+1; i < n; ++i)  // strictly lower
+            {
+                A[i + j*lda] = rand_value<T>( dist );
+                A[j + i*lda] = conjugate( A[i + j*lda] );
+            }
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+// Fill in n-by-n symmetric matrix A with random uniform values on unit square.
+// In complex, this makes a complex-symmetric matrix with complex diagonal,
+// not a Hermitian matrix.
+// If uplo == rocblas_fill_lower, only lower triangle is set;
+// if uplo == rocblas_fill_upper, only upper triangle is set;
+// if uplo == rocblas_fill_full, both lower and upper triangles are set.
+//
+// todo: pass dist into routine, with default = uniform [-1, 1]?
+//
+template <typename T>
+void syrand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
+{
+    using S = decltype( std::real( T{} ) );
+    std::uniform_real_distribution<S> dist( S(-1), S(1) );
+
+    using foo::conjugate;  // todo
+
+    assert( n >= 0 );
+    assert( lda >= n );
+
+    if (uplo == rocblas_fill_lower)
+    {
+        for (rocblas_int j = 0; j < n; ++j)
+        {
+            for (rocblas_int i = j; i < n; ++i)  // lower
+            {
+                A[i + j*lda] = rand_value<T>( dist );
+            }
+        }
+    }
+    else if (uplo == rocblas_fill_upper)
+    {
+        for (rocblas_int j = 0; j < n; ++j)
+        {
+            for (rocblas_int i = 0; i <= j; ++i)  // upper
+            {
+                A[i + j*lda] = rand_value<T>( dist );
+            }
+        }
+    }
+    else if (uplo == rocblas_fill_full)
+    {
+        for (rocblas_int j = 0; j < n; ++j)
+        {
+            A[ j + j*lda ] = rand_value<T>( dist );  // diagonal
+            for (rocblas_int i = j+1; i < n; ++i)  // strictly lower
+            {
+                A[i + j*lda] = rand_value<T>( dist );
+                A[j + i*lda] = A[i + j*lda];
+            }
         }
     }
 }
