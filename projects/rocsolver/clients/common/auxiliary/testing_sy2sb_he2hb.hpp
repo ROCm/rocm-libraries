@@ -34,10 +34,9 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/generate.hpp"
 
 #include "print_matrix.hpp"
-
-#include <stdlib.h>  // rand
 
 //------------------------------------------------------------------------------
 // todo: Can dA and hA have different lda? Or does lda apply only to hA? Weird argument order.
@@ -58,56 +57,12 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
     if (debug_)
         printf( "%s( n %d, kd %d )\n", __func__, n, kd );
 
-    using std::real, foo::conjugate;
-    using S = decltype( std::real( T() ) );
-
-    const S half = 0.5;
-
     if(CPU)
     {
-        srand( 0x12345678 );
-        for (int j = 0; j < n; ++j)
-        {
-            for (int i = j; i < n; ++i)  // lower
-            {
-                if constexpr (rocblas_is_complex<T>) {
-                    hA[0][i + j*lda] = T( 2 * (rand() / S(RAND_MAX) - half),
-                                          2 * (rand() / S(RAND_MAX) - half) );
-                }
-                else {
-                    hA[0][i + j*lda] = 2 * (rand() / S(RAND_MAX) - half);
-                }
-            }
-        }
+        herand( rocblas_fill_full, n, hA[0], lda );
         //rocblas_init<T>(hA, true);
-        //print_matrix( "hA_0", n, n, hA[0], lda );
-
-        // scale band of size kd of A to avoid singularities
-        // todo: remove. no need to scale.
-        // for(rocblas_int i = 0; i < n; i++)
-        // {
-        //     for(rocblas_int j = 0; j < n; j++)
-        //     {
-        //         if(i <= j + kd && i >= j - kd)
-        //             hA[0][i + j * lda] += 400;
-        //         else
-        //             hA[0][i + j * lda] -= 4;
-        //     }
-        // }
-
-        // Symmetrize matrix and make diagonal real.
-        // todo: should this be in he2hb, where it (may) be needed,
-        // and should be timed?
-        // LAPACK does not need this, only rocSolver does.
-        for(rocblas_int j = 0; j < n; ++j)
-        {
-            hA[0][j + j*lda] = real( hA[0][j + j*lda] );
-            for(rocblas_int i = 0; i < j; ++i)  // upper
-            {
-                hA[0][i + j*lda] = conjugate( hA[0][j + i*lda] );
-            }
-        }
-        //print_matrix( "hA_sym", n, n, hA[0], lda );
+        if (debug_)
+            print_matrix( "hA_0", n, n, hA[0], lda );
     }
 
     if(GPU)
