@@ -23,6 +23,16 @@
 // For cuda::std::__cccl_thread_sleep_for / cuda::std::__libcpp_thread_sleep_for(__ns)
 #include <hip/std/atomic>
 
+// Workaround: On Windows, the HIP runtime does not dispatch kernels to the GPU
+// until hipStreamSynchronize is called on the stream. We spawn a detached
+// std::thread ("kicker thread") in prepDeviceForWork() to call
+// hipStreamSynchronize(mainStream) without blocking the calling thread.
+// See prepDeviceForWork() below for the full explanation.
+// If this workaround is ever removed, this include can be removed too.
+#ifdef _WIN32
+    #include <thread>
+#endif
+
 namespace cuda {
 
 enum {
@@ -373,6 +383,26 @@ static __host__ void prepDeviceForWork() {
     }
 
     hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(hip::thread::max_width()), 0, mainStream);
+
+    // Workaround for Windows lazy kernel dispatch:
+    // On Windows, kernel dispatch is delayed until something triggers a flush of the stream (eg. hipStreamSynchronize).
+    // Without this workaround, threading_main is queued but never actually dispatched to the GPU, causing later
+    // hip::thread operations to hang (work is submitted to cpuWorkQueue but the kernel that processes it never starts).
+    //
+    // We can't call hipStreamSynchronize(mainStream) on the calling thread because threading_main is a persistent
+    // kernel that will loop forever until it's told to stop - the sync would block until the kernel finishes, which
+    // only happens after all work is enqueued and notifyDeviceThereMightNotBeAnyMoreWork() is called. That creates a
+    // deadlock: the calling thread can't finish submitting work because it's blocked, and the kernel can't stop because
+    // it is still waiting to receive work.
+    //
+    // Solution: spawn a detached thread that calls hipStreamSynchronize. This kick-starts threading_main, while the
+    // original calling thread continues and can submit all of its work. The detached thread blocks in
+    // hipStreamSynchronize until the kernel eventually exits, at which point the thread silently terminates.
+    #ifdef _WIN32
+        ::std::thread([](){
+            __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(mainStream));
+        }).detach();
+    #endif
 }
 
 static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bool blocking = false) {
