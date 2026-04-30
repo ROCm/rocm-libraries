@@ -118,6 +118,46 @@ class LoopBodyCapture:
 
 
 @dataclass
+class CaptureContext:
+    """Per-kernel capture lifecycle for the dataflow-graph comparison.
+
+    Replaces the five capture-state attributes that used to live scattered
+    across writer (`_last_default_capture`, `_last_cms_capture`,
+    `_last_default_main_capture`) and writer.states (`_defaultNGLCapture`,
+    `_defaultNLLCapture`), plus the lifecycle helpers that go alongside
+    (`_defaultCaptureBuilder`, `_prefetchPackCode{A,B}`).
+
+    `default` and `cms` are the consumer-facing artifacts (read by tests
+    after the build); they survive across kernels until overwritten by
+    the next build. Everything else is per-kernel scratch state cleared by
+    `reset()` from kernelBody's finally block.
+    """
+    # Final captures (consumer-facing — read by tests, CMSValidator, etc.)
+    default: object = None       # FourPartCapture | None
+    cms: object = None           # FourPartCapture | None
+    # Per-kernel scratch state (cleared by reset()).
+    default_main: object = None  # LoopBodyCapture | None
+    default_n_gl: object = None  # LoopBodyCapture | None
+    default_n_ll: object = None  # LoopBodyCapture | None
+    builder: object = None       # LoopBodyCaptureBuilder | None
+    # Snapshots of prefetch pack code per plrIdx, used by _loopBody to tag
+    # leaves consumed at iter 0 (which never enter PackCodeAAllIters).
+    prefetch_pack_a: list = field(default_factory=list)
+    prefetch_pack_b: list = field(default_factory=list)
+
+    def reset(self):
+        """Clear all per-kernel scratch state. `default` and `cms` are
+        intentionally preserved — they're the consumer-facing artifacts.
+        """
+        self.default_main = None
+        self.default_n_gl = None
+        self.default_n_ll = None
+        self.builder = None
+        self.prefetch_pack_a = []
+        self.prefetch_pack_b = []
+
+
+@dataclass
 class FourPartCapture:
     """Symmetric per-codepath dict shape for all four loop-body entries.
 

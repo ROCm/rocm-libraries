@@ -1072,17 +1072,22 @@ class TestPhase5DefaultTailCapture:
 
     def test_n_gl_n_ll_state_resets_after_kernel(self, isa_infrastructure):
         """Phase 5's reset block in kernelBody must clear the per-kernel
-        capture state on self.states._defaultNGLCapture, ._defaultNLLCapture,
-        and self._last_default_main_capture. The final FourPartCapture
+        scratch state on writer._capture_context (default_n_gl, default_n_ll,
+        default_main, builder, prefetch_pack_*). The final FourPartCapture
         survives on writer._last_default_capture (intentional — it's the
-        consumer-facing artifact)."""
+        consumer-facing artifact, aliased to writer._capture_context.default)."""
         writer = self._build_with_capture(isa_infrastructure)
-        # After build, intermediate state should be reset.
-        assert writer.states._defaultNGLCapture is None
-        assert writer.states._defaultNLLCapture is None
-        assert writer._last_default_main_capture is None
+        # After build, intermediate scratch state should be reset.
+        ctx = writer._capture_context
+        assert ctx.default_n_gl is None
+        assert ctx.default_n_ll is None
+        assert ctx.default_main is None
+        assert ctx.builder is None
+        assert ctx.prefetch_pack_a == []
+        assert ctx.prefetch_pack_b == []
         # But the final consumer-facing capture survives.
         assert writer._last_default_capture is not None
+        assert ctx.default is writer._last_default_capture
 
 
 class TestDataflowGraphIntegration:
