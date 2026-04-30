@@ -41,9 +41,9 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
+          repository: "reboss/TheRock" # WIP: using fork for rocsolver test filter changes
           path: TheRock
-          ref: 70a6335b27d48f3781ba07eab89269f75a00f527 # 2026-05-03 commit
+          ref: rocsolver-test-filter
 
       - name: Install python deps
         run: |
