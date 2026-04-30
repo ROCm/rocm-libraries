@@ -4175,7 +4175,7 @@ class KernelWriterAssembly(KernelWriter):
     useSubtile = bool(kernel.get("UseSubtileImpl"))
     useFixedSrd2 = useSubtile
     isPreShuffledAB = tc in ("A", "B") and kernel["ProblemType"].get("SwizzleTensor%s" % tc, False)
-    isSwizzledSubtile = (isgfx950 or isPreShuffledAB) and useSubtile
+    isSwizzledSubtile = isgfx950 and isPreShuffledAB and useSubtile
     if isgfx950mx:
       useFixedSrd2 = True
       tcab = "A" if tc == "MXSA" else "B"
