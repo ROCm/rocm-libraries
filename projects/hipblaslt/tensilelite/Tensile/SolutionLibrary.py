@@ -28,7 +28,7 @@ from . import Properties
 from . import Hardware
 from . import Contractions
 from Tensile.Common import state, IsaInfo
-from Tensile.Common.Architectures import gfxToIsa
+from Tensile.Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from Tensile.SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 
 class SingleSolutionLibrary:
@@ -372,7 +372,13 @@ class MasterSolutionLibrary:
 
             if lazyLibrary:
                 if cuCount: placeholderName += "_CU" + str(cuCount)
-                if pciChipId:
+                # Only append the chip-id suffix on architectures whose runtime
+                # HardwarePredicate also includes the chip-id discriminator
+                # (see Hardware.HardwarePredicate.FromHardware). Otherwise the
+                # filename diverges between sibling YAMLs while their predicates
+                # remain equal, producing PredicateLibrary.merge collisions whose
+                # PlaceholderLibrary children silently drop one leaf.
+                if pciChipId and supportsChipIdPredicate(devicePart):
                     # Convert device names list to a sanitized string for filename
                     # e.g., ['Device 75a0', 'Device 75b0'] -> 'ID75a0-75b0'
                     if isinstance(pciChipId, list):
