@@ -272,6 +272,9 @@ class block_adjacent_difference_benchmark : public primbench::benchmark_interfac
                             input.size() * sizeof(input[0]),
                             hipMemcpyHostToDevice));
 
+        state.set_items(items);
+        state.add_writes<T>(items);
+
         state.run(
             [&]
             {
@@ -284,9 +287,6 @@ class block_adjacent_difference_benchmark : public primbench::benchmark_interfac
                     d_input,
                     d_output);
             });
-
-        state.set_items(items);
-        state.add_writes<T>(items);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
@@ -341,6 +341,9 @@ class block_adjacent_difference_partial_tile_benchmark : public primbench::bench
                             tile_sizes.size() * sizeof(tile_sizes[0]),
                             hipMemcpyHostToDevice));
 
+        state.set_items(Trials * items);
+        state.add_writes<T>(Trials * items);
+
         state.run(
             [&]
             {
@@ -356,9 +359,6 @@ class block_adjacent_difference_partial_tile_benchmark : public primbench::bench
                 HIP_CHECK(hipGetLastError());
                 HIP_CHECK(hipDeviceSynchronize());
             });
-
-        state.set_items(Trials * items);
-        state.add_writes<T>(Trials * items);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_tile_sizes));

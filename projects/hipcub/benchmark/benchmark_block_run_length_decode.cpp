@@ -153,6 +153,9 @@ class block_run_length_decode_benchmark : public primbench::benchmark_interface
         ItemT* d_output{};
         HIP_CHECK(hipMalloc(&d_output, output_length * sizeof(ItemT)));
 
+        state.set_items(Trials * output_length);
+        state.add_writes<ItemT>(Trials * output_length);
+
         state.run(
             [&]
             {
@@ -170,9 +173,6 @@ class block_run_length_decode_benchmark : public primbench::benchmark_interface
                     d_run_offsets,
                     d_output);
             });
-
-        state.set_items(Trials * output_length);
-        state.add_writes<ItemT>(Trials * output_length);
     }
 };
 

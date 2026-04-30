@@ -133,6 +133,9 @@ private:
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
+        state.set_items(batch_size * size);
+        state.add_writes<T>(batch_size * size);
+
         state.run(
             [&]
             {
@@ -149,9 +152,6 @@ private:
                                                                      stream));
                 }
             });
-
-        state.set_items(batch_size * size);
-        state.add_writes<T>(batch_size * size);
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_input));
@@ -217,6 +217,9 @@ private:
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
+        state.add_writes<T>(batch_size * size * Channels);
+        state.set_items(batch_size * size * Channels);
+
         state.run(
             [&]
             {
@@ -235,9 +238,6 @@ private:
                             stream)));
                 }
             });
-
-        state.add_writes<T>(batch_size * size * Channels);
-        state.set_items(batch_size * size * Channels);
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_input));
@@ -291,6 +291,9 @@ class range_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
+        state.set_items(batch_size * size);
+        state.add_writes<T>(batch_size * size);
+
         state.run(
             [&]
             {
@@ -306,9 +309,6 @@ class range_benchmark : public primbench::benchmark_interface
                                                                       stream));
                 }
             });
-
-        state.set_items(batch_size * size);
-        state.add_writes<T>(batch_size * size);
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_input));
@@ -378,6 +378,9 @@ class multi_range_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
+        state.set_items(batch_size * size * Channels);
+        state.add_writes<T>(batch_size * size * Channels);
+
         state.run(
             [&]
             {
@@ -395,9 +398,6 @@ class multi_range_benchmark : public primbench::benchmark_interface
                             stream)));
                 }
             });
-
-        state.set_items(batch_size * size * Channels);
-        state.add_writes<T>(batch_size * size * Channels);
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_input));

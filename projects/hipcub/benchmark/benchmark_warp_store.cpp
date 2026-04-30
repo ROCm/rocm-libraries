@@ -122,15 +122,15 @@ class warp_store_benchmark : public primbench::benchmark_interface
         T* d_output;
         HIP_CHECK(hipMalloc(&d_output, items * sizeof(T)));
 
+        state.set_items(items);
+        state.add_writes<T>(items);
+
         state.run(
             [&]
             {
                 warp_store_kernel<BlockSize, ItemsPerThread, LogicalWarpSize, Algorithm>
                     <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(d_output);
             });
-
-        state.set_items(items);
-        state.add_writes<T>(items);
 
         HIP_CHECK(hipFree(d_output));
     }
