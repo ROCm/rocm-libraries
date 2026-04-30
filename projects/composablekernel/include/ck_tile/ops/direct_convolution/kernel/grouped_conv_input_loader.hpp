@@ -118,6 +118,12 @@ struct InputLoader
             // the valid region spans BLOCK_W * BLOCK_C8 * 8 fp16 elements.
             // Threads writing beyond this boundary are in the padded region
             // (TOTAL_SPATIAL > BLOCK_W) and can skip the instruction.
+            // TODO: We should handle this by padding the tensor descriptor and let 
+            // CK Tile infra to disable out-of-bounds threads, instead of using a manual check here.
+            // The problem is that we cannot keep the DRAM window alive for the duration of the compute loop.
+            // It uses too many registers and causes spill. 
+            // We are running low on the register space because we keep the whole weight tensor in registers
+            // to mimize the data movement. 
             {
                 const int lane_id = ck_tile::get_lane_id();
                 load_active = (warp_lds_offset + lane_id * 8
@@ -187,9 +193,8 @@ struct InputLoader
                 store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
 
             // Async DRAM→LDS load: 8 × fp16 = 16 bytes per thread.
-            // oob_conditional_check=true: use is_valid from pad transform to force OOB for
-            // threads in padding regions. Without this, threads in the padding zone but within
-            // the buffer's address range would load real data instead of zeros.
+            // oob_conditional_check=true: we currently use the load guard to disable 
+            // threads that would access the out of bounds region.
             ck_tile::amd_async_buffer_load<_Float16, 8,
                 ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
                 lds_dest,
