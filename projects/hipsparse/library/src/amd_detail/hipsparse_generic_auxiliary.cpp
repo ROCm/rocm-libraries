@@ -595,36 +595,29 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
-
-    // rocsparse does not expose rocsparse_create_const_bsr_descr, so we create a
-    // regular (non-const) bsr descriptor and hand it back as a const wrapper. The
-    // input data pointers are const-correct at the hipsparse API layer.
-    hipsparseSpMatDescr_st* tmpDescr = new hipsparseSpMatDescr_st();
+    spMatDescr[0] = new hipsparseSpMatDescr_st();
 
     hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_create_bsr_descr(tmpDescr->get_spmat_descr_reference(),
-                                   mb,
-                                   nb,
-                                   nnzb,
-                                   hipsparse::hipDirectionToHCCDirection(blockDir),
-                                   blockDim,
-                                   const_cast<void*>(bsrRowPtr),
-                                   const_cast<void*>(bsrColInd),
-                                   const_cast<void*>(bsrValues),
-                                   hipsparse::hipIndexTypeToHCCIndexType(bsrRowPtrType),
-                                   hipsparse::hipIndexTypeToHCCIndexType(bsrColIndType),
-                                   hipsparse::hipBaseToHCCBase(idxBase),
-                                   hipsparse::hipDataTypeToHCCDataType(valueType)));
+        rocsparse_create_const_bsr_descr(spMatDescr[0]->get_const_spmat_descr_reference(),
+                                         mb,
+                                         nb,
+                                         nnzb,
+                                         hipsparse::hipDirectionToHCCDirection(blockDir),
+                                         blockDim,
+                                         bsrRowPtr,
+                                         bsrColInd,
+                                         bsrValues,
+                                         hipsparse::hipIndexTypeToHCCIndexType(bsrRowPtrType),
+                                         hipsparse::hipIndexTypeToHCCIndexType(bsrColIndType),
+                                         hipsparse::hipBaseToHCCBase(idxBase),
+                                         hipsparse::hipDataTypeToHCCDataType(valueType)));
 
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
-        delete tmpDescr;
-        return status;
+        delete spMatDescr[0];
     }
 
-    spMatDescr[0] = tmpDescr;
-
-    return HIPSPARSE_STATUS_SUCCESS;
+    return status;
 }
 
 hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
