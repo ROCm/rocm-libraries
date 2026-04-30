@@ -49,6 +49,23 @@ Tests:
              HIPSPARSE_SPMV_COO_ALG1,
              HIPSPARSE_SPMV_COO_ALG2]
 
+- name: spmv_coo_mixed
+  category: quick
+  function: spmv_coo
+  indextype: *i32_i64
+  precision: *spmv_mixed_precisions
+  M: [50]
+  N: [84]
+  alpha: [2.0]
+  alphai: [0.5]
+  beta: [1.0]
+  betai: [0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT,
+             HIPSPARSE_SPMV_COO_ALG1,
+             HIPSPARSE_SPMV_COO_ALG2]
+
 - name: spmv_coo
   category: pre_checkin
   function: spmv_coo

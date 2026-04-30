@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,14 @@ constexpr auto hipsparse_datatype2string(hipDataType type)
 {
     switch(type)
     {
+    case HIP_R_8I:
+        return "i8_r";
+    case HIP_R_16F:
+        return "f16_r";
+    case HIP_R_16BF:
+        return "bf16_r";
+    case HIP_R_32I:
+        return "i32_r";
     case HIP_R_32F:
         return "f32_r";
     case HIP_R_64F:
@@ -96,7 +104,7 @@ constexpr auto hipsparse_direction2string(hipsparseDirection_t direction)
     return "invalid";
 }
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 constexpr auto hipsparse_order2string(hipsparseOrder_t order)
 {
     switch(order)
@@ -109,7 +117,7 @@ constexpr auto hipsparse_order2string(hipsparseOrder_t order)
     return "invalid";
 }
 #else
-#if(CUDART_VERSION >= 11000)
+#if (CUDART_VERSION >= 11000)
 constexpr auto hipsparse_order2string(hipsparseOrder_t order)
 {
     switch(order)
@@ -121,7 +129,7 @@ constexpr auto hipsparse_order2string(hipsparseOrder_t order)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 10010)
+#elif (CUDART_VERSION >= 10010)
 constexpr auto hipsparse_order2string(hipsparseOrder_t order)
 {
     switch(order)
@@ -134,7 +142,7 @@ constexpr auto hipsparse_order2string(hipsparseOrder_t order)
 #endif
 #endif
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 constexpr auto hipsparse_format2string(hipsparseFormat_t format)
 {
     switch(format)
@@ -155,7 +163,7 @@ constexpr auto hipsparse_format2string(hipsparseFormat_t format)
     return "invalid";
 }
 #else
-#if(CUDART_VERSION >= 12011)
+#if (CUDART_VERSION >= 12011)
 constexpr auto hipsparse_format2string(hipsparseFormat_t format)
 {
     switch(format)
@@ -173,7 +181,7 @@ constexpr auto hipsparse_format2string(hipsparseFormat_t format)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
+#elif (CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
 constexpr auto hipsparse_format2string(hipsparseFormat_t format)
 {
     switch(format)
@@ -189,7 +197,7 @@ constexpr auto hipsparse_format2string(hipsparseFormat_t format)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
 constexpr auto hipsparse_format2string(hipsparseFormat_t format)
 {
     switch(format)
@@ -207,7 +215,7 @@ constexpr auto hipsparse_format2string(hipsparseFormat_t format)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
 constexpr auto hipsparse_format2string(hipsparseFormat_t format)
 {
     switch(format)
@@ -286,7 +294,7 @@ constexpr auto hipsparse_solvepolicy2string(hipsparseSolvePolicy_t policy)
     return "invalid";
 }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11022)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11022)
 constexpr auto hipsparse_sddmmalg2string(hipsparseSDDMMAlg_t alg)
 {
     switch(alg)
@@ -298,7 +306,7 @@ constexpr auto hipsparse_sddmmalg2string(hipsparseSDDMMAlg_t alg)
 }
 #endif
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 constexpr auto hipsparse_spgemmalg2string(hipsparseSpGEMMAlg_t alg)
 {
     switch(alg)
@@ -319,7 +327,7 @@ constexpr auto hipsparse_spgemmalg2string(hipsparseSpGEMMAlg_t alg)
     return "invalid";
 }
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
 constexpr auto hipsparse_spgemmalg2string(hipsparseSpGEMMAlg_t alg)
 {
     switch(alg)
@@ -339,7 +347,7 @@ constexpr auto hipsparse_spgemmalg2string(hipsparseSpGEMMAlg_t alg)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
 constexpr auto hipsparse_spmmalg2string(hipsparseSpGEMMAlg_t alg)
 {
     switch(alg)
@@ -353,7 +361,7 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpGEMMAlg_t alg)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 11000)
+#elif (CUDART_VERSION >= 11000)
 constexpr auto hipsparse_spmmalg2string(hipsparseSpGEMMAlg_t alg)
 {
     switch(alg)
@@ -366,7 +374,7 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpGEMMAlg_t alg)
 #endif
 #endif
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
 {
     switch(alg)
@@ -393,7 +401,7 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
     return "invalid";
 }
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
 constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
 {
     switch(alg)
@@ -419,7 +427,7 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
 constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
 {
     switch(alg)
@@ -445,7 +453,7 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
+#elif (CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
 constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
 {
     switch(alg)
@@ -469,7 +477,7 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
 constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
 {
     switch(alg)
@@ -490,7 +498,7 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
 #endif
 #endif
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
 {
     switch(alg)
@@ -511,7 +519,7 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
     return "invalid";
 }
 #else
-#if(CUDART_VERSION >= 12011)
+#if (CUDART_VERSION >= 12011)
 constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
 {
     switch(alg)
@@ -531,7 +539,7 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
+#elif (CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
 constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
 {
     switch(alg)
@@ -549,7 +557,7 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
 constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
 {
     switch(alg)
@@ -567,7 +575,7 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
 constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
 {
     switch(alg)
@@ -586,7 +594,7 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
 #endif
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 constexpr auto hipsparse_spsmalg2string(hipsparseSpSMAlg_t alg)
 {
     switch(alg)
@@ -598,7 +606,7 @@ constexpr auto hipsparse_spsmalg2string(hipsparseSpSMAlg_t alg)
 }
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 constexpr auto hipsparse_spsvalg2string(hipsparseSpSVAlg_t alg)
 {
     switch(alg)
@@ -610,7 +618,7 @@ constexpr auto hipsparse_spsvalg2string(hipsparseSpSVAlg_t alg)
 }
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
 constexpr auto hipsparse_sparsetodensealg2string(hipsparseSparseToDenseAlg_t alg)
 {
     switch(alg)
@@ -622,7 +630,7 @@ constexpr auto hipsparse_sparsetodensealg2string(hipsparseSparseToDenseAlg_t alg
 }
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
 constexpr auto hipsparse_densetosparsealg2string(hipsparseDenseToSparseAlg_t alg)
 {
     switch(alg)
@@ -634,7 +642,7 @@ constexpr auto hipsparse_densetosparsealg2string(hipsparseDenseToSparseAlg_t alg
 }
 #endif
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 constexpr auto hipsparse_csr2cscalg2string(hipsparseCsr2CscAlg_t alg)
 {
     switch(alg)
@@ -649,7 +657,7 @@ constexpr auto hipsparse_csr2cscalg2string(hipsparseCsr2CscAlg_t alg)
     return "invalid";
 }
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
 constexpr auto hipsparse_csr2cscalg2string(hipsparseCsr2CscAlg_t alg)
 {
     switch(alg)
@@ -661,7 +669,7 @@ constexpr auto hipsparse_csr2cscalg2string(hipsparseCsr2CscAlg_t alg)
     }
     return "invalid";
 }
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
 constexpr auto hipsparse_csr2cscalg2string(hipsparseCsr2CscAlg_t alg)
 {
     switch(alg)
