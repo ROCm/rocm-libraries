@@ -361,11 +361,11 @@ struct MIOPEN_INTERNALS_EXPORT ConvAsm7x7c3h224w224k64u2v2p3q3f1 final : ConvSol
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd11x11 final : ConvSolver
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwd11x11 final : ConvSolver
 {
     const std::string& SolverDbId() const override
     {
-        return GetSolverDbId<ConvOclDirectFwd11x11>();
+        return GetSolverDbId<ConvHipDirectFwd11x11>();
     }
 
     bool IsApplicable(const ExecutionContext&,

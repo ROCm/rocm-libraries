@@ -3,8 +3,14 @@
 
 find_package(Threads REQUIRED)
 
-find_package(hipdnn_test_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+# hipdnn SDK dependencies - use targets directly if available (superbuild),
+# otherwise find installed packages (true standalone)
+if(NOT TARGET hipdnn_test_sdk)
+    find_package(hipdnn_test_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 add_executable(
     hip_kernel_provider_integration_tests

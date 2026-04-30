@@ -263,8 +263,8 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD11X11``
-        | Controls ConvOclDirectFwd11x11 direct solution.
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD11X11``
+        | Controls ConvHipDirectFwd11x11 direct solution.
       - | 0: Disable
         | 1: Enable
 
