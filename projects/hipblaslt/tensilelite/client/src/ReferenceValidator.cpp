@@ -704,22 +704,25 @@ namespace TensileLite
                 // Match the EXACT allocation logic in copyBadInputBuffers:
                 // dPadding = totalElements - totalAllocatedElements()  (in elements)
                 // dPadding = multiplyElementSize(dPadding, elementBytes())  (convert to bytes)
-                // dPadding = (dPadding / (2*elementBytes)) * (2*elementBytes)  (ensure alignment)
+                // dPadding = round to multiple of (2 * ceil(max(1, elementBytes)))  (ensure alignment)
                 // dstOffset = dst + dPadding / 2  (divide bytes by 2)
                 ptrdiff_t paddingElements = maxElement - tensor.totalAllocatedElements();
                 size_t paddingBytes = multiplyElementSize(paddingElements, tensor.elementBytes());
 
-                // Ensure alignment: round to even multiple of elementBytes
-                size_t elementBytes = static_cast<size_t>(tensor.elementBytes());
-                size_t doubleElement = 2 * elementBytes;
-                paddingBytes = (paddingBytes / doubleElement) * doubleElement;
+                // Ensure paddingBytes/2 is properly aligned for the element type
+                // Match the exact rounding logic from copyBadInputBuffers
+                float elementBytes = tensor.elementBytes();
+                size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
+                paddingBytes = (paddingBytes / alignmentBytes) * alignmentBytes;
 
                 size_t bytesBeforeData = paddingBytes / 2;
 
                 copySource = (uint8_t const*)result - bytesBeforeData;
 
                 // Calculate elementsBeforeData for bounds checking display
-                elementsBeforeData = bytesBeforeData / static_cast<size_t>(tensor.elementBytes());
+                // Note: for sub-byte types this may not be exact due to rounding
+                elementsBeforeData = bytesBeforeData / std::max(static_cast<size_t>(1),
+                                                                 static_cast<size_t>(tensor.elementBytes()));
                 elementsAfterData
                     = elementsToCopy - (tensor.totalAllocatedElements() + elementsBeforeData);
             }

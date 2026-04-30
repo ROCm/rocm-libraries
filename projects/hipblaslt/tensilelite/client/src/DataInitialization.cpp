@@ -768,15 +768,17 @@ namespace TensileLite
                           multiplyElementSize(totalElements,
                                               DataTypeInfo::Get(descriptor.dataType()).elementSize),
                           kind));
-            // Then, copy valid data to middle section, overwriting NaN padding
+            // Then, copy valid data to middle section, overwriting sentinel padding
             ptrdiff_t dPadding = totalElements - descriptor.totalAllocatedElements();
             dPadding           = multiplyElementSize(dPadding, descriptor.elementBytes());
 
-            // Ensure dPadding/2 is aligned to element boundaries
-            // Round to even multiple of elementBytes so division by 2 stays aligned
-            size_t elementBytes = static_cast<size_t>(descriptor.elementBytes());
-            size_t doubleElement = 2 * elementBytes;
-            dPadding = (dPadding / doubleElement) * doubleElement;
+            // Ensure dPadding/2 is properly aligned for the element type
+            // Round dPadding to multiple of (2 * ceil(elementBytes)) to ensure:
+            // 1. dPadding is even (so dPadding/2 is a whole number)
+            // 2. dPadding/2 is aligned to element boundaries
+            float elementBytes = descriptor.elementBytes();
+            size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
+            dPadding = (dPadding / alignmentBytes) * alignmentBytes;
 
             void* dstOffset    = (void*)((uint8_t*)dst + dPadding / 2);
             TensileLite::hip::CopyTensorVoid(dstOffset, src, descriptor, kind);
@@ -2084,7 +2086,7 @@ namespace TensileLite
                     }
                     if(ptr == nullptr)
                     {
-                        std::runtime_error("output ptr is null when copy input");
+                        throw std::runtime_error("output ptr is null when copy input");
                     }
                     ptrs[i]        = ptr;
                     batchPtrs[i]   = p.getInputByKind(kind).batch.get();

@@ -53,12 +53,10 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # Standard size - creates even padding (for baseline)
+          # Mix of problem sizes to test padding alignment
+          # Padding = (maxElements - problemElements + basePadding) where buffer is reused
+          # This can create odd-byte padding after multiplyElementSize conversion
           - Exact: [256, 256, 1, 256]
-          # Odd-sized tensor that creates odd-element padding
-          # 137 * 129 = 17673 elements (odd when buffer reuse creates large padding)
           - Exact: [137, 129, 1, 64]
-          # Another odd size to test different alignment scenarios
           - Exact: [141, 131, 1, 128]
-          # Edge case: very small odd size
           - Exact: [17, 19, 1, 32]
