@@ -42,8 +42,8 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
 void testing_spmv_csr_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     int64_t              m           = 100;
     int64_t              n           = 100;
     int64_t              nnz         = 100;

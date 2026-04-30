@@ -3269,12 +3269,7 @@ void host_bsrxmv(hipsparseDirection_t dir,
     }
 }
 
-template <typename T,
-          typename I,
-          typename J,
-          typename A,
-          typename X,
-          typename Y = T>
+template <typename T, typename I, typename J, typename A, typename X, typename Y = T>
 inline void host_sellmv(hipsparseOperation_t trans,
                         J                    M,
                         J                    N,
@@ -3308,9 +3303,8 @@ inline void host_sellmv(hipsparseOperation_t trans,
                 J col       = sell_col_ind[j] - base;
                 if(col >= 0)
                 {
-                    sums[local_row] = testing_fma(testing_cast<T>(sell_val[j]),
-                                                  static_cast<T>(x[col]),
-                                                  sums[local_row]);
+                    sums[local_row] = testing_fma(
+                        testing_cast<T>(sell_val[j]), static_cast<T>(x[col]), sums[local_row]);
                 }
             }
 
@@ -3367,12 +3361,7 @@ inline void host_sellmv(hipsparseOperation_t trans,
     }
 }
 
-template <typename I,
-          typename J,
-          typename A,
-          typename X,
-          typename Y,
-          typename T>
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
 inline void host_csrmv(hipsparseOperation_t trans,
                        J                    M,
                        J                    N,
@@ -7580,10 +7569,9 @@ void host_coomv(I                    m,
         const I row = coo_row_ind[i] - idx_base;
         const I col = coo_col_ind[i] - idx_base;
         T       yi  = static_cast<T>(y[row]);
-        yi          = testing_fma(testing_mult(alpha, testing_cast<T>(coo_val[i])),
-                         static_cast<T>(x[col]),
-                         yi);
-        y[row]      = static_cast<Y>(yi);
+        yi          = testing_fma(
+            testing_mult(alpha, testing_cast<T>(coo_val[i])), static_cast<T>(x[col]), yi);
+        y[row] = static_cast<Y>(yi);
     }
 }
 
@@ -7615,10 +7603,9 @@ void host_coomv_aos(I                    m,
         const I row = coo_ind[2 * i] - idx_base;
         const I col = coo_ind[2 * i + 1] - idx_base;
         T       yi  = static_cast<T>(y[row]);
-        yi          = testing_fma(testing_mult(alpha, testing_cast<T>(coo_val[i])),
-                         static_cast<T>(x[col]),
-                         yi);
-        y[row]      = static_cast<Y>(yi);
+        yi          = testing_fma(
+            testing_mult(alpha, testing_cast<T>(coo_val[i])), static_cast<T>(x[col]), yi);
+        y[row] = static_cast<Y>(yi);
     }
 }
 

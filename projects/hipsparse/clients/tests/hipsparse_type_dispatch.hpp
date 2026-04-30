@@ -167,65 +167,57 @@ auto hipsparse_spmv_dispatch(const Arguments& arg)
     const auto Y = arg.y_type;
     const auto T = arg.compute_type;
 
-#define HIPSPARSE_SPMV_DISPATCH_BLOCK(I_t, J_t)                                                  \
-    do                                                                                           \
-    {                                                                                            \
-        /* Uniform precisions: A == X == Y == T */                                               \
-        if(A == HIP_R_32F && X == HIP_R_32F && Y == HIP_R_32F && T == HIP_R_32F)                 \
-            return TEST<I_t, J_t, float, float, float, float>{}(arg);                            \
-        if(A == HIP_R_64F && X == HIP_R_64F && Y == HIP_R_64F && T == HIP_R_64F)                 \
-            return TEST<I_t, J_t, double, double, double, double>{}(arg);                        \
-        if(A == HIP_C_32F && X == HIP_C_32F && Y == HIP_C_32F && T == HIP_C_32F)                 \
-            return TEST<I_t, J_t, hipComplex, hipComplex, hipComplex, hipComplex>{}(arg);        \
-        if(A == HIP_C_64F && X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)                 \
-            return TEST<I_t,                                                                     \
-                        J_t,                                                                     \
-                        hipDoubleComplex,                                                        \
-                        hipDoubleComplex,                                                        \
-                        hipDoubleComplex,                                                        \
-                        hipDoubleComplex>{}(arg);                                                \
-        /* Basic mixed precisions: A == X, Y / T may differ */                                   \
-        if(A == HIP_R_8I && X == HIP_R_8I && Y == HIP_R_32I && T == HIP_R_32I)                   \
-            return TEST<I_t, J_t, int8_t, int8_t, int32_t, int32_t>{}(arg);                      \
-        if(A == HIP_R_8I && X == HIP_R_8I && Y == HIP_R_32F && T == HIP_R_32F)                   \
-            return TEST<I_t, J_t, int8_t, int8_t, float, float>{}(arg);                          \
-        if(A == HIP_R_16F && X == HIP_R_16F && Y == HIP_R_32F && T == HIP_R_32F)                 \
-            return TEST<I_t, J_t, hipsparseFloat16, hipsparseFloat16, float, float>{}(arg);      \
-        if(A == HIP_R_16F && X == HIP_R_16F && Y == HIP_R_16F && T == HIP_R_32F)                 \
-            return TEST<I_t,                                                                     \
-                        J_t,                                                                     \
-                        hipsparseFloat16,                                                        \
-                        hipsparseFloat16,                                                        \
-                        hipsparseFloat16,                                                        \
-                        float>{}(arg);                                                           \
-        if(A == HIP_R_16BF && X == HIP_R_16BF && Y == HIP_R_32F && T == HIP_R_32F)               \
-            return TEST<I_t, J_t, hipsparseBfloat16, hipsparseBfloat16, float, float>{}(arg);    \
-        if(A == HIP_R_16BF && X == HIP_R_16BF && Y == HIP_R_16BF && T == HIP_R_32F)              \
-            return TEST<I_t,                                                                     \
-                        J_t,                                                                     \
-                        hipsparseBfloat16,                                                       \
-                        hipsparseBfloat16,                                                       \
-                        hipsparseBfloat16,                                                       \
-                        float>{}(arg);                                                           \
-        if(A == HIP_R_32F && X == HIP_R_64F && Y == HIP_R_64F && T == HIP_R_64F)                 \
-            return TEST<I_t, J_t, float, double, double, double>{}(arg);                         \
-        if(A == HIP_C_32F && X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)                 \
-            return TEST<I_t,                                                                     \
-                        J_t,                                                                     \
-                        hipComplex,                                                              \
-                        hipDoubleComplex,                                                        \
-                        hipDoubleComplex,                                                        \
-                        hipDoubleComplex>{}(arg);                                                \
-        if(A == HIP_R_32F && X == HIP_C_32F && Y == HIP_C_32F && T == HIP_C_32F)                 \
-            return TEST<I_t, J_t, float, hipComplex, hipComplex, hipComplex>{}(arg);             \
-        if(A == HIP_R_64F && X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)                 \
-            return TEST<I_t,                                                                     \
-                        J_t,                                                                     \
-                        double,                                                                  \
-                        hipDoubleComplex,                                                        \
-                        hipDoubleComplex,                                                        \
-                        hipDoubleComplex>{}(arg);                                                \
-        return TEST<void>{}(arg);                                                                \
+#define HIPSPARSE_SPMV_DISPATCH_BLOCK(I_t, J_t)                                                    \
+    do                                                                                             \
+    {                                                                                              \
+        /* Uniform precisions: A == X == Y == T */                                                 \
+        if(A == HIP_R_32F && X == HIP_R_32F && Y == HIP_R_32F && T == HIP_R_32F)                   \
+            return TEST<I_t, J_t, float, float, float, float>{}(arg);                              \
+        if(A == HIP_R_64F && X == HIP_R_64F && Y == HIP_R_64F && T == HIP_R_64F)                   \
+            return TEST<I_t, J_t, double, double, double, double>{}(arg);                          \
+        if(A == HIP_C_32F && X == HIP_C_32F && Y == HIP_C_32F && T == HIP_C_32F)                   \
+            return TEST<I_t, J_t, hipComplex, hipComplex, hipComplex, hipComplex>{}(arg);          \
+        if(A == HIP_C_64F && X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)                   \
+            return TEST<I_t,                                                                       \
+                        J_t,                                                                       \
+                        hipDoubleComplex,                                                          \
+                        hipDoubleComplex,                                                          \
+                        hipDoubleComplex,                                                          \
+                        hipDoubleComplex>{}(arg);                                                  \
+        /* Basic mixed precisions: A == X, Y / T may differ */                                     \
+        if(A == HIP_R_8I && X == HIP_R_8I && Y == HIP_R_32I && T == HIP_R_32I)                     \
+            return TEST<I_t, J_t, int8_t, int8_t, int32_t, int32_t>{}(arg);                        \
+        if(A == HIP_R_8I && X == HIP_R_8I && Y == HIP_R_32F && T == HIP_R_32F)                     \
+            return TEST<I_t, J_t, int8_t, int8_t, float, float>{}(arg);                            \
+        if(A == HIP_R_16F && X == HIP_R_16F && Y == HIP_R_32F && T == HIP_R_32F)                   \
+            return TEST<I_t, J_t, hipsparseFloat16, hipsparseFloat16, float, float>{}(arg);        \
+        if(A == HIP_R_16F && X == HIP_R_16F && Y == HIP_R_16F && T == HIP_R_32F)                   \
+            return TEST<I_t, J_t, hipsparseFloat16, hipsparseFloat16, hipsparseFloat16, float>{}(  \
+                arg);                                                                              \
+        if(A == HIP_R_16BF && X == HIP_R_16BF && Y == HIP_R_32F && T == HIP_R_32F)                 \
+            return TEST<I_t, J_t, hipsparseBfloat16, hipsparseBfloat16, float, float>{}(arg);      \
+        if(A == HIP_R_16BF && X == HIP_R_16BF && Y == HIP_R_16BF && T == HIP_R_32F)                \
+            return TEST<I_t,                                                                       \
+                        J_t,                                                                       \
+                        hipsparseBfloat16,                                                         \
+                        hipsparseBfloat16,                                                         \
+                        hipsparseBfloat16,                                                         \
+                        float>{}(arg);                                                             \
+        if(A == HIP_R_32F && X == HIP_R_64F && Y == HIP_R_64F && T == HIP_R_64F)                   \
+            return TEST<I_t, J_t, float, double, double, double>{}(arg);                           \
+        if(A == HIP_C_32F && X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)                   \
+            return TEST<I_t,                                                                       \
+                        J_t,                                                                       \
+                        hipComplex,                                                                \
+                        hipDoubleComplex,                                                          \
+                        hipDoubleComplex,                                                          \
+                        hipDoubleComplex>{}(arg);                                                  \
+        if(A == HIP_R_32F && X == HIP_C_32F && Y == HIP_C_32F && T == HIP_C_32F)                   \
+            return TEST<I_t, J_t, float, hipComplex, hipComplex, hipComplex>{}(arg);               \
+        if(A == HIP_R_64F && X == HIP_C_64F && Y == HIP_C_64F && T == HIP_C_64F)                   \
+            return TEST<I_t, J_t, double, hipDoubleComplex, hipDoubleComplex, hipDoubleComplex>{}( \
+                arg);                                                                              \
+        return TEST<void>{}(arg);                                                                  \
     } while(0)
 
     if(I == HIPSPARSE_INDEX_32I && J == HIPSPARSE_INDEX_32I)
