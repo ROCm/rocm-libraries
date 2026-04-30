@@ -1325,7 +1325,11 @@ def _class_tag_from_category(category, inst) -> str:
     if category == "LCC":
         return "LCC"
     if category == "SYNC":
-        return "SWAIT"
+        # _captureSubIterToBuilder lumps SWaitCnt AND SBarrier into category
+        # "SYNC", so we must distinguish them here by class. Without this,
+        # an SBarrier would render as cls='SWAIT' and never match a real
+        # SBARRIER identity in the other graph.
+        return _class_tag(inst)
     if category == "SNOP":
         return "SNOP"
     if category == "BARRIER":

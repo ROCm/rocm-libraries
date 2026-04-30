@@ -451,7 +451,14 @@ class TestRenderStringIdentity:
         assert _class_tag_from_category("LRSA", pack_mfma) == "LRS"
         assert _class_tag_from_category("LWSA", pack_mfma) == "LWS"
         assert _class_tag_from_category("LCC",  pack_mfma) == "LCC"
-        assert _class_tag_from_category("SYNC", pack_mfma) == "SWAIT"
+        # category="SYNC" lumps SWaitCnt and SBarrier together (capture-side
+        # bucket); fall back to isinstance to disambiguate.
+        assert _class_tag_from_category("SYNC", pack_mfma) == "MFMA"  # isinstance fallback
+        from rocisa.instruction import SWaitCnt, SBarrier
+        sw = SWaitCnt(comment="t")
+        sb = SBarrier()
+        assert _class_tag_from_category("SYNC", sw) == "SWAIT"
+        assert _class_tag_from_category("SYNC", sb) == "SBARRIER"
         assert _class_tag_from_category("BARRIER", pack_mfma) == "SBARRIER"
         # Unrecognized category falls back to isinstance.
         assert _class_tag_from_category("UNKNOWN", pack_mfma) == "MFMA"
