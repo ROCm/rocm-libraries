@@ -629,10 +629,16 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     CHECK_RETURNED_WORKSPACE_SIZE(workspaceSize, max_workspace_size);
     THROW_IF_HIP_ERROR(hipMalloc(&workspace, workspaceSize));
     hipblaslt_alpha_beta_type<Tc> alpha, beta;
-    auto                          tmp = *prob.alpha;
-    alpha                             = tmp;
-    tmp                               = *prob.beta;
-    beta                              = tmp;
+    if(prob.alpha != nullptr)
+    {
+        auto                          tmp = *prob.alpha;
+        alpha                             = tmp;
+    }
+    if(prob.beta != nullptr)
+    {
+        auto tmp                               = *prob.beta;
+        beta                              = tmp;
+    }
     if(!prob.strided_batch)
     {
         int              batch_count = prob.batch_count;
@@ -640,7 +646,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         std::vector<Ti*> B(batch_count, nullptr);
         std::vector<To*> C(batch_count, nullptr);
         std::vector<To*> D(batch_count, nullptr);
-        if(prob.buffer_offset_a > 0)
+        if(prob.buffer_offset_a > 0 && prob.batch_A != nullptr)
         {
             std::cout << "Applying buffer offset for A: " << prob.buffer_offset_a << std::endl;
             THROW_IF_HIP_ERROR(hipMemcpy(
@@ -657,7 +663,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                          sizeof(void*) * batch_count,
                                          hipMemcpyHostToDevice));
         }
-        if(prob.buffer_offset_b > 0)
+        if(prob.buffer_offset_b > 0 && prob.batch_B != nullptr)
         {
             std::cout << "Applying buffer offset for B: " << prob.buffer_offset_b << std::endl;
             THROW_IF_HIP_ERROR(hipMemcpy(
@@ -674,7 +680,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                          sizeof(void*) * batch_count,
                                          hipMemcpyHostToDevice));
         }
-        if(prob.buffer_offset_c > 0)
+        if(prob.buffer_offset_c > 0 && prob.batch_C != nullptr)
         {
             std::cout << "Applying buffer offset for C: " << prob.buffer_offset_c << std::endl;
             THROW_IF_HIP_ERROR(hipMemcpy(
@@ -691,7 +697,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                          sizeof(void*) * batch_count,
                                          hipMemcpyHostToDevice));
         }
-        if(prob.buffer_offset_d > 0)
+        if(prob.buffer_offset_d > 0 && prob.batch_D != nullptr)
         {
             std::cout << "Applying buffer offset for D: " << prob.buffer_offset_d << std::endl;
             THROW_IF_HIP_ERROR(hipMemcpy(
