@@ -246,6 +246,19 @@ class EstimateAsmCyclesPassImpl : public Pass {
     }
 
    private:
+    // (For future extension: If analysis needs to track cycles per basic block/label,
+    // consider using a map like below)
+    // std::unordered_map<std::string, unsigned int> labelCycles_;
+    void appendComment(StinkyInstruction* inst, const std::string& suffix) {
+        if (!inst || suffix.empty()) return;
+        if (auto* c = inst->getModifier<CommentData>()) {
+            if (!c->comment.empty()) c->comment += " ";
+            c->comment += suffix;
+        } else {
+            inst->addModifier<CommentData>(CommentData{suffix});
+        }
+    }
+
     /// Get a string key for a StinkyRegister for use in vgprState/sgprState maps.
     /// Uses symbolic name if set, otherwise "prefix" + reg index (e.g. "v0", "s1").
     static std::string getRegisterKey(const StinkyRegister& reg) {
@@ -864,6 +877,12 @@ class EstimateAsmCyclesPassImpl : public Pass {
             // Update total cycles
             if (!isLabel(*inst)) {
                 // inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));
+                if (auto* c = inst->getModifier<CommentData>()) {
+                    c->comment = "AsmCycles " + std::to_string(cycles);
+                } else {
+                    inst->addModifier<CommentData>(
+                        CommentData{"AsmCycles " + std::to_string(cycles)});
+                }
             }
             // std::cout << "cycles: " << cycles - totalCycles << std::endl;
             totalCycles = cycles;
