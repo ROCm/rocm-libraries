@@ -239,7 +239,7 @@ struct CShuffleEpilogueChainBaseOp
      *
      * @return The vector store size for C tensor.
      */
-    CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeC()
+    CK_TILE_DEVICE static constexpr index_t GetVectorSizeC()
     {
         if constexpr(FixedVectorSize)
         {
@@ -268,7 +268,7 @@ struct CShuffleEpilogueChainBaseOp
      * @return The vector store size for Di tensor.
      */
     template <index_t I>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeD(number<I> index)
+    CK_TILE_DEVICE static constexpr index_t GetVectorSizeD(number<I> index)
     {
         constexpr index_t max_vector_size = 16;
         using DiDataType = remove_cvref_t<std::tuple_element_t<index.value, DsDataType>>;
@@ -354,7 +354,7 @@ struct CShuffleEpilogueChainBaseOp
                                                   sequence<MPerIterationShuffle, NPerIterationShuffle>>;
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsBlockDescriptor()
+    CK_TILE_DEVICE static constexpr auto MakeLdsBlockDescriptor()
     {
         // N is contiguous dimension
         if constexpr(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>)
@@ -409,7 +409,7 @@ struct CShuffleEpilogueChainBaseOp
         return block_dstr_encoding;
     }
 
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
         return MPerIterationShuffle * NPerIterationShuffle * sizeof(ODataType);
     }
