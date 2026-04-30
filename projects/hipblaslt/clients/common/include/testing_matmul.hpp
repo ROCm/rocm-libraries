@@ -83,7 +83,7 @@ extern "C" __global__ void flush_icache()
 // FP4 (4-bit) packs 2 elements per byte; all other types use realDataTypeSize.
 size_t elementsToBytes(size_t numElements, hipDataType dtype)
 {
-    if(static_cast<int>(dtype) == HIP_R_4F_E2M1_EXT)
+    if(static_cast<int>(dtype) == HIP_R_4F_E2M1)
         return numElements / 2;
     return numElements * realDataTypeSize(dtype);
 }
@@ -2642,6 +2642,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 auto* dataPtr  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
                 auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
                 auto batchRef = generateMXInput(TiA,
+                                                scaleDataType(arg.scaleA),
                                                 dataPtr,
                                                 scalePtr,
                                                 A_row[i],
@@ -2753,6 +2754,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 auto* dataPtr  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
                 auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
                 auto batchRef = generateMXInput(TiB,
+                                                scaleDataType(arg.scaleB),
                                                 dataPtr,
                                                 scalePtr,
                                                 B_row[i],
