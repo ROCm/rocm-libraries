@@ -293,11 +293,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW1X1``
-        | Controls ConvHipDirectWrW1x1 direct solution.
-      - | 0: Disable
-        | 1: Enable
-
     * - | ``MIOPEN_DEBUG_CONV_DIRECT_ASM_1X1U_PERF_VALS``
         | Controls performance values for ConvAsm1x1U direct solution.
       - | 0: Disable

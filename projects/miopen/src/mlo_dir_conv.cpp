@@ -235,7 +235,6 @@ static auto GetBwdWrW2DSolvers()
                                            miopen::solver::conv::ConvOclBwdWrW2<16>,
                                            miopen::solver::conv::ConvOclBwdWrW2NonTunable,
                                            miopen::solver::conv::ConvOclBwdWrW53,
-                                           miopen::solver::conv::ConvHipDirectWrW1x1,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw>{};
