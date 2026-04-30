@@ -1,8 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #pragma once
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <sstream>
+#include <stdexcept>
 #include <gtest/gtest.h>
 
 #include "ck_tile/core.hpp"
@@ -18,6 +21,19 @@ using AddScale          = ck_tile::element_wise::AddScale;
 using ElementWiseAddAdd = ck_tile::element_wise::MultiDAdd;
 using MultiplyMultiply  = ck_tile::element_wise::MultiDMultiply;
 using PassThrough       = ck_tile::element_wise::PassThrough;
+
+template <std::size_t N>
+std::array<ck_tile::index_t, N> to_fixed_dims(const std::vector<ck_tile::index_t>& dims)
+{
+    if(dims.size() != N)
+    {
+        throw std::invalid_argument("Unexpected dimension count");
+    }
+
+    std::array<ck_tile::index_t, N> result{};
+    std::copy(dims.begin(), dims.end(), result.begin());
+    return result;
+}
 
 struct AddDs
 {
@@ -130,7 +146,13 @@ class TestCkTileContractionMultiABD : public ::testing::Test
               bool kPadN = false,
               bool kPadK = false>
     bool invoke_kernel(
-        const ck_tile::BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>& args,
+        const ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                          NumDimM,
+                                                          NumDimN,
+                                                          NumDimK,
+                                                          NumATensor,
+                                                          NumBTensor,
+                                                          NumDTensor>& args,
         const ck_tile::stream_config& s)
     {
         constexpr ck_tile::index_t M_Tile = 128;
@@ -368,30 +390,59 @@ class TestCkTileContractionMultiABD : public ::testing::Test
         std::vector<ck_tile::index_t> E_strides  = convert_strides(e_gpu_host.get_strides());
 
         using HostArgs =
-            ck_tile::BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>;
+            ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                        NumDimM,
+                                                        NumDimN,
+                                                        NumDimK,
+                                                        NumATensor,
+                                                        NumBTensor,
+                                                        NumDTensor>;
+        using ADims = typename HostArgs::ADims;
+        using BDims = typename HostArgs::BDims;
+        using EDims = typename HostArgs::EDims;
 
-        HostArgs host_args;
+        std::array<const void*, NumATensor> as_ptr{};
+        std::array<const void*, NumBTensor> bs_ptr{};
+        std::array<const void*, NumDTensor> ds_ptr{};
+        std::array<ADims, NumATensor> As_dims{};
+        std::array<BDims, NumBTensor> Bs_dims{};
+        std::array<EDims, NumDTensor> Ds_dims{};
+        std::array<ADims, NumATensor> As_strides{};
+        std::array<BDims, NumBTensor> Bs_strides{};
+        std::array<EDims, NumDTensor> Ds_strides{};
         for(ck_tile::index_t a = 0; a < NumATensor; ++a)
         {
-            host_args.as_ptr[a]     = as_dev[a].GetDeviceBuffer();
-            host_args.As_dims[a]    = A_dims;
-            host_args.As_strides[a] = convert_strides(as_host[a].get_strides());
+            as_ptr[a]     = as_dev[a].GetDeviceBuffer();
+            As_dims[a]    = to_fixed_dims<NumDimG + NumDimM + NumDimK>(A_dims);
+            As_strides[a] = to_fixed_dims<NumDimG + NumDimM + NumDimK>(
+                convert_strides(as_host[a].get_strides()));
         }
         for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
         {
-            host_args.bs_ptr[b]     = bs_dev[b].GetDeviceBuffer();
-            host_args.Bs_dims[b]    = B_dims;
-            host_args.Bs_strides[b] = convert_strides(bs_host[b].get_strides());
+            bs_ptr[b]     = bs_dev[b].GetDeviceBuffer();
+            Bs_dims[b]    = to_fixed_dims<NumDimG + NumDimN + NumDimK>(B_dims);
+            Bs_strides[b] = to_fixed_dims<NumDimG + NumDimN + NumDimK>(
+                convert_strides(bs_host[b].get_strides()));
         }
         for(ck_tile::index_t d = 0; d < NumDTensor; ++d)
         {
-            host_args.ds_ptr[d]     = ds_dev[d].GetDeviceBuffer();
-            host_args.Ds_dims[d]    = E_dims;
-            host_args.Ds_strides[d] = convert_strides(ds_host[d].get_strides());
+            ds_ptr[d]     = ds_dev[d].GetDeviceBuffer();
+            Ds_dims[d]    = to_fixed_dims<NumDimG + NumDimM + NumDimN>(E_dims);
+            Ds_strides[d] = to_fixed_dims<NumDimG + NumDimM + NumDimN>(
+                convert_strides(ds_host[d].get_strides()));
         }
-        host_args.e_ptr     = e_dev.GetDeviceBuffer();
-        host_args.E_dims    = E_dims;
-        host_args.E_strides = E_strides;
+        HostArgs host_args{as_ptr,
+                           bs_ptr,
+                           ds_ptr,
+                           e_dev.GetDeviceBuffer(),
+                           As_dims,
+                           Bs_dims,
+                           Ds_dims,
+                           to_fixed_dims<NumDimG + NumDimM + NumDimN>(E_dims),
+                           As_strides,
+                           Bs_strides,
+                           Ds_strides,
+                           to_fixed_dims<NumDimG + NumDimM + NumDimN>(E_strides)};
 
         const bool supported = invoke_kernel<NumDimG, NumDimM, NumDimN, NumDimK, kPadM, kPadN, kPadK>(
             host_args, ck_tile::stream_config{nullptr, false});

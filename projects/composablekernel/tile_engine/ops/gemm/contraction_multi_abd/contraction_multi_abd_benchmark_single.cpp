@@ -72,7 +72,11 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
 
     try
     {
-        auto kernel_func = [](const ck_tile::BatchedContractionMultiABDHostArgs<NumATensor,
+        auto kernel_func = [](const ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                                                NumDimM,
+                                                                                NumDimN,
+                                                                                NumDimK,
+                                                                                NumATensor,
                                                                                 NumBTensor,
                                                                                 NumDTensor>& args,
                               const ck_tile::stream_config& stream) {

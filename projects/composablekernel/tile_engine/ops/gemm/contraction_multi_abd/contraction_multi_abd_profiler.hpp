@@ -27,7 +27,13 @@ class ContractionMultiABDProfiler
     void benchmark(
         ContractionMultiABDProblem& problem,
         std::function<float(
-            const ck_tile::BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>&,
+            const ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                              NumDimM,
+                                                              NumDimN,
+                                                              NumDimK,
+                                                              NumATensor,
+                                                              NumBTensor,
+                                                              NumDTensor>&,
             const ck_tile::stream_config&)> kernel_func)
     {
         const auto g_dims = problem.g_dims_;
@@ -81,29 +87,54 @@ class ContractionMultiABDProfiler
         e_dev.SetZero();
         e_host_dev_result.SetZero();
 
-        ck_tile::BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor> host_args;
-        host_args.as_ptr  = {a0_dev.GetDeviceBuffer(), a1_dev.GetDeviceBuffer()};
-        host_args.bs_ptr  = {b0_dev.GetDeviceBuffer()};
-        host_args.ds_ptr  = {d0_dev.GetDeviceBuffer()};
-        host_args.e_ptr   = e_dev.GetDeviceBuffer();
+        using HostArgs = ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                                     NumDimM,
+                                                                     NumDimN,
+                                                                     NumDimK,
+                                                                     NumATensor,
+                                                                     NumBTensor,
+                                                                     NumDTensor>;
+        using ADims = typename HostArgs::ADims;
+        using BDims = typename HostArgs::BDims;
+        using EDims = typename HostArgs::EDims;
 
+        std::array<const void*, NumATensor> as_ptr = {a0_dev.GetDeviceBuffer(),
+                                                      a1_dev.GetDeviceBuffer()};
+        std::array<const void*, NumBTensor> bs_ptr = {b0_dev.GetDeviceBuffer()};
+        std::array<const void*, NumDTensor> ds_ptr = {d0_dev.GetDeviceBuffer()};
+        std::array<ADims, NumATensor> As_dims{};
+        std::array<BDims, NumBTensor> Bs_dims{};
+        std::array<EDims, NumDTensor> Ds_dims{};
+        std::array<ADims, NumATensor> As_strides{};
+        std::array<BDims, NumBTensor> Bs_strides{};
+        std::array<EDims, NumDTensor> Ds_strides{};
         for(ck_tile::index_t i = 0; i < NumATensor; ++i)
         {
-            host_args.As_dims[i]    = a_dims;
-            host_args.As_strides[i] = a_strides;
+            As_dims[i]    = to_fixed_dims<NumDimG + NumDimM + NumDimK>(a_dims);
+            As_strides[i] = to_fixed_dims<NumDimG + NumDimM + NumDimK>(a_strides);
         }
         for(ck_tile::index_t i = 0; i < NumBTensor; ++i)
         {
-            host_args.Bs_dims[i]    = b_dims;
-            host_args.Bs_strides[i] = b_strides;
+            Bs_dims[i]    = to_fixed_dims<NumDimG + NumDimN + NumDimK>(b_dims);
+            Bs_strides[i] = to_fixed_dims<NumDimG + NumDimN + NumDimK>(b_strides);
         }
         for(ck_tile::index_t i = 0; i < NumDTensor; ++i)
         {
-            host_args.Ds_dims[i]    = e_dims;
-            host_args.Ds_strides[i] = e_strides;
+            Ds_dims[i]    = to_fixed_dims<NumDimG + NumDimM + NumDimN>(e_dims);
+            Ds_strides[i] = to_fixed_dims<NumDimG + NumDimM + NumDimN>(e_strides);
         }
-        host_args.E_dims    = e_dims;
-        host_args.E_strides = e_strides;
+        HostArgs host_args{as_ptr,
+                           bs_ptr,
+                           ds_ptr,
+                           e_dev.GetDeviceBuffer(),
+                           As_dims,
+                           Bs_dims,
+                           Ds_dims,
+                           to_fixed_dims<NumDimG + NumDimM + NumDimN>(e_dims),
+                           As_strides,
+                           Bs_strides,
+                           Ds_strides,
+                           to_fixed_dims<NumDimG + NumDimM + NumDimN>(e_strides)};
 
         float avg_time =
             kernel_func(host_args,

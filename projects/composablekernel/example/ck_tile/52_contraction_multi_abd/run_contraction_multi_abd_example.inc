@@ -115,23 +115,17 @@ int run_contraction_multi_abd_example(int argc, char* argv[])
     std::vector<ck_tile::index_t> D0_strides = convert_strides(d0_host.get_strides());
     std::vector<ck_tile::index_t> E_strides  = convert_strides(e_host.get_strides());
 
-    // Build host args
-    using HostArgs =
-        ck_tile::BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>;
-
-    HostArgs host_args;
-    host_args.as_ptr     = {a0_dev.GetDeviceBuffer(), a1_dev.GetDeviceBuffer()};
-    host_args.bs_ptr     = {b0_dev.GetDeviceBuffer()};
-    host_args.ds_ptr     = {d0_dev.GetDeviceBuffer()};
-    host_args.e_ptr      = e_dev.GetDeviceBuffer();
-    host_args.As_dims    = {A_dims, A_dims};
-    host_args.Bs_dims    = {B_dims};
-    host_args.Ds_dims    = {E_dims};
-    host_args.E_dims     = E_dims;
-    host_args.As_strides = {A0_strides, A1_strides};
-    host_args.Bs_strides = {B0_strides};
-    host_args.Ds_strides = {D0_strides};
-    host_args.E_strides  = E_strides;
+    const std::array<const void*, NumATensor> as_ptr = {a0_dev.GetDeviceBuffer(),
+                                                        a1_dev.GetDeviceBuffer()};
+    const std::array<const void*, NumBTensor> bs_ptr = {b0_dev.GetDeviceBuffer()};
+    const std::array<const void*, NumDTensor> ds_ptr = {d0_dev.GetDeviceBuffer()};
+    const std::array<std::vector<ck_tile::index_t>, NumATensor> As_dims = {A_dims, A_dims};
+    const std::array<std::vector<ck_tile::index_t>, NumBTensor> Bs_dims = {B_dims};
+    const std::array<std::vector<ck_tile::index_t>, NumDTensor> Ds_dims = {E_dims};
+    const std::array<std::vector<ck_tile::index_t>, NumATensor> As_strides = {A0_strides,
+                                                                              A1_strides};
+    const std::array<std::vector<ck_tile::index_t>, NumBTensor> Bs_strides = {B0_strides};
+    const std::array<std::vector<ck_tile::index_t>, NumDTensor> Ds_strides = {D0_strides};
 
     int n_warmup = arg_parser.get_int("warmup");
     int n_repeat = arg_parser.get_int("repeat");
@@ -159,7 +153,18 @@ int run_contraction_multi_abd_example(int argc, char* argv[])
                                            AElementWise,
                                            BElementWise,
                                            CDEElementWise>(
-        host_args,
+        as_ptr,
+        bs_ptr,
+        ds_ptr,
+        e_dev.GetDeviceBuffer(),
+        As_dims,
+        Bs_dims,
+        Ds_dims,
+        E_dims,
+        As_strides,
+        Bs_strides,
+        Ds_strides,
+        E_strides,
         ck_tile::stream_config{nullptr, true, 1, n_warmup, n_repeat},
         G_dims.size(),
         M_dims.size(),

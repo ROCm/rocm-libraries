@@ -232,7 +232,9 @@ struct BatchedContractionKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_A_GridDescriptor_M_K({}, {}));
+                                       VectorSizeE>::Make_A_GridDescriptor_M_K(
+                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{},
+                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{}));
     using BGridDesc_N_K_ =
         decltype(TensorDescriptorUtils<NumDimG,
                                        NumDimM,
@@ -240,7 +242,9 @@ struct BatchedContractionKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_B_GridDescriptor_N_K({}, {}));
+                                       VectorSizeE>::Make_B_GridDescriptor_N_K(
+                                           std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{},
+                                           std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{}));
     using EGridDesc_M_N_ =
         decltype(TensorDescriptorUtils<NumDimG,
                                        NumDimM,
@@ -248,7 +252,9 @@ struct BatchedContractionKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_E_GridDescriptor_M_N({}, {}));
+                                       VectorSizeE>::Make_E_GridDescriptor_M_N(
+                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{},
+                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{}));
 
     AGridDesc_M_K_ a_grid_desc_m_k; ///< Tensor descriptor for A[M, K] with actual strides
     BGridDesc_N_K_ b_grid_desc_n_k; ///< Tensor descriptor for B[N, K] with actual strides

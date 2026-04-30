@@ -12,28 +12,75 @@ namespace ck_tile {
 
 /// @brief Host arguments for batched tensor contraction with multiple A, B, and D tensors.
 ///
+/// @tparam NumDimG Number of batch dimensions
+/// @tparam NumDimM Number of M dimensions
+/// @tparam NumDimN Number of N dimensions
+/// @tparam NumDimK Number of K dimensions
 /// @tparam NumATensor Number of A input tensors (fused via elementwise op)
 /// @tparam NumBTensor Number of B input tensors (fused via elementwise op)
 /// @tparam NumDTensor Number of D auxiliary tensors (fused in epilogue)
-template <ck_tile::index_t NumATensor, ck_tile::index_t NumBTensor, ck_tile::index_t NumDTensor>
+template <ck_tile::index_t NumDimG,
+          ck_tile::index_t NumDimM,
+          ck_tile::index_t NumDimN,
+          ck_tile::index_t NumDimK,
+          ck_tile::index_t NumATensor,
+          ck_tile::index_t NumBTensor,
+          ck_tile::index_t NumDTensor>
 struct BatchedContractionMultiABDHostArgs
 {
-    std::array<const void*, NumATensor> as_ptr;
-    std::array<const void*, NumBTensor> bs_ptr;
-    std::array<const void*, NumDTensor> ds_ptr;
-    void* e_ptr;
+    using ADims = std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>;
+    using BDims = std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>;
+    using EDims = std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>;
 
-    // Per-tensor dims: A[i] = [G0,..,M0,..,K0,..], B[j] = [G0,..,N0,..,K0,..]
-    std::array<std::vector<ck_tile::index_t>, NumATensor> As_dims;
-    std::array<std::vector<ck_tile::index_t>, NumBTensor> Bs_dims;
-    std::array<std::vector<ck_tile::index_t>, NumDTensor> Ds_dims;
-    std::vector<ck_tile::index_t> E_dims;
+    CK_TILE_HOST BatchedContractionMultiABDHostArgs(
+        const std::array<const void*, NumATensor>& as_ptr_,
+        const std::array<const void*, NumBTensor>& bs_ptr_,
+        const std::array<const void*, NumDTensor>& ds_ptr_,
+        void* e_ptr_,
+        const std::array<ADims, NumATensor>& As_dims_,
+        const std::array<BDims, NumBTensor>& Bs_dims_,
+        const std::array<EDims, NumDTensor>& Ds_dims_,
+        const EDims& E_dims_,
+        const std::array<ADims, NumATensor>& As_strides_,
+        const std::array<BDims, NumBTensor>& Bs_strides_,
+        const std::array<EDims, NumDTensor>& Ds_strides_,
+        const EDims& E_strides_)
+        : as_ptr(as_ptr_),
+          bs_ptr(bs_ptr_),
+          ds_ptr(ds_ptr_),
+          e_ptr(e_ptr_),
+          As_dims(As_dims_),
+          Bs_dims(Bs_dims_),
+          Ds_dims(Ds_dims_),
+          E_dims(E_dims_),
+          As_strides(As_strides_),
+          Bs_strides(Bs_strides_),
+          Ds_strides(Ds_strides_),
+          E_strides(E_strides_)
+    {
+    }
+
+    const std::array<const void*, NumATensor> as_ptr;
+    const std::array<const void*, NumBTensor> bs_ptr;
+    const std::array<const void*, NumDTensor> ds_ptr;
+    union
+    {
+        void* e_ptr;
+        void* c_ptr;
+    };
+
+    // Contraction intentionally keeps full multi-dimensional descriptors, unlike GEMM's scalar
+    // M/N/K and leading strides.
+    const std::array<ADims, NumATensor> As_dims;
+    const std::array<BDims, NumBTensor> Bs_dims;
+    const std::array<EDims, NumDTensor> Ds_dims;
+    const EDims E_dims;
 
     // Per-tensor strides
-    std::array<std::vector<ck_tile::index_t>, NumATensor> As_strides;
-    std::array<std::vector<ck_tile::index_t>, NumBTensor> Bs_strides;
-    std::array<std::vector<ck_tile::index_t>, NumDTensor> Ds_strides;
-    std::vector<ck_tile::index_t> E_strides;
+    const std::array<ADims, NumATensor> As_strides;
+    const std::array<BDims, NumBTensor> Bs_strides;
+    const std::array<EDims, NumDTensor> Ds_strides;
+    const EDims E_strides;
 };
 
 /// @brief Kernel arguments for batched contraction with multiple A, B, and D tensors.
@@ -77,7 +124,9 @@ struct BatchedContractionMultiABDKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_A_GridDescriptor_M_K({}, {}));
+                                       VectorSizeE>::Make_A_GridDescriptor_M_K(
+                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{},
+                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{}));
     using BGridDesc_N_K_ =
         decltype(TensorDescriptorUtils<NumDimG,
                                        NumDimM,
@@ -85,7 +134,9 @@ struct BatchedContractionMultiABDKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_B_GridDescriptor_N_K({}, {}));
+                                       VectorSizeE>::Make_B_GridDescriptor_N_K(
+                                           std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{},
+                                           std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{}));
     using EGridDesc_M_N_ =
         decltype(TensorDescriptorUtils<NumDimG,
                                        NumDimM,
@@ -93,7 +144,9 @@ struct BatchedContractionMultiABDKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_E_GridDescriptor_M_N({}, {}));
+                                       VectorSizeE>::Make_E_GridDescriptor_M_N(
+                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{},
+                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{}));
 
     std::array<AGridDesc_M_K_, NumATensor> as_grid_desc_m_k;
     std::array<BGridDesc_N_K_, NumBTensor> bs_grid_desc_n_k;
@@ -342,47 +395,14 @@ struct BatchedContractionMultiABDKernel
     }
 
     CK_TILE_HOST static KernelArgs MakeKernelArgs(
-        const BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>& host_args)
+        const BatchedContractionMultiABDHostArgs<NumDimG,
+                                                 NumDimM,
+                                                 NumDimN,
+                                                 NumDimK,
+                                                 NumATensor,
+                                                 NumBTensor,
+                                                 NumDTensor>& host_args)
     {
-        const auto expected_A_dims = NumDimG + NumDimM + NumDimK;
-        const auto expected_B_dims = NumDimG + NumDimN + NumDimK;
-        const auto expected_E_dims = NumDimG + NumDimM + NumDimN;
-
-        // Validate all A tensor dimensions
-        for(ck_tile::index_t a = 0; a < NumATensor; ++a)
-        {
-            if(host_args.As_dims[a].size() != expected_A_dims ||
-               host_args.As_strides[a].size() != expected_A_dims)
-            {
-                throw std::invalid_argument("A[" + std::to_string(a) + "] dimension size mismatch");
-            }
-        }
-
-        // Validate all B tensor dimensions
-        for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
-        {
-            if(host_args.Bs_dims[b].size() != expected_B_dims ||
-               host_args.Bs_strides[b].size() != expected_B_dims)
-            {
-                throw std::invalid_argument("B[" + std::to_string(b) + "] dimension size mismatch");
-            }
-        }
-
-        if(host_args.E_dims.size() != expected_E_dims ||
-           host_args.E_strides.size() != expected_E_dims)
-        {
-            throw std::invalid_argument("E dimension size mismatch");
-        }
-
-        for(ck_tile::index_t d = 0; d < NumDTensor; ++d)
-        {
-            if(host_args.Ds_dims[d].size() != expected_E_dims ||
-               host_args.Ds_strides[d].size() != expected_E_dims)
-            {
-                throw std::invalid_argument("D[" + std::to_string(d) + "] dimension size mismatch");
-            }
-        }
-
         KernelArgs kargs;
         kargs.as_ptr  = host_args.as_ptr;
         kargs.bs_ptr  = host_args.bs_ptr;

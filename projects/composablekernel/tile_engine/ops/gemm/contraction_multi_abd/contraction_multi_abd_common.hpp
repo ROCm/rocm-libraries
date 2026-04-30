@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <sstream>
@@ -33,6 +36,20 @@ inline ck_tile::index_t calculate_total(const std::vector<ck_tile::index_t>& dim
     for(auto d : dims)
         total *= d;
     return total;
+}
+
+template <std::size_t N>
+inline std::array<ck_tile::index_t, N> to_fixed_dims(const std::vector<ck_tile::index_t>& dims)
+{
+    if(dims.size() != N)
+    {
+        throw std::invalid_argument("Expected " + std::to_string(N) + " dimensions, got " +
+                                    std::to_string(dims.size()));
+    }
+
+    std::array<ck_tile::index_t, N> result{};
+    std::copy(dims.begin(), dims.end(), result.begin());
+    return result;
 }
 
 inline std::vector<ck_tile::index_t>

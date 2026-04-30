@@ -376,8 +376,13 @@ struct SelectedKernel
         TilePartitioner, GemmPipeline, GemmEpilogue>;
 
     static float launch(
-        const ck_tile::BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>&
-            args,
+        const ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                          NumDimM,
+                                                          NumDimN,
+                                                          NumDimK,
+                                                          NumATensor,
+                                                          NumBTensor,
+                                                          NumDTensor>& args,
         const ck_tile::stream_config& stream)
     {{
         auto kargs = Kernel::MakeKernelArgs(args);
