@@ -3017,7 +3017,7 @@ class Solution(collections.abc.Mapping):
         totalVectorsCoalescedA = totalElementsCoalescedA // GlobalReadVectorWidthA
 
         # handle global read vector width MXSA
-        if state["ProblemType"]["MXBlockA"]:
+        if state["ProblemType"]["MXBlockA"] and not state["UseSubtileImpl"]:
           if state["ProblemType"]["TLUMXSA"]: # NT/NN
             totalElementsCoalescedMXSA = state["MacroTileMXSA"]
             totalElementsPerpMXSA = state["_DepthUMXSA"]
@@ -3093,7 +3093,7 @@ class Solution(collections.abc.Mapping):
         totalVectorsCoalescedB = totalElementsCoalescedB // GlobalReadVectorWidthB
 
         # handle global read vector width MXSB
-        if state["ProblemType"]["MXBlockB"]:
+        if state["ProblemType"]["MXBlockB"] and not state["UseSubtileImpl"]:
           if state["ProblemType"]["TLUMXSB"]: # NT/NN
             totalElementsCoalescedMXSB = state["MacroTileMXSB"]
             totalElementsPerpMXSB = state["_DepthUMXSB"]
@@ -3360,14 +3360,14 @@ class Solution(collections.abc.Mapping):
     if not Solution.setGlobalLoadTileDimClassic(state, "A", state["NumLoadsA"], \
         totalVectorsCoalescedA, totalElementsPerpA, state["_DepthUA"], printRejectionReason):
       return
-    if state["ProblemType"]["MXBlockA"]:
+    if state["ProblemType"]["MXBlockA"] and not state["UseSubtileImpl"]:
       if not Solution.setGlobalLoadTileDimClassic(state, "MXSA", state["NumLoadsMXSA"], \
           totalVectorsCoalescedMXSA, totalElementsPerpMXSA, state["_DepthUMXSA"], printRejectionReason):
         return
     if not Solution.setGlobalLoadTileDimClassic(state, "B", state["NumLoadsB"], \
         totalVectorsCoalescedB, totalElementsPerpB, state["_DepthUB"], printRejectionReason):
       return
-    if state["ProblemType"]["MXBlockB"]:
+    if state["ProblemType"]["MXBlockB"] and not state["UseSubtileImpl"]:
       if not Solution.setGlobalLoadTileDimClassic(state, "MXSB", state["NumLoadsMXSB"], \
           totalVectorsCoalescedMXSB, totalElementsPerpMXSB, state["_DepthUMXSB"], printRejectionReason):
         return
