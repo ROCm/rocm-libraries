@@ -344,26 +344,18 @@ def do_bootstrap(args: argparse.Namespace) -> None:
 
     python = setup_python(therock_dir)
 
-    # Fetch sources if needed
-    hip_version_a = therock_dir / "short-hip-runtime" / "hip" / "VERSION"
-    hip_version_b = therock_dir / "rocm-systems" / "projects" / "hip" / "VERSION"
-    if not hip_version_a.exists() and not hip_version_b.exists():
-        print("Fetching submodule sources...")
-        fetch_cmd = [str(python), str(therock_dir / "build_tools" / "fetch_sources.py")]
-        # Skip DVC large-file pulls — they require 'dvc' on PATH and are not
-        # needed when using prebuilt CI artifacts.  Pass a dummy project name
-        # that won't match anything so the pull loop is a no-op.
-        if shutil.which("dvc") is None:
-            print()
-            print("  WARNING: 'dvc' not found on PATH — skipping large file pulls.")
-            print(
-                "  Some components may fail to build if they require DVC-managed files."
-            )
-            print("  Install DVC from https://dvc.org/doc/install if needed.")
-            print()
-            fetch_cmd.extend(["--dvc-projects", "_skip"])
-        run_cmd(fetch_cmd, cwd=therock_dir)
+    # Always fetch sources to ensure they're up to date
+    print("Fetching submodule sources...")
+    fetch_cmd = [str(python), str(therock_dir / "build_tools" / "fetch_sources.py")]
+    if shutil.which("dvc") is None:
         print()
+        print("  WARNING: 'dvc' not found on PATH — skipping large file pulls.")
+        print("  Some components may fail to build if they require DVC-managed files.")
+        print("  Install DVC from https://dvc.org/doc/install if needed.")
+        print()
+        fetch_cmd.extend(["--dvc-projects", "_skip"])
+    run_cmd(fetch_cmd, cwd=therock_dir)
+    print()
 
     # Find latest run ID if not specified
     if not run_id:
