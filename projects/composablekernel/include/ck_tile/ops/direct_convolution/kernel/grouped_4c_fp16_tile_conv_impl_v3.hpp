@@ -98,7 +98,11 @@ struct Config
 
     std::string GetName() const
     {
-        std::string swz = (swizzle_type == SwizzleType::XOR) ? "swizzleXOR" : "noswizzle";
+        std::string swz = "no-swizzle";
+        if (swizzle_type == SwizzleType::XOR)
+            swz = "xor-swizzle";
+        else if (swizzle_type == SwizzleType::CyclicShift)
+            swz = "cyclicshift-swizzle";
         std::string waves_c64_str = "_waves_c64_" + std::to_string(waves_c64);
         std::string waves_q4_str = "_waves_q4_" + std::to_string(waves_q4);
         std::string base = "v3_grouped_4c_" + swz + waves_c64_str + waves_q4_str;

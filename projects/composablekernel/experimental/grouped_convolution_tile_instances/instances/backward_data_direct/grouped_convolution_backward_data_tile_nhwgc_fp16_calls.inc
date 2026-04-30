@@ -49,6 +49,9 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<31, direc
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<32, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<33, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<34, direct_conv::Version::v3>, SIGNATURE>);
+// Cyclic shift swizzle
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<42, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<43, direct_conv::Version::v3>, SIGNATURE>);
 
 
 ////////////////////////////////////////////////////////////////////////

@@ -49,6 +49,9 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<36, direc
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<37, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<38, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<39, direct_conv::Version::v3>, SIGNATURE>);
+// Cyclic shift swizzle
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<40, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward4CFp16Kernel<41, direct_conv::Version::v3>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
 // Direct CK Tile convolution (streaming) 16c v2 kernels — Fprop configs 9-17

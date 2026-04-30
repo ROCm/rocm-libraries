@@ -90,11 +90,11 @@ struct Config
 
     std::string GetName() const
     {
-        std::string swz = "noswizzle";
+        std::string swz = "no-swizzle";
         if (swizzle_type == SwizzleType::XOR)
-            swz = "xorswizzle";
+            swz = "xor-swizzle";
         else if (swizzle_type == SwizzleType::CyclicShift)
-            swz = "cyclicshift";
+            swz = "cyclicshift-swizzle";
         
         std::string base = "tile_v2_grouped_16c_" + swz + "_waves_per_wg_" +
                            std::to_string(waves_per_wg);
