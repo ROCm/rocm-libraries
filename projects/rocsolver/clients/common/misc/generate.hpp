@@ -28,7 +28,7 @@ T rand_value( DistType& dist )
 // todo: pass dist into routine, with default = uniform [-1, 1]?
 //
 template <typename T>
-T gerand( rocblas_int m, rocblas_int n, T* A, rocblas_int lda )
+void gerand( rocblas_int m, rocblas_int n, T* A, rocblas_int lda )
 {
     using S = decltype( std::real( T{} ) );
     std::uniform_real_distribution<S> dist( S(-1), S(1) );
@@ -42,7 +42,7 @@ T gerand( rocblas_int m, rocblas_int n, T* A, rocblas_int lda )
         for (rocblas_int i = 0; i < m; ++i)
         {
             // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
-            A[i + j*ldc] = rand_value<T>( dist );
+            A[i + j*lda] = rand_value<T>( dist );
         }
     }
 }
@@ -56,8 +56,8 @@ T gerand( rocblas_int m, rocblas_int n, T* A, rocblas_int lda )
 // todo: pass dist into routine, with default = uniform [-1, 1]?
 //
 template <typename T>
-T hbrand( rocblas_int n, rocblas_int kl, rocblas_int ku,
-          T* Aband, rocblas_int ldab )
+void hbrand( rocblas_int n, rocblas_int kd,
+             T* Aband, rocblas_int ldab )
 {
     using S = decltype( std::real( T{} ) );
     std::uniform_real_distribution<S> dist( S(-1), S(1) );
@@ -65,16 +65,19 @@ T hbrand( rocblas_int n, rocblas_int kl, rocblas_int ku,
     using foo::conjugate;  // todo
 
     assert( n >= 0 );
-    assert( kl >= 0 );
-    assert( ku >= 0 );
-    assert( kl >= ku );
+    assert( kd >= 0 );
+
+    // For bandwidth kd, need ku = kd-1 superdiagonals to cover the diagonal
+    // blocks. (ku superdiagonals needed if we update diag blocks using
+    // gemv/ger, but none needed if we used hemv/her2.)
+    // Need kl = 2*kd-1 subdiagonals to cover the off-diagonal blocks and bulges.
+    rocblas_int ku = kd - 1;
+    rocblas_int kl = 2*kd - 1;
     assert( ldab >= ku + kl + 1 );
 
     // Index of main diagonal.
     rocblas_int idiag = ku;
 
-    // Similar code in testing_sb2st_hb2st to setup Aband.
-    // todo: factor out into matrix generation routines.
     for (rocblas_int j = 0; j < n; ++j)
     {
         // Diagonal is real.
