@@ -33,7 +33,7 @@ python scripts/run_tensile_logic_check.py library/src/amd_detail/rocblaslt/src/T
 
 ### Known-bugs list (ROCM-7144 / validation exceptions)
 
-If `tensilelite/Tensile/TensileLogic/known_bugs.yaml` exists, this script passes **`--known-bugs`** to TensileLogic automatically so specific `(logic file path, SolutionIndex)` pairs are skipped (same as the CMake pre-build gate). Paths in that YAML are relative to the library logic root (`library/`), with optional `#` comments and an optional `ticket:` field for Jira keys. Override or disable by passing your own `--known-bugs` path on the command line.
+If `tensilelite/Tensile/TensileLogic/known_bugs.yaml` exists, this script passes **`--known-bugs`** to TensileLogic automatically so specific `(logic file path, SolutionIndex)` pairs are skipped (same as the CMake pre-build gate). Paths in that YAML are relative to the library logic root (`library/`), with optional `#` comments and an optional `ticket:` field for Jira keys. Override or disable this list by passing your own `--known-bugs` path on the command line.
 
 ### Exit code
 
