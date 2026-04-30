@@ -260,12 +260,13 @@ class ABInputGeometry(TileGeometry):
   dtype. loadShape is declared here but GR and LR instances are initialized
   with different values — subtile shape lives on ABGRGeometry/ABLRGeometry.
   """
-  mmaLayout: MMALayout
-  instK: int
-  bpe: float
-  supportedTypes: Tuple[str, ...] = ()
-  loadShape: LoadShape = field(default_factory=lambda: LoadShape(m=1, k=1))
-  loadWidth: int = 16  # load instruction width in bytes per lane (e.g. 16 = 128-bit, 32 = 256-bit)
+  mmaLayout: MMALayout                # MMA instruction layout (instM, instK, vgprs, waveSize)
+  instK: int                          # K-dimension of the MMA instruction (elements per inst)
+  bpe: float                          # bytes per element (e.g. 2 for bf16, 0.5 for fp4)
+  tlu: bool = False                   # True = column-major (contiguous along M); False = row-major (contiguous along K)
+  supportedTypes: Tuple[str, ...] = ()                                     # dtype names this geometry supports
+  loadShape: LoadShape = field(default_factory=lambda: LoadShape(m=1, k=1)) # elements loaded per lane (m, k)
+  loadWidth: int = 16                 # load instruction width in bytes per lane (e.g. 16 = 128-bit, 32 = 256-bit)
 
   # Derived (computed in __post_init__, independent of macro tile and subtile shape)
   mmaTileShape: Tuple[int, int] = field(init=False)
@@ -306,11 +307,10 @@ class ABGRGeometry(ABInputGeometry):
   For the contiguous TLU=1 case: blockCount=1, blockStride=0 (pinned).
   For TLU=0 with wg_m=4: blockCount=None -> derived as 4, blockStride=MT0_mma/4.
   """
-  tag:         object           = field(default=None)  # GRTag_1x2 | GRTag_TLU1 — selects emit impl
-  # TODO: may want to look at better names — "block" is a placeholder for contiguous unit
-  blockShape:  Tuple[int, int]      = (1, 1)  # (m_mma, k_mma) per contiguous block
-  blockCount:  Optional[int]        = None    # None = derive from wg_m via for_kernel; set explicitly to pin
-  blockStride: Optional[int]        = None    # None = derive from MT0_mma/wg_m via for_kernel; set explicitly to pin
+  tag:         object              = field(default=None) # emit strategy tag (GRTag_1x2 | GRTag_2x2 | GRTag_TLU1) — dispatches to singledispatch emit impl
+  blockShape:  Tuple[int, int]     = (1, 1)             # MMA tiles per contiguous GR block: (rows_M, cols_K)
+  blockCount:  Optional[int]       = None               # number of blocks per wave group; None = derived from wg_m in for_kernel()
+  blockStride: Optional[int]       = None               # stride between blocks in MMA tiles (M-dim); None = derived from MT0_mma/wg_m in for_kernel()
 
   def localGRGranularity(self, numWaves: int) -> Tuple[int, int]:
     """Number of localSubtile rows covered by one GR load, as (M, K).
@@ -446,8 +446,8 @@ class ABLRGeometry(ABInputGeometry):
   Owns the LR subtile shape, which may differ from the GR subtile shape.
   Concrete subclasses implement LR offset and LR instruction emit.
   """
-  tag:          object           = field(default=None)  # LRTag_1x2 | LRTag_TLU1 — selects emit impl
-  subtileShape: Tuple[int, int]  = (1, 1)
+  tag:          object           = field(default=None) # emit strategy tag (LRTag_1x2 | LRTag_TLU1) — dispatches to singledispatch emit impl
+  subtileShape: Tuple[int, int]  = (1, 1)             # MMA tiles per LR subtile: (rows_M, cols_K)
 
   def globalSubtileGrid(self, macroTile: int, depthU: int) -> Tuple[float, float]:
     glbl = self.globalMMATileGrid(macroTile, depthU)

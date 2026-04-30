@@ -311,7 +311,10 @@ AB_B8 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B8, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32), loadWidth=32), # 256-bit LR: 32 fp8 along K
 )
 
-# Experimental 2x2 block shape: 2 MMA rows x 2 MMA cols per block, count=1, stride=0
+AB_B4_2x2 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_2x2(), **_B4, blockShape=(2, 2), blockCount=1, blockStride=0, loadShape=LoadShape(m=1, k=32)),
+    lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(2, 2), loadShape=LoadShape(m=1, k=32)),
+)
 AB_B16_2x2 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_2x2(), **_B16, blockShape=(2, 2), blockCount=1, blockStride=0, loadShape=LoadShape(m=1, k=8)),
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B16, subtileShape=(2, 2), loadShape=LoadShape(m=1, k=8)),
@@ -319,12 +322,12 @@ AB_B16_2x2 = ABTilePair(
 
 # Column-major A/B (TLU=1): GR and LR contiguous along M
 AB_B16_TLU1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, blockShape=(8, 1), blockCount=1, blockStride=0, loadShape=LoadShape(m=8, k=1)),   # 128-bit GR: 8 bf16 along M
-    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, subtileShape=(8, 1), loadShape=LoadShape(m=8, k=1)),                              # 128-bit LR: 8 bf16 along M
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, blockShape=(8, 1), blockCount=1, blockStride=0, loadShape=LoadShape(m=8, k=1)),   # 128-bit GR: 8 bf16 along M
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(8, 1), loadShape=LoadShape(m=8, k=1)),                              # 128-bit LR: 8 bf16 along M
 )
 AB_B16_TLU1_16x1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, blockShape=(16, 1), blockCount=1, blockStride=0, loadShape=LoadShape(m=16, k=1), loadWidth=32), # 256-bit GR: 16 bf16 along M
-    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, subtileShape=(16, 1), loadShape=LoadShape(m=16, k=1), loadWidth=32),                            # 256-bit LR: 16 bf16 along M
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, blockShape=(16, 1), blockCount=1, blockStride=0, loadShape=LoadShape(m=16, k=1), loadWidth=32), # 256-bit GR: 16 bf16 along M
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=16, k=1), loadWidth=32),                            # 256-bit LR: 16 bf16 along M
 )
 
 # MX scale factor inputs (one scale per mxBlock data elements)
@@ -346,25 +349,20 @@ def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   raise NotImplementedError(f"selectMXScaleGeometry: unsupported dtype {dtype} for tc={tc}")
 
 
+AB_GEOMETRY_MAP = {
+  "AB_B16":      AB_B16,
+  "AB_B16_2x2":  AB_B16_2x2,
+  "AB_B4":       AB_B4,
+  "AB_B4_2x2":   AB_B4_2x2,
+  "AB_B8":       AB_B8,
+  "AB_B16_TLU1": AB_B16_TLU1,
+  "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
+}
+
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
-  """Return the ABTilePair template that matches the kernel's dtype and layout for tc ('A' or 'B')."""
-  tlu_key  = f"TLU{tc}"
-  dtype_key = f"DataType{tc}"
-  tlu   = kernel["ProblemType"].get(tlu_key, False)
-  dtype = kernel["ProblemType"][dtype_key]
-
-  if tlu:
-    if dtype.isBFloat16() or dtype.isHalf():
-      return AB_B16_TLU1
-    raise NotImplementedError(f"selectABGeometry: no TLU=1 geometry for dtype {dtype}")
-
-  if dtype.isBFloat16() or dtype.isHalf():
-    return AB_B16
-  if dtype.is8bitFloat():
-    return AB_B8
-  if dtype.is6bitFloat() or dtype.isFloat4():
-    return AB_B4
-  raise NotImplementedError(f"selectABGeometry: unsupported dtype {dtype} for tc={tc}")
+  """Return the ABTilePair selected by Solution.py for tc ('A' or 'B')."""
+  key = kernel[f"_ABTilePair{tc}"]
+  return AB_GEOMETRY_MAP[key]
 
 
 def selectDGeometry(kernel: dict) -> CDTileGeometry:

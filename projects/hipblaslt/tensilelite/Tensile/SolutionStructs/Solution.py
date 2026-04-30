@@ -690,6 +690,25 @@ class Solution(collections.abc.Mapping):
       if state["DepthU"] % duUnit != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 support only DepthU multiple of 2 * MatrixInstK * LocalSplitU")
 
+      for tc in ('A', 'B'):
+        dtype = state["ProblemType"][f"DataType{tc}"]
+        tlu = state["ProblemType"].get(f"TLU{tc}", False)
+        if tlu:
+          if dtype.isBFloat16() or dtype.isHalf():
+            state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
+          else:
+            reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
+            return
+        elif dtype.isBFloat16() or dtype.isHalf():
+          state[f"_ABTilePair{tc}"] = "AB_B16"
+        elif dtype.is8bitFloat():
+          state[f"_ABTilePair{tc}"] = "AB_B8"
+        elif dtype.is6bitFloat() or dtype.isFloat4():
+          state[f"_ABTilePair{tc}"] = "AB_B4"
+        else:
+          reject(state, printRejectionReason, f"No subtile geometry for dtype {dtype}")
+          return
+
       bytesLoaded = state["NumThreads"] * 16
       if state["ProblemType"]["MXBlockA"]:
         numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
