@@ -36,24 +36,6 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-#if 0 // moved to laset.hpp for now
-//------------------------------------------------------------------------------
-/// @return ceil( x / y ), for integers x, y.
-template <typename Ix, typename Iy>
-constexpr auto ceildiv( Ix x, Iy y )
-{
-    return (x + y - 1)/y;
-}
-
-//------------------------------------------------------------------------------
-/// @return y * ceil( x / y ), for integers x, y.
-template <typename Ix, typename Iy>
-constexpr auto roundup( Ix x, Iy y )
-{
-    return y * ceildiv( x, y );
-}
-#endif
-
 //------------------------------------------------------------------------------
 template <bool BATCHED, typename T>
 void rocsolver_sy2sb_he2hb_getMemorySize(
