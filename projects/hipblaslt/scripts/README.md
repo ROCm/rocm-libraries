@@ -44,4 +44,4 @@ The full tree (~2246 files) can take several minutes, so passing a subdirectory 
 
 ### run_tensile_logic_check.sh (Unix only)
 
-Thin wrapper that runs the script with `.venv/bin/python` if present, else `python3`. Use the `.py` script directly on Windows.
+Thin wrapper that runs the script with `.venv/bin/python`, if it's present, and with `python3` otherwise. Use the `.py` script directly on Windows.
