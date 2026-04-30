@@ -202,6 +202,8 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
                        const rocblas_int ldab,
                        Td& dTau,
                        Th& hA,
+                       Th& hAband,
+                       Th& hTau,
                        double* gpu_time_used,
                        double* cpu_time_used,
                        const rocblas_int hot_calls,
@@ -216,8 +218,25 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
 
     if(!perf)
     {
+        sy2sb_he2hb_initData<true, false, T>(handle, n, kd, dA, lda, hA);
+
+        // lwork for LAPACK hetrd_he2hb
+        size_t lwork = n * kd + n * std::max(kd, 128) + 2 * kd * kd;
+        std::vector<T> hwork(lwork);
+
         // cpu-lapack performance (only if not in perf mode)
-        *cpu_time_used = nan("");
+        *cpu_time_used = get_time_us_no_sync();
+        cpu_sy2sb_he2hb(rocblas_fill_lower,
+            n,
+            kd,
+            hA[0],
+            lda,
+            hAband[0],
+            ldab,
+            hTau[0],
+            hwork.data(),
+            lwork);
+        *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
     sy2sb_he2hb_initData<true, false, T>(handle, n, kd, dA, lda, hA);
@@ -381,7 +400,7 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     if(argus.timing && hot_calls > 0) {
         sy2sb_he2hb_getPerfData<T>(
             handle, n, kd, nb,
-            dA, lda, dAband, ldab, dTau, hA,
+            dA, lda, dAband, ldab, dTau, hA, hAband, hTau,
             &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                              argus.profile_kernels, argus.perf);
     }
