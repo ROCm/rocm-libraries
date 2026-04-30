@@ -1079,6 +1079,10 @@ _SBARRIER_CLASS_NAMES = {
     "_FakeSBarrier",
     "SBarrier",
 }
+_SNOP_CLASS_NAMES = {
+    "_FakeSNop",
+    "SNop",
+}
 
 
 def _is_lr(inst):
@@ -1103,6 +1107,10 @@ def _is_swait(inst):
 
 def _is_sbarrier(inst):
     return type(inst).__name__ in _SBARRIER_CLASS_NAMES
+
+
+def _is_snop(inst):
+    return type(inst).__name__ in _SNOP_CLASS_NAMES
 
 
 def _reg_signature(reg) -> tuple:
@@ -1462,13 +1470,27 @@ def _make_node(tagged_inst, body_label: str) -> GraphNode:
 _BODY_BUILD_ORDER = (BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL)
 
 
-def build_dataflow_graph(four_part_capture, *, strict_unknown_instructions=False):
+def build_dataflow_graph(four_part_capture):
     """Build the unified 4-body register dataflow graph from a FourPartCapture.
 
     Walks bodies in execution order (ML-1 -> ML -> NGL -> NLL); the per-counter
     FIFO queue persists across body boundaries so cross-body raw_intrawave
     edges form correctly when a producer in body i is drained by a wait in
     body i+1.
+
+    Node policy: every captured instruction becomes a node EXCEPT SWait,
+    SBarrier, and SNop — those are scheduler-choice (CMS may emit any
+    number of redundant ones and still be correct), so they're kept in
+    the per-body sidecar (for waits_in_window/barriers_in_window/FIFO
+    simulation) but excluded from the cross-graph identity set. Every
+    other instruction class — including ones the FIFO classifier doesn't
+    model (VPermB32, VCvtPkF32toBF16, scalar arith, pointer math, etc.)
+    — is added as a node so cross-graph topology comparison is complete.
+
+    Missed-instruction guard: an instruction whose category resolves to
+    no recognized scheduler-role tag AND whose Python class isn't in
+    LR/LW/GR/MFMA/SWait/SBarrier raises CaptureUnknownInstructionError.
+    Surfaces capture-pipeline gaps that left an instruction uncategorized.
 
     Edge-formation rule (raw_intrawave):
       On producer instruction (LR/LW/GR):
@@ -1480,13 +1502,6 @@ def build_dataflow_graph(four_part_capture, *, strict_unknown_instructions=False
       On consumer instruction:
         for each reg read:
           if ready_writer[reg]: form an edge
-
-    `strict_unknown_instructions=True` causes the builder to raise
-    CaptureUnknownInstructionError on any instruction whose class isn't
-    one of LR/LW/GR/MFMA/SWait/SBarrier. Used by unit tests to catch
-    fixture mistakes. Default is lenient: unknown instructions (scalar
-    arith for GRInc, packing ops, etc.) are skipped — they don't
-    participate in the dataflow model.
 
     Always raises CaptureEmptyBodyError if any body has zero
     instructions (capture-pipeline bug; bodies always contain at least
@@ -1534,33 +1549,51 @@ def build_dataflow_graph(four_part_capture, *, strict_unknown_instructions=False
 
         for tagged_inst in body.instructions:
             inst = tagged_inst.inst
-            # Lenient mode: skip instructions we don't model (scalar arith,
-            # pack ops, etc.). Strict mode: surface them as a fixture bug.
-            if not (_is_lr(inst) or _is_lw(inst) or _is_gr(inst)
-                    or _is_mfma(inst) or _is_swait(inst) or _is_sbarrier(inst)):
-                if strict_unknown_instructions:
-                    raise CaptureUnknownInstructionError(
-                        f"build_dataflow_graph: instruction class "
-                        f"{type(inst).__name__!r} in body {label!r} is not "
-                        f"one of LR/LW/GR/MFMA/SWait/SBarrier."
-                    )
-                continue
 
-            node = _make_node(tagged_inst, label)
-            # Producer/consumer nodes (LR/LW/GR/MFMA) define the cross-graph
-            # topology and go into nodes_by_identity. SWaits/SBarriers (and
-            # implicitly SNops, which lenient mode already skips) are
-            # SCHEDULER-CHOICE instructions: CMS may add arbitrary numbers
-            # of redundant waits and barriers and still be correct. Keeping
-            # them out of the identity set makes compare_graphs's first-pass
-            # diff insensitive to those redundancies; per-edge correctness
-            # (MissingWait/WaitInsufficient/MissingBarrier) is still checked
-            # in diagnose_missing_edge by walking the per-body sidecar
-            # (nodes_per_body / capture._graph_nodes).
-            if not (_is_swait(inst) or _is_sbarrier(inst)):
-                nodes_by_identity[node.identity] = node
+            # _make_node computes the identity, which routes through
+            # _class_tag_from_category(category, inst). When the category
+            # is recognized (LRA*, PackA*, GRInc*, LRS, LWS, etc.), we get
+            # a tag (LR, PACK, GRINC, etc.). When it's None or 'UNKNOWN',
+            # _class_tag_from_category falls back to _class_tag(inst), which
+            # raises CaptureUnknownInstructionError if the instruction's
+            # Python class isn't one of LR/LW/GR/MFMA/SWait/SBarrier. That
+            # raise is the intended "missed-instruction" guard — surfaces
+            # any capture-pipeline gap that left an instruction without a
+            # recognized category AND without a recognized class. Re-raise
+            # with the body label for diagnostic clarity.
+            try:
+                node = _make_node(tagged_inst, label)
+            except CaptureUnknownInstructionError as e:
+                raise CaptureUnknownInstructionError(
+                    f"build_dataflow_graph: cannot classify instruction "
+                    f"{type(inst).__name__!r} (category={tagged_inst.category!r}) "
+                    f"in body {label!r}. The capture pipeline must assign a "
+                    f"recognized category, or the instruction's class must be "
+                    f"one of LR/LW/GR/MFMA/SWait/SBarrier. Inner: {e}"
+                ) from e
+
+            # Per-body sidecar: every node lives here so waits_in_window /
+            # barriers_in_window can find SWaits/SBarriers and the FIFO
+            # simulation has stream order to walk.
             nodes_per_body[label].append(node)
 
+            # Cross-graph identity set: only producer/consumer/data nodes
+            # participate. SWait, SBarrier, and SNop are SCHEDULER-CHOICE
+            # instructions — CMS may emit arbitrary redundant ones and
+            # still be correct, so they must NOT contribute to the
+            # cross-graph topology diff. Per-edge correctness for waits/
+            # barriers is checked in diagnose_missing_edge by walking the
+            # sidecar.
+            if not (_is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst)):
+                nodes_by_identity[node.identity] = node
+
+            # FIFO / edge-formation logic. Instructions whose Python class
+            # we don't model (e.g. VPermB32 in pack code, scalar arith in
+            # GR-inc, pointer math in pointerLRCode) become nodes without
+            # affecting the FIFO state — they're present in the graph for
+            # completeness but don't push to queues or form edges from the
+            # built-in raw_intrawave classifier. (Future work may model
+            # additional dataflow patterns for these.)
             if _is_swait(inst):
                 # Drain each constrained counter to the cap N.
                 for counter in ("dscnt", "vlcnt"):
@@ -1601,8 +1634,9 @@ def build_dataflow_graph(four_part_capture, *, strict_unknown_instructions=False
                             ))
                 continue
 
-            # Unreachable: the strict-vs-lenient guard above already handled
-            # any instruction not in LR/LW/GR/MFMA/SWait/SBarrier.
+            # Otherwise: classification succeeded (we have a node) but the
+            # instruction's Python class isn't modeled by the FIFO. Node-only;
+            # no FIFO/edge action.
 
         # Stash per-body GraphNodes on the LoopBodyCapture for the helpers
         # (waits_in_window, barriers_in_window) to use without rebuilding.

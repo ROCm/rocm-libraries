@@ -364,10 +364,13 @@ class TestStructuralProperties:
         assert len(ids_b) == 1
         assert ids_a[0] == ids_b[0]
 
-    def test_unknown_instruction_class_raises_in_strict_mode(self):
-        """An instruction whose rocisa class is none of LR/LW/GR/MFMA/SWait/
-        SBarrier raises in strict mode (used to catch fixture mistakes).
-        Lenient mode (default for production) skips them."""
+    def test_unknown_instruction_raises_always(self):
+        """An instruction whose category resolves to no recognized scheduler-
+        role tag AND whose Python class isn't one of LR/LW/GR/MFMA/SWait/
+        SBarrier MUST raise — the missed-instruction guard. There is no
+        lenient mode: silently skipping unmodeled instructions hid
+        capture-pipeline gaps.
+        """
         from dataclasses import dataclass
 
         @dataclass
@@ -379,17 +382,48 @@ class TestStructuralProperties:
         )
         ti = TaggedInstruction(
             inst=_UnknownInst(),
-            category="WHATEVER",
+            category="WHATEVER",  # not a recognized prefix or exact match
             slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
                          mfma_index=0, sequence=0),
         )
         cap = make_capture(BODY_LABEL_ML, [ti])
-        # Strict: raises.
         with pytest.raises(CaptureUnknownInstructionError):
-            build_dataflow_graph(_wrap(cap), strict_unknown_instructions=True)
-        # Lenient (default): silently skips the unknown instruction.
+            build_dataflow_graph(_wrap(cap))
+
+    def test_known_category_with_unmodeled_class_becomes_node(self):
+        """An instruction with a recognized category (e.g. PackA0) but a
+        Python class the FIFO classifier doesn't model (e.g. a stand-in
+        for VPermB32) MUST become a graph node — node-only, no FIFO/edge
+        action. This is the case that motivates 'every non-sync instruction
+        is a node': pack-VPerms must show up so cross-graph topology
+        comparison sees them.
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class _PackInst:
+            def __str__(self):
+                return "v_perm_b32 v[0:0], v[1:1], v[2:2], s[3:3]"
+
+        from Tensile.Components.ScheduleCapture import (
+            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+        )
+        # Need at least one MFMA so the body satisfies non-empty constraints
+        # downstream.
+        ti_pack = TaggedInstruction(
+            inst=_PackInst(),
+            category="PackA0",
+            slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+                         mfma_index=0, sequence=0),
+        )
+        cap = make_capture(BODY_LABEL_ML, [
+            ti_pack,
+            make_mfma(0, 8, 32, slot=1, a_src_count=4),
+        ])
         g = build_dataflow_graph(_wrap(cap))
-        assert g.edges == []
+        pack_nodes = [n for n in g.nodes.values() if n.category == "PackA0"]
+        assert len(pack_nodes) == 1
+        assert pack_nodes[0].identity[0] == "PACK"
 
     def test_empty_body_raises(self):
         """A captured body with zero TaggedInstructions is a capture-pipeline
