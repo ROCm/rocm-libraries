@@ -36,45 +36,41 @@ int main(int argc, char* argv[])
     /***************************************
     * Check device support                 *
     **************************************/
-    if(!isF32F32MatrixCoreSupported())
+    if(!isF32F16MatrixCoreSupported())
     {
         std::cout << "unsupported host device" << std::endl;
         exit(EXIT_FAILURE);
     }
 
-    typedef float ADataType;
-    typedef float BDataType;
-    typedef float CDataType;
-    typedef float DDataType;
-    typedef float EDataType;
-    typedef float floatTypeCompute;
+    typedef float    ADataType;
+    typedef float    BDataType;
+    typedef float    CDataType;
+    typedef float    EDataType;
+    typedef _Float16 floatTypeCompute;
 
     constexpr hiptensorDataType_t          typeA       = HIPTENSOR_R_32F;
     constexpr hiptensorDataType_t          typeB       = HIPTENSOR_R_32F;
     constexpr hiptensorDataType_t          typeC       = HIPTENSOR_R_32F;
-    constexpr hiptensorDataType_t          typeD       = HIPTENSOR_R_32F;
     constexpr hiptensorDataType_t          typeE       = HIPTENSOR_R_32F;
-    constexpr hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_32F;
+    constexpr hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_16F;
 
     /**********************
      * Computing: E_{m,n,b,r,a} = alpha * A_{m,k,a,j,b,i} B_{k,n,i} C_{r,j}
-     *                             + beta * D_{m,n,b,r,a}
+     *            (scale: no beta * D term)
      **********************/
 
     std::vector<int> modeA{'m', 'k', 'a', 'j', 'b', 'i'};
     std::vector<int> modeB{'k', 'n', 'i'};
     std::vector<int> modeC{'r', 'j'};
-    std::vector<int> modeD{'m', 'n', 'b', 'r', 'a'};
     std::vector<int> modeE{'m', 'n', 'b', 'r', 'a'};
 
     int nmodeA = modeA.size();
     int nmodeB = modeB.size();
     int nmodeC = modeC.size();
-    int nmodeD = modeD.size();
     int nmodeE = modeE.size();
 
     std::unordered_map<int, int64_t> extent;
-    extent['m'] = 64; //256;
+    extent['m'] = 64;
     extent['a'] = 32;
     extent['b'] = 32;
     extent['n'] = 64;
@@ -95,10 +91,6 @@ int main(int argc, char* argv[])
     for(auto mode : modeC)
         extentC.push_back(extent[mode]);
 
-    std::vector<int64_t> extentD;
-    for(auto mode : modeD)
-        extentD.push_back(extent[mode]);
-
     std::vector<int64_t> extentE;
     for(auto mode : modeE)
         extentE.push_back(extent[mode]);
@@ -114,34 +106,28 @@ int main(int argc, char* argv[])
         extentB.begin(), extentB.end(), size_t{1}, std::multiplies<size_t>());
     size_t elementsC = std::accumulate(
         extentC.begin(), extentC.end(), size_t{1}, std::multiplies<size_t>());
-    size_t elementsD = std::accumulate(
-        extentD.begin(), extentD.end(), size_t{1}, std::multiplies<size_t>());
     size_t elementsE = std::accumulate(
         extentE.begin(), extentE.end(), size_t{1}, std::multiplies<size_t>());
 
     size_t sizeA = sizeof(ADataType) * elementsA;
     size_t sizeB = sizeof(BDataType) * elementsB;
     size_t sizeC = sizeof(CDataType) * elementsC;
-    size_t sizeD = sizeof(DDataType) * elementsD;
     size_t sizeE = sizeof(EDataType) * elementsE;
 
     printf("Total memory: %.2f GiB\n",
-           (sizeA + sizeB + sizeC + sizeD + sizeE) / 1024. / 1024. / 1024);
+           (sizeA + sizeB + sizeC + sizeE) / 1024. / 1024. / 1024);
 
     ADataType* A = nullptr;
     BDataType* B = nullptr;
     CDataType* C = nullptr;
-    DDataType* D = nullptr;
     CHECK_HIP_ERROR(hipHostMalloc((void**)&A, sizeA));
     CHECK_HIP_ERROR(hipHostMalloc((void**)&B, sizeB));
     CHECK_HIP_ERROR(hipHostMalloc((void**)&C, sizeC));
-    CHECK_HIP_ERROR(hipHostMalloc((void**)&D, sizeD));
 
-    void *A_d, *B_d, *C_d, *D_d, *E_d;
+    void *A_d, *B_d, *C_d, *E_d;
     CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&A_d), sizeA));
     CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&B_d), sizeB));
     CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&C_d), sizeC));
-    CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&D_d), sizeD));
     CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&E_d), sizeE));
 
     /*******************
@@ -153,8 +139,6 @@ int main(int argc, char* argv[])
         B[i] = (BDataType)(float(std::rand()) / float(RAND_MAX) - 0.5) * 100;
     for(int64_t i = 0; i < elementsC; i++)
         C[i] = (CDataType)(float(std::rand()) / float(RAND_MAX) - 0.5) * 100;
-    for(int64_t i = 0; i < elementsD; i++)
-        D[i] = (DDataType)(float(std::rand()) / float(RAND_MAX) - 0.5) * 100;
 
     /********************************************
      * Transfer the Host Tensor to Device Memory
@@ -164,7 +148,6 @@ int main(int argc, char* argv[])
     CHECK_HIP_ERROR(hipMemcpy(A_d, static_cast<const void*>(A), sizeA, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(B_d, static_cast<const void*>(B), sizeB, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(C_d, static_cast<const void*>(C), sizeC, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(D_d, static_cast<const void*>(D), sizeD, hipMemcpyHostToDevice));
 
     /************************************************
      * Retrieve the memory alignment for each tensor
@@ -205,15 +188,6 @@ int main(int argc, char* argv[])
                                                           typeC,
                                                           alignmentRequirement));
 
-    hiptensorTensorDescriptor_t descD = nullptr;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
-                                                          &descD,
-                                                          nmodeD,
-                                                          extentD.data(),
-                                                          NULL, /*stride*/
-                                                          typeD,
-                                                          alignmentRequirement));
-
     hiptensorTensorDescriptor_t descE = nullptr;
     CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
                                                           &descE,
@@ -239,8 +213,8 @@ int main(int argc, char* argv[])
                                                             descC,
                                                             modeC.data(),
                                                             HIPTENSOR_OP_IDENTITY,
-                                                            descD,
-                                                            modeD.data(),
+                                                            nullptr,
+                                                            nullptr,
                                                             HIPTENSOR_OP_IDENTITY,
                                                             descE,
                                                             modeE.data(),
@@ -260,7 +234,6 @@ int main(int argc, char* argv[])
     assert(scalarType == *hiptensor::convertToHipTensorDataType(typeCompute));
 
     floatTypeCompute alpha = 1.1f;
-    floatTypeCompute beta  = 2.3f;
 
     /**************************
      * Set the algorithm to use
@@ -295,7 +268,7 @@ int main(int argc, char* argv[])
     /**********************
      * Run
      **********************/
-    std::cout << "Launching trinary contraction kernel..." << std::endl;
+    std::cout << "Launching trinary scale contraction kernel..." << std::endl;
 
     CHECK_HIPTENSOR_ERROR(hiptensorContractTrinary(handle,
                                                    plan,
@@ -303,8 +276,8 @@ int main(int argc, char* argv[])
                                                    A_d,
                                                    B_d,
                                                    C_d,
-                                                   (void*)&beta,
-                                                   D_d,
+                                                   nullptr,
+                                                   nullptr,
                                                    E_d,
                                                    workspace,
                                                    worksize,
@@ -333,11 +306,6 @@ int main(int argc, char* argv[])
         hiptensorDestroyTensorDescriptor(descC);
         descC = nullptr;
     }
-    if(descD)
-    {
-        hiptensorDestroyTensorDescriptor(descD);
-        descD = nullptr;
-    }
     if(descE)
     {
         hiptensorDestroyTensorDescriptor(descE);
@@ -347,12 +315,10 @@ int main(int argc, char* argv[])
     HIPTENSOR_FREE_HOST(A);
     HIPTENSOR_FREE_HOST(B);
     HIPTENSOR_FREE_HOST(C);
-    HIPTENSOR_FREE_HOST(D);
 
     HIPTENSOR_FREE_DEVICE(A_d);
     HIPTENSOR_FREE_DEVICE(B_d);
     HIPTENSOR_FREE_DEVICE(C_d);
-    HIPTENSOR_FREE_DEVICE(D_d);
     HIPTENSOR_FREE_DEVICE(E_d);
     HIPTENSOR_FREE_DEVICE(workspace);
 

@@ -168,8 +168,10 @@ The ``test`` directory contains the test codes for testing the following functio
 
 - ``00_unit/logger_test``: Tests logger API functions of hipTensor.
 - ``00_unit/yaml_test``: Tests the YAML serialization and de-serialization for testing parameters.
-- ``01_contraction/contraction_test``: Testing harness for the bilinear and scale contractions.
-- ``01_contraction/complex_*_contraction``: Testing harness for the bilinear and scale contractions with complex data types.
+- ``01_contraction/bilinear_contraction_test_*``: Testing harness for the bilinear contractions.
+- ``01_contraction/scale_contraction_test_*``: Testing harness for the scale contractions.
+- ``01_contraction/complex_bilinear_contraction_test_*``: Testing harness for the bilinear contractions with complex data types.
+- ``01_contraction/complex_scale_contraction_test_*``: Testing harness for the scale contractions with complex data types.
 - ``01_contraction/trinary_contraction_test``: Testing harness for the trinary contractions.
 - ``01_contraction/trinary_bilinear_contraction_test``: Testing harness for the trinary bilinear contractions.
 - ``01_contraction/trinary_scale_contraction_test``: Testing harness for the trinary scale contractions.

@@ -773,8 +773,7 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
 // are input tensors, D is an optional bias tensor, and E is the output.
 //
 // CK (Composable Kernel) does not provide a native 3-input contraction kernel,
-// so we decompose the operation into two successive binary contractions
-// (Strategy A):
+// so we decompose the operation into two successive binary contractions.
 //
 //   Step 1:  T = A * B               (alpha=1, beta=0, no bias)
 //   Step 2:  E = alpha * T * C + beta * D
@@ -794,7 +793,7 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
 // removed; all surviving modes of A come first (in order), followed by
 // modes of B that are not in A (i.e. !setA.count(m)).  A's order is
 // preserved verbatim and B contributes only its A-disjoint modes.
-inline std::vector<int32_t> computeIntermediateModes(
+inline std::vector<int32_t> computeTrinaryContractionIntermediateModes(
     const std::vector<int32_t>& modeA,
     const std::vector<int32_t>& modeB,
     const std::vector<int32_t>& modeC,
@@ -836,7 +835,7 @@ inline std::vector<int32_t> computeIntermediateModes(
 // Build a tensor descriptor for T by looking up each mode's extent from A or B,
 // then computing packed (column-major) strides.  The data type matches E so
 // that step 2 can consume T without a type conversion.
-inline hiptensorTensorDescriptor buildIntermediateDescriptor(
+inline hiptensorTensorDescriptor buildTrinaryContractionIntermediateDescriptor(
     const std::vector<int32_t>&        modeT,
     const hiptensorTensorDescriptor_t  descA,
     const std::vector<int32_t>&        modeA,
@@ -874,8 +873,8 @@ inline hiptensorTensorDescriptor buildIntermediateDescriptor(
     return descT;
 }
 
-// Total byte count of the intermediate tensor (element count * element size).
-inline std::size_t intermediateByteSize(const hiptensorTensorDescriptor& desc)
+// Total byte count of the tensor (element count * element size).
+inline std::size_t tensorByteSize(const hiptensorTensorDescriptor& desc)
 {
     auto elements = hiptensor::elementsFromLengths(desc.mLengths);
     return elements * hiptensor::hiptensorDataTypeSize(desc.mType);
@@ -1042,15 +1041,15 @@ hiptensorStatus_t contractionTrinaryGetWorkspaceSize(
     
     *workspaceSizeEstimate = 0u;
 
-    auto modeT = computeIntermediateModes(desc->mModeA, desc->mModeB,
+    auto modeT = computeTrinaryContractionIntermediateModes(desc->mModeA, desc->mModeB,
                                           desc->mModeC, desc->mModeE);
 
     auto tDataType = desc->mDescE->mType;
-    auto intermediateDesc = buildIntermediateDescriptor(
+    auto intermediateDesc = buildTrinaryContractionIntermediateDescriptor(
         modeT, desc->mDescA, desc->mModeA, desc->mDescB, desc->mModeB,
         tDataType);
 
-    auto tBytes = intermediateByteSize(intermediateDesc);
+    auto tBytes = tensorByteSize(intermediateDesc);
     auto tBytesAligned = alignUp256(tBytes);
 
     uint64_t kernelWs = 0u;
@@ -1155,15 +1154,15 @@ hiptensorStatus_t contractionTrinaryInitPlan(
     }
 
     // --- Derive the intermediate tensor T from mode analysis ---
-    auto modeT = computeIntermediateModes(desc->mModeA, desc->mModeB,
+    auto modeT = computeTrinaryContractionIntermediateModes(desc->mModeA, desc->mModeB,
                                           desc->mModeC, desc->mModeE);
 
     // T shares E's data type to avoid a type conversion between steps.
     auto tDataType = desc->mDescE->mType;
-    auto intermediateDesc = buildIntermediateDescriptor(
+    auto intermediateDesc = buildTrinaryContractionIntermediateDescriptor(
         modeT, desc->mDescA, desc->mModeA, desc->mDescB, desc->mModeB, tDataType);
 
-    auto tBytes = intermediateByteSize(intermediateDesc);
+    auto tBytes = tensorByteSize(intermediateDesc);
     auto tBytesAligned = alignUp256(tBytes);
 
     // Workspace beyond what T needs is available for kernel scratchpads.
@@ -1471,15 +1470,15 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     }
 
     // Recompute the intermediate tensor T's shape from the operation descriptor.
-    auto modeT = computeIntermediateModes(plan->mOpDesc->mModeA, plan->mOpDesc->mModeB,
+    auto modeT = computeTrinaryContractionIntermediateModes(plan->mOpDesc->mModeA, plan->mOpDesc->mModeB,
                                           plan->mOpDesc->mModeC, plan->mOpDesc->mModeE);
     auto tDataType = plan->mOpDesc->mDescE->mType;
-    auto intermediateDesc = buildIntermediateDescriptor(
+    auto intermediateDesc = buildTrinaryContractionIntermediateDescriptor(
         modeT, plan->mOpDesc->mDescA, plan->mOpDesc->mModeA,
         plan->mOpDesc->mDescB, plan->mOpDesc->mModeB, tDataType);
 
     // Partition the workspace: [T (aligned)] [sub-workspace for kernels]
-    auto tBytes        = intermediateByteSize(intermediateDesc);
+    auto tBytes        = tensorByteSize(intermediateDesc);
     auto tBytesAligned = alignUp256(tBytes);
 
     if(workspaceSize < tBytesAligned)
@@ -1523,9 +1522,9 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     hiptensor::writeVal(&zeroScalar, plan->mOpDesc->mDescCompute,
                         hiptensor::ScalarData(plan->mOpDesc->mDescCompute, 0.0, 0.0));
 
-    hiptensorStatus_t errorCode1 = HIPTENSOR_STATUS_SUCCESS;
+    hiptensorStatus_t errorCode = HIPTENSOR_STATUS_SUCCESS;
     float             time1      = 0.0f;
-    std::tie(errorCode1, time1)
+    std::tie(errorCode, time1)
         = (*solution)(&oneScalar,
                       A,
                       B,
@@ -1554,19 +1553,19 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     std::tie(m1, n1, k1) = solution->problemDims();
     auto bytes1 = solution->problemBytes();
 
-    if(errorCode1 != HIPTENSOR_STATUS_SUCCESS)
+    if(errorCode != HIPTENSOR_STATUS_SUCCESS)
     {
         snprintf(msg, sizeof(msg),
                  "Trinary contraction step 1 (T = A*B) failed (%s)",
-                 hiptensorGetErrorString(errorCode1));
+                 hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorContractTrinary", msg);
-        return errorCode1;
+        return errorCode;
     }
 
     // --- Step 2: E = alpha * T * C + beta * D ---
-    hiptensorStatus_t errorCode2 = HIPTENSOR_STATUS_SUCCESS;
+    errorCode = HIPTENSOR_STATUS_SUCCESS;
     float             time2      = 0.0f;
-    std::tie(errorCode2, time2)
+    std::tie(errorCode, time2)
         = (*solution)(alpha,
                        T,
                        C,
@@ -1590,13 +1589,13 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
                        kernelWsSize,
                        streamCfg);
 
-    if(errorCode2 != HIPTENSOR_STATUS_SUCCESS)
+    if(errorCode != HIPTENSOR_STATUS_SUCCESS)
     {
         snprintf(msg, sizeof(msg),
                  "Trinary contraction step 2 (E = alpha*T*C + beta*D) failed (%s)",
-                 hiptensorGetErrorString(errorCode2));
+                 hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorContractTrinary", msg);
-        return errorCode2;
+        return errorCode;
     }
 
     auto totalTime = time1 + time2;
@@ -1634,5 +1633,5 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     autotuneMgr->saveAutotune<hiptensor::ContractionSolution>(
         hiptensor::AutotuneOps::Autotune_ContractionTrinary, totalTime, handle, plan);
 
-    return errorCode2;
+    return errorCode;
 }
