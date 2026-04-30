@@ -35,16 +35,6 @@ def miopenCheckout()
     ])
 }
 
-def show_node_info() {
-    sh """
-        echo "NODE_NAME = \$NODE_NAME"
-        lsb_release -sd
-        uname -r
-        cat /sys/module/amdgpu/version
-        ls /opt/ -la
-    """
-}
-
 def check_host() {
     if ("${env.MIOPEN_SCCACHE}" != "null"){
         def SCCACHE_SERVER="${env.MIOPEN_SCCACHE.split(':')[0]}"
@@ -218,6 +208,10 @@ def cmake_fin_build_cmd(prefixpath){
 def getDockerImageName(dockerArgs)
 {
     sh "echo ${dockerArgs} > ${env.WORKSPACE}/factors.txt"
+    // Include the candidate image so the CI docker hash changes per TheRock hash.
+    if (env.THEROCK_CANDIDATE_IMAGE) {
+        sh "echo ${env.THEROCK_CANDIDATE_IMAGE} >> ${env.WORKSPACE}/factors.txt"
+    }
     def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
     // Note: The following files and directories from the CK repo are used to generate a hash for 
     // the docker image build. To ensure that we rebuild the docker image only when necessary.
@@ -256,17 +250,206 @@ def getDockerImageName(dockerArgs)
     return image
 }
 
+// Builds rocm/miopen:therock-<shortHash> from source; returns {image, fullHash, shortHash, skip}.
+// Skips if :therock already carries this hash; reuses the hash-tagged image if it exists.
+def buildTheRockDockerImage(Map conf=[:])
+{
+    env.DOCKER_BUILDKIT=1
+    def prefixpath = conf.get("prefixpath", "/opt/rocm")
+
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:therock_cache"
+
+    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201" // multiarch builds
+
+    // Read the TheRock hash pinned in the workflow file.
+    def theRockHash = sh(
+        script: """
+            grep -A 5 'repository: "ROCm/TheRock"' ${env.WORKSPACE}/.github/workflows/therock-ci-linux.yml \
+            | grep '^ *ref:' \
+            | awk '{print \$2}'
+        """.stripIndent(),
+        returnStdout: true
+    ).trim()
+
+    def shortHash   = theRockHash.take(7)
+    def hashedImage = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock-${shortHash}"
+
+    // Check whether this hash is already live on :therock via its baked-in label.
+    // Pull and inspect are separated so that docker pull stdout does not contaminate the captured label.
+    def lastPromotedHash = ""
+    try {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
+            lastPromotedHash = sh(
+                script: """
+                    docker inspect \
+                        --format '{{ index .Config.Labels "therock.git.hash" }}' \
+                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
+                """.stripIndent(),
+                returnStdout: true
+            ).trim()
+        }
+    } catch (Exception e) {
+        echo "Could not read label from existing :therock image (first-time run?): ${e.message}"
+    }
+
+    if (lastPromotedHash == theRockHash) {
+        echo "TheRock hash ${shortHash} is already promoted to :therock - skipping build."
+        return [image: null, fullHash: theRockHash, shortHash: shortHash, skip: true]
+    }
+    echo "New TheRock hash detected: ${theRockHash} (previously promoted: '${lastPromotedHash ?: 'none'}')"
+
+    // Reuse the hash-tagged image if a previous nightly already built it.
+    def imageAlreadyBuilt = false
+    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        def rc = sh(script: "docker manifest inspect ${hashedImage} > /dev/null 2>&1", returnStatus: true)
+        imageAlreadyBuilt = (rc == 0)
+    }
+    if (imageAlreadyBuilt) {
+        echo "Hash-tagged image ${hashedImage} already exists - reusing without rebuild."
+    } else {
+        echo "Hash-tagged image ${hashedImage} not found - will build now."
+    }
+
+    if (!imageAlreadyBuilt) {
+        def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
+                         "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
+                         "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
+                         "--build-arg BUILD_TYPE=build " +
+                         "--label therock.git.hash=${theRockHash} " +
+                         "--target update_therock " +
+                         " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
+
+        if (params.USE_SCCACHE_DOCKER && check_host() && "${env.MIOPEN_SCCACHE}" != "null") {
+            dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache "
+        }
+
+        echo "Building ${hashedImage} with args: ${dockerArgs}"
+
+        def buildContext    = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min " +
+                              "--cache-from type=registry,ref=${cacheRef} "
+
+        try {
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                sh """
+                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                    docker buildx create --name ci-builder --driver docker-container --use
+                    docker buildx use ci-builder
+                    docker buildx inspect --bootstrap
+                """.stripIndent()
+
+                sh """
+                    DOCKER_BUILDKIT=1 docker buildx build \
+                    --push \
+                    --tag ${hashedImage} \
+                    ${dockerCacheArgs} \
+                    ${dockerArgs} \
+                    ${buildContext}
+                """.stripIndent()
+            }
+        } catch (Exception bex) {
+            echo "Buildx not available or failed, falling back to docker.build"
+            def dockerImage = docker.build("${hashedImage}", "${dockerArgs} ${buildContext}")
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                dockerImage.push()
+            }
+        }
+    }
+
+    return [image: hashedImage, fullHash: theRockHash, shortHash: shortHash, skip: false]
+}
+
+// Retags the CI image as rocm/miopen-dev:multiarch_dev_<date> and :latest.
+// Uses CI_DOCKER_IMAGE set by the Build Docker stage to avoid recomputing the image name.
+def publishDevDockerImage(Map conf=[:])
+{
+    def date = new Date().format('yyyyMMdd')
+    def devImageUrl = "${env.MIOPEN_DOCKER_IMAGE_URL}-dev"
+    def dateTag   = "${devImageUrl}:multiarch_dev_${date}"
+    def latestTag = "${devImageUrl}:latest"
+    def ciImage   = env.CI_DOCKER_IMAGE
+
+    if (!ciImage) {
+        error "CI_DOCKER_IMAGE is not set - Build Docker stage must run before Publish Dev Image."
+    }
+
+    echo "Publishing dev image: ${ciImage} -> ${dateTag}"
+    withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
+        sh """
+            docker pull ${ciImage}
+            docker tag  ${ciImage} ${dateTag}
+            docker tag  ${ciImage} ${latestTag}
+            docker push ${dateTag}
+            docker push ${latestTag}
+        """.stripIndent()
+    }
+}
+
+// Re-tags the hash-tagged image as :therock; the baked label is preserved by docker tag.
+def promoteTheRockDockerImage(String hashedImage, String fullHash)
+{
+    def targetImage = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock"
+    echo "Promoting ${hashedImage} -> ${targetImage} (hash: ${fullHash})"
+    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        sh """
+            docker pull ${hashedImage}
+            docker tag  ${hashedImage} ${targetImage}
+            docker push ${targetImage}
+        """.stripIndent()
+    }
+    echo "Promotion complete - :therock now points to TheRock hash ${fullHash}"
+}
+
+
 def getDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
     def prefixpath = conf.get("prefixpath", "/opt/rocm") // one image for each prefix 1: /usr/local 2:/opt/rocm
-    // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
-    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx11-generic;gfx12-generic" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
-    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
+    def gpu_family = conf.get("gpu_family")
+
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_${gpu_family}"
+
+    // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
+    def gpu_arch
+    if (gpu_family == "ci")
+    {
+        gpu_arch = "gfx908;gfx90a;gfx942;gfx1101;gfx1151" // Builds docker image with subset of architectures that CI is run on.
+    }
+    else if (gpu_family == "gfx90X")
+    {
+        gpu_arch = "gfx908;gfx90a"
+    }
+    else if (gpu_family == "gfx942")
+    {
+        gpu_arch = "gfx942"
+    }
+    else if (gpu_family == "gfx950")
+    {
+        gpu_arch = "gfx950"
+    }
+    else if (gpu_family == "gfx942_gfx950")
+    {
+        gpu_arch = "gfx942;gfx950"
+    }
+    else if (gpu_family == "navi")
+    {
+        gpu_arch = "gfx1101;gfx1151"
+    }
+    else
+    {
+        error("Unsupported GPU family: ${gpu_family}")
+    }
 
     def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
-                     "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
+                     "--target miopen "
+
+    // Build the CI image FROM the candidate TheRock base when one is staged.
+    if (env.THEROCK_CANDIDATE_IMAGE) {
+        dockerArgs = dockerArgs + "--build-arg THEROCK_BASE_IMAGE=${env.THEROCK_CANDIDATE_IMAGE} "
+    }
+
     if(env.CCACHE_HOST)
     {
         def check_host = sh(script:"""(printf "PING\r\n";) | nc -N ${env.CCACHE_HOST} 6379 """, returnStdout: true).trim()
@@ -284,13 +467,54 @@ def getDockerImage(Map conf=[:])
     }
     else if (params.USE_SCCACHE_DOCKER && check_host() && "${env.MIOPEN_SCCACHE}" != "null")
     {
-        dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache"
+        dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache "
     }
 
     def image = getDockerImageName(dockerArgs)
 
+    // Do not append gpu family for common ci image
+    if(gpu_family != "ci"){
+        image = image + "_${gpu_family}"
+    }
+
+    // Append GPU arch after image name for a common hash
+    dockerArgs = dockerArgs + "--build-arg THEROCK_ASIC=\"${gpu_arch}\" "
+
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
+
+    // Carry the promoted TheRock hash forward into the CI image metadata.
+    try {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
+            def promotedHash = sh(
+                script: """
+                    docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
+                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
+                """.stripIndent(),
+                returnStdout: true
+            ).trim()
+            if (promotedHash) {
+                echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
+                dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
+                env.THEROCK_PROMOTED_HASH = promotedHash
+            }
+        }
+    } catch (Exception e) {
+        echo "Could not read TheRock label from :therock image, skipping metadata embedding: ${e.message}"
+    }
+
+    // Embed the CK commit hash built into this image.
+    def ckHash = sh(
+        script: "git -C ${env.WORKSPACE}/${env.CK_DIR} rev-parse HEAD",
+        returnStdout: true
+    ).trim()
+    if (ckHash) {
+        echo "Embedding CK hash into CI image metadata: ${ckHash}"
+        dockerArgs = dockerArgs + "--label ck.git.hash=${ckHash} "
+        env.CK_GIT_HASH = ckHash
+    }
+
     echo "Docker Args: ${dockerArgs}"
 
     def dockerImage
@@ -300,6 +524,15 @@ def getDockerImage(Map conf=[:])
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
             dockerImage.pull()
         }
+        def embeddedTheRockHash = sh(
+            script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
+            returnStdout: true
+        ).trim()
+        def embeddedCkHash = sh(
+            script: "docker inspect --format '{{ index .Config.Labels \"ck.git.hash\" }}' ${image} 2>/dev/null || true",
+            returnStdout: true
+        ).trim()
+        echo "CI image TheRock hash: ${embeddedTheRockHash ?: 'not set'} | CK hash: ${embeddedCkHash ?: 'not set'}"
     }
     catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
         echo "The job was cancelled or aborted"
@@ -309,20 +542,21 @@ def getDockerImage(Map conf=[:])
     {
         echo "Building image..."
         def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
-                              "--cache-from type=registry,ref=${cacheRef} "
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
+                              "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
 
         try {
+
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 sh """
-                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                    docker buildx rm ci-builder || true
                     docker buildx create --name ci-builder --driver docker-container --use
                     docker buildx use ci-builder
                     docker buildx inspect --bootstrap
                 """.stripIndent()
-            
                 sh """
                     DOCKER_BUILDKIT=1 docker buildx build \
+                    --builder ci-builder \
                     --push \
                     --tag ${image} \
                     ${dockerCacheArgs} \
@@ -392,8 +626,13 @@ def getDockerImageWithStatus(Map conf=[:]) {
     }
 }
 
+def runShell(String command){
+    def responseCode = sh returnStatus: true, script: "${command} > tmp.txt"
+    def output = readFile(file: "tmp.txt")
+    return (output != "")
+}
+
 def buildHipClangJob(Map conf=[:]){
-        show_node_info()
         /*
             The following is a workaround for git submodule updating for the fin module.  After Jenkins upgrade,
             many plugins started misbehaving, and submodules wouldn't get pulled.  This ensures that we always pull
@@ -426,9 +665,14 @@ def buildHipClangJob(Map conf=[:]){
                 (retimage, image) = getDockerImage(conf)
                 if (needs_gpu) {
                     withDockerContainer(image: image, args: dockerOpts) {
-                        timeout(time: 5, unit: 'MINUTES')
-                        {
-                            sh 'PATH="/opt/rocm/opencl/bin:/opt/rocm/opencl/bin/x86_64:$PATH" clinfo'
+                        timeout(time: 2, unit: 'MINUTES'){
+                            sh 'rocminfo | tee rocminfo.log'
+                            if ( !runShell('grep -n "gfx" rocminfo.log') ){
+                                throw new Exception ("GPU not found")
+                            }
+                            else{
+                                echo "GPU is OK"
+                            }
                         }
                     }
                 }
@@ -441,9 +685,14 @@ def buildHipClangJob(Map conf=[:]){
                 (retimage, image) = getDockerImage(conf)
                 if (needs_gpu) {
                     withDockerContainer(image: image, args: dockerOpts) {
-                        timeout(time: 5, unit: 'MINUTES')
-                        {
-                            sh 'PATH="/opt/rocm/opencl/bin:/opt/rocm/opencl/bin/x86_64:$PATH" clinfo'
+                        timeout(time: 2, unit: 'MINUTES'){
+                            sh 'rocminfo | tee rocminfo.log'
+                            if ( !runShell('grep -n "gfx" rocminfo.log') ){
+                                throw new Exception ("GPU not found")
+                            }
+                            else{
+                                echo "GPU is OK"
+                            }
                         }
                     }
                 }
@@ -526,6 +775,48 @@ def RunPerfTest(Map conf=[:]){
     catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
         echo "The job was cancelled or aborted"
         throw e
+    }
+}
+
+def sendTeamsFailureNotification(Map conf=[:]) {
+    def teamsMessage = null
+    def teamsColor = null
+    def teamsFacts = null
+
+    if (conf.get("buildTheRock", false)) {
+        teamsMessage = 'TheRock Docker Promotion Failed'
+        teamsColor = '#FF6600'
+        teamsFacts = [
+            [name: 'Build',           template: "#${env.BUILD_NUMBER}"],
+            [name: 'TheRock hash',    template: "${env.THEROCK_FULL_HASH ?: 'unknown'}"],
+            [name: 'CK hash',         template: "${env.CK_GIT_HASH ?: 'unknown'}"],
+            [name: 'Duration',        template: "${currentBuild.durationString}"],
+            [name: 'Previous result', template: "${currentBuild.previousBuild?.result ?: 'N/A'}"],
+            [name: 'Build URL',       template: "${env.BUILD_URL}"]
+        ]
+    } else if (env.BRANCH_NAME == 'develop') {
+        teamsMessage = 'MIOpen develop branch CI failed'
+        teamsColor = '#FF0000'
+        teamsFacts = [
+            [name: 'Build',           template: "#${env.BUILD_NUMBER}"],
+            [name: 'Commit',          template: "${env.GIT_COMMIT?.take(7) ?: 'unknown'}"],
+            [name: 'TheRock hash',    template: "${env.THEROCK_PROMOTED_HASH ?: 'unknown'}"],
+            [name: 'Duration',        template: "${currentBuild.durationString}"],
+            [name: 'Previous result', template: "${currentBuild.previousBuild?.result ?: 'N/A'}"],
+            [name: 'Build URL',       template: "${env.BUILD_URL}"]
+        ]
+    }
+
+    if (teamsMessage) {
+        withCredentials([string(credentialsId: 'TEAMS_WEBHOOK_URL', variable: 'TEAMS_WEBHOOK_URL')]) {
+            office365ConnectorSend(
+                webhookUrl: TEAMS_WEBHOOK_URL,
+                message: teamsMessage,
+                status: 'Failure',
+                color: teamsColor,
+                factDefinitions: teamsFacts
+            )
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,8 +54,8 @@ inline size_t get_merge_vsmem_size_per_block(detail::target t)
         {
             if(target{candidate} == most_common_config<targets>(t))
             {
-                using ArchConfig           = target_config<Config, Selector, decltype(candidate)>;
-                using merge_kernel_impl_t  = merge_kernel_impl_<ArchConfig, Key, Value>;
+                using TargetConfig         = target_config<Config, Selector, decltype(candidate)>;
+                using merge_kernel_impl_t  = merge_kernel_impl_<TargetConfig, Key, Value>;
                 using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
 
                 vsmem_per_block = merge_vsmem_helper_t::vsmem_per_block;
@@ -93,12 +93,7 @@ inline hipError_t merge_impl(void*                temporary_storage,
 
     using selector = merge_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto         params           = get_config<selector>(Config{}, current_target);
     const unsigned int block_size       = params.kernel_config.block_size;
@@ -181,12 +176,13 @@ inline hipError_t merge_impl(void*                temporary_storage,
         start = std::chrono::steady_clock::now();
     }
 
-    auto merge_kernel = [=, vsm = detail::vsmem_t{vsmem}](auto arch_config) mutable
+    auto merge_kernel = [=, vsm = detail::vsmem_t{vsmem}](auto target_config) mutable
     {
         using key_type   = typename std::iterator_traits<KeysInputIterator1>::value_type;
         using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
 
-        using merge_kernel_impl_t = merge_kernel_impl_<decltype(arch_config), key_type, value_type>;
+        using merge_kernel_impl_t
+            = merge_kernel_impl_<decltype(target_config), key_type, value_type>;
 
         using VSmemHelperT = detail::vsmem_helper_impl<merge_kernel_impl_t>;
         ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
@@ -261,6 +257,8 @@ inline hipError_t merge_impl(void*                temporary_storage,
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_merge.cpp).
+///
 /// \par Example
 /// \parblock
 /// In this example a device-level ascending merge is performed on an array of
@@ -272,8 +270,8 @@ inline hipError_t merge_impl(void*                temporary_storage,
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
 /// size_t input_size1;     // e.g., 4
 /// size_t input_size2;     // e.g., 4
-/// int * input1;           // e.g., [0, 1, 2, 3]
-/// int * input2;           // e.g., [0, 1, 2, 3]
+/// int * input1; // e.g., [0, 2, 4, 6]
+/// int * input2; // e.g., [1, 3, 5, 7]
 /// int * output;           // empty array of 8 elements
 ///
 /// size_t temporary_storage_size_bytes;
@@ -292,7 +290,7 @@ inline hipError_t merge_impl(void*                temporary_storage,
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input1, input2, output, input_size1, input_size2
 /// );
-/// // output: [0, 0, 1, 1, 2, 2, 3, 3]
+/// // output: [0, 1, 2, 3, 4, 5, 6, 7]
 /// \endcode
 /// \endparblock
 template<class Config = default_config,

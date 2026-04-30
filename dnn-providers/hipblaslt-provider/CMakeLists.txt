@@ -4,13 +4,15 @@
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(HIPBLASLT_PLUGIN "0.0.1")
-project(hipDNN VERSION ${HIPBLASLT_PLUGIN} LANGUAGES CXX)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+dnn_provider_setup_version(hipblaslt_provider ${CMAKE_CURRENT_LIST_DIR})
+
+project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 
 if(NOT WIN32)
     # Only set if not already specified by user
@@ -68,8 +70,19 @@ list(
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
-find_package(hipdnn_data_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+# SDK dependencies - use targets directly in superbuild, find_package otherwise
+if(NOT TARGET hipdnn_data_sdk)
+    find_package(hipdnn_data_sdk CONFIG REQUIRED)
+endif()
+
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+endif()
+
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 # Setup testing dependencies, tests & clang format
 include(Dependencies)
@@ -111,7 +124,8 @@ add_library(
     HipblasltMatrixLayout.cpp
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_plugin_sdk hip::host)
+dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
+target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
@@ -138,10 +152,13 @@ if(NOT HIPDNN_SKIP_TESTS)
 
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets()
+    # Finalize test targets with prefix to avoid collisions in superbuild mode
+    finalize_test_targets("${PROJECT_NAME}")
 
     # For standalone builds we need to install the ctest files
-    install_hipblaslt_plugin_ctest_files()
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        install_hipblaslt_plugin_ctest_files()
+    endif()
 endif()
 
 install(TARGETS hipblaslt_plugin EXPORT hipblaslt-plugin

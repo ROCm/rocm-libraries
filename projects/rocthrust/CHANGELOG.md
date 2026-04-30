@@ -3,7 +3,18 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## rocThrust x.y.z for ROCm x.y
+## Since last release ROCm 7.12
+
+### Added
+
+* Improved documentation on relevant environment variables.
+
+### Resolved issues
+
+* Fixed memory leak in unit test.
+* Fixed unit test compatibility with ASAN.
+
+## rocThrust 4.3.0 for ROCm 7.12
 
 ### Added
 
@@ -14,6 +25,7 @@ Documentation for rocThrust available at
 ### Changed
 
 * Updated the documentation on how to run rocThrust tests on multiple GPUs in parallel.
+* Renamed CMake option `ROCTHRUST_DEVICE_SYSTEM` to `LINK_HIP_DEVICE_LIBS` and changed it to a boolean (`ON/OFF`). Added new CMake options `THRUST_DEVICE_SYSTEM` and `THRUST_HOST_SYSTEM` to set the device and host backends, respectively. Device system options include `OMP`, `TBB`, `CPP`, and `HIP`. Host system options include `CPP`, `OMP`, and `TBB`.
 
 ### Removed
 

@@ -48,11 +48,12 @@ environmental variables to control logging. Both variables are disabled by defau
 
 * ``MIOPEN_WARN_SEARCH``: Elevate log messages for Search to warnings.
 
-* ``MIOPEN_LOG_BUFFER_SIZE``: Message length of the Info2 buffer.
+* ``MIOPEN_LOG_BUFFER_SIZE``: Message length of the Info2 buffer in lines.
   If ``MIOPEN_LOG_LEVEL`` is less than 6, then log messages will be buffered.
   The buffered logs will be dumped to a log file when MIOpen logs an error message,
   or an error is thrown by MIOpen.
   This log can be found in ``/tmp/miopen_error_<pid>``.
+  This feature is disabled by default and can be enabled by setting the value to greater than 0 (e.g., 128).
 
 .. note::
 
@@ -147,7 +148,7 @@ Some of the solutions have individual controls, which affect both find and immed
   * ``MIOPEN_DEBUG_CONV_DIRECT_ASM_7X7C3H224W224`` -- ``ConvAsm7x7c3h224w224k64u2v2p3q3f1``
   * ``MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW3X3`` -- ``ConvAsmBwdWrW3x3``
   * ``MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1`` -- ``ConvAsmBwdWrW1x1``
-  * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD11X11`` -- ``ConvOclDirectFwd11x11``
+  * ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD11X11`` -- ``ConvHipDirectFwd11x11``
   * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWDGEN`` -- ``ConvOclDirectFwdGen``
   * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD`` -- ``ConvOclDirectFwd``
   * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD1X1`` -- ``ConvOclDirectFwd1x1``

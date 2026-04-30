@@ -27,6 +27,7 @@
 #define GUARD_MIOPEN_KERNEL_BUILD_PARAMETERS_HPP_
 
 #include <algorithm>
+#include <iterator>
 #include <cassert>
 #include <initializer_list>
 #include <string>
@@ -135,19 +136,22 @@ private:
 };
 
 namespace kbp {
-struct MIOPEN_INTERNALS_EXPORT OpenCL
+struct OpenCL
 {
-    static std::string Generate(const std::vector<KernelBuildParameter>& options);
+    MIOPEN_INTERNALS_EXPORT static std::string
+    Generate(const std::vector<KernelBuildParameter>& options);
 };
 
-struct MIOPEN_INTERNALS_EXPORT GcnAsm
+struct GcnAsm
 {
-    static std::string Generate(const std::vector<KernelBuildParameter>& options);
+    MIOPEN_INTERNALS_EXPORT static std::string
+    Generate(const std::vector<KernelBuildParameter>& options);
 };
 
-struct MIOPEN_INTERNALS_EXPORT HIP
+struct HIP
 {
-    static std::string Generate(const std::vector<KernelBuildParameter>& options);
+    MIOPEN_INTERNALS_EXPORT static std::string
+    Generate(const std::vector<KernelBuildParameter>& options);
 };
 } // namespace kbp
 

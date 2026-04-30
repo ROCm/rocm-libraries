@@ -12,6 +12,20 @@
 
 namespace ck_tile {
 
+// `always_false_v<T...>` — a value-template that is always `false` but whose
+// evaluation is deferred until template instantiation. The canonical use is
+// inside the `else` arm of an `if constexpr` chain or under an arch-gated
+// `#if` to fire a `static_assert` ONLY when the offending instantiation is
+// actually requested, e.g.:
+//
+//     if constexpr (...) { ... }
+//     else { static_assert(always_false_v<T>, "unsupported T"); }
+//
+// A bare `static_assert(false, ...)` would fire at template-definition
+// parse time on conforming compilers, breaking the whole TU.
+template <typename...>
+inline constexpr bool always_false_v = false;
+
 // remove_cvref_t
 template <typename T>
 using remove_reference_t = typename std::remove_reference<T>::type;
@@ -103,7 +117,7 @@ template <
     typename PY,
     typename PX,
     typename std::enable_if<std::is_pointer_v<PY> && std::is_pointer_v<PX>, bool>::type = false>
-CK_TILE_HOST_DEVICE PY c_style_pointer_cast(PX p_x)
+CK_TILE_HOST_DEVICE PY c_style_pointer_cast([[clang::lifetimebound]] PX p_x)
 {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
@@ -111,6 +125,11 @@ CK_TILE_HOST_DEVICE PY c_style_pointer_cast(PX p_x)
     return (PY)p_x; // NOLINT(old-style-cast, cast-align)
 #pragma clang diagnostic pop
 }
+
+// Template ternary: if Cond == Match, use TrueType, else FalseType
+// Usage: if_select_t<T, int, float, double> evaluates to float if T==int, else double
+template <typename Cond, typename Match, typename TrueType, typename FalseType>
+using if_select_t = std::conditional_t<std::is_same_v<Cond, Match>, TrueType, FalseType>;
 
 template <typename CompareTo, typename... Rest>
 struct is_any_of : std::false_type
@@ -203,5 +222,22 @@ static constexpr bool is_packed_type_v = is_packed_type<T>::value;
 template <typename ADataType, typename BDataType>
 using largest_type_t =
     std::conditional_t<sizeof(ADataType) >= sizeof(BDataType), ADataType, BDataType>;
+
+/**
+ * @brief Type trait to detect whether a type is a @c std::tuple specialization.
+ * @tparam T The type to inspect.
+ */
+template <typename T>
+struct is_std_tuple : std::false_type
+{
+};
+
+template <typename... Args>
+struct is_std_tuple<std::tuple<Args...>> : std::true_type
+{
+};
+
+template <typename T>
+static constexpr bool is_std_tuple_v = is_std_tuple<T>::value;
 
 } // namespace ck_tile

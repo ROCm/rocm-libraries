@@ -370,7 +370,11 @@ TEST(rocfft_UnitTest, buffer_hashing_half)
     {
         run_test(params);
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
@@ -392,7 +396,11 @@ TEST(rocfft_UnitTest, buffer_hashing_single)
     {
         run_test(params);
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
@@ -414,7 +422,11 @@ TEST(rocfft_UnitTest, buffer_hashing_double)
     {
         run_test(params);
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }

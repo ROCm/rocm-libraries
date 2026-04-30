@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -53,6 +53,8 @@ BEGIN_ROCPRIM_NAMESPACE
  * array is runtime-dependent and potentially without any upper bound. To address this, `block_run_length_decode` allows
  * retrieving a "window" from the run-length decoded array. The window's offset can be specified and `BLOCK_THREADS *
  * DECODED_ITEMS_PER_THREAD` (i.e., referred to as `window_size`) decoded items from the specified window will be returned.
+ *
+ * The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_run_length_decode.cpp).
  *
  * \par
  * \code
@@ -127,9 +129,10 @@ template<typename ItemT,
          unsigned int BlockSizeX,
          int          RUNS_PER_THREAD,
          int          DECODED_ITEMS_PER_THREAD,
-         typename DecodedOffsetT = uint32_t,
-         unsigned int BlockSizeY = 1,
-         unsigned int BlockSizeZ = 1>
+         typename DecodedOffsetT                = uint32_t,
+         unsigned int            BlockSizeY     = 1,
+         unsigned int            BlockSizeZ     = 1,
+         arch::wavefront::target TargetWaveSize = arch::wavefront::get_target()>
 class block_run_length_decode
 {
 private:
@@ -144,7 +147,8 @@ private:
                                                 BlockSizeX,
                                                 rocprim::block_scan_algorithm::using_warp_scan,
                                                 BlockSizeY,
-                                                BlockSizeZ>;
+                                                BlockSizeZ,
+                                                TargetWaveSize>;
 
     /// Type used to index into the block's runs
     using RunOffsetT = uint32_t;
@@ -330,22 +334,34 @@ public:
               - static_cast<RunOffsetT>(1U);
 
         // Set the current_run_end to thread_decoded_offset to trigger new run branch in the first iteration
-        DecodedOffsetT current_run_begin, current_run_end = thread_decoded_offset;
+        DecodedOffsetT current_run_begin;
+        DecodedOffsetT current_run_end;
 
         ItemT val{};
 
 #pragma unroll
         for(DecodedOffsetT i = 0; i < DECODED_ITEMS_PER_THREAD; ++i, ++thread_decoded_offset)
         {
-            // If we are in a new run...
-            if(thread_decoded_offset == current_run_end)
+            // Check if we are in a new run. Short-circuit the check on 'i==0', since 'current_run_end'
+            // is uninitialized.
+            if(i == 0 || thread_decoded_offset == current_run_end)
             {
                 // The value of the new run
                 val = temp_storage.runs.run_values[current_run];
 
                 // The run bounds
                 current_run_begin = temp_storage.runs.run_offsets[current_run];
-                current_run_end   = temp_storage.runs.run_offsets[++current_run];
+                // Move the cursor to the next run if it exists.
+
+                // Otherwise just use the begin offset if we are the last run of the thread. On the next
+                // iteration, thread_decoded_offset will be moved away from the begin offset and we will
+                // emit infinite elements until the call-site detects we are outside the decoded values
+                // per thread.
+                if(current_run + 1 < BLOCK_RUNS)
+                {
+                    current_run++;
+                }
+                current_run_end = temp_storage.runs.run_offsets[current_run];
             }
 
             // Decode the current run by storing the run's value

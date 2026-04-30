@@ -1,0 +1,49 @@
+[project]
+name = "dnn-benchmarking"
+version = "0.1.0"
+description = "Benchmarking and validation tool for hipDNN graphs"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Advanced Micro Devices, Inc."},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+# torch is intentionally not listed here — it must come from the ROCm or CUDA
+# nightly index (see requirements-{rocm,cuda}.txt) which pip cannot express
+# in pyproject.toml. Everything else resolves cleanly from PyPI.
+dependencies = [
+    "numpy>=1.19.0",
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+dnn-benchmark = "dnn_benchmarking.cli.main:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: marks tests requiring GPU (deselect with '-m \"not gpu\"')",
+    "amd: marks tests requiring AMD ROCm GPUs",
+    "nvidia: marks tests requiring NVIDIA CUDA GPUs",
+    "slow: marks slow integration tests",
+]

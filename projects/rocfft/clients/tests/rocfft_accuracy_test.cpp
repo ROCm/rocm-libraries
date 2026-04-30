@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -68,8 +68,6 @@ static user_mp_launch_command get_mp_launch_command()
     return ret;
 }
 
-extern last_cpu_fft_cache last_cpu_fft_data;
-
 void fft_vs_reference(rocfft_params& params, bool round_trip)
 {
     switch(params.precision)
@@ -120,13 +118,17 @@ TEST_P(accuracy_test, vs_fftw)
         catch(const std::bad_alloc&)
         {
             // explicitly clear cache
-            last_cpu_fft_data = last_cpu_fft_cache();
+            reference_fft_data_t::clear_cache();
             GTEST_SKIP() << "host memory allocation failure";
         }
         catch(const HOSTBUF_MEM_USAGE& e)
         {
             // explicitly clear cache
-            last_cpu_fft_data = last_cpu_fft_cache();
+            reference_fft_data_t::clear_cache();
+            GTEST_SKIP() << e.what();
+        }
+        catch(const DEVICEBUF_MEM_USAGE& e)
+        {
             GTEST_SKIP() << e.what();
         }
         catch(const ROCFFT_SKIP& e)

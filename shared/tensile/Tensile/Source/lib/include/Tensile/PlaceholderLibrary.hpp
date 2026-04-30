@@ -41,6 +41,7 @@ namespace Tensile
         None,
         gfx803,
         gfx900,
+        gfx90c,
         gfx906,
         gfx908,
         gfx90a,
@@ -66,6 +67,7 @@ namespace Tensile
         gfx1153,
         gfx1200,
         gfx1201,
+        gfx1250,
         All
     };
 
@@ -80,6 +82,8 @@ namespace Tensile
             return "TensileLibrary_*_gfx803";
         case LazyLoadingInit::gfx900:
             return "TensileLibrary_*_gfx900";
+        case LazyLoadingInit::gfx90c:
+            return "TensileLibrary_*_gfx90c";
         case LazyLoadingInit::gfx906:
             return "TensileLibrary_*_gfx906";
         case LazyLoadingInit::gfx908:
@@ -130,6 +134,8 @@ namespace Tensile
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:
             return "TensileLibrary_*_gfx1201";
+        case LazyLoadingInit::gfx1250:
+            return "TensileLibrary_*_gfx1250";
         case LazyLoadingInit::None:
             return "";
         }
@@ -149,7 +155,7 @@ namespace Tensile
 
         PlaceholderLibrary() = default;
 
-        bool loadPlaceholderLibrary() const
+        bool loadPlaceholderLibrary(Hardware const* hardware = nullptr) const
         {
             std::lock_guard<std::mutex> lock(lazyLoadingGuard);
             // If condition in case two threads got into this function
@@ -161,7 +167,21 @@ namespace Tensile
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
                 library = mLibrary->library;
                 std::lock_guard<std::mutex> lock(*solutionsGuard);
-                masterSolutions->insert(mLibrary->solutions.begin(), mLibrary->solutions.end());
+                if(hardware == nullptr)
+                {
+                    masterSolutions->insert(mLibrary->solutions.begin(), mLibrary->solutions.end());
+                }
+                else
+                {
+                    std::transform(std::begin(mLibrary->solutions),
+                                   std::end(mLibrary->solutions),
+                                   std::inserter(*masterSolutions, std::end(*masterSolutions)),
+                                   [this, hardware](auto& i) {
+                                       i.second->codeObjectFilename
+                                           = getCodeObjectFileName(*hardware, *i.second);
+                                       return i;
+                                   });
+                }
 
                 return mLibrary;
             }
@@ -199,7 +219,7 @@ namespace Tensile
                                                              = nullptr) const override
         {
             if(!library)
-                loadPlaceholderLibrary();
+                loadPlaceholderLibrary(&hardware);
 
             auto solution = library->findBestSolution(problem, hardware, fitness);
 
@@ -220,7 +240,7 @@ namespace Tensile
         {
             if(!library)
             {
-                loadPlaceholderLibrary();
+                loadPlaceholderLibrary(&hardware);
             }
 
             auto solutions = library->findAllSolutions(problem, hardware);
@@ -239,7 +259,7 @@ namespace Tensile
         {
             if(!library)
             {
-                loadPlaceholderLibrary();
+                loadPlaceholderLibrary(&hardware);
             }
 
             auto solutions = library->findAllSolutionsMatchingType(problem, hardware);

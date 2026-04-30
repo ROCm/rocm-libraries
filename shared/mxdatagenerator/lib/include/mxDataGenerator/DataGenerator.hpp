@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -620,6 +597,22 @@ namespace DGen
                                             "number and zero is not include in the bounds.");
         }
 
+        // The requested range falls entirely below the type's minimum representable scale.
+        // This can happen when the scale format has a narrow exponent range (e.g. E4M3, E5M3)
+        // and the requested bounds are smaller than any value the type can represent.
+        // Since zero is within bounds, generate zeros.
+        if(max_scale < min_scale)
+        {
+            if(min <= 0 && 0 <= max)
+            {
+                post_sprinkle(size, min_exp);
+                return;
+            }
+            else
+                throw std::invalid_argument("Invalid bounds: the requested range is not "
+                                            "representable by this type's scale format.");
+        }
+
         std::uniform_int_distribution<> scale_dist(min_scale, max_scale);
 
         // other setup
@@ -647,9 +640,10 @@ namespace DGen
 
             if constexpr(isScaled<DTYPE>())
             {
-                ub_block_scale      = scale_dist(m_gen[tid]);
-                int32_t block_scale = ub_block_scale + scaleBias;
-                std::memcpy(&m_scaleBytes[scale_i], &block_scale, m_scaleDesc.byte_size);
+                ub_block_scale = scale_dist(m_gen[tid]);
+                int32_t stored_scale
+                    = (ub_block_scale + scaleBias) << getScaleMantissaBits<DTYPE>();
+                std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
             for(index_t block_i = 0; block_i < block_size; block_i++)
@@ -777,6 +771,13 @@ namespace DGen
         max_exp   = std::min(exp_of_max, max_exp);
         max_scale = std::min(exp_of_max, max_scale);
 
+        // The requested |max| falls below the type's minimum representable scale: return zeros.
+        if(max_scale < getScaleUnBiasedEMin<DTYPE>())
+        {
+            post_sprinkle(size, isScaled<DTYPE>() ? -F64BIAS : -F32BIAS);
+            return;
+        }
+
         std::uniform_int_distribution<> scale_dist(getScaleUnBiasedEMin<DTYPE>(), max_scale);
 
         // other setup
@@ -808,9 +809,10 @@ namespace DGen
             //
             if constexpr(isScaled<DTYPE>())
             {
-                ub_block_scale = scale_dist(m_gen[tid]);
-                block_scale    = ub_block_scale + getScaleBias<DTYPE>();
-                std::memcpy(&m_scaleBytes[scale_i], &block_scale, m_scaleDesc.byte_size);
+                ub_block_scale      = scale_dist(m_gen[tid]);
+                block_scale         = ub_block_scale + getScaleBias<DTYPE>();
+                int32_t stored_scale = block_scale << getScaleMantissaBits<DTYPE>();
+                std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
             for(index_t block_i = 0; block_i < block_size; block_i++)
@@ -958,8 +960,9 @@ namespace DGen
 
                     std::uniform_int_distribution<> scale_dist(scaleMin, scaleMax);
 
-                    const auto s = scale_dist(m_gen[tid]);
-                    std::memcpy(&m_scaleBytes[scale_i], &s, m_scaleDesc.byte_size);
+                    const auto biased_exp = scale_dist(m_gen[tid]);
+                    const int32_t stored  = biased_exp << getScaleMantissaBits<DTYPE>();
+                    std::memcpy(&m_scaleBytes[scale_i], &stored, m_scaleDesc.byte_size);
 
                     // reset per block values
                     max_exp = std::numeric_limits<int32_t>::min();
@@ -1614,7 +1617,7 @@ namespace DGen
             data[i] = d;
         }
 
-        return block_scale;
+        return static_cast<uint32_t>(block_scale) << getScaleMantissaBits<DTYPE>();
     }
 
     template <typename DTYPE>
@@ -1760,13 +1763,15 @@ namespace DGen
                         const auto target_scale_i = target_data_i / block_size;
 
                         // get scale
-                        uint32_t biased_scale = 0;
+                        uint32_t stored_scale = 0;
                         if constexpr(isScaled<DTYPE>())
-                            std::memcpy(&biased_scale,
+                            std::memcpy(&stored_scale,
                                         &m_scaleBytes[target_scale_i * m_scaleDesc.byte_size],
                                         m_scaleDesc.byte_size);
 
-                        int32_t unbiased_scale = biased_scale - getScaleBias<DTYPE>();
+                        int32_t unbiased_scale
+                            = static_cast<int32_t>(stored_scale >> getScaleMantissaBits<DTYPE>())
+                              - getScaleBias<DTYPE>();
                         int32_t exp_bound      = unbiased_scale + getDataUnBiasedEMin<DTYPE>();
 
                         if(unbiased_min_exp < exp_bound)

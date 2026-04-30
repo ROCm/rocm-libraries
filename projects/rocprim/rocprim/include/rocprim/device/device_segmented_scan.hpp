@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -96,13 +96,7 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 
     using Selector = detail::scan_config_selector<input_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -124,9 +118,9 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
     {
         start = std::chrono::steady_clock::now();
     }
-    auto segmented_scan_kernel = [=](auto arch_config)
+    auto segmented_scan_kernel = [=](auto target_config)
     {
-        segmented_scan<decltype(arch_config), Exclusive, result_type>(
+        segmented_scan<decltype(target_config), Exclusive, result_type>(
             input,
             output,
             begin_offsets,
@@ -197,6 +191,8 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 /// In this example a device-level segmented inclusive min-scan operation is performed on
 /// an array of integer values (<tt>short</tt>s are scanned into <tt>int</tt>s) using custom operator.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_segmented_scan.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
@@ -225,7 +221,7 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform scan
-/// rocprim::inclusive_scan(
+/// rocprim::segmented_inclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, segments, offsets, offsets + 1, min_op
 /// );

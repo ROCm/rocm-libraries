@@ -20,7 +20,7 @@ into the following categories:
 * :ref:`svds`: Singular values and related problems for general matrices.
 
 .. note::
-   
+
    The API descriptions use the following notations:
 
    *  ``i``, ``j``, and ``k`` are used as general purpose indices. In some legacy LAPACK APIs, ``k`` can be
@@ -1176,6 +1176,118 @@ rocsolver_<type>posv_strided_batched()
    :outline:
 .. doxygenfunction:: rocsolver_sposv_strided_batched
 
+.. _sytrs:
+
+rocsolver_<type>sytrs()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zsytrs_64
+   :outline:
+.. doxygenfunction:: rocsolver_csytrs_64
+   :outline:
+.. doxygenfunction:: rocsolver_dsytrs_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssytrs_64
+   :outline:
+.. doxygenfunction:: rocsolver_zsytrs
+   :outline:
+.. doxygenfunction:: rocsolver_csytrs
+   :outline:
+.. doxygenfunction:: rocsolver_dsytrs
+   :outline:
+.. doxygenfunction:: rocsolver_ssytrs
+
+rocsolver_<type>sytrs_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zsytrs_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_csytrs_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_dsytrs_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssytrs_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_zsytrs_batched
+   :outline:
+.. doxygenfunction:: rocsolver_csytrs_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dsytrs_batched
+   :outline:
+.. doxygenfunction:: rocsolver_ssytrs_batched
+
+rocsolver_<type>sytrs_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zsytrs_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_csytrs_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_dsytrs_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssytrs_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_zsytrs_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_csytrs_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dsytrs_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_ssytrs_strided_batched
+
+.. .. _sytrs2:
+.. 
+.. rocsolver_<type>sytrs2()
+.. ---------------------------------------------------
+.. .. doxygenfunction:: rocsolver_zsytrs2_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_csytrs2_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_dsytrs2_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_ssytrs2_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_zsytrs2
+..    :outline:
+.. .. doxygenfunction:: rocsolver_csytrs2
+..    :outline:
+.. .. doxygenfunction:: rocsolver_dsytrs2
+..    :outline:
+.. .. doxygenfunction:: rocsolver_ssytrs2
+.. 
+.. rocsolver_<type>sytrs2_batched()
+.. ---------------------------------------------------
+.. .. doxygenfunction:: rocsolver_zsytrs2_batched_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_csytrs2_batched_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_dsytrs2_batched_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_ssytrs2_batched_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_zsytrs2_batched
+..    :outline:
+.. .. doxygenfunction:: rocsolver_csytrs2_batched
+..    :outline:
+.. .. doxygenfunction:: rocsolver_dsytrs2_batched
+..    :outline:
+.. .. doxygenfunction:: rocsolver_ssytrs2_batched
+.. 
+.. rocsolver_<type>sytrs2_strided_batched()
+.. ---------------------------------------------------
+.. .. doxygenfunction:: rocsolver_zsytrs2_strided_batched_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_csytrs2_strided_batched_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_dsytrs2_strided_batched_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_ssytrs2_strided_batched_64
+..    :outline:
+.. .. doxygenfunction:: rocsolver_zsytrs2_strided_batched
+..    :outline:
+.. .. doxygenfunction:: rocsolver_csytrs2_strided_batched
+..    :outline:
+.. .. doxygenfunction:: rocsolver_dsytrs2_strided_batched
+..    :outline:
+.. .. doxygenfunction:: rocsolver_ssytrs2_strided_batched
+
 
 
 .. _leastsqr:
@@ -1544,3 +1656,36 @@ rocsolver_<type>gesvdx_strided_batched()
 .. doxygenfunction:: rocsolver_dgesvdx_strided_batched
    :outline:
 .. doxygenfunction:: rocsolver_sgesvdx_strided_batched
+
+.. _gesdd:
+
+rocsolver_<type>gesdd()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgesdd
+   :outline:
+.. doxygenfunction:: rocsolver_cgesdd
+   :outline:
+.. doxygenfunction:: rocsolver_dgesdd
+   :outline:
+.. doxygenfunction:: rocsolver_sgesdd
+
+rocsolver_<type>gesdd_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgesdd_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgesdd_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dgesdd_batched
+   :outline:
+.. doxygenfunction:: rocsolver_sgesdd_batched
+
+rocsolver_<type>gesdd_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgesdd_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgesdd_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dgesdd_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_sgesdd_strided_batched
+

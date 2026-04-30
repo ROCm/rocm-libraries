@@ -36,7 +36,7 @@ struct UniversalGemmHostArgs
         const std::array<const void*, NumATensor>& as_ptr_,
         const std::array<const void*, NumBTensor>& bs_ptr_,
         const std::array<const void*, NumDTensor>& ds_ptr_,
-        void* e_ptr_,
+        [[clang::lifetimebound]] void* e_ptr_,
         index_t k_batch_,
         index_t M_,
         index_t N_,
@@ -418,7 +418,8 @@ struct UniversalGemmKernel
             }
         }
 
-        if(kargs.K < GemmPipeline::BlockGemmShape::WarpTile::at(number<2>{}) * kargs.k_batch)
+        if(integer_divide_ceil(kargs.K, GemmPipeline::BlockGemmShape::WarpTile::at(number<2>{})) <
+           kargs.k_batch)
         {
             if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
             {
@@ -447,23 +448,11 @@ struct UniversalGemmKernel
                 }
                 if(kargs.K % vectorSizeA != 0)
                 {
-                    const auto remainder = kargs.K % vectorSizeA;
-                    constexpr ck_tile::index_t APackedSize =
-                        ck_tile::numeric_traits<ADataType>::PackedSize;
-                    const auto remainder_in_bytes = remainder * sizeof(ADataType) / APackedSize;
-                    // oob can support to dword level
-                    if(remainder_in_bytes % 4 == 0)
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
-                        AsTensorIsValid = true;
+                        CK_TILE_ERROR("K is not a multiple of vector load size for A tensor!");
                     }
-                    else
-                    {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR("K is not a multiple of vector load size for A tensor!");
-                        }
-                        AsTensorIsValid = false;
-                    }
+                    AsTensorIsValid = false;
                 }
             }
             else
@@ -479,24 +468,11 @@ struct UniversalGemmKernel
                 }
                 if(kargs.M % vectorSizeA != 0)
                 {
-                    const auto remainder = kargs.M % vectorSizeA;
-                    constexpr ck_tile::index_t APackedSize =
-                        ck_tile::numeric_traits<ADataType>::PackedSize;
-                    const auto remainder_in_bytes = remainder * sizeof(ADataType) / APackedSize;
-                    // oob can support to dword level
-                    if(remainder_in_bytes % 4 == 0)
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
-
-                        AsTensorIsValid = true;
+                        CK_TILE_ERROR("M is not a multiple of vector load size for A tensor!");
                     }
-                    else
-                    {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR("M is not a multiple of vector load size for A tensor!");
-                        }
-                        AsTensorIsValid = false;
-                    }
+                    AsTensorIsValid = false;
                 }
             }
         });
@@ -519,58 +495,33 @@ struct UniversalGemmKernel
                 }
                 if(kargs.N % vectorSizeB != 0)
                 {
-                    const auto remainder = kargs.N % vectorSizeB;
-                    constexpr ck_tile::index_t BPackedSize =
-                        ck_tile::numeric_traits<BDataType>::PackedSize;
-                    const auto remainder_in_bytes = remainder * sizeof(BDataType) / BPackedSize;
-                    // oob can support to dword level
-                    if(remainder_in_bytes % 4 == 0)
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
-                        BsTensorIsValid = true;
+                        CK_TILE_ERROR("N is not a multiple of vector load size for B tensor!");
                     }
-                    else
-                    {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR("N is not a multiple of vector load size for B tensor!");
-                        }
-                        BsTensorIsValid = false;
-                    }
+                    BsTensorIsValid = false;
                 }
-                else
+            }
+            else
+            {
+                if(kargs.K % (TilePartitioner::KPerBlock * kargs.k_batch) != 0 &&
+                   GemmPipeline::kPadK == false)
                 {
-                    if(kargs.K % (TilePartitioner::KPerBlock * kargs.k_batch) != 0 &&
-                       GemmPipeline::kPadK == false)
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR(
-                                "Can't support K that is not a multiple of k_batch * KPerBlock "
-                                "without padding!");
-                        }
-                        BsTensorIsValid = false;
+                        CK_TILE_ERROR(
+                            "Can't support K that is not a multiple of k_batch * KPerBlock "
+                            "without padding!");
                     }
-                    if(kargs.K % vectorSizeB != 0)
+                    BsTensorIsValid = false;
+                }
+                if(kargs.K % vectorSizeB != 0)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
-                        const auto remainder = kargs.K % vectorSizeB;
-                        constexpr ck_tile::index_t BPackedSize =
-                            ck_tile::numeric_traits<BDataType>::PackedSize;
-                        const auto remainder_in_bytes = remainder * sizeof(BDataType) / BPackedSize;
-                        // oob can support to dword level
-                        if(remainder_in_bytes % 4 == 0)
-                        {
-                            BsTensorIsValid = true;
-                        }
-                        else
-                        {
-                            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                            {
-                                CK_TILE_ERROR(
-                                    "K is not a multiple of vector load size for B tensor!");
-                            }
-                            BsTensorIsValid = false;
-                        }
+                        CK_TILE_ERROR("K is not a multiple of vector load size for B tensor!");
                     }
+                    BsTensorIsValid = false;
                 }
             }
         });
@@ -689,39 +640,150 @@ struct UniversalGemmKernel
         return AsTensorIsValid && BsTensorIsValid && DTensorIsValid;
     }
 
+    template <typename ALayout>
     CK_TILE_DEVICE static auto
-    MakeABlockWindows(const std::array<const ADataType*, NumATensor>& as_ptr,
-                      const KernelArgs& kargs,
-                      const index_t k_size,
-                      const index_t i_m)
+    MakeDefaultATensorDescriptor(const index_t M, const index_t stride, const index_t k_size)
     {
-        // Step 1: Create tensor views for A tensors (from MakeGemmTensorViews)
-        const auto& as_tensor_view = generate_tuple(
-            [&](auto i) {
-                using AiLayout   = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
-                using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
-                if constexpr(std::is_same_v<AiLayout, tensor_layout::gemm::RowMajor>)
+        if constexpr(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
+        {
+            return make_naive_tensor_descriptor(make_tuple(M, k_size),
+                                                make_tuple(stride, 1),
+                                                number<GemmPipeline::GetVectorSizeA()>{},
+                                                number<1>{});
+        }
+        else
+        {
+            return make_naive_tensor_descriptor(make_tuple(k_size, M),
+                                                make_tuple(stride, 1),
+                                                number<GemmPipeline::GetVectorSizeA()>{},
+                                                number<1>{});
+        }
+    }
+
+    template <typename BLayout>
+    CK_TILE_DEVICE static auto MakeDefaultBTensorDescriptor(const index_t N,
+                                                            const index_t K,
+                                                            const index_t stride,
+                                                            const index_t k_size)
+    {
+        if constexpr(std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>)
+        {
+            if constexpr(GemmPipeline::BlockGemmShape::PermuteB)
+            {
+                constexpr index_t K1          = GemmPipeline::GetSmemPackB();
+                const index_t K0              = k_size / K1;
+                constexpr index_t VectorSizeB = std::min(K1, GemmPipeline::GetVectorSizeB());
+                const auto b_k0_n_k1_desc     = make_naive_tensor_descriptor(make_tuple(K0, N, K1),
+                                                                         make_tuple(N * K1, K1, I1),
+                                                                         number<VectorSizeB>{},
+                                                                         number<1>{});
+                return transform_tensor_descriptor(
+                    b_k0_n_k1_desc,
+                    make_tuple(make_merge_transform(make_tuple(K0, K1)),
+                               make_pass_through_transform(N)),
+                    make_tuple(sequence<0, 2>{}, sequence<1>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+            }
+            else
+            {
+                return make_naive_tensor_descriptor(make_tuple(k_size, N),
+                                                    make_tuple(stride, 1),
+                                                    number<GemmPipeline::GetVectorSizeB()>{},
+                                                    number<1>{});
+            }
+        }
+        else
+        {
+            if constexpr(GemmPipeline::BlockGemmShape::PermuteB)
+            {
+                constexpr index_t K1          = GemmPipeline::GetSmemPackB();
+                const index_t K0              = k_size / K1;
+                constexpr index_t VectorSizeB = std::min(K1, GemmPipeline::GetVectorSizeB());
+                const auto b_k0_n_k1_desc     = make_naive_tensor_descriptor(make_tuple(K0, N, K1),
+                                                                         make_tuple(N * K1, K1, I1),
+                                                                         number<VectorSizeB>{},
+                                                                         number<1>{});
+                return transform_tensor_descriptor(
+                    b_k0_n_k1_desc,
+                    make_tuple(make_merge_transform(make_tuple(K0, K1)),
+                               make_pass_through_transform(N)),
+                    make_tuple(sequence<0, 2>{}, sequence<1>{}),
+                    make_tuple(sequence<1>{}, sequence<0>{}));
+            }
+            else
+            {
+                if constexpr(GemmPipeline::Preshuffle)
                 {
-                    return make_naive_tensor_view<address_space_enum::global>(
-                        static_cast<const AiDataType*>(as_ptr[i]),
-                        make_tuple(kargs.M, k_size),
-                        make_tuple(kargs.stride_As[i], 1),
-                        number<GemmPipeline::GetVectorSizeA()>{},
-                        number<1>{});
+                    index_t kFlatK =
+                        GemmPipeline::BlockGemmShape::flatKPerWarp *
+                        (k_size / GemmPipeline::BlockGemmShape::WarpTile::at(number<2>{}));
+                    index_t kFlatN = N * K / kFlatK;
+
+                    return make_naive_tensor_descriptor(make_tuple(kFlatN, kFlatK),
+                                                        make_tuple(kFlatK, 1),
+                                                        number<GemmPipeline::GetVectorSizeB()>{},
+                                                        number<1>{});
                 }
                 else
                 {
-                    return make_naive_tensor_view<address_space_enum::global>(
-                        static_cast<const AiDataType*>(as_ptr[i]),
-                        make_tuple(k_size, kargs.M),
-                        make_tuple(kargs.stride_As[i], 1),
-                        number<GemmPipeline::GetVectorSizeA()>{},
-                        number<1>{});
+                    return make_naive_tensor_descriptor(make_tuple(N, k_size),
+                                                        make_tuple(stride, 1),
+                                                        number<GemmPipeline::GetVectorSizeB()>{},
+                                                        number<1>{});
                 }
+            }
+        }
+    }
+
+    template <typename DLayout, index_t VectorSizeD>
+    CK_TILE_DEVICE static auto
+    MakeDefaultDTensorDescriptor(const index_t M, const index_t N, const index_t stride)
+    {
+        if constexpr(std::is_same_v<DLayout, tensor_layout::gemm::RowMajor>)
+        {
+            return make_naive_tensor_descriptor(
+                make_tuple(M, N), make_tuple(stride, 1), number<VectorSizeD>{}, number<1>{});
+        }
+        else
+        {
+            return make_naive_tensor_descriptor(
+                make_tuple(N, M), make_tuple(stride, 1), number<VectorSizeD>{}, number<1>{});
+        }
+    }
+
+    CK_TILE_DEVICE static auto
+    MakeDefaultETensorDescriptor(const index_t M, const index_t N, const index_t stride)
+    {
+        if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
+        {
+            return make_naive_tensor_descriptor(make_tuple(M, N),
+                                                make_tuple(stride, 1),
+                                                number<EpiloguePipeline::GetVectorSizeC()>{},
+                                                number<1>{});
+        }
+        else
+        {
+            return make_naive_tensor_descriptor(
+                make_tuple(M, N), make_tuple(1, stride), number<1>{}, number<1>{});
+        }
+    }
+
+    template <typename AsTensorDesc>
+    CK_TILE_DEVICE static auto
+    MakeABlockWindows(const std::array<const ADataType*, NumATensor>& as_ptr,
+                      const AsTensorDesc& as_desc,
+                      const index_t i_m)
+    {
+        // Step 1: Create tensor views
+        const auto& as_tensor_view = generate_tuple(
+            [&](auto i) {
+                using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
+                return make_tensor_view<address_space_enum::global>(
+                    static_cast<const AiDataType*>(as_ptr[i]), as_desc[i]);
             },
             number<NumATensor>{});
 
-        // Step 2: Create padded views (from MakeGemmPadViews)
+        // Step 2: Create padded views
         const auto& as_pad_view = generate_tuple(
             [&](auto i) {
                 using AiLayout = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
@@ -742,7 +804,7 @@ struct UniversalGemmKernel
             },
             number<NumATensor>{});
 
-        // Step 3: Create tile windows (from MakeGemmTileWindows)
+        // Step 3: Create tile windows
         const auto& as_block_window = generate_tuple(
             [&](auto i) {
                 using AiLayout = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
@@ -767,101 +829,38 @@ struct UniversalGemmKernel
     }
 
     CK_TILE_DEVICE static auto
-    MakeBBlockWindows(const std::array<const BDataType*, NumBTensor>& bs_ptr,
+    MakeABlockWindows(const std::array<const ADataType*, NumATensor>& as_ptr,
                       const KernelArgs& kargs,
                       const index_t k_size,
+                      const index_t i_m)
+    {
+        // Step 1: Create tensor descriptors for A tensors
+        const auto& as_tensor_desc = generate_tuple(
+            [&](auto i) {
+                using AiLayout = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
+                return MakeDefaultATensorDescriptor<AiLayout>(kargs.M, kargs.stride_As[i], k_size);
+            },
+            number<NumATensor>{});
+
+        return MakeABlockWindows(as_ptr, as_tensor_desc, i_m);
+    }
+
+    template <typename BsTensorDesc>
+    CK_TILE_DEVICE static auto
+    MakeBBlockWindows(const std::array<const BDataType*, NumBTensor>& bs_ptr,
+                      const BsTensorDesc& bs_desc,
                       const index_t i_n)
     {
-        // Step 1: Create tensor views for B tensors (from MakeGemmTensorViews)
+        // Step 1: Create tensor views
         const auto& bs_tensor_view = generate_tuple(
             [&](auto i) {
-                using BiLayout   = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
                 using BiDataType = remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
-                if constexpr(std::is_same_v<BiLayout, tensor_layout::gemm::RowMajor>)
-                {
-                    if constexpr(GemmPipeline::BlockGemmShape::PermuteB)
-                    {
-                        constexpr index_t K1 = GemmPipeline::GetSmemPackB();
-                        const index_t K0     = k_size / K1;
-                        constexpr index_t VectorSizeB =
-                            std::min(K1, GemmPipeline::GetVectorSizeB());
-                        const auto b_k0_n_k1_desc =
-                            make_naive_tensor_descriptor(make_tuple(K0, kargs.N, K1),
-                                                         make_tuple(kargs.N * K1, K1, I1),
-                                                         number<VectorSizeB>{},
-                                                         number<1>{});
-                        const auto b_n_k_desc = transform_tensor_descriptor(
-                            b_k0_n_k1_desc,
-                            make_tuple(make_merge_transform(make_tuple(K0, K1)),
-                                       make_pass_through_transform(kargs.N)),
-                            make_tuple(sequence<0, 2>{}, sequence<1>{}),
-                            make_tuple(sequence<0>{}, sequence<1>{}));
-                        return make_tensor_view<address_space_enum::global>(
-                            static_cast<const BiDataType*>(bs_ptr[i]), b_n_k_desc);
-                    }
-                    else
-                    {
-                        return make_naive_tensor_view<address_space_enum::global>(
-                            bs_ptr[i],
-                            make_tuple(k_size, kargs.N),
-                            make_tuple(kargs.stride_Bs[i], 1),
-                            number<GemmPipeline::GetVectorSizeB()>{},
-                            number<1>{});
-                    }
-                }
-                else
-                {
-                    if constexpr(GemmPipeline::BlockGemmShape::PermuteB)
-                    {
-                        constexpr index_t K1 = GemmPipeline::GetSmemPackB();
-                        const index_t K0     = k_size / K1;
-                        constexpr index_t VectorSizeB =
-                            std::min(K1, GemmPipeline::GetVectorSizeB());
-                        const auto b_k0_n_k1_desc =
-                            make_naive_tensor_descriptor(make_tuple(K0, kargs.N, K1),
-                                                         make_tuple(kargs.N * K1, K1, I1),
-                                                         number<VectorSizeB>{},
-                                                         number<1>{});
-                        const auto b_n_k_desc = transform_tensor_descriptor(
-                            b_k0_n_k1_desc,
-                            make_tuple(make_merge_transform(make_tuple(K0, K1)),
-                                       make_pass_through_transform(kargs.N)),
-                            make_tuple(sequence<0, 2>{}, sequence<1>{}),
-                            make_tuple(sequence<1>{}, sequence<0>{}));
-                        return make_tensor_view<address_space_enum::global>(
-                            static_cast<const BiDataType*>(bs_ptr[i]), b_n_k_desc);
-                    }
-                    else
-                    {
-                        if constexpr(GemmPipeline::Preshuffle)
-                        {
-                            index_t kFlatK =
-                                GemmPipeline::BlockGemmShape::flatKPerWarp *
-                                (k_size / GemmPipeline::BlockGemmShape::WarpTile::at(number<2>{}));
-                            index_t kFlatN = kargs.N * kargs.K / kFlatK;
-
-                            return make_naive_tensor_view<address_space_enum::global>(
-                                bs_ptr[i],
-                                make_tuple(kFlatN, kFlatK),
-                                make_tuple(kFlatK, 1),
-                                number<GemmPipeline::GetVectorSizeB()>{},
-                                number<1>{});
-                        }
-                        else
-                        {
-                            return make_naive_tensor_view<address_space_enum::global>(
-                                bs_ptr[i],
-                                make_tuple(kargs.N, k_size),
-                                make_tuple(kargs.stride_Bs[i], 1),
-                                number<GemmPipeline::GetVectorSizeB()>{},
-                                number<1>{});
-                        }
-                    }
-                }
+                return make_tensor_view<address_space_enum::global>(
+                    static_cast<const BiDataType*>(bs_ptr[i]), bs_desc[i]);
             },
             number<NumBTensor>{});
 
-        // Step 2: Create padded views (from MakeGemmPadViews)
+        // Step 2: Create padded views
         const auto& bs_pad_view = generate_tuple(
             [&](auto i) {
                 using BiLayout = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
@@ -882,7 +881,7 @@ struct UniversalGemmKernel
             },
             number<NumBTensor>{});
 
-        // Step 3: Create tile windows (from MakeGemmTileWindows)
+        // Step 3: Create tile windows
         const auto& bs_block_window = generate_tuple(
             [&](auto i) {
                 using BiLayout = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
@@ -918,38 +917,39 @@ struct UniversalGemmKernel
         return bs_block_window;
     }
 
+    CK_TILE_DEVICE static auto
+    MakeBBlockWindows(const std::array<const BDataType*, NumBTensor>& bs_ptr,
+                      const KernelArgs& kargs,
+                      const index_t k_size,
+                      const index_t i_n)
+    {
+        const auto& bs_tensor_desc = generate_tuple(
+            [&](auto i) {
+                using BiLayout = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
+                return MakeDefaultBTensorDescriptor<BiLayout>(
+                    kargs.N, kargs.K, kargs.stride_Bs[i], k_size);
+            },
+            number<NumBTensor>{});
+
+        return MakeBBlockWindows(bs_ptr, bs_tensor_desc, i_n);
+    }
+
+    template <typename DsTensorDesc>
     CK_TILE_DEVICE static auto MakeDBlockWindows(const std::array<const void*, NumDTensor>& ds_ptr,
-                                                 const KernelArgs& kargs,
+                                                 const DsTensorDesc& ds_desc,
                                                  const index_t i_m,
                                                  const index_t i_n)
     {
-        // Step 1: Create tensor views for D tensors (from MakeGemmTensorViews)
+        // Step 1: Create tensor views
         const auto& ds_tensor_view = generate_tuple(
             [&](auto i) {
-                using DiLayout   = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
                 using DDataType_ = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
-                if constexpr(std::is_same_v<DiLayout, tensor_layout::gemm::RowMajor>)
-                {
-                    return make_naive_tensor_view<address_space_enum::global>(
-                        static_cast<const DDataType_*>(ds_ptr[i]),
-                        make_tuple(kargs.M, kargs.N),
-                        make_tuple(kargs.stride_Ds[i], 1),
-                        number<EpiloguePipeline::GetVectorSizeD(i)>{},
-                        number<1>{});
-                }
-                else
-                {
-                    return make_naive_tensor_view<address_space_enum::global>(
-                        static_cast<const DDataType_*>(ds_ptr[i]),
-                        make_tuple(kargs.N, kargs.M),
-                        make_tuple(kargs.stride_Ds[i], 1),
-                        number<EpiloguePipeline::GetVectorSizeD(i)>{},
-                        number<1>{});
-                }
+                return make_tensor_view<address_space_enum::global>(
+                    static_cast<const DDataType_*>(ds_ptr[i]), ds_desc[i]);
             },
             number<NumDTensor>{});
 
-        // Step 2: Create padded views (from MakeGemmPadViews)
+        // Step 2: Create padded views
         const auto& ds_pad_view = generate_tuple(
             [&](auto i) {
                 using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
@@ -970,7 +970,7 @@ struct UniversalGemmKernel
             },
             number<NumDTensor>{});
 
-        // Step 3: Create tile windows (from MakeGemmTileWindows)
+        // Step 3: Create tile windows
         const auto& ds_block_window = generate_tuple(
             [&](auto i) {
                 using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
@@ -994,59 +994,74 @@ struct UniversalGemmKernel
         return ds_block_window;
     }
 
-    template <memory_operation_enum DstInMemOp = memory_operation_enum::set>
-    CK_TILE_DEVICE static auto MakeCBlockWindows(EDataType* e_ptr,
+    CK_TILE_DEVICE static auto MakeDBlockWindows(const std::array<const void*, NumDTensor>& ds_ptr,
                                                  const KernelArgs& kargs,
                                                  const index_t i_m,
                                                  const index_t i_n)
     {
-        // Step 1: Create tensor view for E/C tensor (from MakeGemmTensorViews)
-        const auto& e_tensor_view = [&]() {
-            if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
-            {
-                return make_naive_tensor_view<address_space_enum::global, DstInMemOp>(
-                    e_ptr,
-                    make_tuple(kargs.M, kargs.N),
-                    make_tuple(kargs.stride_E, 1),
-                    number<EpiloguePipeline::GetVectorSizeC()>{},
-                    number<1>{});
-            }
-            else
-            {
-                return make_naive_tensor_view<address_space_enum::global, DstInMemOp>(
-                    e_ptr,
-                    make_tuple(kargs.M, kargs.N),
-                    make_tuple(1, kargs.stride_E),
-                    number<1>{},
-                    number<1>{});
-            }
-        }();
+        const auto& ds_tensor_desc = generate_tuple(
+            [&](auto i) {
+                using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                return MakeDefaultDTensorDescriptor<DiLayout, EpiloguePipeline::GetVectorSizeD(i)>(
+                    kargs.M, kargs.N, kargs.stride_Ds[i]);
+            },
+            number<NumDTensor>{});
 
-        // Step 2: Create padded view (from MakeGemmPadViews)
+        return MakeDBlockWindows(ds_ptr, ds_tensor_desc, i_m, i_n);
+    }
+
+    template <memory_operation_enum DstInMemOp = memory_operation_enum::set, typename ETensorDesc>
+    CK_TILE_DEVICE static auto MakeCBlockWindows(
+        EDataType* e_ptr,
+        const index_t i_m,
+        const index_t i_n,
+        const ETensorDesc& e_desc) // Argument order differs from A,B,D to disambiguate overloads
+    {
+        // Step 1: Create tensor view for E/C tensor
+        const auto& e_tensor_view =
+            make_tensor_view<address_space_enum::global, DstInMemOp>(e_ptr, e_desc);
+
+        // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add
+        // Add padding for not contiguous dim due to the lack of OOB check
+        constexpr bool pad_not_contiguous_dim =
+            std::is_same_v<EDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
+
+        // Step 2: Create padded view
         const auto& e_pad_view = [&]() {
             if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
             {
                 return pad_tensor_view(e_tensor_view,
                                        make_tuple(number<TilePartitioner::MPerBlock>{},
                                                   number<TilePartitioner::NPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadN>{});
+                                       sequence<pad_not_contiguous_dim, GemmPipeline::kPadN>{});
             }
             else
             {
                 return pad_tensor_view(e_tensor_view,
                                        make_tuple(number<TilePartitioner::MPerBlock>{},
                                                   number<TilePartitioner::NPerBlock>{}),
-                                       sequence<GemmPipeline::kPadM, false>{});
+                                       sequence<GemmPipeline::kPadM, pad_not_contiguous_dim>{});
             }
         }();
 
-        // Step 3: Create tile window (from MakeGemmTileWindows)
+        // Step 3: Create tile window
         auto e_block_window = make_tile_window(
             e_pad_view,
             make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
             {i_m, i_n});
 
         return e_block_window;
+    }
+
+    template <memory_operation_enum DstInMemOp = memory_operation_enum::set>
+    CK_TILE_DEVICE static auto MakeCBlockWindows(EDataType* e_ptr,
+                                                 const KernelArgs& kargs,
+                                                 const index_t i_m,
+                                                 const index_t i_n)
+    {
+
+        const auto& e_tensor_desc = MakeDefaultETensorDescriptor(kargs.M, kargs.N, kargs.stride_E);
+        return MakeCBlockWindows<DstInMemOp>(e_ptr, i_m, i_n, e_tensor_desc);
     }
 
     /**
@@ -1097,9 +1112,13 @@ struct UniversalGemmKernel
         }
         else
         {
-            auto c_block_window = MakeCBlockWindows<memory_operation_enum::atomic_add>(
-                e_ptr, kargs, block_idx_m, block_idx_n);
-            EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+            if constexpr(EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
+                         !is_any_of<EDataType, fp16_t, bf16_t>::value)
+            {
+                auto c_block_window = MakeCBlockWindows<memory_operation_enum::atomic_add>(
+                    e_ptr, kargs, block_idx_m, block_idx_n);
+                EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+            }
         }
     }
 
@@ -1207,23 +1226,37 @@ struct UniversalGemmKernel
             s_waitcnt_barrier();
             const auto tile_idx = amd_wave_read_first_lane(block_id % num_tiles);
             const auto [iM, iN] = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(tile_idx);
-            const index_t i_m   = amd_wave_read_first_lane(iM * TilePartitioner::MPerBlock);
-            const index_t i_n   = amd_wave_read_first_lane(iN * TilePartitioner::NPerBlock);
+            // Apply pivot to M tile index first, then use the same pivoted index
+            // for both data-tile selection and chunk-signal wait.
+            auto iM_eff = amd_wave_read_first_lane(iM);
+
+            if(kargs.async_input_scheduler.chunk_signals != nullptr)
+            {
+                const auto tile_idx_pivot =
+                    amd_wave_read_first_lane(kargs.async_input_scheduler.tile_idx_pivot_m);
+                const auto tiles_m = amd_wave_read_first_lane(
+                    integer_divide_ceil(kargs.M, TilePartitioner::MPerBlock));
+                if(tiles_m > 0)
+                {
+                    iM_eff = amd_wave_read_first_lane((iM_eff + tile_idx_pivot) % tiles_m);
+                }
+            }
+
+            const index_t i_m = amd_wave_read_first_lane(iM_eff * TilePartitioner::MPerBlock);
+            const index_t i_n = amd_wave_read_first_lane(iN * TilePartitioner::NPerBlock);
 
             // Synchronize with producer to ensure input data is ready before processing tile
             if(kargs.async_input_scheduler.chunk_signals != nullptr)
             {
                 const auto tiles_per_chunk =
                     amd_wave_read_first_lane(kargs.async_input_scheduler.tiles_per_chunk_m);
-                const auto tile_idx_pivot =
-                    amd_wave_read_first_lane(kargs.async_input_scheduler.tile_idx_pivot_m);
                 const auto num_chunks =
                     amd_wave_read_first_lane(kargs.async_input_scheduler.num_chunks);
                 if(tiles_per_chunk > 0 && num_chunks > 0)
                 {
                     // Pivot allows rotating chunk assignments for load balancing
-                    const auto chunk_idx = amd_wave_read_first_lane(
-                        ((iM + tile_idx_pivot) / tiles_per_chunk) % num_chunks);
+                    const auto chunk_idx =
+                        amd_wave_read_first_lane((iM_eff / tiles_per_chunk) % num_chunks);
                     workgroup_barrier chunk_barrier(kargs.async_input_scheduler.chunk_signals);
                     chunk_barrier.wait_eq_wave(/*value=*/1, /*offset=*/chunk_idx);
                 }

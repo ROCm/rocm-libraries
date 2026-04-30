@@ -1,0 +1,10 @@
+# ROCm nightly PyTorch for AMD GPUs.
+# This file installs ONLY torch (from the ROCm nightly index). All other deps
+# live in pyproject.toml. --index-url replaces PyPI so pip cannot accidentally
+# pull a CUDA torch build. --pre is required because ROCm torch is pre-release.
+# Nightlies are ephemeral (~30 days); if install fails, check the latest
+# available build at:
+#   https://rocm.nightlies.amd.com/v2-staging/gfx90X-dcgpu/torch/
+--index-url https://rocm.nightlies.amd.com/v2-staging/gfx90X-dcgpu/
+--pre
+torch

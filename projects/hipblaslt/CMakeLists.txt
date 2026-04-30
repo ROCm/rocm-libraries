@@ -15,6 +15,7 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+include(hipblaslt_shim)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
@@ -25,7 +26,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.2.2" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.3.0" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -50,6 +51,8 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 option(HIPBLASLT_ENABLE_DEVICE "Build hipBLASLt device libraries." ON)
+option(HIPBLASLT_ENABLE_EXTOPS "Build hipBLASLt ExtOp device libraries." ON)
+option(HIPBLASLT_ENABLE_MATRIX_TRANSFORM "Build hipBLASLt MatrixTransform device library." ON)
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
@@ -74,9 +77,8 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_ASAN "Build hipBLASLt with address sanitizer enabled." OFF)
     option(HIPBLASLT_ENABLE_TSAN "Build hipBLASLt with thread sanitizer enabled." OFF)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
-    option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
+    option(HIPBLASLT_ENABLE_YAML "Use YAML for parsing configuration files." OFF)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-    option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -154,7 +156,7 @@ if(HIPBLASLT_ENABLE_OPENMP)
     find_package(OpenMP REQUIRED)
 endif()
 
-if(HIPBLASLT_ENABLE_LLVM)
+if(HIPBLASLT_ENABLE_YAML)
     find_package(LLVM REQUIRED)
 endif()
 
@@ -195,10 +197,10 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
 endif()
 
 if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
-    set(HIPBLASLT_PYTHON_DEPS "rocisa")
+    set(HIPBLASLT_PYTHON_DEPS "_rocisa")
     set(hipblaslt_python_dev Development.Module)
     hipblaslt_find_python("${hipblaslt_python_dev}")
-    hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa/lib" "${san_opts}")
+    hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 else()
     hipblaslt_find_python("${hipblaslt_python_dev}")
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
@@ -223,7 +225,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_MSGPACK)
+if(NOT HIPBLASLT_ENABLE_YAML)
     # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
     # Prefer 6.x (msgpack-cxx)
     find_package(msgpack-cxx CONFIG)
@@ -231,7 +233,7 @@ if(HIPBLASLT_ENABLE_MSGPACK)
         message(STATUS "Found msgpack-cxx (>=6.x)")
         set(hipblaslt_msgpack_target "msgpack-cxx")
     else()
-        # TODO: set minimum version requied for *-cxx library
+        # TODO: set minimum version required for *-cxx library
         find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
         set(hipblaslt_msgpack_target "msgpackc-cxx")
         message(STATUS "Found msgpack (<=5.x)")
@@ -265,7 +267,7 @@ if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
     endif()
-    if(HIPBLASLT_ENABLE_MSGPACK)
+    if(NOT HIPBLASLT_ENABLE_YAML)
         target_link_libraries(hipblaslt PRIVATE ${hipblaslt_msgpack_target})
     endif()
     rocm_set_soversion(hipblaslt "${hipblaslt_SOVERSION}")
@@ -321,6 +323,8 @@ if(HIPBLASLT_ENABLE_HOST)
     set_target_properties(hipblaslt
         PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/library"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
     )
     add_subdirectory(library)
 endif()
@@ -436,7 +440,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt-bench-extop-amax
         COMPONENT benchmarks
     )
-    if(HIPBLASLT_ENABLE_LLVM)
+    if(HIPBLASLT_ENABLE_YAML)
         rocm_install(
             TARGETS
                 hipblaslt-sequence

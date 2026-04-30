@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,24 @@ include(ConfigAutotuneSettings.cmake)
 option(BENCHMARK_TUNE_PARAM_NAMES "Tuning parameter names" "")
 option(BENCHMARK_TUNE_PARAMS "Tuning parameters" "")
 
-option(BENCHMARK_USE_AMDSMI "Let benchmarks use AMD SMI to output more GPU statistics" OFF)
+# Get the current branch, or fall back to DETACHED
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} symbolic-ref -q --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE BRANCH_NAME
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(BRANCH_NAME STREQUAL "")
+  set(BRANCH_NAME "DETACHED")
+endif()
+
+# Get the short commit hash
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE COMMIT_HASH
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
 if(BENCHMARK_CONFIG_TUNING)
   add_custom_target("benchmark_config_tuning")
@@ -76,6 +93,11 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
     add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
   endif()
 
+  target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
+
+  target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
+  target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")
+
   if(BUILD_NAIVE_BENCHMARK)
     target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BUILD_NAIVE_BENCHMARK)
   endif()
@@ -84,11 +106,7 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
     target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BENCHMARK_AUTOTUNED_TYPES_ONLY)
   endif()
 
-  target_link_libraries(${BENCHMARK_TARGET}
-    PRIVATE
-      rocprim
-      benchmark::benchmark
-  )
+  target_link_libraries(${BENCHMARK_TARGET} PRIVATE rocprim)
 
   if(USE_HIPCXX)
     target_link_libraries(${BENCHMARK_TARGET}
@@ -101,14 +119,10 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
       hip::device)
   endif()
 
-  if(BENCHMARK_USE_AMDSMI)
-    find_library(AMDSMI_LIB NAMES amd_smi)
-    if(AMDSMI_LIB)
-      target_link_libraries(${BENCHMARK_TARGET} PRIVATE ${AMDSMI_LIB})
-    else()
-      message(FATAL_ERROR "BENCHMARK_USE_AMDSMI was ON, but AMD SMI is not installed")
-    endif()
-    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_USE_AMDSMI)
+  if(WIN32)
+    target_compile_definitions(${BENCHMARK_TARGET} PUBLIC PRIMBENCH_NO_MONITORING)
+  else()
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
   endif()
 
   target_compile_options(${BENCHMARK_TARGET}
@@ -191,6 +205,7 @@ add_rocprim_benchmark(benchmark_device_select.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_radix_sort_keys.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_radix_sort_pairs.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_reduce.cpp)
+add_rocprim_benchmark(benchmark_device_segmented_scan.cpp)
 add_rocprim_benchmark(benchmark_device_transform.cpp)
 add_rocprim_benchmark(benchmark_device_transform_pointer.cpp)
 add_rocprim_benchmark(benchmark_predicate_iterator.cpp)

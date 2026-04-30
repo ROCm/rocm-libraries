@@ -20,7 +20,7 @@
 
 #include "hipfft/hipfftw.h"
 #include "../../../shared/array_validator.h"
-#include "../../../shared/data_layout.h"
+#include "../../../shared/client_data_layout_helpers.h"
 #include "../../../shared/environment.h"
 #include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "rocfft/rocfft.h"
@@ -190,7 +190,7 @@ namespace
                 (void)hipHostFree(ptr);
                 break;
             case hipMemoryType::hipMemoryTypeUnregistered:
-#ifdef WIN32
+#ifdef _WIN32
                 _aligned_free(ptr);
 #else
                 std::free(ptr);
@@ -1057,7 +1057,7 @@ namespace
                 else
                 {
                     constexpr size_t alignment = 64;
-#ifdef WIN32
+#ifdef _WIN32
                     ret = _aligned_malloc(byte_size, alignment);
 #else
                     ret = std::aligned_alloc(alignment, byte_size);

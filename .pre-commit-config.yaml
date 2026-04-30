@@ -41,10 +41,12 @@ exclude: |
     # ==========================================================================
     # Permanent exclusions
     # ==========================================================================
+    # Auto-generated GitHub Agentic Workflow lock files
+    \.github/workflows/.*\.lock\.yml$|
     # Binary files
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
-    projects/hipdnn/data_sdk/include/hipdnn_data_sdk/data_objects/.*_generated\.h|
+    projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
     # Reference data
     projects/hipdnn/hipdnn_reference_data/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
@@ -62,7 +64,9 @@ repos:
           (?x)
           ^projects/hipdnn/\.clang-format$|
           ^dnn-providers/miopen-provider/\.clang-format$|
-          ^dnn-providers/hipblaslt-provider/\.clang-format$
+          ^dnn-providers/hipblaslt-provider/\.clang-format$|
+          ^dnn-providers/hip-kernel-provider/\.clang-format$|
+          ^dnn-providers/integration-tests/\.clang-format$
       - id: check-added-large-files
 
   - repo: https://github.com/psf/black
@@ -85,7 +89,7 @@ repos:
         name: flatc (hipDNN)
         entry: python projects/hipdnn/scripts/run_flatc.py
         language: python
-        files: ^projects/hipdnn/data_sdk/schemas/.*\.fbs$
+        files: ^projects/hipdnn/(data_sdk|flatbuffers_sdk)/schemas/.*\.fbs$
         pass_filenames: true
 
   - repo: https://github.com/cheshirekow/cmake-format-precommit

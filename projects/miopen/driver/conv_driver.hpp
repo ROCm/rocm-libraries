@@ -20,6 +20,7 @@
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/env.hpp>
+#include <miopen/errors.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/find_controls.hpp>
 #include <miopen/logger.hpp>
@@ -378,6 +379,7 @@ private:
     bool warmup_enabled        = false;
     bool is_gpualloc           = false;
     bool init_output_nan       = false;
+    bool use_hip_graph         = false;
     GPUMem::Check buffer_check = GPUMem::Check::None;
     int tuning_policy          = 0;
 
@@ -667,10 +669,9 @@ int ConvDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
 
     if(is_gpualloc && inflags.GetValueInt("verify") == 1)
     {
-        std::cerr << "Error: '--gpualloc 1' should not be used with enabled verification. Add "
-                     "'--verify 0' to options."
-                  << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "'--gpualloc 1' should not be used with enabled verification. "
+                     "Add '--verify 0' to options.");
     }
 
     in.SetGpuallocMode(is_gpualloc);
@@ -703,8 +704,8 @@ void ConvDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string layout_va
 {
     if((ChkLayout_ShortName()))
     {
-        std::cerr << " Invalid Layout Short Name = " << ChkLayout_ShortName() << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid Layout Short Name = " + std::to_string(ChkLayout_ShortName()));
     }
     else
     {
@@ -716,8 +717,7 @@ void ConvDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string layout_va
         }
         else
         {
-            std::cerr << "Invalid Layout Parameter Value - " << layout_value << std::endl;
-            exit(EXIT_FAILURE);
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid Layout Parameter Value - " + layout_value);
         }
     }
 }
@@ -732,10 +732,10 @@ void ConvDriver<Tgpu, Tref>::ValidateVectorizedParameters(int vector_dim, int ve
     }
     else
     {
-        std::cerr << "Invalid Tensor Vectorization Parameter Value - "
-                  << "vector_dim:" << vector_dim << ", vector_length:" << vector_length
-                  << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid Tensor Vectorization Parameter Value - vector_dim:" +
+                         std::to_string(vector_dim) +
+                         ", vector_length:" + std::to_string(vector_length));
     }
 }
 
@@ -752,8 +752,7 @@ int ConvDriver<Tgpu, Tref>::ChkLayout_ShortName()
     }
     else
     {
-        std::cerr << "Error:Invalid Short Name!" << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid Short Name!");
     }
 }
 
@@ -1007,6 +1006,8 @@ int ConvDriver<Tgpu, Tref>::AddCmdLineArgs()
     // TODO:(LYM) change back to 0 when TF32 is fully supported
     inflags.AddInputFlag("math_type", 'M', "1", "math type of compute (Default=1)", "int");
 
+    AddHipGraphFlag(inflags);
+
     return 0;
 }
 
@@ -1170,8 +1171,7 @@ int ConvDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
         if(in_c % group_count != 0 || out_c % group_count != 0 || group_count > in_c ||
            group_count > out_c)
         {
-            printf("Invalid group number\n");
-            exit(0); // NOLINT (concurrency-mt-unsafe)
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid group number");
         }
     }
 
@@ -1935,21 +1935,38 @@ int ConvDriver<Tgpu, Tref>::RunForwardGPU()
     {
         float alpha = static_cast<float>(1), beta = static_cast<float>(0);
 
-        miopenConvolutionForwardBias(GetHandle(),
-                                     &alpha,
-                                     biasTensor,
-                                     b.GetDevicePtr(),
-                                     &beta,
-                                     outputTensor,
-                                     out.GetDevicePtr());
+        int bias_return_code = CaptureKernel([&]() -> int {
+            miopenConvolutionForwardBias(GetHandle(),
+                                         &alpha,
+                                         biasTensor,
+                                         b.GetDevicePtr(),
+                                         &beta,
+                                         outputTensor,
+                                         out.GetDevicePtr());
+            return miopenStatusSuccess;
+        });
+
+        if(bias_return_code != miopenStatusSuccess)
+            return bias_return_code;
+
+        ExecuteKernel();
 
         if(time_enabled)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
-
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+            float time    = 0.0;
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             printf("GPU Kernel Time Forward Conv. Bias Elapsed: %f ms\n", time);
         }
+
+        FinalizeKernel();
     }
 
     bool is_int8 = data_type == miopenInt8 || data_type == miopenInt8x4;
@@ -2071,13 +2088,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
     ResizeWorkspaceDev(ctx, ws_size);
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
-        if(init_output_nan)
-        {
-            out.FillGpuBufferWithNans(handle, outputTensor);
-        }
-
+    int return_code = CaptureKernel([&]() -> int {
         rc = miopenConvolutionForward(GetHandle(),
                                       &alpha,
                                       in_tens,
@@ -2091,21 +2102,41 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
                                       out.GetDevicePtr(),
                                       workspace_dev != nullptr ? workspace_dev->GetMem() : nullptr,
                                       ws_size);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        if(init_output_nan)
+        {
+            out.FillGpuBufferWithNans(handle, outputTensor);
+        }
+
+        ExecuteKernel();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+            float time    = 0.0;
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    FinalizeKernel();
 
     if(wall_enabled)
     {
@@ -2232,13 +2263,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
 
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
-        if(init_output_nan)
-        {
-            out.FillGpuBufferWithNans(handle, outputTensor);
-        }
-
+    int return_code = CaptureKernel([&]() -> int {
         rc = miopenConvolutionForwardImmediate(
             handle,
             (is_transform ? weightTensor_vect4 : weightTensor),
@@ -2251,21 +2276,41 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
             ws ? ws->GetMem() : nullptr,
             ws_size,
             selected->solution_id);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        if(init_output_nan)
+        {
+            out.FillGpuBufferWithNans(handle, outputTensor);
+        }
+
+        ExecuteKernel();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+            float time    = 0.0;
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    FinalizeKernel();
 
     if(wall_enabled)
     {
@@ -2494,19 +2539,46 @@ int ConvDriver<Tgpu, Tref>::RunBackwardGPU()
     {
         float alpha = static_cast<float>(1), beta = static_cast<float>(0);
 
-        ret |= miopenConvolutionBackwardBias(GetHandle(),
-                                             &alpha,
-                                             outputTensor,
-                                             dout.GetDevicePtr(),
-                                             &beta,
-                                             biasTensor,
-                                             db.GetDevicePtr());
+        int bias_return_code = CaptureKernel([&]() -> int {
+            return miopenConvolutionBackwardBias(GetHandle(),
+                                                 &alpha,
+                                                 outputTensor,
+                                                 dout.GetDevicePtr(),
+                                                 &beta,
+                                                 biasTensor,
+                                                 db.GetDevicePtr());
+        });
 
-        if(time_enabled)
+        if(bias_return_code == miopenStatusNotImplemented)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
-            printf("GPU Kernel Time Backward Bias Conv. Elapsed: %f ms\n", time);
+            std::cout << "Skipping backward bias: miopenConvolutionBackwardBias is deprecated and "
+                         "not implemented."
+                      << std::endl;
+        }
+        else if(bias_return_code != miopenStatusSuccess)
+        {
+            ret |= bias_return_code;
+        }
+        else
+        {
+            ExecuteKernel();
+
+            if(time_enabled)
+            {
+                use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+                float time    = 0.0;
+                if(use_hip_graph)
+                {
+                    time = GetHipGraphExecutionTime();
+                }
+                else
+                {
+                    miopenGetKernelTime(GetHandle(), &time);
+                }
+                printf("GPU Kernel Time Backward Bias Conv. Elapsed: %f ms\n", time);
+            }
+
+            FinalizeKernel();
         }
 
         db.CopyFromDeviceToHost(GetStream());
@@ -2557,12 +2629,12 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuFind()
     ResizeWorkspaceDev(ctx, ws_size);
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
+    int return_code = CaptureKernel([&]() -> int {
         if(init_output_nan)
         {
             din.FillGpuBufferWithNans(handle, inputTensor);
         }
+
         rc = miopenConvolutionBackwardData(GetHandle(),
                                            &alpha,
                                            outputTensor,
@@ -2577,21 +2649,36 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuFind()
                                            workspace_dev != nullptr ? workspace_dev->GetMem()
                                                                     : nullptr,
                                            ws_size);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        ExecuteKernel();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+            float time    = 0.0;
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    FinalizeKernel();
 
     if(wall_enabled)
     {
@@ -2771,8 +2858,7 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuFind()
     ResizeWorkspaceDev(ctx, ws_size);
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
+    int return_code = CaptureKernel([&]() -> int {
         if(init_output_nan)
         {
             dwei.FillGpuBufferWithNans(handle, weightTensor);
@@ -2792,21 +2878,36 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuFind()
                                               workspace_dev != nullptr ? workspace_dev->GetMem()
                                                                        : nullptr,
                                               ws_size);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        ExecuteKernel();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+            float time    = 0.0;
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    FinalizeKernel();
 
     if(wall_enabled)
     {
@@ -3014,8 +3115,7 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuImmed()
 
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
+    int return_code = CaptureKernel([&]() -> int {
         if(init_output_nan)
         {
             din.FillGpuBufferWithNans(handle, inputTensor);
@@ -3032,21 +3132,36 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGpuImmed()
                                                     ws ? ws->GetMem() : nullptr,
                                                     ws_size,
                                                     selected->solution_id);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        ExecuteKernel();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+            float time    = 0.0;
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    FinalizeKernel();
 
     if(wall_enabled)
     {
@@ -3149,8 +3264,7 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuImmed()
 
     wall.start(wall_enabled);
 
-    for(int i = 0; i < num_iterations; i++)
-    {
+    int return_code = CaptureKernel([&]() -> int {
         if(init_output_nan)
         {
             dwei.FillGpuBufferWithNans(handle, weightTensor);
@@ -3167,21 +3281,36 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWrwGpuImmed()
                                                        ws ? ws->GetMem() : nullptr,
                                                        ws_size,
                                                        selected->solution_id);
-        if(rc != miopenStatusSuccess)
-            return rc;
+        return rc;
+    });
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < num_iterations; i++)
+    {
+        ExecuteKernel();
 
         if(wall_enabled && i == 0)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+            float time    = 0.0;
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             kernel_total_time += time;
             if(i == 0)
                 kernel_first_time = time;
         }
     }
+    FinalizeKernel();
 
     if(wall_enabled)
     {
@@ -3479,10 +3608,8 @@ std::string ConvDriver<Tgpu, Tref>::GetVerificationCacheFileName(
     miopen::LogRange(ss << "_", trans_output_pads, "x");
     ss << "_" << inflags.GetValueInt("pad_val");
     ss << "_" << inflags.GetValueInt("bias");
-    ss << "_"
-       << "GPU" << get_datatype_string(Tgpu{});
-    ss << "_"
-       << "REF" << get_datatype_string(Tref{});
+    ss << "_" << "GPU" << get_datatype_string(Tgpu{});
+    ss << "_" << "REF" << get_datatype_string(Tref{});
 
     return ss.str();
 }

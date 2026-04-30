@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -79,12 +79,6 @@ GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(bitwise_repro_test);
 // Transform parameters for manual test:
 fft_params manual_params;
 
-// Host memory limitation for tests (GiB):
-size_t ramgb;
-
-// Device memory limitation for tests (GiB):
-size_t vramgb;
-
 // Number of hip devices to use.
 int ngpus{};
 
@@ -116,7 +110,7 @@ bool use_fftw_wisdom = false;
 bool fftw_compare = true;
 
 // Cache the last cpu fft that was requested
-last_cpu_fft_cache last_cpu_fft_data;
+reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
 
 // Number of devices to distribute the FFT to for manual tests
 int manual_devices = 1;
@@ -145,7 +139,7 @@ void init_gtest_flags()
     std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
 
     // move stdout to devnull
-#ifdef WIN32
+#ifdef _WIN32
     int stdout_fd   = _fileno(stdout);
     int devnull     = _open("NUL", _O_WRONLY);
     int stdout_copy = _dup(stdout_fd);
@@ -160,7 +154,7 @@ void init_gtest_flags()
     (void)RUN_ALL_TESTS();
 
     // put stdout back
-#ifdef WIN32
+#ifdef _WIN32
     _dup2(stdout_copy, stdout_fd);
     _close(stdout_copy);
     _close(devnull);
@@ -304,6 +298,10 @@ int main(int argc, char* argv[])
     // we re-parse the arguments with gtest and CLI.
     std::string argv0 = argv[0];
 
+    // Unless specified otherwise by the user, no limit on host/device memory usage
+    // (see corresponding default values)
+    size_t ramgb_limit, vramgb_limit;
+
     CLI::App app{
         "\n"
         "rocFFT Runtime Test command line options\n"
@@ -333,7 +331,6 @@ int main(int argc, char* argv[])
     app.add_option("--ngpus", ngpus, "Number of GPUs to use per rank")
         ->default_val(-1)
         ->check(CLI::NonNegativeNumber);
-    app.add_option("--gpus", n_random_tests, "Number of extra randomized tests")->default_val(0);
     app.add_option("--test_prob", test_prob, "Probability of running individual tests")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
@@ -396,13 +393,13 @@ int main(int argc, char* argv[])
             if(nidx(emulationtype) == nidx("smoke"))
             {
                 // 2GB vram limit, approx 1 minute GPU time with short tests.
-                vramgb         = 2;
+                vramgb_limit   = 2;
                 test_prob      = 0;
                 emulation_prob = 0.005;
             }
             if(nidx(emulationtype) == nidx("regression"))
             {
-                vramgb         = 16;
+                vramgb_limit   = 16;
                 emulation_prob = 1;
                 test_prob      = 0.01;
             }
@@ -534,9 +531,11 @@ int main(int argc, char* argv[])
     non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
-    app.add_option("--R", ramgb, "RAM limit in GiB for tests")
-        ->default_val(host_memory::singleton().get_total_gbytes());
-    app.add_option("--V", vramgb, "VRAM limit in GiB for tests")->default_val(0);
+    app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
+        ->default_val(system_memory::singleton().get_total_gbytes());
+    app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
+        ->default_val(DivRoundingUp(
+            device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
     app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
     app.add_option("--double_epsilon", double_epsilon)->default_val(1e-15);
@@ -648,9 +647,25 @@ int main(int argc, char* argv[])
     fftwf_plan_with_nthreads(rocfft_concurrency());
 #endif
 
-    // Set host memory limit from command-line options
-    host_memory::singleton().set_limit_gbytes(ramgb);
-    std::cout << "Host memory limit: " << ramgb << " GiB" << std::endl;
+    system_memory::singleton().set_limit_bytes(ramgb_limit * ONE_GiB);
+    std::cout << "Refraining from using more than "
+              << byte_size_to_str(system_memory::singleton().get_limit_bytes())
+              << " of system memory." << std::endl;
+    device_memory_accountant::singleton().set_limit_bytes_for_all_devices(vramgb_limit * ONE_GiB);
+    std::cout << "Refraining from using more than ";
+    for(size_t dev_id = 0; dev_id < device_memory_accountant::singleton().num_devices(); dev_id++)
+    {
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << "\n\t";
+        std::cout << byte_size_to_str(
+            device_memory_accountant::singleton().get_limit_bytes_on_device(dev_id))
+                  << " of device memory";
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << " on device ID " << dev_id;
+        std::cout << (dev_id == device_memory_accountant::singleton().num_devices() - 1 ? "."
+                                                                                        : ";");
+    }
+    std::cout << std::endl;
 
     if(use_fftw_wisdom)
     {
@@ -825,10 +840,14 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
     {
         // explicitly clear test cache
-        last_cpu_fft_data = last_cpu_fft_cache();
+        reference_fft_data_t::clear_cache();
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
         GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
@@ -878,6 +897,10 @@ TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
         GTEST_FAIL() << e.what();
     }
     catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }

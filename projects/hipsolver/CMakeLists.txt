@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 #
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.14)
 
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
@@ -46,39 +46,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# This finds the rocm-cmake project, and installs it if not found
-# rocm-cmake contains common cmake code for rocm projects to help setup and install
-set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
-find_package(ROCM 0.7.3 CONFIG QUIET PATHS /opt/rocm)
-if(NOT ROCM_FOUND)
-  set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
-  set(rocm_cmake_url "https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip")
-  set(rocm_cmake_path "${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}")
-  set(rocm_cmake_archive "${rocm_cmake_path}.zip")
-  file(DOWNLOAD "${rocm_cmake_url}" "${rocm_cmake_archive}" STATUS status LOG log)
+# Add our CMake helper files to the lookup path
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-  list(GET status 0 status_code)
-  list(GET status 1 status_string)
+# Get rocm-cmake
+include(get-rocm-cmake)
 
-  if(status_code EQUAL 0)
-    message(STATUS "downloading... done")
-  else()
-    message(FATAL_ERROR "error: downloading\n'${rocm_cmake_url}' failed
-    status_code: ${status_code}
-    status_string: ${status_string}
-    log: ${log}\n")
-  endif()
-
-  execute_process(COMMAND ${CMAKE_COMMAND} -E tar xzvf "${rocm_cmake_archive}"
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-  execute_process(COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag})
-  execute_process(COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-
-  find_package(ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake)
-endif()
-
+# Include the rocm-cmake components we use
 include(ROCMSetupVersion)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)
@@ -107,9 +81,9 @@ option(BUILD_HIPSPARSE_TESTS "Build additional tests to cover sparse functionali
 # BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
 option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at build time (requires installed dependencies)" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
-option(USE_CUDA "Look for CUDA and use that as a backend if found" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
+option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
 
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
@@ -136,25 +110,40 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 
-
-# Find CUDA if the user wants a CUDA version.
-if(USE_CUDA)
-  find_package(CUDA REQUIRED)
+# Deprecated USE_CUDA option
+if(DEFINED USE_CUDA)
+  if(USE_CUDA)
+    set(ENV{HIP_PLATFORM} nvidia)
+    set(HIP_PLATFORM nvidia CACHE STRING "HIP platform (e.g., amd or nvidia)")
+    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=nvidia)")
+  else()
+    set(ENV{HIP_PLATFORM} amd)
+    set(HIP_PLATFORM amd CACHE STRING "HIP platform (e.g., amd or nvidia)")
+    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=amd)")
+  endif()
 endif()
 
 # Hip headers required of all clients; clients use hip to allocate device memory
-if(USE_CUDA)
-  # Append cmake path for hip (for convenience)
-  # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
-  list(APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${HIP_PATH}/cmake)
-  find_package(HIP MODULE REQUIRED)
+find_package(hip CONFIG PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+
+# support for cuda backend with hip < 6.0
+if(NOT hip_FOUND)
+    find_package(HIP MODULE REQUIRED)
+    list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
+    set(ENV{HIP_PLATFORM} nvidia)
+    if (NOT HIP_PLATFORM)
+      set(HIP_PLATFORM nvidia)
+    endif()
 else()
-  find_package(hip REQUIRED CONFIG PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+    if(NOT HIP_PLATFORM)
+      set(HIP_PLATFORM amd)
+    endif()
 endif()
 
-if(USE_CUDA)
-  list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
+if(HIP_PLATFORM STREQUAL nvidia)
+  find_package(CUDA REQUIRED)
 endif()
+
 
 # Append our library helper cmake path
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
@@ -237,7 +226,7 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
 endif()
 
 # Package specific CPACK vars
-if(NOT USE_CUDA)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(rocblas_minimum 4.2.0)
   set(rocsolver_minimum 3.33.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
@@ -288,7 +277,7 @@ endif()
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
 # Give hipsolver compiled for CUDA backend a different name
-if(NOT USE_CUDA)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(package_name hipsolver)
 else()
   set(package_name hipsolver-alt)

@@ -202,10 +202,6 @@ void alloc_bench_bricks(const Tparams&                            params,
     // bricks.  e.g. in-place real-complex
     if(params.placement == fft_placement_inplace)
     {
-        if(ibricks.size() != 1 && obricks.size() != 1 && ibricks != obricks)
-            throw std::runtime_error(
-                "in-place transform to different brick shapes only allowed for single bricks");
-
         // allocate the larger of the two bricks
         auto isize_bytes = compute_ptrdiff(ibricks.front().length(), ibricks.front().stride)
                            * var_size<size_t>(params.precision, params.itype);
@@ -259,14 +255,12 @@ void init_bench_input(const Tparams&                            params,
     }
     else
     {
-#ifdef USE_HIPRAND
         std::vector<void*> ptrs;
         ptrs.reserve(buffers.size());
         for(auto& buf : buffers)
             ptrs.push_back(buf.data());
 
         init_local_input<Tparams, gpubuf>(0, params, bricks, elem_size, ptrs);
-#endif
     }
 }
 

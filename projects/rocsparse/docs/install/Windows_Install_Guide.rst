@@ -14,14 +14,15 @@ For information on installing and building rocSPARSE on Linux, see :doc:`rocSPAR
 Prerequisites
 =============
 
-rocSPARSE on Windows requires an AMD HIP SDK-enabled platform. It's supported on the
+rocSPARSE on Windows requires an AMD HIP SDK-enabled platform. It is supported on the
 same Windows versions and toolchains that the HIP SDK supports. For more information, see
 :doc:`HIP SDK installation for Windows <rocm-install-on-windows:index>`.
 
 Installing prebuilt packages
 ============================
 
-rocSPARSE can be installed on Windows 10 or 11 using the AMD HIP SDK installer.
+rocSPARSE can be installed on Windows using the AMD HIP SDK installer.
+For version support information, see the :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
 
 The simplest way to add rocSPARSE to your code is to use CMake.
 Add the SDK installation location to your ``CMAKE_PREFIX_PATH``.

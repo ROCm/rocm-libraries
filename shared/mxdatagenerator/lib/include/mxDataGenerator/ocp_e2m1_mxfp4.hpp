@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -46,10 +23,9 @@ namespace DGen
         static constexpr bool hasZero = true;
     };
 
-    struct ocp_e2m1_mxfp4
+    struct ocp_e2m1_mxfp4_base
     {
         static constexpr OCP_E2M1_MXFP4_DATA dataInfo{};
-        static constexpr E8M0_SCALE_INFO     scaleInfo{};
 
         static constexpr uint8_t oneMask     = 0b0010;
         static constexpr uint8_t setSignMask = 0b0111;
@@ -67,6 +43,21 @@ namespace DGen
 
         static constexpr uint8_t positiveZeroMask = 0b0000;
         static constexpr uint8_t negativeZeroMask = 0b1000;
+    };
+
+    struct ocp_e2m1_mxfp4 : ocp_e2m1_mxfp4_base
+    {
+        static constexpr ScaleInfo<ScaleType::E8M0> scaleInfo{};
+    };
+
+    struct ocp_e2m1_mxfp4_e5m3 : ocp_e2m1_mxfp4_base
+    {
+        static constexpr ScaleInfo<ScaleType::E5M3> scaleInfo{};
+    };
+
+    struct ocp_e2m1_mxfp4_e4m3 : ocp_e2m1_mxfp4_base
+    {
+        static constexpr ScaleInfo<ScaleType::E4M3> scaleInfo{};
     };
 
 #include "ocp_e2m1_mxfp4_impl.hpp"

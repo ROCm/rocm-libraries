@@ -51,8 +51,8 @@ TEST(TestEngineOrdering, BothMiopenEngines)
 TEST(TestEngineOrdering, MiopenEnginesWithOthers)
 {
     // Create a fake "other" engine ID
-    int64_t otherEngine1 = HIPBLASLT_ENGINE_ID;
-    int64_t otherEngine2 = 999999; // Arbitrary other engine
+    const int64_t otherEngine1 = HIPBLASLT_ENGINE_ID;
+    const int64_t otherEngine2 = 999999; // Arbitrary other engine
 
     // Test: other, MIOPEN_ENGINE_DETERMINISTIC, MIOPEN_ENGINE, other
     std::vector<int64_t> engineIds
@@ -70,12 +70,12 @@ TEST(TestEngineOrdering, MiopenEnginesWithOthers)
 
 TEST(TestEngineOrdering, OnlyOtherEngines)
 {
-    int64_t otherEngine1 = HIPBLASLT_ENGINE_ID;
-    int64_t otherEngine2 = 888888;
-    int64_t otherEngine3 = 777777;
+    const int64_t otherEngine1 = HIPBLASLT_ENGINE_ID;
+    const int64_t otherEngine2 = 888888;
+    const int64_t otherEngine3 = 777777;
 
     std::vector<int64_t> engineIds = {otherEngine1, otherEngine2, otherEngine3};
-    std::vector<int64_t> originalOrder = engineIds;
+    const std::vector<int64_t> originalOrder = engineIds;
 
     sortEngineIds(engineIds);
 
@@ -86,9 +86,9 @@ TEST(TestEngineOrdering, OnlyOtherEngines)
 
 TEST(TestEngineOrdering, ComplexScenario)
 {
-    int64_t other1 = 111111;
-    int64_t other2 = 222222;
-    int64_t other3 = 333333;
+    const int64_t other1 = 111111;
+    const int64_t other2 = 222222;
+    const int64_t other3 = 333333;
 
     // Start with: other1, MIOPEN_ENGINE_DETERMINISTIC, other2, MIOPEN_ENGINE, other3
     std::vector<int64_t> engineIds
@@ -106,10 +106,10 @@ TEST(TestEngineOrdering, ComplexScenario)
 
 TEST(TestEngineOrdering, StableOrderPreservedForOthers)
 {
-    int64_t other1 = 100;
-    int64_t other2 = 200;
-    int64_t other3 = 300;
-    int64_t other4 = 400;
+    const int64_t other1 = 100;
+    const int64_t other2 = 200;
+    const int64_t other3 = 300;
+    const int64_t other4 = 400;
 
     // Mix with MIOpen engines
     std::vector<int64_t> engineIds

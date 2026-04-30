@@ -1,32 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "CustomMatchers.hpp"
@@ -726,7 +704,10 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 {
     using namespace rocRoller;
     using Expression::literal;
-    auto context = TestContext::ForDefaultTarget();
+
+    KernelOptions opts;
+    opts->minLaunchTimeExpressionComplexity = 5;
+    auto context                            = TestContext::ForDefaultTarget(opts);
 
     auto command = std::make_shared<Command>();
 
@@ -830,7 +811,7 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
     {
         auto dataTypeInfo = DataTypeInfo::Get(dataType);
 
-        auto arg = command->allocateArgument(dataType, argTag, ArgumentType::Limit);
+        auto arg = command->allocateArgument(dataType, argTag, ArgumentType::Size);
 
         auto argExp = fast(arg->expression());
 
@@ -943,7 +924,7 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
     {
         auto dataTypeInfo = DataTypeInfo::Get(dataType);
 
-        auto arg = command->allocateArgument(dataType, argTag, ArgumentType::Limit);
+        auto arg = command->allocateArgument(dataType, argTag, ArgumentType::Size);
 
         auto argExp = fast(arg->expression());
 
@@ -1530,6 +1511,23 @@ TEST_CASE("BitfieldCombine expression and lowering", "[expression][expression-tr
             srcExpr, dstExpr, "", srcOffset, dstOffset, width, true, true});
 
         auto expected = logicalShiftR(srcExpr, offsetDiff) | dstExpr;
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Lowering with width=32 (full width)")
+    {
+        auto const fullWidth   = 32u;
+        auto const srcOffset32 = 0u;
+        auto const dstOffset32 = 0u;
+
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset32, dstOffset32, fullWidth});
+
+        // When width=32, srcMask should be 0xFFFFFFFF (all bits)
+        // and dstMask should be 0x00000000 (clear all bits)
+        auto expected = (Expression::literal(Raw32(0xFFFFFFFFu)) & srcExpr)
+                        | (Expression::literal(Raw32(0x00000000u)) & dstExpr);
 
         CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
     }
