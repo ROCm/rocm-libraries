@@ -284,9 +284,10 @@ bool run_gemm(const ProblemType& problem_size, const ExecutionConfig& config)
 
     std::string device_name = ck::get_device_name();
     if(!(device_name.find("gfx11") != std::string::npos ||
-         device_name.find("gfx12") != std::string::npos))
+         device_name.find("gfx12") != std::string::npos ||
+         device_name.find("gfx13") != std::string::npos))
     {
-        std::cout << "This kernel support gfx1100 and gfx1200 only" << std::endl;
+        std::cout << "This kernel support gfx1100, gfx1200 and gfx1300 only" << std::endl;
 
         return true;
     }
