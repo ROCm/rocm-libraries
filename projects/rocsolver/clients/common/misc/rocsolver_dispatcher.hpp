@@ -483,7 +483,7 @@ class rocsolver_dispatcher
             // auxiliaries
             {"lacgv", testing_lacgv<T, rocblas_int>},
             {"lacgv_64", testing_lacgv<T, int64_t>},
-            {"he2sb", testing_sy2sb_he2hb<T>},
+            {"he2hb", testing_sy2sb_he2hb<T>},
             // ungxx
             {"ung2r", testing_orgxr_ungxr<T, 0>},
             {"ungqr", testing_orgxr_ungxr<T, 1>},
