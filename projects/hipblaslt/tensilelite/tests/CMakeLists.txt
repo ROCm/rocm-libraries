@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 find_package(GTest REQUIRED)
+include(GoogleTest)
 
 add_executable(tensilelite-tests)
 add_subdirectory(configs)
@@ -33,6 +34,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
 )
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -44,6 +46,7 @@ target_link_libraries(tensilelite-tests
     PRIVATE
         hip::device
         ${CMAKE_DL_LIBS}
+        ${hipblaslt_msgpack_target}
 )
 
 gtest_discover_tests(tensilelite-tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)
@@ -76,13 +79,13 @@ set(F32_SIZES -M 133 -N 147 -K 165)
 set(F16_SIZES -M 131 -N 141 -K 151)
 set(ADDITIONAL_SIZES -M 102 -N 103 -K 105)
 
-macro(get_test_sizes TYPE OUT_SIZES)
+function(get_test_sizes TYPE OUT_SIZES)
     if("${TYPE}" STREQUAL "f32")
-        set(${OUT_SIZES} ${F32_SIZES})
+        set(${OUT_SIZES} ${F32_SIZES} PARENT_SCOPE)
     else()
-        set(${OUT_SIZES} ${F16_SIZES})
+        set(${OUT_SIZES} ${F16_SIZES} PARENT_SCOPE)
     endif()
-endmacro()
+endfunction()
 
 # Helper: convert transpose tag (NN/TN/NT/TT) to flags
 macro(get_trans_flags TRANS OUT_FLAGS)
@@ -162,17 +165,20 @@ foreach(PATH fast slow)
         )
     endforeach()
 
-endforeach()
-
-# ScaleAB tests (slow path only — fast path does not yet support useScaleAB)
-foreach(MODE Scalar Vector)
-    foreach(TYPE f32 f16 bf16)
-        get_test_sizes(${TYPE} SIZES)
-        add_cpu_gemm_test(slow_${TYPE}_ScaleAB_${MODE}
-            ARGS ${SIZES} --type ${TYPE} --validate --useScaleAB ${MODE}
+    # ScaleAB tests
+    foreach(MODE Scalar Vector)
+        foreach(TYPE f32 f16 bf16)
+            get_test_sizes(${TYPE} SIZES)
+            add_cpu_gemm_test(${PATH}_${TYPE}_ScaleAB_${MODE}
+                ARGS ${SIZES} --type ${TYPE} --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_f32_ScaleAB_${MODE}_AllFeatures
+            ARGS ${F32_SIZES} --type f32 --beta 0.5 --validate --useScaleAB ${MODE} --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        )
+        # ScaleAB with factorDim=1 (column-dimension ScaleAlphaVec)
+        add_cpu_gemm_test(${PATH}_f32_ScaleAB_${MODE}_ColN
+            ARGS ${F32_SIZES} --type f32 --validate --useScaleAB ${MODE} --scaleAlphaVec --factorDim 1 ${PATH_FLAGS}
         )
     endforeach()
-    add_cpu_gemm_test(slow_f32_ScaleAB_${MODE}_AllFeatures
-        ARGS ${F32_SIZES} --type f32 --beta 0.5 --validate --useScaleAB ${MODE} --bias --activation relu --scaleAlphaVec
-    )
 endforeach()

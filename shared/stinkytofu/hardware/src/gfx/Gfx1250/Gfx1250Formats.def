@@ -180,6 +180,24 @@ DEF_FORMAT(VOP3,
     },
 )
 
+// Vector 2-source VOP3 (64-bit encoding)
+// Used for VOP3-encoded instructions that only take src0/src1.
+DEF_FORMAT(VOP3_2SRC,
+    .parent = VOP3,
+    .maxOperands = 3,  // dst + src0 + src1
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
+)
+
+// Vector 2-source VOP3 (64-bit encoding), commutative ops.
+DEF_FORMAT(VOP3_2SRC_COMMUTATIVE,
+    .parent = VOP3_2SRC,
+    .flags = {Commutative},
+)
+
 // Vector compare (32-bit encoding)
 // Used for: v_cmp_eq_f32, v_cmp_lt_i32, etc.
 DEF_FORMAT(VOPC,

@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 
 #include "stinkytofu/serialization/asm/IRParser.hpp"
@@ -23,13 +24,13 @@ class FuzzTest : public ::testing::Test {
    protected:
     // Helper to parse pattern from string
     PatternParseResult parsePatternString(const std::string& input) {
-        const char* tmpFile = "/tmp/fuzz_test.pattern";
-        std::ofstream out(tmpFile);
+        auto tmpPath = std::filesystem::temp_directory_path() / "fuzz_test.pattern";
+        std::ofstream out(tmpPath);
         out << input;
         out.close();
 
-        auto result = parsePatternFileWithDiagnostics(tmpFile);
-        std::remove(tmpFile);
+        auto result = parsePatternFileWithDiagnostics(tmpPath.string().c_str());
+        std::filesystem::remove(tmpPath);
         return result;
     }
 };

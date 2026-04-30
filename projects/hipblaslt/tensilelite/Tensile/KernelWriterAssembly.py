@@ -78,6 +78,7 @@ from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout
+from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
@@ -1428,7 +1429,9 @@ class KernelWriterAssembly(KernelWriter):
       # Use 2^31 for BufferOOB behavior.
       # set BufferOOB to NumRecords field of SRD.
       # if thread is OOB, we can invalid it by setting vOffset to BufferOOB
-      module.add(ValueSet("BufferOOB", 0x80000000, format=1))
+      module.add(ValueSet("BufferOOB", 0xfffff000, format=1))
+      # Set BufferOOB to 0xfffff000 instead of 0xffffffff (reserving 4KB) to prevent
+      # overflows from instruction offsets (max 4095) during memory access.
 
       srdUpperValue = SrdUpperValue(self.states.version)
       module.addComment2("Bits 127:96 of SRD.\n" + srdUpperValue.desc())
@@ -2079,10 +2082,16 @@ class KernelWriterAssembly(KernelWriter):
         moduleArgs.add(self.argLoader.loadKernArg("Synchronizer", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+8), dword=2))
         moduleArgs.add(extReadEpilogueLabeltmp)
 
-      moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))
+      #moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))
       labelHBM = Label("HBMArgs", comment="")
       labelLoadEnd = Label("LoadArgsEnd", comment="")
+      # Routing General Batched GEMM to Strided Batched GEMM path
+      Bypass_ArgType3_to_ArgType0_Instance1 = Label("Bypass_ArgType3_to_ArgType0_Instance1", comment="")
+      moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(3), comment="Is kernel argType == 3")) 
+      moduleArgs.add(SCBranchSCC1(labelName=Bypass_ArgType3_to_ArgType0_Instance1.getLabelName()))     
+      moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))      
       moduleArgs.add(SCBranchSCC0(labelName=labelHBM.getLabelName()))
+      moduleArgs.add(Bypass_ArgType3_to_ArgType0_Instance1)
       moduleArgs.add(SAddU32(dst=sgpr("KernArgAddress"), src0=sgpr("KernArgAddress"), src1=hex(self.states.userArgsInfo.commonArgsSize), comment="Shift common args"))
       moduleArgs.add(SAddCU32(dst=sgpr("KernArgAddress+1"), src0=sgpr("KernArgAddress+1"), src1=0))
       moduleArgs.addModuleAsFlatItems(self.getKernelArgLoadModule(kernel, sgprStart, load, 0))
@@ -2129,10 +2138,15 @@ class KernelWriterAssembly(KernelWriter):
           moduleArgs.add(extReadEpilogueLabeltmp)
 
         moduleArgs.add(SMovB32(dst=sgpr(sgprPackedArgs), src=sgpr(preloadSgprStartIdx+1), comment="Preload internal args"))
+        # Routing the General Batched GEMM to Strided Batched GEMM path
+        Bypass_ArgType3_to_ArgType0_Instance2 = Label("Bypass_ArgType3_to_ArgType0_Instance2", comment="")
+        moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(3), comment="Is kernel argType == 3")) 
+        moduleArgs.add(SCBranchSCC1(labelName=Bypass_ArgType3_to_ArgType0_Instance2.getLabelName()))
         moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))
         preloadLabelHBM = Label("Preload_HBMArgs", comment="")
         perloadLabelLoadEnd = Label("Preload_LoadArgsEnd", comment="")
         moduleArgs.add(SCBranchSCC0(labelName=preloadLabelHBM.getLabelName()))
+        moduleArgs.add(Bypass_ArgType3_to_ArgType0_Instance2)
         moduleArgs.add(SAddU32(dst=sgpr("KernArgAddress"), src0=sgpr("KernArgAddress"), src1=hex(self.states.userArgsInfo.commonArgsSize), comment="Shift common args"))
         moduleArgs.add(SAddCU32(dst=sgpr("KernArgAddress+1"), src0=sgpr("KernArgAddress+1"), src1=0))
         self.argLoader.resetOffset()
@@ -2164,6 +2178,9 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["GlobalSplitU"] != 0:
         moduleRegInit.add(SAndB32(dst=sgpr("GSU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF), comment="Restore GSUConfig and GSU"))
 
+      # Commented the below condition since ArgType check is needed for General Batched GEMM
+      # as well which reuses the Strided Batched GEMM logic after setting the Batched Matrix Pointers. 
+      # Previously, ArgType was backed up for use of Grouped GEMM with External User Args structure only.
       if kernel["ProblemType"]["SupportUserArgs"]:
         moduleRegInit.add(SMovB32(dst=sgpr("ArgType"),src=sgpr(sgprArgType)))
 
@@ -2318,10 +2335,15 @@ class KernelWriterAssembly(KernelWriter):
 
       self.sgprPool.checkIn(tmpSgprNumWorkGroups)
       tmpSgprNumWorkGroups = None
+      # General Batched GEMM Routed to Strided Batched GEMM path
+      ArgType3_Routed_To_ArgType0 = Label(label="ArgType3_Routed_To_ArgType0", comment="")
+      module.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=3))
+      module.add(SCBranchSCC1(labelName=ArgType3_Routed_To_ArgType0.getLabelName()))      
       module.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=0))
       self.sgprPool.checkIn(sgprArgType)
       sgprArgType = None # Cannot be used after this point
       module.add(SCBranchSCC0(labelName=labelMultiGemm.getLabelName()))
+      module.add(ArgType3_Routed_To_ArgType0)      
       module.add(deepcopy(moduleWg))
       if kernel["StreamK"] == 0:
         module.add(self.remapWgSerial(kernel, earlyStop=False))
@@ -2576,7 +2598,12 @@ class KernelWriterAssembly(KernelWriter):
 
     # self.states.groOffsetInMacroTile == 1 case, subtract pre-pad here
     if self.states.groOffsetInMacroTile:
-      if not kernel["enableTDMA"]:
+      # Added logic to check for Pointer Array case (ArgType==3) and not prepad the double pointer addresses
+      Skip_Address_Prepad_For_Pointer_Array = Label(label="Skip_Address_Prepad_For_Pointer_Array", comment="Skip pre-padding of address for pointer array case")
+      if kernel["ProblemType"]["SupportUserArgs"]:
+        module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+        module.add(SCBranchSCC1(labelName=Skip_Address_Prepad_For_Pointer_Array.getLabelName())) 
+      if not kernel["enableTDMA"]:       
         prePad = int(self.states.srdShiftLeft["A"] * tPA["bpeGR"]) # leave room in case we have to pointer shift
         module.add(SSubU32(dst=sgpr("AddressA+0"), src0=sgpr("AddressA+0"), src1=prePad, comment="pre-pad to make room for possible pointer shift"))
         module.add(SSubBU32(dst=sgpr("AddressA+1"), src0=sgpr("AddressA+1"), src1=0, comment="pre-pad to make room for possible pointer shift"))
@@ -2596,7 +2623,7 @@ class KernelWriterAssembly(KernelWriter):
         prePad = int(self.states.srdShiftLeft["Metadata"] * tPM["bpe"]) # leave room in case we have to pointer shift
         module.add(SSubU32(dst=sgpr("AddressMetadata+0"), src0=sgpr("AddressMetadata+0"), src1=prePad, comment="pre-pad to make room for possible pointer shift"))
         module.add(SSubBU32(dst=sgpr("AddressMetadata+1"), src0=sgpr("AddressMetadata+1"), src1=0, comment="pre-pad to make room for possible pointer shift"))
-
+      module.add(Skip_Address_Prepad_For_Pointer_Array)
     # Check alpha == 0, is done before kernel body
     # so if alpha/beta=Half, they haven't been converted to f32
     # This means we can use ComputeDataType as AlphaType (even <h,h,h,h,"h,h"> +"HPA")
@@ -4075,6 +4102,8 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def computeLoadSrd(self, kernel, tP, tc, indices, bpe):
     module = Module("computeLoadSrd")
+    moduleLoadGeneralBatch = Module("computeLoadSrd-GeneralBatch")
+    moduleLoadStridedBatch = Module("computeLoadSrd-StridedBatch")      
     with self.allocTmpSgpr(2 + 2 + (0 if self.states.use64bShadowLimit else 2)) as tmpSgprInfo:
       stmp = tmpSgprInfo.idx
       tileStart = stmp+2
@@ -4254,34 +4283,58 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=prePad, comment="extend limit for pre-pad"))
 
       # Apply any high-order address components to the tileStart and eventually the SRD - batch idx for batched gemm
-      if kernel["ProblemType"]["StridedBatched"]:
-        wg=2 # TODO - refactor since only WG2 is supported and this is always batch
-        for i in range(1, numDim):
-          idx = indices[i]
-          if idx == kernel["ProblemType"]["Index0"] \
-              or idx == kernel["ProblemType"]["Index1"] \
-              or idx in kernel["ProblemType"]["IndicesSummation"] \
-              or isPackedIndex(kernel, idx):
-                continue # these will be captured in GRO not the SRD (or other summations are always 0)
+      wg=2 # TODO - refactor since only WG2 is supported and this is always batch
+      for i in range(1, numDim):
+        idx = indices[i]
+        if idx == kernel["ProblemType"]["Index0"] \
+            or idx == kernel["ProblemType"]["Index1"] \
+            or idx in kernel["ProblemType"]["IndicesSummation"] \
+            or isPackedIndex(kernel, idx):
+              continue # these will be captured in GRO not the SRD (or other summations are always 0)
+        else:
+          assert(wg==2) # can only have one wg2 with a batch. Other dimensions should be packed into wg0/wg1
+          stride = "Stride%s%s"%(tc,self.states.indexChars[tP['ia'][i]])
+          stridedBatchedGemmLoad = Label(label="StridedBatchedGemmLoad"+tc, comment="Computing the Batch Matrix's base address for Strided Batched GEMM")
+          stridedBatchedGemmLoad_End = Label(label="StridedBatchedGemmLoad"+tc+"_End", comment="End Computing the Batch Matrix's base address for Strided Batched")
+          if kernel["ProblemType"]["SupportUserArgs"]:
+            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
           else:
-            assert(wg==2) # can only have one wg2 with a batch. Other dimensions should be packed into wg0/wg1
-            stride = "Stride%s%s"%(tc,self.states.indexChars[tP['ia'][i]])
-            if not wroteTileStart:
-              module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
-              wroteTileStart = True
-            else:
-              module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
-              module.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0), comment="accum wg term to tilestart"))
-              module.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(stmp+1), comment="accum wg term to tilestart"))
-            wg+=1
+            module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
+          moduleLoadGeneralBatch.add(SMulI32(dst=sgpr(stmp+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute Offset into Pointer Array"))             
+          if not wroteTileStart:
+            moduleLoadStridedBatch.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
+            wroteTileStart = True
+          else:
+            moduleLoadStridedBatch.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
+            moduleLoadStridedBatch.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0), comment="accum wg term to tilestart"))
+            moduleLoadStridedBatch.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(stmp+1), comment="accum wg term to tilestart"))
+          wg+=1
+    moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
+    moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
+    moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
+    moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+    if self.states.groOffsetInMacroTile and ((tc == "A" and not kernel["enableTDMA"]) or (tc == "B" and not kernel["enableTDMB"])):
+      prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
+      moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
+      moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))                     
 
     # Add the tile start to the SRD
     if wroteTileStart:
-      module.add(scalarMultiply64Bpe(tileStart, tileStart, tP["bpeGR"], stmp, "tileStart"))
-      module.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Address%s+0"%tc), src1=sgpr(tileStart+0), comment="SRD base = Address+ tileStart0"))
-      module.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Address%s+1"%tc), src1=sgpr(tileStart+1), comment="SRD base = Address+ tileStart1"))
+      moduleLoadStridedBatch.add(scalarMultiply64Bpe(tileStart, tileStart, tP["bpeGR"], stmp, "tileStart"))
+      moduleLoadStridedBatch.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Address%s+0"%tc), src1=sgpr(tileStart+0), comment="SRD base = Address+ tileStart0"))
+      moduleLoadStridedBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Address%s+1"%tc), src1=sgpr(tileStart+1), comment="SRD base = Address+ tileStart1"))
+      moduleLoadGeneralBatch.add(scalarMultiply64Bpe(tileStart, tileStart, tP["bpeGR"], stmp, "tileStart"))
+      moduleLoadGeneralBatch.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr(tileStart+0), src1=sgpr("Srd%s+0"%tc), comment="SRD base = Address+ tileStart0"))
+      moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr(tileStart+1), src1=sgpr("Srd%s+1"%tc), comment="SRD base = Address+ tileStart1"))      
     else:
-      module.add(SMovB64(dst=sgpr("Srd%s"%tc, 2), src=sgpr("Address%s"%tc, 2), comment="init SRD base address"))
+      moduleLoadStridedBatch.add(SMovB64(dst=sgpr("Srd%s"%tc, 2), src=sgpr("Address%s"%tc, 2), comment="init SRD base address"))         
+    moduleLoadGeneralBatch.add(SBranch(labelName = stridedBatchedGemmLoad_End.getLabelName()))
+    moduleLoadGeneralBatch.add(stridedBatchedGemmLoad)                     
+
+    module.add(moduleLoadGeneralBatch) # Logic for General Batched GEMM comes first 
+    module.add(moduleLoadStridedBatch) # Logic for Strided Batched GEMM comes second
+    module.add(stridedBatchedGemmLoad_End)
 
     # self.states.groOffsetInMacroTile == 1 case,  pre-pad is already subtracted from AddressA/B
     if prePad and self.states.groOffsetInMacroTile == 0:
@@ -6911,6 +6964,9 @@ class KernelWriterAssembly(KernelWriter):
             if "MX" in tPB:
               evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPB["MX"]))
             evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPB))
+            #swap local write memory token
+            self.states.ldsWriteTokenIdx = \
+              self.states.memTokenLdsBuffer1 if self.states.ldsWriteTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
 
         # generate even, odd exit code
         # not oddLabel case, order is even -> odd
@@ -10029,8 +10085,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if tc == "A" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      if "TensorLoadToLds" in self.states.setMemTokenInsts:
-        comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
+      comp.setMemToken([self.states.ldsTensorTokenIdx])
       if self.states.inTailLoop and not kernel["1LDSBuffer"]:
         ldsAddrSgprName = comp.getLdsAddrSgprName("tdmAGroup0")
         clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -10041,8 +10096,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if tc == "MXSA" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      if "TensorLoadToLds" in self.states.setMemTokenInsts:
-        comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
+      comp.setMemToken([self.states.ldsTensorTokenIdx])
       if kernel["ProblemType"]["MXBlockA"]:
         if self.states.inTailLoop and not kernel["1LDSBuffer"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSAGroup0")
@@ -10056,8 +10110,7 @@ class KernelWriterAssembly(KernelWriter):
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if prod(kernel["MIWaveGroup"]) == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-        if "TensorLoadToLds" in self.states.setMemTokenInsts:
-          comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
+        comp.setMemToken([self.states.ldsTensorTokenIdx])
         if self.states.inTailLoop and not kernel["1LDSBuffer"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmBGroup0")
           clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -10070,8 +10123,7 @@ class KernelWriterAssembly(KernelWriter):
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if prod(kernel["MIWaveGroup"]) == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-        if "TensorLoadToLds" in self.states.setMemTokenInsts:
-          comp.setMemToken(self.states.setMemTokenInsts["TensorLoadToLds"])
+        comp.setMemToken([self.states.ldsTensorTokenIdx])
         if self.states.inTailLoop and not kernel["1LDSBuffer"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSBGroup0")
           clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -11201,12 +11253,8 @@ class KernelWriterAssembly(KernelWriter):
                   else:
                     Hcvt2BMap[f16Tobf16Idx] = 0
                   f16Tobf16Idx += Hcvt2BMap[f16Tobf16Idx]
-                  localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx))))
-                  if ti.getArchCaps()["NoSDWA"]:
-                    localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp+1), src=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx)), true16=[-1, -1, 1]))
-                  else:
-                    sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_1)
-                    localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp+1), src=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx)),sdwa=sdwa))
+                  localWriteCVTCode.add(ECvtF16toF32(dst=vgpr(vgprTmp), src=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx)), sel=HighBitSel.LOW))
+                  localWriteCVTCode.add(ECvtF16toF32(dst=vgpr(vgprTmp+1), src=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx)), sel=HighBitSel.HIGH))
                   localWriteCVTCode.add(VPackF16toB32(dst=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx)), src0=vgpr(vgprTmp), src1=vgpr(vgprTmp+1),
                                     vop3=VOP3PModifiers(op_sel=[1,1,0])))
                 self.vgprPool.checkIn(vgprTmp)
@@ -11225,20 +11273,10 @@ class KernelWriterAssembly(KernelWriter):
                   new_src = deepcopy(paramList[0])
                   if isHigh16Bits:
                     new_src.regName.addOffset(1)
-                  if ti.getArchCaps()["NoSDWA"]:
-                    dst_sel = 1 if isHigh16Bits else 0
-                    localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=new_src, true16=[dst_sel], comment="convert C to fp16"))
-                  else:
-                    dst_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
-                    localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=new_src, sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                  localWriteCVTCode.add(ECvtF32toF16(dst=paramList[0], src=new_src, sel=HighBitSel.HIGH if isHigh16Bits else HighBitSel.LOW, comment="convert C to fp16"))
                 else:
                   for vi in range(0, int(newBlockWidth)):
-                    if ti.getArchCaps()["NoSDWA"]:
-                      dst_sel = (vi % 2)
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), true16=[dst_sel], comment="convert C to fp16"))
-                    else:
-                      dst_sel = SelectBit.WORD_1 if vi%2==1 else SelectBit.WORD_0
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                    localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sel=HighBitSel.HIGH if vi % 2 else HighBitSel.LOW, comment="convert C to fp16"))
               elif (kernel["ProblemType"]["DataType%s"%tc].isHalf() and kernel["ProblemType"]["MacDataType%s"%tc if (tc=='A' or tc=='B') else "DataType"].is8bitFloat()):
                 #HH_F8/B8/F8B8/B8F8_
                 toF8 = False
@@ -11258,12 +11296,8 @@ class KernelWriterAssembly(KernelWriter):
                       vgprTmp = self.vgprPool.checkOutAligned(4, 2)
                   else:
                     vgprTmp = self.vgprPool.checkOutAligned(1, 2)
-                  src_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
                   sel = 1 if isHigh16Bits else 0
-                  if ti.getArchCaps()["NoSDWA"]:
-                    localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=paramList[0], true16=[-1, -1, sel], comment="convert to F32"))
-                  else:
-                    localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=paramList[0], sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert to F32"))
+                  localWriteCVTCode.add(ECvtF16toF32(dst=vgpr(vgprTmp), src=paramList[0], sel=HighBitSel.HIGH if isHigh16Bits else HighBitSel.LOW, comment="convert to F32"))
 
                   # ScaleA/B
                   if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["ProblemType"]["DataType%s"%tc].numRegisters() > kernel["ProblemType"]["DataType"].numRegisters():
@@ -11309,12 +11343,9 @@ class KernelWriterAssembly(KernelWriter):
                       else:
                         localWriteCVTCode.add(VCvtScalePkF16toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), scale=0x3f800000,\
                                                               vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="convert F16 to BF8"))
-                    elif ti.getArchCaps()["NoSDWA"]:
-                      localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), true16=[-1, -1, 0], comment="convert to F32"))
-                      localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), true16=[-1, -1, 1], comment="convert to F32"))
                     else:
-                      localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                      localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_1), comment="convert to F32"))
+                      localWriteCVTCode.add(ECvtF16toF32(dst=vgpr(vgprTmp), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sel=HighBitSel.LOW, comment="convert to F32"))
+                      localWriteCVTCode.add(ECvtF16toF32(dst=vgpr(vgprTmp2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sel=HighBitSel.HIGH, comment="convert to F32"))
 
                       if kernel["ProblemType"]["StochasticRounding"]:
                         # ScaleA/B, sgpr upper is dummy.
@@ -11362,6 +11393,7 @@ class KernelWriterAssembly(KernelWriter):
                   self.vgprPool.checkIn(vgprTmp)
 
               elif (kernel["ProblemType"]["DataType%s"%tc].isAnyFloat8() and kernel["ProblemType"]["DataType"].isHalf()):
+                noSDWA = ti.getArchCaps()["NoSDWA"]
                 newBlockWidth = tP["globalReadInstruction"].blockWidth
                 if newBlockWidth == 0.25:
                   new_src = deepcopy(paramList[0])
@@ -11372,16 +11404,13 @@ class KernelWriterAssembly(KernelWriter):
                       sel = [0,1,1,0] if isHigh16Bits else [0,0,0,0]
                       localWriteCVTCode.add(VCvtScaleFP8toF16(dst=paramList[0], src=new_src, scale=0x3f800000, vop3=VOP3PModifiers(op_sel=sel), comment="A convert fp8 to f16"))
                     else:
-                      if ti.getArchCaps()["NoSDWA"]:
-                        src_sel = 1 if isHigh16Bits else 0
-                        dst_sel = 1 if isHigh16Bits else 0
-                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , vop3=VOP3PModifiers(byte_sel=[src_sel]), comment="convert C to fp32"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), true16=[dst_sel], comment="convert C to fp16"))
+                      sel = 1 if isHigh16Bits else 0
+                      if noSDWA:
+                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, vop3=VOP3PModifiers(byte_sel=[sel]), comment="convert C to fp32"))
                       else:
                         src_sel = SelectBit.BYTE_2 if isHigh16Bits else SelectBit.BYTE_0
-                        dst_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
-                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
+                      localWriteCVTCode.add(ECvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sel=HighBitSel.HIGH if isHigh16Bits else HighBitSel.LOW, comment="convert C to fp16"))
                     self.vgprPool.checkIn(vgprTmp)
                   else:
                     if isCvtHighBits and isHigh16Bits:
@@ -11415,17 +11444,20 @@ class KernelWriterAssembly(KernelWriter):
                           if regTmpVgprBlock == None:
                             regTmpVgprBlock = self.vgprPool.checkOutAligned(2, 2)
                           src_sel2 = SelectBit.WORD_0 if src_sel == SelectBit.BYTE_0 else SelectBit.WORD_1
-                          localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(regTmpVgprBlock, 2), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel2), comment="convert C to fp32"))
-                          localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                          localWriteCVTCode.add(ECvtPkFP8toF32(dst=vgpr(regTmpVgprBlock, 2), src=new_src, sel=HighBitSel.HIGH if src_sel2 == SelectBit.WORD_1 else HighBitSel.LOW, comment="convert C to fp32"))
+                          localWriteCVTCode.add(ECvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock), sel=HighBitSel.HIGH if isHigh16Bits else HighBitSel.LOW, comment="convert C to fp16"))
                         else:
-                          localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock + 1), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                          localWriteCVTCode.add(ECvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock + 1), sel=HighBitSel.HIGH if isHigh16Bits else HighBitSel.LOW, comment="convert C to fp16"))
                     else:
                       vgprTmp = self.vgprPool.checkOut(1)
                       if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
                         localWriteCVTCode.add(VCvtScaleFP8toF16(dst=paramList[0], src=new_src, scale=0x3f800000, vop3=VOP3PModifiers(op_sel=sel), comment="C convert fp8 to f16"))
                       else:
-                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                        if noSDWA:
+                          localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, vop3=VOP3PModifiers(op_sel=[1 if isHigh16Bits else 0]), comment="convert C to fp32"))
+                        else:
+                          localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
+                        localWriteCVTCode.add(ECvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sel=HighBitSel.HIGH if isHigh16Bits else HighBitSel.LOW, comment="convert C to fp16"))
                       self.vgprPool.checkIn(vgprTmp)
                 elif newBlockWidth == 0.5:
                   vgprTmp = self.vgprPool.checkOutAligned(2, 2)
@@ -11437,12 +11469,12 @@ class KernelWriterAssembly(KernelWriter):
                                                           vop3=VOP3PModifiers(op_sel=sel), comment="D convert fp8 to f16"))
                   else:
                     if (not isHigh16Bits) and (g2lIdx % modNum == 0):
-                      localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert to F32"))
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
+                      localWriteCVTCode.add(ECvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), sel=HighBitSel.HIGH if src_sel == SelectBit.WORD_1 else HighBitSel.LOW, comment="convert to F32"))
+                      localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp), sel=HighBitSel.LOW, comment="Convert to FP16"))
                       if (newBlockWidth <= blockWidth):
-                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                        localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp+1), sel=HighBitSel.HIGH, comment="Convert to FP16"))
                     elif (newBlockWidth > blockWidth):
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                      localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp+1), sel=HighBitSel.HIGH, comment="Convert to FP16"))
                   self.vgprPool.checkIn(vgprTmp)
                 else:
                   modNum = max(1, int(newBlockWidth / blockWidth))
@@ -11459,31 +11491,30 @@ class KernelWriterAssembly(KernelWriter):
                         localWriteCVTCode.add(VCvtScaleFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), scale=0x3f800000,\
                                                             vop3=VOP3PModifiers(op_sel=[1,1,1,0]), comment="E convert fp8 to f16"))
                       else:
-                        localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                        localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_1), comment="convert to F32"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                        localWriteCVTCode.add(ECvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sel=HighBitSel.LOW, comment="convert to F32"))
+                        localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp), sel=HighBitSel.LOW, comment="Convert to FP16"))
+                        localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp+1), sel=HighBitSel.HIGH, comment="Convert to FP16"))
+                        localWriteCVTCode.add(ECvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sel=HighBitSel.HIGH, comment="convert to F32"))
+                        localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp), sel=HighBitSel.LOW, comment="Convert to FP16"))
+                        localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp+1), sel=HighBitSel.HIGH, comment="Convert to FP16"))
                   else:
                     if (not isHigh16Bits):
                       idxMod = g2lIdx % modNum
                       g2lIdxTmp = g2lIdx - idxMod
                       vi = idxMod // 2
-                      selectBit = SelectBit.WORD_0 if idxMod % 2 == 0 else SelectBit.WORD_1
                       interOffset = 0 if idxMod % 2 == 0 else 1
                       if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
-                        sel = 1 if idxMod % 2 == 0 else 1
+                        sel = 0 if idxMod % 2 == 0 else 1
                         localWriteCVTCode.add(VCvtScalePkFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)),\
                                                               src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), scale=0x3f800000,\
                                                               vop3=VOP3PModifiers(op_sel=[0,0,0,sel]), comment="F convert fp8 to f16"))
                       else:
-                        localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=selectBit), comment="convert to F32"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
+                        localWriteCVTCode.add(ECvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), sel=HighBitSel.HIGH if idxMod % 2 else HighBitSel.LOW, comment="convert to F32"))
+                        localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp), sel=HighBitSel.LOW, comment="Convert to FP16"))
                         if blockWidth != 0.5:
-                          localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                          localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sel=HighBitSel.HIGH, comment="Convert to FP16"))
                     elif blockWidth == 0.5:
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                      localWriteCVTCode.add(ECvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sel=HighBitSel.HIGH, comment="Convert to FP16"))
                   self.vgprPool.checkIn(vgprTmp)
               elif (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isBFloat16()):
                 newBlockWidth = (tP["bpeGR"] / tP["bpe"]) * blockWidth
@@ -11503,15 +11534,24 @@ class KernelWriterAssembly(KernelWriter):
                 printExit("Unsupported combination DataType%s (%s) -> DataType (%s)"%(tc, kernel["ProblemType"]["DataType%s"%tc].toChar(), kernel["ProblemType"]["DataType"].toChar()))
 
             LocalWriteX = tP["localWriteInstruction"].getInst(isHigh16Bits)
+            localWriteMemToken = [self.states.ldsWriteTokenIdx]
+            if len(localWriteMemToken) == 1:
+              memTokenComment = "sync LDS%u"%(localWriteMemToken[0])
+            else:
+              memTokenComment = "sync LDS %s"%(localWriteMemToken)
+            commentWithMemToken = "%s %s"%(comment, memTokenComment)
             if numBlocks == 1:
               addrIdx = paramList[1] // 65536
               olwa = "LocalWriteAddr%s+%u"%(tc, addrIdx)
               paramList[1] -= addrIdx * 65536
               ds        = DSModifiers(na=1, offset=paramList[1])
-              writeInst = LocalWriteX(dstAddr=vgpr(olwa), src=paramList[0], ds=ds, comment=comment)
+              writeInst = LocalWriteX(dstAddr=vgpr(olwa), src=paramList[0], ds=ds, comment=commentWithMemToken)
             else:
               ds        = DSModifiers(na=2, offset0=paramList[2], offset1=paramList[3])
-              writeInst = LocalWriteX(dstAddr=vgpr(lwa), src0=paramList[0], src1=paramList[1], ds=ds, comment=comment)
+              writeInst = LocalWriteX(dstAddr=vgpr(lwa), src0=paramList[0], src1=paramList[1], ds=ds, comment=commentWithMemToken)
+            # Attach LDS memory token to local write instructions so downstream
+            # StinkyTofu passes can track local write dependencies.
+            writeInst.setMemToken(MemTokenData(localWriteMemToken))
             if self.do["LocalWriteCVT"]:
               localWriteCode.add(localWriteCVTCode)
             if self.do["LocalWrite%s"%tc]:
@@ -12112,7 +12152,8 @@ class KernelWriterAssembly(KernelWriter):
       # Packed follows same philosophy but may have more vector components
       indices = list(range(0, kernel["ProblemType"]["NumIndicesC"]))
       numDim = len(indices)
-      addrSrcSgpr = "Address" # use "Address" only for the first iteration
+      #addrSrcSgpr = "Address" # use "Address" only for the first iteration
+      addrSrcSgpr = "Srd" # Since SrdC/D are initialized with AddressC/D for non-General Batched GEMM case.      
       for i in range(1, numDim):
         if i == kernel["ProblemType"]["Index0"]:
           # Used if the output is transposed?
@@ -12135,9 +12176,15 @@ class KernelWriterAssembly(KernelWriter):
         assert len(srdTcList) == len(sgprBpeList)
         if addToSrd:
           for mat, sgprBpe, us in zip(srdTcList, sgprBpeList, useSize):
+            generalBatchedGemmLoad = Label(label="GeneralBatchedGemmLoad"+mat, comment="Computing the Batch Matrix's base address for General Batched GEMM")
+            generalBatchedGemmLoad_End = Label(label="GeneralBatchedGemmLoad"+mat+"_End", comment="End of label GeneralBatchedGemmLoad"+mat)
+            multipleBufferChecks = Label(label="MultipleBufferChecks"+mat, comment="Checks for MultipleBuffer/MultiBufferSingleKernel cases")
+            stridedBatchedGemmLoad = Label(label="StridedBatchedGemmLoad"+mat, comment="Computing the Batch Matrix's base address for Strided Batched GEMM")            
             bpe = self.states.bpeCinternal if mat =="Bias" else (self.states.bpeE if mat == "E" else self.states.bpeCexternal)
             bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) if kernel["_GlobalAccumulation"] == 'MultipleBuffer' and mat =="C" else bpe
             bpe = sgpr(sgprBpe) if sgprBpe else log2(bpe)  # sgprBpe cannot be 0
+            if(kernel["GlobalSplitU"] != 0):
+              module.add(SAndB32(dst=sgpr(tmpS1), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
             # These are constant across all workitems, just add to the SRD:
             if us:
               if i == 0:
@@ -12150,17 +12197,58 @@ class KernelWriterAssembly(KernelWriter):
                 for x in range(2, i - 1):
                   strideC = "Size%s"%(INDEX_CHARS[x])
                   module.add(SMulI32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr(strideC)))
+                if(i == 2 and (mat == "C" or mat == "D")):
+                  if(kernel["GlobalSplitU"] != 0):
+                    module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
+                    module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
+                  if kernel["ProblemType"]["SupportUserArgs"]:
+                    module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))   
+                  if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+                    module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))               
+                    module.add(multipleBufferChecks)    
+                    if kernel["ProblemType"]["SupportUserArgs"]:                
+                      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+                      module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))                 
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(tmpS0), comment="Scale%s %s by Stride"%(mat, coord)))
               else:
                 strideC = "Size%s"%(INDEX_CHARS[i-1])
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), comment="Scale%s %s by Stride"%(mat, coord)))
             else:
               strideC = "Stride%s%s"%(mat, self.states.indexChars[i])
+              if(i == 2 and (mat == "C" or mat == "D")):
+                if(kernel["GlobalSplitU"] != 0):
+                  module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
+                  if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+                    module.add(SCBranchSCC0(labelName=multipleBufferChecks.getLabelName()))
+                  else:
+                    module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
+                if kernel["ProblemType"]["SupportUserArgs"]:
+                  module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+                  module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName())) 
+                                
+                if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+                  module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
+                  module.add(multipleBufferChecks)
+                  if kernel["ProblemType"]["SupportUserArgs"]:
+                    module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))   
+                    module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))                                
+                module.add(stridedBatchedGemmLoad)
               module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), comment="Scale%s %s by Stride"%(mat, coord)))
             module.add(SLShiftLeftB64(dst=sgpr(tmpS0,2), src=sgpr(tmpS0,2), shiftHex=bpe, comment="scale by bpe"))
             module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("%s%s+0"%(addrSrcSgpr, mat)), src1=sgpr(tmpS0), comment="add lo to SRD"))
             module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("%s%s+1"%(addrSrcSgpr, mat)), src1=sgpr(tmpS1), comment="add hi to SRD"))
-
+            if(i == 2 and (mat == "C" or mat == "D")):
+              module.add(SBranch(labelName=generalBatchedGemmLoad_End.getLabelName()))
+              module.add(generalBatchedGemmLoad)
+              module.add(SMulI32(dst=sgpr(tmpS0), src0=8, src1=coord, comment="Compute stride in bytes into Pointer Array"))
+              module.add(SAddU32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr("Address%s+0"%mat), comment="Offsetting to the location [Lower half of address]"))
+              module.add(SAddCU32(dst=sgpr(tmpS1), src0=sgpr("Address%s+1"%mat), src1=0, comment="Offsetting to the location [Higher half of address]"))
+              module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr(tmpS0, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
+              module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+              module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(tmpS0), comment="Offsetting within the Batch Matrix [Lower half of address]"))
+              module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Offsetting within the Batch Matrix [Higher half of address]")) 
+              module.add(generalBatchedGemmLoad_End)
           module.addSpaceLine()
 
           addrSrcSgpr = "Srd" # update src Sgpr for the second or later iterations
@@ -12240,7 +12328,7 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("SrdTDInit")
     tmpspgr0 = self.sgprPool.checkOut(1)
     tmpspgr1 = self.sgprPool.checkOutAligned(2, 4, preventOverflow=False)
-
+    tmpspgr2 = self.sgprPool.checkOutAligned(2, 4, preventOverflow=False)
     module.addComment0("calculate SrdTD address")
 
     module.add(SMovB32(dst=sgpr("SrdTD+2"), src="BufferOOB"))
@@ -12253,6 +12341,13 @@ class KernelWriterAssembly(KernelWriter):
     bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) # self.states.bpeCinternal
     module.add(SLShiftLeftB64(dst=sgpr(tmpspgr1,2), src=sgpr(tmpspgr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
 
+    SrdTDGeneralBatched = Label(label="SrdTDInit_GeneralBatched", comment="")
+    SrdTDGeneralBatched_End = Label(label="SrdTDInit_GeneralBatched_End", comment="")
+
+    if kernel["ProblemType"]["SupportUserArgs"]:
+      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+      module.add(SCBranchSCC1(labelName=SrdTDGeneralBatched.getLabelName(), comment="Initializing General Batched GEMM SrdTD differently"))
+
     module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("AddressTD+0"), src1=sgpr(tmpspgr1+0), comment="add lo to SRTD" ))
     module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("AddressTD+1"), src1=sgpr(tmpspgr1+1), comment="add hi to SRTD" ))
 
@@ -12260,20 +12355,28 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMulI32(dst=sgpr(tmpspgr1+0), src0=sgpr("WorkGroup2"), src1=sgpr("StrideDK"), comment=""))
 
     module.add(SLShiftLeftB64(dst=sgpr(tmpspgr1,2), src=sgpr(tmpspgr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
-
+    module.add(SBranch(labelName=SrdTDGeneralBatched_End.getLabelName()))
+    module.add(SrdTDGeneralBatched)
+    module.add(SMulI32(dst=sgpr(tmpspgr2+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute stride in bytes into Pointer Array"))
+    module.add(SAddU32(dst=sgpr(tmpspgr2+0), src0=sgpr(tmpspgr2+0), src1=sgpr("AddressTD+0"), comment="Offsetting to the location [Lower half of address]"))
+    module.add(SAddCU32(dst=sgpr(tmpspgr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
+    module.add(SLoadB64(dst=sgpr("SrdTD", 2), base=sgpr(tmpspgr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
+    module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+    module.add(SrdTDGeneralBatched_End)
     module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpspgr1+0), comment="add lo to SRTD" ))
     module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpspgr1+1), comment="add hi to SRTD" ))
 
     self.sgprPool.checkIn(tmpspgr0)
     self.sgprPool.checkIn(tmpspgr1)
+    self.sgprPool.checkIn(tmpspgr2)
 
     return module
 
   def globalWriteWorkGroupInit(self, kernel):
     module = Module("globalWriteWorkGroupInit")
     if kernel["BufferStore"]:
-      module.add(self.allocPostLoopSrd("D"))
-      module.add(self.allocPostLoopSrd("C"))
+      module.add(self.allocPostLoopSrd("D", kernel))
+      module.add(self.allocPostLoopSrd("C", kernel))
       sgprBpeList = ["GSULog2BpeC", "GSULog2BpeD"] if kernel["GlobalSplitU"] != 0 else []
 
       # Set BPE based on reduction algorithm
@@ -12470,11 +12573,29 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SOrB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), sgpr(stmpRes.idx)))
         module.add(SLShiftRightB32(sgpr("Srd%s+2"%tc), 7, sgpr("Srd%s+2"%tc)))
     return module
-
-  def allocPostLoopSrd(self, ch: str):
+ 
+  def allocPostLoopSrd(self, ch: str, kernel):   
     module = Module("allocPostLoopSrd")
-    # Buffer-load uses one base read pointer stored in the SRD - set it here:
+    GeneralBatchedGemmSrdInitiation = Label(label="GeneralBatchedGemmSrdInitiation"+ch, comment="Handling General Batched GEMM SRD initialization")
+    GeneralBatchedGemmSrdInitiation_End = Label(label="GeneralBatchedGemmSrdInitiation"+ch+"_End", comment="End of handling General Batched GEMM SRD initialization")
+    ArgTypeCheckLabel = Label(label="ArgTypeCheck"+ch, comment="Check if ArgType is for General Batched GEMM for "+ch)
+    if(((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) and kernel["GlobalSplitU"] != 0):
+      with self.allocTmpSgpr(1) as tmpSgprGSU:
+        module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+        module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
+        module.add(SCBranchSCC1(labelName=ArgTypeCheckLabel.getLabelName(), comment="Handling General Batched GEMM SRD initialization"))
+        if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and ch == "D")):
+          module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" )) 
+          module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName(), comment="End of handling General Batched GEMM SRD initialization"))
+        module.add(ArgTypeCheckLabel)
+    if kernel["ProblemType"]["SupportUserArgs"]:
+      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+      module.add(SCBranchSCC1(labelName=GeneralBatchedGemmSrdInitiation.getLabelName()))
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" ))
+    module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName()))
+    module.add(GeneralBatchedGemmSrdInitiation)
+    module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=0, comment="init SRD to 0" ))
+    module.add(GeneralBatchedGemmSrdInitiation_End)
     module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src="BufferOOB"))
     module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
     module.add(self.shiftSrd(ch))
@@ -15107,7 +15228,7 @@ class KernelWriterAssembly(KernelWriter):
         shiftOffset2 = shiftOffset + int(vi * dataType.numRegisters())
         if kernel["ProblemType"]["ComputeDataType"].isSingle():
           if dataType.isHalf():
-            module.add(VCvtF16toF32(dst=vgpr(tmpVgpr1 + vi + i * gwvw), src=vgpr(tmpVgpr1 + shiftOffset2+ i * gwvw), comment="convert to FP32"))
+            module.add(ECvtF16toF32(dst=vgpr(tmpVgpr1 + vi + i * gwvw), src=vgpr(tmpVgpr1 + shiftOffset2+ i * gwvw), sel=HighBitSel.HIGH if vi % 2 else HighBitSel.LOW, comment="convert to FP32"))
           elif dataType.isBFloat16():
             module.add(VCvtBF16toFP32(dst=vgpr(tmpVgpr1 + vi + i * gwvw), src=vgpr(tmpVgpr1 + shiftOffset2+ i * gwvw), vgprMask=None, vi=0))
           elif dataType.isInt32():
@@ -15308,6 +15429,8 @@ class KernelWriterAssembly(KernelWriter):
       isAdded = False
       if isinstance(storeModule, Module):
         for item in storeModule.items():
+          if isinstance(item, DSStoreInstruction):
+            item.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
           if (not isAdded) and isinstance(item, (VCvtInstruction, DSStoreInstruction, VCndMaskB32, VLShiftLeftB32, VAndB32)):
             vlcnt = vlcnt - 1
             module.add(SWaitCnt(vlcnt=(vlcnt), comment="wait for global load"))
@@ -15319,6 +15442,8 @@ class KernelWriterAssembly(KernelWriter):
           if isinstance(item, DSStoreInstruction):
             isAdded = False
       else:
+        if isinstance(storeModule, DSStoreInstruction):
+          storeModule.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
         module.add(storeModule)
 
     return module

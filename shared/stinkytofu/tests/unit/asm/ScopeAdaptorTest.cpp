@@ -43,13 +43,14 @@ class CountingPass : public Pass {
         return "CountingPass";
     }
 
-    void run(Function& func, PassContext& /*ctx*/) override {
+    PreservedAnalyses run(Function& func, PassContext& /*ctx*/, AnalysisManager& /*AM*/) override {
         count = 0;
         for (auto& bb : func) {
             for (auto& ir : bb) {
                 if (ir.getType() == IRBase::IRType::StinkyTofu) count++;
             }
         }
+        return PreservedAnalyses::none();
     }
 
     int count = 0;

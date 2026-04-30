@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "HipKernelHandle.hpp"
+#include "HipKernelUtils.hpp"
 #include "hip/ICompiledProgram.hpp"
 #include "hip/IRunnableKernel.hpp"
 
@@ -26,6 +27,13 @@ class BatchnormFwdTrainingParams
 public:
     BatchnormFwdTrainingParams(
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
+
+    BatchnormFwdTrainingParams(
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
@@ -53,6 +61,9 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningMean() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningVariance() const;
 
+    const std::optional<hip_kernel_utils::ActivationParams>& optActivation() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
+
 private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
@@ -71,6 +82,9 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _nextRunningVariance = nullptr;
     std::optional<double> _momentumValue;
     bool _hasRunningStats{false};
+
+    std::optional<hip_kernel_utils::ActivationParams> _optActivation;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
 class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>

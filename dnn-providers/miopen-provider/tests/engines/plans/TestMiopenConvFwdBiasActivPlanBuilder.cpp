@@ -17,7 +17,9 @@
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "tests/common/ActivationCommon.hpp"
 #include "tests/common/ConvolutionCommon.hpp"
+#include "tests/common/TestWorkarounds.hpp"
 
+#include <memory>
 #include <unordered_map>
 
 using namespace miopen_plugin;
@@ -29,8 +31,20 @@ using namespace hipdnn_frontend::graph;
 class TestMiopenConvFwdBiasActivPlanBuilder : public ::testing::Test
 {
 protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        // No issue-5409 SKIP here: the TEST_F cases in this fixture either call
+        // getMaxWorkspaceSize/buildPlan (which the workaround REJECT does not
+        // gate) or assert isApplicable() == false for non-CBA graphs (still true
+        // when the workaround forces false). Skipping would silently drop
+        // regression coverage on gfx90a. The GPU-execution fixture below keeps
+        // its SKIP because that one drives buildPlan on supported graphs.
+        _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
+    }
+
     MiopenConvFwdBiasActivPlanBuilder _planBuilder;
-    HipdnnMiopenHandle _dummyHandle;
+    std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
 };
 
 enum class TypeKey
@@ -119,6 +133,8 @@ protected:
         SKIP_IF_WINDOWS();
 
         SKIP_IF_NO_DEVICES();
+        SKIP_IF_WORKAROUND_ISSUE_5409();
+        _handle = std::make_unique<HipdnnMiopenHandle>();
 
         auto param = GetParam();
         auto& convTestCase = param.convTestCase;
@@ -235,7 +251,7 @@ protected:
     }
 
     MiopenConvFwdBiasActivPlanBuilder _planBuilder;
-    HipdnnMiopenHandle _handle;
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
 
     Graph _graphObj;
     bool _isApplicable;
@@ -578,15 +594,15 @@ TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAnd
     auto graph = GraphWrapper(graphBuffer.data(), graphBuffer.size());
     MockEngineConfig mockEngineConfig;
 
-    EXPECT_EQ(_planBuilder.isApplicable(_handle, graph), _isApplicable);
+    EXPECT_EQ(_planBuilder.isApplicable(*_handle, graph), _isApplicable);
 
     if(_isApplicable)
     {
         HipdnnMiopenSettings settings;
-        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(_handle, graph, settings));
+        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(*_handle, graph, settings));
 
         HipdnnMiopenContext ctx;
-        ASSERT_NO_THROW(_planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx));
+        ASSERT_NO_THROW(_planBuilder.buildPlan(*_handle, graph, mockEngineConfig, ctx));
         EXPECT_TRUE(ctx.hasValidPlan());
     }
 }
@@ -602,7 +618,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                          builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
@@ -610,7 +626,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                          builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
@@ -618,7 +634,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                          builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
@@ -626,7 +642,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                          builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
@@ -634,7 +650,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                          builder.GetSize());
 
-        bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+        bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
 }
@@ -644,13 +660,13 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForWrongNo
     {
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
-        bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+        bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
         EXPECT_FALSE(applicable);
     }
     {
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
-        bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+        bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
         EXPECT_FALSE(applicable);
     }
 }
@@ -662,7 +678,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
 
         HipdnnMiopenSettings settings;
-        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings),
+        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(*_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
     {
@@ -670,7 +686,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
 
         HipdnnMiopenSettings settings;
-        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings),
+        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(*_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
 }
@@ -682,7 +698,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForUnsupport
                                                                      builder.GetSize());
 
     HipdnnMiopenSettings settings;
-    EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings),
+    EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(*_dummyHandle, graph, settings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -695,7 +711,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGr
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
         HipdnnMiopenContext ctx;
 
-        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, mockConfig, ctx),
+        EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, mockGraph, mockConfig, ctx),
                      hipdnn_plugin_sdk::HipdnnPluginException);
         EXPECT_FALSE(ctx.hasValidPlan());
     }
@@ -704,7 +720,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGr
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
         HipdnnMiopenContext ctx;
 
-        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, mockConfig, ctx),
+        EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, mockGraph, mockConfig, ctx),
                      hipdnn_plugin_sdk::HipdnnPluginException);
         EXPECT_FALSE(ctx.hasValidPlan());
     }
@@ -718,7 +734,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph
     HipdnnMiopenContext ctx;
     MockEngineConfig mockConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, mockConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }

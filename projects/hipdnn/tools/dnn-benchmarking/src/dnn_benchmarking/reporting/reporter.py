@@ -7,8 +7,14 @@ import sys
 from pathlib import Path
 from typing import Any, Optional, TextIO
 
-from ..config.benchmark_config import ABTestConfig, BenchmarkConfig
+from ..config.benchmark_config import ABTestConfig, BenchmarkConfig, SuiteConfig
 from .statistics import BenchmarkStats, CombinedBenchmarkStats
+from .suite_results import (
+    CorrectnessResult,
+    GraphResult,
+    ProviderEngineResult,
+    SuiteMetadata,
+)
 
 
 class Reporter:
@@ -31,18 +37,27 @@ class Reporter:
         """
         self._output = output
 
-    def print_header(self, config: BenchmarkConfig, graph_name: str) -> None:
+    def print_header(
+        self,
+        config: BenchmarkConfig,
+        graph_name: str,
+        provider: Optional[str] = None,
+    ) -> None:
         """Print benchmark configuration header.
 
         Args:
             config: Benchmark configuration.
             graph_name: Name of the graph being benchmarked.
+            provider: Optional engine display name. When set, replaces the
+                legacy "(MIOpen)" literal so suite-mode verbose output can
+                show the actual engine for each result.
         """
+        engine_label = provider if provider else "MIOpen"
         self._print_line("=")
         self._print(f"hipDNN Benchmark: {graph_name}")
         self._print_line("=")
         self._print(f"Graph:      {config.graph_path}")
-        self._print(f"Engine ID:  {config.engine_id} (MIOpen)")
+        self._print(f"Engine ID:  {config.engine_id} ({engine_label})")
         self._print(f"Warmup:     {config.warmup_iters} iterations")
         self._print(f"Benchmark:  {config.benchmark_iters} iterations")
         self._print_line("-")
@@ -394,6 +409,132 @@ class Reporter:
         self._print(f"  (rtol={rtol:.0e}, atol={atol:.0e})")
 
     # Reference Validation Methods
+
+    # Suite Methods
+
+    def print_suite_header(self, total_graphs: int) -> None:
+        """Print suite execution header."""
+        self._print_line("=")
+        self._print(f"hipDNN Benchmark Suite: {total_graphs} graph(s)")
+        self._print_line("=")
+        self._print("")
+
+    def print_suite_graph_start(self, index: int, total: int, graph_name: str) -> None:
+        """Print per-graph progress line at start.
+
+        Format: [1/3] graph_name...
+        """
+        self._print(f"[{index}/{total}] {graph_name}...")
+
+    def print_suite_graph_result(
+        self, passed: int, failed: int, skipped: int, errored: int
+    ) -> None:
+        """Print per-graph result summary line.
+
+        Format:   -> 2 passed, 1 failed, 0 skipped, 0 errored
+        """
+        self._print(
+            f"  -> {passed} passed, {failed} failed, "
+            f"{skipped} skipped, {errored} errored"
+        )
+
+    def print_suite_graph_error(self, graph_name: str, error: str) -> None:
+        """Print inline error when a graph fails to load/execute.
+
+        Prints error then continues (caller must not abort).
+        """
+        self._print(f"  ERROR: {error}")
+
+    def print_suite_summary(self, metadata: SuiteMetadata) -> None:
+        """Print suite execution summary from suite metadata.
+
+        Args:
+            metadata: SuiteMetadata containing graph and combination totals.
+        """
+        self._print("")
+        self._print_line("-")
+        self._print("Suite Summary:")
+        self._print(f"  Graphs:       {metadata.total_graphs}")
+        self._print(f"  Combinations: {metadata.total_combinations}")
+        self._print(f"  Passed:       {metadata.pass_combinations}")
+        self._print(f"  Failed:       {metadata.fail_combinations}")
+        self._print(f"  Skipped:      {metadata.skip_combinations}")
+        self._print(f"  Errors:       {metadata.error_combinations}")
+
+    def print_suite_footer(self) -> None:
+        """Print suite footer."""
+        self._print_line("=")
+
+    def print_verbose_graph_result(
+        self, graph_result: GraphResult, suite_config: SuiteConfig
+    ) -> None:
+        """Render a graph's per-engine results in the rich single-graph format.
+
+        For each ProviderEngineResult, prints a header + init time + execution
+        statistics + correctness block, matching the legacy run_benchmark output.
+        Used in verbose mode when the unified runner processes a graph.
+        """
+        for pe in graph_result.results:
+            cfg_view = BenchmarkConfig(
+                graph_path=Path(graph_result.graph_path),
+                warmup_iters=suite_config.warmup_iters,
+                benchmark_iters=suite_config.benchmark_iters,
+                engine_id=pe.engine_id,
+            )
+            self.print_header(cfg_view, graph_result.graph_name, provider=pe.provider)
+
+            if pe.cpu_build_time_ms is not None:
+                self.print_init_time(pe.cpu_build_time_ms)
+
+            if pe.status == "success":
+                self._print_pe_stats(pe)
+                if pe.correctness is not None:
+                    self._print_pe_correctness(pe.correctness, suite_config)
+            elif pe.status == "skipped":
+                self._print(f"Status: SKIPPED ({pe.skip_reason or 'no reason given'})")
+                self._print("")
+            else:  # error
+                self.print_error(pe.error_message or "execution failed")
+                self._print("")
+
+            self.print_footer()
+            self._print("")
+
+    def _print_pe_stats(self, pe: ProviderEngineResult) -> None:
+        """Print E2E + kernel stats from a ProviderEngineResult."""
+        if pe.e2e_stats is not None:
+            self._print("E2E Execution Statistics:")
+            self._print_stats_block(pe.e2e_stats)
+            self._print("")
+        if pe.gpu_kernel_stats is not None:
+            self._print("Kernel Execution Statistics:")
+            self._print_stats_block(pe.gpu_kernel_stats)
+            self._print("")
+        elif pe.e2e_stats is not None:
+            self._print("Kernel Timing: Not available")
+            self._print("")
+
+    def _print_pe_correctness(
+        self, correctness: CorrectnessResult, suite_config: SuiteConfig
+    ) -> None:
+        """Print correctness block from a CorrectnessResult."""
+        if correctness.tolerance_match is None:
+            reason = correctness.error_message or "no reference comparison performed"
+            self._print(f"Reference Validation: SKIPPED ({reason})")
+            self._print(f"  Provider: {suite_config.reference_provider}")
+            self._print("")
+            return
+
+        status = "PASSED" if correctness.tolerance_match else "FAILED"
+        self._print(f"Reference Validation: {status}")
+        self._print(f"  Provider: {suite_config.reference_provider}")
+        self._print(f"  (rtol={correctness.rtol:.0e}, atol={correctness.atol:.0e})")
+        if not correctness.tolerance_match:
+            if correctness.max_abs_diff is not None:
+                self._print(f"  Max abs diff: {correctness.max_abs_diff:.2e}")
+            if correctness.max_rel_diff is not None:
+                self._print(f"  Max rel diff: {correctness.max_rel_diff:.2e}")
+        self._print("")
 
     def print_reference_validation(
         self,

@@ -784,7 +784,7 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
         imod.addComment1("local write B")
         imod.add(writer.codes.localWriteB)
 
-        if kernel["PrefetchGlobalRead"] == 2: # TODO: check condition
+        if kernel["PrefetchGlobalRead"] == 2 and writer.codes.perIterLocalWriteCodeNGLL is not None: # TODO: check condition
             # do we need a module here? That would prevent these from being scheduled
             imod = writer.codes.perIterLocalWriteCodeNGLL[localWriteEndIter][1].add(Module())
             imod.add(

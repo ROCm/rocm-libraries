@@ -417,6 +417,12 @@ inline std::map<std::string, int>
     rv["s_delay_alu"]
         = tryAssembler(isaVersion, assemblerPath, "s_delay_alu instid0(VALU_DEP_1)", isDebug);
     rv["HasVgprMSB"] = tryAssembler(isaVersion, assemblerPath, "s_set_vgpr_msb 0", isDebug);
+    // 16-bit MSB form packs the previous-instruction MSB in the high byte
+    // (e.g. 0x0101). Some assemblers accept only the 8-bit form, so probe
+    // the wider encoding separately.
+    rv["HasVgprMSB16"]
+        = rv["HasVgprMSB"]
+          && tryAssembler(isaVersion, assemblerPath, "s_set_vgpr_msb 0x0101", isDebug);
     // workaround: as we generate s_set_vgpr_msb in toString(), we can't calculate inst len correctly.
     rv["ShortBranchMaxLength"] = rv["HasVgprMSB"]? 8192 : 16384;
 
@@ -488,7 +494,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
     rv["DSLow16NotPreserve"] = isaVersion[0] == 12;
     rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
-    rv["NoSDWA"]             = isaVersion[0] == 12;
+    rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});
     rv["VOP3ByteSel"]        = isaVersion[0] == 12;
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
