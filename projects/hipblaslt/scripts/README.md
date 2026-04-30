@@ -14,7 +14,7 @@ From the **hipblaslt project root** (where `library/` and `tensilelite/` live):
 python scripts/run_tensile_logic_check.py
 ```
 
-**Windows:** `python scripts\run_tensile_logic_check.py` (or use `py` if you have the launcher.)
+**Windows**: `python scripts\run_tensile_logic_check.py` (or use `py` if you have the launcher).
 
 That’s it. Use whatever Python you have (system, store, or a venv). If that Python is missing dependencies (e.g. joblib) and the project has a **`.venv`** in the repo root, the script will re-run itself with `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` (Unix), so you don’t have to remember to activate.
 
