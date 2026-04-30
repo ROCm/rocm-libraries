@@ -1153,6 +1153,22 @@ TEST_F(TestTensorDescriptor, ToStringContainsExpectedInfo)
     ASSERT_NE(str.find("999"), std::string::npos);
 }
 
+TEST_F(TestTensorDescriptor, ToStringValueBool)
+{
+    auto desc = getDescriptor();
+    setRequiredAttributes();
+    auto dataType = HIPDNN_DATA_BOOLEAN;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+
+    bool valTrue = true;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(valTrue), &valTrue);
+    ASSERT_NE(desc->toString().find("value=true"), std::string::npos);
+
+    bool valFalse = false;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(valFalse), &valFalse);
+    ASSERT_NE(desc->toString().find("value=false"), std::string::npos);
+}
+
 TEST_F(TestTensorDescriptor, ToStringHandlesUnsetDataType)
 {
     auto desc = getDescriptor();
