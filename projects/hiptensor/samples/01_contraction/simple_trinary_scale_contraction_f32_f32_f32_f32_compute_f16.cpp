@@ -23,7 +23,6 @@
  * THE SOFTWARE.
  *
  *******************************************************************************/
-#pragma once
 
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/hiptensor_types.h>
@@ -32,53 +31,69 @@
 
 #include "common.hpp"
 
-template <typename ADataType,
-          typename BDataType,
-          typename CDataType,
-          hiptensorDataType_t          typeA,
-          hiptensorDataType_t          typeB,
-          hiptensorDataType_t          typeC,
-          hiptensorComputeDescriptor_t typeCompute>
-int bilinearContractionSample(void* alpha, void* beta)
+int main(int argc, char* argv[])
 {
+    /***************************************
+    * Check device support                 *
+    **************************************/
+    if(!isF32F16MatrixCoreSupported())
+    {
+        std::cout << "unsupported host device" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    typedef float    ADataType;
+    typedef float    BDataType;
+    typedef float    CDataType;
+    typedef float    EDataType;
+    typedef _Float16 floatTypeCompute;
+
+    constexpr hiptensorDataType_t          typeA       = HIPTENSOR_R_32F;
+    constexpr hiptensorDataType_t          typeB       = HIPTENSOR_R_32F;
+    constexpr hiptensorDataType_t          typeC       = HIPTENSOR_R_32F;
+    constexpr hiptensorDataType_t          typeE       = HIPTENSOR_R_32F;
+    constexpr hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_16F;
+
     /**********************
-     * Computing: C_{m,n,u,v} = alpha * A_{m,n,h,k} B_{u,v,h,k} + beta * C_{m,n,u,v}
+     * Computing: E_{m,n,b,r,a} = alpha * A_{m,k,a,j,b,i} B_{k,n,i} C_{r,j}
+     *            (scale: no beta * D term)
      **********************/
 
-    std::vector<int> modeC{'m', 'n', 'u', 'v'};
-    std::vector<int> modeA{'m', 'n', 'h', 'k'};
-    std::vector<int> modeB{'u', 'v', 'h', 'k'};
+    std::vector<int> modeA{'m', 'k', 'a', 'j', 'b', 'i'};
+    std::vector<int> modeB{'k', 'n', 'i'};
+    std::vector<int> modeC{'r', 'j'};
+    std::vector<int> modeE{'m', 'n', 'b', 'r', 'a'};
 
     int nmodeA = modeA.size();
     int nmodeB = modeB.size();
     int nmodeC = modeC.size();
+    int nmodeE = modeE.size();
 
     std::unordered_map<int, int64_t> extent;
+    extent['m'] = 64;
+    extent['a'] = 32;
+    extent['b'] = 32;
+    extent['n'] = 64;
+    extent['r'] = 64;
+    extent['k'] = 8;
+    extent['i'] = 8;
+    extent['j'] = 64;
 
-    extent['m'] = 128;
-    extent['n'] = 32;
-    extent['u'] = 48;
-    extent['v'] = 32;
-    extent['h'] = 64;
-    extent['k'] = 56;
-
-    std::vector<int64_t> c_ms_ns_lengths;
-    for(auto mode : modeC)
-    {
-        c_ms_ns_lengths.push_back(extent[mode]);
-    }
-
-    std::vector<int64_t> a_ms_ks_lengths;
+    std::vector<int64_t> extentA;
     for(auto mode : modeA)
-    {
-        a_ms_ks_lengths.push_back(extent[mode]);
-    }
+        extentA.push_back(extent[mode]);
 
-    std::vector<int64_t> b_ns_ks_lengths;
+    std::vector<int64_t> extentB;
     for(auto mode : modeB)
-    {
-        b_ns_ks_lengths.push_back(extent[mode]);
-    }
+        extentB.push_back(extent[mode]);
+
+    std::vector<int64_t> extentC;
+    for(auto mode : modeC)
+        extentC.push_back(extent[mode]);
+
+    std::vector<int64_t> extentE;
+    for(auto mode : modeE)
+        extentE.push_back(extent[mode]);
 
     /**********************
      * Allocating data
@@ -86,15 +101,21 @@ int bilinearContractionSample(void* alpha, void* beta)
     std::cout << "Initializing host data..." << std::endl;
 
     size_t elementsA = std::accumulate(
-        a_ms_ks_lengths.begin(), a_ms_ks_lengths.end(), size_t{1}, std::multiplies<size_t>());
+        extentA.begin(), extentA.end(), size_t{1}, std::multiplies<size_t>());
     size_t elementsB = std::accumulate(
-        b_ns_ks_lengths.begin(), b_ns_ks_lengths.end(), size_t{1}, std::multiplies<size_t>());
+        extentB.begin(), extentB.end(), size_t{1}, std::multiplies<size_t>());
     size_t elementsC = std::accumulate(
-        c_ms_ns_lengths.begin(), c_ms_ns_lengths.end(), size_t{1}, std::multiplies<size_t>());
+        extentC.begin(), extentC.end(), size_t{1}, std::multiplies<size_t>());
+    size_t elementsE = std::accumulate(
+        extentE.begin(), extentE.end(), size_t{1}, std::multiplies<size_t>());
 
     size_t sizeA = sizeof(ADataType) * elementsA;
     size_t sizeB = sizeof(BDataType) * elementsB;
     size_t sizeC = sizeof(CDataType) * elementsC;
+    size_t sizeE = sizeof(EDataType) * elementsE;
+
+    printf("Total memory: %.2f GiB\n",
+           (sizeA + sizeB + sizeC + sizeE) / 1024. / 1024. / 1024);
 
     ADataType* A = nullptr;
     BDataType* B = nullptr;
@@ -103,51 +124,21 @@ int bilinearContractionSample(void* alpha, void* beta)
     CHECK_HIP_ERROR(hipHostMalloc((void**)&B, sizeB));
     CHECK_HIP_ERROR(hipHostMalloc((void**)&C, sizeC));
 
-    void *A_d, *B_d, *C_d;
-
+    void *A_d, *B_d, *C_d, *E_d;
     CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&A_d), sizeA));
     CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&B_d), sizeB));
     CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&C_d), sizeC));
+    CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&E_d), sizeE));
 
     /*******************
      * Initialize data
      *******************/
-    int initMethod = 1; // TODO read value from commandline
     for(int64_t i = 0; i < elementsA; i++)
-    {
-        if(initMethod == 0)
-        {
-            A[i] = ADataType(float(std::rand()) / float(RAND_MAX) - 0.5) * 100;
-        }
-        else
-        {
-            A[i] = (ADataType)(float(i) / 100);
-        }
-    }
-
+        A[i] = (ADataType)(float(std::rand()) / float(RAND_MAX) - 0.5) * 100;
     for(int64_t i = 0; i < elementsB; i++)
-    {
-        if(initMethod == 0)
-        {
-            B[i] = BDataType(float(std::rand()) / float(RAND_MAX) - 0.5) * 100;
-        }
-        else
-        {
-            B[i] = (BDataType)(float(i) / 100);
-        }
-    }
-
+        B[i] = (BDataType)(float(std::rand()) / float(RAND_MAX) - 0.5) * 100;
     for(int64_t i = 0; i < elementsC; i++)
-    {
-        if(initMethod == 0)
-        {
-            C[i] = CDataType(float(std::rand()) / float(RAND_MAX) - 0.5) * 100;
-        }
-        else
-        {
-            C[i] = (CDataType)(float(i) / 100);
-        }
-    }
+        C[i] = (CDataType)(float(std::rand()) / float(RAND_MAX) - 0.5) * 100;
 
     /********************************************
      * Transfer the Host Tensor to Device Memory
@@ -170,52 +161,68 @@ int bilinearContractionSample(void* alpha, void* beta)
     /********************************************
      * Initialize tensors with the input lengths
      ********************************************/
-    hiptensorTensorDescriptor_t a_ms_ks = nullptr;
+    hiptensorTensorDescriptor_t descA = nullptr;
     CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
-                                                          &a_ms_ks,
+                                                          &descA,
                                                           nmodeA,
-                                                          a_ms_ks_lengths.data(),
+                                                          extentA.data(),
                                                           NULL, /*stride*/
                                                           typeA,
                                                           alignmentRequirement));
 
-    hiptensorTensorDescriptor_t b_ns_ks = nullptr;
+    hiptensorTensorDescriptor_t descB = nullptr;
     CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
-                                                          &b_ns_ks,
+                                                          &descB,
                                                           nmodeB,
-                                                          b_ns_ks_lengths.data(),
+                                                          extentB.data(),
                                                           NULL, /*stride*/
                                                           typeB,
                                                           alignmentRequirement));
 
-    hiptensorTensorDescriptor_t c_ms_ns = nullptr;
+    hiptensorTensorDescriptor_t descC = nullptr;
     CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
-                                                          &c_ms_ns,
+                                                          &descC,
                                                           nmodeC,
-                                                          c_ms_ns_lengths.data(),
+                                                          extentC.data(),
                                                           NULL, /*stride*/
                                                           typeC,
                                                           alignmentRequirement));
 
-    /********************************
+    hiptensorTensorDescriptor_t descE = nullptr;
+    CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
+                                                          &descE,
+                                                          nmodeE,
+                                                          extentE.data(),
+                                                          NULL, /*stride*/
+                                                          typeE,
+                                                          alignmentRequirement));
+
+    /*******************************
      * Create Contraction Descriptor
-     ********************************/
+     *******************************/
 
     hiptensorOperationDescriptor_t desc;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreateContraction(handle,
-                                                     &desc,
-                                                     a_ms_ks,
-                                                     modeA.data(),
-                                                     HIPTENSOR_OP_IDENTITY,
-                                                     b_ns_ks,
-                                                     modeB.data(),
-                                                     HIPTENSOR_OP_IDENTITY,
-                                                     c_ms_ns,
-                                                     modeC.data(),
-                                                     HIPTENSOR_OP_IDENTITY,
-                                                     c_ms_ns,
-                                                     modeC.data(),
-                                                     typeCompute));
+    CHECK_HIPTENSOR_ERROR(hiptensorCreateContractionTrinary(handle,
+                                                            &desc,
+                                                            descA,
+                                                            modeA.data(),
+                                                            HIPTENSOR_OP_IDENTITY,
+                                                            descB,
+                                                            modeB.data(),
+                                                            HIPTENSOR_OP_IDENTITY,
+                                                            descC,
+                                                            modeC.data(),
+                                                            HIPTENSOR_OP_IDENTITY,
+                                                            nullptr,
+                                                            nullptr,
+                                                            HIPTENSOR_OP_IDENTITY,
+                                                            descE,
+                                                            modeE.data(),
+                                                            typeCompute));
+
+    /*****************************
+     * Optional: ensure that the scalar type is correct.
+     *****************************/
 
     hiptensorDataType_t scalarType;
     CHECK_HIPTENSOR_ERROR(
@@ -226,12 +233,16 @@ int bilinearContractionSample(void* alpha, void* beta)
                                                  sizeof(scalarType)));
     assert(scalarType == *hiptensor::convertToHipTensorDataType(typeCompute));
 
-    /***************************
+    floatTypeCompute alpha = 1.1f;
+
+    /**************************
      * Set the algorithm to use
      ***************************/
+    const hiptensorAlgo_t algo = HIPTENSOR_ALGO_DEFAULT;
+
     hiptensorPlanPreference_t planPref;
     CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(
-        handle, &planPref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE));
+        handle, &planPref, algo, HIPTENSOR_JIT_MODE_NONE));
 
     /**********************
      * Query workspace
@@ -248,98 +259,57 @@ int bilinearContractionSample(void* alpha, void* beta)
     hiptensorPlan_t plan;
     CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
 
-    // TODO query actually used workspace
     void* workspace = nullptr;
-
     if(worksize > 0)
     {
         CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&workspace), worksize));
     }
 
-    std::cout << "Launching contraction kernel..." << std::endl;
+    /**********************
+     * Run
+     **********************/
+    std::cout << "Launching trinary scale contraction kernel..." << std::endl;
 
-    CHECK_HIPTENSOR_ERROR(hiptensorContract(
-        handle, plan, alpha, A_d, B_d, beta, C_d, C_d, workspace, worksize, 0 /* stream */));
+    CHECK_HIPTENSOR_ERROR(hiptensorContractTrinary(handle,
+                                                   plan,
+                                                   (void*)&alpha,
+                                                   A_d,
+                                                   B_d,
+                                                   C_d,
+                                                   nullptr,
+                                                   nullptr,
+                                                   E_d,
+                                                   workspace,
+                                                   worksize,
+                                                   0 /* stream */));
 
-#if !NDEBUG
-    bool printElements = false;
-    bool storeElements = false;
-
-    if(printElements)
-    {
-        if(elementsA < MAX_ELEMENTS_PRINT_COUNT)
-        {
-            std::cout << "Tensor A elements:\n";
-            hiptensorPrintArrayElements(std::cout, A, elementsA);
-            std::cout << std::endl;
-        }
-
-        if(elementsB < MAX_ELEMENTS_PRINT_COUNT)
-        {
-            std::cout << "Tensor B elements:\n";
-            hiptensorPrintArrayElements(std::cout, B, elementsB);
-            std::cout << std::endl;
-        }
-
-        if(elementsC < MAX_ELEMENTS_PRINT_COUNT)
-        {
-            std::cout << "Tensor C elements:\n";
-            hiptensorPrintArrayElements(std::cout, C, elementsC);
-            std::cout << std::endl;
-        }
-
-        CHECK_HIP_ERROR(hipMemcpy(C, C_d, sizeC, hipMemcpyDeviceToHost));
-
-        if(elementsC < MAX_ELEMENTS_PRINT_COUNT)
-        {
-            std::cout << "Tensor D elements:\n";
-            hiptensorPrintArrayElements(std::cout, C, elementsC);
-            std::cout << std::endl;
-        }
-    }
-
-    if(storeElements)
-    {
-        std::ofstream tensorA, tensorB, tensorC;
-        tensorA.open("tensor_A.txt");
-        hiptensorPrintElementsToFile(tensorA, A, elementsA, ", ");
-        tensorA.close();
-
-        tensorB.open("tensor_B.txt");
-        hiptensorPrintElementsToFile(tensorB, B, elementsB, ", ");
-        tensorB.close();
-
-        tensorC.open("tensor_C.txt");
-        hiptensorPrintElementsToFile(tensorC, C, elementsC, ", ");
-        tensorC.close();
-
-        CHECK_HIP_ERROR(hipMemcpy(C, C_d, sizeC, hipMemcpyDeviceToHost));
-
-        tensorC.open("tensor_C_scale_contraction_results.txt");
-        hiptensorPrintElementsToFile(tensorC, C, elementsC, ", ");
-        tensorC.close();
-    }
-
-#endif
-
+    /**********************
+     * Clean up
+     **********************/
     CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
     CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
     CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
     CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
-    if(a_ms_ks)
+
+    if(descA)
     {
-        hiptensorDestroyTensorDescriptor(a_ms_ks);
-        a_ms_ks = nullptr;
+        hiptensorDestroyTensorDescriptor(descA);
+        descA = nullptr;
     }
-    if(b_ns_ks)
+    if(descB)
     {
-        hiptensorDestroyTensorDescriptor(b_ns_ks);
-        b_ns_ks = nullptr;
+        hiptensorDestroyTensorDescriptor(descB);
+        descB = nullptr;
     }
-    if(c_ms_ns)
+    if(descC)
     {
-        hiptensorDestroyTensorDescriptor(c_ms_ns);
-        c_ms_ns = nullptr;
+        hiptensorDestroyTensorDescriptor(descC);
+        descC = nullptr;
+    }
+    if(descE)
+    {
+        hiptensorDestroyTensorDescriptor(descE);
+        descE = nullptr;
     }
 
     HIPTENSOR_FREE_HOST(A);
@@ -349,6 +319,7 @@ int bilinearContractionSample(void* alpha, void* beta)
     HIPTENSOR_FREE_DEVICE(A_d);
     HIPTENSOR_FREE_DEVICE(B_d);
     HIPTENSOR_FREE_DEVICE(C_d);
+    HIPTENSOR_FREE_DEVICE(E_d);
     HIPTENSOR_FREE_DEVICE(workspace);
 
     std::cout << "Finished!" << std::endl;
