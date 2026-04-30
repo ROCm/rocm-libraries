@@ -17,6 +17,7 @@
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "tests/common/ActivationCommon.hpp"
 #include "tests/common/ConvolutionCommon.hpp"
+#include "tests/common/TestWorkarounds.hpp"
 
 #include <memory>
 #include <unordered_map>
@@ -33,6 +34,12 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        // No issue-5409 SKIP here: the TEST_F cases in this fixture either call
+        // getMaxWorkspaceSize/buildPlan (which the workaround REJECT does not
+        // gate) or assert isApplicable() == false for non-CBA graphs (still true
+        // when the workaround forces false). Skipping would silently drop
+        // regression coverage on gfx90a. The GPU-execution fixture below keeps
+        // its SKIP because that one drives buildPlan on supported graphs.
         _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
     }
 
@@ -126,6 +133,7 @@ protected:
         SKIP_IF_WINDOWS();
 
         SKIP_IF_NO_DEVICES();
+        SKIP_IF_WORKAROUND_ISSUE_5409();
         _handle = std::make_unique<HipdnnMiopenHandle>();
 
         auto param = GetParam();

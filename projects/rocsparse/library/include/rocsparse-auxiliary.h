@@ -949,21 +949,21 @@ rocsparse_status rocsparse_create_coo_aos_descr(rocsparse_spmat_descr* descr,
  *  @param[out]
  *  descr        the pointer to the sparse BSR matrix descriptor.
  *  @param[in]
- *  mb           number of rows in the BSR matrix.
+ *  brows        number of block rows in the BSR matrix.
  *  @param[in]
- *  nb           number of columns in the BSR matrix
+ *  bcols        number of block columns in the BSR matrix.
  *  @param[in]
- *  nnzb         number of non-zeros in the BSR matrix.
+ *  bnnz         number of non-zero blocks in the BSR matrix.
  *  @param[in]
  *  block_dir    direction of the internal block storage.
  *  @param[in]
  *  block_dim    dimension of the blocks.
  *  @param[in]
- *  bsr_row_ptr  row offsets of the BSR matrix (must be array of length \p mb+1 ).
+ *  bsr_row_ptr  row offsets of the BSR matrix (must be array of length \p brows+1 ).
  *  @param[in]
- *  bsr_col_ind  column indices of the BSR matrix (must be array of length \p nnzb ).
+ *  bsr_col_ind  column indices of the BSR matrix (must be array of length \p bnnz ).
  *  @param[in]
- *  bsr_val      values of the BSR matrix (must be array of length \p nnzb * \p block_dim * \p block_dim ).
+ *  bsr_val      values of the BSR matrix (must be array of length \p bnnz * \p block_dim * \p block_dim ).
  *  @param[in]
  *  row_ptr_type \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
  *  @param[in]
@@ -976,14 +976,15 @@ rocsparse_status rocsparse_create_coo_aos_descr(rocsparse_spmat_descr* descr,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p bsr_row_ptr or \p bsr_col_ind or \p bsr_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p mb or \p nb or \p nnzb \p block_dim is invalid.
+ *  \retval rocsparse_status_invalid_size if \p brows or \p bcols or \p bnnz \p block_dim is invalid.
  *  \retval rocsparse_status_invalid_value if \p row_ptr_type or \p col_ind_type or \p idx_base or \p data_type or \p block_dir is invalid.
  */
+/**@{*/
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_bsr_descr(rocsparse_spmat_descr* descr,
-                                            int64_t                mb,
-                                            int64_t                nb,
-                                            int64_t                nnzb,
+                                            int64_t                brows,
+                                            int64_t                bcols,
+                                            int64_t                bnnz,
                                             rocsparse_direction    block_dir,
                                             int64_t                block_dim,
                                             void*                  bsr_row_ptr,
@@ -993,6 +994,22 @@ rocsparse_status rocsparse_create_bsr_descr(rocsparse_spmat_descr* descr,
                                             rocsparse_indextype    col_ind_type,
                                             rocsparse_index_base   idx_base,
                                             rocsparse_datatype     data_type);
+
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_const_bsr_descr(rocsparse_const_spmat_descr* descr,
+                                                  int64_t                      brows,
+                                                  int64_t                      bcols,
+                                                  int64_t                      bnnz,
+                                                  rocsparse_direction          block_dir,
+                                                  int64_t                      block_dim,
+                                                  const void*                  bsr_row_ptr,
+                                                  const void*                  bsr_col_ind,
+                                                  const void*                  bsr_val,
+                                                  rocsparse_indextype          row_ptr_type,
+                                                  rocsparse_indextype          col_ind_type,
+                                                  rocsparse_index_base         idx_base,
+                                                  rocsparse_datatype           data_type);
+/**@}*/
 
 /*! \ingroup aux_module
  *  \brief Create a sparse CSR matrix descriptor
@@ -2432,21 +2449,21 @@ rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
  *  @param[in]
  *  descr        the pointer to the sparse BSR matrix descriptor.
  *  @param[out]
- *  brows         number of rows in the BSR matrix.
+ *  brows        number of block rows in the BSR matrix.
  *  @param[out]
- *  bcols         number of columns in the BSR matrix
+ *  bcols        number of block columns in the BSR matrix.
  *  @param[out]
- *  bnnz          number of non-zeros in the BSR matrix.
+ *  bnnz         number of non-zero blocks in the BSR matrix.
  *  @param[out]
- *  bdir          storage layout of the dense block matrices.
+ *  block_dir    storage layout of the dense block matrices.
  *  @param[out]
- *  bdim          block dimension.
+ *  block_dim    block dimension.
  *  @param[out]
  *  bsr_row_ptr  row offsets of the BSR matrix (must be array of length \p brows+1 ).
  *  @param[out]
  *  bsr_col_ind  column indices of the BSR matrix (must be array of length \p bnnz ).
  *  @param[out]
- *  bsr_val      values of the BSR matrix (must be array of length \p bnnz * \p bdim * \p bdim ).
+ *  bsr_val      values of the BSR matrix (must be array of length \p bnnz * \p block_dim * \p block_dim ).
  *  @param[out]
  *  row_ptr_type \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
  *  @param[out]
@@ -2458,9 +2475,10 @@ rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
  *               \ref rocsparse_datatype_f32_c or \ref rocsparse_datatype_f64_c.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr or \p csr_row_ptr or \p csr_col_ind or \p csr_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz is invalid.
- *  \retval rocsparse_status_invalid_value if \p row_ptr_type or \p col_ind_type or \p idx_base or \p data_type is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p brows or \p bcols or \p bnnz or
+ *          \p block_dir or \p block_dim or \p bsr_row_ptr or \p bsr_col_ind or \p bsr_val or
+ *          \p row_ptr_type or \p col_ind_type or \p idx_base or \p data_type is invalid.
+ *  \retval rocsparse_status_not_initialized if \p descr has not been initialized.
  */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -2468,8 +2486,8 @@ rocsparse_status rocsparse_bsr_get(const rocsparse_spmat_descr descr,
                                    int64_t*                    brows,
                                    int64_t*                    bcols,
                                    int64_t*                    bnnz,
-                                   rocsparse_direction*        bdir,
-                                   int64_t*                    bdim,
+                                   rocsparse_direction*        block_dir,
+                                   int64_t*                    block_dim,
                                    void**                      bsr_row_ptr,
                                    void**                      bsr_col_ind,
                                    void**                      bsr_val,
@@ -2483,8 +2501,8 @@ rocsparse_status rocsparse_const_bsr_get(rocsparse_const_spmat_descr descr,
                                          int64_t*                    brows,
                                          int64_t*                    bcols,
                                          int64_t*                    bnnz,
-                                         rocsparse_direction*        bdir,
-                                         int64_t*                    bdim,
+                                         rocsparse_direction*        block_dir,
+                                         int64_t*                    block_dim,
                                          const void**                bsr_row_ptr,
                                          const void**                bsr_col_ind,
                                          const void**                bsr_val,

@@ -12,6 +12,7 @@
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
+#include "tests/common/TestWorkarounds.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -24,6 +25,7 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        SKIP_IF_WORKAROUND_ISSUE_5409();
         _handle = std::make_unique<HipdnnMiopenHandle>();
     }
 
