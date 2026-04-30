@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "ck_tile/ops/direct_convolution/kernel/grouped_8c_fp16_tile_conv_impl.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_8c_fp16_tile_conv_impl_v2.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_conv_host_args.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
@@ -23,6 +24,15 @@ struct VersionTraits8c<Version::v1>
     static constexpr auto get_launch_params = &grouped_8c_tile::v1::get_launch_params;
     static constexpr auto launch = &grouped_8c_tile::v1::launch;
     static constexpr auto make_variant = &grouped_8c_tile::v1::make_variant;
+};
+
+template <>
+struct VersionTraits8c<Version::v2>
+{
+    static constexpr auto& configs = grouped_8c_tile::v2::configs;
+    static constexpr auto get_launch_params = &grouped_8c_tile::v2::get_launch_params;
+    static constexpr auto launch = &grouped_8c_tile::v2::launch;
+    static constexpr auto make_variant = &grouped_8c_tile::v2::make_variant;
 };
 
 /// Wrapper struct that presents the grouped_8c Fprop tile conv kernel (at a specific config index)

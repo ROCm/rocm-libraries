@@ -126,3 +126,50 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<14, direc
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<15, direct_conv::Version::v1>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<16, direct_conv::Version::v1>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<17, direct_conv::Version::v1>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Direct CK Tile convolution (streaming) 8c v2 kernels — Fprop configs
+////////////////////////////////////////////////////////////////////////
+// Group 0: no swizzle, direct DRAM epilogue — Fprop indices 9-17
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<9, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<10, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<11, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<12, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<13, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<14, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<15, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<16, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<17, direct_conv::Version::v2>, SIGNATURE>);
+// Group 1: no swizzle, LDS-staged epilogue — Fprop indices 27-35
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<27, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<28, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<29, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<30, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<31, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<32, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<33, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<34, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<35, direct_conv::Version::v2>, SIGNATURE>);
+// Group 2: XOR swizzle, direct DRAM epilogue — Fprop indices 45-53
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<45, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<46, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<47, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<48, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<49, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<50, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<51, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<52, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<53, direct_conv::Version::v2>, SIGNATURE>);
+// Group 3: XOR swizzle, LDS-staged epilogue — Fprop indices 63-71
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<63, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<64, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<65, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<66, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<67, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<68, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<69, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<70, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<71, direct_conv::Version::v2>, SIGNATURE>);
+// Group 4: Cyclic-shift swizzle — Fprop indices 72-73
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<72, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<73, direct_conv::Version::v2>, SIGNATURE>);
