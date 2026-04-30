@@ -166,8 +166,8 @@ template<> struct Dispatcher<bf16_t, bf16_t, float, 32, 32, 16,  true, true> { u
 
 // fp8
 // ADataType, BDataType, AccDataType, MPerWave, NPerWave, KPerWave, TransposeC, SwizzleA, UseStructuredSparsity
-template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  16, false> { using Type = WarpGemmMfma_f32_32x32x16_fp8_fp8; };
-template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  16, false, false, false, ESingle, ESingle, false, true> { using Type = WarpGemmMfma_f32_32x32x16_fp8_fp8; };
+template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  16, false> { using Type = WarpGemmMfma_f32_32x32x16_fp8_fp8<>; };
+template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  16, false, false, false, ESingle, ESingle, false, true> { using Type = WarpGemmMfma_f32_32x32x16_fp8_fp8<ESingle, ESingle, true>; };
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  32, false> { using Type = WarpGemmMfma_f32_16x16x32_fp8_fp8; };
 template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  16,  true> { using Type = WarpGemmMfma_f32_32x32x16_fp8_fp8_CTransposed; };
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  32,  true> { using Type = WarpGemmMfma_f32_16x16x32_fp8_fp8_CTransposed; };

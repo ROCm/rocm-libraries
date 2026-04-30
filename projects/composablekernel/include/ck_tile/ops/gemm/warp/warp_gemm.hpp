@@ -370,8 +370,14 @@ using WarpGemmMfma_f32_32x32x32_bf8_bf8 = WarpGemmImpl<WarpGemmAttributeMfmaIter
     2>>;
 #endif
 
+template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
+          bool PackNumAccess                 = AttrNumAccessA != AttrNumAccessB>
 using WarpGemmMfma_f32_32x32x16_fp8_fp8 = WarpGemmImpl<
-    WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_32x32x16_fp8_fp8<WGAttrCtlEnum::Default_>>>;
+    WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_32x32x16_fp8_fp8<WGAttrCtlEnum::Default_>,
+                          AttrNumAccessA,
+                          AttrNumAccessB,
+                          PackNumAccess>>;
 
 using WarpGemmMfma_f32_32x32x16_fp8_bf8 = WarpGemmImpl<
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_32x32x16_fp8_bf8<WGAttrCtlEnum::Default_>>>;
