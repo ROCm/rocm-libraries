@@ -4726,6 +4726,53 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if getattr(self.states, "_captureDefaultSchedule", False):
         builder = getattr(self.states, "_defaultCaptureBuilder", None)
         if builder is not None:
+          # Capture leftover pack[*] / packPre[*] content that wasn't
+          # consumed by any iter's _makeSubIterSchedule. Under CMS the
+          # for-uIdx loop uses pack as a circular buffer with
+          # storeIdx=(u+pflr)%N and consumeIdx=u%N; when storeIdx wraps
+          # back into a slot already consumed earlier in the loop (e.g.
+          # iter 3 stores to pack[0] for F32X with LoopIters=4 numPackBuffer=4),
+          # that content is the cross-outer-iteration handoff for the
+          # NEXT loop pass. CMS aggregates ALL iters' pack content into
+          # its main_loop macro, so for a comparable framing the shadow's
+          # main_loop must also include the leftover. Tag via the same
+          # build_idmap-derived id-to-cat that the in-loop iters used.
+          from Tensile.Components.ScheduleCapture import (
+            build_idmap, invert_idmap_to_id_to_category, SLOT_KIND_POST_LOOP,
+          )
+          leftover_idmap = build_idmap(
+            num_loop_iter=len(LRCodeAAllIters),
+            LRCodeA=LRCodeAAllIters, PackCodeA=PackCodeAAllIters,
+            LRCodeB=LRCodeBAllIters, PackCodeB=PackCodeBAllIters,
+            globalReadA=self.codes.globalReadA,
+            globalReadB=self.codes.globalReadB,
+            globalReadIncACode=globalReadIncACode,
+            globalReadIncBCode=globalReadIncBCode,
+            localWriteA=self.codes.localWriteA,
+            localWriteB=self.codes.localWriteB,
+            LRSwapA=LRSwapAAllIters, LRSwapB=LRSwapBAllIters,
+            LWSwapA=LWSwapAAllIters, LWSwapB=LWSwapBAllIters,
+            loopCounterCode=Module(),
+            syncCode=Module(),
+            snopCode=Module(),
+          )
+          leftover_id_to_cat = invert_idmap_to_id_to_category(leftover_idmap)
+          for buf in list(pack) + list(packPre):
+            if buf is None:
+              continue
+            for leaf in buf.flatitems():
+              cat = leftover_id_to_cat.get(id(leaf))
+              if cat is None:
+                # Untagged leaf in leftover pack — shouldn't happen if
+                # build_idmap covers PackCodeAAllIters fully, but skip
+                # rather than crash. The strict missed-instruction guard
+                # in build_dataflow_graph would surface a real gap.
+                continue
+              builder.append(
+                inst=leaf, category=cat,
+                iteration=kernel["LoopIters"],
+                slot_kind=SLOT_KIND_POST_LOOP, mfma_index=-1,
+              )
           self._last_default_main_capture = builder.finalize()
           self.states._defaultCaptureBuilder = None
 
