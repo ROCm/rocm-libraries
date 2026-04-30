@@ -384,11 +384,15 @@ void run_pipeline_matrix_test_impl(uint32_t M,
         {
             // When transposeExpected is true, the kernel computes C^T via SwapAB,
             // so compare actual C[m][n] against reference C[n][m].
+            constexpr float relative_tolerance = 1e-2f;
+            constexpr float absolute_tolerance = 1e-3f;
+
             float expected = transposeExpected ? static_cast<float>(C_expected[n * M + m])
                                                : static_cast<float>(C_expected[m * N + n]);
             expected *= referenceScale;
             float actual = static_cast<float>(C_actual[m * N + n]);
-            EXPECT_NEAR(actual, expected, std::abs(expected) * 1e-2f + 1e-3f)
+            EXPECT_NEAR(
+                actual, expected, std::abs(expected) * relative_tolerance + absolute_tolerance)
                 << "Mismatch at C[" << m << "][" << n << "]";
         }
     }
