@@ -623,9 +623,9 @@ class CustomKernel:
                    macrotile=d['macrotile'],
                    threads=d['threads'],
                    grid=d['grid'],
-                   workspaceType=d['workspaceType'],
-                   workspaceSizePerElemC=d['workspaceSizePerElemC'],
-                   workspaceSizePerElemBias=d['workspaceSizePerElemBias'])
+                   workspaceType=d.get('workspaceType', 'None'),
+                   workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
+                   workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0))
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):

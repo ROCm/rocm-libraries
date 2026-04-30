@@ -1168,10 +1168,10 @@ class Solution(collections.abc.Mapping):
     state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
     state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
 
-    state["_WorkspaceSizePerElemC"] = ck["workspaceSizePerElemC"]
+    state["_WorkspaceSizePerElemC"] = ck.get("workspaceSizePerElemC", 0)
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
-      state["_WorkspaceSizePerElemBias"] = ck["workspaceSizePerElemBias"]
+      state["_WorkspaceSizePerElemBias"] = ck.get("workspaceSizePerElemBias", 0)
 
     state["MIWaveGroup"] = [0, 0]
     state["LocalSplitU"] = 1

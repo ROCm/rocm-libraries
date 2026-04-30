@@ -1653,6 +1653,9 @@ namespace TensileLite
             throw std::runtime_error(
                 concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
 
+        dim3 tiles;
+        calculateTiles(tiles, problem);
+
         uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
 
@@ -1717,9 +1720,6 @@ namespace TensileLite
             std::cout << "Work group size: " << rv.workGroupSize.x << ", " << rv.workGroupSize.y << ", " << rv.workGroupSize.z << std::endl;
             std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
         }
-
-        dim3 tiles;
-        calculateTiles(tiles, problem);
 
         if(T_Debug)
         {

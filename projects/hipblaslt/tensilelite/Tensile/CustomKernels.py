@@ -62,7 +62,7 @@ _METADATA_NAME_TO_SEMANTIC = {
     "StrideBias":             "StrideBias",
     "factorDim":              "FactorDim",
     "E":                      "AddressE",
-    "activationType":         "ActivationType",
+    "activationType":         "ActivationTypeArg",
     "AddrAmaxOut":            "AddressAmaxOut",
     "AmaxWS":                 "AmaxWS",
     "AmaxSync":               "AmaxSync",
@@ -257,6 +257,9 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         "macrotile": macrotile,
         "threads": threads,
         "grid": grid,
+        "workspaceType": "None",
+        "workspaceSizePerElemC": 0,
+        "workspaceSizePerElemBias": 0,
     }
 
 def getCustomKernelConfig(
@@ -301,6 +304,9 @@ def getCustomKernelConfig(
         kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
 
     kernelConfig["CustomKernel"]["name"] = kernelName
+    kernelConfig["CustomKernel"].setdefault("workspaceType", "None")
+    kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemC", 0)
+    kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemBias", 0)
     kernelConfig["CustomKernelName"] = kernelName
 
     return kernelConfig

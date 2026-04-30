@@ -8660,7 +8660,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     _reg("address", "AddressD")
     _reg("address", "AddressC")
     _reg("address", "AddressA")
+    if kernel["ProblemType"]["MXBlockA"]:
+      _reg("address", "AddressMXScaleA")
     _reg("address", "AddressB")
+    if kernel["ProblemType"]["MXBlockB"]:
+      _reg("address", "AddressMXScaleB")
     if kernel["ProblemType"]["Sparse"]:
       _reg("address", "AddressMetadata")
     if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
@@ -8674,8 +8678,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       _reg("uint32", "StrideC%d" % i)
     for i in range(self.states.a.numSgprStrides):
       _reg("uint32", "StrideA%d" % i)
+    if kernel["ProblemType"]["MXBlockA"]:
+      for i in range(self.states.mxsa.numSgprStrides):
+        _reg("uint32", "StrideScaleA%d" % i)
     for i in range(self.states.b.numSgprStrides):
       _reg("uint32", "StrideB%d" % i)
+    if kernel["ProblemType"]["MXBlockB"]:
+      for i in range(self.states.mxsb.numSgprStrides):
+        _reg("uint32", "StrideScaleB%d" % i)
     if kernel["ProblemType"]["Sparse"]:
       for i in range(self.states.m.numSgprStrides):
         _reg("uint32", "StrideMetadata%d" % i)
@@ -8702,7 +8712,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       _reg("uint32", "ItersPerTile")
       _reg("uint32", "MagicNumberItersPerTile")
       _reg("uint32", "MagicShiftItersPerTile")
-      _reg("uint32", "TotalIters")
       _reg("uint32", "SKItersPerWG")
       if kernel["StreamK"] >= 2:
         _reg("uint32", "SKGrid")
@@ -8746,7 +8755,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       for idx in range(len(kernel["ProblemType"]["ActivationType"].getAdditionalArgStringList())):
         _reg(actArgType, "ActivationArg", idx)
       if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
-        _reg("uint32", "ActivationType")
+        _reg("uint32", "ActivationTypeArg")
 
     # -- Amax output -----------------------------------------------------------
     if kernel["ProblemType"]["OutputAmaxD"]:
@@ -8780,6 +8789,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       "macrotile": [kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]],
       "threads": [kernel["NumThreads"], 1, 1],
       "grid": [gridX, "One", "One"],
+      "workspaceType": "None",
+      "workspaceSizePerElemC": 0,
+      "workspaceSizePerElemBias": 0,
       "generated": True,
     }
 
