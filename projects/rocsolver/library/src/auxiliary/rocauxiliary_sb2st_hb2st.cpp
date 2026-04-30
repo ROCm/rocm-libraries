@@ -36,6 +36,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 template <typename T, typename S, typename U>
 rocblas_status rocsolver_sb2st_hb2st_impl(
     rocblas_handle handle,
+    rocblas_fill uplo,
     const rocblas_int n,
     const rocblas_int kd,
     U Aband,
@@ -47,13 +48,15 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
 {
     ROCSOLVER_ENTER_TOP( "sb2st_hb2st", "-n", n, "--kd", kd, "--ldab", ldab, "--ldv", ldv );
 
+//printf( "%s: uplo %c, n %d, kd %d, ldab %d, ldv %d\n",
+//        __func__, rocblas2char_fill( uplo ), n, kd, ldab, ldv );
     if (! handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
     // todo: why is argCheck not in same order as routine itself?
     rocblas_status st = rocsolver_sb2st_hb2st_argCheck(
-        handle, n, kd, ldab, ldv, Aband, D, E, V );
+        handle, uplo, n, kd, ldab, ldv, Aband, D, E, V );
         // handle, n, kd, Aband, ldab, D, E, V, ldv  // e.g.
     if (st != rocblas_status_continue)
         return st;
@@ -94,7 +97,7 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
     // future compatability?
     // execution
     return rocsolver_sb2st_hb2st_template<false, false, T>(
-        handle, n, kd,
+        handle, uplo, n, kd,
         Aband, shiftA, ldab, strideA,
         D, strideD,
         E, strideE,
@@ -114,6 +117,7 @@ extern "C" {
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st(
     rocblas_handle handle,
+    rocblas_fill uplo,
     const rocblas_int n,
     const rocblas_int kd,
     float* Aband,
@@ -124,11 +128,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st(
     const rocblas_int ldv )
 {
     return rocsolver::rocsolver_sb2st_hb2st_impl<float>(
-        handle, n, kd, Aband, ldab, D, E, V, ldv );
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv );
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(
     rocblas_handle handle,
+    rocblas_fill uplo,
     const rocblas_int n,
     const rocblas_int kd,
     double* Aband,
@@ -139,11 +144,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(
     const rocblas_int ldv )
 {
     return rocsolver::rocsolver_sb2st_hb2st_impl<double>(
-        handle, n, kd, Aband, ldab, D, E, V, ldv );
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv );
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(
     rocblas_handle handle,
+    rocblas_fill uplo,
     const rocblas_int n,
     const rocblas_int kd,
     rocblas_float_complex* Aband,
@@ -154,11 +160,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(
     const rocblas_int ldv )
 {
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex>(
-        handle, n, kd, Aband, ldab, D, E, V, ldv );
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv );
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(
     rocblas_handle handle,
+    rocblas_fill uplo,
     const rocblas_int n,
     const rocblas_int kd,
     rocblas_double_complex* Aband,
@@ -169,7 +176,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(
     const rocblas_int ldv )
 {
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex>(
-        handle, n, kd, Aband, ldab, D, E, V, ldv );
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv );
 }
 
 } // extern C

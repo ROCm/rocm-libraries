@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "print_matrix.hpp"
 
 //------------------------------------------------------------------------------
 template <bool CPU, bool GPU, typename T, typename Ud, typename Uh>
@@ -45,6 +46,7 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
                           const rocblas_int ldab,
                           Uh& hAband)
 {
+//printf( "%s:%d\n", __func__, __LINE__ );
     using foo::conjugate;
     using S = decltype( std::real( T{} ) );
 
@@ -66,71 +68,88 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
     {
         for (rocblas_int j = 0; j < n; ++j)
         {
-            // Diagonal is real.
-            // Random on [-1, 1].
-            // todo: better random number generator.
-            hAband[0][idiag + j*ldab] = 2*(rand() / S( RAND_MAX )) - 1;
+            #if 0
+                printf( "skipping init\n" );
+                for (rocblas_int i = 0; i < ldab; ++i)
+                {
+                    hAband[0][i + j*ldab] = i + j/100.;
+                }
+            #else
+                // Diagonal is real.
+                // Random on [-1, 1].
+                // todo: better random number generator.
+                hAband[0][idiag + j*ldab] = 2*(rand() / S( RAND_MAX )) - 1;
+                // j/100.;
 
-            // Fill in lower band and copy conjugate to upper band.
-            for (rocblas_int i = 1; i < kd + 1; ++i)
-            {
-                // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
-                if constexpr (rocblas_is_complex<T>)
+                // Fill in lower band and copy conjugate to upper band.
+                for (rocblas_int i = 1; i < kd + 1 && i + j < n; ++i)
                 {
-                    hAband[0][idiag + i + j*ldab]
-                        = T( 2*(rand() / S( RAND_MAX )) - 1,
-                             2*(rand() / S( RAND_MAX )) - 1 );
-                }
-                else
-                {
-                    hAband[0][idiag + i + j*ldab]
-                        = 2*(rand() / S( RAND_MAX )) - 1;
-                }
+                    // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
+                    if constexpr (rocblas_is_complex<T>)
+                    {
+                        hAband[0][idiag + i + j*ldab]
+                            = T( 2*(rand() / S( RAND_MAX )) - 1,
+                                 2*(rand() / S( RAND_MAX )) - 1 );
+                    }
+                    else
+                    {
+                        hAband[0][idiag + i + j*ldab]
+                            //= i + j/100.;
+                            = 2*(rand() / S( RAND_MAX )) - 1;
+                    }
 
-                // Copy conj to upper band. The kd-th diagonal is not needed,
-                // as it is outside the kd x kd diagonal blocks.
-                if (i < kd)
+                    #if 1
+                        // Copy conj of lower band to upper band. The kd-th diagonal is
+                        // not needed, as it is outside the kd x kd diagonal blocks.
+                        if (i < kd)
+                        {
+                            hAband[0][idiag - i + (j + i)*ldab]
+                                = conjugate( hAband[0][idiag + i + j*ldab] );
+                        }
+                    #endif
+                }
+                // Zero out entries outside band where bulges will fill in.
+                for (rocblas_int i = kd+1; i < 2*kd; ++i)
                 {
-                    hAband[0][idiag - i + j*ldab]
-                        = conjugate( hAband[0][idiag + i + j*ldab] );
+                    hAband[0][idiag + i + j*ldab] = 0;
+                }
+            #endif
+        }
+
+        #if 1
+            // Mark entries outside the band structure as nan,
+            // to ensure we don't use them.
+            // Example with n = 6, ku = 2, kl = 2, set x = nan:
+            // [ x x . . . . ] }
+            // [ x . . . . . ] } ku = 2
+            // [ . . . . . . ] <= main diag
+            // [ . . . . . x ] } kl = 2
+            // [ . . . . x x ] }
+            for (rocblas_int j = 0; j < ku; ++j)
+            {
+                for (rocblas_int i = 0; i < ku - j; ++i)
+                {
+                    hAband[0][i + j*ldab] = nan( "" );
                 }
             }
-            // Zero out entries outside band where bulges will fill in.
-            for (rocblas_int i = kd+1; i < 2*kd; ++i)
+            // For lower band, work from right-most column (n-1) to left.
+            for (rocblas_int j = 0; j < kl; ++j)
             {
-                hAband[0][idiag + i + j*ldab] = 0;
+                for (rocblas_int i = j; i < kl; ++i)
+                {
+                    hAband[0][idiag + 1 + i + (n - 1 - j)*ldab] = nan( "" );
+                }
             }
-        }
-        // Mark entries outside the band structure as nan,
-        // to ensure we don't use them.
-        // Example with n = 6, ku = 2, kl = 2, set x = nan:
-        // [ x x . . . . ] }
-        // [ x . . . . . ] } ku = 2
-        // [ . . . . . . ] <= main diag
-        // [ . . . . . x ] } kl = 2
-        // [ . . . . x x ] }
-        for (rocblas_int j = 0; j < ku; ++j)
-        {
-            for (rocblas_int i = 0; i < ku - j; ++i)
-            {
-                hAband[0][i + j*ldab] = nan( "" );
-            }
-        }
-        // For lower band, work from right-most column (n-1) to left.
-        for (rocblas_int j = 0; j < kl; ++j)
-        {
-            for (rocblas_int i = j; i < kl; ++i)
-            {
-                hAband[0][idiag + 1 + i + (n - 1 - j)*ldab] = nan( "" );
-            }
-        }
+        #endif
     }
+print_matrix( "hAband", ldab, n, hAband[0], ldab );
 
     if (GPU)
     {
         // now copy to the GPU
         CHECK_HIP_ERROR( dAband.transfer_from( hAband ) );
     }
+//printf( "%s:%d end\n", __func__, __LINE__ );
 }
 
 //------------------------------------------------------------------------------
@@ -152,6 +171,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
                           Th& hW,
                           double* max_err)
 {
+printf( "%s:%d\n", __func__, __LINE__ );
     using S = decltype( std::real( T{} ) );
     using std::abs, std::imag, std::real, std::max;
 
@@ -161,6 +181,9 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     sb2st_hb2st_initData<true, true, T>(
         handle, uplo, n, kd, dAband, ldab, hAband );
 
+print_matrix( "dAband_in", ldab, n, dAband.data(), ldab );
+
+printf( "%s:%d error call\n", __func__, __LINE__ );
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(
@@ -173,55 +196,106 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR( hDRes.transfer_from( dD ) );
     CHECK_HIP_ERROR( hERes.transfer_from( dE ) );
 
-    // Check that diag & subdiag are real, and Aband was copied to D and E.
+print_matrix( "dAband_out", ldab, n, hAbandRes.data(), ldab );
+print_matrix( "D", 1, n,   hDRes.data(), 1 );
+print_matrix( "E", 1, n-1, hERes.data(), 1 );
+
     S err = 0;
-    for (rocblas_int j = 0; j < n; ++j)
+    S max_err_ = 0;
+    if constexpr (rocblas_is_complex<T>)
     {
-        if constexpr (rocblas_is_complex<T>)
+        // Check that diag is real.
+        for (rocblas_int j = 0; j < n; ++j)
         {
             err = max( err, abs( imag( hAbandRes[0][idiag + j*ldab] ) ) );
-            // todo: assuming lower
-            if (j < n-1)
-                err = max( err, abs( imag( hAbandRes[0][idiag + 1 + j*ldab] ) ) );
         }
-        // todo: assuming lower
-        // todo: kernel not saving E back to Aband?
-        // Check that D == diag( Aband ) and E == diag( Aband, -1 ).
-        err += hDRes[0][j] != real( hAbandRes[0][idiag     + j*ldab] );
-        err += hERes[0][j] != real( hAbandRes[0][idiag + 1 + j*ldab] );
+        printf( "imag( D ) error %9.3g\n", err );
+        max_err_ = max( err, max_err_ );
 
-        // todo: assuming lower
-        // Check that E == diag( Aband, -1 ), the 1st subdiagonal.
-        if (j < n-1)
-            err += hERes[0][j] != real( hAbandRes[0][idiag + 1 + j*ldab] );
+        // Check that subdiag is real.
+        err = 0;
+        for (rocblas_int j = 0; j < n-1; ++j)
+        {
+            err = max( err, abs( imag( hAbandRes[0][idiag + 1 + j*ldab] ) ) );
+        }
+        printf( "imag( E ) error %9.3g\n", err );
+        max_err_ = max( err, max_err_ );
     }
-    *max_err = err;
 
-    // Compute eigenvalues of tridiagonal matrix
-    cpu_sterf( n, hDRes.data(), hERes.data() );
+    // Check that diag( A ) == D.
+    err = 0;
+    for (rocblas_int j = 0; j < n; ++j)
+    {
+        err += hDRes[0][j] != real( hAbandRes[0][idiag + j*ldab] );
+    }
+    printf( "diag( A ) == D error     %9.3g\n", err );
+    max_err_ = max( err, max_err_ );
 
-    // CPU lapack
-    // Compute eigenvalues of banded matrix
-    int info;
-    int worksize = n;  // for complex [cz]hbev and real [sd]sbev
-    std::vector<T> work( worksize, T( 0 ) );
-    int worksize_real = rocblas_is_complex<T> ? std::max( 1, 3*n - 2 ) : 0;
-    std::vector<S> work_real( worksize_real, S( 0 ) );
-    T dummy;  // for Z
-    // todo: assuming lower
-    cpu_sbev_hbev( rocblas_evect_none, uplo, n, kd, &hAband[0][idiag], ldab,
-                   hW.data(), &dummy, 1,
-                   work.data(), work_real.data(), &info );
+    // Check that diag( A, -1 ) == E.
+    err = 0;
+    for (rocblas_int j = 0; j < n-1; ++j)
+    {
+        err += hERes[0][j] != real( hAbandRes[0][idiag + 1 + j*ldab] );
+    }
+    printf( "diag( A, -1 ) == E error %9.3g\n", err );
+    max_err_ = max( err, max_err_ );
+
+    #if 1
+        // Compute eigenvalues of tridiagonal matrix
+        cpu_sterf( n, hDRes.data(), hERes.data() );
+
+        printf( "eig_rocsol = [" );
+        for (int i = 0; i < std::min( 5, n ); ++i)
+        {
+            printf( "  %11.5g", hDRes[0][i] );
+        }
+        printf( "  ..." );
+        for (int i = std::max( n-5, 5 ); i < n; ++i)
+        {
+            printf( "  %11.5g", hDRes[0][i] );
+        }
+        printf( " ];\n" );
+    #endif
+
+    #if 1
+        // CPU lapack
+        // Compute eigenvalues of banded matrix
+        int info;
+        int worksize = rocblas_is_complex<T> ? n : std::max( 1, 3*n - 2 );
+        std::vector<T> work( worksize, T( 0 ) );
+        int worksize_real = rocblas_is_complex<T> ? std::max( 1, 3*n - 2 ) : 0;
+        std::vector<S> work_real( worksize_real, S( 0 ) );
+        T dummy;  // for Z
+        // todo: assuming lower
+        cpu_sbev_hbev( rocblas_evect_none, uplo, n, kd, &hAband[0][idiag], ldab,
+                       hW.data(), &dummy, 1,
+                       work.data(), work_real.data(), &info );
+
+        printf( "eig_lapack = [" );
+        for (int i = 0; i < std::min( 5, n ); ++i)
+        {
+            printf( "  %11.5g", hW[0][i] );
+        }
+        printf( "  ..." );
+        for (int i = std::max( n-5, 5 ); i < n; ++i)
+        {
+            printf( "  %11.5g", hW[0][i] );
+        }
+        printf( " ];\n" );
+    #endif
 
     // Compare CPU and GPU eigval results in hW and hDRes, respectively.
     err = norm_error( 'F', 1, n, 1, hW.data(), hDRes.data() );
-    *max_err = max( *max_err, double( err ) );
+    max_err_ = max( max_err_, err );
     if (std::isnan( err ))
-        *max_err = err;
+        max_err_ = err;
+
+    *max_err = max_err_;
 
     // todo: check orthogonality of V?
     // todo: check backwards error Q^H Aband - Atridiag or Aband - Q Atridiag?
     // cf. LAWN 41.
+printf( "%s:%d end\n", __func__, __LINE__ );
 }
 
 template <typename T, typename Td, typename Ud, typename Uh>
@@ -243,6 +317,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                              const bool profile_kernels,
                              const bool perf)
 {
+printf( "%s:%d\n", __func__, __LINE__ );
     if (! perf)
     {
         // cpu-lapack performance (only if not in perf mode)
@@ -255,6 +330,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
     // cold calls
     for (int iter = 0; iter < 2; iter++)
     {
+printf( "%s:%d cold call %d ----------\n", __func__, __LINE__, iter );
         sb2st_hb2st_initData<false, true, T>(
             handle, uplo, n, kd, dAband, ldab, hAband );
 
@@ -283,6 +359,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
 
     for (rocblas_int iter = 0; iter < hot_calls; iter++)
     {
+printf( "%s:%d hot call %d ----------\n", __func__, __LINE__, iter );
         sb2st_hb2st_initData<false, true, T>(
             handle, uplo, n, kd, dAband, ldab, hAband);
 
@@ -297,26 +374,29 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
         // todo: print time
     }
     *gpu_time_used /= hot_calls;
+printf( "%s:%d end\n", __func__, __LINE__ );
 }
 
 template <typename T>
 void testing_sb2st_hb2st( Arguments& argus )
 {
+printf( "%s:%d\n", __func__, __LINE__ );
     using S = decltype( std::real( T{} ) );
 
     // get arguments
     rocblas_local_handle handle;
     char uploC = argus.get<char>("uplo");
     rocblas_int n = argus.get<rocblas_int>("n");
-    rocblas_int kd = argus.get<rocblas_int>("kd");  // todo: kd
-    rocblas_int ldab = argus.get<rocblas_int>("ldab", 3*kd - 1);  // todo: ldab
+    rocblas_int kd = argus.get<rocblas_int>("kd");
+    rocblas_int ldab = argus.get<rocblas_int>("ldab", 3*kd - 1);
+    rocblas_int ldv = argus.get<rocblas_int>("ldv", 3*kd);
 
     // V is ldv x nv
     // todo: if eigval only, don't need T, and only need V vectors and tau
     // for 2 rounds, so maybe 2(n+1) or so is enough.
     rocblas_int nt = ceildiv( n, kd );
-    rocblas_int nv = nt*(nt + 1)/2;
-    rocblas_int ldv = 3*kd;  // 2*kd-1 for V, kd for T, 1 for tau
+    rocblas_int nv_blocks = nt*(nt + 1)/2;
+    rocblas_int nv = nv_blocks*kd;
 
     rocblas_fill uplo = char2rocblas_fill( uploC );
     rocblas_int hot_calls = argus.iters;
@@ -346,7 +426,7 @@ void testing_sb2st_hb2st( Arguments& argus )
                 (T*)nullptr, ldv ),
             rocblas_status_invalid_size );
 
-        if ( argus.timing )
+        if (argus.timing)
             rocsolver_bench_inform( inform_invalid_size );
 
         return;
@@ -444,10 +524,10 @@ void testing_sb2st_hb2st( Arguments& argus )
         if (! argus.perf)
         {
             rocsolver_bench_header( "Arguments:" );
-            rocsolver_bench_output( "n", "kd", "ldab" );
-            rocsolver_bench_output( n, kd, ldab );
+            rocsolver_bench_output( "uplo", "n", "kd", "ldab", "ldv" );
+            rocsolver_bench_output( uplo, n, kd, ldab, ldv );
             rocsolver_bench_header( "Results:" );
-            if ( argus.norm_check )
+            if (argus.norm_check)
             {
                 rocsolver_bench_output( "cpu_time_us", "gpu_time_us", "error" );
                 rocsolver_bench_output( cpu_time_used, gpu_time_used, max_error );
@@ -461,7 +541,7 @@ void testing_sb2st_hb2st( Arguments& argus )
         }
         else
         {
-            if ( argus.norm_check )
+            if (argus.norm_check)
                 rocsolver_bench_output( gpu_time_used, max_error );
             else
                 rocsolver_bench_output( gpu_time_used );
@@ -470,6 +550,7 @@ void testing_sb2st_hb2st( Arguments& argus )
 
     // ensure all arguments were consumed
     argus.validate_consumed();
+printf( "%s:%d end\n", __func__, __LINE__ );
 }
 
 #define EXTERN_TESTING_SB2ST_HB2ST( ... ) \
