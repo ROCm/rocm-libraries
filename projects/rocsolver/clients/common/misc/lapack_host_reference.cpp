@@ -42,10 +42,15 @@
 extern "C" {
 #endif
 
-float slange_(char* norm, int* m, int* n, float* A, int* lda, float* work);
-double dlange_(char* norm, int* m, int* n, double* A, int* lda, double* work);
-float clange_(char* norm, int* m, int* n, rocblas_float_complex* A, int* lda, float* work);
-double zlange_(char* norm, int* m, int* n, rocblas_double_complex* A, int* lda, double* work);
+float  slange_(char* norm, int* m, int* n, float* A, int* lda, float* rwork);
+double dlange_(char* norm, int* m, int* n, double* A, int* lda, double* rwork);
+float  clange_(char* norm, int* m, int* n, rocblas_float_complex* A, int* lda, float* rwork);
+double zlange_(char* norm, int* m, int* n, rocblas_double_complex* A, int* lda, double* rwork);
+
+float  slansb_(const char* norm, const char* uplo, const int* n, const int* kd, const float*  Aband, const int* ldab, float*  rwork);
+double dlansb_(const char* norm, const char* uplo, const int* n, const int* kd, const double* Aband, const int* ldab, double* rwork);
+float  clanhb_(const char* norm, const char* uplo, const int* n, const int* kd, const rocblas_float_complex*  Aband, const int* ldab, float*  rwork);
+double zlanhb_(const char* norm, const char* uplo, const int* n, const int* kd, const rocblas_double_complex* Aband, const int* ldab, double* rwork);
 
 void sgecon_(char* norm,
              int* n,
@@ -2851,6 +2856,56 @@ double cpu_lange<rocblas_double_complex, double>(char norm,
                                                  double* work)
 {
     return zlange_(&norm, &m, &n, A, &lda, work);
+}
+
+// lanhb
+
+template <>
+float cpu_lanhb<float, float>(char norm,
+                              char uplo,
+                              rocblas_int n,
+                              rocblas_int kd,
+                              const float* A,
+                              rocblas_int lda,
+                              float* rwork)
+{
+    return slansb_(&norm, &uplo, &n, &kd, A, &lda, rwork);
+}
+
+template <>
+double cpu_lanhb<double, double>(char norm,
+                                 char uplo,
+                                 rocblas_int n,
+                                 rocblas_int kd,
+                                 const double* A,
+                                 rocblas_int lda,
+                                 double* rwork)
+{
+    return dlansb_(&norm, &uplo, &n, &kd, A, &lda, rwork);
+}
+
+template <>
+float cpu_lanhb<rocblas_float_complex, float>(char norm,
+                                              char uplo,
+                                              rocblas_int n,
+                                              rocblas_int kd,
+                                              const rocblas_float_complex* A,
+                                              rocblas_int lda,
+                                              float* rwork)
+{
+    return clanhb_(&norm, &uplo, &n, &kd, A, &lda, rwork);
+}
+
+template <>
+double cpu_lanhb<rocblas_double_complex, double>(char norm,
+                                                 char uplo,
+                                                 rocblas_int n,
+                                                 rocblas_int kd,
+                                                 const rocblas_double_complex* A,
+                                                 rocblas_int lda,
+                                                 double* rwork)
+{
+    return zlanhb_(&norm, &uplo, &n, &kd, A, &lda, rwork);
 }
 
 // gecon

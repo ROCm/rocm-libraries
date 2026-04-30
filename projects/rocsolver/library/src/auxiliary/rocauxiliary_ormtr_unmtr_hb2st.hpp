@@ -102,11 +102,11 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(rocblas_handle handle,
                                               const rocblas_int m,
                                               const rocblas_int n,
                                               const rocblas_int kd,
-                                              const rocblas_int ldv,
-                                              const rocblas_int ldc,
                                               T V,
+                                              const rocblas_int ldv,
+                                              U tau,  // why U? claude put last
                                               T C,
-                                              U tau)  // why U and last?
+                                              const rocblas_int ldc)
 {
     // order is important for unit tests:
 

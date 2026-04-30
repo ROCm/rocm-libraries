@@ -37,6 +37,7 @@
 #include "common/misc/rocsolver_timer.hpp"
 #include "common/misc/generate.hpp"
 #include "common/misc/cpu_blas.hpp"
+#include "laset.hpp"
 
 //------------------------------------------------------------------------------
 // todo: is COMPLEX needed?
@@ -132,13 +133,14 @@ void testing_ormtr_unmtr_hb2st_bad_arg()
 }
 
 //------------------------------------------------------------------------------
-template <bool CPU, bool GPU, typename T, typename Td, typename Th>
+template <bool CPU, bool GPU, typename T, typename Td, typename Th, typename Sd, typename Sh>
 void ormtr_unmtr_hb2st_initData(const rocblas_handle handle,
                                 const rocblas_side side,
                                 const rocblas_operation trans,
                                 const rocblas_int m,
                                 const rocblas_int n,
                                 const rocblas_int kd,
+
                                 Td& dAband,
                                 const rocblas_int ldab,
                                 Td& dV,
@@ -146,10 +148,15 @@ void ormtr_unmtr_hb2st_initData(const rocblas_handle handle,
                                 Td& dTau,
                                 Td& dC,
                                 const rocblas_int ldc,
+                                Sd& dD,
+                                Sd& dE,
+
                                 Th& hAband,
                                 Th& hV,
                                 Th& hTau,
-                                Th& hC)
+                                Th& hC,
+                                Sh& hD,
+                                Sh& hE)
 {
     // TODO: how to handle uplo? Easiest would be to convert upper to lower.
 
@@ -158,22 +165,14 @@ void ormtr_unmtr_hb2st_initData(const rocblas_handle handle,
         // Matrix A is m-by-m on left, or n-by-n on right.
         rocblas_int nA = (side == rocblas_side_left ? m : n);
 
-        // For bandwidth kd, need ku = kd-1 superdiagonals to cover the diagonal
-        // blocks. (ku superdiagonals needed if we update diag blocks using
-        // gemv/ger, but none needed if we used hemv/her2.)
-        // Need kl = 2*kd-1 subdiagonals to cover the off-diagonal blocks and bulges.
-        rocblas_int ku = kd - 1;
-        rocblas_int kl = 2*kd - 1;
-        assert( ldab >= ku + kl + 1 );
-
-        gerand( m, n, C, ldc );
-        hbrand( nA, ku, kl, Aband, ldab );
+        gerand( m, n, hC[0], ldc );
+        hbrand( nA, kd, hAband[0], ldab );
 
         // Call hb2st on GPU to compute dV. (dTau stored in dV.)
         CHECK_HIP_ERROR(dAband.transfer_from(hAband));
         CHECK_ROCBLAS_ERROR(
             rocsolver_sb2st_hb2st(
-                handle, uplo, nA, kd,
+                handle, rocblas_fill_lower, nA, kd,
                 dAband.data(), ldab,
                 dD.data(), dE.data(),
                 dV.data(), ldv ) );
@@ -213,52 +212,76 @@ void ormtr_unmtr_hb2st_initData(const rocblas_handle handle,
 // and na = n for side = right. R for residuals is max(m,n)-by-max(m,n).
 // cf. LAPACK LAWN 41
 //
-template <typename T, typename Td, typename Th>
+template <typename T, typename Td, typename Th, typename Sd, typename Sh>
 void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
                                 const rocblas_side side,
                                 const rocblas_operation trans,
                                 const rocblas_int m,
                                 const rocblas_int n,
                                 const rocblas_int kd,
+
                                 Td& dAband,
                                 const rocblas_int ldab,
                                 Td& dV,
                                 const rocblas_int ldv,
-                                Td& dTau,
+                                Td& dTau,  // unused
                                 Td& dC,
                                 const rocblas_int ldc,
+                                Sd& dD,
+                                Sd& dE,
+                                Td& dQ,
+                                const rocblas_int ldq,
                                 Td& dR,
                                 const rocblas_int ldr,
                                 Sd& dnorm,
+
                                 Th& hAband,
                                 Th& hV,
-                                Th& hTau,
+                                Th& hTau,  // unused
                                 Th& hC,
+                                Sh& hD,
+                                Sh& hE,
+                                Th& hQ,
                                 Th& hR,
                                 Sh& hnorm,
+
                                 double errors[3])
 {
+    using S = decltype( std::real( T{} ) );
+
+    const T one = 1;
+    const T negone = -1;
+    const T zero = 0;
+
+    rocblas_int idiag = kd - 1;
+
     rocblas_int nA = (side == rocblas_side_left ? m : n);
+    rocblas_stride shift = 0;
+    rocblas_stride stride = 1;
 
-    rocsolver_norm_type norm = rocblas_norm_one;
+    // todo: can we remove "_type" from these names. Doesn't seem to add anything.
+    rocsolver_norm_type norm = rocsolver_norm_type_one;
 
-    // langb, lanhb need n. gemm needs n^2.
-    // todo: should we pass hW in? should we allocate dR and hR here?
-    // What things get passed and what get allocated locally?
-    size_t size_W = nA * nA;
-    std::vector<T> hW( size_W );
+    // cpu_lange, cpu_lanhb need rwork size n.
+    std::vector<S> hrwork( nA );
+
+    // cpu_gemm needs hW size n*n.
+    // todo: Should this be passed in?
+    rocblas_int ldw = nA;
+    std::vector<T> hW( ldw * nA );
 
     // initialize data
     ormtr_unmtr_hb2st_initData<true, true, T>(
         handle, side, trans, m, n, kd,
-        dAband, ldab, dV, ldv, dTau, dC, ldc,
-        hAband, hV, hTau, hC);
+        dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
+        hAband, hV, hTau, hC, hD, hE);
 
     // execute computations
     // Set Q = Identity, then generate Q = Q*I or I*Q. (Works for either side.)
-    CHECK_ROCBLAS_ERROR(
-        laset(
-            handle, rocblas_fill_general, nA, nA, zero, one, dQ.data(), ldq ));
+    //CHECK_ROCBLAS_ERROR(
+        rocsolver::laset(
+            handle, 'g' /*rocblas_fill_full*/, nA, nA, zero, one,
+            dQ.data(), shift, ldq, stride, 1 );
     CHECK_ROCBLAS_ERROR(
         rocsolver_ormtr_unmtr_hb2st(
             handle, side, rocblas_operation_none, m, n, kd,
@@ -266,18 +289,20 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
 
     // Check 0: || I - Q^H Q ||_1 / n
     // Set R = Identity, then generate residual R = I - Q^H Q.
-    CHECK_ROCBLAS_ERROR(
-        laset(
-            handle, rocblas_fill_general, nA, nA, zero, one, dR.data(), ldr ));
+    //CHECK_ROCBLAS_ERROR(
+        rocsolver::laset(
+            handle, 'g' /*rocblas_fill_full*/, nA, nA, zero, one,
+            dR.data(), shift, ldr, stride, 1 );
     CHECK_ROCBLAS_ERROR(
         rocblas_gemm(
-            handle, rocblas_operation_conjugate_transpose, rocblas_operation_none,
+            false, handle,
+            rocblas_operation_conjugate_transpose, rocblas_operation_none,
             nA, nA, nA,
-            -one, dQ.data(), ldq, dQ.data(), ldq,
-            one, dR.data(), ldr ));
+            &negone, dQ.data(), ldq, stride, dQ.data(), ldq, stride,
+            &one, dR.data(), ldr, stride, 1 ));
     // norm( R )
     CHECK_ROCBLAS_ERROR(
-        rocblas_lange(
+        rocsolver_lange(
             handle, norm, nA, nA, dR.data(), ldr, dnorm.data() ));
     CHECK_HIP_ERROR(
         hnorm.transfer_from( dnorm ) );
@@ -296,10 +321,10 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
               one, hR.data(), ldr, hQ.data(), ldq,
               zero, hW.data(), ldw );
     cpu_hbadd( rocblas_fill_lower, nA, kd,
-               -one, &hAband[0][idiag], ldab,
+               negone, &hAband[0][idiag], ldab,
                one, hW.data(), ldw );
-    errors[1] = cpu_lange( norm, nA, nA, hR.data(), ldr, hW ) / nA;
-    S Anorm = cpu_lanhb( norm, rocblas_fill_lower, nA, kd, &hAband[0][idiag], ldab, hW );
+    errors[1] = cpu_lange( '1', nA, nA, hW.data(), ldw, hrwork.data() ) / nA;
+    S Anorm = cpu_lanhb( '1', 'L', nA, kd, &hAband[0][idiag], ldab, hrwork.data() );
     if (Anorm != 0)
         errors[1] /= Anorm;
 
@@ -313,15 +338,15 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
         rocsolver_ormtr_unmtr_hb2st(
             handle, side, trans, m, n, kd,
             dV.data(), ldv, dTau.data(), dR.data(), ldr));
-    if (side == left)
+    if (side == rocblas_side_left)
     {
         // R -= op(Q) C
         assert( nA == m );
         CHECK_ROCBLAS_ERROR(
             rocblas_gemm(
-                handle, trans, rocblas_operation_none, m, n, nA,
-                -one, dQ.data(), ldq, dC.data(), ldc,
-                one, dR.data(), ldr));
+                false, handle, trans, rocblas_operation_none, m, n, nA,
+                &negone, dQ.data(), ldq, stride, dC.data(), ldc, stride,
+                &one, dR.data(), ldr, stride, 1 ));
     }
     else // right
     {
@@ -329,13 +354,13 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
         assert( nA == n );
         CHECK_ROCBLAS_ERROR(
             rocblas_gemm(
-                handle, rocblas_operation_none, trans, m, n, nA,
-                -one, dC.data(), ldc, dQ.data(), ldq,
-                one, dR.data(), ldr));
+                false, handle, rocblas_operation_none, trans, m, n, nA,
+                &negone, dC.data(), ldc, stride, dQ.data(), ldq, stride,
+                &one, dR.data(), ldr, stride, 1 ));
     }
     // norm( R )
     CHECK_ROCBLAS_ERROR(
-        rocblas_lange(
+        rocsolver_lange(
             handle, norm, m, n, dR.data(), ldr, dnorm ));
     CHECK_HIP_ERROR(
         hnorm.transfer_from( dnorm ) );
@@ -343,7 +368,7 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
 
     // norm( C )
     CHECK_ROCBLAS_ERROR(
-        rocblas_lange(
+        rocsolver_lange(
             handle, norm, m, n, dC.data(), ldc, dnorm ));
     CHECK_HIP_ERROR(
         hnorm.transfer_from( dnorm ) );
@@ -352,13 +377,14 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
 }
 
 //------------------------------------------------------------------------------
-template <typename T, typename Td, typename Th>
+template <typename T, typename Td, typename Th, typename Sd, typename Sh>
 void ormtr_unmtr_hb2st_getPerfData(const rocblas_handle handle,
                                    const rocblas_side side,
                                    const rocblas_operation trans,
                                    const rocblas_int m,
                                    const rocblas_int n,
                                    const rocblas_int kd,
+
                                    Td& dAband,
                                    const rocblas_int ldab,
                                    Td& dV,
@@ -366,10 +392,16 @@ void ormtr_unmtr_hb2st_getPerfData(const rocblas_handle handle,
                                    Td& dTau,
                                    Td& dC,
                                    const rocblas_int ldc,
+                                   Sd& dD,
+                                   Sd& dE,
+
                                    Th& hAband,
                                    Th& hV,
                                    Th& hTau,
                                    Th& hC,
+                                   Sh& hD,
+                                   Sh& hE,
+
                                    double* gpu_time_used,
                                    double* cpu_time_used,
                                    const rocblas_int hot_calls,
@@ -377,6 +409,8 @@ void ormtr_unmtr_hb2st_getPerfData(const rocblas_handle handle,
                                    const bool profile_kernels,
                                    const bool perf)
 {
+    using S = decltype( std::real( T{} ) );
+
     // todo: hW needed?
     size_t size_W = (side == rocblas_side_left ? m : n) * 32;
     std::vector<T> hW(size_W);
@@ -387,16 +421,16 @@ void ormtr_unmtr_hb2st_getPerfData(const rocblas_handle handle,
     // Initialize CPU data.
     ormtr_unmtr_hb2st_initData<true, false, T>(
         handle, side, trans, m, n, kd,
-        dAband, ldab, dV, ldv, dTau, dC, ldc,
-        hAband, hV, hTau, hC);
+        dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
+        hAband, hV, hTau, hC, hD, hE);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
         ormtr_unmtr_hb2st_initData<false, true, T>(
             handle, side, trans, m, n, kd,
-            dAband, ldab, dV, ldv, dTau, dC, ldc,
-            hAband, hV, hTau, hC);
+            dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
+            hAband, hV, hTau, hC, hD, hE);
 
         CHECK_ROCBLAS_ERROR(
             rocsolver_ormtr_unmtr_hb2st(
@@ -423,8 +457,8 @@ void ormtr_unmtr_hb2st_getPerfData(const rocblas_handle handle,
     {
         ormtr_unmtr_hb2st_initData<false, true, T>(
             handle, side, trans, m, n, kd,
-            dAband, ldab, dV, ldv, dTau, dC, ldc,
-            hAband, hV, hTau, hC);
+            dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
+            hAband, hV, hTau, hC, hD, hE);
 
         timer.start(stream);
         rocsolver_ormtr_unmtr_hb2st(
@@ -439,6 +473,8 @@ void ormtr_unmtr_hb2st_getPerfData(const rocblas_handle handle,
 template <typename T, bool COMPLEX = rocblas_is_complex<T>>
 void testing_ormtr_unmtr_hb2st(Arguments& argus)
 {
+    using S = decltype( std::real( T{} ) );
+
     // get arguments
     rocblas_local_handle handle;
     char sideC = argus.get<char>("side");
@@ -490,17 +526,16 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     rocblas_int nv = nv_blocks*kd;
 
     // determine sizes
-    size_t size_Aband = ldab * n;
-    size_t size_V = ldv * nv;
+    size_t size_Aband = size_t(ldab) * n;
+    size_t size_V = size_t(ldv) * nv;
     size_t size_D = n;
     size_t size_E = n - 1;
-    size_t size_tau = size_t(kd);
+    size_t size_tau = kd;  // todo: tau unused
     size_t size_C = size_t(ldc) * n;
     size_t size_Q = size_t(ldq) * nA;
     size_t size_R = size_t(ldr) * std::max( m, n );
+    size_t size_norm = 1;
     double errors[3] = { 0, 0, 0 }, gpu_time_used = 0, cpu_time_used = 0;
-
-    size_t size_Cr = (argus.unit_check || argus.norm_check) ? size_C : 0;
 
     // check invalid sizes
     bool invalid_size = (m < 0 || n < 0 || kd < 0 || ldv < 3*kd || ldc < m);
@@ -536,25 +571,31 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
 
     // memory allocations
     host_strided_batch_vector<T> hAband( size_Aband, 1, size_Aband, 1 );
-    host_strided_batch_vector<T> hV(size_V, 1, size_V, 1);
-    host_strided_batch_vector<T> hC(size_C, 1, size_C, 1);
-    host_strided_batch_vector<S> hD( size_Dres, 1, size_Dres, 1 );
-    host_strided_batch_vector<S> hE( size_Eres, 1, size_Eres, 1 );
-    host_strided_batch_vector<T> hQ(size_C, 1, size_C, 1);
-    host_strided_batch_vector<T> hR(size_C, 1, size_C, 1);
+    host_strided_batch_vector<T> hV( size_V, 1, size_V, 1 );
+    host_strided_batch_vector<T> hTau( size_tau, 1, size_tau, 1 );  // unused
+    host_strided_batch_vector<T> hC( size_C, 1, size_C, 1 );
+    host_strided_batch_vector<S> hD( size_D, 1, size_D, 1 );
+    host_strided_batch_vector<S> hE( size_E, 1, size_E, 1 );
+    host_strided_batch_vector<T> hQ( size_Q, 1, size_Q, 1 );
+    host_strided_batch_vector<T> hR( size_R, 1, size_R, 1 );
+    host_strided_batch_vector<S> hnorm(size_norm, 1, size_norm, 1);
 
     device_strided_batch_vector<T> dAband( size_Aband, 1, size_Aband, 1 );
     device_strided_batch_vector<T> dV( size_V, 1, size_V, 1 );
+    device_strided_batch_vector<T> dTau( size_tau, 1, size_tau, 1 );  // unused
     device_strided_batch_vector<T> dC( size_C, 1, size_C, 1 );
     device_strided_batch_vector<S> dD( size_D, 1, size_D, 1 );
     device_strided_batch_vector<S> dE( size_E, 1, size_E, 1 );
-    device_strided_batch_vector<S> dQ( size_Q, 1, size_Q, 1 );
-    device_strided_batch_vector<S> dR( size_R, 1, size_R, 1 );
+    device_strided_batch_vector<T> dQ( size_Q, 1, size_Q, 1 );
+    device_strided_batch_vector<T> dR( size_R, 1, size_R, 1 );
+    device_strided_batch_vector<S> dnorm(size_norm, 1, size_norm, 1);
 
     if (size_Aband)
         CHECK_HIP_ERROR( dAband.memcheck() );
     if (size_V)
         CHECK_HIP_ERROR( dV.memcheck() );
+    if (size_tau)
+        CHECK_HIP_ERROR( dTau.memcheck() );
     if (size_C)
         CHECK_HIP_ERROR( dC.memcheck() );
     if (size_D)
@@ -565,6 +606,8 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
         CHECK_HIP_ERROR( dQ.memcheck() );
     if (size_R)
         CHECK_HIP_ERROR( dR.memcheck() );
+    if (size_norm)
+        CHECK_HIP_ERROR( dnorm.memcheck() );
 
     // check quick return
     if(m == 0 || n == 0 || kd == 0)
@@ -586,8 +629,8 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     {
         ormtr_unmtr_hb2st_getError<T>(
             handle, side, trans, m, n, kd,
-            dAband, ldab, dV, ldv, dTau, dC, ldc,
-            hAband, hV, hTau, hC, hCr, errors);
+            dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE, dQ, ldq, dR, ldr, dnorm,
+            hAband, hV, hTau, hC, hD, hE, hQ, hR, hnorm, errors);
     }
 
     // collect performance data
@@ -595,8 +638,8 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     {
         ormtr_unmtr_hb2st_getPerfData<T>(
             handle, side, trans, m, n, kd,
-            dAband, dV, ldv, dTau, dC, ldc,
-            hAband, hV, hTau, hC,
+            dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
+            hAband, hV, hTau, hC, hD, hE,
             &gpu_time_used, &cpu_time_used, hot_calls,
             argus.profile, argus.profile_kernels, argus.perf);
     }
