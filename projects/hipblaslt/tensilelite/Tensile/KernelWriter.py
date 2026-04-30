@@ -895,21 +895,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
         f"got ScheduleIterAlg={scheduleIterAlg}. SIA0/SIA1/SIA2 do not produce "
         "per-MFMA slotted schedules and cannot be captured into a comparable form."
       )
-      # Categorization map: caller (e.g. _loopBody) passes the id-to-category
-      # map built via ScheduleCapture.build_idmap + invert, sharing CMS's
-      # source-of-truth schema. Falls back to the legacy structural-walk
-      # (_buildCaptureIdentityMap) for callers that haven't migrated yet —
-      # those callers will pay an UNKNOWN-categorization cost since the
-      # structural walk doesn't cover GRInc, LRSwap, LWSwap, or pointer math.
-      if capture_id_to_category is None:
-        capture_id_to_category = self._buildCaptureIdentityMap(
-          iteration=iteration,
-          localReadCode=localReadCode,
-          localWriteCode=localWriteCode,
-          globalReadCode=globalReadCode,
-          packCode=packCode,
-          packPreCode=packPreCode,
-        )
+      # Categorization map: caller MUST pass the id-to-category map built
+      # via the ScheduleCapture factories (single source of truth):
+      #   - _loopBody uses build_idmap + invert (per-category source modules).
+      #   - _noLoadLoopBodyDefault uses build_id_to_category_per_iter
+      #     (per-iteration combined modules).
+      assert capture_id_to_category is not None, (
+        "Schedule capture requires capture_id_to_category. Call "
+        "ScheduleCapture.build_idmap + invert_idmap_to_id_to_category, "
+        "or build_id_to_category_per_iter, depending on input shape."
+      )
       # Pointer-math items (VXorB32/SXorB32 from local{Read,Write}SwapOffsets,
       # SAdd/SAddC/SSub/SSubB from address increments) are SEPARATE Python
       # objects from the LRSwap*/LWSwap*AllIters items CMS sees — separate
@@ -2620,100 +2615,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     return iterCode
 
-  def _buildCaptureIdentityMap(self, iteration, localReadCode, localWriteCode,
-                                globalReadCode, packCode, packPreCode):
-    """Build {id(item) -> category} for SIA3 schedule capture.
-
-    Snapshotted at SIA3 entry before any reordering. Item identity survives
-    Module.popFirstItem / popFirstNItems / addItems through SIA3's localRead
-    reorder loop (KernelWriter.py:1086-1125) and the global/pack pop sites
-    elsewhere in SIA3.
-    """
-    id_to_category = {}
-
-    def tag_module(mod, category):
-      if mod is None:
-        return
-      for item in mod.flatitems():
-        id_to_category[id(item)] = category
-
-    # localReadCode is a Module containing named submodules LocalReadDoA_I*,
-    # LocalReadDoB_I*, LocalReadDoMXSA_I*, LocalReadDoMXSB_I*, LocalReadDoMetadata_I*.
-    # Tag by tensor.
-    if localReadCode is not None:
-      for iui in range(self.states.kernel["InnerUnroll"] if hasattr(self.states, "kernel") else 1):
-        pass  # handled by named-submodule walk below
-      for child in localReadCode.flatitems():
-        # Per-instruction; we need the parent named module to know A/B.
-        # Since flatitems flattens, we lose the parent name. Use direct
-        # findNamedItem instead.
-        pass
-
-      for iui_name in ("LocalReadDoA", "LocalReadDoB", "LocalReadDoMXSA",
-                       "LocalReadDoMXSB", "LocalReadDoMetadata"):
-        # Try multiple InnerUnroll indices.
-        for iui in range(8):
-          sub = localReadCode.findNamedItem(f"{iui_name}_I{iui}")
-          if sub is None:
-            continue
-          if iui_name == "LocalReadDoA":
-            cat = f"LRA{iteration}"
-          elif iui_name == "LocalReadDoB":
-            cat = f"LRB{iteration}"
-          elif iui_name == "LocalReadDoMXSA":
-            cat = f"LRMXSA{iteration}"
-          elif iui_name == "LocalReadDoMXSB":
-            cat = f"LRMXSB{iteration}"
-          elif iui_name == "LocalReadDoMetadata":
-            cat = f"LRMetadata{iteration}"
-          tag_module(sub, cat)
-
-    # globalReadCode: tag generically as 'GR'. globalReadCode is a deepcopy
-    # of self.codes.perIterGlobalRead (deepcopy happens at KernelWriter.py:834
-    # under SIA3), so id() lookups against self.codes.globalReadA/B miss
-    # deterministically. A vs B distinction at this level isn't recoverable
-    # without parsing the actual buffer-load semantics; the comparison rule
-    # aggregates GR/GRA/GRB into a single global-read total.
-    if globalReadCode is not None:
-      for item in globalReadCode.flatitems():
-        # First-tag-wins: don't overwrite if this item was already tagged
-        # by an earlier source (e.g. DirectToLds mode where globalRead and
-        # localWrite share instructions).
-        if id(item) not in id_to_category:
-          id_to_category[id(item)] = "GR"
-
-    # localWriteCode: tag generically as 'LW'. Same first-tag-wins behavior
-    # because under DirectToLds=1, globalRead instructions ARE the local
-    # writes (same Instruction objects), and we want them tagged 'GR' to
-    # match the CMS-side idMap key for the schedule's globalRead bucket.
-    if localWriteCode is not None:
-      for item in localWriteCode.flatitems():
-        if id(item) not in id_to_category:
-          id_to_category[id(item)] = "LW"
-
-    # packCode / packPreCode: split A vs B by named submodule.
-    for pack_mod, prefix_a, prefix_b in (
-      (packCode, "packA", "packB"),
-      (packPreCode, "packA", "packB"),
-    ):
-      if pack_mod is None:
-        continue
-      for iui in range(8):
-        sub_a = pack_mod.findNamedItem(f"{prefix_a}_I{iui}")
-        sub_b = pack_mod.findNamedItem(f"{prefix_b}_I{iui}")
-        if sub_a is not None:
-          tag_module(sub_a, f"PackA{iteration}")
-        if sub_b is not None:
-          tag_module(sub_b, f"PackB{iteration}")
-        sub_a_pre = pack_mod.findNamedItem(f"{prefix_a}_I{iui} Pre")
-        sub_b_pre = pack_mod.findNamedItem(f"{prefix_b}_I{iui} Pre")
-        if sub_a_pre is not None:
-          tag_module(sub_a_pre, f"PackA{iteration}")
-        if sub_b_pre is not None:
-          tag_module(sub_b_pre, f"PackB{iteration}")
-
-    return id_to_category
-
   def _captureSubIterToBuilder(self, iterCode, capture, iteration,
                                  numMfmaPerIter, id_to_category):
     """Walk iterCode.flatitems() and append TaggedInstructions to capture.
@@ -3764,9 +3665,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
         tP = tensorParametersA if kernel["ProblemType"]["BiasSrc"] == "A" else tensorParametersB
         macIterCode.add(self.exclasses.biasSumUnroll.loopSum(self, kernel, tP, u, kernel["InnerUnroll"]))
+      # NLL/NGL capture path: build the {id(item) -> category} map from the
+      # per-iter combined modules NLL produces (it doesn't accumulate per-side
+      # AllIters lists like _loopBody does, so the build_idmap factory doesn't
+      # fit; build_id_to_category_per_iter handles this shape via named
+      # sub-module walk). Same schema as build_idmap, so _captureSubIterToBuilder
+      # consumes both uniformly.
+      capture_id_to_cat = None
+      if capture is not None:
+        from Tensile.Components.ScheduleCapture import build_id_to_category_per_iter
+        capture_id_to_cat = build_id_to_category_per_iter(
+          iteration=u,
+          localReadCode=localReads,
+          localWriteCode=self.codes.perIterLocalWrite[u][1] if u < len(self.codes.perIterLocalWrite) else None,
+          globalReadCode=self.codes.perIterGlobalRead[u] if u < len(self.codes.perIterGlobalRead) else None,
+          packCode=pack[packIdx],
+          packPreCode=packPre[packPreIdx],
+          inner_unroll_max=kernel["InnerUnroll"],
+        )
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], \
-                      module, NLLlast=NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True, capture=capture)
+                      module, NLLlast=NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True, capture=capture,
+                      capture_id_to_category=capture_id_to_cat)
       module.add(subIterCode)
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       pack[packIdx] = Module()

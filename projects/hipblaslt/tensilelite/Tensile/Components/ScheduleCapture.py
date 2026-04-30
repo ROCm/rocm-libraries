@@ -836,6 +836,81 @@ def structural_clone(item):
     return new_mod
 
 
+def build_id_to_category_per_iter(*, iteration, localReadCode, localWriteCode,
+                                  globalReadCode, packCode, packPreCode,
+                                  inner_unroll_max=8):
+    """Build {id(item) -> category} for one SIA3 iteration's combined modules.
+
+    Companion to build_idmap. Two factories, one schema, two input shapes:
+
+    - build_idmap + invert_idmap_to_id_to_category: when the caller has
+      per-category source modules (LRCodeAAllIters[u] etc.). Used by the
+      main-loop capture path in _loopBody.
+    - build_id_to_category_per_iter: when the caller has per-iteration
+      combined modules (localReads, pack[packIdx], packPre[packPreIdx])
+      with named A/B/MXSA/MXSB/Metadata sub-modules. Used by the NLL/NGL
+      capture path in _noLoadLoopBodyDefault.
+
+    Both produce the same {id(item) -> category} mapping that
+    _captureSubIterToBuilder consumes.
+
+    Walk strategy:
+      - localReadCode: per-tensor (A/B/MXSA/MXSB/Metadata) sub-modules
+        named LocalReadDo{Tensor}_I{iui}; tag as LR{Tensor}{iteration}.
+      - packCode/packPreCode: per-side (A/B) sub-modules named
+        pack{A,B}_I{iui} (and "pack{A,B}_I{iui} Pre"); tag as
+        Pack{A,B}{iteration}.
+      - globalReadCode: tagged generically as 'GR' (A/B distinction not
+        recoverable here without parsing buffer-load semantics).
+      - localWriteCode: tagged generically as 'LW'.
+      - First-tag-wins under DirectToLds=1 where globalRead instructions
+        ARE the local writes (same Instruction objects); the GR tag wins.
+    """
+    id_to_category = {}
+
+    def tag_module(mod, category):
+        if mod is None:
+            return
+        for item in mod.flatitems():
+            id_to_category[id(item)] = category
+
+    if localReadCode is not None:
+        for sub_name, cat_template in (
+            ("LocalReadDoA",        "LRA{}"),
+            ("LocalReadDoB",        "LRB{}"),
+            ("LocalReadDoMXSA",     "LRMXSA{}"),
+            ("LocalReadDoMXSB",     "LRMXSB{}"),
+            ("LocalReadDoMetadata", "LRMetadata{}"),
+        ):
+            cat = cat_template.format(iteration)
+            for iui in range(inner_unroll_max):
+                sub = localReadCode.findNamedItem(f"{sub_name}_I{iui}")
+                if sub is not None:
+                    tag_module(sub, cat)
+
+    if globalReadCode is not None:
+        for item in globalReadCode.flatitems():
+            id_to_category.setdefault(id(item), "GR")
+
+    if localWriteCode is not None:
+        for item in localWriteCode.flatitems():
+            id_to_category.setdefault(id(item), "LW")
+
+    for pack_mod in (packCode, packPreCode):
+        if pack_mod is None:
+            continue
+        for iui in range(inner_unroll_max):
+            for prefix, side in (("packA", "A"), ("packB", "B")):
+                sub = pack_mod.findNamedItem(f"{prefix}_I{iui}")
+                if sub is not None:
+                    tag_module(sub, f"Pack{side}{iteration}")
+                sub_pre = pack_mod.findNamedItem(f"{prefix}_I{iui} Pre")
+                if sub_pre is not None:
+                    tag_module(sub_pre, f"Pack{side}{iteration}")
+
+    return id_to_category
+
+
 def assert_idmap_completeness(idmap, capture):
     """Verify per-category instruction counts match between idMap and capture.
 
