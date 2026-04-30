@@ -6,6 +6,7 @@
 
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
+#include "../tests/common/TestWorkarounds.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
@@ -28,6 +29,7 @@ protected:
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
+        SKIP_IF_WORKAROUND_ISSUE_5409();
 
         const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
 

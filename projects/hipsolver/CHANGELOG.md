@@ -7,7 +7,10 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 
 ### Added
 
-* Added compatibility-only functions:
+* Added compatibility-only functions
+  * geev
+    * hipsolverDnXgeev_bufferSize
+    * hipsolverDnXgeev
   * syevBatched
     * hipsolverDnXsyevBatched_bufferSize
     * hipsolverDnXsyevBatched

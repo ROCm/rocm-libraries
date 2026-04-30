@@ -20,6 +20,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwiseSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::detail
@@ -48,6 +49,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               MatmulSignatureKey,
                                               PointwiseSignatureKey,
                                               RMSNormFwdSignatureKey,
+                                              SdpaBwdSignatureKey,
                                               SdpaFwdSignatureKey,
                                               ReductionSignatureKey>;
 
