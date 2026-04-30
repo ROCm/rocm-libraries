@@ -3,12 +3,6 @@ name: TheRock CI Linux
 on:
   workflow_call:
     inputs:
-      therock_ref:
-        type: string
-        required: true
-      docker_image:
-        type: string
-        required: true
       cmake_options:
         type: string
       projects_to_test:
@@ -19,8 +13,6 @@ on:
         type: string
       test_runs_on:
         type: string
-      build_runs_on:
-        type: string
 
 permissions:
   contents: read
@@ -28,11 +20,11 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build (${{ inputs.amdgpu_families }})
-    runs-on: ${{ inputs.build_runs_on }}
+    runs-on: azure-linux-scale-rocm
     permissions:
       id-token: write
     container:
-      image: ${{ inputs.docker_image }}
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
@@ -49,9 +41,9 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
+          repository: "reboss/TheRock"
           path: TheRock
-          ref: ${{ inputs.therock_ref }}
+          ref: pytest-test-filter-support
 
       - name: Install python deps
         run: |
@@ -140,16 +132,17 @@ jobs:
             --build-dir TheRock/build \
             --upload
 
-      - name: Notify Teams Channel on Failure
-        if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
+      - name: Notify MIOpen Teams Channel on Failure
+        # Channel name "MIOpen CI Reporting"
+        if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && !github.event.pull_request.head.repo.fork }}
         run: |
           python3 .github/scripts/notify_teams.py \
+            --project miopen \
             --failure-stage build \
             --log-path TheRock/build/logs \
-            --webhook-urls '{"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' \
+            --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
             --pr-number "${{ github.event.pull_request.number }}" \
-            --pr-title "${{ github.event.pull_request.title }}" \
-            --component-name "${{ inputs.projects_to_test }}"
+            --pr-title "${{ github.event.pull_request.title }}"
 
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
