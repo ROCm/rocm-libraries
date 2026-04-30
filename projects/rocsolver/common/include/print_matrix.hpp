@@ -33,7 +33,7 @@
 template <typename T, typename I>
 void copy_matrix( I m, I n, T* src, I ld_src, T* dst, I ld_dst, hipStream_t stream )
 {
-    printf( "%s( m=%d, n=%d, src=%p, ld=%d, dst=%p, ld=%d, stream=%p )\n",
+    printf( "# %s( m=%d, n=%d, src=%p, ld=%d, dst=%p, ld=%d, stream=%p )\n",
             __func__, m, n, src, ld_src, dst, ld_dst, stream );
     hip_call(
         hipMemcpy2DAsync(
@@ -142,7 +142,7 @@ void print_matrix(
     int ldha;
 #ifdef HIP
     if (is_devptr( A )) {
-        printf( "%% copying device %s => host\n", label );
+        printf( "# copying device %s => host\n", label );
         ldha = m;
         hA = new T[ ldha*n ];
         copy_matrix( m, n, A, lda, hA, ldha, stream );
@@ -154,17 +154,19 @@ void print_matrix(
         hA = A;
     }
 
-    printf( "%% %s %d x %d, ld %d, %s\n"
-            "%s = [\n",
+    printf( "# %s %d x %d, ld %d, %s\n"
+            "%s = numpy.array([\n",
             label, m, n, lda, get_type_name<T>().c_str(), label );
     for (int i = 0; i < m; ++i) {
+        printf( "  [  " );
         for (int j = 0; j < n; ++j) {
-            printf( "  " );
+            //printf( "  " );
             print_value( opts, hA[ i + j*ldha ] );
+            printf( ",  " );
         }
-        printf( "\n" );
+        printf( "],\n" );
     }
-    printf( "];\n" );
+    printf( "]);\n" );
 
     if (hA != A) {
         delete[] hA;
