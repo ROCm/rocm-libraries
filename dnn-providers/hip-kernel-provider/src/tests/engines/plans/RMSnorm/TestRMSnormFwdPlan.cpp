@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <utility>
+
 #include <gtest/gtest.h>
 
 #include "engines/plans/RMSnorm/RMSnormFwdPlan.hpp"
@@ -94,10 +96,11 @@ TEST(TestRMSnormFwdParams, IsNotCopyConstructible)
 namespace
 {
 
-RMSnormFwdPlan createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
-                                   const std::vector<int64_t>& dims = {1, 3, 224, 224},
-                                   hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
-                                   = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+std::pair<flatbuffers::FlatBufferBuilder, RMSnormFwdPlan>
+    createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
+                        const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                        hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
 {
     auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormGraph(strides, dims, inputDataType);
@@ -108,7 +111,7 @@ RMSnormFwdPlan createPlanFromGraph(const std::vector<int64_t>& strides = {150528
     const auto& attr = *node.attributes_as_RMSNormAttributes();
 
     RMSnormFwdParams params(attr, graph.getTensorMap());
-    return RMSnormFwdPlan{std::move(params)};
+    return {std::move(builder), RMSnormFwdPlan{std::move(params)}};
 }
 
 hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
@@ -128,21 +131,21 @@ hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
 
 TEST(TestRMSnormFwdPlan, ExecuteWithoutCompileThrows)
 {
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestRMSnormFwdPlan, GetWorkspaceSizeReturnsZero)
 {
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
 TEST(TestRMSnormFwdPlan, IsMoveConstructible)
 {
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
 
     RMSnormFwdPlan moved(std::move(plan));
     HipKernelHandle handle;
@@ -173,7 +176,7 @@ TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelName)
     EXPECT_CALL(mockCompiler, compile("RMSNormFwd.cpp", ::testing::_))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -195,7 +198,7 @@ TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOption)
                 compile(::testing::_, ::testing::Contains(std::string("--offload-arch=gfx942"))))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps("gfx942");
 
     plan.compile(mockCompiler, deviceProps);
@@ -218,7 +221,7 @@ TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -251,9 +254,9 @@ TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph({150528, 50176, 224, 1},
-                                    {1, 3, 224, 224},
-                                    hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1},
+                                           {1, 3, 224, 224},
+                                           hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
@@ -286,9 +289,10 @@ TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph({150528, 50176, 224, 1},
-                                    {1, 3, 224, 224},
-                                    hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    auto [fbb, plan]
+        = createPlanFromGraph({150528, 50176, 224, 1},
+                              {1, 3, 224, 224},
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
     auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);

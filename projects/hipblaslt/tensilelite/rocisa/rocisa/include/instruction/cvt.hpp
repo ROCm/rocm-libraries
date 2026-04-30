@@ -364,8 +364,9 @@ namespace rocisa
                        const InstructionInput&                   src,
                        const std::optional<SDWAModifiers>&       sdwa    = std::nullopt,
                        const std::optional<VOP3PModifiers>&      vop3    = std::nullopt,
+                       const std::vector<int>&                   true16  = {},
                        const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_PK_FP8_to_F32, dst, {src}, sdwa, vop3, std::vector<int>({}), comment)
+            : VCvtInstruction(CvtType::CVT_PK_FP8_to_F32, dst, {src}, sdwa, vop3, true16, comment)
         {
             setInst("v_cvt_pk_f32_fp8");
         }
@@ -387,8 +388,9 @@ namespace rocisa
                        const InstructionInput&                   src,
                        const std::optional<SDWAModifiers>&       sdwa    = std::nullopt,
                        const std::optional<VOP3PModifiers>&      vop3    = std::nullopt,
+                       const std::vector<int>&                   true16  = {},
                        const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_PK_BF8_to_F32, dst, {src}, sdwa, vop3, std::vector<int>({}), comment)
+            : VCvtInstruction(CvtType::CVT_PK_BF8_to_F32, dst, {src}, sdwa, vop3, true16, comment)
         {
             setInst("v_cvt_pk_f32_bf8");
         }
@@ -744,8 +746,9 @@ namespace rocisa
                         const std::shared_ptr<Container>&         src,
                         std::optional<SDWAModifiers>              sdwa    = std::nullopt,
                         std::optional<VOP3PModifiers>             vop3    = std::nullopt,
+                        const std::vector<int>&                   true16  = {},
                         const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_BF16_to_F32, dst, {src}, sdwa, vop3, std::vector<int>({}), comment)
+            : VCvtInstruction(CvtType::CVT_BF16_to_F32, dst, {src}, sdwa, vop3, true16, comment)
         {
             setInst("v_cvt_f32_bf16");
         }

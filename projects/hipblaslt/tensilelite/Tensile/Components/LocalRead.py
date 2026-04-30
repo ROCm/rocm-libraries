@@ -24,10 +24,11 @@
 
 from rocisa.code import Module
 from rocisa.container import DSModifiers, vgpr, sgpr, SDWAModifiers, VOP3PModifiers, ContinuousRegister
-from rocisa.enum import SelectBit, InstType
+from rocisa.enum import HighBitSel, SelectBit, InstType
 from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, \
-                            VMovB32, VMovB64, VLShiftRightB32, VCvtPkFP8toF32, VCvtF32toF16, VCvtFP8toF16, VCvtScalePkFP8toF16, VCvtFP8toF32, VCvtScaleFP8toF16, VCvtScalePkFP8toF16, \
-                            VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, SNop, VSubF32, VSwapB32, MFMAInstruction
+                            VMovB32, VMovB64, VLShiftRightB32, VCvtFP8toF16, VCvtScalePkFP8toF16, VCvtFP8toF32, VCvtScaleFP8toF16, VCvtScalePkFP8toF16, \
+                            VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, SNop, VSubF32, VSwapB32, MFMAInstruction, \
+                            ECvtPkFP8toF32, ECvtF32toF16
 
 from ..Component import LocalRead
 
@@ -1050,20 +1051,19 @@ class LocalReadMFMA(LocalRead):
                                                                                 src=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+offset)),\
                                                                                 vop3=VOP3PModifiers(op_sel=[0,0]), comment="convert fp8 to f16"))
                                                 else:
-                                                    packCodeT.add(VCvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+offset)),\
-                                                                                sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_1), comment="convert to F32"))
-                                                    packCodeT.add(VCvtF32toF16(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+1+offset*2)), src=vgpr("CvtTemp+0"),\
-                                                                            sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtF32toF16(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+1+offset*2)), src=vgpr("CvtTemp+1"),\
-                                                                            sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+offset)),\
-                                                                                sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                                                    packCodeT.add(VCvtF32toF16(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+0+offset*2)), src=vgpr("CvtTemp+0"),\
-                                                                            sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtF32toF16(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+0+offset*2)), src=vgpr("CvtTemp+1"),\
-                                                                            sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+offset)),\
+                                                                                sel=HighBitSel.HIGH, comment="convert to F32"))
+                                                    packCodeT.add(ECvtF32toF16(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+1+offset*2)), src=vgpr("CvtTemp+0"),\
+                                                                            sel=HighBitSel.LOW, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtF32toF16(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+1+offset*2)), src=vgpr("CvtTemp+1"),\
+                                                                            sel=HighBitSel.HIGH, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+offset)),\
+                                                                                sel=HighBitSel.LOW, comment="convert to F32"))
+                                                    packCodeT.add(ECvtF32toF16(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+0+offset*2)), src=vgpr("CvtTemp+0"),\
+                                                                            sel=HighBitSel.LOW, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtF32toF16(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+0+offset*2)), src=vgpr("CvtTemp+1"),\
+                                                                            sel=HighBitSel.HIGH, comment="Convert to FP16"))
                                         elif (writer.states.lrvwTileA == 1 and tc == 'A') or (writer.states.lrvwTileB == 1 and tc == 'B'):
-                                            sdwa = SDWAModifiers(dst_sel=SelectBit.WORD_0) if (rIdx % 2 == 0) else SDWAModifiers(dst_sel=SelectBit.WORD_1)
                                             destVgpr   = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, int(valufIdx*2)), numVgpr)
                                             CvtDstVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, int(valufIdx*2)), numVgpr)
                                             if needPack and (rIdx%4) != 0:
@@ -1079,7 +1079,7 @@ class LocalReadMFMA(LocalRead):
                                                 packCode.add(VCvtFP8toF16(dst=CvtDstVgpr, src=destVgpr, vop3=VOP3PModifiers(byte_sel=[sel]),comment="convert F8 to F16"))
                                             else:
                                                 packCodeT.add(VCvtFP8toF32(dst=destVgpr, src=destVgpr, sdwa=SDWAModifiers(src0_sel=SelectBit.BYTE_0)))
-                                                packCodeT.add(VCvtF32toF16(dst=CvtDstVgpr, src=destVgpr, sdwa=sdwa, comment="Convert to FP16"))
+                                                packCodeT.add(ECvtF32toF16(dst=CvtDstVgpr, src=destVgpr, sel=HighBitSel.LOW if rIdx % 2 == 0 else HighBitSel.HIGH, comment="Convert to FP16"))
                                         elif (writer.states.lrvwTileA == 2 and tc == 'A') or (writer.states.lrvwTileB == 2 and tc == 'B'):
                                             if needPack or numSplitMetadata:
                                                 destVgpr = vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, rIdx%(MIInputPerThUnroll), vIdx*numVgpr), numVgpr)
@@ -1090,9 +1090,9 @@ class LocalReadMFMA(LocalRead):
                                                     elif writer.states.asmCaps["HasCvtFP8toF16"]:
                                                         packCode.add(VCvtScalePkFP8toF16(dst=destVgpr, src=destVgpr, vop3=VOP3PModifiers(op_sel=[0]),comment="convert F8 to F16"))
                                                     else:
-                                                        packCodeT.add(VCvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=destVgpr, sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                                                        packCodeT.add(VCvtF32toF16(dst=destVgpr, src=vgpr("CvtTemp+0"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                                                        packCodeT.add(VCvtF32toF16(dst=destVgpr, src=vgpr("CvtTemp+1"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                                                        packCodeT.add(ECvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=destVgpr, sel=HighBitSel.LOW, comment="convert to F32"))
+                                                        packCodeT.add(ECvtF32toF16(dst=destVgpr, src=vgpr("CvtTemp+0"), sel=HighBitSel.LOW, comment="Convert to FP16"))
+                                                        packCodeT.add(ECvtF32toF16(dst=destVgpr, src=vgpr("CvtTemp+1"), sel=HighBitSel.HIGH, comment="Convert to FP16"))
 
                                                 if rIdx == numReadsPerUnroll-1:
                                                     for i in range(0, numVgpr):
@@ -1118,12 +1118,12 @@ class LocalReadMFMA(LocalRead):
                                                     packCode.add(VCvtScalePkFP8toF16(dst=destVgpr, src=destVgpr, vop3=VOP3PModifiers(op_sel=[0]),comment="convert F8 to F16"))
                                                     packCode.add(VCvtScalePkFP8toF16(dst=cvtDestVgpr, src=cvtDestVgpr, vop3=VOP3PModifiers(op_sel=[0]),comment="convert F8 to F16"))
                                                 else:
-                                                    packCodeT.add(VCvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=destVgpr, sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                                                    packCodeT.add(VCvtF32toF16(dst=destVgpr, src=vgpr("CvtTemp+0"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtF32toF16(dst=destVgpr, src=vgpr("CvtTemp+1"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr, sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr, src=vgpr("CvtTemp+0"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr, src=vgpr("CvtTemp+1"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=destVgpr, sel=HighBitSel.LOW, comment="convert to F32"))
+                                                    packCodeT.add(ECvtF32toF16(dst=destVgpr, src=vgpr("CvtTemp+0"), sel=HighBitSel.LOW, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtF32toF16(dst=destVgpr, src=vgpr("CvtTemp+1"), sel=HighBitSel.HIGH, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr, sel=HighBitSel.LOW, comment="convert to F32"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr, src=vgpr("CvtTemp+0"), sel=HighBitSel.LOW, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr, src=vgpr("CvtTemp+1"), sel=HighBitSel.HIGH, comment="Convert to FP16"))
 
                                                 if rIdx == numReadsPerUnroll-1:
                                                     for i in range(0, numVgpr*2):
@@ -1159,18 +1159,18 @@ class LocalReadMFMA(LocalRead):
                                                     packCode.add(VCvtScalePkFP8toF16(dst=cvtDestVgpr2, src=cvtDestVgpr2, vop3=VOP3PModifiers(op_sel=[0]),comment="convert F8 to F16"))
                                                     packCode.add(VCvtScalePkFP8toF16(dst=cvtDestVgpr3, src=cvtDestVgpr3, vop3=VOP3PModifiers(op_sel=[0]),comment="convert F8 to F16"))
                                                 else:
-                                                    packCodeT.add(VCvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr0, sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr0, src=vgpr("CvtTemp+0"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr0, src=vgpr("CvtTemp+1"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr1, sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr1, src=vgpr("CvtTemp+0"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr1, src=vgpr("CvtTemp+1"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr2, sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr2, src=vgpr("CvtTemp+0"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr2, src=vgpr("CvtTemp+1"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr3, sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr3, src=vgpr("CvtTemp+0"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                                                    packCodeT.add(VCvtF32toF16(dst=cvtDestVgpr3, src=vgpr("CvtTemp+1"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr0, sel=HighBitSel.LOW, comment="convert to F32"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr0, src=vgpr("CvtTemp+0"), sel=HighBitSel.LOW, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr0, src=vgpr("CvtTemp+1"), sel=HighBitSel.HIGH, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr1, sel=HighBitSel.LOW, comment="convert to F32"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr1, src=vgpr("CvtTemp+0"), sel=HighBitSel.LOW, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr1, src=vgpr("CvtTemp+1"), sel=HighBitSel.HIGH, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr2, sel=HighBitSel.LOW, comment="convert to F32"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr2, src=vgpr("CvtTemp+0"), sel=HighBitSel.LOW, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr2, src=vgpr("CvtTemp+1"), sel=HighBitSel.HIGH, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtPkFP8toF32(dst=vgpr("CvtTemp", 2), src=cvtDestVgpr3, sel=HighBitSel.LOW, comment="convert to F32"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr3, src=vgpr("CvtTemp+0"), sel=HighBitSel.LOW, comment="Convert to FP16"))
+                                                    packCodeT.add(ECvtF32toF16(dst=cvtDestVgpr3, src=vgpr("CvtTemp+1"), sel=HighBitSel.HIGH, comment="Convert to FP16"))
 
                                                 if rIdx == numReadsPerUnroll-1:
                                                     for i in range(0, numVgpr*2):

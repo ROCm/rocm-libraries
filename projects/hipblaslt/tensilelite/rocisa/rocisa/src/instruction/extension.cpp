@@ -108,6 +108,30 @@ void ext_inst(nb::module_ m)
           nb::arg("hasSMulHi") = false,
           nb::arg("sign")      = false,
           nb::arg("comment")   = "");
+    m.def("ECvtF16toF32",
+          &rocisa::ECvtF16toF32,
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("sel"),
+          nb::arg("comment") = "");
+    m.def("ECvtF32toF16",
+          &rocisa::ECvtF32toF16,
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("sel")     = nb::none(),
+          nb::arg("comment") = "");
+    m.def("ECvtPkFP8toF32",
+          &rocisa::ECvtPkFP8toF32,
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("sel"),
+          nb::arg("comment") = "");
+    m.def("ECvtPkBF8toF32",
+          &rocisa::ECvtPkBF8toF32,
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("sel"),
+          nb::arg("comment") = "");
     m.def("VCvtBF16toFP32",
           &rocisa::VCvtBF16toFP32,
           nb::arg("dst"),

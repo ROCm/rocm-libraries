@@ -7,6 +7,7 @@ GlobalParameters:
   PrintLevel: 1
   PrintSolutionRejectionReason: True
   Device: 0
+  RotatingBufferSize: 512
   CMakeBuildType: Release
   KernelTime: True
   MaxWorkspaceSize: 13421772800

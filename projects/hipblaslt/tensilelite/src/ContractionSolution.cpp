@@ -1181,12 +1181,12 @@ namespace TensileLite
         if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
             defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
 
-        // Mapping should be in this range: [0, 1, 2, 3]
-        assert(defaultStaggerUMapping < 4);
+        // Mapping should be in this range: [0, 1, 2, 3, 4]
+        assert(defaultStaggerUMapping < 5);
         // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
         assert((defaultStaggerU & (defaultStaggerU - 1)) == 0 && defaultStaggerU < 65);
-        // StaggerUStrideShift should be in [0, 5] (shift of 5 = stride multiplier of 32)
-        assert(defaultStaggerUStrideShift <= 5);
+        // StaggerUStrideShift is packed in 5-bit field (bits [12:8]), valid range [0, 31]
+        assert(defaultStaggerUStrideShift <= 31);
 
         return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
     }
@@ -2119,7 +2119,9 @@ namespace TensileLite
         if(sizeMapping.streamK > 0)
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            gsu        = sk.grid / tiles;
+            // Avoid 0 division when tiles is 0 (e.g. zero-sized dimension in grouped gemm)
+            if(tiles > 0)
+                gsu = sk.grid / tiles;
         }
 
         args.template append<uint32_t>(concatenate_if<T_Debug>("gsu"), gsu);

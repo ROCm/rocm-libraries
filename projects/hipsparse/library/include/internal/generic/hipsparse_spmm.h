@@ -35,7 +35,7 @@ extern "C" {
 *  \f[
 *    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, COO, BSR, or Blocked ELL storage format,
+*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, CSC, COO, BSR, or Blocked ELL storage format,
 *  \f$B\f$ is a dense matrix of size \f$k \times n\f$, and \f$C\f$ is a dense matrix of size \f$m \times n\f$.
 *
 *  \p hipsparseSpMM_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpMM
@@ -105,7 +105,7 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
 *  \f[
 *    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, COO, BSR, or Blocked ELL storage format,
+*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, CSC, COO, BSR, or Blocked ELL storage format,
 *  \f$B\f$ is a dense matrix of size \f$k \times n\f$, and \f$C\f$ is a dense matrix of size \f$m \times n\f$.
 *
 *  \p hipsparseSpMM_preprocess supports multiple combinations of data types and compute types. See \ref hipsparseSpMM for a complete
@@ -173,7 +173,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \details
 *  \p hipsparseSpMM multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$ matrix \f$op(A)\f$,
-*  defined in CSR, COO, BSR, or Blocked ELL storage format, and the dense \f$k \times n\f$ matrix \f$op(B)\f$
+*  defined in CSR, CSC, COO, BSR, or Blocked ELL storage format, and the dense \f$k \times n\f$ matrix \f$op(B)\f$
 *  and adds the result to the dense \f$m \times n\f$ matrix \f$C\f$ that is multiplied by the scalar
 *  \f$\beta\f$, such that
 *  \f[
@@ -217,8 +217,8 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  be performed.
 *
 *  <table>
-*  <caption id="spmm_csr_algorithms">CSR Algorithms</caption>
-*  <tr><th>CSR Algorithms
+*  <caption id="spmm_csr_algorithms">CSR/CSC Algorithms</caption>
+*  <tr><th>CSR/CSC Algorithms
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG2</td>
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG3</td>
@@ -273,13 +273,15 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
 *  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F
 *  <tr><td>HIP_R_16F  <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_16F <td>HIP_R_32F
 *  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  \p hipsparseSpMM supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions
 *  for storing the row pointer and column indices arrays of the sparse matrices.
 *
-*  \p hipsparseSpMM also supports batched computation for CSR and COO matrices. There are three supported batch modes:
+*  \p hipsparseSpMM also supports batched computation for CSR, CSC, COO and Blocked ELL matrices. There are three supported batch modes:
 *  \f[
 *      C_i = A \times B_i \\
 *      C_i = A_i \times B \\

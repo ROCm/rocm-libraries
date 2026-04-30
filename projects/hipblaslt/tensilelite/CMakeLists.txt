@@ -56,20 +56,9 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(include)
 
     if(TENSILELITE_ENABLE_CLIENT)
-        if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
-            # Add mxDataGenerator if it hasn't been added by clients build
-            if(NOT TARGET roc::mxDataGenerator)
-                if(NOT ROCM_LIBS_SUPERBUILD)
-                    if(HIPBLASLT_ENABLE_THEROCK)
-                        find_package(mxDataGenerator REQUIRED)
-                    else()
-                        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator"
-                                       "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
-                    endif()
-                endif()
-            endif()
-        endif()
-
+        # mxDataGenerator bootstrap and `hipblaslt::mxdatagen` helper target
+        # live in projects/hipblaslt/CMakeLists.txt and are guaranteed to be
+        # available before this subdirectory is processed.
         add_subdirectory(client)
     endif()
 

@@ -259,43 +259,49 @@ if(NOT ROCM_LIBS_SUPERBUILD)
     endif()
 endif()
 
-add_subdirectory(tensilelite)
+# INTERFACE library that owns the public hipblaslt API headers (the in-tree
+# `library/include` subtree plus its build-tree counterpart, where
+# `hipblaslt-export.h` and `hipblaslt-version.h` are generated). Routing the
+# include directories through a target lets consumers pick them up via the
+# build graph rather than via `target_include_directories(<tgt> BEFORE
+# PRIVATE .../library/include ...)`. `hip::host` is exposed as an INTERFACE
+# link because the in-tree headers `#include <hip/...>`.
+add_library(hipblaslt-headers INTERFACE)
+add_library(hipblaslt::headers ALIAS hipblaslt-headers)
+target_include_directories(hipblaslt-headers
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/library/include>
+)
+target_link_libraries(hipblaslt-headers INTERFACE hip::host)
 
-if(TENSILELITE_ENABLE_CLIENT AND NOT HIPBLASLT_ENABLE_HOST)
-    set(_hipblaslt_gen_include_dir "${CMAKE_CURRENT_BINARY_DIR}/library/include")
+# `hipblaslt-version.h` is consumed by `library/include/hipblaslt/hipblaslt.h`
+# (only included when HIPBLASLT_ENABLE_HOST is ON). When HOST is ON, the
+# canonical `configure_file` call in `library/include/CMakeLists.txt`
+# regenerates the same file from the same template; this generation is
+# unconditional only because the file is cheap to produce.
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-version.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
+)
 
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-version.h.in"
-        "${_hipblaslt_gen_include_dir}/hipblaslt/hipblaslt-version.h"
-    )
-
-    file(WRITE "${_hipblaslt_gen_include_dir}/hipblaslt/hipblaslt-export.h" [=[
-#ifndef HIPBLASLT_EXPORT_H
-#define HIPBLASLT_EXPORT_H
-
-#ifndef HIPBLASLT_EXPORT
-#  define HIPBLASLT_EXPORT __attribute__((visibility("default")))
-#endif
-
-#ifndef HIPBLASLT_NO_EXPORT
-#  define HIPBLASLT_NO_EXPORT __attribute__((visibility("hidden")))
-#endif
-
-#ifndef HIPBLASLT_DEPRECATED
-#  define HIPBLASLT_DEPRECATED __attribute__((__deprecated__))
-#endif
-
-#ifndef HIPBLASLT_DEPRECATED_EXPORT
-#  define HIPBLASLT_DEPRECATED_EXPORT HIPBLASLT_EXPORT HIPBLASLT_DEPRECATED
-#endif
-
-#ifndef HIPBLASLT_DEPRECATED_NO_EXPORT
-#  define HIPBLASLT_DEPRECATED_NO_EXPORT HIPBLASLT_NO_EXPORT HIPBLASLT_DEPRECATED
-#endif
-
-#endif /* HIPBLASLT_EXPORT_H */
-]=])
+# `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
+# only built when at least one consumer needs it. tensilelite/client and
+# tensilelite/tests reach for it on the same condition, so we drive the
+# subdir from here to keep the dependency wiring close to the gate that
+# decides whether to build it at all.
+set(_hipblaslt_mxdatagen_enabled FALSE)
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR
+        AND (HIPBLASLT_ENABLE_CLIENT
+             OR TENSILELITE_ENABLE_CLIENT
+             OR TENSILELITE_BUILD_TESTING))
+    set(_hipblaslt_mxdatagen_enabled TRUE)
 endif()
+if(_hipblaslt_mxdatagen_enabled)
+    add_subdirectory(clients/common)
+endif()
+
+add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)

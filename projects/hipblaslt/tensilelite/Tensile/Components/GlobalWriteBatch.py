@@ -23,7 +23,7 @@
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
   SDWAModifiers, replaceHolder, EXEC, EXECLO, EXECHI, VCC, vgpr, sgpr, ContinuousRegister
-from rocisa.enum import CvtType, RoundType, SaturateCastType, SelectBit
+from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAndB32, \
@@ -49,6 +49,7 @@ from ..Activation import ActivationModule
 from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
+from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 
 from math import ceil, log2
 
@@ -1137,12 +1138,8 @@ class GlobalWriteBatchWriter:
             for vi in range(0, self.gwvw):
               dataEV  = dataE + vi
               dataEV2 = dataE + vi // 2
-              if self.parentWriter.states.archCaps["NoSDWA"]:
-                selectbit = 0 if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else 1
-                gradientCvtModule.add(VCvtF16toF32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), true16=[-1, -1, selectbit], comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
-              else:
-                selectbit = SelectBit.WORD_0 if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else SelectBit.WORD_1
-                gradientCvtModule.add(VCvtF16toF32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), sdwa=SDWAModifiers(src0_sel=selectbit), comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
+              selectbit = HighBitSel.LOW if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else HighBitSel.HIGH
+              gradientCvtModule.add(ECvtF16toF32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), sel=selectbit, comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
           elif activationCDataType.isSingle() and self.kernel["ProblemType"]["DataTypeE"].isBFloat16():
             for vi in range(0, self.gwvw):
               dataEV  = dataE + vi
@@ -2422,14 +2419,7 @@ class GlobalWriteBatchWriter:
             continue
           else:
             isPK = True
-            if self.parentWriter.states.archCaps["NoSDWA"]:
-              # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
-              sb = 0 if vi%4 == 0 else 1
-              module.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[sb])))
-            else:
-              # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
-              sb = SelectBit.WORD_0 if vi%4 == 0 else SelectBit.WORD_1
-              module.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sdwa=SDWAModifiers(src0_sel=sb)))
+            module.add(ECvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
           module.add(SNop(waitState=0))
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
             module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta"))
@@ -2456,14 +2446,7 @@ class GlobalWriteBatchWriter:
             continue
           else:
             isPK = True
-            if self.parentWriter.states.archCaps["NoSDWA"]:
-              # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
-              sb = 0 if vi%4 == 0 else 1
-              module.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[sb])))
-            else:
-              # Enable WORD_0 of 2-nd VGPR with vi=4 for vw=8
-              sb = SelectBit.WORD_0 if vi%4 == 0 else SelectBit.WORD_1
-              module.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sdwa=SDWAModifiers(src0_sel=sb)))
+            module.add(ECvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
           module.add(SNop(waitState=0))
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
             module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta"))

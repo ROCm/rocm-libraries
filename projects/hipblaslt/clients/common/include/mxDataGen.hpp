@@ -26,6 +26,12 @@
 
 #pragma once
 
+// All content below is gated so the header is harmless to include when the
+// feature is disabled (the entire translation unit collapses to nothing).
+// Callers that actually invoke `generateMXInput` must guard their use sites
+// on the same macro.
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-export.h>
@@ -34,8 +40,6 @@
 
 #include <string_view>
 #include <vector>
-
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 std::vector<float> generateMXInput(hipDataType                dataType,
                                    hipDataType                scaleType,
@@ -53,4 +57,5 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                    std::string_view const     initMethod = "Bounded",
                                    float                      min_val    = -1.0f,
                                    float                      max_val    = 1.0f);
+
 #endif

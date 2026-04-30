@@ -25,6 +25,10 @@
  *******************************************************************************/
 
 #include "DataInitialization.hpp"
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+#include <mxDataGen.hpp>
+#endif
 #include "TensorDataManipulation.hpp"
 #include "Utility.hpp"
 // #include "DataInitializationTyped.hpp"
@@ -959,12 +963,10 @@ namespace TensileLite
                 }
             }
 
-            bool isRMInit = false;
             for(auto const& p : problemFactory.problems())
             {
                 if(auto ptr = dynamic_cast<ContractionProblemGemm const*>(p.get()))
                 {
-                    std::vector<size_t>           vec_rm;
                     const ContractionProblemGemm& problem = (*ptr);
                     for(size_t i = 0; i < problem.tensors().size(); i++)
                     {
@@ -995,20 +997,6 @@ namespace TensileLite
 
                         pristine.maxElements = std::max(pristine.maxElements, numAllocatedElements);
 
-                        if(m_rotatingBuffer)
-                        {
-                            if(i <= ContractionProblemGemm::TENSOR::METADATA)
-                            {
-                                if(i == ContractionProblemGemm::TENSOR::C && problem.beta() == 0.0)
-                                {
-                                    vec_rm.push_back(0);
-                                }
-                                else
-                                {
-                                    vec_rm.push_back(numAllocatedBytes);
-                                }
-                            }
-                        }
                         if(m_vdata[i].name.empty())
                         {
                             m_vdata[i].name = problem.tensors()[i].getName();
@@ -1020,15 +1008,6 @@ namespace TensileLite
                                             + " at index " + std::to_string(i) + ".";
                             throw std::runtime_error(s.c_str());
                         }
-                    }
-                    if(m_rotatingBuffer)
-                    {
-                        if(!isRMInit)
-                        {
-                            m_rm     = std::make_shared<RotatingMemory>(vec_rm.size());
-                            isRMInit = true;
-                        }
-                        m_rm->addRotatingSize(vec_rm);
                     }
                     auto constants = problem.constants();
                     for(size_t i = 0; i < constants.size(); i++)
@@ -1060,12 +1039,10 @@ namespace TensileLite
                         size_t              maxElements;
                         std::vector<size_t> offsets;
                     };
-                    std::vector<size_t> vec_rm;
-                    auto                gElements
+                    auto gElements
                         = std::vector<std::map<rocisa::DataType, gElement>>(m_vdata.size());
                     for(auto const& problem : problems.gemms)
                     {
-                        std::vector<size_t> tmp_rm;
                         for(size_t i = 0; i < problem.tensors().size(); i++)
                         {
                             auto dataType = problem.tensors()[i].dataType();
@@ -1084,22 +1061,6 @@ namespace TensileLite
                                 += problem.tensors()[i].totalAllocatedElements();
                             gElements[i][dataType].offsets.push_back(
                                 problem.tensors()[i].totalAllocatedElements());
-                            if(m_rotatingBuffer)
-                            {
-                                if(i <= ContractionProblemGemm::TENSOR::METADATA)
-                                {
-                                    if(i == ContractionProblemGemm::TENSOR::C
-                                       && problem.beta() == 0.0)
-                                    {
-                                        tmp_rm.push_back(0);
-                                    }
-                                    else
-                                    {
-                                        tmp_rm.push_back(
-                                            problem.tensors()[i].totalAllocatedBytes());
-                                    }
-                                }
-                            }
                             if(m_vdata[i].name.empty())
                             {
                                 m_vdata[i].name = problem.tensors()[i].getName();
@@ -1111,21 +1072,6 @@ namespace TensileLite
                                                 + " not match the pristine name " + m_vdata[i].name
                                                 + " at index " + std::to_string(i) + ".";
                                 throw std::runtime_error(s.c_str());
-                            }
-                        }
-                        if(vec_rm.empty())
-                        {
-                            vec_rm = tmp_rm;
-                        }
-                        else
-                        {
-                            if(vec_rm.size() != tmp_rm.size())
-                            {
-                                throw std::runtime_error("Unable to update vec_rm.");
-                            }
-                            for(size_t i = 0; i < tmp_rm.size(); i++)
-                            {
-                                vec_rm[i] += tmp_rm[i];
                             }
                         }
                         auto constants = problem.constants();
@@ -1148,15 +1094,6 @@ namespace TensileLite
                         for(size_t i = 0; i < problem.batchIndices().size(); i++)
                             numOfBatch *= problem.batchSize(i);
                         m_maxBatch = std::max(m_maxBatch, numOfBatch);
-                    }
-                    if(m_rotatingBuffer)
-                    {
-                        if(!isRMInit)
-                        {
-                            m_rm     = std::make_shared<RotatingMemory>(vec_rm.size());
-                            isRMInit = true;
-                        }
-                        m_rm->addRotatingSize(vec_rm);
                     }
 
                     // Update maxElements
@@ -1234,6 +1171,99 @@ namespace TensileLite
                 std::cout << "Tensor name " << m_vdata[i].name << " init mode "
                           << ToString(m_vdata[i].init) << std::endl;
             }
+
+            // Rotating buffer sizes must match post-bounds-check pristine.maxElements (e.g. guard
+            // page round-up). vec_rm was previously built before that adjustment, undersizing pools.
+            if(m_rotatingBuffer)
+            {
+                m_rm.reset();
+                bool isRMInitPost = false;
+                for(auto const& p : problemFactory.problems())
+                {
+                    if(auto ptr = dynamic_cast<ContractionProblemGemm const*>(p.get()))
+                    {
+                        std::vector<size_t>           vec_rm;
+                        const ContractionProblemGemm& problem = *ptr;
+                        for(size_t i = 0; i < problem.tensors().size(); i++)
+                        {
+                            if(i > ContractionProblemGemm::TENSOR::METADATA)
+                                continue;
+                            auto dataType = problem.tensors()[i].dataType();
+                            auto  it      = m_vdata[i].pristine.find(dataType);
+                            if(i == ContractionProblemGemm::TENSOR::C && problem.beta() == 0.0)
+                            {
+                                vec_rm.push_back(0);
+                                continue;
+                            }
+                            if(it == m_vdata[i].pristine.end() || it->second.maxElements == 0)
+                            {
+                                vec_rm.push_back(0);
+                                continue;
+                            }
+                            size_t const bytes = multiplyElementSize(
+                                it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
+                            vec_rm.push_back(bytes);
+                        }
+                        if(!isRMInitPost)
+                        {
+                            m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
+                            isRMInitPost = true;
+                        }
+                        m_rm->addRotatingSize(vec_rm);
+                    }
+                    else if(auto ptr = dynamic_cast<ContractionProblemGroupedGemm const*>(p.get()))
+                    {
+                        const ContractionProblemGroupedGemm& grouped = *ptr;
+                        std::vector<size_t>                    vec_rm;
+                        for(auto const& problem : grouped.gemms)
+                        {
+                            std::vector<size_t> tmp_rm;
+                            for(size_t i = 0; i < problem.tensors().size(); i++)
+                            {
+                                if(i > ContractionProblemGemm::TENSOR::METADATA)
+                                    continue;
+                                auto dataType = problem.tensors()[i].dataType();
+                                auto  it      = m_vdata[i].pristine.find(dataType);
+                                if(i == ContractionProblemGemm::TENSOR::C && problem.beta() == 0.0)
+                                {
+                                    tmp_rm.push_back(0);
+                                    continue;
+                                }
+                                if(it == m_vdata[i].pristine.end() || it->second.maxElements == 0)
+                                {
+                                    tmp_rm.push_back(0);
+                                    continue;
+                                }
+                                size_t const bytes = multiplyElementSize(
+                                    it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
+                                tmp_rm.push_back(bytes);
+                            }
+                            if(vec_rm.empty())
+                            {
+                                vec_rm = std::move(tmp_rm);
+                            }
+                            else
+                            {
+                                if(vec_rm.size() != tmp_rm.size())
+                                {
+                                    throw std::runtime_error("Unable to update vec_rm.");
+                                }
+                                for(size_t j = 0; j < tmp_rm.size(); j++)
+                                {
+                                    vec_rm[j] += tmp_rm[j];
+                                }
+                            }
+                        }
+                        if(!isRMInitPost)
+                        {
+                            m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
+                            isRMInitPost = true;
+                        }
+                        m_rm->addRotatingSize(vec_rm);
+                    }
+                }
+            }
+
             // Init contants
             for(size_t i = 0; i < m_cdata.size(); i++)
             {
@@ -1795,6 +1825,7 @@ namespace TensileLite
             }
         }
 
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
         namespace
         {
             /** Maps Tensile MX scale element type to hipDataType for generateMXInput (mxDataGen). */
@@ -2029,6 +2060,16 @@ namespace TensileLite
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSB);
             }
         }
+#else  // HIPBLASLT_ENABLE_MXDATAGENERATOR
+        void DataInitialization::initializeMXData(ContractionProblemGemm const& /*problem*/)
+        {
+            // The MX data generator is disabled at build time. Reaching this
+            // path means a problem requiring MX FP4 initialization was issued
+            // against a build that doesn't include mxDataGenerator support.
+            throw std::runtime_error(
+                "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time");
+        }
+#endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
 
         void DataInitialization::initializeConstantInputs(ContractionProblemGemm const& problem)
         {

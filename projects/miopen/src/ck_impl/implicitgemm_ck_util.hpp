@@ -239,6 +239,7 @@ template <template <typename, typename> class DeviceOpPtrs,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 std::vector<std::string> FillValidKernelsGeneric(const ProblemDescriptionType& problem)
 {
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
     {
     case miopenHalf:
@@ -261,6 +262,10 @@ std::vector<std::string> FillValidKernelsGeneric(const ProblemDescriptionType& p
 
     default: return {};
     }
+#else
+    (void)problem;
+    return {};
+#endif
 }
 
 /**
@@ -344,6 +349,7 @@ template <template <typename, typename> class BilinearPtrs,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 std::vector<std::string> FillValidKernelsWithAlphaBetaGeneric(const ProblemDescriptionType& problem)
 {
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     // Data type dispatch with TF32 support (C++17 compatible - uses helper function)
     switch(problem.GetInDataType())
     {
@@ -384,6 +390,10 @@ std::vector<std::string> FillValidKernelsWithAlphaBetaGeneric(const ProblemDescr
 
     default: return {};
     }
+#else
+    (void)problem;
+    return {};
+#endif
 }
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL

@@ -463,6 +463,134 @@ namespace rocisa
         return module;
     }
 
+    ////////////////////////////////////////////////////////////////////////////////
+    // True16 conversion helpers.
+    // These query the NoSDWA arch cap at runtime and emit either:
+    //   - true16 encoding (op_sel / byte_sel) on NoSDWA targets (gfx11+), or
+    //   - SDWA encoding (src0_sel / dst_sel)  on legacy targets.
+    // Callers only provide a semantic `sel` (HighBitSel::LOW or HighBitSel::HIGH).
+    ////////////////////////////////////////////////////////////////////////////////
+    /// Convert F16 → F32, selecting src half-word by `sel`.
+    inline std::shared_ptr<Item>
+        ECvtF16toF32(const std::shared_ptr<RegisterContainer>& dst,
+                     const InstructionInput&                   src,
+                     HighBitSel                                sel,
+                     const std::string&                        comment = "")
+    {
+        rocIsa& instance = rocIsa::getInstance();
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            return std::make_shared<VCvtF16toF32>(
+                dst,
+                src,
+                std::nullopt,
+                std::vector<int>{-1, -1, static_cast<int>(sel)},
+                comment);
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.src0_sel = (sel == HighBitSel::HIGH) ? SelectBit::WORD_1
+                                                  : SelectBit::WORD_0;
+        return std::make_shared<VCvtF16toF32>(
+            dst, src, sdwa, std::vector<int>{}, comment);
+    }
+
+    /**
+     * Convert F32->F16 with optional half-word packing.
+     *
+     * @param sel  std::nullopt -> plain VCvtF32toF16, no half-word modifier.
+     *             HighBitSel::LOW / HIGH -> pack result into the selected
+     *             half-word via op_sel (NoSDWA / true16) or SDWA dst_sel
+     *             (legacy).
+     */
+    inline std::shared_ptr<Item>
+        ECvtF32toF16(const std::shared_ptr<RegisterContainer>& dst,
+                     const InstructionInput&                   src,
+                     std::optional<HighBitSel>                 sel     = std::nullopt,
+                     const std::string&                        comment = "")
+    {
+        if(!sel.has_value())
+        {
+            return std::make_shared<VCvtF32toF16>(
+                dst, src, std::nullopt, std::vector<int>{}, comment);
+        }
+
+        rocIsa& instance = rocIsa::getInstance();
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            return std::make_shared<VCvtF32toF16>(
+                dst,
+                src,
+                std::nullopt,
+                std::vector<int>{static_cast<int>(*sel)},
+                comment);
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.dst_sel = (*sel == HighBitSel::HIGH) ? SelectBit::WORD_1
+                                                  : SelectBit::WORD_0;
+        return std::make_shared<VCvtF32toF16>(
+            dst, src, sdwa, std::vector<int>{}, comment);
+    }
+
+    /// Unpack packed-FP8 → 2×F32, selecting src half-word by `sel`.
+    inline std::shared_ptr<Item>
+        ECvtPkFP8toF32(const std::shared_ptr<RegisterContainer>& dst,
+                       const InstructionInput&                   src,
+                       HighBitSel                                sel,
+                       const std::string&                        comment = "")
+    {
+        int     selInt   = static_cast<int>(sel);
+        rocIsa& instance = rocIsa::getInstance();
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            VOP3PModifiers vop3;
+            vop3.op_sel.push_back(selInt);
+            return std::make_shared<VCvtPkFP8toF32>(
+                dst,
+                src,
+                std::nullopt,
+                vop3,
+                std::vector<int>{-1, -1, selInt},
+                comment);
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.src0_sel = (sel == HighBitSel::HIGH) ? SelectBit::WORD_1
+                                                  : SelectBit::WORD_0;
+        return std::make_shared<VCvtPkFP8toF32>(
+            dst, src, sdwa, std::nullopt, std::vector<int>{}, comment);
+    }
+
+    /// Unpack packed-BF8 → 2×F32, selecting src half-word by `sel`.
+    inline std::shared_ptr<Item>
+        ECvtPkBF8toF32(const std::shared_ptr<RegisterContainer>& dst,
+                       const InstructionInput&                   src,
+                       HighBitSel                                sel,
+                       const std::string&                        comment = "")
+    {
+        int     selInt   = static_cast<int>(sel);
+        rocIsa& instance = rocIsa::getInstance();
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            VOP3PModifiers vop3;
+            vop3.op_sel.push_back(selInt);
+            return std::make_shared<VCvtPkBF8toF32>(
+                dst,
+                src,
+                std::nullopt,
+                vop3,
+                std::vector<int>{-1, -1, selInt},
+                comment);
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.src0_sel = (sel == HighBitSel::HIGH) ? SelectBit::WORD_1
+                                                  : SelectBit::WORD_0;
+        return std::make_shared<VCvtPkBF8toF32>(
+            dst, src, sdwa, std::nullopt, std::vector<int>{}, comment);
+    }
+
     inline std::shared_ptr<Item>
         VCvtBF16toFP32(const std::shared_ptr<RegisterContainer>&         dst,
                        const std::shared_ptr<RegisterContainer>&         src,
@@ -470,45 +598,31 @@ namespace rocisa
                        int                                               vi,
                        const std::string&                                comment = "")
     {
-        auto& instance = rocIsa::getInstance();
-        if(instance.getAsmCaps()["HasBF16CVT"])
-        {
-            if(instance.getArchCaps()["NoSDWA"])
-            {
-                auto vop3 = VOP3PModifiers();
-                vop3.op_sel.push_back(vi % 2);
-                return std::make_shared<PVCvtBF16toFP32>(
-                    dst, src, std::nullopt, vop3, "cvt bf16 to fp32. " + comment);
-            }
-            else
-            {
-                auto select_bit = SelectBit::WORD_0;
-                if(vi % 2 == 1)
-                {
-                    select_bit = SelectBit::WORD_1;
-                }
-                auto sdwa     = SDWAModifiers();
-                sdwa.src0_sel = select_bit;
-                return std::make_shared<PVCvtBF16toFP32>(
-                    dst, src, sdwa, std::nullopt, "cvt bf16 to fp32. " + comment);
-            }
-        }
-        else
+        rocIsa& instance = rocIsa::getInstance();
+        if(!instance.getAsmCaps()["HasBF16CVT"])
         {
             if((vi % 2) == 1)
             {
                 if(!vgprMask.has_value())
-                {
                     throw std::runtime_error("vgprMask is null");
-                }
                 return std::make_shared<VAndB32>(
                     dst, src, *vgprMask, "cvt bf16 to fp32. " + comment);
             }
-            else
-            {
-                return std::make_shared<VLShiftLeftB32>(
-                    dst, 16, src, "cvt bf16 to fp32. " + comment);
-            }
+            return std::make_shared<VLShiftLeftB32>(
+                dst, 16, src, "cvt bf16 to fp32. " + comment);
         }
+
+        if(instance.getArchCaps()["NoSDWA"])
+        {
+            VOP3PModifiers vop3;
+            vop3.op_sel.push_back(vi % 2);
+            return std::make_shared<PVCvtBF16toFP32>(
+                dst, src, std::nullopt, vop3, std::vector<int>{-1, -1, vi % 2}, "cvt bf16 to f32");
+        }
+
+        SDWAModifiers sdwa;
+        sdwa.src0_sel = (vi % 2 == 1) ? SelectBit::WORD_1 : SelectBit::WORD_0;
+        return std::make_shared<PVCvtBF16toFP32>(
+            dst, src, sdwa, std::nullopt, std::vector<int>{}, "cvt bf16 to f32");
     }
 } // namespace rocisa

@@ -39,8 +39,6 @@
 
 #include "RunListener.hpp"
 
-#include <mxDataGen.hpp>
-
 namespace TensileLite
 {
     namespace Client
@@ -288,6 +286,7 @@ namespace TensileLite
                                     problem.gemms[0],
                                     kind);
                     }
+                    return m_cachedGPUInputs;
                 }
                 else
                 {
@@ -311,7 +310,8 @@ namespace TensileLite
                 if(m_cpuPtrs.empty())
                     initializeConstantInputs(problem.gemms[0]);
 
-                return ConvertToProblemInputs(problem.gemms[0], true);
+                m_cachedGPUInputs = ConvertToProblemInputs(problem.gemms[0], true);
+                return m_cachedGPUInputs;
             }
 
             std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblemGemm const& problem)
@@ -347,6 +347,7 @@ namespace TensileLite
                                     problem,
                                     kind);
                     }
+                    return m_cachedGPUInputs;
                 }
                 else
                 {
@@ -392,7 +393,8 @@ namespace TensileLite
                 if(m_cpuPtrs.empty())
                     initializeConstantInputs(problem);
 
-                return ConvertToProblemInputs(problem, true);
+                m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
+                return m_cachedGPUInputs;
             }
 
             std::vector<std::shared_ptr<ProblemInputs>>
@@ -864,7 +866,9 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX scale with preSwizzle now that solution is available
+                // Re-init MX FP4 inputs once the solution is known (MI-based preSwizzle when enabled).
+                // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
+                // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
                 if(m_currentSolution != nullptr
                    && m_mxScaleFormat > 0
                    && m_currentGemmProblem != nullptr
@@ -1048,6 +1052,8 @@ namespace TensileLite
 
             bool m_cpuInit = false;
             bool m_gpuInit = false;
+
+            std::shared_ptr<ProblemInputs> m_cachedGPUInputs;
 
             size_t m_maxBatch;
 
