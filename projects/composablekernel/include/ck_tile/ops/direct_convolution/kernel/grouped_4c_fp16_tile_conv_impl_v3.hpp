@@ -3,16 +3,12 @@
 
 #pragma once
 
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_descriptors.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_kernel_base.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_input_loader.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_weight_loader.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_output_writer.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_compute_loop.hpp"
 #include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
-#include "ck_tile/ops/direct_convolution/utils/detail.hpp"
-#include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
-#include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
 #include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
@@ -43,7 +39,7 @@ constexpr int WARP_Q = 4;
 struct Config
 {
     // waves_c64 — channel (group) dimension
-    // Each wave computes outputs for 64 input channels worth of groups. 
+    // Each wave computes outputs for 64 input channels worth of groups.
     // If each group has, e.g., exactly 4 channels, 64 channels -> 16 groups per workgroup.
     // This number tells many waves of 64 channels are processed by one workgroup (thread block).
     int waves_c64;
@@ -59,12 +55,12 @@ struct Config
 
     // Batch folding:
     // The batch dimension is folded into the grid by a factor of n_fold, meaning each block processes n_fold batches.
-    // The grid for launching the kernel becomes 
+    // The grid for launching the kernel becomes
     //      dim3(ceil(out_W / block_q) * n_fold,   ceil(C / block_c),   ceil(N / n_fold))
     // This means that W-tiles are interleaved with n_fold groups of images
     // The n_fold number tells how many image slots are packed into one X-dimension stride.
-    // By spreading images into the X dimension rather than only Z, 
-    // the GPU can schedule blocks from different images onto different CUs without 
+    // By spreading images into the X dimension rather than only Z,
+    // the GPU can schedule blocks from different images onto different CUs without
     // waiting for one image's channel tiles to finish first.
     int n_fold = 8;
 
@@ -237,100 +233,43 @@ constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
 inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
 {
     if(par.direction != cfg.direction)
-    {
         return false;
-    }
     if((par.groups % cfg.block_groups()) != 0)
-    {
         return false;
-    }
     const int out_q = (par.direction == Direction::Dgrad) ? par.w : par.q;
     if(out_q < cfg.block_q() && cfg.waves_q4 > 1)
-    {
         return false;
-    }
-    // XOR swizzle constraint: every block_q offset must be a multiple of
-    // BLOCK_C8 (= block_c/8). The XOR transform operates in global coords on
-    // (x_global, c8), mapping c8 -> c8 ^ (x_global % BLOCK_C8). The LDS read
-    // applies XOR in local coords: c8 -> c8 ^ (x_local % BLOCK_C8). For
-    // consistency we need (block_q + x_local) % BLOCK_C8 == x_local % BLOCK_C8,
-    // i.e. block_q % BLOCK_C8 == 0 for every tile. This is guaranteed when:
-    //   (a) cfg.block_q() is a multiple of BLOCK_C8 (all offsets aligned), OR
-    //   (b) only a single spatial tile is needed (out_q <= block_q, so offset=0).
-    if(cfg.swizzle_type == SwizzleType::XOR)
-    {
-        const int block_c8 = cfg.block_c() / 8;
-        if(cfg.block_q() % block_c8 != 0 && out_q > cfg.block_q())
-        {
-            return false;
-        }
-    }
+    if(cfg.swizzle_type == SwizzleType::XOR && !xor_config_valid(cfg, par))
+        return false;
     return true;
 }
 
 inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
 {
-    const auto& cfg = configs[config_idx];
-
-    // Compute the grid size.
-    // For Dgrad the output is the input gradient (width = par.w, not par.q).
-    const int out_q    = (cfg.direction == Direction::Dgrad) ? par.w : par.q;
-    auto blocks_w      = ck_tile::integer_divide_ceil(out_q, cfg.block_q());
-    auto blocks_w_n    = blocks_w * cfg.n_fold;
-    auto blocks_c      = ck_tile::integer_divide_ceil(par.c_tot, cfg.block_c());
-    auto blocks_n_fold = ck_tile::integer_divide_ceil(par.n, cfg.n_fold);
-
-    LaunchParams launch;
-    launch.grid       = dim3(blocks_w_n, blocks_c, blocks_n_fold);
-    launch.block_size = dim3(cfg.block_size(), 1, 1);
-    return launch;
+    return get_launch_params_impl(configs[config_idx], par);
 }
 
-// Tile constants derived from the kernel configuration.
+// -----------------------------------------------------------------------
+// TileConstants — inherits all shared constants from TileConstantsBase.
+// Only adds the three variant-specific tile distributions:
+//   Mfma::MakeAccTileDistribution       (mfma_f32_4x4x4f16 lane layout)
+//   Weight::MakeLdsReadTileDistribution (Fprop weight read from LDS)
+//   Output::MakeDramWriteTileDistributionNarrow
+// -----------------------------------------------------------------------
 template <Config cfg>
-struct TileConstants
+struct TileConstants : direct_conv::TileConstantsBase<cfg>
 {
-    static constexpr int GROUP_SIZE   = cfg.channels_per_group; // 4
-    static constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4;         // 1
+    using Base = direct_conv::TileConstantsBase<cfg>;
 
-    // Number of input columns loaded by each workgroup (output columns plus halo).
-    static constexpr int BLOCK_W = cfg.block_q() + (cfg.kw - 1);
-
-    // uint4 vectors per channel fiber (8 fp16 per uint4).
-    static constexpr int BLOCK_C8 = cfg.block_c() / 8;
-
-    // Total channels per block in fp16 elements.
-    static constexpr int BLOCK_C = BLOCK_C8 * 8;
-
-    // fp16x4 groups per channel fiber (4 fp16 per group = one MFMA result vector).
-    static constexpr int BLOCK_C4 = BLOCK_C / 4;
-
-    // Number of uint4 vectors to store per output row (LDS epilogue path).
-    static constexpr int STORE_VECS = cfg.block_q() * BLOCK_C8;
-
-    // LDS double buffering for input loads.
-    static constexpr int NUM_INPUT_LDS_BUFFERS     = 2;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_C8  = BLOCK_C8 * BLOCK_W;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_C4  = INPUT_LDS_BUFFER_SIZE_C8 * 2;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_FP16 = INPUT_LDS_BUFFER_SIZE_C8 * 8;
-
-    // Tile-level async load constants.
-    static constexpr int NUM_WAVES     = cfg.num_waves();
-    static constexpr int LANES_PER_ROW = WAVE_SIZE / BLOCK_C8;
-    static constexpr int TOTAL_SPATIAL = cfg.block_size() / BLOCK_C8;
-
-    // Aliases for cfg fields used as template arguments inside nested structs.
-    // Direct member access (cfg.waves_q4) in template argument positions can
-    // confuse the parser in nested struct context; aliases avoid this.
+    // Compile-time aliases for the two wave-dimension sizes used in the
+    // tile distributions below. cfg.waves_q4 / cfg.waves_c64 are accessible
+    // as template parameters of the enclosing struct, but spelled out here
+    // to make the distribution code self-documenting.
     static constexpr int WAVES_Q4  = cfg.waves_q4;
     static constexpr int WAVES_C64 = cfg.waves_c64;
-    static constexpr int BLOCK_Q   = cfg.block_q();
-    static constexpr int KH_KW     = cfg.kh * cfg.kw;
-    static constexpr int KW        = cfg.kw;
-    static constexpr SwizzleType SWIZZLE_TYPE = cfg.swizzle_type;
 
     // -----------------------------------------------------------------------
-    // Mfma — shared tile distribution for MFMA operands and results.
+    // Mfma — tile distribution for mfma_f32_4x4x4f16 operands and results.
     //
     // Maps (P0=warp_id, P1=lane_id) to a 3D tile coordinate
     //   (q_local, c4_local, c_sub) where:
@@ -338,36 +277,18 @@ struct TileConstants
     //   c4_local = warp_c64 * 16 + lane_batch  ∈ [0, BLOCK_C4)
     //   c_sub    ∈ [0, 4) — vectorization (Y dimension)
     //
-    // This is the thread layout produced and consumed by mfma_f32_4x4x4f16:
+    // mfma_f32_4x4x4f16 lane layout (64-lane wave):
     //   lane_col   = (lane % 4)       → Q column within warp (4 output cols)
     //   lane_batch = (lane / 4) % 16  → C4 group within warp (16 groups of 4)
     //
-    // 3D tile: [block_q, BLOCK_C4, 4]
-    //   X0 = block_q [waves_q4, 4]:
-    //     factor 0 (waves_q4): warp Q group → P0
-    //     factor 1 (4): lane column → P1
-    //   X1 = BLOCK_C4 [waves_c64, 16]:
-    //     factor 0 (waves_c64): warp C group → P0
-    //     factor 1 (16): lane batch → P1
-    //   X2 = 4 (vectorization, Y dimension)
-    //
-    // R = [] (no replication)
+    // P0 merge = {waves_q4, waves_c64}: warp_q → X0 factor 0, warp_c64 → X1 factor 0
+    // P1 merge = {16, 4}:               lane_batch → X1 factor 1, lane_col → X0 factor 1
+    // Y0 (length 4) → X2 (vectorization)
     // -----------------------------------------------------------------------
     struct Mfma
     {
         static constexpr auto MakeAccTileDistribution()
         {
-            // RH-major indices: 0=R(empty), 1=X0(Q), 2=X1(C4), 3=X2(c_sub)
-            //
-            // P0 (warp_id = num_waves, merge {waves_q4, waves_c64}):
-            //   factor 0 (waves_q4)  → X0 factor 0 → major=1, minor=0
-            //   factor 1 (waves_c64) → X1 factor 0 → major=2, minor=0
-            //
-            // P1 (lane_id = 64, merge {16, 4}):
-            //   factor 0 (16 = batch) → X1 factor 1 → major=2, minor=1
-            //   factor 1 (4 = col)    → X0 factor 1 → major=1, minor=1
-            //
-            // Y0 (length 4) → X2 factor 0 → major=3, minor=0 (vectorization)
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<
                     ck_tile::sequence<>,
@@ -382,80 +303,27 @@ struct TileConstants
     };
 
     // -----------------------------------------------------------------------
-    // Input — descriptors and distributions for the input activation tensor.
+    // Weight — adds the Fprop LDS read tile distribution.
     //
-    // Memory stages:
-    //   DRAM:  4D [hi, wi_padded, BLOCK_C8, 8] in fp16 — async loaded to LDS.
-    //   LDS:   4D [1, BLOCK_W, BLOCK_C8, 8] in fp16 — staging buffer.
-    //   Regs:  3D [BLOCK_W, BLOCK_C4, 4] in fp16 — MFMA A operand (read via Mfma distribution).
+    // P0 merge = {waves_q4, waves_c64}:
+    //   factor 0 (waves_q4)  → R dim (replicated across Q-waves)
+    //   factor 1 (waves_c64) → X0 factor 0 (K-channel wave group)
+    // P1 merge = {16, 4}:
+    //   factor 0 (16 = lane_batch) → X0 factor 1
+    //   factor 1 (4  = lane_col)   → X0 factor 2
+    // Y0 (kh*kw) → X1, Y1 (GROUP_SIZE=4) → X2
+    // R = [waves_q4]: all Q-waves read the same weights (replication).
     // -----------------------------------------------------------------------
-    struct Input
+    struct Weight : Base::Weight
     {
-        using Shared = SharedDescriptors<TileConstants<cfg>>::Input;
-
-        static CK_TILE_DEVICE auto MakeDramReadDescriptor(int hi, int wi, int C_total, int px)
-        {
-            return Shared::MakeDramReadDescriptor(hi, wi, C_total, px);
-        }
-
-        static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
-
-        static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
-
-        static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
-    };
-
-    // -----------------------------------------------------------------------
-    // Weight — descriptors and distributions for the filter weight tensor.
-    //
-    // Memory stages:
-    //   DRAM:  2D [WEIGHT_LDS_SIZE_UINT4, 8] in fp16 — async loaded to LDS
-    //          in NUM_WEIGHT_PASSES passes (one block_size chunk per pass).
-    //   LDS:   2D [WEIGHT_LDS_PADDED_UINT4, 8] in fp16 — staging buffer.
-    //   Regs:  1D array [kh*kw] of fp16x4 — MFMA B operand.
-    //          Fprop reads via MakeLdsReadTileDistribution.
-    //          Dgrad reads via TransposeLDSLayout (ds_read_b64_tr_b16).
-    // -----------------------------------------------------------------------
-    struct Weight
-    {
-        using Shared = SharedDescriptors<TileConstants<cfg>>::Weight;
-
-        // Weight LDS sizing (uniform formula: block_c * kh * kw * GROUP_SIZE / 4 uint2).
-        static constexpr int WEIGHT_LDS_SIZE_UINT2   =
-            cfg.kh * cfg.kw * cfg.block_groups() * GROUP_SIZE * GROUP_SIZE_4;
-        static constexpr int WEIGHT_LDS_SIZE_UINT4   = WEIGHT_LDS_SIZE_UINT2 / 2;
-        static constexpr int NUM_WEIGHT_PASSES =
-            (WEIGHT_LDS_SIZE_UINT4 + cfg.block_size() - 1) / cfg.block_size();
-        static constexpr int WEIGHT_LDS_PADDED_UINT4 = NUM_WEIGHT_PASSES * cfg.block_size();
-        static constexpr int WEIGHT_LDS_READ_K = cfg.block_c();
-
-        static constexpr auto MakeDramReadDescriptor() { return Shared::MakeDramReadDescriptor(); }
-        static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
-        static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
-        static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
-
-        // Tile distribution for weight LDS reads (Fprop only).
-        // R = [waves_q4]: all Q-waves read the same weights (replication).
         static constexpr auto MakeLdsReadTileDistribution()
         {
-            // RH-major indices: 0=R, 1=X0(K-channel), 2=X1(filter pos), 3=X2(sub-channel)
-            //
-            // P0 (warp_id = num_waves, merge {waves_q4, waves_c64}):
-            //   factor 0 (waves_q4) → R dim → major=0, minor=0
-            //   factor 1 (waves_c64) → X0 factor 0 → major=1, minor=0
-            //
-            // P1 (lane_id = 64, merge {16, 4}):
-            //   factor 0 (16 = batch) → X0 factor 1 → major=1, minor=1
-            //   factor 1 (4 = k)      → X0 factor 2 → major=1, minor=2
-            //
-            // Y0 (length kh*kw) → X1 factor 0 → major=2, minor=0
-            // Y1 (length 4)     → X2 factor 0 → major=3, minor=0
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<
                     ck_tile::sequence<WAVES_Q4>,
                     ck_tile::tuple<ck_tile::sequence<WAVES_C64, 16, 4>,
-                                   ck_tile::sequence<KH_KW>,
-                                   ck_tile::sequence<GROUP_SIZE>>,
+                                   ck_tile::sequence<Base::KH_KW>,
+                                   ck_tile::sequence<Base::GROUP_SIZE>>,
                     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<1, 1>>,
                     ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<1, 2>>,
                     ck_tile::sequence<2, 3>,
@@ -464,83 +332,21 @@ struct TileConstants
     };
 
     // -----------------------------------------------------------------------
-    // Output — descriptors and distributions for the output activation tensor.
+    // Output — adds the narrow DRAM write tile distribution.
     //
-    // Memory stages:
-    //   Regs:  Distributed fp32x4 accumulators in the MFMA layout
-    //          (mapped to/from fp16x4 via Mfma::MakeAccTileDistribution).
-    //   LDS:   3D [block_q, BLOCK_C4, 4] in fp16 — staging buffer for the
-    //          LDS epilogue path (RegistersToLdsToGlobalMemory).
-    //   DRAM:  4D [ho, wo_padded, BLOCK_C4, 4] in fp16 — final output.
-    //          MakeDramWriteTileDistributionNarrow is also used to read back from LDS before
-    //          the coalesced DRAM store (both use the same thread mapping).
+    // 4D tile: [1, block_q, BLOCK_C4, 4]
+    // P0 merge = {waves_q4, waves_c64}:
+    //   factor 0 (waves_q4)  → X1 factor 0 (Q wave group)
+    //   factor 1 (waves_c64) → X2 factor 0 (C wave group)
+    // P1 merge = {16, 4}:
+    //   factor 0 (16=batch) → X2 factor 1
+    //   factor 1 (4=col)    → X1 factor 1
+    // Y0 (1) → X0 (trivial row), Y1 (4) → X3 (vectorization)
     // -----------------------------------------------------------------------
-    struct Output
+    struct Output : Base::Output
     {
-        using Shared = SharedDescriptors<TileConstants<cfg>>::Output;
-
-        static constexpr int OUTPUT_LDS_BUFFER_SIZE = BLOCK_C8 * BLOCK_Q;
-
-        static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
-
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrow(int ho, int wo, int C)
-        {
-            return Shared::MakeDramWriteDescriptorNarrow(ho, wo, C);
-        }
-
-        // Store distribution for wider LDS reads and DRAM stores.
-        // Maps all block_size threads to [STORE_Q, BLOCK_C8, 8] positions.
-        // Only STORE_VECS threads are active (Q < BLOCK_Q).
-        //
-        // Thread decomposition:
-        //   P0 (warp_id, NUM_WAVES) → X0 factor 0 (Q warp group)
-        //   P1 (lane_id = 64, merge {LANES_PER_ROW, BLOCK_C8}):
-        //     factor 0 (LANES_PER_ROW) → X0 factor 1 (Q within warp)
-        //     factor 1 (BLOCK_C8) → X1 (C8)
-        //   Y0 (length 8) → X2 (vectorization)
-        static constexpr auto MakeDramWriteTileDistributionWide()
-        {
-            return ck_tile::make_static_tile_distribution(
-                ck_tile::tile_distribution_encoding<
-                    ck_tile::sequence<>,
-                    ck_tile::tuple<ck_tile::sequence<NUM_WAVES, LANES_PER_ROW>,
-                                   ck_tile::sequence<BLOCK_C8>,
-                                   ck_tile::sequence<8>>,
-                    ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
-                    ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0>>,
-                    ck_tile::sequence<3>,
-                    ck_tile::sequence<0>,
-                    ck_tile::number<STORE_VECS>>{});
-        }
-
-        static constexpr int STORE_Q = TOTAL_SPATIAL;
-
-        static constexpr auto MakeLdsReadDescriptorWide()
-        {
-            return Shared::template MakeLdsReadDescriptorWide<STORE_Q>();
-        }
-
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorWide(int wo, int C)
-        {
-            return Shared::MakeDramWriteDescriptorWide(wo, C);
-        }
-
-        // Tile distribution for DRAM output writes (variant-specific wave decomposition).
-        // 4D tile: [1, block_q, BLOCK_C4, 4]
         static constexpr auto MakeDramWriteTileDistributionNarrow()
         {
-            // RH-major indices: 0=R(empty), 1=X0(row), 2=X1(Q), 3=X2(C_group), 4=X3(C_sub)
-            //
-            // P0 (warp_id), merge {waves_q4, waves_c64}:
-            //   factor 0 → X1 factor 0 (waves_q4)  → major=2, minor=0
-            //   factor 1 → X2 factor 0 (waves_c64) → major=3, minor=0
-            //
-            // P1 (lane_id=64), merge {16, 4}:
-            //   factor 0 (16=batch) → X2 factor 1 → major=3, minor=1
-            //   factor 1 (4=col)    → X1 factor 1 → major=2, minor=1
-            //
-            // Y0 (length 1) → X0 → major=1, minor=0 (trivial row)
-            // Y1 (length 4) → X3 → major=4, minor=0 (vectorization)
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<
                     ck_tile::sequence<>,
@@ -558,28 +364,7 @@ struct TileConstants
 
 // Workgroup-level coordinates derived from blockIdx.
 template <Config cfg>
-struct BlockCoords
-{
-    int block_n;      // Batch index for this workgroup (unfolded from blockIdx).
-    int block_q;      // Starting output column (W dimension) for this workgroup.
-    int block_group;  // Starting convolution group index for this workgroup.
-    int block_k;      // Starting output channel index (= block_group * channels_per_group).
-    int block_c8;     // block_k expressed in uint4 vector units (block_k / 8).
-    int C;            // Total number of input channels (groups * channels_per_group).
-    int C8;           // Total number of input channels in uint4 vector units (C / 8).
-    int K;            // Total number of output channels (== C for this kernel since K_tot == C_tot).
-
-    __device__ BlockCoords(int groups)
-        : C(groups * cfg.channels_per_group), C8(C / 8), K(C)
-    {
-        const int block_q_n_idx = blockIdx.x;
-        block_n     = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
-        block_q     = (block_q_n_idx / cfg.n_fold) * cfg.block_q();
-        block_group = static_cast<int>(blockIdx.y) * cfg.block_groups();
-        block_k     = block_group * cfg.channels_per_group;
-        block_c8    = block_k / 8; // TODO: rename block_c8 to block_k8
-    }
-};
+using BlockCoords = direct_conv::BlockCoords<cfg>;
 
 // Handles input loads from global memory into LDS and then into registers.
 template <Config cfg>
@@ -636,31 +421,7 @@ struct WeightLoader
         }
         else
         {
-            // Fprop: use tile distribution to read weights from LDS.
-            constexpr auto weight_lds_read_desc = TC::Weight::MakeLdsReadDescriptor();
-            auto weight_lds_view =
-                ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-                    reinterpret_cast<_Float16*>(weight_lds), weight_lds_read_desc);
-
-            constexpr auto weight_lds_read_dist = TC::Weight::MakeLdsReadTileDistribution();
-            auto weight_lds_read_window         = ck_tile::make_tile_window(
-                weight_lds_view,
-                ck_tile::make_tuple(ck_tile::number<TC::Weight::WEIGHT_LDS_READ_K>{},
-                                    ck_tile::number<TC::KH_KW>{},
-                                    ck_tile::number<TC::GROUP_SIZE>{}),
-                {0, 0, 0},
-                weight_lds_read_dist);
-
-            const auto weight_tile = ck_tile::load_tile(weight_lds_read_window);
-            const auto& buf        = weight_tile.get_thread_buffer();
-
-            static_for<TC::KH_KW>(
-                [&]<int khw>()
-                {
-                    __builtin_memcpy(&weights_reg[khw],
-                                     &buf.get(khw * TC::GROUP_SIZE),
-                                     sizeof(fp16x4_t));
-                });
+            direct_conv::weight_read_fprop<TC>(weights_reg, weight_lds);
         }
     }
 };
@@ -729,27 +490,9 @@ __global__ void conv2d_grouped_4c_fp16_nhwc_cdna4(const _Float16* __restrict__ i
                                                   int py,
                                                   int px)
 {
-    conv2d_grouped_4c_fp16_cdna4_nhwc_impl<cfg>(in,
-                                                wei,
-                                                alpha,
-                                                beta,
-                                                out,
-                                                N,
-                                                groups,
-                                                c_per_group,
-                                                k_per_group,
-                                                hi,
-                                                wi,
-                                                ho,
-                                                wo,
-                                                fy,
-                                                fx,
-                                                sy,
-                                                sx,
-                                                dy,
-                                                dx,
-                                                py,
-                                                px);
+    conv2d_grouped_4c_fp16_cdna4_nhwc_impl<cfg>(in, wei, alpha, beta, out,
+                                                N, groups, c_per_group, k_per_group,
+                                                hi, wi, ho, wo, fy, fx, sy, sx, dy, dx, py, px);
 }
 
 template <size_t... Is>
@@ -813,30 +556,11 @@ constexpr KernelVariant make_variant()
         .is_applicable =
             [](const Conv2dParams& par)
         {
-            if(par.in_type != DataType::fp16)
-                return false;
-            if(par.wei_type != DataType::fp16)
-                return false;
-            if(par.out_type != DataType::fp16)
-                return false;
-            if(par.order != TensorOrder::NHWC)
-                return false;
-            if(par.direction != Direction::Fprop &&
-               par.direction != Direction::Dgrad)
-                return false;
-            if(par.kh != 3 || par.kw != 3)
-                return false;
-            if(par.k_tot != par.c_tot)
+            if(!is_applicable_base(par))
                 return false;
             if(par.channels_per_group() != 4)
                 return false;
             if(par.c_tot % 4 != 0)
-                return false;
-            if(par.stride_h != 1 || par.stride_w != 1)
-                return false;
-            if(par.dilation_h != 1 || par.dilation_w != 1)
-                return false;
-            if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1)
                 return false;
             return true;
         },
