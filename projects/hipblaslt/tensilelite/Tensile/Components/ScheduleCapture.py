@@ -699,6 +699,104 @@ class LoopBodyCaptureBuilder:
         return LoopBodyCapture(instructions=list(self._instructions))
 
 
+# =============================================================================
+# --- CMS category schema ---
+# =============================================================================
+# Single source of truth for which CMS categories exist and which source modules
+# each draws from. Both customMainLoopSchedule (for idMap consumed by
+# cmsv.isValid) and the SIA3 default-side capture path (for tag_by_origin_id)
+# call build_idmap; the latter then inverts via invert_idmap_to_id_to_category
+# to feed its {id(inst): category} tag map. Adding a new category means adding
+# it here and only here.
+
+
+def split_for_plr(module):
+    """Split a single per-loop module into 2 halves for numIterPLR=0 mode.
+
+    Mirrors customMainLoopSchedule's nested splitForPLR. Both call sites
+    (CustomSchedule and the default-side capture builder) must use this
+    helper; otherwise CMS and default-side capture see different
+    per-iteration shapes and their idMaps diverge.
+
+    Returns [second_half, first_half] — second half is iter 0; first
+    half is iter 1. Items are NOT cloned; the returned lists share
+    Python identity with the source module's items.
+    """
+    items = module.flatitems()
+    n = len(items)
+    return [items[n // 2:], items[:n // 2]]
+
+
+def build_idmap(*, num_loop_iter,
+                LRCodeA, PackCodeA, LRCodeB, PackCodeB,
+                globalReadA, globalReadB,
+                globalReadIncACode, globalReadIncBCode,
+                localWriteA, localWriteB,
+                LRSwapA, LRSwapB, LWSwapA, LWSwapB,
+                loopCounterCode, syncCode, snopCode):
+    """Build the canonical {category: source-module-or-list} dict.
+
+    This is the SINGLE definition of which categories exist and what
+    source each draws from. Both consumers call this:
+      - customMainLoopSchedule (CustomSchedule.py): builds idMap for
+        cmsv.isValid() and stashes on writer._last_id_map.
+      - _loopBody capture site (KernelWriter.py): inverts via
+        invert_idmap_to_id_to_category() to feed the SIA3 default-side
+        capture's tag map.
+
+    Adding a new category means adding it here and only here.
+    """
+    idmap = {
+        'GRIncA': globalReadIncACode,
+        'GRIncB': globalReadIncBCode,
+        'GRA':    globalReadA,
+        'GRB':    globalReadB,
+        'LWA':    localWriteA,
+        'LWB':    localWriteB,
+        'LRSA':   LRSwapA,
+        'LRSB':   LRSwapB,
+        'LWSA':   LWSwapA,
+        'LWSB':   LWSwapB,
+        'LCC':    loopCounterCode,
+    }
+    for u in range(num_loop_iter):
+        idmap[f"LRA{u}"]   = LRCodeA[u]
+        idmap[f"LRB{u}"]   = LRCodeB[u]
+        idmap[f"PackA{u}"] = PackCodeA[u]
+        idmap[f"PackB{u}"] = PackCodeB[u]
+    idmap['SYNC'] = syncCode
+    idmap['SNOP'] = snopCode
+    return idmap
+
+
+def invert_idmap_to_id_to_category(idmap):
+    """Invert {category: items_or_module} to {id(instruction): category}.
+
+    Handles values that are either Modules (with .flatitems()) or plain
+    lists of instructions (the form CustomSchedule's removeComments()
+    produces).
+
+    Raises ValueError if the same instruction id appears under two
+    categories — this is a schema bug (a leaf shared between two
+    categories), not a normal case. Last-wins would silently corrupt
+    categorization downstream.
+    """
+    out = {}
+    for cat, val in idmap.items():
+        if val is None:
+            continue
+        items = val.flatitems() if hasattr(val, 'flatitems') else val
+        for item in items:
+            key = id(item)
+            if key in out and out[key] != cat:
+                raise ValueError(
+                    f"Instruction id {key} appears under both "
+                    f"categories {out[key]!r} and {cat!r}; idMap schema bug."
+                )
+            out[key] = cat
+    return out
+
+
 def assert_idmap_completeness(idmap, capture):
     """Verify per-category instruction counts match between idMap and capture.
 

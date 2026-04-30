@@ -307,23 +307,13 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             PackCodeB[uIdx] = removeComments(PackCodeB[uIdx])
     else: # numIterPLR = 0 case
         numLoopIter = 2
-        # Split instruction stream for numiterPLR=0
-        # First half is done in subiter 1, second half is done in subiter 0
-        def splitForPLR(oldModule):
-            newList0 = []
-            newList1 = []
-            numInst = len(oldModule.flatitems())
-            for ii in range(numInst):
-                if ii < numInst // 2:
-                    newList1.append(oldModule.flatitems()[ii])
-                else:
-                    newList0.append(oldModule.flatitems()[ii])
-            return [newList0, newList1]
-
-        LRCodeA = splitForPLR(LRCodeA[0])
-        LRCodeB = splitForPLR(LRCodeB[0])
-        PackCodeA = splitForPLR(PackCodeA[0])
-        PackCodeB = splitForPLR(PackCodeB[0])
+        # Split instruction stream for numiterPLR=0.
+        # split_for_plr lives in ScheduleCapture so the default-side capture
+        # path can apply the same split and its idMap matches CMS's.
+        LRCodeA = scap.split_for_plr(LRCodeA[0])
+        LRCodeB = scap.split_for_plr(LRCodeB[0])
+        PackCodeA = scap.split_for_plr(PackCodeA[0])
+        PackCodeB = scap.split_for_plr(PackCodeB[0])
 
 
     LRSwapA = removeComments(LRSwapA)
@@ -348,29 +338,20 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     if len(opt1.mfmaReorder) > 0:
         mfmaCode = [mfmaCode[x] for x in opt1.mfmaReorder]
 
-    idMap = {
-        'GRIncA' : globalReadIncACode,
-        'GRIncB' : globalReadIncBCode,
-        'GRA'    : globalReadA,
-        'GRB'    : globalReadB,
-        'LWA'    : localWriteA,
-        'LWB'    : localWriteB,
-        'LRSA'   : LRSwapA,
-        'LRSB'   : LRSwapB,
-        'LWSA'   : LWSwapA,
-        'LWSB'   : LWSwapB,
-        'LCC'    : loopCounterCode,
-    }
-
-
-    for uIdx in range(0, numLoopIter):
-        idMap["LRA%u"%uIdx] = LRCodeA[uIdx]
-        idMap["LRB%u"%uIdx] = LRCodeB[uIdx]
-        idMap["PackA%u"%uIdx] = PackCodeA[uIdx]
-        idMap["PackB%u"%uIdx] = PackCodeB[uIdx]
-
-    idMap['SYNC'] = opt1.syncCode
-    idMap['SNOP'] = opt1.snopCode
+    idMap = scap.build_idmap(
+        num_loop_iter=numLoopIter,
+        LRCodeA=LRCodeA, PackCodeA=PackCodeA,
+        LRCodeB=LRCodeB, PackCodeB=PackCodeB,
+        globalReadA=globalReadA, globalReadB=globalReadB,
+        globalReadIncACode=globalReadIncACode,
+        globalReadIncBCode=globalReadIncBCode,
+        localWriteA=localWriteA, localWriteB=localWriteB,
+        LRSwapA=LRSwapA, LRSwapB=LRSwapB,
+        LWSwapA=LWSwapA, LWSwapB=LWSwapB,
+        loopCounterCode=loopCounterCode,
+        syncCode=opt1.syncCode,
+        snopCode=opt1.snopCode,
+    )
 
     # Expose the real idMap and mfmaCode for test infrastructure.
     # Tests call _getKernelSource() then read writer._last_id_map to get
