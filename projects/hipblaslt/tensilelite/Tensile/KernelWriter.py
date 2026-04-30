@@ -858,10 +858,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def _makeSubIterSchedule(self, kernel, tPA, tPB, localReadCode, iteration, pointerLWCode, pointerLRCode, waitCode, macIterCode, \
       waitLWCode = Module(), syncCode = Module(), packCode = Module(), packPreCode = Module(), prevIterCode = Module(), localReadCodeSecondHalf = Module(), NLLlast = False, \
-                   tailloopInNll = False, isNLLorNGLL=False, capture=None):
+                   tailloopInNll = False, isNLLorNGLL=False, capture=None, capture_id_to_category=None):
 
     iterCode = Module()
-    globalReadCode       = deepcopy(self.codes.perIterGlobalRead[iteration])
+    if capture is not None:
+      # On the capture path, structural_clone preserves leaf identity so
+      # GR-inc instructions (which CMS sees via globalReadIncACode/BCode and
+      # SIA3 sees via perIterGlobalRead[i] — same Python objects appended in
+      # SIA.py:732) keep their id() and categorize as GRIncA/GRIncB. The
+      # deepcopy below would sever that and leave them UNKNOWN.
+      from Tensile.Components.ScheduleCapture import structural_clone
+      globalReadCode     = structural_clone(self.codes.perIterGlobalRead[iteration])
+    else:
+      globalReadCode     = deepcopy(self.codes.perIterGlobalRead[iteration])
     localWriteCodeCounts = self.codes.perIterLocalWrite[iteration][0]
     localWriteCode       = self.codes.perIterLocalWrite[iteration][1]
     isBarrier            = kernel["LoopIters"] - self.states.numItersPLR
@@ -880,25 +889,40 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # only schedules pack against MFMAs and inserts non-CMS-id_map instructions
     # (SSetPrior/VMov). Hard-fail at capture entry rather than silently emit a
     # malformed LoopBodyCapture.
-    capture_id_to_category = None
     if capture is not None:
       assert scheduleIterAlg == 3, (
         "Schedule capture is only supported for ScheduleIterAlg=3 (SIA3); "
         f"got ScheduleIterAlg={scheduleIterAlg}. SIA0/SIA1/SIA2 do not produce "
         "per-MFMA slotted schedules and cannot be captured into a comparable form."
       )
-      # Snapshot identity sets BEFORE SIA3 reorders the input modules. Module
-      # popFirstItem / popFirstNItems / addItems preserve item identity per the
-      # rocisa C++ API (verified against KernelWriter.py:1106-1125 reorder logic
-      # and the popFirstNItems behavior at 1669, 1675).
-      capture_id_to_category = self._buildCaptureIdentityMap(
-        iteration=iteration,
-        localReadCode=localReadCode,
-        localWriteCode=localWriteCode,
-        globalReadCode=globalReadCode,
-        packCode=packCode,
-        packPreCode=packPreCode,
-      )
+      # Categorization map: caller (e.g. _loopBody) passes the id-to-category
+      # map built via ScheduleCapture.build_idmap + invert, sharing CMS's
+      # source-of-truth schema. Falls back to the legacy structural-walk
+      # (_buildCaptureIdentityMap) for callers that haven't migrated yet —
+      # those callers will pay an UNKNOWN-categorization cost since the
+      # structural walk doesn't cover GRInc, LRSwap, LWSwap, or pointer math.
+      if capture_id_to_category is None:
+        capture_id_to_category = self._buildCaptureIdentityMap(
+          iteration=iteration,
+          localReadCode=localReadCode,
+          localWriteCode=localWriteCode,
+          globalReadCode=globalReadCode,
+          packCode=packCode,
+          packPreCode=packPreCode,
+        )
+      # Pointer-math items (VXorB32/SXorB32 from local{Read,Write}SwapOffsets,
+      # SAdd/SAddC/SSub/SSubB from address increments) are SEPARATE Python
+      # objects from the LRSwap*/LWSwap*AllIters items CMS sees — separate
+      # function calls in _loopBody (lines 4244, 4258 etc.). Tag any
+      # uncategorized item from the pointer modules here so they don't land
+      # in UNKNOWN. Generic 'LRS'/'LWS' since the pointer modules combine
+      # both A and B in the SIA3 view.
+      if pointerLRCode is not None:
+        for item in pointerLRCode.flatitems():
+          capture_id_to_category.setdefault(id(item), "LRS")
+      if pointerLWCode is not None:
+        for item in pointerLWCode.flatitems():
+          capture_id_to_category.setdefault(id(item), "LWS")
     # Default schedule is other, local reads, then local writes:
     if scheduleIterAlg == 0:
       # simple schedule, just add the modules in-order
@@ -3873,9 +3897,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # vgprPool.checkOut, the shadow path leaks vregs and needs vgprPool
     # snapshotting. Currently SIA3 doesn't (verified in Phase 4).
     if getattr(self.states, "_captureDefaultSchedule", False) and not isOptNLL:
-      from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder
-      shadow_pack = deepcopy(pack)
-      shadow_packPre = deepcopy(packPre)
+      from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder, structural_clone
+      # structural_clone (not deepcopy) — see KernelWriter.py:4358 comment.
+      # Pack/packPre leaves are shared with CMS's PackA/PackB id_map source;
+      # preserving leaf identity keeps capture-side categorization correct.
+      # `pack` and `packPre` are lists/dicts of Modules; clone each entry.
+      shadow_pack = type(pack)(structural_clone(m) for m in pack) if isinstance(pack, list) else \
+                    {k: structural_clone(v) for k, v in pack.items()}
+      shadow_packPre = type(packPre)(structural_clone(m) for m in packPre) if isinstance(packPre, list) else \
+                       {k: structural_clone(v) for k, v in packPre.items()}
       shadow_capture = LoopBodyCaptureBuilder()
       self._noLoadLoopBodyDefault(
           kernel, tensorParametersA, tensorParametersB,
@@ -4654,29 +4684,70 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # Phase 4 of plans/then-let-s-work-on-jaunty-reddy.md: drive shadow
         # _makeSubIterSchedule with capture on so we can build a default-style
         # main_loop schedule alongside the CMS one for diff. ALL input modules
-        # are deepcopied for the shadow run because SIA3 mutates them via
-        # popFirstItem / popFirstNItems (KernelWriter.py:1086-1125, 1669-1682)
-        # — without the deepcopies, the shadow run would consume the items
+        # are structural_clone'd for the shadow run because SIA3 mutates them
+        # via popFirstItem / popFirstNItems (KernelWriter.py:1086-1125, 1669-
+        # 1682) — without isolation, the shadow run would consume the items
         # that the CMS bucket-accumulation path needs immediately afterward.
+        # structural_clone clones Module wrappers but SHARES leaf instruction
+        # references, so leaf id() identity survives across the boundary.
+        # That preserves CMS's idMap {id(item): category} lookups against the
+        # cloned tree's contents (the over-strong deepcopy gave every leaf a
+        # new id and broke that). Label sharing is safe because iterCode is
+        # discarded by the capture branch — never appended to module — so
+        # there's no duplicate-label-position hazard at the assembler.
         # writer state (localReadsVacancy/Wait/FIFO, scheduledGRInstCounts,
         # perIterLocalWriteCanSkip) is mutated by the shadow; this only
         # affects shadow runs themselves and is benign for downstream code
-        # (NLL/NGL short-circuit at KernelWriter.py:2858-2866). The captured
-        # iterCode is discarded — only the builder's appended TaggedInstructions
-        # matter.
+        # (NLL/NGL short-circuit at KernelWriter.py:2858-2866).
         if not hasattr(self.states, "_defaultCaptureBuilder") or self.states._defaultCaptureBuilder is None:
           from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder
           self.states._defaultCaptureBuilder = LoopBodyCaptureBuilder()
+        from Tensile.Components.ScheduleCapture import (
+          structural_clone, build_idmap, invert_idmap_to_id_to_category,
+        )
+        # Build the {id(item) -> category} map from the SAME source modules
+        # CMS will consume in customMainLoopSchedule. Both paths route through
+        # build_idmap as the single source of truth for categorization. The
+        # leaf items in these source modules are SHARED with what SIA3 emits
+        # (LRCodeAAllIters[u] / PackCodeAAllIters[u] are .add()-ed the same
+        # localReadCodeA / packCodeA objects that flow into localReads /
+        # pack[packIdx]; perIterGlobalRead[u] ends up containing the same
+        # items as globalReadIncACode/BCode via SIA.py:732). structural_clone
+        # at the call boundary preserves leaf id() so this map remains valid.
+        # LRCodeAAllIters etc. are appended-to per-iter at line 3949; at iter
+        # u we have entries 0..u populated. Use the populated length so the
+        # map covers exactly what's been emitted so far.
+        capture_idmap = build_idmap(
+          num_loop_iter=len(LRCodeAAllIters),
+          LRCodeA=LRCodeAAllIters, PackCodeA=PackCodeAAllIters,
+          LRCodeB=LRCodeBAllIters, PackCodeB=PackCodeBAllIters,
+          globalReadA=self.codes.globalReadA,
+          globalReadB=self.codes.globalReadB,
+          globalReadIncACode=globalReadIncACode,
+          globalReadIncBCode=globalReadIncBCode,
+          localWriteA=self.codes.localWriteA,
+          localWriteB=self.codes.localWriteB,
+          LRSwapA=LRSwapAAllIters, LRSwapB=LRSwapBAllIters,
+          LWSwapA=LWSwapAAllIters, LWSwapB=LWSwapBAllIters,
+          loopCounterCode=Module(),  # LCC items are added by customMainLoopSchedule, not SIA3
+          syncCode=Module(),         # SYNC tagged by SWaitCnt isinstance fallback
+          snopCode=Module(),         # SNOP tagged by SNop isinstance fallback
+        )
+        capture_id_to_cat = invert_idmap_to_id_to_category(capture_idmap)
+        # Pointer-math items (LRS/LWS) are tagged inside _makeSubIterSchedule
+        # via the pointerLRCode/pointerLWCode walk, so callers don't need to
+        # do it themselves.
         self._makeSubIterSchedule(
           kernel, tensorParametersA, tensorParametersB,
-          deepcopy(localReads),
+          structural_clone(localReads),
           u,
-          deepcopy(pointerLWCode), deepcopy(pointerLRCode),
-          deepcopy(waitCode), deepcopy(macIterCode),
-          deepcopy(waitLWCode), deepcopy(syncCode),
-          deepcopy(pack[packIdx]), deepcopy(packPre[packPreIdx]),
+          structural_clone(pointerLWCode), structural_clone(pointerLRCode),
+          structural_clone(waitCode), structural_clone(macIterCode),
+          structural_clone(waitLWCode), structural_clone(syncCode),
+          structural_clone(pack[packIdx]), structural_clone(packPre[packPreIdx]),
           module,
           capture=self.states._defaultCaptureBuilder,
+          capture_id_to_category=capture_id_to_cat,
         )
 
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
