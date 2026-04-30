@@ -36,6 +36,9 @@
 #include <initializer_list>
 #include <list>
 
+// Test whether C++17 STL headers are available.
+#include <filesystem>
+
 #include "../../shared/CLI11.hpp"
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
@@ -290,6 +293,8 @@ void precompile_test_kernels(const std::string& precompile_file)
 
 int main(int argc, char* argv[])
 {
+    std::filesystem::path dummypath;
+    
     const auto test_begin = std::chrono::system_clock::now();
 
     // We would like to parse a few arguments before initiating gtest.
