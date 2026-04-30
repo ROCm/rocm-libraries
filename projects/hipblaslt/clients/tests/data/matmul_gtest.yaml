@@ -68,6 +68,7 @@ Tests:
     matmul: *gfx13_precisions
   matrix_size: *gfx13_size_range
   transA_transB: *transA_transB_range
+  gpu_arch: '13\d{2}'
 
 - name: matmul_one
   category: quick

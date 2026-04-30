@@ -390,16 +390,17 @@ def parseLibraryLogicData(
                 isp = solutionState["InternalSupportParams"]
             customConfig = getCustomKernelConfig(solutionState["CustomKernelName"], isp)
 
-            mi = customConfig.get('MatrixInstruction', [])
-            isa = next(iter(isaInfoMap.keys()))
-            wfsize = customConfig["WavefrontSize"]
-            ptype = customConfig["ProblemType"]
-            wg = customConfig.get("WorkGroup", None)
-            if len(mi) == 9:
-                miParams = matrixInstructionToMIParameters(mi, isa, wfsize, ptype, wg, isaInfoMap)
-                customConfig.update(miParams)
-            elif len(mi) == 0:
-                customConfig["EnableMatrixInstruction"] = False
+            if 'MatrixInstruction' in customConfig:
+                mi = customConfig['MatrixInstruction']
+                if len(mi) == 9:
+                    isa = next(iter(isaInfoMap.keys()))
+                    wfsize = customConfig["WavefrontSize"]
+                    ptype = customConfig["ProblemType"]
+                    wg = customConfig.get("WorkGroup", None)
+                    miParams = matrixInstructionToMIParameters(mi, isa, wfsize, ptype, wg, isaInfoMap)
+                    customConfig.update(miParams)
+                elif len(mi) == 0:
+                    customConfig["EnableMatrixInstruction"] = False
 
             for key, value in customConfig.items():
                 solutionState[key] = value
