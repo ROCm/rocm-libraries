@@ -118,7 +118,7 @@ jobs:
           if echo "$project_list" | grep -Fxq "$project_slug"; then
             echo "exists=true" >> $GITHUB_OUTPUT
 
-            # Fetch the RTD-configured documentation URL to get the correct alias
+            # Fetch documentation URL
             doc_url=$(curl \
               --connect-timeout 180 \
               --silent \
