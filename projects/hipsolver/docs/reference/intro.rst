@@ -170,6 +170,17 @@ Partial SVD has been implemented in rocSOLVER, but it does not use an approximat
     :ref:`hipsolverDnXgesvdaStridedBatched_bufferSize <dense_gesvda_strided_batched_bufferSize>`, x, x, x, x
     :ref:`hipsolverDnXgesvdaStridedBatched <dense_gesvda_strided_batched>`, x, x, x, x
 
+General eigensolvers
+------------------------------
+
+General eigensolvers are not yet implemented in rocSOLVER. The rocSOLVER backend will instead call into a CPU implementation of LAPACK.
+
+.. csv-table:: General eigensolvers
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`hipsolverDnXgeev_bufferSize <dense_geev_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXgeev <dense_geev>`, x, x, x, x
+
 Sparse matrix routines
 ------------------------------
 
