@@ -69,7 +69,7 @@ BenchmarkProblems:
         # - UseSgprForGRO: [0,1]
         - UseSgprForGRO: [0]
         # - DepthU: [64, 128]
-        - DepthU: [128]
+        - DepthU: [256]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         - AssertSummationElementMultiple: [64]
