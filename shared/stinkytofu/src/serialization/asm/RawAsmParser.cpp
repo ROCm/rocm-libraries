@@ -26,13 +26,17 @@
 #include <algorithm>
 #include <cctype>
 #include <climits>
+#include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 
 #include "IRLexer.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+
+#define DEBUG_TYPE "RawAsmParser"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
@@ -921,6 +925,8 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
             block->instructions.push_back(std::move(inst));
         } else {
             // Unknown mnemonic or parse failure → preserve verbatim
+            DEBUG_WITH_TYPE("RawAsmParser", std::cerr << "[RawAsmParser] line " << lineNo
+                                                      << ": text block: " << line << "\n");
             block->instructions.push_back(makeTextBlock(line));
         }
     }
