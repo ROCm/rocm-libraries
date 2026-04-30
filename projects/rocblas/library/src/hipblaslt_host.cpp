@@ -646,75 +646,28 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         std::vector<Ti*> B(batch_count, nullptr);
         std::vector<To*> C(batch_count, nullptr);
         std::vector<To*> D(batch_count, nullptr);
+        auto addOffset = []<typename T1, typename T2>(std::vector<T1*>& vec, T2* batch_ptr, int batch_count, size_t offset){
+            THROW_IF_HIP_ERROR(hipMemcpy(
+                (void*)(&vec[0]), batch_ptr, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+            for(int batch = 0; batch < batch_count; batch++)
+                vec[batch] += offset;
+            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(batch_ptr)),
+                                         (void*)(&vec[0]),
+                                         sizeof(void*) * batch_count,
+                                         hipMemcpyHostToDevice));
+        };
         if(prob.buffer_offset_a > 0 && prob.batch_A != nullptr)
-        {
-            std::cout << "Applying buffer offset for A: " << prob.buffer_offset_a << std::endl;
-            THROW_IF_HIP_ERROR(hipMemcpy(
-                (void*)(&A[0]), prob.batch_A, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
-            for(int batch = 0; batch < batch_count; batch++)
-            {
-                std::cout << "Original A[" << batch << "] pointer: " << A[batch] << std::endl;
-                A[batch] += prob.buffer_offset_a;
-                std::cout << "Adjusted A[" << batch << "] pointer: " << A[batch] << std::endl;
-            }
-
-            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(prob.batch_A)),
-                                         (void*)(&A[0]),
-                                         sizeof(void*) * batch_count,
-                                         hipMemcpyHostToDevice));
-        }
+            addOffset(A, prob.batch_A, batch_count, prob.buffer_offset_a);
+        
         if(prob.buffer_offset_b > 0 && prob.batch_B != nullptr)
-        {
-            std::cout << "Applying buffer offset for B: " << prob.buffer_offset_b << std::endl;
-            THROW_IF_HIP_ERROR(hipMemcpy(
-                (void*)(&B[0]), prob.batch_B, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
-            for(int batch = 0; batch < batch_count; batch++)
-            {
-                std::cout << "Original B[" << batch << "] pointer: " << B[batch] << std::endl;
-                B[batch] += prob.buffer_offset_b;
-                std::cout << "Adjusted B[" << batch << "] pointer: " << B[batch] << std::endl;
-            }
+            addOffset(B, prob.batch_B, batch_count, prob.buffer_offset_b);
 
-            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(prob.batch_B)),
-                                         (void*)(&B[0]),
-                                         sizeof(void*) * batch_count,
-                                         hipMemcpyHostToDevice));
-        }
         if(prob.buffer_offset_c > 0 && prob.batch_C != nullptr)
-        {
-            std::cout << "Applying buffer offset for C: " << prob.buffer_offset_c << std::endl;
-            THROW_IF_HIP_ERROR(hipMemcpy(
-                (void*)(&C[0]), prob.batch_C, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
-            for(int batch = 0; batch < batch_count; batch++)
-            {
-                std::cout << "Original C[" << batch << "] pointer: " << C[batch] << std::endl;
-                C[batch] += prob.buffer_offset_c;
-                std::cout << "Adjusted C[" << batch << "] pointer: " << C[batch] << std::endl;
-            }
+            addOffset(C, prob.batch_C, batch_count, prob.buffer_offset_c);
 
-            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(prob.batch_C)),
-                                         (void*)(&C[0]),
-                                         sizeof(void*) * batch_count,
-                                         hipMemcpyHostToDevice));
-        }
         if(prob.buffer_offset_d > 0 && prob.batch_D != nullptr)
-        {
-            std::cout << "Applying buffer offset for D: " << prob.buffer_offset_d << std::endl;
-            THROW_IF_HIP_ERROR(hipMemcpy(
-                (void*)(&D[0]), prob.batch_D, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
-            for(int batch = 0; batch < batch_count; batch++)
-            {
-                std::cout << "Original D[" << batch << "] pointer: " << D[batch] << std::endl;
-                D[batch] += prob.buffer_offset_d;
-                std::cout << "Adjusted D[" << batch << "] pointer: " << D[batch] << std::endl;
-            }
-
-            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(prob.batch_D)),
-                                         (void*)(&D[0]),
-                                         sizeof(void*) * batch_count,
-                                         hipMemcpyHostToDevice));
-        }
-
+            addOffset(D, prob.batch_D, batch_count, prob.buffer_offset_d);    
+    
         EXPECT_HIPBLAS_STATUS(
             hipblasLtMatmul(handle,
                             matmulDesc,
