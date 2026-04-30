@@ -104,20 +104,19 @@ int64_t RMSnormFwdPlan::getInnerSize(unsigned normalizeDim) const
 
 unsigned RMSnormFwdPlan::getNormalizeDim() const
 {
-    const auto* scaleDims = _params.scale()->dims();
-    const auto* xDims = _params.x()->dims();
+    const std::vector<int64_t> scaleDims(_params.scale()->dims()->begin(),
+                                         _params.scale()->dims()->end());
+    const std::vector<int64_t> xDims(_params.x()->dims()->begin(), _params.x()->dims()->end());
 
     // Find number of trailing dims where scaleDims[i] == inputDims[i]
     const auto [scaleMismatch, _]
-        = std::mismatch(scaleDims->rbegin(), scaleDims->rend(), xDims->rbegin(), xDims->rend());
-    const auto matchCount
-        = static_cast<unsigned>(std::distance(scaleDims->rbegin(), scaleMismatch));
+        = std::mismatch(scaleDims.rbegin(), scaleDims.rend(), xDims.rbegin(), xDims.rend());
+    const auto matchCount = static_cast<size_t>(std::distance(scaleDims.rbegin(), scaleMismatch));
 
     // Scale must have at least one normalization axis, so account for the case where input has a single batch and scale
     // matches exactly.
-    const unsigned normalizeDim
-        = (matchCount >= scaleDims->size()) ? 1 : scaleDims->size() - matchCount;
-    return normalizeDim;
+    const auto normalizeDim = (matchCount == scaleDims.size()) ? 1 : scaleDims.size() - matchCount;
+    return static_cast<unsigned>(normalizeDim);
 }
 
 void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,

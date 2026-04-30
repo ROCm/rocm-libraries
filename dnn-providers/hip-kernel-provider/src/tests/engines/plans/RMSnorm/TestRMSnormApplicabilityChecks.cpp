@@ -54,11 +54,11 @@ TEST(TestRMSnormValidator, UnsupportedDim)
 namespace
 {
 flatbuffers::FlatBufferBuilder
-    createInvalidTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType xType,
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType yType,
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType scaleType,
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType biasType,
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType invRMSType)
+    createExplicitTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType xType,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType yType,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType scaleType,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType biasType,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType invRMSType)
 {
     std::vector<int64_t> strides{48, 16, 4, 1};
     std::vector<int64_t> dims{1, 3, 4, 4};
@@ -141,11 +141,11 @@ flatbuffers::FlatBufferBuilder
 TEST(TestRMSnormValidator, MismatchIOTypes)
 {
     auto builder
-        = createInvalidTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = createExplicitTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
@@ -162,11 +162,11 @@ TEST(TestRMSnormValidator, MismatchIOTypes)
 TEST(TestRMSnormValidator, UnsupportedScaleType)
 {
     auto builder
-        = createInvalidTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = createExplicitTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
@@ -183,11 +183,11 @@ TEST(TestRMSnormValidator, UnsupportedScaleType)
 TEST(TestRMSnormValidator, UnsupportedInvRMSType)
 {
     auto builder
-        = createInvalidTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+        = createExplicitTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
@@ -204,16 +204,16 @@ TEST(TestRMSnormValidator, UnsupportedInvRMSType)
 namespace
 {
 flatbuffers::FlatBufferBuilder
-    createInvalidShapeRMSNormGraph(const std::vector<int64_t>& xDims,
-                                   const std::vector<int64_t>& xStrides,
-                                   const std::vector<int64_t>& yDims,
-                                   const std::vector<int64_t>& yStrides,
-                                   const std::vector<int64_t>& scaleDims,
-                                   const std::vector<int64_t>& scaleStrides,
-                                   const std::vector<int64_t>& biasDims,
-                                   const std::vector<int64_t>& biasStrides,
-                                   const std::vector<int64_t>& invRMSDims,
-                                   const std::vector<int64_t>& invRMSStrides)
+    createExplicitShapeRMSNormGraph(const std::vector<int64_t>& xDims,
+                                    const std::vector<int64_t>& xStrides,
+                                    const std::vector<int64_t>& yDims,
+                                    const std::vector<int64_t>& yStrides,
+                                    const std::vector<int64_t>& scaleDims,
+                                    const std::vector<int64_t>& scaleStrides,
+                                    const std::vector<int64_t>& biasDims,
+                                    const std::vector<int64_t>& biasStrides,
+                                    const std::vector<int64_t>& invRMSDims,
+                                    const std::vector<int64_t>& invRMSStrides)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -307,21 +307,21 @@ TEST(TestRMSnormValidator, MismatchIOShapes)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
-    // inv_rms should be inferend from IO and derived dims
+    // inv_rms should be infered from IO and derived dims
     std::vector<int64_t> invRMSDims{2, 3, 1, 1};
     std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
-    auto builder = createInvalidShapeRMSNormGraph(xDims,
-                                                  xStrides,
-                                                  yDims,
-                                                  yStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  invRMSDims,
-                                                  invRMSStrides);
+    auto builder = createExplicitShapeRMSNormGraph(xDims,
+                                                   xStrides,
+                                                   yDims,
+                                                   yStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   invRMSDims,
+                                                   invRMSStrides);
 
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
@@ -349,21 +349,21 @@ TEST(TestRMSnormValidator, MismatchAffineDims)
     const std::vector<int64_t> biasStrides = hipdnn_data_sdk::utilities::generateStrides(
         biasDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    // inv_rms should be inferend from IO and derived dims
+    // inv_rms should be infered from IO and derived dims
     std::vector<int64_t> invRMSDims{2, 3, 4, 1};
     std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto builder = createInvalidShapeRMSNormGraph(ioDims,
-                                                  ioStrides,
-                                                  ioDims,
-                                                  ioStrides,
-                                                  scaleDims,
-                                                  scaleStrides,
-                                                  biasDims,
-                                                  biasStrides,
-                                                  invRMSDims,
-                                                  invRMSStrides);
+    auto builder = createExplicitShapeRMSNormGraph(ioDims,
+                                                   ioStrides,
+                                                   ioDims,
+                                                   ioStrides,
+                                                   scaleDims,
+                                                   scaleStrides,
+                                                   biasDims,
+                                                   biasStrides,
+                                                   invRMSDims,
+                                                   invRMSStrides);
 
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
@@ -386,21 +386,21 @@ TEST(TestRMSnormValidator, UnsupportedScaleShape)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    // inv_rms should be inferend from IO and derived dims
+    // inv_rms should be infered from IO and derived dims
     std::vector<int64_t> invRMSDims{2, 3, 4, 1};
     std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto builder = createInvalidShapeRMSNormGraph(ioDims,
-                                                  ioStrides,
-                                                  ioDims,
-                                                  ioStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  invRMSDims,
-                                                  invRMSStrides);
+    auto builder = createExplicitShapeRMSNormGraph(ioDims,
+                                                   ioStrides,
+                                                   ioDims,
+                                                   ioStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   invRMSDims,
+                                                   invRMSStrides);
 
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
@@ -427,23 +427,23 @@ TEST(TestRMSnormValidator, UnsupportedInvRMShape)
     std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto builder = createInvalidShapeRMSNormGraph(ioDims,
-                                                  ioStrides,
-                                                  ioDims,
-                                                  ioStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  invRMSDims,
-                                                  invRMSStrides);
+    auto builder = createExplicitShapeRMSNormGraph(ioDims,
+                                                   ioStrides,
+                                                   ioDims,
+                                                   ioStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   invRMSDims,
+                                                   invRMSStrides);
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
 
-    // inv_rms should be inferend from IO and derived dims, throw if not the case
+    // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
     EXPECT_THROW(validator.checkTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
@@ -462,28 +462,27 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis1)
     std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto builder = createInvalidShapeRMSNormGraph(ioDims,
-                                                  ioStrides,
-                                                  ioDims,
-                                                  ioStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  invRMSDims,
-                                                  invRMSStrides);
+    auto builder = createExplicitShapeRMSNormGraph(ioDims,
+                                                   ioStrides,
+                                                   ioDims,
+                                                   ioStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   invRMSDims,
+                                                   invRMSStrides);
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
 
-    // inv_rms should be inferend from IO and derived dims, throw if not the case
+    // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
     EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
 }
 
-// Needs implemented
 TEST(TestRMSnormValidator, ScaleNormalizeAxis2)
 {
     std::vector<int64_t> ioDims{2, 3, 4, 4};
@@ -497,28 +496,27 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis2)
     std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto builder = createInvalidShapeRMSNormGraph(ioDims,
-                                                  ioStrides,
-                                                  ioDims,
-                                                  ioStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  invRMSDims,
-                                                  invRMSStrides);
+    auto builder = createExplicitShapeRMSNormGraph(ioDims,
+                                                   ioStrides,
+                                                   ioDims,
+                                                   ioStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   invRMSDims,
+                                                   invRMSStrides);
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
 
-    // inv_rms should be inferend from IO and derived dims, throw if not the case
+    // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
     EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
 }
 
-// Needs implemented
 TEST(TestRMSnormValidator, ScaleNormalizeAxis3)
 {
     std::vector<int64_t> ioDims{2, 3, 4, 4};
@@ -532,23 +530,23 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis3)
     std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto builder = createInvalidShapeRMSNormGraph(ioDims,
-                                                  ioStrides,
-                                                  ioDims,
-                                                  ioStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  derivedDims,
-                                                  derivedStrides,
-                                                  invRMSDims,
-                                                  invRMSStrides);
+    auto builder = createExplicitShapeRMSNormGraph(ioDims,
+                                                   ioStrides,
+                                                   ioDims,
+                                                   ioStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   derivedDims,
+                                                   derivedStrides,
+                                                   invRMSDims,
+                                                   invRMSStrides);
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
 
-    // inv_rms should be inferend from IO and derived dims, throw if not the case
+    // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
     EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
 }

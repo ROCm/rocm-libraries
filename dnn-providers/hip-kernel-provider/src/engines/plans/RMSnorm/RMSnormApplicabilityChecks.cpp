@@ -121,7 +121,7 @@ void RMSnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& io
                              affineDims,
                              "Scale and bias tensors for RMSnorm must have the same shape.");
 
-    checkAffineNormalizedShape(affineTensorAttr, ioTensorAttr);
+    checkAffineNormalizedShape(affineDims, ioDims);
 
     // inv_rms shapes is derived from scale and input:
     // Where scale has a non-1 dim, inv_rms gets 1 (normalized dimension collapses).
@@ -140,22 +140,18 @@ void RMSnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& io
         "RMS variance tensor for RMSnorm must be derived from scale and IO shape.");
 }
 
-void RMSnormValidator::checkAffineNormalizedShape(
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& affine,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& io)
+void RMSnormValidator::checkAffineNormalizedShape(const std::vector<int64_t>& affineDims,
+                                                  const std::vector<int64_t>& ioDims)
 {
-    auto ioDims = io.dims();
-    auto affineDims = affine.dims();
-
     const auto [scaleMismatch, _]
-        = std::mismatch(affineDims->rbegin(), affineDims->rend(), ioDims->rbegin(), ioDims->rend());
-    const auto matchCount = static_cast<size_t>(std::distance(affineDims->rbegin(), scaleMismatch));
+        = std::mismatch(affineDims.rbegin(), affineDims.rend(), ioDims.rbegin(), ioDims.rend());
+    const auto matchCount = static_cast<size_t>(std::distance(affineDims.rbegin(), scaleMismatch));
     const size_t normalizeDim
-        = (matchCount >= affineDims->size()) ? 1 : affineDims->size() - matchCount;
+        = (matchCount == affineDims.size()) ? 1 : affineDims.size() - matchCount;
 
-    for(unsigned i = 1; i < normalizeDim; ++i)
+    for(unsigned i = 0; i < normalizeDim; ++i)
     {
-        if(affineDims->Get(i) != 1)
+        if(affineDims[i] != 1)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "Affine tensors not correctly normalized");
