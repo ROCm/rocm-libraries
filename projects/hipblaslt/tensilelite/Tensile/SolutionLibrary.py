@@ -71,7 +71,15 @@ class PlaceholderLibrary:
         pass
 
     def merge(self, other):
-        pass
+        raise RuntimeError(
+            "[PlaceholderLibrary.merge] COLLISION: two source YAMLs produced "
+            "different per-file libraries for the same dispatch slot.\n"
+            f"  self:  {self.filenamePrefix}\n"
+            f"  other: {getattr(other, 'filenamePrefix', other)!r}\n"
+            "  Likely cause: duplicate DeviceNames declarations or two YAMLs "
+            "covering the same (Hardware, OperationID, Metric, typed-Predicate) "
+            "tuple."
+        ) 
 
 
 class MatchingLibrary:
