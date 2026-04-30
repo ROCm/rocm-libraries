@@ -126,8 +126,8 @@ jobs:
               "https://app.readthedocs.com/api/v3/projects/$project_slug/" \
               | jq --raw-output '.urls.documentation')
 
-            # Strip trailing version segment (e.g. ".../en/latest/") to get the base
-            doc_base=$(echo "$doc_url" | sed 's|/[^/]*/$||')
+            # Strip trailing version segment (e.g. "latest/") to get the base url
+            doc_base=$(echo "$doc_url" | sed 's|/[^/]\+/\?$||')
             echo "doc_base=$doc_base" >> $GITHUB_OUTPUT
           else
             echo "${{ steps.extract.outputs.project_name }} does not exist on Read the Docs, skipping."
@@ -155,10 +155,10 @@ jobs:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |
           declare version_url="https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
-          
+
           declare -i MAXIMUM_NUMBER_OF_POLLS=20
           declare -i SLEEP_BETWEEN_POLLS_SECONDS=15
-          
+
           echo "Polling for version to appear: $version_url"
           for i in $(seq 1 ${MAXIMUM_NUMBER_OF_POLLS}); do
             status=$(curl --silent --output /dev/null --write-out "%{http_code}" \
