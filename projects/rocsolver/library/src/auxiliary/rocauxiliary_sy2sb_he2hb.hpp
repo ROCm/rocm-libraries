@@ -492,30 +492,6 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         Aband, idx2D( idiag, i, ldab ),      ldab-1, strideAb,  // Aband_ii
         no_mask{}, rocblas_fill_lower );
 
-    // Clear lower triangle of last block.
-    // Ack -- need the other lower triangle. For n=16, kd=2,
-    // "." indicates structural zero outside matrix.
-    //  Aband = [
-    //      . . 2 2 2 2 2 2 2 2 2 2 2 2 2 2
-    //      . 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
-    //      d d d d d d d d d d d d d d d d
-    //      1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 .  \ zero this triangle
-    //      2 2 2 2 2 2 2 2 2 2 2 2 2 2 . .  /
-    //      3 3 3 3 3 3 3 3 3 3 3 3 . . . .  \ zero these rows?
-    //      4 4 4 4 4 4 4 4 4 4 4 . . . . .  /
-    //
-    // Likely, this kernel doesn't need to clear these. The tester could clear
-    // these. As long as the hb2st kernel doesn't access them, which it
-    // shouldn't because they are outside the matrix. Maybe they should be NaN.
-    //
-    // todo: can we be more careful with copies above to not need to clear here?
-    // todo: do we need to clear rows 2*kd:3*kd? Those will be fill in hb2st.
-    // laset(
-    //     handle, 'l',
-    //     ldab, n, zero, zero,
-    //     Aband, idx2D( kd, n-kd, ldab ), ldab, strideAb,
-    //     batch_count );
-
     if (debug_) {
         print_matrix( "A", n, n, A, lda );
         print_matrix( "Aband", ldab, n, Aband, ldab );
