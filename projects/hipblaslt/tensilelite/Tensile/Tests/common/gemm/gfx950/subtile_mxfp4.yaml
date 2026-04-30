@@ -696,7 +696,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0]
+        - StreamK: [0, 3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
