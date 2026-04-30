@@ -1547,7 +1547,18 @@ def build_dataflow_graph(four_part_capture, *, strict_unknown_instructions=False
                 continue
 
             node = _make_node(tagged_inst, label)
-            nodes_by_identity[node.identity] = node
+            # Producer/consumer nodes (LR/LW/GR/MFMA) define the cross-graph
+            # topology and go into nodes_by_identity. SWaits/SBarriers (and
+            # implicitly SNops, which lenient mode already skips) are
+            # SCHEDULER-CHOICE instructions: CMS may add arbitrary numbers
+            # of redundant waits and barriers and still be correct. Keeping
+            # them out of the identity set makes compare_graphs's first-pass
+            # diff insensitive to those redundancies; per-edge correctness
+            # (MissingWait/WaitInsufficient/MissingBarrier) is still checked
+            # in diagnose_missing_edge by walking the per-body sidecar
+            # (nodes_per_body / capture._graph_nodes).
+            if not (_is_swait(inst) or _is_sbarrier(inst)):
+                nodes_by_identity[node.identity] = node
             nodes_per_body[label].append(node)
 
             if _is_swait(inst):

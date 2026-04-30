@@ -108,6 +108,40 @@ class TestCleanComparison:
         g_subj = build_dataflow_graph(_wrap(subj_cap))
         assert compare_graphs(g_ref, g_subj) == []
 
+    def test_redundant_swaits_and_barriers_in_subject_no_failures(self):
+        """CMS may emit arbitrary numbers of redundant SWaits / SBarriers
+        and still be correct. The cross-graph identity set must not include
+        them, so that subject can have MORE waits/barriers than reference
+        without producing 'in subject not reference' diffs that would
+        previously have surfaced as identity-coverage warnings.
+
+        Per-edge correctness is unaffected: the reference's LR->MFMA edge
+        still finds a covering wait in the subject.
+        """
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=2, a_src_count=4),
+        ])
+        # Subject: identical dataflow + several redundant waits & barriers.
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),         # primary drain
+            make_swait(slot=2, dscnt=0),         # redundant
+            make_sbarrier(slot=3),               # redundant safety barrier
+            make_swait(slot=4, vlcnt=0),         # different counter, no-op here
+            make_mfma(0, 8, 32, slot=5, a_src_count=4),
+        ])
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        # Identity sets should differ ONLY on producer/consumer nodes,
+        # which here are identical -> no failures, no identity mismatch.
+        assert compare_graphs(g_ref, g_subj) == []
+        # Defensive: the SWait/SBarrier nodes must not have leaked into
+        # nodes_by_identity. Subject and reference must have the SAME
+        # identity-set sizes despite subject having 3 extra sync ops.
+        assert set(g_ref.nodes.keys()) == set(g_subj.nodes.keys())
+
 
 # =============================================================================
 # Negative — per-Failure-class diagnosis
