@@ -26,6 +26,10 @@ from torch.utils.cpp_extension import load
 _THIS_DIR = Path(__file__).resolve().parent
 _CK_INCLUDE = (_THIS_DIR.parent.parent / "projects" / "composablekernel" / "include").resolve()
 
+# The LDS variants use gfx950-only CKTile async buffer paths.  PyTorch otherwise
+# tries to build the JIT extension for every visible ROCm target.
+os.environ.setdefault("PYTORCH_ROCM_ARCH", "gfx950")
+
 if not _CK_INCLUDE.is_dir():
     raise RuntimeError(
         f"Could not locate CKTile include directory at {_CK_INCLUDE}. "
@@ -77,11 +81,31 @@ def _load_extension():
 _ext = _load_extension()
 
 warp_decode_gate_up_fp8 = _ext.warp_decode_gate_up_fp8
+warp_decode_gate_up_fp8_base = _ext.warp_decode_gate_up_fp8_base
+warp_decode_gate_up_fp8_pkf32 = _ext.warp_decode_gate_up_fp8_pkf32
+warp_decode_gate_up_fp8_lds = _ext.warp_decode_gate_up_fp8_lds
 warp_decode_gate_up_bf16 = _ext.warp_decode_gate_up_bf16
+warp_decode_gate_up_bf16_base = _ext.warp_decode_gate_up_bf16_base
+warp_decode_gate_up_bf16_pkf32 = _ext.warp_decode_gate_up_bf16_pkf32
+warp_decode_gate_up_bf16_lds = _ext.warp_decode_gate_up_bf16_lds
 warp_decode_down_reduce = _ext.warp_decode_down_reduce
+warp_decode_down_reduce_dot2 = _ext.warp_decode_down_reduce_dot2
+warp_decode_down_reduce_base = _ext.warp_decode_down_reduce_base
+warp_decode_down_reduce_pkf32 = _ext.warp_decode_down_reduce_pkf32
+warp_decode_down_reduce_lds = _ext.warp_decode_down_reduce_lds
 
 __all__ = [
     "warp_decode_gate_up_fp8",
+    "warp_decode_gate_up_fp8_base",
+    "warp_decode_gate_up_fp8_pkf32",
+    "warp_decode_gate_up_fp8_lds",
     "warp_decode_gate_up_bf16",
+    "warp_decode_gate_up_bf16_base",
+    "warp_decode_gate_up_bf16_pkf32",
+    "warp_decode_gate_up_bf16_lds",
     "warp_decode_down_reduce",
+    "warp_decode_down_reduce_dot2",
+    "warp_decode_down_reduce_base",
+    "warp_decode_down_reduce_pkf32",
+    "warp_decode_down_reduce_lds",
 ]

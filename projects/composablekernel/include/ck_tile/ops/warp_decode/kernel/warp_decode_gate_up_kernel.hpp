@@ -684,6 +684,24 @@ struct WarpDecodeGateUpLdsXKernel : public WarpDecodeGateUpKernel<Problem_, Poli
             >{});
     }
 
+    template <typename ProblemT>
+    CK_TILE_DEVICE static constexpr auto MakePerWarpTileDistribution()
+    {
+        constexpr index_t V = ProblemT::kVector;
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<
+                    sequence<1>,
+                    sequence<get_warp_size(), V>
+                >,
+                tuple<sequence<2>>,
+                tuple<sequence<0>>,
+                sequence<2>,
+                sequence<1>
+            >{});
+    }
+
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         constexpr bool is_packed_w = std::is_same_v<WDataType, pk_fp4_t>;
@@ -718,13 +736,30 @@ struct WarpDecodeGateUpLdsXKernel : public WarpDecodeGateUpKernel<Problem_, Poli
         __shared__ ComputeDataType w_gate_scale_lds[kWarpsPerBlock][kMaxScaleBlocks];
         __shared__ ComputeDataType w_up_scale_lds[kWarpsPerBlock][kMaxScaleBlocks];
 
-        const auto x_copy_view = make_naive_tensor_view<address_space_enum::global>(
+        const auto x_copy_base_view = make_naive_tensor_view<address_space_enum::global>(
             static_cast<const XDataType*>(kargs.p_x),
             make_tuple(kargs.b, kargs.hidden),
             make_tuple(kargs.stride_x, 1),
             number<kXCopyVector>{}, number<1>{});
+        const auto x_copy_view = pad_tensor_view(
+            x_copy_base_view,
+            make_tuple(number<1>{}, number<kCopyTileN>{}),
+            sequence<false, true>{});
 
         const auto prefetch_x_chunk = [&](index_t stage, index_t copy_offset) {
+            const index_t valid_count = min(kCopyTileN, kargs.hidden - copy_offset);
+            if(valid_count < kCopyTileN)
+            {
+                for(index_t idx = get_thread_id(); idx < kCopyTileN; idx += kBlockSize)
+                {
+                    if(idx >= valid_count)
+                    {
+                        x_lds[stage][idx] = XDataType{};
+                    }
+                }
+                block_sync_lds();
+            }
+
             auto x_lds_view = make_naive_tensor_view<address_space_enum::lds>(
                 &x_lds[stage][0],
                 make_tuple(number<1>{}, number<kCopyTileN>{}),
@@ -830,12 +865,12 @@ struct WarpDecodeGateUpLdsXKernel : public WarpDecodeGateUpKernel<Problem_, Poli
             w_gate_view,
             make_tuple(number<1>{}, number<kTileN>{}),
             {w_row, 0},
-            Policy::template MakeTileDistribution<Problem>());
+            MakePerWarpTileDistribution<Problem>());
         auto w_up_window = make_tile_window(
             w_up_view,
             make_tuple(number<1>{}, number<kTileN>{}),
             {w_row, 0},
-            Policy::template MakeTileDistribution<Problem>());
+            MakePerWarpTileDistribution<Problem>());
 
         ComputeDataType gate_acc = 0;
         ComputeDataType up_acc   = 0;
@@ -863,7 +898,7 @@ struct WarpDecodeGateUpLdsXKernel : public WarpDecodeGateUpKernel<Problem_, Poli
                 x_lds_compute_view,
                 make_tuple(number<1>{}, number<kTileN>{}),
                 {0, chunk_iter_begin * kTileN - chunk_base},
-                Policy::template MakeTileDistribution<Problem>());
+                MakePerWarpTileDistribution<Problem>());
 
             for(index_t i = chunk_iter_begin; i < chunk_iter_end; ++i)
             {

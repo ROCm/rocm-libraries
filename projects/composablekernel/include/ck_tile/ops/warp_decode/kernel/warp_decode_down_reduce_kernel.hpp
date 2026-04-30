@@ -521,6 +521,24 @@ struct WarpDecodeDownReduceLdsInterKernel : public WarpDecodeDownReduceKernel<Pr
             >{});
     }
 
+    template <typename ProblemT>
+    CK_TILE_DEVICE static constexpr auto MakePerWarpTileDistribution()
+    {
+        constexpr index_t V = ProblemT::kVector;
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<
+                    sequence<1>,
+                    sequence<get_warp_size(), V>
+                >,
+                tuple<sequence<2>>,
+                tuple<sequence<0>>,
+                sequence<2>,
+                sequence<1>
+            >{});
+    }
+
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         constexpr bool is_packed_w = std::is_same_v<WDataType, pk_fp4_t>;
@@ -566,19 +584,36 @@ struct WarpDecodeDownReduceLdsInterKernel : public WarpDecodeDownReduceKernel<Pr
                     : (16 * numeric_traits<IntermediateDataType>::PackedSize /
                        sizeof(IntermediateDataType));
             constexpr index_t kCopyTileN = kBlockSize * kInterCopyVector;
-            const auto inter_copy_view = make_naive_tensor_view<address_space_enum::global>(
+            const auto inter_copy_base_view = make_naive_tensor_view<address_space_enum::global>(
                 static_cast<const IntermediateDataType*>(kargs.p_intermediate),
                 make_tuple(kargs.b * kargs.top_k, kargs.inter),
                 make_tuple(kargs.stride_intermediate, 1),
                 number<kInterCopyVector>{}, number<1>{});
+            const auto inter_copy_view = pad_tensor_view(
+                inter_copy_base_view,
+                make_tuple(number<1>{}, number<kCopyTileN>{}),
+                sequence<false, true>{});
             auto inter_lds_view = make_naive_tensor_view<address_space_enum::lds>(
                 inter_lds,
-                make_tuple(number<1>{}, kargs.inter),
-                make_tuple(kargs.inter, number<1>{}),
+                make_tuple(number<1>{}, number<kMaxInter>{}),
+                make_tuple(number<kMaxInter>{}, number<1>{}),
                 number<kInterCopyVector>{}, number<1>{});
 
             for(index_t copy_offset = 0; copy_offset < kargs.inter; copy_offset += kCopyTileN)
             {
+                const index_t valid_count = min(kCopyTileN, kargs.inter - copy_offset);
+                if(valid_count < kCopyTileN)
+                {
+                    for(index_t idx = get_thread_id(); idx < kCopyTileN; idx += kBlockSize)
+                    {
+                        if(idx >= valid_count && copy_offset + idx < kMaxInter)
+                        {
+                            inter_lds[copy_offset + idx] = IntermediateDataType{};
+                        }
+                    }
+                    block_sync_lds();
+                }
+
                 auto inter_copy_window = make_tile_window(
                     inter_copy_view,
                     make_tuple(number<1>{}, number<kCopyTileN>{}),
@@ -608,7 +643,7 @@ struct WarpDecodeDownReduceLdsInterKernel : public WarpDecodeDownReduceKernel<Pr
                 w_down_view,
                 make_tuple(number<1>{}, number<kTileN>{}),
                 {w_row, 0},
-                Policy::template MakeTileDistribution<Problem>());
+                MakePerWarpTileDistribution<Problem>());
 
             for(index_t i = 0; i < num_iterations; ++i)
             {
