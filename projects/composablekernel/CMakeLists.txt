@@ -213,7 +213,14 @@ endif()
 #Unsupported GPU targets to be filtered from the list:
 set(CK_UNSUPPORTED_GPU_TARGETS "gfx900;gfx906;gfx90c")
 
-#Filter out any targets currently on the unsupported list:
+#If only one of the unsupported targets is requested, generate dummy target and exit here.
+if("${GPU_TARGETS}" IN_LIST CK_UNSUPPORTED_GPU_TARGETS)
+    add_custom_target(ck_dummy_target)
+    message("CK is not supported for target ${GPU_TARGETS}")
+    return()
+endif()
+
+#If multiple targets are requested, filter out any targets currently on the unsupported list:
 message(STATUS "Filtering out unsupported targets: ${CK_UNSUPPORTED_GPU_TARGETS}")
 list(REMOVE_ITEM GPU_TARGETS ${CK_UNSUPPORTED_GPU_TARGETS})
 list(REMOVE_ITEM GPU_ARCHS ${CK_UNSUPPORTED_GPU_TARGETS})
