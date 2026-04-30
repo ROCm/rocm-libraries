@@ -100,3 +100,29 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<71, dire
 // Group 4: Cyclic-shift swizzle - Fprop indices 72-73
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<72, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<73, direct_conv::Version::v2>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Direct HIP convolution (streaming) 8c kernels — configs 9-17 are Fprop
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward8CFp16Kernel<9>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward8CFp16Kernel<10>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward8CFp16Kernel<11>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward8CFp16Kernel<12>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward8CFp16Kernel<13>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward8CFp16Kernel<14>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward8CFp16Kernel<15>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward8CFp16Kernel<16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward8CFp16Kernel<17>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Direct CK Tile convolution (streaming) 8c v1 kernels — Fprop configs 9-17
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<9, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<10, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<11, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<12, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<13, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<14, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<15, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<16, direct_conv::Version::v1>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<17, direct_conv::Version::v1>, SIGNATURE>);

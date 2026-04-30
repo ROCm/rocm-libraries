@@ -11,6 +11,7 @@ namespace ck_tile::direct_conv
 
 using fp16_t   = _Float16;
 using fp16x4_t = __attribute__((vector_size(4 * sizeof(fp16_t)))) fp16_t;
+using fp16x8_t = __attribute__((vector_size(8 * sizeof(fp16_t)))) fp16_t;
 using fp32x4_t = __attribute__((vector_size(4 * sizeof(float)))) float;
 
 using bf16_t = __bf16;

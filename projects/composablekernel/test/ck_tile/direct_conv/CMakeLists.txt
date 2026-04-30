@@ -9,6 +9,7 @@ add_gtest_executable(test_direct_conv_params test_conv_params.cpp)
 add_gtest_executable(test_direct_conv_matrix_layout test_matrix_layout.cpp)
 add_gtest_executable(test_direct_conv_swizzle test_swizzle.cpp)
 add_gtest_executable(test_direct_conv_transpose_lds test_transpose_lds_layout.cpp)
+add_gtest_executable(test_direct_conv_tile_distribution_max_thread_id test_tile_distribution_max_thread_id.cpp)
 
 # Integration test (gfx950 / CDNA4 only)
 if(GPU_TARGETS MATCHES "gfx950")
@@ -51,6 +52,24 @@ if(GPU_TARGETS MATCHES "gfx950")
         )
     endif()
 
+    add_gtest_executable(test_direct_conv_grouped_8c_fp16 test_grouped_8c_fp16.cpp)
+    if(TARGET test_direct_conv_grouped_8c_fp16)
+        target_compile_options(test_direct_conv_grouped_8c_fp16 PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
+    add_gtest_executable(test_direct_conv_grouped_8c_fp16_tile_conv test_grouped_8c_fp16_tile_conv.cpp)
+    if(TARGET test_direct_conv_grouped_8c_fp16_tile_conv)
+        target_compile_options(test_direct_conv_grouped_8c_fp16_tile_conv PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
     add_gtest_executable(test_direct_conv_mfma test_mfma.cpp)
     if(TARGET test_direct_conv_mfma)
         target_compile_options(test_direct_conv_mfma PRIVATE
@@ -73,6 +92,7 @@ if(GPU_TARGETS MATCHES "gfx950")
     set(CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS
         test_direct_conv_grouped_4c_fp16_tile_conv
         test_direct_conv_grouped_16c_fp16_tile_conv
+        test_direct_conv_grouped_8c_fp16_tile_conv
         test_direct_conv_mfma
         test_direct_conv_lds_bank_conflicts
     )
