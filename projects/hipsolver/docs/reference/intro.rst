@@ -159,6 +159,17 @@ These wrappers are supported in rocSOLVER, but are provided by equivalent functi
 that use different algorithmic approaches or by functionality that is not fully exposed in the public API.
 For these reasons, the corresponding wrappers are not provided in the regular hipSOLVER API.
 
+Linear-system solvers
+------------------------------
+
+The following linear-system solvers are implemented in rocSOLVER, but 64-bit functions have not yet been added to hipSOLVER's regular API.
+
+.. csv-table:: Linear-system solvers
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`hipsolverDnXsytrs_bufferSize <dense_sytrs_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXsytrs <dense_sytrs>`, x, x, x, x
+
 Partial SVD functions
 ------------------------------
 
