@@ -4667,6 +4667,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
           snopCode=Module(),         # SNOP tagged by SNop isinstance fallback
         )
         capture_id_to_cat = invert_idmap_to_id_to_category(capture_idmap)
+        # Tag prefetch pack code leaves (consumed at iter 0 via pack[packIdx=0])
+        # as PackA{plrIdx}/PackB{plrIdx}. Without this, prefetch's packCodeA/B
+        # leaves land in UNKNOWN at categorize time because they never enter
+        # PackCodeAAllIters. Snapshot is built in kernelBody's prefetch loop
+        # when UseCustomMainLoopSchedule is set.
+        for _plrIdx, _prefetch_mod in enumerate(getattr(self.states, '_prefetchPackCodeA', [])):
+          for _leaf in _prefetch_mod.flatitems():
+            capture_id_to_cat.setdefault(id(_leaf), f"PackA{_plrIdx}")
+        for _plrIdx, _prefetch_mod in enumerate(getattr(self.states, '_prefetchPackCodeB', [])):
+          for _leaf in _prefetch_mod.flatitems():
+            capture_id_to_cat.setdefault(id(_leaf), f"PackB{_plrIdx}")
         # Pointer-math items (LRS/LWS) are tagged inside _makeSubIterSchedule
         # via the pointerLRCode/pointerLWCode walk, so callers don't need to
         # do it themselves.
@@ -4757,6 +4768,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
             snopCode=Module(),
           )
           leftover_id_to_cat = invert_idmap_to_id_to_category(leftover_idmap)
+          # Same prefetch-pack tagging as the per-iter capture path so leftover
+          # leaves still in pack[*] from prefetch get categorized correctly.
+          for _plrIdx, _prefetch_mod in enumerate(getattr(self.states, '_prefetchPackCodeA', [])):
+            for _leaf in _prefetch_mod.flatitems():
+              leftover_id_to_cat.setdefault(id(_leaf), f"PackA{_plrIdx}")
+          for _plrIdx, _prefetch_mod in enumerate(getattr(self.states, '_prefetchPackCodeB', [])):
+            for _leaf in _prefetch_mod.flatitems():
+              leftover_id_to_cat.setdefault(id(_leaf), f"PackB{_plrIdx}")
           for buf in list(pack) + list(packPre):
             if buf is None:
               continue
@@ -5246,6 +5265,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     expand = kernel["ExpandPointerSwap"]
     self.dontAppendCode = False
 
+    # Auto-activate default-schedule capture for CMS kernels so the
+    # dataflow-graph comparison + wait-coverage validation gate every
+    # CMS build. Non-CMS kernels stay unaffected.
+    if kernel.get("UseCustomMainLoopSchedule"):
+      self.states._captureDefaultSchedule = True
+
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
 
     ####################################
@@ -5461,6 +5486,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         usePLRPack = self.states.doFullPackCodePrefetch or (kernel["UseCustomMainLoopSchedule"] and kernel["UsePLRPack"])
 
+        # Snapshot prefetch pack code so _loopBody's capture path can tag the
+        # leaves consumed at iter 0 (via pack[packIdx=0]). Without this the
+        # prefetch's packCode/packPre leaves never enter PackCodeAAllIters and
+        # land in UNKNOWN at categorize time.
+        if kernel["UseCustomMainLoopSchedule"]:
+          from rocisa.code import Module as _Module_for_prefetch_snap
+          self.states._prefetchPackCodeA = [_Module_for_prefetch_snap() for _ in range(self.states.numItersPLR)]
+          self.states._prefetchPackCodeB = [_Module_for_prefetch_snap() for _ in range(self.states.numItersPLR)]
+
       # prefetch-local
       if self.states.numItersPLR:
         # in some cases need an extra copy of the LDS read with appropriate double buffer offsets
@@ -5484,6 +5518,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   packPrePrefetchA.add(packPreA)
                 else:
                   pack[plrIdx].add(packPreA)
+                  if kernel["UseCustomMainLoopSchedule"]:
+                    self.states._prefetchPackCodeA[plrIdx].add(packPreA)
                 if usePLRPack:
                   # usePLRPack case, generate all pack code at prefetch phase
                   # CMS only needs 1st PLRPack code insertion in preLoop, but localReadDo returns only 1st PLRPack code.
@@ -5491,6 +5527,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   packPrePrefetchA.add(packCodeA)
                 else:
                   pack[plrIdx].add(packCodeA)
+                  if kernel["UseCustomMainLoopSchedule"]:
+                    self.states._prefetchPackCodeA[plrIdx].add(packCodeA)
               if kernel["ProblemType"]["MXBlockA"]:
                 if iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]:
                   module.addComment1("local read prefetch mxsa")
@@ -5521,6 +5559,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   packPrePrefetchB.add(packPreB)
                 else:
                   pack[plrIdx].add(packPreB)
+                  if kernel["UseCustomMainLoopSchedule"]:
+                    self.states._prefetchPackCodeB[plrIdx].add(packPreB)
                 if usePLRPack:
                   # usePLRPack case, generate all pack code at prefetch phase
                   # CMS only needs 1st PLRPack code insertion in preLoop, but localReadDo returns only 1st PLRPack code.
@@ -5528,6 +5568,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   packPrePrefetchB.add(packCodeB)
                 else:
                   pack[plrIdx].add(packCodeB)
+                  if kernel["UseCustomMainLoopSchedule"]:
+                    self.states._prefetchPackCodeB[plrIdx].add(packCodeB)
               if not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]):
                 module.addComment1("local read inc a")
                 module.add(self.localReadInc(kernel, iui, tensorParametersA))
@@ -5878,55 +5920,60 @@ class KernelWriter(metaclass=abc.ABCMeta):
         f"got loopCopies={loopCopies}. needSecondLoop or DTV/ULSGRO may "
         f"have re-bumped it. Capture machinery needs per-lc support."
       )
-      main = getattr(self, "_last_default_main_capture", None)
-      n_gl = getattr(self.states, "_defaultNGLCapture", LoopBodyCapture(instructions=[]))
-      n_ll = getattr(self.states, "_defaultNLLCapture", LoopBodyCapture(instructions=[]))
-      if main is not None:
-        num_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
-        self._last_default_capture = FourPartCapture(
-          main_loop={0: main},
-          main_loop_prev={0: clone_loop_body(main)},
-          n_gl={0: n_gl},
-          n_ll={0: n_ll},
-          num_mfma=num_mfma,
-          num_codepaths=1,
-          source="default-sia3",
-          num_mfma_per_iter=self.states.numMfmaPerIter,
-        )
-        if getattr(self, "_last_cms_capture", None) is not None:
-          kernel_label = (
-            f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}"
+      try:
+        main = getattr(self, "_last_default_main_capture", None)
+        n_gl = getattr(self.states, "_defaultNGLCapture", LoopBodyCapture(instructions=[]))
+        n_ll = getattr(self.states, "_defaultNLLCapture", LoopBodyCapture(instructions=[]))
+        if main is not None:
+          num_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
+          self._last_default_capture = FourPartCapture(
+            main_loop={0: main},
+            main_loop_prev={0: clone_loop_body(main)},
+            n_gl={0: n_gl},
+            n_ll={0: n_ll},
+            num_mfma=num_mfma,
+            num_codepaths=1,
+            source="default-sia3",
+            num_mfma_per_iter=self.states.numMfmaPerIter,
           )
-          ref_graph = build_dataflow_graph(self._last_default_capture)
-          subj_graph = build_dataflow_graph(self._last_cms_capture)
-          graph_failures = compare_graphs(
-            ref_graph, subj_graph, raise_on_unexplained=False,
-          )
-          assert not graph_failures, (
-            f"Dataflow graph comparison failed for kernel {kernel_label}: "
-            f"{len(graph_failures)} edge difference(s):\n  "
-            + "\n  ".join(
-              f.format(self._last_cms_capture.main_loop.get(0))
-              for f in graph_failures
+          if getattr(self, "_last_cms_capture", None) is not None:
+            kernel_label = (
+              f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}"
             )
-          )
-          wait_failures = validate_edge_wait_coverage(
-            subj_graph, raise_on_unexplained=False,
-          )
-          assert not wait_failures, (
-            f"Wait-coverage validation failed for kernel {kernel_label}: "
-            f"{len(wait_failures)} failure(s):\n  "
-            + "\n  ".join(
-              f.format(self._last_cms_capture.main_loop.get(0))
-              for f in wait_failures
+            ref_graph = build_dataflow_graph(self._last_default_capture)
+            subj_graph = build_dataflow_graph(self._last_cms_capture)
+            graph_failures = compare_graphs(
+              ref_graph, subj_graph, raise_on_unexplained=False,
             )
-          )
-      # Reset state for the next kernel. _last_default_main_capture must
-      # also be cleared — without this, a subsequent kernel that fails to
-      # populate _defaultCaptureBuilder would re-consume the stale value.
-      self.states._defaultNGLCapture = None
-      self.states._defaultNLLCapture = None
-      self._last_default_main_capture = None
+            assert not graph_failures, (
+              f"Dataflow graph comparison failed for kernel {kernel_label}: "
+              f"{len(graph_failures)} edge difference(s):\n  "
+              + "\n  ".join(
+                f.format(self._last_cms_capture.main_loop.get(0))
+                for f in graph_failures
+              )
+            )
+            wait_failures = validate_edge_wait_coverage(
+              subj_graph, raise_on_unexplained=False,
+            )
+            assert not wait_failures, (
+              f"Wait-coverage validation failed for kernel {kernel_label}: "
+              f"{len(wait_failures)} failure(s):\n  "
+              + "\n  ".join(
+                f.format(self._last_cms_capture.main_loop.get(0))
+                for f in wait_failures
+              )
+            )
+      finally:
+        # Reset capture state so it doesn't leak into the next kernel even
+        # if compare_graphs/validate_edge_wait_coverage raised. With auto-
+        # activation, ~2.7 MB per CMS kernel × 10k+ kernels in a tuning
+        # run would be a 27 GB peak leak otherwise.
+        self.states._defaultNGLCapture = None
+        self.states._defaultNLLCapture = None
+        self._last_default_main_capture = None
+        self.states._prefetchPackCodeA = []
+        self.states._prefetchPackCodeB = []
 
     if self.states.actualSummationLoops>1 and self.states.staggerUCode:
       module.addComment1("remove stagger offsets")
