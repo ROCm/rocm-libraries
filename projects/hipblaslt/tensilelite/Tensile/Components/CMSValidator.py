@@ -3579,16 +3579,40 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
                 scheduleInfo.pretty_print()
                 return False, f"Code path {code_path}: {error}"
 
-    # Phase 6 of plans/then-let-s-work-on-jaunty-reddy.md: cross-scheduler
-    # comparison rule. Only fires when both default and CMS captures are
-    # present in the context (i.e. capture was enabled when this kernel was
-    # scheduled). Currently checks only data-movement totals; richer per-edge
-    # diff comes with Phase 7's dataflow graph.
+    # Cross-scheduler comparison rule. Only fires when both default and CMS
+    # captures are present in the context (i.e. capture was enabled when
+    # this kernel was scheduled). Validates the CMS schedule against the
+    # default via dataflow-graph equality + per-edge wait-coverage.
     if context.default_capture is not None and context.cms_capture is not None:
-        from Tensile.Components.ScheduleCapture import compare_captures
-        ok, msg = compare_captures(context.default_capture, context.cms_capture)
-        if not ok:
-            return False, f"Schedule capture comparison failed: {msg}"
+        from Tensile.Components.ScheduleCapture import (
+            build_dataflow_graph, compare_graphs, validate_edge_wait_coverage,
+        )
+        ref_graph = build_dataflow_graph(context.default_capture)
+        subj_graph = build_dataflow_graph(context.cms_capture)
+        graph_failures = compare_graphs(
+            ref_graph, subj_graph, raise_on_unexplained=False,
+        )
+        if graph_failures:
+            summary = "\n  ".join(
+                f.format(context.cms_capture.main_loop.get(0))
+                for f in graph_failures
+            )
+            return False, (
+                f"Dataflow graph comparison failed: "
+                f"{len(graph_failures)} edge difference(s):\n  {summary}"
+            )
+        wait_failures = validate_edge_wait_coverage(
+            subj_graph, raise_on_unexplained=False,
+        )
+        if wait_failures:
+            summary = "\n  ".join(
+                f.format(context.cms_capture.main_loop.get(0))
+                for f in wait_failures
+            )
+            return False, (
+                f"Wait-coverage validation failed: "
+                f"{len(wait_failures)} failure(s):\n  {summary}"
+            )
 
     # All rules passed, considered valid.
     return True, ""

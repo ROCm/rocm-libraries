@@ -28,7 +28,6 @@ Phase 1 of the schedule-capture implementation. Verifies:
 - Data structure construction and shape invariants.
 - SlotKey ordering / uniqueness.
 - LoopBodyCaptureBuilder sequence-counter behavior.
-- compare_captures rule on the kernel-level invariants.
 - RegisterContainer hashability is value-based (prerequisite for the future
   dataflow graph that keys last_writer by RegisterContainer).
 """
@@ -50,7 +49,6 @@ from Tensile.Components.ScheduleCapture import (
     DataflowGraph,
     build_dataflow_graph,
     clone_loop_body,
-    compare_captures,
     evaluate_guard,
     expand_cms_macro,
     build_cms_four_part_capture,
@@ -238,96 +236,6 @@ class TestCloneLoopBody:
         assert cloned.instructions[0].category == "GRA"
         assert cloned.instructions[0].slot.iteration == 2
         assert cloned.instructions[0].slot.mfma_index == 5
-
-
-# =============================================================================
-# compare_captures
-# =============================================================================
-
-class TestCompareCaptures:
-    def test_both_none_passes(self):
-        ok, msg = compare_captures(None, None)
-        assert ok and msg == ""
-
-    def test_one_none_passes(self):
-        cap = _make_capture(source="cms", num_mfma=4)
-        ok, msg = compare_captures(None, cap)
-        assert ok and msg == ""
-
-    def test_identical_captures_pass(self):
-        d = _make_capture(source="default-sia3", num_mfma=4)
-        c = _make_capture(source="cms", num_mfma=4)
-        ok, msg = compare_captures(d, c)
-        assert ok, f"unexpected failure: {msg}"
-
-    def test_different_num_mfma_does_not_fail_initially(self):
-        """Cross-scheduler num_mfma differences are tolerated (F32X emulation
-        legitimately splits MFMAs differently between default and CMS). The
-        per-edge dataflow comparison (Phase 7) is the right place for tight
-        semantic checks. Per-body self-consistency is still enforced."""
-        d = _make_capture(source="default-sia3", num_mfma=4)
-        c = _make_capture(source="cms", num_mfma=5)
-        ok, msg = compare_captures(d, c)
-        # Self-consistency holds for both captures, and cross-scheduler
-        # num_mfma is no longer compared, so this passes.
-        assert ok, f"unexpected failure: {msg}"
-
-    def test_per_body_zero_mfma_fails(self):
-        """The per-body MFMA presence check (not strict equality) catches
-        the gross failure of an entire body with zero MFMAs. Strict equality
-        was relaxed because F32X emulation distributes MFMAs into pack-code
-        submodules differently across bodies (main_loop's 'PackB1'-tagged
-        MFMAs may not appear in n_gl, etc.)."""
-        d = _make_capture(source="default-sia3", num_mfma=4)
-        # Corrupt: replace main_loop[0]'s instructions with non-MFMA only.
-        d.main_loop[0].instructions = [
-            ti for ti in d.main_loop[0].instructions if ti.category != "MFMA"
-        ]
-        # Add a non-MFMA so the body isn't empty (which would be skipped).
-        from Tensile.Components.ScheduleCapture import (
-            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
-        )
-        d.main_loop[0].instructions.append(TaggedInstruction(
-            inst="non-mfma", category="GRA",
-            slot=SlotKey(0, SLOT_KIND_MFMA, 0, 0),
-        ))
-        c = _make_capture(source="cms", num_mfma=4)
-        ok, msg = compare_captures(d, c)
-        assert not ok
-        assert "zero MFMA" in msg
-
-    def test_data_movement_count_mismatch_fails(self):
-        # Comparison aggregates GR+LW. Build captures with different totals.
-        d = _make_capture(source="default-sia3", num_mfma=4,
-                          extra_main_cats=[("GRA", 3), ("GRB", 2), ("LWA", 5)])
-        c = _make_capture(source="cms", num_mfma=4,
-                          extra_main_cats=[("GRA", 3), ("GRB", 1), ("LWA", 5)])  # one fewer GRB
-        ok, msg = compare_captures(d, c)
-        assert not ok
-        assert "data-movement" in msg
-
-    def test_extra_sync_does_not_fail(self):
-        # CMS legitimately adds SYNC/SNOP that the default doesn't.
-        d = _make_capture(source="default-sia3", num_mfma=4,
-                          extra_main_cats=[("GRA", 2), ("GRB", 2)])
-        c = _make_capture(source="cms", num_mfma=4,
-                          extra_main_cats=[("GRA", 2), ("GRB", 2),
-                                            ("SYNC", 5), ("SNOP", 3)])
-        ok, msg = compare_captures(d, c)
-        assert ok, f"loose comparison should ignore SYNC/SNOP delta; got: {msg}"
-
-    def test_dtl_classification_difference_does_not_fail(self):
-        # Under DirectToLds, default-side may tag GR instructions as 'LW'
-        # (because they're shared between globalRead and localWrite buckets
-        # and first-tag-wins picks LW). CMS tags them as 'GRA'/'GRB'. The
-        # comparison aggregates both into a combined GR+LW total which must
-        # match.
-        d = _make_capture(source="default-sia3", num_mfma=4,
-                          extra_main_cats=[("LW", 16)])  # default tags as LW
-        c = _make_capture(source="cms", num_mfma=4,
-                          extra_main_cats=[("GRA", 8), ("GRB", 8)])  # CMS tags as GRA/GRB
-        ok, msg = compare_captures(d, c)
-        assert ok, f"DTL category-difference should be tolerated; got: {msg}"
 
 
 # =============================================================================
@@ -1152,11 +1060,11 @@ class TestPhase5DefaultTailCapture:
         assert n_ll_mfmas > 0, f"n_ll has no MFMA-tagged instructions"
 
     def test_no_false_positive_on_clean_cms_kernel(self, isa_infrastructure):
-        """The Phase 5 cross-scheduler comparison rule must not false-positive
-        on a known-good CMS kernel. If this test fails with an AssertionError
+        """The cross-scheduler comparison rule must not false-positive on a
+        known-good CMS kernel. If this test fails with an AssertionError
         from kernelBody, the comparison rule is too strict for real kernels."""
-        # The build itself runs compare_captures from kernelBody. If it
-        # asserts, the test fails with the specific message.
+        # kernelBody runs compare_graphs + validate_edge_wait_coverage. If
+        # either asserts, the test fails with the specific message.
         writer = self._build_with_capture(isa_infrastructure)
         # If we got here, comparison passed.
         assert writer._last_default_capture is not None
@@ -1177,14 +1085,14 @@ class TestPhase5DefaultTailCapture:
         assert writer._last_default_capture is not None
 
 
-class TestPhase7DataflowGraphIntegration:
-    """Stack 2.10-2.13: Phase 7 dataflow-graph comparison wired into
-    KernelWriter. The comparison runs alongside the legacy compare_captures
-    when both _captureDefaultSchedule AND _useDataflowGraphComparison are
-    set. Logs at WARN/print2 without affecting build pass/fail.
+class TestDataflowGraphIntegration:
+    """Dataflow-graph comparison + wait-coverage validation are the
+    assertion-gating checks wired into KernelWriter.kernelBody when
+    _captureDefaultSchedule is set. Both must pass on a clean CMS kernel
+    or the build raises AssertionError.
     """
 
-    def _build_with_dataflow_comparison(self, isa_infrastructure):
+    def _build_with_capture(self, isa_infrastructure):
         from cms_test_utils import _make_solution
         from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
 
@@ -1209,33 +1117,17 @@ class TestPhase7DataflowGraphIntegration:
         def _setupNewTile_with_flags(*args, **kwargs):
             result = original_setupNewTile(*args, **kwargs)
             writer.states._captureDefaultSchedule = True
-            writer.states._useDataflowGraphComparison = True
             return result
         writer.setupNewTile = _setupNewTile_with_flags
 
         return writer, solution
 
-    def test_dataflow_comparison_runs_without_raising(self, isa_infrastructure):
-        """The opt-in compare_graphs path runs alongside compare_captures
-        without raising. Output is observability-only (printWarning / print2);
-        the build's pass/fail decision is still controlled by compare_captures.
-
-        Note: this kernel is one of the pre-existing compare_captures
-        false-positive cases (data-movement totals mismatch). Even when that
-        legacy assertion fires, the new dataflow comparison must reach its
-        try-block BEFORE the legacy assertion, so we only need to test that
-        the *try-block invocation* doesn't crash on real inputs."""
-        import pytest
-        writer, solution = self._build_with_dataflow_comparison(isa_infrastructure)
-        # The legacy compare_captures may assert (pre-existing false positive
-        # tracked in CMSValidator_TODO.md). What matters here is that the
-        # new dataflow comparison code runs WITHOUT a TypeError, ImportError,
-        # or unexpected exception type from inside its own logic.
-        try:
-            writer._getKernelSource(solution)
-        except AssertionError as e:
-            # The pre-existing compare_captures assertion. Confirm it's the
-            # legacy one, not a NEW failure from compare_graphs.
-            assert "Schedule capture comparison failed" in str(e), str(e)
-        # If we got here, the new code at minimum didn't ImportError or
-        # crash with an unexpected exception inside the try-block.
+    def test_dataflow_gating_passes_on_clean_cms_kernel(self, isa_infrastructure):
+        """compare_graphs + validate_edge_wait_coverage are the gating
+        assertions in kernelBody. On a clean CMS kernel (F32X TF32
+        16x16x32 4x4 with DepthU=32) both must report zero failures.
+        """
+        writer, solution = self._build_with_capture(isa_infrastructure)
+        writer._getKernelSource(solution)
+        assert writer._last_default_capture is not None
+        assert writer._last_cms_capture is not None
