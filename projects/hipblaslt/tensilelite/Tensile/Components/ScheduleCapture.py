@@ -797,6 +797,45 @@ def invert_idmap_to_id_to_category(idmap):
     return out
 
 
+def structural_clone(item):
+    """Recursively clone rocisa Module wrappers; share leaf references.
+
+    SIA3 calls popFirstItem/popFirstNItems on input modules — that mutates
+    the Module's child list. To isolate a callee from that mutation while
+    preserving leaf-instruction Python identity (so id-based categorization
+    survives across the boundary), we clone every Module wrapper in the
+    tree but reuse the same Python objects for non-Module children
+    (Instruction, TextBlock, Label, ValueIf, etc.).
+
+    The reused leaves have stable id() values, so any pre-built
+    {id(item) -> category} dict (e.g. from CMS's idMap) continues to
+    work for lookups against the cloned tree's contents.
+
+    Module attribute audit (Step 0 of the structural-clone work):
+      - name: constructor arg.
+      - setNoOpt/isNoOpt: local boolean — preserved via setNoOpt(...).
+      - parent: re-assigned when the cloned child is add()-ed to its
+        cloned parent in the recursion above.
+      - kernel, vgprIdx, vgprMsb, archCaps/asmCaps/asmBugs/regCaps:
+        read-only properties derived from kernel context, no local
+        state.
+      - setInlineAsmPrintMode: no getter exposed (invisible state); only
+        set in Activation.py, far from any capture-input module.
+      - addTempVgpr: method exists but no Python callers.
+    """
+    from rocisa.code import Module
+    if not isinstance(item, Module):
+        return item  # leaf: share reference (Instruction, TextBlock, Label, ValueIf, etc.)
+    # Pass empty string explicitly rather than relying on a truthy check —
+    # an unnamed Module's name should round-trip to an unnamed clone.
+    new_mod = Module(item.name or "")
+    if item.isNoOpt():
+        new_mod.setNoOpt(True)
+    for child in item.items():
+        new_mod.add(structural_clone(child))
+    return new_mod
+
+
 def assert_idmap_completeness(idmap, capture):
     """Verify per-category instruction counts match between idMap and capture.
 
