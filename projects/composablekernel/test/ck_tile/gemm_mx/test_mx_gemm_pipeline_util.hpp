@@ -416,11 +416,13 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         }
 
         {
-            constexpr int a_bias = ck_tile::numeric_traits<AScaleDataType>::bias;
-            constexpr int b_bias = ck_tile::numeric_traits<BScaleDataType>::bias;
+            constexpr int a_mant = ck_tile::numeric_traits<AScaleDataType>::mant;
+            constexpr int b_mant = ck_tile::numeric_traits<BScaleDataType>::mant;
+            constexpr int a_one  = ck_tile::numeric_traits<AScaleDataType>::bias << a_mant;
+            constexpr int b_one  = ck_tile::numeric_traits<BScaleDataType>::bias << b_mant;
             std::mt19937 gen(11941);
-            std::uniform_int_distribution<int> dist_a(a_bias - 3, a_bias + 1);
-            std::uniform_int_distribution<int> dist_b(b_bias - 3, b_bias + 1);
+            std::uniform_int_distribution<int> dist_a(a_one - (3 << a_mant), a_one + (1 << a_mant));
+            std::uniform_int_distribution<int> dist_b(b_one - (3 << b_mant), b_one + (1 << b_mant));
             for(auto& s : scale_a.mData)
             {
                 s = AScaleDataType(static_cast<typename AScaleDataType::type>(dist_a(gen)));
