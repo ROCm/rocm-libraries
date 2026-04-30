@@ -521,6 +521,10 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         sync_class=SWaitCnt,
         snop_class=SNop,
         mfma_classes=mfma_classes,
+        # Same numMfmaPerIter the writer used during emission. Both
+        # default-side and CMS-side captures need the same value so
+        # build_dataflow_graph derives matching MFMA-iter logical positions.
+        num_mfma_per_iter=getattr(writer.states, 'numMfmaPerIter', 0),
     )
     writer._last_opt1_for_capture = opt1_for_capture
 

@@ -5900,6 +5900,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           num_mfma=num_mfma,
           num_codepaths=1,
           source="default-sia3",
+          num_mfma_per_iter=self.states.numMfmaPerIter,
         )
         if getattr(self, "_last_cms_capture", None) is not None:
           # Phase 7 of plans/then-let-s-work-on-jaunty-reddy.md:

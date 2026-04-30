@@ -137,6 +137,14 @@ class FourPartCapture:
     num_mfma: int
     num_codepaths: int
     source: str  # 'cms' or 'default-sia3'
+    # numMfmaPerIter — used by build_dataflow_graph to derive per-MFMA
+    # iteration index (mfma_index // num_mfma_per_iter). Both default-side
+    # and CMS-side construction sites should pass writer.states.numMfmaPerIter
+    # so the two graphs derive matching logical positions for the same MFMA.
+    # Defaults to 0 ("don't split MFMAs by iter"); the resolver then keeps
+    # all MFMAs at iter 0, which loses cross-iter PLR dataflow edges. Test
+    # fixtures may safely leave it unset.
+    num_mfma_per_iter: int = 0
 
 
 # =============================================================================
@@ -1395,6 +1403,147 @@ def _class_tag_from_category(category, inst) -> str:
     return _class_tag(inst)
 
 
+# =============================================================================
+# --- Reorder-invariant logical position ---
+# =============================================================================
+# Edge formation must be reorder-invariant: two captures of the same instruction
+# set should produce the same edges, regardless of how each scheduler placed
+# the instructions in the stream. The current FIFO-simulation model isn't
+# invariant — ready_writer's last-write-wins is sensitive to the order in
+# which producers drain. Instead, derive a "logical position" per node from
+# (body, iter, kind, sequence) where:
+#
+#   - body comes from BODY_LABEL_TO_LOOP_INDEX.
+#   - iter comes from the category suffix (LRA0 -> 0, PackB3 -> 3) for
+#     LR/Pack/MX*; from mfma_index // numMfmaPerIter for MFMA; 0 otherwise.
+#   - kind_rank is a small finite map of category-base -> integer.
+#   - sequence is the node's index within its (body, category) cohort —
+#     used as a tiebreaker; mostly irrelevant when each producer writes a
+#     unique register sub-range (the typical Tensile pattern).
+#
+# Every component is preserved across schedulers (they all derive from the
+# kernel writer's idMap/category structure, NOT from stream position).
+
+import re as _re
+_TRAILING_DIGITS_RE = _re.compile(r"^(.*?)(\d*)$")
+
+# kind_rank assigns every category-base to a small integer. Order matters
+# only insofar as it determines which producer is "more recent" when two
+# share the same iter — typically Pack > LR is the natural pipeline order.
+# MFMA (rank 7) is encoded specially: its iter comes from mfma_index, not
+# from a category suffix.
+_KIND_RANK = {
+    # local reads (iter-suffixed)
+    "LRA":         0,
+    "LRB":         0,
+    "LRMXSA":      0,
+    "LRMXSB":      0,
+    "LRMetadata":  0,
+    # local read pointer ops (no iter suffix)
+    "LRSA":        1,
+    "LRSB":        1,
+    "LRS":         1,
+    # local writes (no iter suffix)
+    "LWA":         2,
+    "LWB":         2,
+    # local write pointer ops
+    "LWSA":        3,
+    "LWSB":        3,
+    "LWS":         3,
+    # global reads (no iter suffix)
+    "GRA":         4,
+    "GRB":         4,
+    "GR":          4,
+    "GRIncA":      4,
+    "GRIncB":      4,
+    # pack ops (iter-suffixed)
+    "PackA":       5,
+    "PackB":       5,
+    # MFMA handled specially in _logical_position; rank 6 used for it.
+    # SYNC / SBARRIER / SNOP / LCC don't get logical positions (they're
+    # excluded from the cross-graph identity set, hence excluded from
+    # edges).
+}
+
+_MFMA_KIND_RANK = 6
+
+
+def _split_category_iter(category):
+    """Split 'LRA0' -> ('LRA', 0), 'PackB3' -> ('PackB', 3), 'GRA' -> ('GRA', 0).
+
+    Trailing digits become the iteration index; everything before is the
+    base category name. Categories with no trailing digits (e.g. GRA, LWA)
+    return iter=0.
+    """
+    m = _TRAILING_DIGITS_RE.match(category)
+    base, suffix = m.group(1), m.group(2)
+    return base, (int(suffix) if suffix else 0)
+
+
+def _logical_position(node, num_mfma_per_iter):
+    """Return the reorder-invariant logical position for `node`.
+
+    Format: (body_loop_index, iter, kind_rank, intra_seq).
+
+    intra_seq is the node's offset within its body's _graph_nodes list —
+    used only as a tiebreaker for the (typically rare) case where two
+    producers of the same kind write overlapping registers in the same
+    iteration. For most Tensile patterns each producer writes a unique
+    register sub-range, so resolution succeeds before intra_seq matters.
+
+    Raises if the node's category doesn't map to a known kind. SYNC /
+    SBARRIER / SNOP / LCC are excluded from edge formation upstream so
+    this function isn't called for them.
+    """
+    body_idx = node.position.loop_index
+    cat = node.category
+    if cat == "MFMA":
+        idx = node.position.vmfma_index
+        if num_mfma_per_iter and num_mfma_per_iter > 0:
+            iter_ = idx // num_mfma_per_iter
+            within = idx % num_mfma_per_iter
+        else:
+            iter_, within = 0, idx
+        return (body_idx, iter_, _MFMA_KIND_RANK, within)
+    base, iter_ = _split_category_iter(cat)
+    rank = _KIND_RANK.get(base)
+    if rank is None:
+        raise CaptureUnknownInstructionError(
+            f"_logical_position: category {cat!r} (base {base!r}) has no "
+            f"kind_rank entry; node={node.name!r} body={node.body_label!r}."
+        )
+    # intra_seq is the node's offset in its body's _graph_nodes list,
+    # filled in by the caller (build_dataflow_graph) since it's body-relative.
+    return (body_idx, iter_, rank, getattr(node, '_intra_seq', 0))
+
+
+def _resolve_register_producers(read_reg, consumer, producers_by_kind, num_mfma_per_iter):
+    """Resolve every producer of `read_reg` for `consumer`.
+
+    Yields (producer_node, written_reg) pairs for each producer whose
+    logical_position is strictly before consumer's AND whose written
+    register overlaps `read_reg`. A wide read (e.g. MFMA reading
+    v[8:15]) covered by two narrower writes (LR_a writes v[8:11],
+    LR_b writes v[12:15]) yields BOTH edges — both producers
+    genuinely contribute data the consumer reads.
+
+    Reorder-invariant: each yielded pair depends only on register
+    identity + category + iteration, all preserved across schedulers.
+    Both schedulers see the same instruction set so both yield the
+    same set of (producer, register) pairs.
+    """
+    consumer_lp = _logical_position(consumer, num_mfma_per_iter)
+    for kind, prod_list in producers_by_kind.items():
+        for lp, prod_node, written_regs in prod_list:
+            if lp >= consumer_lp:
+                # prod_list is sorted ascending; nothing later will be < consumer_lp.
+                break
+            for wreg in written_regs:
+                if _reg_overlaps(read_reg, wreg):
+                    yield (prod_node, wreg)
+                    break  # this producer matched once; one edge per producer per read
+
+
 def _identity_for(inst, body_label: str, category=None) -> tuple:
     """Build a content-based identity tuple for an instruction.
 
@@ -1520,39 +1669,39 @@ _BODY_BUILD_ORDER = (BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LAB
 def build_dataflow_graph(four_part_capture):
     """Build the unified 4-body register dataflow graph from a FourPartCapture.
 
-    Walks bodies in execution order (ML-1 -> ML -> NGL -> NLL); the per-counter
-    FIFO queue persists across body boundaries so cross-body raw_intrawave
-    edges form correctly when a producer in body i is drained by a wait in
-    body i+1.
+    Two phases:
 
-    Node policy: every captured instruction becomes a node EXCEPT SWait,
-    SBarrier, and SNop — those are scheduler-choice (CMS may emit any
-    number of redundant ones and still be correct), so they're kept in
-    the per-body sidecar (for waits_in_window/barriers_in_window/FIFO
-    simulation) but excluded from the cross-graph identity set. Every
-    other instruction class — including ones the FIFO classifier doesn't
-    model (VPermB32, VCvtPkF32toBF16, scalar arith, pointer math, etc.)
-    — is added as a node so cross-graph topology comparison is complete.
+    Phase 1 — node construction. Walks bodies in execution order
+    (ML-1 -> ML -> NGL -> NLL). Every captured instruction becomes a
+    node EXCEPT SWait/SBarrier/SNop (scheduler-choice; sidecar only)
+    and LCC (out-of-scope: default emits it outside _loopBody, CMS
+    bakes it into the macro). Per-body sidecar `_graph_nodes` is
+    attached so wait/barrier helpers can find sync ops in stream order.
+
+    Phase 2 — edge formation by REGISTER-NAME RESOLUTION (reorder-
+    invariant). For each consumer's read register R, find the unique
+    producer P that writes R. Producer is the latest in LOGICAL ORDER
+    (body, iter, kind_rank, intra_seq) whose written register overlaps
+    R. Logical order is derived from category + mfma_index — preserved
+    by both schedulers — so two captures of the same instruction set
+    in different schedules produce IDENTICAL edges.
+
+    A separate barrier-edge collector (`_collect_barrier_edges`) emits
+    LDS-reuse edges (lr_to_gr_lds_reuse, gr_to_lr_lds_reuse) over the
+    unified node stream — same as before; that collector is already
+    pattern-based and reorder-invariant.
+
+    Wait-coverage validation lives elsewhere (see
+    `validate_edge_wait_coverage` and `diagnose_missing_edge`) — those
+    take the constructed graph and check, per-edge, whether CMS's
+    stream has a covering SWaitCnt that drains the producer.
 
     Missed-instruction guard: an instruction whose category resolves to
     no recognized scheduler-role tag AND whose Python class isn't in
     LR/LW/GR/MFMA/SWait/SBarrier raises CaptureUnknownInstructionError.
-    Surfaces capture-pipeline gaps that left an instruction uncategorized.
-
-    Edge-formation rule (raw_intrawave):
-      On producer instruction (LR/LW/GR):
-        append (producer_node, regs_written) to queue[counter_for(producer)]
-      On SWaitCnt with field set (dscnt=N, vlcnt=N):
-        while len(queue[counter]) > N:
-          pop oldest (FIFO drain by op-count, NOT by register)
-          mark its regs as ready_writer[reg] = producer
-      On consumer instruction:
-        for each reg read:
-          if ready_writer[reg]: form an edge
 
     Always raises CaptureEmptyBodyError if any body has zero
-    instructions (capture-pipeline bug; bodies always contain at least
-    the MFMA loop).
+    instructions.
     """
     captures = {}
     if four_part_capture is None:
@@ -1576,38 +1725,26 @@ def build_dataflow_graph(four_part_capture):
             )
         captures[label] = body
 
-    # Per-counter FIFO queues. Each entry: (producer_node, [regs_written]).
-    # Persist across bodies — hardware preserves SWaitCnt state across labels.
-    queues = {"dscnt": [], "vlcnt": []}
-    # ready_writer[register-key] -> producer GraphNode that's been drained.
-    ready_writer = {}
+    num_mfma_per_iter = getattr(four_part_capture, 'num_mfma_per_iter', 0) or 0
 
     nodes_by_identity = {}
-    edges = []
-
-    # Per-body cache of GraphNodes — used by waits_in_window / barriers_in_window
-    # via the LoopBodyCapture._graph_nodes attribute (set below).
     nodes_per_body = {label: [] for label in _BODY_BUILD_ORDER}
 
+    # ---------------------------------------------------------------------
+    # Phase 1 — node construction + sidecar.
+    # ---------------------------------------------------------------------
+    # Per-body intra_seq counters: keyed on category, used for the
+    # logical-position tiebreaker. The same item-within-category order is
+    # preserved by both schedulers because they consume from the same idMap
+    # source modules; intra_seq based on per-body cohort index works.
     for label in _BODY_BUILD_ORDER:
         if label not in captures:
             continue
         body = captures[label]
+        intra_seq_counter = {}  # category -> next sequence
 
         for tagged_inst in body.instructions:
             inst = tagged_inst.inst
-
-            # _make_node computes the identity, which routes through
-            # _class_tag_from_category(category, inst). When the category
-            # is recognized (LRA*, PackA*, GRInc*, LRS, LWS, etc.), we get
-            # a tag (LR, PACK, GRINC, etc.). When it's None or 'UNKNOWN',
-            # _class_tag_from_category falls back to _class_tag(inst), which
-            # raises CaptureUnknownInstructionError if the instruction's
-            # Python class isn't one of LR/LW/GR/MFMA/SWait/SBarrier. That
-            # raise is the intended "missed-instruction" guard — surfaces
-            # any capture-pipeline gap that left an instruction without a
-            # recognized category AND without a recognized class. Re-raise
-            # with the body label for diagnostic clarity.
             try:
                 node = _make_node(tagged_inst, label)
             except CaptureUnknownInstructionError as e:
@@ -1619,82 +1756,80 @@ def build_dataflow_graph(four_part_capture):
                     f"one of LR/LW/GR/MFMA/SWait/SBarrier. Inner: {e}"
                 ) from e
 
-            # Per-body sidecar: every node lives here so waits_in_window /
-            # barriers_in_window can find SWaits/SBarriers and the FIFO
-            # simulation has stream order to walk.
+            # Stamp intra_seq for logical-position tiebreaking.
+            cat = tagged_inst.category
+            seq = intra_seq_counter.get(cat, 0)
+            intra_seq_counter[cat] = seq + 1
+            node._intra_seq = seq
+
+            # Per-body sidecar: every node lives here, including SWait/
+            # SBarrier/SNop, so waits_in_window/barriers_in_window can
+            # find them.
             nodes_per_body[label].append(node)
 
-            # Cross-graph identity set: only producer/consumer/data nodes
-            # participate. SWait, SBarrier, and SNop are SCHEDULER-CHOICE
-            # instructions — CMS may emit arbitrary redundant ones and
-            # still be correct, so they must NOT contribute to the
-            # cross-graph topology diff. Per-edge correctness for waits/
-            # barriers is checked in diagnose_missing_edge by walking the
-            # sidecar.
-            #
-            # LCC (loop-counter code) is also excluded: CMS bakes it into
-            # the macro body, but the default-side scheduler emits it
-            # OUTSIDE _loopBody (in closeLoop). The two paths capture
-            # different scopes for loop-counter ops, so cross-graph
-            # comparison should ignore them.
+            # Cross-graph identity set: only "real" instructions
+            # participate (excludes scheduler-choice SWait/SBarrier/SNop
+            # and out-of-scope LCC).
             if (not (_is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst))
                     and node.identity[0] != "LCC"):
                 nodes_by_identity[node.identity] = node
 
-            # FIFO / edge-formation logic. Instructions whose Python class
-            # we don't model (e.g. VPermB32 in pack code, scalar arith in
-            # GR-inc, pointer math in pointerLRCode) become nodes without
-            # affecting the FIFO state — they're present in the graph for
-            # completeness but don't push to queues or form edges from the
-            # built-in raw_intrawave classifier. (Future work may model
-            # additional dataflow patterns for these.)
-            if _is_swait(inst):
-                # Drain each constrained counter to the cap N.
-                for counter in ("dscnt", "vlcnt"):
-                    cap_value = _swait_drains(node, counter)
-                    if cap_value is None:
-                        continue
-                    while len(queues[counter]) > cap_value:
-                        producer, regs = queues[counter].pop(0)
-                        for reg in regs:
-                            ready_writer[_reg_signature(reg)] = (producer, reg)
-                continue
-
-            if _is_sbarrier(inst):
-                # Barriers don't form raw_intrawave edges; handled in step 2.8.
-                continue
-
-            if _is_lr(inst) or _is_lw(inst):
-                regs = _writes(inst)
-                queues["dscnt"].append((node, regs))
-                continue
-
-            if _is_gr(inst):
-                regs = _writes(inst)
-                queues["vlcnt"].append((node, regs))
-                continue
-
-            if _is_mfma(inst):
-                # Consumer — form edges for each register that overlaps a
-                # ready producer's write.
-                for read_reg in _reads(inst):
-                    for writer_sig, (producer, written_reg) in list(ready_writer.items()):
-                        if _reg_overlaps(read_reg, written_reg):
-                            edges.append(DataflowEdge(
-                                producer=producer,
-                                consumer=node,
-                                register=written_reg,
-                                edge_kind="raw_intrawave",
-                            ))
-                continue
-
-            # Otherwise: classification succeeded (we have a node) but the
-            # instruction's Python class isn't modeled by the FIFO. Node-only;
-            # no FIFO/edge action.
-
-        # Stash per-body GraphNodes on the LoopBodyCapture for the helpers
-        # (waits_in_window, barriers_in_window) to use without rebuilding.
+        # Stash per-body GraphNodes on the LoopBodyCapture for the helpers.
         body._graph_nodes = nodes_per_body[label]
+
+    # ---------------------------------------------------------------------
+    # Phase 2 — edge formation by register-name resolution.
+    # ---------------------------------------------------------------------
+    # Collect every producer node (anything _writes() returns regs for)
+    # bucketed by kind_rank, sorted by logical_position. Then walk every
+    # consumer node, resolve each read register to its unique producer
+    # via _resolve_register_producer, emit the edge.
+    edges = []
+
+    # Skip when nothing was captured — e.g., the no-op build_dataflow_graph(None)
+    # contract holds but here we have an empty captures map after seeding.
+    if nodes_by_identity:
+        producers_by_kind = {}  # kind_rank -> list of (lp, node, written_regs)
+        for node in nodes_by_identity.values():
+            written = _writes(node.rocisa_inst)
+            if not written:
+                continue
+            try:
+                lp = _logical_position(node, num_mfma_per_iter)
+            except CaptureUnknownInstructionError:
+                # Producer's category not in _KIND_RANK — skip (can't
+                # participate in dataflow without a logical position).
+                continue
+            producers_by_kind.setdefault(lp[2], []).append((lp, node, written))
+
+        # Sort each kind's producer list by logical_position ascending so
+        # _resolve_register_producer can walk-from-end to find the latest.
+        for kind in producers_by_kind:
+            producers_by_kind[kind].sort(key=lambda triple: triple[0])
+
+        # Resolve each consumer's reads.
+        for node in nodes_by_identity.values():
+            reads = _reads(node.rocisa_inst)
+            if not reads:
+                continue
+            try:
+                # _logical_position is required for the resolver's
+                # ordering check — skip if consumer's kind isn't ranked.
+                _logical_position(node, num_mfma_per_iter)
+            except CaptureUnknownInstructionError:
+                continue
+            for read_reg in reads:
+                if read_reg is None:
+                    continue
+                for producer, written_reg in _resolve_register_producers(
+                    read_reg, node, producers_by_kind, num_mfma_per_iter,
+                ):
+                    edges.append(DataflowEdge(
+                        producer=producer,
+                        consumer=node,
+                        register=written_reg,
+                        edge_kind="raw_intrawave",
+                    ))
 
     # =========================================================================
     # SBarrier-edge collectors (cross-wave LDS-reuse)
@@ -2178,6 +2313,141 @@ def _last_drain(waits, producer, subj_graph):
     return max(drainers, key=lambda w: w.position)
 
 
+# =============================================================================
+# Self-validation: per-edge wait coverage
+# =============================================================================
+# Edges are now reorder-invariant (register-name resolution). The
+# scheduler-correctness check — does the schedule have a covering
+# s_waitcnt that drains each producer before its consumer reads? —
+# is a SEPARATE pass over the graph + the captured stream.
+#
+# This is the lint that replaces:
+#   - LRDataReadyRule              (CMSValidator.py:3461)
+#   - GRAfterLRRule                (CMSValidator.py:3470)  [LDS-reuse barrier-edges]
+#   - GRBeforeLRRule               (CMSValidator.py:3480)  [LDS-reuse barrier-edges]
+#   - PackDataReadyRule (ordering) (CMSValidator.py:3464)
+#
+# Same Failure types the cross-graph diagnose_missing_edge classifier
+# emits — the wiring is just driven differently. Instead of "for each
+# missing edge, classify why subject lacks it", it's "for each edge in
+# the (single) graph, classify whether the schedule covers it".
+
+
+def validate_edge_wait_coverage(graph, *, raise_on_unexplained=False):
+    """Validate that every dataflow edge has a covering wait/barrier in
+    the captured stream.
+
+    For each `raw_intrawave` edge: walk the captured stream between
+    producer.position and consumer.position; require an SWaitCnt on the
+    producer's counter (`dscnt` for LR/LW, `vlcnt` for GR) that drains
+    the producer's queue slot. Emits MissingWaitFailure /
+    WaitOnWrongCounterFailure / WaitInsufficientFailure as appropriate.
+
+    For each `lr_to_gr_lds_reuse` / `gr_to_lr_lds_reuse` edge: the wait
+    check above plus a barrier-coverage check (mirrors the LDS-reuse
+    barrier requirement); emits MissingBarrierFailure when the wait
+    covers but no barrier follows.
+
+    Same-body OrderInverted (producer.position > consumer.position
+    within the same body) is reported here as well — it indicates the
+    schedule placed the producer after its consumer, which the wait
+    machinery can't recover from.
+
+    `raise_on_unexplained`: if True, raise UnexplainedMissingEdgeError
+    when an edge falls through every classifier branch (defensive —
+    means the classifier missed a case). Default False (production
+    observability prefers a soft synthetic Failure).
+
+    Returns a list of Failure objects. Empty list means "every edge in
+    the graph has a covering wait/barrier in the captured stream".
+    """
+    failures = []
+    for edge in graph.edges:
+        edge_failures = _classify_edge_coverage(edge, graph,
+                                                raise_on_unexplained=raise_on_unexplained)
+        failures.extend(edge_failures)
+    return failures
+
+
+def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
+    """Per-edge coverage classifier — same logic diagnose_missing_edge
+    runs in compare_graphs, but driven from a single graph rather than
+    a missing-edge diff.
+    """
+    p_node = edge.producer
+    c_node = edge.consumer
+
+    # Phase 1 — same-body order check.
+    if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
+        return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
+
+    # Phase 2 — wait coverage.
+    expected_counter = counter_for(p_node)
+    waits = waits_in_window(subj_graph, p_node.position, c_node.position,
+                            counter=expected_counter)
+    waits_other = waits_in_window(subj_graph, p_node.position, c_node.position,
+                                  exclude_counter=expected_counter)
+
+    failures = []
+    wait_failure_emitted = False
+
+    if not waits:
+        if waits_other:
+            failures.append(WaitOnWrongCounterFailure(
+                producer=p_node, consumer=c_node,
+                expected_counter=expected_counter,
+                wrong_counter_waits=waits_other,
+            ))
+        else:
+            failures.append(MissingWaitFailure(
+                producer=p_node, consumer=c_node,
+                counter_kind=expected_counter,
+            ))
+        wait_failure_emitted = True
+    else:
+        if not _any_drains(waits, p_node, subj_graph):
+            insufficient = _first_insufficient(waits, p_node, subj_graph)
+            if insufficient is not None:
+                depth = _queue_depth_at(insufficient, p_node, subj_graph)
+                cv = _swait_drains(insufficient, expected_counter)
+                failures.append(WaitInsufficientFailure(
+                    producer=p_node, consumer=c_node,
+                    wait=insufficient,
+                    queue_depth_at_wait=depth,
+                    counter_value=cv if cv is not None else 0,
+                ))
+            else:
+                failures.append(MissingWaitFailure(
+                    producer=p_node, consumer=c_node,
+                    counter_kind=expected_counter,
+                ))
+            wait_failure_emitted = True
+
+    # Barrier check for LDS-reuse edges only.
+    if (edge.edge_kind in ("lr_to_gr_lds_reuse", "gr_to_lr_lds_reuse")
+            and not wait_failure_emitted):
+        last_drain = _last_drain(waits, p_node, subj_graph)
+        if last_drain is not None:
+            barriers = barriers_in_window(subj_graph,
+                                          start=last_drain.position,
+                                          end=c_node.position)
+            if not barriers:
+                role = ("must_start_after"
+                        if edge.edge_kind == "lr_to_gr_lds_reuse"
+                        else "needed_by")
+                failures.append(MissingBarrierFailure(
+                    producer=p_node, consumer=c_node, role=role,
+                ))
+
+    if not failures and raise_on_unexplained:
+        raise UnexplainedMissingEdgeError(
+            f"validate_edge_wait_coverage: edge {p_node.identity} -> "
+            f"{c_node.identity} (kind={edge.edge_kind}) wasn't classified "
+            f"by any branch. Classifier bug."
+        )
+    return failures
+
+
 def compare_captures(default_capture, cms_capture):
     """Initial data-movement-totals comparison rule.
 
@@ -2424,7 +2694,8 @@ def expand_cms_macro(macro, id_value, useGR, usePLR, useGRInc, useLoop,
 
 
 def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
-                                  sync_class, snop_class, mfma_classes):
+                                  sync_class, snop_class, mfma_classes,
+                                  num_mfma_per_iter=0):
     """Expand a CMS MAINLOOP macro four ways and assemble a FourPartCapture.
 
     main_loop[cp] expands with all flags=1 and \\ID=cp for each cp.
@@ -2474,4 +2745,5 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
         num_mfma=num_mfma,
         num_codepaths=num_codepaths,
         source="cms",
+        num_mfma_per_iter=num_mfma_per_iter,
     )

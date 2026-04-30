@@ -40,6 +40,7 @@ from Tensile.Components.ScheduleCapture import (
     build_dataflow_graph,
     compare_graphs,
     diagnose_missing_edge,
+    validate_edge_wait_coverage,
     OrderInvertedFailure,
     MissingWaitFailure,
     WaitOnWrongCounterFailure,
@@ -206,59 +207,54 @@ class TestPerFailureDiagnosis:
         return build_dataflow_graph(_wrap(cap))
 
     def test_missing_wait_diagnosis(self):
-        """Subject capture deletes the SWait — no waits at all in the window."""
-        ref = self._build_ref()
+        """Schedule has the LR and the consuming MFMA but no SWait between
+        them. With register-resolution edges, the LR->MFMA edge forms in
+        BOTH ref and subject (compare_graphs sees no diff). The validator
+        validate_edge_wait_coverage flags the subject's missing wait.
+        """
         subj_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         subj = build_dataflow_graph(_wrap(subj_cap))
-        failures = compare_graphs(ref, subj)
+        failures = validate_edge_wait_coverage(subj)
         assert any(isinstance(f, MissingWaitFailure) for f in failures)
         mw = next(f for f in failures if isinstance(f, MissingWaitFailure))
         assert mw.counter_kind == "dscnt"
 
     def test_wait_on_wrong_counter_diagnosis(self):
-        """Subject replaces SWait(dscnt=0) with SWait(vlcnt=0)."""
-        ref = self._build_ref()
+        """Schedule has SWait(vlcnt=0) where SWait(dscnt=0) is needed for
+        an LR -> MFMA edge. validate_edge_wait_coverage emits
+        WaitOnWrongCounterFailure."""
         subj_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_swait(slot=1, vlcnt=0),    # wrong counter
+            make_swait(slot=1, vlcnt=0),
             make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
         subj = build_dataflow_graph(_wrap(subj_cap))
-        failures = compare_graphs(ref, subj)
+        failures = validate_edge_wait_coverage(subj)
         assert any(isinstance(f, WaitOnWrongCounterFailure) for f in failures)
         wf = next(f for f in failures if isinstance(f, WaitOnWrongCounterFailure))
         assert wf.expected_counter == "dscnt"
         assert len(wf.wrong_counter_waits) >= 1
 
     def test_wait_insufficient_diagnosis(self):
-        """Subject replaces SWait(dscnt=0) with SWait(dscnt=2) while 5 LRs
-        are in flight."""
-        # Reference: 5 LRs + SWait(dscnt=0) + MFMA on the 5th LR's regs.
-        ref_cap = make_capture(BODY_LABEL_ML, [
+        """Schedule has 5 LRs in flight + SWait(dscnt=2) which only drains
+        the oldest 3. The MFMA reads the youngest LR's register (LR_e at
+        regIdx=24) — the LR_e -> MFMA edge forms by register resolution,
+        and validate_edge_wait_coverage emits WaitInsufficientFailure
+        because LR_e's queue position (4) exceeds the SWait's cap (2)."""
+        subj_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),     # LR_a
             make_lr(12, 4, 80, slot=1, category="LRA0"),    # LR_b
             make_lr(16, 4, 96, slot=2, category="LRA0"),    # LR_c
             make_lr(20, 4, 112, slot=3, category="LRA0"),   # LR_d
             make_lr(24, 4, 128, slot=4, category="LRA0"),   # LR_e
-            make_swait(slot=5, dscnt=0),
-            make_mfma(0, 24, 32, slot=6, a_src_count=4),    # reads LR_e's regs
-        ])
-        ref = build_dataflow_graph(_wrap(ref_cap))
-        # Subject: same 5 LRs, but SWait(dscnt=2) leaves the youngest 2 pending.
-        subj_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 4, 64, slot=0, category="LRA0"),
-            make_lr(12, 4, 80, slot=1, category="LRA0"),
-            make_lr(16, 4, 96, slot=2, category="LRA0"),
-            make_lr(20, 4, 112, slot=3, category="LRA0"),
-            make_lr(24, 4, 128, slot=4, category="LRA0"),
-            make_swait(slot=5, dscnt=2),                    # only drains the oldest 3
-            make_mfma(0, 24, 32, slot=6, a_src_count=4),
+            make_swait(slot=5, dscnt=2),                    # drains oldest 3
+            make_mfma(0, 24, 32, slot=6, a_src_count=4),    # reads LR_e
         ])
         subj = build_dataflow_graph(_wrap(subj_cap))
-        failures = compare_graphs(ref, subj)
+        failures = validate_edge_wait_coverage(subj)
         assert any(isinstance(f, WaitInsufficientFailure) for f in failures)
 
     def test_missing_barrier_must_start_after_diagnosis(self):
