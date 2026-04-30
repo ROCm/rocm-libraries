@@ -34,10 +34,10 @@ Two independent defects combined to silently orphan a leaf library:
    (chip-id is not part of the predicate on gfx942), so they collided in
    ``PredicateLibrary.merge``.
 
-2. *Code*: ``SolutionLibrary.MasterSolutionLibrary.FromOriginalState``'s
-   ``hardware()`` closure appended an ``_ID<chipid>`` suffix to the
-   placeholder filename whenever the YAML carried ``DeviceNames``, *without*
-   gating on ``supportsChipIdPredicate``. The predicate gate
+2. *Code*: ``SolutionLibrary.MasterSolutionLibrary.hardware`` appended an
+   ``_ID<chipid>`` suffix to the placeholder filename whenever the YAML
+   carried ``DeviceNames``, *without* gating on
+   ``supportsChipIdPredicate``. The predicate gate
    (``Hardware.HardwarePredicate.FromHardware``) and the filename gate must
    agree; otherwise non-gfx950 archs produce distinct on-disk filenames for
    colliding predicates, and ``PlaceholderLibrary.merge`` (a no-op) silently
@@ -46,7 +46,6 @@ Two independent defects combined to silently orphan a leaf library:
 
 These tests guard both invariants so the failure mode cannot recur silently.
 """
-import inspect
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -73,14 +72,26 @@ _LOGIC_ROOT = (
 
 def _iter_arch_dirs():
     """Yield every (codename, arch_dir) under asm_full/<codename>/<gfxN>."""
-    if not _LOGIC_ROOT.is_dir():
-        return
     for codename_dir in _LOGIC_ROOT.iterdir():
         if not codename_dir.is_dir():
             continue
         for arch_dir in codename_dir.iterdir():
             if arch_dir.is_dir() and arch_dir.name.startswith("gfx"):
                 yield codename_dir.name, arch_dir
+
+
+def _all_arch_names():
+    """Collect every unique gfx* arch directory name under the logic root.
+
+    Used to parametrize the chip-id-gate scope test so that any new arch
+    added to the repo is automatically audited rather than silently exempt.
+    """
+    if not _LOGIC_ROOT.is_dir():
+        return []
+    names = set()
+    for _codename, arch_dir in _iter_arch_dirs():
+        names.add(arch_dir.name)
+    return sorted(names)
 
 
 # Matches a logic-YAML header DeviceNames line, e.g. "- [Device 0049, Device 0050]".
@@ -124,10 +135,6 @@ def _read_device_names(yaml_path: Path):
 # PlaceholderLibrary.merge (no-op) drops one leaf.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(
-    not _LOGIC_ROOT.is_dir(),
-    reason=f"Logic YAML root not found at {_LOGIC_ROOT}",
-)
 def test_logic_yaml_sibling_device_names_consistent():
     """Sibling logic YAMLs (same arch dir, same basename) must agree on DeviceNames.
 
@@ -136,6 +143,7 @@ def test_logic_yaml_sibling_device_names_consistent():
     chip-id is not part of the HardwarePredicate, PredicateLibrary.merge will
     collapse the rows and PlaceholderLibrary.merge (no-op) will silently drop
     one leaf, leaving its .dat file unreachable at runtime."""
+    assert _LOGIC_ROOT.is_dir(), f"Logic root not found: {_LOGIC_ROOT}"
     violations = []
     for codename, arch_dir in _iter_arch_dirs():
         # by_basename: basename -> {device-names-tuple: [paths]}
@@ -170,35 +178,70 @@ def test_logic_yaml_sibling_device_names_consistent():
 # Test 2: code-side invariant. The placeholder _ID<chipid> suffix in
 # SolutionLibrary.hardware() must be gated on supportsChipIdPredicate so the
 # filename gate matches the predicate gate in Hardware.HardwarePredicate.
+#
+# Exercised behaviorally: invoke the lifted MasterSolutionLibrary.hardware
+# staticmethod with a representative gfx942 (chip-id-unaware) input and
+# confirm that the produced placeholder name does not pick up the _ID
+# suffix even though DeviceNames is supplied.
 # ---------------------------------------------------------------------------
 
-def test_solution_library_gates_placeholder_chip_id_suffix():
-    """``hardware()`` must only append ``_ID<chipid>`` when the runtime
-    HardwarePredicate also discriminates on chip-id (gfx950 today).
+def _arch_inputs():
+    """Return (devicePart, deviceNames, expect_id_suffix) cases for the gate
+    test. Includes one chip-id-aware and one chip-id-unaware arch so the
+    behavior is pinned in both directions."""
+    # gfx942: chip-id is NOT part of the HardwarePredicate, so the filename
+    # MUST NOT carry the _ID suffix even when DeviceNames is present --
+    # otherwise PlaceholderLibrary leaves diverge while predicates collide.
+    # gfx950: chip-id IS part of the HardwarePredicate, so the filename
+    # MUST carry the _ID suffix to match the predicate-side discrimination.
+    return [
+        ("gfx942", ["Device 74a1"], False),
+        ("gfx950", ["Device 75a0"], True),
+    ]
+
+
+@pytest.mark.parametrize("devicePart,deviceNames,expect_id_suffix", _arch_inputs())
+def test_hardware_gates_placeholder_chip_id_suffix(
+    devicePart, deviceNames, expect_id_suffix
+):
+    """``MasterSolutionLibrary.hardware`` must only append ``_ID<chipid>``
+    when the runtime HardwarePredicate also discriminates on chip-id.
 
     Otherwise two YAMLs that differ only in DeviceNames produce identical
     predicates but distinct placeholder filenames; the predicate collision
     drops one leaf via PlaceholderLibrary.merge while the orphan placeholder
     keeps its uniquely-named .dat on disk, unreferenced.
     """
-    src = inspect.getsource(SolutionLibrary.MasterSolutionLibrary.FromOriginalState)
-    assert "supportsChipIdPredicate" in src, (
-        "SolutionLibrary.MasterSolutionLibrary.FromOriginalState no longer "
-        "references supportsChipIdPredicate. The placeholder _ID<chipid> "
-        "suffix MUST be gated on supportsChipIdPredicate(devicePart) to "
-        "mirror Hardware.HardwarePredicate.FromHardware; otherwise non-gfx950 "
-        "archs regress to the F8NHS TN orphan-leaf failure pattern."
+    d = {
+        "ArchitectureName": devicePart,
+        "CUCount": None,
+        "DeviceNames": deviceNames,
+    }
+    _newLib, placeholderName = SolutionLibrary.MasterSolutionLibrary.hardware(
+        d, library=None, placeholderName="TensileLibrary", lazyLibrary=True
     )
-    # Tight pattern: the gate must be conjunctive with the pciChipId truthiness
-    # check, on the same conditional branch that emits the suffix.
-    assert re.search(r"pciChipId\s+and\s+supportsChipIdPredicate", src), (
-        "The placeholder _ID<chipid> suffix branch in "
-        "SolutionLibrary.MasterSolutionLibrary.FromOriginalState.hardware() "
-        "must be guarded by `if pciChipId and supportsChipIdPredicate(...)`. "
-        "A bare `if pciChipId:` allows the filename to diverge while the "
-        "predicate stays equal, causing PredicateLibrary.merge to collide "
-        "the rows and PlaceholderLibrary.merge (no-op) to drop one leaf."
-    )
+
+    has_id_suffix = "_ID" in placeholderName
+    if expect_id_suffix:
+        assert has_id_suffix, (
+            f"{devicePart}: expected _ID<chipid> suffix in placeholder "
+            f"name (chip-id is part of this arch's HardwarePredicate) but "
+            f"got {placeholderName!r}."
+        )
+    else:
+        assert not has_id_suffix, (
+            f"{devicePart}: placeholder name {placeholderName!r} contains "
+            "the _ID<chipid> suffix even though chip-id is NOT part of "
+            "this arch's HardwarePredicate. The filename gate must mirror "
+            "supportsChipIdPredicate -- otherwise sibling YAMLs whose "
+            "predicates compare equal will produce divergent placeholder "
+            "filenames, PredicateLibrary.merge will collapse the rows, "
+            "and PlaceholderLibrary.merge (no-op) will silently drop one "
+            "leaf."
+        )
+    # The arch suffix must always be present so leaves remain partitioned
+    # by arch even when chip-id is not.
+    assert placeholderName.endswith("_" + devicePart), placeholderName
 
 
 # ---------------------------------------------------------------------------
@@ -208,42 +251,35 @@ def test_solution_library_gates_placeholder_chip_id_suffix():
 # (SolutionLibrary.hardware()). This test ensures the two stay in lockstep
 # by failing loudly if a non-gfx950 arch is added to the gate without an
 # accompanying audit.
+#
+# Parametrized over every arch directory present under the logic root so any
+# new arch added to the repo is picked up automatically.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize(
-    "arch",
-    [
-        "gfx900",
-        "gfx906",
-        "gfx908",
-        "gfx90a",
-        "gfx940",
-        "gfx941",
-        "gfx942",
-        "gfx1030",
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1200",
-        "gfx1201",
-        "gfx1250",
-    ],
-)
+@pytest.mark.parametrize("arch", _all_arch_names())
 def test_supports_chip_id_predicate_only_gfx950(arch):
     """Lock the current scope of chip-id-aware archs.
 
     If this test starts failing because ``supportsChipIdPredicate`` was
     widened, that is fine -- but the change author must also confirm:
 
-    * ``SolutionLibrary.MasterSolutionLibrary.FromOriginalState.hardware()``
-      still gates the ``_ID<chipid>`` suffix on the same predicate, and
+    * ``SolutionLibrary.MasterSolutionLibrary.hardware`` still gates the
+      ``_ID<chipid>`` suffix on the same predicate, and
     * existing logic YAMLs for the newly-included arch declare consistent
-      ``DeviceNames`` (see ``test_logic_yaml_device_names_uniform_per_arch``).
+      ``DeviceNames`` (see ``test_logic_yaml_sibling_device_names_consistent``).
     """
-    assert supportsChipIdPredicate(arch) is False, (
-        f"{arch} now claims chip-id support; verify SolutionLibrary.hardware() "
-        "still gates the placeholder _ID<chipid> suffix on this predicate and "
-        "that all logic YAMLs for this arch declare uniform DeviceNames."
+    # Strip the _<NN>cu / _id<chipid> suffix that some tuned arch dirs carry
+    # (e.g. gfx942_152cu, gfx950_id75a3) before passing to the gate, since
+    # the gate's contract is on the base arch name.
+    base_arch = arch.split("_", 1)[0]
+    if base_arch == "gfx950":
+        assert supportsChipIdPredicate(base_arch) is True
+        return
+    assert supportsChipIdPredicate(base_arch) is False, (
+        f"{arch} (base {base_arch}) now claims chip-id support; verify "
+        "SolutionLibrary.MasterSolutionLibrary.hardware still gates the "
+        "placeholder _ID<chipid> suffix on this predicate and that all "
+        "logic YAMLs for this arch declare uniform DeviceNames."
     )
 
 

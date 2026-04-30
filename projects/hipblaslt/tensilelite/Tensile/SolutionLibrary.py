@@ -322,6 +322,53 @@ class PredicateLibrary:
 class MasterSolutionLibrary:
     StateKeys = ["solutions", "library"]
 
+    @staticmethod
+    def hardware(d, library, placeholderName, lazyLibrary, logicFile=None):
+        """Build the Hardware-level PredicateLibrary row and update the
+        placeholder filename.
+
+        Lifted out of ``FromOriginalState`` so the placeholder-suffix gating
+        invariant (the ``_ID<chipid>`` suffix must only be appended when the
+        runtime ``HardwarePredicate`` also discriminates on chip-id, see
+        ``Hardware.HardwarePredicate.FromHardware`` and
+        ``supportsChipIdPredicate``) can be exercised behaviorally rather than
+        by source-string inspection.
+        """
+        devicePart = d["ArchitectureName"]
+        cuCount = d["CUCount"]
+
+        pciChipId = d.get("DeviceNames", None)
+
+        newLib = PredicateLibrary(tag="Hardware")
+        if devicePart == "fallback":
+            pred = Hardware.HardwarePredicate("TruePred")
+        else:
+            pred = Hardware.HardwarePredicate.FromHardware(
+                gfxToIsa(devicePart), cuCount, pciChipId, logicFile=logicFile
+            )
+
+        newLib.rows.append({"predicate": pred, "library": library})
+
+        if lazyLibrary:
+            if cuCount: placeholderName += "_CU" + str(cuCount)
+            # Only append the chip-id suffix on architectures whose runtime
+            # HardwarePredicate also includes the chip-id discriminator
+            # (see Hardware.HardwarePredicate.FromHardware). Otherwise the
+            # filename diverges between sibling YAMLs while their predicates
+            # remain equal, producing PredicateLibrary.merge collisions whose
+            # PlaceholderLibrary children silently drop one leaf.
+            if pciChipId and supportsChipIdPredicate(devicePart):
+                # Convert device names list to a sanitized string for filename
+                # e.g., ['Device 75a0', 'Device 75b0'] -> 'ID75a0-75b0'
+                if isinstance(pciChipId, list):
+                    chipIdStr = '-'.join([str(d).replace('Device ', '').strip() for d in pciChipId])
+                else:
+                    chipIdStr = str(pciChipId).replace('Device ', '').strip()
+                placeholderName += "_ID" + chipIdStr
+            placeholderName += "_" + str(devicePart)
+
+        return newLib, placeholderName
+
     @classmethod
     def FixSolutionIndices(cls, solutions):
         # fix missing and duplicate solution indices.
@@ -355,40 +402,7 @@ class MasterSolutionLibrary:
 
         # functions for creating each "level" of the library
         def hardware(d, problemType, solutions, library, placeholderName):
-            devicePart = d["ArchitectureName"]
-            cuCount = d["CUCount"]
-
-            pciChipId = d.get("DeviceNames", None)
-
-            newLib = PredicateLibrary(tag="Hardware")
-            if devicePart == "fallback":
-                pred = Hardware.HardwarePredicate("TruePred")
-            else:
-                pred = Hardware.HardwarePredicate.FromHardware(
-                    gfxToIsa(devicePart), cuCount, pciChipId, logicFile=logicFile
-                )
-
-            newLib.rows.append({"predicate": pred, "library": library})
-
-            if lazyLibrary:
-                if cuCount: placeholderName += "_CU" + str(cuCount)
-                # Only append the chip-id suffix on architectures whose runtime
-                # HardwarePredicate also includes the chip-id discriminator
-                # (see Hardware.HardwarePredicate.FromHardware). Otherwise the
-                # filename diverges between sibling YAMLs while their predicates
-                # remain equal, producing PredicateLibrary.merge collisions whose
-                # PlaceholderLibrary children silently drop one leaf.
-                if pciChipId and supportsChipIdPredicate(devicePart):
-                    # Convert device names list to a sanitized string for filename
-                    # e.g., ['Device 75a0', 'Device 75b0'] -> 'ID75a0-75b0'
-                    if isinstance(pciChipId, list):
-                        chipIdStr = '-'.join([str(d).replace('Device ', '').strip() for d in pciChipId])
-                    else:
-                        chipIdStr = str(pciChipId).replace('Device ', '').strip()
-                    placeholderName += "_ID" + chipIdStr
-                placeholderName += "_" + str(devicePart)
-
-            return newLib, placeholderName
+            return cls.hardware(d, library, placeholderName, lazyLibrary, logicFile=logicFile)
 
         def operationIdentifier(d, problemType, solutions, library, placeholderName):
             operationID = problemType.operationIdentifier
