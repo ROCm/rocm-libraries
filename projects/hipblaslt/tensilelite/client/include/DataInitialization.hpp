@@ -881,15 +881,6 @@ namespace TensileLite
                                    m_groupedOffsets,
                                    *m_currentGemmProblem,
                                    hipMemcpyDeviceToDevice);
-                        // CPU reference uses m_cpuPtrs (current); initializeMXData wrote valid.
-                        // Keep CPU "current" in sync so SolveCPU matches GPU after per-solution MX layout.
-                        std::vector<void**> cpuDummyBatchPtrs;
-                        copyInputs(m_cpuPtrs,
-                                   cpuDummyBatchPtrs,
-                                   m_maxElements,
-                                   m_groupedOffsets,
-                                   *m_currentGemmProblem,
-                                   hipMemcpyHostToHost);
                     }
                 }
             }
