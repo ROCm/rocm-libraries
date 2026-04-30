@@ -679,6 +679,13 @@ class Solution(collections.abc.Mapping):
       state["Use64bShadowLimit"] = False
       state["Use64bShadowLimitMX"] = False
 
+      # DepthU should be multiple of 2 * MIK. DepthU=-1 case, set DepthU=2*MIK*LSU
+      duUnit = 2 * state["MatrixInstK"] * state["LocalSplitU"]
+      if state["DepthU"] == -1:
+        state["DepthU"] = duUnit
+      if state["DepthU"] % duUnit != 0:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 support only DepthU multiple of 2 * MatrixInstK * LocalSplitU")
+
       bytesLoaded = state["NumThreads"] * 16
       if state["ProblemType"]["MXBlockA"]:
         numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
