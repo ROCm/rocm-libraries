@@ -75,6 +75,7 @@ BenchmarkProblems:
         - LdsPadA: [4]
         - LdsPadB: [4]
         - WorkGroupMapping: [64]
+        - StreamK: [0,3]
         - UseSubtileImpl: [1] # TODO: enable subtile
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
