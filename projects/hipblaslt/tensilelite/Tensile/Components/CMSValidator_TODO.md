@@ -281,6 +281,40 @@ TWO categories of issues, one fixed and one outstanding:
    16+ identities differed. Now emits a class-tag breakdown
    (`{'MFMA': 16}`) plus the first 3 full identities for investigation.
 
+**Symbolic-vs-numeric register robustness — RESOLVED via render-string identity:**
+
+Brainstormed approaches to make the comparison robust regardless of
+how registers are spelled:
+1. **Name-resolution table** — build {sym_name -> numeric_idx} from
+   writer state. Pros: structured. Cons: brittle (must replicate
+   writer's name allocation formulas), thread through API.
+2. **Symbolic-only normalization** — translate numeric to synthetic
+   symbolic. Pros: simple. Cons: doesn't solve the actual problem.
+3. **Numeric-only resolution** — full symbolic→numeric resolution.
+   Pros: true canonical. Cons: requires assembly-time dependency.
+4. **Equivalence-class comparison** — group by role pattern. Pros: no
+   exact resolution. Cons: loses precision, requires curated patterns.
+5. **Render-string identity** — use canonicalized str(inst) as
+   identity. Pros: matches GPU view, robust to symbolic/numeric/mixed,
+   simple, debuggable. Cons: cross-capture same-logical-reg with
+   DIFFERENT identifiers still differs (rare in practice).
+
+**Picked: render-string identity** (commit
+[12] Render-string identity for register-type robustness).
+
+The identity tuple is now (class_tag, loop_index, canonical_render).
+canonical_render strips comments and normalizes whitespace. Two
+instructions producing the same canonical assembly text have equal
+identity regardless of register-type mixing. Tested with
+`test_mixed_symbolic_numeric_registers_in_same_inst`.
+
+**Documented limitation**: if two captures construct the SAME logical
+register with DIFFERENT identifiers (one symbolic, one numeric for the
+same physical reg), render-strings differ and identities differ. This
+case doesn't arise in practice because both captures consume the same
+kernel-writer state; if it ever does, a name-resolution table
+(approach 1 above) would be the fix.
+
 **Outstanding — Phase 5 capture mechanism issues:**
 
 Running with the above fixes, compare_graphs surfaces 16 MFMA
