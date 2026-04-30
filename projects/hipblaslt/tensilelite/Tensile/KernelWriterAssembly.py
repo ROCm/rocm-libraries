@@ -13478,7 +13478,7 @@ class KernelWriterAssembly(KernelWriter):
               self.states.deferredEdgeModules = []
             self.states.deferredEdgeModules.append(edgeDeferredModule)
             # Inline stub: keep "Then" label, jump to deferred, return + jump to GW_End
-            edgeModule.add(writeLabels[beta][factorDim][vectorWidth]["Then"])
+            edgeModule.add(writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Then"])
             with self.allocTmpSgpr(3) as tmpSgprInfo:
               posLabel = self.labels.getNameInc("ThenDeferredDir")
               edgeModule.add(SLongBranch(writeLabels[beta][factorDim][vectorWidth]["ThenDeferred"], tmpSgprInfo, posLabel, comment="edge store (deferred)"))
@@ -13498,13 +13498,13 @@ class KernelWriterAssembly(KernelWriter):
                                           vectorWidth, element, activationLabelList,
                                           tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                           actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
-                                          edgeModule, writeLabels[beta][factorDim][vectorWidth]["Then"], endLabel,
+                                          edgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Then"], endLabel,
                                           currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims)
           # Edge conditions and branches
           if edge == True:
             # Else label
             elseLabelPos = 0 if vectorWidth == min(vectorWidths) else -1
-            edgeModule.add(writeLabels[beta][factorDim][vectorWidth]["Else"], pos=elseLabelPos)
+            edgeModule.add(writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Else"], pos=elseLabelPos)
             currentInstLength += 1
             # This check is dedicated to adaptive kernel
             if kernel["AdaptiveGemm"] == 1 and vectorWidth != min(vectorWidths):
@@ -13512,12 +13512,12 @@ class KernelWriterAssembly(KernelWriter):
               isLongBranch = True if currentInstLength >= self.states.asmCaps["ShortBranchMaxLength"] else False
               with self.allocTmpSgpr(4) as tmpSgprInfo:
                 checkIsEdge = edgeModule.add(self.checkIsEdge(kernel, tmpSgprInfo, \
-                  writeLabels[beta][factorDim][vectorWidth]["Else"], vectorWidth, isLongBranch=isLongBranch), pos=0)
+                  writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Else"], vectorWidth, isLongBranch=isLongBranch), pos=0)
                 currentInstLength += countInstruction(checkIsEdge)
             # Longest vectorWidth should have non edge module
             if vectorWidth == max(vectorWidths):
               # NonEdgeEnd label
-              edgeModule.add(writeLabels[beta][factorDim][vectorWidth]["NonEdgeEnd"], pos=0)
+              edgeModule.add(writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdgeEnd"], pos=0)
               currentInstLength += 1
               # Non edge module
               # Keep B0 FD0 NonEdge inline (optimized store path with permute).
@@ -13543,7 +13543,7 @@ class KernelWriterAssembly(KernelWriter):
                   self.states.deferredEdgeModules = []
                 self.states.deferredEdgeModules.append(nonEdgeDeferredModule)
                 nonEdgeModule = Module("Non_Edge_B%u_FD%u_VW%u" % (beta, factorDim, vectorWidth))
-                nonEdgeModule.add(writeLabels[beta][factorDim][vectorWidth]["NonEdge"])
+                nonEdgeModule.add(writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdge"])
                 with self.allocTmpSgpr(3) as tmpSgprInfo:
                   posLabel = self.labels.getNameInc("NonEdgeDeferredDir")
                   nonEdgeModule.add(SLongBranch(writeLabels[beta][factorDim][vectorWidth]["NonEdgeDeferred"], tmpSgprInfo, posLabel, comment="beta NonEdge store (deferred)"))
@@ -13564,13 +13564,13 @@ class KernelWriterAssembly(KernelWriter):
                                               vectorWidth, element, activationLabelList,
                                               tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                               actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
-                                              nonEdgeModule, writeLabels[beta][factorDim][vectorWidth]["NonEdge"], endLabel,
+                                              nonEdgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdge"], endLabel,
                                               currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims)
               edgeModule.add(nonEdgeModule, pos=0)
               # NOTE: isEdgeTarget of normal and adaptive kernels are different
               #   Normal kernel: to Then/Else label, followed by edge store
               #   Adaptive kernel: to NonEdgeEnd label, followed by Size0 % vectorWidth check
-              isEdgeTarget = writeLabels[beta][factorDim][vectorWidth]
+              isEdgeTarget = writeLabels[beta][factorDim][vectorWidth][globalWriteMode]
               # When UseSubtileImpl is active (and not a multi-buffer GSU accumulation),
               # use subtile-aligned edge check: remainder must be a multiple of the
               # subtile block size (32 for M, 16 for N) rather than requiring a full tile.
@@ -13606,7 +13606,7 @@ class KernelWriterAssembly(KernelWriter):
           betaModule.add(edgeModule, pos=0)
 
         # FactorDim label
-        betaModule.add(writeLabels[beta][factorDim]["Label"], pos=0)
+        betaModule.add(writeLabels[beta][factorDim][globalWriteMode]["Label"], pos=0)
         currentInstLength += 1
 
       # If module, checking factorDim is zero
@@ -13614,11 +13614,11 @@ class KernelWriterAssembly(KernelWriter):
         isLongBranch = True if currentInstLength >= self.states.asmCaps["ShortBranchMaxLength"] else False
         with self.allocTmpSgpr(3) as tmpSgprInfo:
           checkIsFactorDimZero = betaModule.add(self.checkIsFactorDimZero(kernel, tmpSgprInfo, \
-            writeLabels[beta][factorDims[1]]["Label"], isLongBranch=isLongBranch), pos=0)
+            writeLabels[beta][factorDims[1]][globalWriteMode]["Label"], isLongBranch=isLongBranch), pos=0)
           currentInstLength += countInstruction(checkIsFactorDimZero)
 
       # Beta label
-      betaModule.add(writeLabels[beta]["Label"], pos=0)
+      betaModule.add(writeLabels[beta][globalWriteMode]["Label"], pos=0)
       currentInstLength += 1
 
       betaModules.add(betaModule, pos=0)
@@ -13637,12 +13637,12 @@ class KernelWriterAssembly(KernelWriter):
     if False in betas and True in betas:
       isBetaLongBranch = False
       count = 0
-      count, found = findInstCount(betaModules, writeLabels[1]["Label"], count)
+      count, found = findInstCount(betaModules, writeLabels[1][globalWriteMode]["Label"], count)
       if found:
         if count >= self.states.asmCaps["ShortBranchMaxLength"]:
           isBetaLongBranch = True
         with self.allocTmpSgpr(3 if isBetaLongBranch else 1) as tmpSgprInfo:
-          module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, writeLabels[1]["Label"], isBetaLongBranch, posNeg=1))
+          module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, writeLabels[1][globalWriteMode]["Label"], isBetaLongBranch, posNeg=1))
     
     return module
 
