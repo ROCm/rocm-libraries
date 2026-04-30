@@ -44,21 +44,21 @@ void ScaleMfmaGfx950Specialization_impl()
                                     CompilerTargetGfx950,
                                     MmaOpFamily::SCALE>;
 
-    static_assert(std::is_same_v<typename TestScaleMma::OpType, MfmaOp> &&
-                      TestScaleMma::OpFamily == MmaOpFamily::SCALE,
-                  "GFX950 scale intrinsic should have ScaleMFMAOp type");
+    EXPECT_TRUE((std::is_same_v<typename TestScaleMma::OpType, MfmaOp> &&
+                 TestScaleMma::OpFamily == MmaOpFamily::SCALE))
+        << "GFX950 scale intrinsic should have ScaleMFMAOp type";
 
-    static_assert(is_mma_op_of_family_v<MmaOpFamily::SCALE, TestScaleMma>,
-                  "GFX950 scale intrinsic should be detected as Scale");
+    EXPECT_TRUE((is_mma_op_of_family_v<MmaOpFamily::SCALE, TestScaleMma>))
+        << "GFX950 scale intrinsic should be detected as Scale";
 
     // Get its traits
     using TestTraits = MmaOpTraits<TestScaleMma>;
 
     // Verify trait detection
-    static_assert(TestTraits::IsScale, "Scale MMA should be detected as scale");
-    static_assert(TestTraits::IsSupported, "Scale MMA specialization should be supported");
-    static_assert(TestTraits::IsMfma, "Scale MFMA should be detected as MFMA");
-    static_assert(!TestTraits::IsWmma, "Scale MFMA should not be detected as WMMA");
+    EXPECT_TRUE(TestTraits::IsScale) << "Scale MMA should be detected as scale";
+    EXPECT_TRUE(TestTraits::IsSupported) << "Scale MMA specialization should be supported";
+    EXPECT_TRUE(TestTraits::IsMfma) << "Scale MFMA should be detected as MFMA";
+    EXPECT_FALSE(TestTraits::IsWmma) << "Scale MFMA should not be detected as WMMA";
 }
 
 TEST(ScaleMMATrait, ScaleMfmaGfx950Specialization)
@@ -97,7 +97,7 @@ void TestConceptRequirements_impl()
                                     DefaultScaleMfmaCtrlFlags,
                                     CompilerTargetGfx950,
                                     MmaOpFamily::SCALE>;
-    static_assert(MmaOpI<TestScaleMma>);
+    EXPECT_TRUE(MmaOpI<TestScaleMma>);
 }
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
@@ -132,15 +132,15 @@ void ScaleSelector_impl()
             if constexpr(isValid)
             {
                 // Selector should pick a scale MFMA implementation
-                static_assert(MmaOpTraits<Selected>::IsScale);
-                static_assert(MmaOpTraits<Selected>::IsMfma);
-                static_assert(MmaOpTraits<Selected>::IsSupported);
-                static_assert((std::is_same<typename Selected::OpType, MfmaOp>::value));
+                EXPECT_TRUE(MmaOpTraits<Selected>::IsScale);
+                EXPECT_TRUE(MmaOpTraits<Selected>::IsMfma);
+                EXPECT_TRUE(MmaOpTraits<Selected>::IsSupported);
+                EXPECT_TRUE((std::is_same<typename Selected::OpType, MfmaOp>::value));
             }
             else
             {
                 // Selector should pick the unsupported pass through
-                static_assert(!MmaOpTraits<Selected>::IsSupported);
+                EXPECT_FALSE(MmaOpTraits<Selected>::IsSupported);
             }
         });
     });
