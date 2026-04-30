@@ -1188,7 +1188,6 @@ class Solution(collections.abc.Mapping):
       state.setdefault("MIWaveTile", [0, 0])
       state["MIWaveGroup"] = [0, 0]
 
-    # state["LocalSplitU"] = state["WorkGroup"][2]
     state["LocalSplitU"] = 1
     state["GlobalReadVectorWidthA"] = 1
     state["GlobalReadVectorWidthB"] = 1

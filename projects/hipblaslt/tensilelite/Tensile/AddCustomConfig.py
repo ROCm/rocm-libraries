@@ -81,11 +81,20 @@ def _parse_tensile_yaml(path, kernel_name=None):
     """
     import yaml
     with open(path) as f:
-        data = yaml.safe_load(f)
+        try:
+            data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise RuntimeError(f"Failed to parse Tensile YAML '{path}': {e}") from e
 
-    bp = data["BenchmarkProblems"][0]
-    problem_type = bp[0]
-    bench = bp[1]
+    try:
+        bp = data["BenchmarkProblems"][0]
+        problem_type = bp[0]
+        bench = bp[1]
+    except (KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(
+            f"Tensile YAML '{path}' does not contain BenchmarkProblems[0] "
+            "with ProblemType and ForkParameters"
+        ) from e
 
     config = {"ProblemType": problem_type}
 
@@ -118,8 +127,13 @@ def _parse_tensile_yaml(path, kernel_name=None):
                 config["WavefrontSize"] = wf_list[0]
 
     if kernel_name and "CustomKernel" not in config:
-        print(f"WARNING: Kernel '{kernel_name}' not found in {path}. "
-              f"Available: {available_kernels or 'none'}", file=sys.stderr)
+        raise RuntimeError(
+            f"Kernel '{kernel_name}' not found in {path}. "
+            f"Available: {available_kernels or 'none'}"
+        )
+
+    if "CustomKernel" not in config:
+        raise RuntimeError(f"No CustomKernel entry found in {path}")
 
     return config
 
@@ -143,11 +157,6 @@ def _fmt_yaml_inline(value):
         )
         return "{ " + pairs + " }"
     return _fmt_yaml_scalar(value)
-
-
-def _fmt_yaml_list(values):
-    """Format a list as a YAML inline sequence without quoting strings."""
-    return _fmt_yaml_inline(values)
 
 
 def _fmt_yaml_args(args, indent=4):
@@ -181,13 +190,19 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
     Args:
         origin: Source origin name (e.g. "aiter", "wave").
         config: Dict with ProblemType, CustomKernel, MatrixInstruction, etc.
-                May be None for provenance-only injection.
+                May be None for provenance-only injection. Treated as read-only.
         repository: Optional source repository URL.
         version: Kernel version string.
     """
-    features = config.get("Features", {}) if config else {}
+    # Take local copies so we never mutate caller-supplied dicts.
+    features = dict((config or {}).get("Features", {}))
     for flag in FEATURE_FLAGS:
         features.setdefault(flag, False)
+
+    isp = dict((config or {}).get("InternalSupportParams", {}))
+    isp.setdefault("KernArgsVersion", 0)
+
+    wavefront_size = (config or {}).get("WavefrontSize", 64)
 
     lines = ["custom.config:"]
     lines.append("  Source:")
@@ -197,13 +212,8 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
     lines.append(f"  Version: {version}")
     lines.append("  Features:")
     for flag in FEATURE_FLAGS:
-        val = str(features.get(flag, False)).lower()
-        lines.append(f"    {flag}: {val}")
+        lines.append(f"    {flag}: {str(features[flag]).lower()}")
 
-    isp = {}
-    if config:
-        isp = config.get("InternalSupportParams", {})
-    isp.setdefault("KernArgsVersion", 0)
     lines.append("  InternalSupportParams:")
     for k, v in isp.items():
         lines.append(f"    {k}: {v}")
@@ -224,18 +234,16 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
 
     if config and "MatrixInstruction" in config:
         mi = config["MatrixInstruction"]
-        lines.append(f"  MatrixInstruction: {_fmt_yaml_list(mi)}")
+        lines.append(f"  MatrixInstruction: {_fmt_yaml_inline(mi)}")
 
         macrotile = config.get("CustomKernel", {}).get("macrotile")
         threads = config.get("CustomKernel", {}).get("threads")
-        wavefront_size = config.get("WavefrontSize", 64)
         if len(mi) >= 4 and macrotile and threads:
             lines.append("  EnableMatrixInstruction: True")
             num_threads = threads[0] * threads[1] * threads[2]
             _, mi_wave_tile = deriveWaveParams(mi, num_threads, macrotile, wavefront_size)
-            lines.append(f"  MIWaveTile: {_fmt_yaml_list(mi_wave_tile)}")
+            lines.append(f"  MIWaveTile: {_fmt_yaml_inline(mi_wave_tile)}")
 
-    wavefront_size = config.get("WavefrontSize", 64) if config else 64
     lines.append(f"  WavefrontSize: {wavefront_size}")
 
     return "\n".join(lines)
@@ -289,8 +297,8 @@ def _read_asm_file(filepath):
 
     try:
         metadata = yaml.safe_load("\n".join(yaml_lines))
-    except Exception:
-        return result
+    except yaml.YAMLError as e:
+        raise RuntimeError(f"Failed to parse .amdgpu_metadata YAML in {filepath}: {e}") from e
 
     if not metadata:
         return result
@@ -367,7 +375,11 @@ def main():
     if not filepath.endswith(".s"):
         print(f"WARNING: {filepath} does not end with .s", file=sys.stderr)
 
-    file_info = _read_asm_file(filepath)
+    try:
+        file_info = _read_asm_file(filepath)
+    except RuntimeError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if file_info["has_custom_config"]:
         print(f"ERROR: {filepath} already has a custom.config block.", file=sys.stderr)
@@ -384,7 +396,11 @@ def main():
     config = None
     if args.yaml:
         kernel_name = os.path.basename(filepath)[:-2]
-        config = _parse_tensile_yaml(args.yaml, kernel_name)
+        try:
+            config = _parse_tensile_yaml(args.yaml, kernel_name)
+        except RuntimeError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if config:
         ck = config.get("CustomKernel", {})

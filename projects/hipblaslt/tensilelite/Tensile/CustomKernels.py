@@ -85,6 +85,17 @@ _ACTIVATION_ARG_INDEX = {
     "activationDelta": 3,
 }
 
+# Top-level custom.config keys that are not in validParameters but must survive
+# the parameter-validation/strip pass in getCustomKernelConfig.
+#
+# These two are consumed structurally by Tensile (ProblemType drives the
+# solution; InternalSupportParams threads through to the kernel writer) and
+# would otherwise be popped because they're not tunable parameters.
+#
+# Provenance-only keys (Source, Version, Features) are deliberately NOT in this
+# set: getCustomKernelConfig drops them so they don't pollute the solution
+# dict, while validateCustomKernelMetadata still sees them via its independent
+# readCustomKernelConfig call.
 _PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams"}
 
 def isCustomKernelConfig(config):
@@ -98,62 +109,76 @@ def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
     flat = os.path.join(directory, (name + ".s"))
     if os.path.isfile(flat):
         return flat
-    for root, _, files in os.walk(directory):
-        if (name + ".s") in files:
-            return os.path.join(root, (name + ".s"))
+    for path in iterCustomKernelFiles(directory):
+        if os.path.basename(path) == (name + ".s"):
+            return path
     return flat
 
-def getAllCustomKernelNames(directory=CUSTOM_KERNEL_PATH):
-    names = []
-    for root, _, files in os.walk(directory):
-        for fname in files:
+def iterCustomKernelFiles(directory=CUSTOM_KERNEL_PATH):
+    """Yield custom kernel assembly files using the same recursive discovery as the loader."""
+    for root, dirs, files in os.walk(directory):
+        dirs.sort()
+        for fname in sorted(files):
             if fname.endswith(".s"):
-                names.append(fname[:-2])
-    return names
+                yield os.path.join(root, fname)
+
+def getAllCustomKernelNames(directory=CUSTOM_KERNEL_PATH):
+    return [os.path.basename(path)[:-2] for path in iterCustomKernelFiles(directory)]
 
 def getCustomKernelContents(name, directory=CUSTOM_KERNEL_PATH):
     try:
         with open(getCustomKernelFilepath(name, directory)) as f:
             return f.read()
-    except:
-        raise RuntimeError("Failed to find custom kernel: {}".format(os.path.join(directory, name)))
+    except OSError as e:
+        raise RuntimeError("Failed to find custom kernel: {}".format(os.path.join(directory, name))) from e
 
-def getCustomKernelConfigAndAssembly(name, directory=CUSTOM_KERNEL_PATH):
-    contents  = getCustomKernelContents(name, directory)
-    config = "\n"    #Yaml configuration properties
-    assembly = ""
-    inConfig = False
+def _readEmbeddedYaml(name, directory=CUSTOM_KERNEL_PATH):
+    """Parse the YAML payload between '---' and '...' inside .amdgpu_metadata.
+
+    The .s files emitted under this branch contain exactly one such block;
+    we stop at the first '...' and return whatever yaml.safe_load returns
+    (typically a mapping with 'custom.config' and 'amdhsa.kernels' keys).
+    """
+    contents = getCustomKernelContents(name, directory)
+    inYaml = False
+    yamlLines = []
     for line in contents.splitlines():
-        if   line == "---": inConfig = True                          #Beginning of yaml section
-        elif line == "...": inConfig = False                         #End of yaml section
-        elif      inConfig: config   += line + "\n"
-        else              : assembly += line + "\n"; config += "\n"  #Second statement to keep line numbers consistent for yaml errors
-
-    return (config, assembly)
+        if line == "---":
+            inYaml = True
+            continue
+        if line == "..." and inYaml:
+            break
+        if inYaml:
+            yamlLines.append(line)
+    try:
+        return yaml.safe_load("\n".join(yamlLines))
+    except yaml.YAMLError as e:
+        raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}") from e
 
 def readCustomKernelConfig(name, directory=CUSTOM_KERNEL_PATH):
-    rawConfig, _ = getCustomKernelConfigAndAssembly(name, directory)
-    try:
-        parsed = yaml.safe_load(rawConfig)
-    except yaml.scanner.ScannerError as e:
-        raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}")
+    parsed = _readEmbeddedYaml(name, directory)
     if not isinstance(parsed, dict) or "custom.config" not in parsed:
         raise RuntimeError(f"Custom kernel '{name}' has no custom.config in its .amdgpu_metadata")
-    return parsed["custom.config"]
+    config = parsed["custom.config"]
+    if not isinstance(config, dict):
+        raise RuntimeError(f"Custom kernel '{name}' custom.config must be a YAML mapping")
+    return config
 
-def _readFullYaml(name, directory=CUSTOM_KERNEL_PATH):
-    """Read and return the full parsed YAML (all sections) from a custom kernel .s file."""
-    rawConfig, _ = getCustomKernelConfigAndAssembly(name, directory)
-    try:
-        return yaml.safe_load(rawConfig)
-    except yaml.scanner.ScannerError as e:
-        raise RuntimeError("Failed to read YAML for custom kernel: {0}\nDetails:\n{1}".format(name, e))
+def _metadataArgToCustomArg(metaArg, kernelName=None):
+    """Convert a single amdgpu_metadata .args entry to a CustomKernel arg dict.
 
-def _metadataArgToCustomArg(metaArg):
-    """Convert a single amdgpu_metadata .args entry to a CustomKernel arg dict."""
-    name = metaArg[".name"]
-    size = metaArg[".size"]
-    valueKind = metaArg[".value_kind"]
+    Raises RuntimeError with an actionable message if the arg name is not
+    recognized (which can only happen when auto-inferring a CustomKernel
+    block for a kernel that does not declare one explicitly).
+    """
+    name = metaArg.get(".name")
+    size = metaArg.get(".size")
+    valueKind = metaArg.get(".value_kind")
+    if name is None or size is None or valueKind is None:
+        raise RuntimeError(
+            f"amdgpu_metadata arg entry missing required field "
+            f"(.name/.size/.value_kind): {metaArg}"
+        )
 
     if valueKind == "global_buffer":
         argType = "address"
@@ -200,7 +225,13 @@ def _metadataArgToCustomArg(metaArg):
         idx = INDEX_CHARS.index(m.group(2))
         return {"type": argType, "semantic": m.group(1), "index": idx}
 
-    raise RuntimeError("Unknown metadata arg name: '%s'" % name)
+    where = f" in kernel '{kernelName}'" if kernelName else ""
+    raise RuntimeError(
+        f"Unknown amdgpu_metadata arg name '{name}'{where} while auto-inferring "
+        f"a CustomKernel block. Either add an explicit CustomKernel: section "
+        f"to custom.config, or extend _METADATA_NAME_TO_SEMANTIC in "
+        f"Tensile/CustomKernels.py."
+    )
 
 _HEADER_SEMANTIC_ORDER = {
     "GemmInfo": 0, "InternalArgs": 1, "InternalArgs1": 2, "NumWorkGroups": 3,
@@ -208,9 +239,24 @@ _HEADER_SEMANTIC_ORDER = {
 
 def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     """Build a CustomKernel dict from the amdgpu_metadata and custom.config sections."""
-    kernelMeta = fullYaml["amdhsa.kernels"][0]
+    if not isinstance(fullYaml, dict):
+        raise RuntimeError(f"Custom kernel '{kernelName}' has no parseable .amdgpu_metadata YAML")
+    kernels = fullYaml.get("amdhsa.kernels") or []
+    if not kernels:
+        raise RuntimeError(
+            f"Custom kernel '{kernelName}' has no amdhsa.kernels entries; cannot "
+            f"auto-infer a CustomKernel block. Add an explicit CustomKernel: "
+            f"section to custom.config."
+        )
+    kernelMeta = kernels[0]
+    if ".args" not in kernelMeta:
+        raise RuntimeError(
+            f"Custom kernel '{kernelName}' amdhsa.kernels[0] has no .args; cannot "
+            f"auto-infer a CustomKernel block. Add an explicit CustomKernel: "
+            f"section to custom.config."
+        )
 
-    args = [_metadataArgToCustomArg(a) for a in kernelMeta[".args"]]
+    args = [_metadataArgToCustomArg(a, kernelName) for a in kernelMeta[".args"]]
 
     # UseUniversalArgs kernels expect a header (GemmInfo, InternalArgs, ...) at
     # the start of the kernel argument buffer, followed by the data args.  The
@@ -296,22 +342,25 @@ def getCustomKernelConfig(
         if key not in kernelIsp:
             kernelIsp[key] = internalSupportParams[key]
 
-    validParameters.update(newMIValidParameters)
+    # Compute a merged validParameters set locally; do NOT mutate the global
+    # validParameters dict (that leaks state across calls and into unit tests
+    # via the precomputed _expectedParamTypes cache in test_validateParameterTypes).
+    mergedValid = {**validParameters, **newMIValidParameters}
 
     for k, v in kernelConfig.items():
         if k in _PASSTHROUGH_KEYS:
             continue
-        if k in validParameters:
-            checkParametersAreValid((k, [v]), validParameters)
+        if k in mergedValid:
+            checkParametersAreValid((k, [v]), mergedValid)
 
-    metadata_keys = [k for k in kernelConfig if k not in validParameters and k not in _PASSTHROUGH_KEYS]
+    metadata_keys = [k for k in kernelConfig if k not in mergedValid and k not in _PASSTHROUGH_KEYS]
     for k in metadata_keys:
         kernelConfig.pop(k)
 
     kernelConfig["KernelLanguage"] = "Assembly"
 
     if "CustomKernel" not in kernelConfig:
-        fullYaml = _readFullYaml(kernelName, directory)
+        fullYaml = _readEmbeddedYaml(kernelName, directory)
         kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
 
     kernelConfig["CustomKernel"]["name"] = kernelName
@@ -327,18 +376,48 @@ def getCustomKernelConfig(
 # Embedded metadata validation functions
 ################################################################################
 
-_ADD_CONFIG_HINT = (
-    "To add metadata to an external kernel, run:\n"
+_EXTERNAL_HINT = (
+    "External kernels carry their full Tensile-side interface in custom.config. "
+    "To inject one from a Tensile test YAML, run:\n"
     "  python -m Tensile.AddCustomConfig <file.s> --yaml <test.yaml>\n"
-    "This injects a custom.config block into the .amdgpu_metadata YAML section."
 )
+
+_TENSILE_HINT = (
+    "Tensile-generated kernels only need InternalSupportParams.KernArgsVersion in "
+    "custom.config; ProblemType and tuning state come from the consuming logic file "
+    "or test YAML. If the field is missing, regenerate the kernel with the current "
+    "kernel writer."
+)
+
+def _requiredFieldsMissing(config, fields):
+    return [field for field in fields if field not in config]
+
+def _missingMetadataMessage(kind, name, filepath, missing):
+    hint = _EXTERNAL_HINT if kind == "External" else _TENSILE_HINT
+    return (
+        f"{kind} kernel '{name}' has custom.config but is missing required fields:\n"
+        f"  Missing: {', '.join(missing)}\n"
+        f"  File: {filepath}\n"
+        f"{hint}"
+    )
 
 def validateCustomKernelMetadata(name, directory=CUSTOM_KERNEL_PATH):
     """Validates that a kernel has an embedded custom.config with required fields.
 
-    Tensile-generated kernels need InternalSupportParams + ProblemType.
-    External kernels need Source, Features, InternalSupportParams, ProblemType,
-    CustomKernel (with args/macrotile/threads/grid), and MatrixInstruction.
+    Tensile-generated kernels (no Source.Origin) only need
+    InternalSupportParams.KernArgsVersion -- the only field
+    `getCustomKernelConfig` actually requires at runtime. Their ProblemType and
+    tuning state live in the consuming logic file or test YAML and are merged
+    on top of custom.config there.
+
+    External kernels (Source.Origin present) carry their full Tensile-side
+    interface and provenance in custom.config: Source, Features, Version,
+    InternalSupportParams.KernArgsVersion, ProblemType, MatrixInstruction, and
+    a CustomKernel block with args/macrotile/threads/grid.
+
+    Whether failures are reported as errors or warnings is the caller's
+    decision (see ValidateMetadata.validate_all and
+    Toolchain.Assembly.validateCustomKernelMetadataAtBuild).
 
     Returns:
         (bool, str): A tuple of (is_valid, message).
@@ -348,48 +427,44 @@ def validateCustomKernelMetadata(name, directory=CUSTOM_KERNEL_PATH):
     try:
         config = readCustomKernelConfig(name, directory)
     except RuntimeError as e:
+        # Use the external hint here -- a kernel without any custom.config is
+        # almost always an external kernel that hasn't been migrated yet.
         return False, (
             f"Cannot read custom.config for '{name}' ({filepath}): {e}\n"
-            f"{_ADD_CONFIG_HINT}"
-        )
-    except (KeyError, TypeError):
-        return False, (
-            f"No custom.config found in .amdgpu_metadata for kernel '{name}' ({filepath}).\n"
-            f"{_ADD_CONFIG_HINT}"
-        )
-
-    if config is None:
-        return False, (
-            f"No custom.config found in .amdgpu_metadata for kernel '{name}' ({filepath}).\n"
-            f"{_ADD_CONFIG_HINT}"
+            f"{_EXTERNAL_HINT}"
         )
 
     is_external = "Source" in config
-    has_isp = "InternalSupportParams" in config
+    missing = []
 
-    if not has_isp:
-        return False, (
-            f"Kernel '{name}' is missing InternalSupportParams in custom.config.\n"
-            f"  File: {filepath}\n"
-            f"{_ADD_CONFIG_HINT}"
-        )
+    if "InternalSupportParams" not in config:
+        missing.append("InternalSupportParams")
+    elif not isinstance(config["InternalSupportParams"], dict):
+        missing.append("InternalSupportParams (mapping)")
+    elif "KernArgsVersion" not in config["InternalSupportParams"]:
+        missing.append("InternalSupportParams.KernArgsVersion")
 
     if is_external:
-        missing = []
-        if "Features" not in config:
+        source = config.get("Source")
+        if not isinstance(source, dict) or "Origin" not in source:
+            missing.append("Source.Origin")
+        if "Features" not in config or not isinstance(config["Features"], dict):
             missing.append("Features")
-        if "ProblemType" not in config:
-            missing.append("ProblemType")
-        if "CustomKernel" not in config:
-            missing.append("CustomKernel (args, macrotile, threads, grid)")
-        if "MatrixInstruction" not in config:
-            missing.append("MatrixInstruction")
+        missing.extend(_requiredFieldsMissing(
+            config,
+            ["Version", "ProblemType", "CustomKernel", "MatrixInstruction"],
+        ))
 
-        if missing:
-            return False, (
-                f"External kernel '{name}' has custom.config but is missing required fields:\n"
-                f"  Missing: {', '.join(missing)}\n"
-                f"  File: {filepath}\n"
-                f"{_ADD_CONFIG_HINT}"
-            )
+    if "CustomKernel" in config:
+        custom_kernel = config["CustomKernel"]
+        if not isinstance(custom_kernel, dict):
+            missing.append("CustomKernel (mapping)")
+        else:
+            ck_missing = _requiredFieldsMissing(custom_kernel, ["args", "macrotile", "threads", "grid"])
+            missing.extend(f"CustomKernel.{field}" for field in ck_missing)
+
+    if missing:
+        kind = "External" if is_external else "Tensile"
+        return False, _missingMetadataMessage(kind, name, filepath, missing)
+
     return True, f"Kernel '{name}' metadata is valid"

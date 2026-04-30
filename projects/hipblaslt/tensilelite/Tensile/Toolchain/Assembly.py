@@ -55,7 +55,9 @@ def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kin
 def validateCustomKernelMetadataAtBuild(kernels, directory=CUSTOM_KERNEL_PATH):
     """Validates embedded metadata for all custom kernels in the build.
 
-    Logs warnings for kernels with missing or invalid custom.config.
+    Logs warnings for kernels with missing or invalid custom.config and a
+    single summary line at the end.
+
     Returns the number of validation issues found.
     """
     issues = 0
@@ -75,8 +77,9 @@ def validateCustomKernelMetadataAtBuild(kernels, directory=CUSTOM_KERNEL_PATH):
         if not valid:
             printWarning(f"Metadata validation: {msg}")
             issues += 1
-        else:
-            print1(f"Metadata OK: {name}")
+
+    if validated:
+        print1(f"Metadata: validated {len(validated)} custom kernel(s), {issues} issue(s)")
 
     return issues
 
@@ -101,9 +104,7 @@ def buildAssemblyCodeObjectFiles(
     """
 
     if globalParameters["ValidateMetadata"]:
-        issues = validateCustomKernelMetadataAtBuild(kernels)
-        if issues:
-            printWarning(f"{issues} metadata validation issue(s) found")
+        validateCustomKernelMetadataAtBuild(kernels)
 
     extObj = ".o"
     extCo = ".co"

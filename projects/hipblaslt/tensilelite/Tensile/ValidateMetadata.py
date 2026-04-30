@@ -34,60 +34,37 @@ Exit codes:
 Usage:
     python -m Tensile.ValidateMetadata [--strict] [--custom-kernels-root DIR]
 
-    --strict    Treat missing custom.config as errors.
-                Without --strict, missing metadata produces warnings only.
+    --strict    Treat missing or incomplete metadata as errors.
+                Without --strict, validation failures produce warnings only.
 """
 
 import argparse
 import os
 import sys
 
-from Tensile.CustomKernels import validateCustomKernelMetadata
+from Tensile.CustomKernels import iterCustomKernelFiles, validateCustomKernelMetadata
 
 
-def validate_directory(directory, strict=False):
-    """Validates all kernels in a directory for embedded metadata.
+def validate_all(root, strict=False):
+    """Validates all kernels under a directory for embedded metadata.
+
+    With ``strict=True``, validation failures are returned as errors;
+    otherwise they are returned as warnings.
 
     Returns (errors, warnings) as lists of message strings.
     """
     errors = []
     warnings = []
 
-    s_files = sorted(f for f in os.listdir(directory) if f.endswith(".s"))
-    if not s_files:
-        return errors, warnings
+    for path in iterCustomKernelFiles(root):
+        kernel_dir = os.path.dirname(path)
+        name = os.path.basename(path)[:-2]
 
-    for fname in s_files:
-        name = fname[:-2]
-
-        valid, msg = validateCustomKernelMetadata(name, directory)
+        valid, msg = validateCustomKernelMetadata(name, kernel_dir)
         if not valid:
-            if strict:
-                errors.append(f"{directory}: {msg}")
-            else:
-                warnings.append(f"{directory}: {msg}")
+            (errors if strict else warnings).append(f"{path}: {msg}")
 
     return errors, warnings
-
-
-def validate_all(root, strict=False):
-    """Validates all subdirectories under the custom kernels root.
-
-    Returns (total_errors, total_warnings).
-    """
-    total_errors = []
-    total_warnings = []
-
-    for entry in sorted(os.listdir(root)):
-        subdir = os.path.join(root, entry)
-        if not os.path.isdir(subdir):
-            continue
-
-        errs, warns = validate_directory(subdir, strict=strict)
-        total_errors.extend(errs)
-        total_warnings.extend(warns)
-
-    return total_errors, total_warnings
 
 
 def main():
@@ -122,13 +99,9 @@ def main():
     for e in errors:
         print(f"ERROR: {e}")
 
-    total_dirs = sum(
-        1 for d in os.listdir(root)
-        if os.path.isdir(os.path.join(root, d))
-        and any(f.endswith(".s") for f in os.listdir(os.path.join(root, d)))
-    )
+    total_kernels = sum(1 for _ in iterCustomKernelFiles(root))
 
-    print(f"\nSummary: {total_dirs} directories, {len(errors)} error(s), {len(warnings)} warning(s)")
+    print(f"\nSummary: {total_kernels} kernel(s), {len(errors)} error(s), {len(warnings)} warning(s)")
 
     if errors:
         sys.exit(1)

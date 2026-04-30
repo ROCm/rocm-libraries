@@ -161,6 +161,24 @@ def _getCustomKernelSolutionObj(
     return sol
 
 
+def _hashableProblemTypeKV(k, v):
+    """Make (k, v) hashable for set-difference comparisons of ProblemType.
+
+    Lists become tuples; otherwise we fall back to repr(v) for unhashable
+    nested values (e.g. dict-valued problem-type fields). Note: repr is
+    insertion-order-sensitive for dicts, so equivalent dicts with different
+    insertion orders compare as different. Acceptable for the diagnostic
+    "differing parameters" message produced below.
+    """
+    if isinstance(v, list):
+        return (k, tuple(v))
+    try:
+        hash(v)
+        return (k, v)
+    except TypeError:
+        return (k, repr(v))
+
+
 def _generateCustomKernelSolutions(
         problemType,
         customKernels,
@@ -185,16 +203,8 @@ def _generateCustomKernelSolutions(
         if solution["ProblemType"] != problemType:
             # Raise error if this kernel was specifically requested and problem type doesn't match
             if failOnMismatch:
-                def _hashable(k, v):
-                    if isinstance(v, list):
-                        return (k, tuple(v))
-                    try:
-                        hash(v)
-                        return (k, v)
-                    except TypeError:
-                        return (k, repr(v))
-                benchmarkSet = set([_hashable(k, v) for k, v in problemType.items()])
-                customSet = set([_hashable(k, v) for k, v in solution["ProblemType"].items()])
+                benchmarkSet = {_hashableProblemTypeKV(k, v) for k, v in problemType.items()}
+                customSet = {_hashableProblemTypeKV(k, v) for k, v in solution["ProblemType"].items()}
 
                 msg = "The problem type in the config file does not match " \
                         "that of the custom kernel, {}.".format(kernelName) \

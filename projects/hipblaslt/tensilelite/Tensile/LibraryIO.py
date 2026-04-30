@@ -390,7 +390,7 @@ def parseLibraryLogicData(
     problemType = ProblemType(data["ProblemType"], printIndexAssignmentInfo)
 
     # unpack solution
-    def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
+    def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
         solutionState["CUCount"] = data["CUCount"]
