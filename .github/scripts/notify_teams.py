@@ -242,7 +242,7 @@ class ErrorExtractor:
         if self.log_path.is_file():
             return self._extract_from_file()
         return (
-            "Error details not found in logs. Check the GitHub Actions run for full output.",
+            "Error details not found in logs. Check the previous steps in GitHub Actions",
             f"{self.failure_stage.title()} Failure",
         )
 
@@ -510,7 +510,7 @@ class TeamsNotifier:
 
 def main():
     # Configure logging
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     parser = argparse.ArgumentParser(
         description="Send Microsoft Teams notifications for CI failures"
@@ -535,7 +535,7 @@ def main():
     parser.add_argument(
         "--webhook-urls",
         default="",
-        help="JSON object mapping project names to webhook URLs (e.g., '{\"miopen\": \"url1\", \"hipdnn\": \"url2\"}')",
+        help='JSON object mapping project names to webhook URLs (e.g., \'{\"miopen\": \"url1\", \"hipdnn\": \"url2\"}\')',
     )
     # Legacy: single webhook URL (for backwards compatibility)
     parser.add_argument(
