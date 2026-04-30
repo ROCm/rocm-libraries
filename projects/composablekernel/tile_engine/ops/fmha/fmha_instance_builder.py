@@ -152,6 +152,7 @@ def expand_sweep(
     allowed_dropout = _allow("dropout")
     allowed_logits = _allow("logits")
     allowed_sink = _allow("sink")
+    allowed_paged_kv = _allow("paged_kv")
 
     # Intersect requested dtypes with arch support
     arch_dtypes = set(ARCH_DTYPES.get(arch, ARCH_DTYPES.get("gfx950", [])))
@@ -331,6 +332,15 @@ def expand_sweep(
                                 continue
                             if allowed_biases is not None and mb not in allowed_biases:
                                 continue
+                            lgv = (spec.logits == "t")
+                            sv = (spec.sink == "t")
+                            pkv = (spec.pagedkv == "t")
+                            if allowed_logits is not None and lgv not in allowed_logits:
+                                continue
+                            if allowed_sink is not None and sv not in allowed_sink:
+                                continue
+                            if allowed_paged_kv is not None and pkv not in allowed_paged_kv:
+                                continue
                             m0, n0, k0, n1, k1, k0max, wave_m, warp_m, warp_k = (
                                 _tile_params(tile, hv, dtype, var="splitkv")
                             )
@@ -367,9 +377,9 @@ def expand_sweep(
                                     mask=mm,
                                     bias=mb,
                                     lse=True,
-                                    logits=(spec.logits == "t"),
-                                    sink=(spec.sink == "t"),
-                                    paged_kv=(spec.pagedkv == "t"),
+                                    logits=lgv,
+                                    sink=sv,
+                                    paged_kv=pkv,
                                     gfx_arch=arch,
                                 )
                             )

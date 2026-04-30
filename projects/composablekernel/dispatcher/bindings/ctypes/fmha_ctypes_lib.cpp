@@ -736,11 +736,14 @@ int fmha_dispatcher_run_splitkv(const void* q_host,
                                 const char* data_type_str,
                                 int has_lse,
                                 int is_group_mode,
+                                int perm,
                                 int has_logits,
                                 int bias_type_int,
                                 int has_sink,
                                 int paged_kv,
                                 int page_block_size,
+                                int window_left,
+                                int window_right,
                                 float* time_ms_out)
 {
     if(!g_initialized)
@@ -886,28 +889,43 @@ int fmha_dispatcher_run_splitkv(const void* q_host,
 
     if(grp)
     {
-        // Group-mode: [total_tokens, nhead, hdim]
-        args.stride_q             = nhead_q * hdim_q;
-        args.stride_k             = nhead_k * hdim_q;
-        args.stride_v             = nhead_k * hdim_v;
+        if(perm == 1)
+        {
+            // BHSD group: [1, head, total_tokens, dim]
+            args.stride_q          = hdim_q;
+            args.stride_k          = hdim_q;
+            args.stride_v          = hdim_v;
+            args.stride_o          = hdim_v;
+            args.nhead_stride_q    = static_cast<int64_t>(seqlen_q) * hdim_q;
+            args.nhead_stride_k    = static_cast<int64_t>(seqlen_k) * hdim_q;
+            args.nhead_stride_v    = static_cast<int64_t>(seqlen_k) * hdim_v;
+            args.nhead_stride_o    = static_cast<int64_t>(seqlen_q) * hdim_v;
+        }
+        else
+        {
+            // BSHD group: [total_tokens, nhead, hdim]
+            args.stride_q          = nhead_q * hdim_q;
+            args.stride_k          = nhead_k * hdim_q;
+            args.stride_v          = nhead_k * hdim_v;
+            args.stride_o          = nhead_q * hdim_v;
+            args.nhead_stride_q    = hdim_q;
+            args.nhead_stride_k    = hdim_q;
+            args.nhead_stride_v    = hdim_v;
+            args.nhead_stride_o    = hdim_v;
+        }
         args.stride_bias          = 0;
         args.stride_o_acc         = hdim_v;
-        args.stride_o             = nhead_q * hdim_v;
-        args.nhead_stride_q       = hdim_q;
-        args.nhead_stride_k       = hdim_q;
-        args.nhead_stride_v       = hdim_v;
         args.nhead_stride_bias    = 0;
         args.nhead_stride_lse     = seqlen_q;
-        args.nhead_stride_lse_acc = seqlen_q;
-        args.nhead_stride_o_acc   = static_cast<int64_t>(seqlen_q) * hdim_v;
-        args.nhead_stride_o       = hdim_v;
+        args.nhead_stride_lse_acc = static_cast<int64_t>(num_splits) * seqlen_q;
+        args.nhead_stride_o_acc   = static_cast<int64_t>(num_splits) * seqlen_q * hdim_v;
         args.batch_stride_q       = 0;
         args.batch_stride_k       = 0;
         args.batch_stride_v       = 0;
         args.batch_stride_bias    = 0;
         args.batch_stride_lse     = static_cast<int64_t>(nhead_q) * seqlen_q;
-        args.batch_stride_lse_acc = static_cast<int64_t>(nhead_q) * seqlen_q;
-        args.batch_stride_o_acc   = static_cast<int64_t>(nhead_q) * seqlen_q * hdim_v;
+        args.batch_stride_lse_acc = static_cast<int64_t>(nhead_q) * num_splits * seqlen_q;
+        args.batch_stride_o_acc   = static_cast<int64_t>(nhead_q) * num_splits * seqlen_q * hdim_v;
         args.batch_stride_o       = 0;
     }
     else
@@ -925,22 +943,22 @@ int fmha_dispatcher_run_splitkv(const void* q_host,
         args.nhead_stride_v       = static_cast<int64_t>(kv_seq) * hdim_v;
         args.nhead_stride_bias    = 0;
         args.nhead_stride_lse     = seqlen_q;
-        args.nhead_stride_lse_acc = seqlen_q;
-        args.nhead_stride_o_acc   = static_cast<int64_t>(seqlen_q) * hdim_v;
+        args.nhead_stride_lse_acc = static_cast<int64_t>(num_splits) * seqlen_q;
+        args.nhead_stride_o_acc   = static_cast<int64_t>(num_splits) * seqlen_q * hdim_v;
         args.nhead_stride_o       = static_cast<int64_t>(seqlen_q) * hdim_v;
         args.batch_stride_q       = static_cast<int64_t>(nhead_q) * seqlen_q * hdim_q;
         args.batch_stride_k       = static_cast<int64_t>(nhead_k) * kv_seq * hdim_q;
         args.batch_stride_v       = static_cast<int64_t>(nhead_k) * kv_seq * hdim_v;
         args.batch_stride_bias    = 0;
         args.batch_stride_lse     = static_cast<int64_t>(nhead_q) * seqlen_q;
-        args.batch_stride_lse_acc = static_cast<int64_t>(nhead_q) * seqlen_q;
-        args.batch_stride_o_acc   = static_cast<int64_t>(nhead_q) * seqlen_q * hdim_v;
+        args.batch_stride_lse_acc = static_cast<int64_t>(nhead_q) * num_splits * seqlen_q;
+        args.batch_stride_o_acc   = static_cast<int64_t>(nhead_q) * num_splits * seqlen_q * hdim_v;
         args.batch_stride_o       = static_cast<int64_t>(nhead_q) * seqlen_q * hdim_v;
     }
-    args.split_stride_lse_acc = static_cast<int64_t>(batch) * nhead_q * seqlen_q;
-    args.split_stride_o_acc   = static_cast<int64_t>(batch) * nhead_q * seqlen_q * hdim_v;
-    args.window_size_left     = -1;
-    args.window_size_right    = -1;
+    args.split_stride_lse_acc = seqlen_q;
+    args.split_stride_o_acc   = static_cast<int64_t>(seqlen_q) * hdim_v;
+    args.window_size_left     = window_left;
+    args.window_size_right    = window_right;
     args.sink_size            = 0;
     args.mask_type            = mask_type_int;
 

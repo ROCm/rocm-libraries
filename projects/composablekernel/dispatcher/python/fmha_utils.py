@@ -525,11 +525,14 @@ class FmhaDispatcherLib:
             ctypes.c_char_p,
             ctypes.c_int,  # has_lse
             ctypes.c_int,  # is_group_mode
+            ctypes.c_int,  # perm
             ctypes.c_int,  # has_logits
             ctypes.c_int,  # bias_type
             ctypes.c_int,  # has_sink
             ctypes.c_int,  # paged_kv
             ctypes.c_int,  # page_block_size
+            ctypes.c_int,  # window_left
+            ctypes.c_int,  # window_right
             ctypes.POINTER(ctypes.c_float),
         ]
         lib.fmha_dispatcher_run_splitkv.restype = ctypes.c_int
@@ -865,11 +868,14 @@ class FmhaRunner:
                     data_type.encode(),
                     has_lse,
                     is_group_mode,
+                    perm,
                     has_logits,
                     bias_type,
                     has_sink,
                     paged_kv,
                     page_size,
+                    window_left,
+                    window_right,
                     ctypes.byref(time_ms),
                 )
             elif api_family == "pagedkv":
@@ -1178,6 +1184,42 @@ def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str
     return flags
 
 
+def _make_splitkv_combine_config(splitkv_cfg: FmhaKernelConfig) -> FmhaKernelConfig:
+    """Create a matching fwd_splitkv_combine config for a fwd_splitkv config.
+
+    The combine kernel merges partial results from the split stage into the
+    final output.  Must be in the same .so as the split kernel for the
+    2-stage splitkv pipeline (same pattern as bwd dot_do_o + dq_dk_dv).
+    """
+    import copy
+
+    comb = copy.copy(splitkv_cfg)
+    comb.family = "fwd_splitkv_combine"
+    comb.pipeline = "splitkv_combine"
+    hv = splitkv_cfg.hdim_v
+    comb.hdim_q = hv
+    comb.hdim_v = hv
+    comb.tile_m0 = 32
+    comb.tile_n0 = hv
+    comb.tile_k0 = 32
+    comb.tile_n1 = 32
+    comb.tile_k1 = 0
+    comb.tile_k0max = 0
+    comb.pad_s = 1 if splitkv_cfg.mode == "group" else 0
+    comb.pad_sk = 1
+    comb.pad_d = 1
+    comb.pad_dv = 1
+    comb.lse = True
+    # Combine doesn't use mask/bias/etc., but the dispatcher's supports() check
+    # matches the combine kernel's signature against the problem traits.
+    # Keep them from the split config so the signatures match.
+    comb.dropout = False
+    comb.skip_min_seqlen_q = False
+    comb.qscale = "no"
+    comb.rope = "none"
+    return comb
+
+
 def _make_bwd_dot_do_o_config(dq_cfg: FmhaKernelConfig) -> FmhaKernelConfig:
     """Create a matching bwd_dot_do_o config for a bwd_dq_dk_dv config.
 
@@ -1466,6 +1508,14 @@ def setup_multiple_fmha_dispatchers(
                 [
                     json.loads(dot.to_codegen_json()),
                     json.loads(cfg.to_codegen_json()),
+                ]
+            )
+        elif cfg.family == "fwd_splitkv":
+            comb = _make_splitkv_combine_config(cfg)
+            config_json_str = json.dumps(
+                [
+                    json.loads(cfg.to_codegen_json()),
+                    json.loads(comb.to_codegen_json()),
                 ]
             )
         else:

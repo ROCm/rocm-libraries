@@ -133,6 +133,9 @@ def main():
         all_configs = apply_filter(all_configs, args.filter_expr, args.filter_file)
         print(f"  Filter: {before} -> {len(all_configs)} configs")
 
+    # Remove standalone combine configs -- they are auto-paired during JIT
+    all_configs = [c for c in all_configs if c.family != "fwd_splitkv_combine"]
+
     print(f"\n{'=' * 70}")
     print("FMHA Tile Engine Benchmark")
     print(f"{'=' * 70}")
@@ -235,6 +238,14 @@ def main():
             is_causal = config.mask in ("top_left", "bottom_right")
             is_group = config.mode == "group"
 
+            # Map instance-builder family to runner api_family
+            _FAMILY_TO_API = {
+                "fwd_splitkv": "splitkv",
+                "fwd_pagedkv": "pagedkv",
+                "fwd_appendkv": "appendkv",
+            }
+            api_family = _FAMILY_TO_API.get(config.family, config.family)
+
             result = setup.runner.run(
                 Q, K, V, prob,
                 mask_type=mask_int,
@@ -246,7 +257,7 @@ def main():
                 data_type=config.data_type,
                 is_group_mode=int(is_group),
                 is_v_rowmajor=int(config.vlayout == "r"),
-                api_family=config.family,
+                api_family=api_family,
                 window_left=-1,
                 window_right=0 if is_causal else -1,
             )
