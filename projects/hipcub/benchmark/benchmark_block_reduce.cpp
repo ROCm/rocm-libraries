@@ -119,6 +119,9 @@ class block_reduce_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
+        state.set_items(Trials * items);
+        state.add_writes<T>(Trials * items);
+
         state.run(
             [&]
             {
@@ -130,9 +133,6 @@ class block_reduce_benchmark : public primbench::benchmark_interface
                                    d_input,
                                    d_output);
             });
-
-        state.set_items(Trials * items);
-        state.add_writes<T>(Trials * items);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));

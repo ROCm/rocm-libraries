@@ -79,13 +79,18 @@ class for_each_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMemset(d_count, 0, sizeof(T)));
         op_t<T> device_op{d_count};
 
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(hipcub::DeviceFor::ForEach(d_input, d_input + size, device_op, stream));
-        }
-
         state.set_items(batch_size * size);
         state.add_writes<T>(batch_size * size);
+
+        state.run(
+            [&]
+            {
+                for(size_t i = 0; i < batch_size; i++)
+                {
+                    HIP_CHECK(
+                        hipcub::DeviceFor::ForEach(d_input, d_input + size, device_op, stream));
+                }
+            });
 
         HIP_CHECK(hipFree(d_count));
         HIP_CHECK(hipFree(d_input));

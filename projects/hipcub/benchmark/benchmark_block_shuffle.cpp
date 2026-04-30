@@ -206,6 +206,9 @@ class block_shuffle_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
+        state.set_items(items);
+        state.add_writes<T>(items);
+
         state.run(
             [&]
             {
@@ -217,9 +220,6 @@ class block_shuffle_benchmark : public primbench::benchmark_interface
                                    d_input,
                                    d_output);
             });
-
-        state.set_items(items);
-        state.add_writes<T>(items);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));

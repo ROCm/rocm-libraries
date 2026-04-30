@@ -139,6 +139,9 @@ class merge_sort_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
+        state.set_items(Trials * items);
+        state.add_writes<T>(Trials * items);
+
         state.run(
             [&]
             {
@@ -171,9 +174,6 @@ class merge_sort_benchmark : public primbench::benchmark_interface
                     static_assert(false, "unknown benchmark kind");
                 }
             });
-
-        state.set_items(Trials * items);
-        state.add_writes<T>(Trials * items);
     }
 };
 

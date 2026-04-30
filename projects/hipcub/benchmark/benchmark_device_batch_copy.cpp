@@ -304,6 +304,9 @@ class batch_copy_benchmark : public primbench::benchmark_interface
                                                        NumWlevBuffers,
                                                        NumBlevBuffers);
 
+        state.set_items(data.total_num_elements);
+        state.add_writes<std::byte>(data.total_num_bytes());
+
         state.run(
             [&]
             {
@@ -315,9 +318,6 @@ class batch_copy_benchmark : public primbench::benchmark_interface
                                                       num_buffers,
                                                       stream));
             });
-
-        state.set_items(data.total_num_elements);
-        state.add_writes<std::byte>(data.total_num_bytes());
 
         HIP_CHECK(hipFree(d_temp_storage));
     }
