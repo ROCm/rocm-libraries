@@ -2,8 +2,32 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/batched_contraction/pipeline/batched_contraction_problem.hpp"
 
 namespace ck_tile {
+
+namespace detail {
+
+template <typename AsDataType_,
+          typename BsDataType_,
+          typename DsDataType_,
+          typename EDataType_,
+          ck_tile::index_t NumDimG_,
+          ck_tile::index_t NumDimM_,
+          ck_tile::index_t NumDimN_,
+          ck_tile::index_t NumDimK_>
+using BatchedContractionMultiABDBase = BatchedContractionProblem<
+    ck_tile::remove_cvref_t<std::tuple_element_t<0, ck_tile::remove_cvref_t<AsDataType_>>>,
+    ck_tile::remove_cvref_t<std::tuple_element_t<0, ck_tile::remove_cvref_t<BsDataType_>>>,
+    DsDataType_,
+    EDataType_,
+    NumDimG_,
+    NumDimM_,
+    NumDimN_,
+    NumDimK_,
+    ck_tile::remove_cvref_t<DsDataType_>::size()>;
+
+} // namespace detail
 
 /// @brief Problem specification for batched tensor contraction with multiple A, B, and D tensors.
 ///
@@ -35,7 +59,24 @@ template <typename AsDataType_,
           ck_tile::index_t NumDimN_,
           ck_tile::index_t NumDimK_>
 struct BatchedContractionMultiABDProblem
+    : detail::BatchedContractionMultiABDBase<AsDataType_,
+                                             BsDataType_,
+                                             DsDataType_,
+                                             EDataType_,
+                                             NumDimG_,
+                                             NumDimM_,
+                                             NumDimN_,
+                                             NumDimK_>
 {
+    using Base = detail::BatchedContractionMultiABDBase<AsDataType_,
+                                                       BsDataType_,
+                                                       DsDataType_,
+                                                       EDataType_,
+                                                       NumDimG_,
+                                                       NumDimM_,
+                                                       NumDimN_,
+                                                       NumDimK_>;
+
     using AsDataType = ck_tile::remove_cvref_t<AsDataType_>;
     using BsDataType = ck_tile::remove_cvref_t<BsDataType_>;
     using DsDataType = ck_tile::remove_cvref_t<DsDataType_>;
@@ -54,11 +95,6 @@ struct BatchedContractionMultiABDProblem
 
     static_assert(NumATensor >= 1, "At least one A tensor is required");
     static_assert(NumBTensor >= 1, "At least one B tensor is required");
-
-    static constexpr ck_tile::index_t NumDimG = NumDimG_;
-    static constexpr ck_tile::index_t NumDimM = NumDimM_;
-    static constexpr ck_tile::index_t NumDimN = NumDimN_;
-    static constexpr ck_tile::index_t NumDimK = NumDimK_;
 };
 
 } // namespace ck_tile
