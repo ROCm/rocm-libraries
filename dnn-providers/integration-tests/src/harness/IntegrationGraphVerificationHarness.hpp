@@ -6,8 +6,8 @@
 #include <gtest/gtest.h>
 
 #include <functional>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -127,6 +127,12 @@ protected:
                 }
                 GTEST_SKIP() << "No engine supports this graph";
             }
+        }
+
+        // --skip-graph-validation: graph is confirmed supported, exit early with PASS
+        if(TestConfig::get().skipGraphValidation())
+        {
+            return;
         }
 
         // Build execution plans, engine preference set above should ensure that

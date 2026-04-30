@@ -32,9 +32,12 @@ from Tensile.Common import printExit, printWarning, print2, \
 from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
+from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
-from typing import NamedTuple, List, Dict
+from typing import IO, NamedTuple, List, Dict, Optional
+from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs
+import io
 import os
 import sys
 import subprocess
@@ -75,10 +78,9 @@ except ImportError:
 
 try:
     import msgpack
-    _msgpack_available = True
 except ImportError:
-    _msgpack_available = False
     print("Message pack python library not detected. Must use YAML backend instead.")
+
 
 
 ###################
@@ -120,70 +122,80 @@ def writeMsgPack(filename, data):
     with open(filename, "wb") as f:
         msgpack.pack(data, f)
 
-def _solutionsCacheFilename(yamlFilename):
-    """Return path to the msgpack cache file for a solutions YAML."""
-    base, _ = os.path.splitext(yamlFilename)
-    return base + ".solcache.dat"
+def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs]) -> None:
+    """Write the YAML header (version, problem sizes, bias/activation args)."""
+    f.write("- MinimumRequiredVersion: {}\n".format(__version__))
+    f.write("- ProblemSizes:\n")
+    if problemSizes:
+        for sizeRange in problemSizes.ranges:
+            f.write("  - Range: {}\n".format(sizeRange))
+        for problemExact in problemSizes.exacts:
+            #FIXME-problem, this ignores strides:
+            f.write("  - Exact: {}\n".format(problemExact))
+    if biasTypeArgs:
+        f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
+    if activationArgs:
+        f.write("- ActivationArgs:\n")
+        for setting in activationArgs.settingList:
+            f.write("  - [Enum: %s]\n"%(setting.activationEnum))
 
-def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutions, cache=False):
+def _findBodyOffset(filename: str, headerKeys: set[str]) -> int:
+    """Find the character offset where solution entries begin, skipping the header."""
+    with open(filename, "r") as f:
+        while True:
+            pos = f.tell()
+            line = f.readline()
+            if not line:
+                return pos
+            if line.startswith("- "):
+                key = line[2:].split(":")[0].strip()
+                if key not in headerKeys:
+                    return pos
+
+def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], solutions: list, cache: bool = False) -> None:
     """Writes solution YAML file."""
-    def load_solution_states_from_cache(filename) -> list[dict]:
-        """Try loading from msgpack cache, falling back to YAML."""
-        cachePath = _solutionsCacheFilename(filename)
-        # Try msgpack cache if available and the cache file exists
-        if _msgpack_available and os.path.exists(cachePath):
-            # If the YAML is newer than the cache, don't use the cache; assume it's stale
-            if os.path.getmtime(cachePath) >= os.path.getmtime(filename):
-                try:
-                    with open(cachePath, "rb") as cf:
-                        return msgpack.unpack(cf, raw=False)
-                except Exception as e:
-                    printWarning("Failed to load solution cache: {}".format(e))
-        # Fall back to YAML
-        solYaml = read(filename)
-        if biasTypeArgs and activationArgs:
-            return solYaml[4:]
-        elif biasTypeArgs or activationArgs:
-            return solYaml[3:]
-        else:
-            return solYaml[2:]
+
+    if cache:
+        # Solutions unchanged; rewrite only the header in place
+        with timing_context("python_wsol_prepare"):
+            with timing_context("python_wsol_prepare_cache"):
+                newHeader = io.StringIO()
+                _writeSolutionsHeader(newHeader, problemSizes, biasTypeArgs, activationArgs)
+                newHeader = newHeader.getvalue()
+                headerKeys = {line[2:].split(":")[0].strip()
+                              for line in newHeader.splitlines() if line.startswith("- ")}
+                oldBodyOffset = _findBodyOffset(filename, headerKeys)
+        with timing_context("python_wsol_header"):
+            if len(newHeader) == oldBodyOffset:
+                # Same size header; overwrite in place, body untouched
+                with open(filename, "r+") as f:
+                    f.write(newHeader)
+            else:
+                # Header size changed; must shift the body
+                with open(filename, "r+") as f:
+                    f.seek(oldBodyOffset)
+                    solutionsBody = f.read()
+                    f.seek(0)
+                    f.write(newHeader)
+                    f.write(solutionsBody)
+                    f.truncate()
+        return
 
     with timing_context("python_wsol_prepare"):
-        if cache:
-            with timing_context("python_wsol_prepare_cache"):
-                solutionStates = load_solution_states_from_cache(filename)
-        else:
-            with timing_context("python_wsol_prepare_nocache"):
-                solutionStates: list[dict] = []
-                for solution in solutions:
-                    solutionState = solution.getAttributes()
-                    solutionState["ProblemType"] = solutionState["ProblemType"].state
-                    problemTypeToEnum(solutionState["ProblemType"])
-                    isa = solutionState["ISA"]
-                    solutionState["ISA"] = [isa[0], isa[1], isa[2]]
-                    solutionStates.append(solutionState)
-                if _msgpack_available:
-                    try:
-                        writeMsgPack(_solutionsCacheFilename(filename), solutionStates)
-                    except Exception as e:
-                        printWarning("Failed to write solution cache: {}".format(e))
-    # write dictionaries
+        with timing_context("python_wsol_prepare_nocache"):
+            solutionStates: list[dict] = []
+            for solution in solutions:
+                solutionState = solution.getAttributes()
+                solutionState["ProblemType"] = solutionState["ProblemType"].state
+                problemTypeToEnum(solutionState["ProblemType"])
+                isa = solutionState["ISA"]
+                solutionState["ISA"] = [isa[0], isa[1], isa[2]]
+                solutionStates.append(solutionState)
     with open(filename, "w") as f:
-        f.write("- MinimumRequiredVersion: {}\n".format(__version__))
-        f.write("- ProblemSizes:\n")
-        if problemSizes:
-            for sizeRange in problemSizes.ranges:
-                f.write("  - Range: {}\n".format(sizeRange))
-            for problemExact in problemSizes.exacts:
-                #FIXME-problem, this ignores strides:
-                f.write("  - Exact: {}\n".format(problemExact))
-        if biasTypeArgs:
-            f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
-        if activationArgs:
-            f.write("- ActivationArgs:\n")
-            for setting in activationArgs.settingList:
-                f.write("  - [Enum: %s]\n"%(setting.activationEnum))
-        yaml.dump(solutionStates, f, Dumper=yamlDumper, default_flow_style=None)
+        with timing_context("python_wsol_header"):
+            _writeSolutionsHeader(f, problemSizes, biasTypeArgs, activationArgs)
+        with timing_context("python_wsol_dump"):
+            yaml.dump(solutionStates, f, Dumper=yamlDumper, default_flow_style=None)
 
 
 ###############################
@@ -314,6 +326,7 @@ class LibraryLogic(NamedTuple):
     solutions: list
     exactLogic: list
     library: SolutionLibrary.MasterSolutionLibrary
+    typeMismatches: dict = {}
 
 def parseLibraryLogicFile(
         filename,
@@ -424,7 +437,9 @@ def parseLibraryLogicData(
                          )
         return solutionObject
 
+    resetTypeMismatchCollector()
     solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(
         data,
@@ -439,7 +454,7 @@ def parseLibraryLogicData(
     )
 
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \
-            data.get("ExactLogic"), newLibrary)
+            data.get("ExactLogic"), newLibrary, typeMismatches)
 
 
 def parseLibraryLogicList(data, srcFile="?"):

@@ -21,7 +21,7 @@ namespace {
 
 struct TestParams
 {
-    friend std::ostream& operator<<(std::ostream& os, const TestParams& tp)
+    friend std::ostream& operator<<(std::ostream& os, const TestParams& /*tp*/)
     {
         os << "none";
         return os;
@@ -190,7 +190,7 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvAsm5x10u2v2f1",                                   {5,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsm5x10u2v2b1",                                   {6,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsm7x7c3h224w224k64u2v2p3q3f1",                   {7,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclDirectFwd11x11",                               {8,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
+        {"ConvHipDirectFwd11x11",                               {8,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclDirectFwdGen",                                 {9,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclDirectFwd",                                    {11,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         {"ConvBinWinograd3x3U",                                 {14,    true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
@@ -345,20 +345,6 @@ const auto& GetSolverConfigs<BatchNormSolverConfig>()
     return configs;
 }
 
-template <class SolverInfo>
-const auto& GetSolverNames()
-{
-    static const auto names = [] {
-        std::vector<std::string> names_;
-        const auto& sinfo = GetSolversInfo<SolverInfo>();
-        names_.reserve(sinfo.size());
-        for(const auto& s : sinfo)
-            names_.push_back(s.first);
-        return names_;
-    }();
-    return names;
-}
-
 template <class TestCase>
 const auto GetTestCases()
 {
@@ -378,6 +364,20 @@ const auto GetTestCases()
 }
 
 #if MIOPEN_ENABLE_FIN_INTERFACE
+
+template <class SolverInfo>
+const auto& GetSolverNames()
+{
+    static const auto names = [] {
+        std::vector<std::string> names_;
+        const auto& sinfo = GetSolversInfo<SolverInfo>();
+        names_.reserve(sinfo.size());
+        for(const auto& s : sinfo)
+            names_.push_back(s.first);
+        return names_;
+    }();
+    return names;
+}
 
 // Context
 template <class Problem>

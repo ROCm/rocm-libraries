@@ -26,8 +26,8 @@ find_package(Threads REQUIRED)
 if(NOT TARGET hipdnn_frontend)
     find_package(hipdnn_frontend CONFIG REQUIRED)
 endif()
-if(NOT TARGET hipdnn_data_sdk)
-    find_package(hipdnn_data_sdk CONFIG REQUIRED)
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 endif()
 
 # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not need
@@ -45,7 +45,7 @@ macro(add_hipdnn_sample NAME SOURCE)
     add_executable(${NAME} ${SOURCE})
     # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not
     # need this package. Linking against hipdnn_frontend would be sufficient for normal users
-    # (brings in hipdnn_data_sdk as well).
+    # (brings in hipdnn_flatbuffers_sdk as well).
     target_link_libraries(${NAME} PRIVATE hip::host Threads::Threads hipdnn_frontend hipdnn_test_sdk)
     target_compile_options(${NAME} PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
     list(APPEND HIPDNN_ALL_SAMPLES ${NAME})
@@ -67,7 +67,9 @@ add_hipdnn_sample(hipdnn_sample_fused_conv_fprop_bias_activ convolution/FusedCon
 add_hipdnn_sample(hipdnn_sample_conv_wgrad convolution/ConvWgrad.cpp)
 add_hipdnn_sample(hipdnn_sample_conv_fprop_deterministic convolution/ConvFpropDeterministic.cpp)
 
-add_hipdnn_sample(hipdnn_sample_sdpa_fprop sdpa/SdpaFprop.cpp)
+if(HIPDNN_ENABLE_SDPA)
+    add_hipdnn_sample(hipdnn_sample_sdpa_fprop sdpa/SdpaFprop.cpp)
+endif()
 
 add_hipdnn_sample(hipdnn_sample_serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
@@ -142,3 +144,108 @@ add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS $
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}
         RENAME CTestTestfile.cmake
 )
+
+# =============================================================================
+# Example engine plugin — built as an external project to preserve its
+# standalone build capability. In superbuild mode, hipdnn is installed to a
+# staging directory, matching the environment that the standalone project
+# will be used in and enabling find_package() to work correctly.
+# Tests are forwarded to this project's CTest.
+# =============================================================================
+find_package(hiprtc REQUIRED)
+include(ExternalProject)
+
+find_program(CLANG_TIDY_EXE NAMES clang-tidy-20 clang-tidy)
+set(EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS "")
+set(EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS "")
+if(CLANG_TIDY_EXE)
+    execute_process(
+        COMMAND "${CLANG_TIDY_EXE}" --version
+        OUTPUT_VARIABLE CLANG_TIDY_VERSION_OUTPUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(CLANG_TIDY_VERSION_OUTPUT MATCHES "version 20\\.")
+        list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS
+            "-DCMAKE_CXX_CLANG_TIDY:STRING=${CLANG_TIDY_EXE}"
+        )
+    else()
+        message(STATUS "clang-tidy found at ${CLANG_TIDY_EXE} but is not version 20; disabling clang-tidy for example_engine_plugin build")
+        list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS
+            "-UCMAKE_CXX_CLANG_TIDY"
+        )
+    endif()
+else()
+    list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS
+        "-UCMAKE_CXX_CLANG_TIDY"
+    )
+endif()
+
+# Force the example plugin external project to reconfigure whenever the samples project is reconfigured
+file(REMOVE
+    "${CMAKE_CURRENT_BINARY_DIR}/example_engine_plugin-prefix/src/example_engine_plugin-stamp/example_engine_plugin-configure"
+)
+
+# Build CMAKE_PREFIX_PATH for the example plugin external project
+set(_example_plugin_prefix_path "${CMAKE_PREFIX_PATH}")
+set(_example_plugin_depends "")
+
+if(ROCM_LIBS_SUPERBUILD)
+    # In superbuild mode, install hipdnn to a staging directory so the plugin
+    # can use find_package() as intended for standalone builds.
+    set(EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR "${CMAKE_BINARY_DIR}/hipdnn-staging")
+
+    # Custom target to install hipdnn to staging directory for the example plugin project.
+    # Only install Runtime and Development components - skip test binaries which may not be built.
+    # This only runs when example_engine_plugin is built (due to DEPENDS).
+    add_custom_target(example_plugin_hipdnn-staging-install
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
+        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR}/projects/hipdnn
+                --prefix ${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
+                --component Runtime
+        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR}/projects/hipdnn
+                --prefix ${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
+                --component Development
+        DEPENDS hipdnn_backend hipdnn_data_sdk hipdnn_plugin_sdk hipdnn_flatbuffers_sdk hipdnn_frontend
+        COMMENT "Installing hipDNN to staging directory for example_engine_plugin"
+    )
+
+    list(PREPEND _example_plugin_prefix_path "${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake")
+    list(APPEND _example_plugin_depends example_plugin_hipdnn-staging-install)
+endif()
+
+ExternalProject_Add(example_engine_plugin
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/example_engine_plugin
+    CMAKE_CACHE_ARGS
+        "-DCMAKE_PREFIX_PATH:STRING=${_example_plugin_prefix_path}"
+        "-DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}"
+        "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
+        "-DCMAKE_MAKE_PROGRAM:FILEPATH=${CMAKE_MAKE_PROGRAM}"
+        "-DEXAMPLEPROVIDER_BUILD_UNIT_TESTS:BOOL=ON"
+        "-DEXAMPLEPROVIDER_BUILD_SAMPLE:BOOL=ON"
+        "-DHIP_PLATFORM:STRING=${HIP_PLATFORM}"
+        "-Dhip_DIR:PATH=${hip_DIR}"
+        "-Dhiprtc_DIR:PATH=${hiprtc_DIR}"
+        "-Dflatbuffers_DIR:PATH=${flatbuffers_DIR}"
+        "-Dnlohmann_json_DIR:PATH=${nlohmann_json_DIR}"
+        ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS}
+    CMAKE_ARGS
+        ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS}
+    DEPENDS ${_example_plugin_depends}
+    INSTALL_COMMAND ""
+)
+
+block(SCOPE_FOR VARIABLES)
+    ExternalProject_Get_Property(example_engine_plugin BINARY_DIR)
+
+    add_test(
+        NAME hipdnn_example_provider_unit_tests
+        COMMAND ${BINARY_DIR}/bin/example_provider_tests
+    )
+    set_tests_properties(hipdnn_example_provider_unit_tests PROPERTIES LABELS "sample_test")
+
+    add_test(
+        NAME hipdnn_example_provider_sample
+        COMMAND ${BINARY_DIR}/bin/example_provider_sample
+    )
+    set_tests_properties(hipdnn_example_provider_sample PROPERTIES LABELS "sample_test")
+endblock()

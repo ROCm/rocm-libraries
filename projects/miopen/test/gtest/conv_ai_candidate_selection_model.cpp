@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include <gtest/gtest.h>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/filesystem.hpp>
 #include <string>
 #include <map>
@@ -346,12 +346,31 @@ TEST_P(CPU_CandidateSelection_NONE, ExpandKernelParamsWithSplitKFunctionality_Te
 
 // === INSTANTIATION ===
 
+// Helper function to generate test parameters for both 2D and 3D solvers
+std::vector<CandidateSelectionParams> GenerateCandidateSelectionParams()
+{
+    // Note: Using DeviceGroupedConvBwdWeight_Xdl_CShuffle for all as it's a common kernel
+    // that exists in the metadata for testing infrastructure (not testing kernel accuracy)
+    return {
+        // 2D solvers
+        {"gfx942",
+         "ConvHipImplicitGemmGroupWrwXdlops",
+         "DeviceGroupedConvBwdWeight_Xdl_CShuffle",
+         8},
+        // 3D solvers
+        {"gfx942",
+         "ConvHipImplicitGemm3DGroupWrwXdlops",
+         "DeviceGroupedConvBwdWeight_Xdl_CShuffle",
+         8},
+    };
+}
+
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_CandidateSelection_NONE,
-                         testing::Values(CandidateSelectionParams{}),
-                         [](const testing::TestParamInfo<CandidateSelectionParams>& info_) {
+                         ::testing::ValuesIn(GenerateCandidateSelectionParams()),
+                         [](const ::testing::TestParamInfo<CandidateSelectionParams>& testInfo) {
                              std::ostringstream os;
-                             PrintTo(info_.param, &os);
+                             PrintTo(testInfo.param, &os);
                              return os.str();
                          });
 
