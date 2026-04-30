@@ -129,6 +129,21 @@ void graph_bindings(nb::module_& m)
         .def("get_intermediate_data_type", &graph::Graph::get_intermediate_data_type)
         .def("get_io_data_type", &graph::Graph::get_io_data_type)
         .def("get_preferred_engine_id_ext", &graph::Graph::get_preferred_engine_id_ext)
+        .def(
+            "get_ranked_engine_ids",
+            [](graph::Graph& g,
+               std::vector<HeuristicMode> modes) {
+                std::vector<int64_t> ids;
+                auto result = g.get_ranked_engine_ids(ids, modes);
+                if(!result.is_good())
+                {
+                    throw std::runtime_error("Failed to get ranked engine IDs: "
+                                             + result.get_message());
+                }
+                return ids;
+            },
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            "Get ranked engine IDs for the built operation graph")
         .def("tensor", &graph::Graph::tensor, nb::rv_policy::reference)
         .def_static(
             "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "")
