@@ -38,6 +38,7 @@ from Tensile.Components.ScheduleCapture import (
     build_idmap,
     invert_idmap_to_id_to_category,
     split_for_plr,
+    build_id_to_category_per_iter,
 )
 
 
@@ -198,3 +199,72 @@ def test_split_for_plr_odd_count():
     new0, new1 = split_for_plr(m)
     assert new1 == leaves[:2]
     assert new0 == leaves[2:]
+
+
+def test_per_iter_helper_splits_grinc_from_gr():
+    """build_id_to_category_per_iter must distinguish GR-inc items
+    (tagged GRIncA/GRIncB) from GR-load items (tagged generic GR or
+    GRA/GRB if globalReadA/B is supplied). Without this split, GR-inc
+    instructions get lumped under 'GR' on the NLL path and disagree
+    with the CMS path's idMap['GRIncA'/'GRIncB']. Items in the inc
+    modules are SHARED with items in globalReadCode (perIterGlobalRead)
+    via SIA.py:732, so id() lookup against the more-specific tag wins.
+    """
+    # Build a small synthetic globalReadCode that contains some inc items
+    # AND some pure load items. Inc items also live in their own modules.
+    m_gri_a, gri_a_leaves = _mk_module("globalReadIncrementA", 2)
+    m_gri_b, gri_b_leaves = _mk_module("globalReadIncrementB", 2)
+    m_load_a, load_a_leaves = _mk_module("globalReadA", 2)
+    m_load_b, load_b_leaves = _mk_module("globalReadB", 2)
+    # globalReadCode = the combined per-iter view (inc items appear here too).
+    perIterGR = Module("perIterGR")
+    for it in load_a_leaves + load_b_leaves + gri_a_leaves + gri_b_leaves:
+        perIterGR.add(it)
+
+    out = build_id_to_category_per_iter(
+        iteration=0,
+        localReadCode=None, localWriteCode=None,
+        globalReadCode=perIterGR,
+        packCode=None, packPreCode=None,
+        globalReadA=m_load_a, globalReadB=m_load_b,
+        globalReadIncACode=m_gri_a, globalReadIncBCode=m_gri_b,
+    )
+    for leaf in gri_a_leaves:
+        assert out[id(leaf)] == "GRIncA", f"{leaf} should be GRIncA"
+    for leaf in gri_b_leaves:
+        assert out[id(leaf)] == "GRIncB"
+    for leaf in load_a_leaves:
+        assert out[id(leaf)] == "GRA"
+    for leaf in load_b_leaves:
+        assert out[id(leaf)] == "GRB"
+
+
+def test_per_iter_helper_falls_back_to_generic_gr():
+    """When per-side modules are NOT supplied (caller doesn't have them),
+    items in globalReadCode get the generic 'GR' tag — the legacy
+    behavior, preserved for back-compat."""
+    perIterGR, leaves = _mk_module("perIterGR", 3)
+    out = build_id_to_category_per_iter(
+        iteration=0,
+        localReadCode=None, localWriteCode=None,
+        globalReadCode=perIterGR,
+        packCode=None, packPreCode=None,
+    )
+    for leaf in leaves:
+        assert out[id(leaf)] == "GR"
+
+
+def test_per_iter_helper_grinc_overrides_gr_when_shared():
+    """If a leaf appears in BOTH globalReadCode AND globalReadIncACode
+    (the realistic case), the GRIncA tag must win — it's set first."""
+    shared = TextBlock("// shared")
+    m_gri_a = Module("globalReadIncrementA"); m_gri_a.add(shared)
+    perIterGR = Module("perIterGR"); perIterGR.add(shared)
+    out = build_id_to_category_per_iter(
+        iteration=0,
+        localReadCode=None, localWriteCode=None,
+        globalReadCode=perIterGR,
+        packCode=None, packPreCode=None,
+        globalReadIncACode=m_gri_a,
+    )
+    assert out[id(shared)] == "GRIncA"

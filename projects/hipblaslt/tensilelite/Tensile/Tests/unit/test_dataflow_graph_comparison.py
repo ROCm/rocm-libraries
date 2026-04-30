@@ -142,6 +142,52 @@ class TestCleanComparison:
         # identity-set sizes despite subject having 3 extra sync ops.
         assert set(g_ref.nodes.keys()) == set(g_subj.nodes.keys())
 
+    def test_lcc_excluded_from_identity_set(self):
+        """Loop-counter code (category 'LCC') is emitted by CMS inside the
+        macro body but by the default-side scheduler OUTSIDE _loopBody (in
+        closeLoop). The two schedulers capture different scopes for LCC.
+        The identity-set comparison must exclude cls=LCC so the asymmetry
+        doesn't surface as a CMS-only diff.
+
+        Use a stand-in instruction class — cls=LCC comes from the category
+        mapping (LCC -> 'LCC'), so any inst type works.
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class _LccInst:
+            def __str__(self):
+                return "s_add_u32 s[sgprLoopCounterL], s[sgprLoopCounterL], 1"
+
+        from Tensile.Components.ScheduleCapture import (
+            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+        )
+        ti_lcc = TaggedInstruction(
+            inst=_LccInst(),
+            category="LCC",
+            slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+                         mfma_index=0, sequence=0),
+        )
+        # Reference has the LCC; subject doesn't (mirrors CMS vs default).
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            ti_lcc,
+            make_mfma(0, 8, 32, slot=3, a_src_count=4),
+        ])
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=3, a_src_count=4),
+        ])
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        # Identity sets must match (LCC excluded from both).
+        assert set(g_ref.nodes.keys()) == set(g_subj.nodes.keys())
+        # No LCC in either identity set.
+        assert not any(ident[0] == "LCC" for ident in g_ref.nodes.keys())
+        assert compare_graphs(g_ref, g_subj) == []
+
 
 # =============================================================================
 # Negative — per-Failure-class diagnosis

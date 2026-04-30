@@ -838,6 +838,8 @@ def structural_clone(item):
 
 def build_id_to_category_per_iter(*, iteration, localReadCode, localWriteCode,
                                   globalReadCode, packCode, packPreCode,
+                                  globalReadA=None, globalReadB=None,
+                                  globalReadIncACode=None, globalReadIncBCode=None,
                                   inner_unroll_max=8):
     """Build {id(item) -> category} for one SIA3 iteration's combined modules.
 
@@ -854,14 +856,20 @@ def build_id_to_category_per_iter(*, iteration, localReadCode, localWriteCode,
     Both produce the same {id(item) -> category} mapping that
     _captureSubIterToBuilder consumes.
 
-    Walk strategy:
+    Walk strategy (most-specific tag wins, populated first):
+      - globalReadIncACode / globalReadIncBCode (optional): items tagged
+        GRIncA / GRIncB. Same scheme CMS's idMap uses, so cross-graph
+        comparison agrees on the GR-inc identities instead of seeing
+        them as generic 'GR' on one side.
+      - globalReadA / globalReadB (optional): items tagged GRA / GRB.
+        Splits the buffer-load instructions by tensor side.
       - localReadCode: per-tensor (A/B/MXSA/MXSB/Metadata) sub-modules
         named LocalReadDo{Tensor}_I{iui}; tag as LR{Tensor}{iteration}.
       - packCode/packPreCode: per-side (A/B) sub-modules named
         pack{A,B}_I{iui} (and "pack{A,B}_I{iui} Pre"); tag as
         Pack{A,B}{iteration}.
-      - globalReadCode: tagged generically as 'GR' (A/B distinction not
-        recoverable here without parsing buffer-load semantics).
+      - globalReadCode: fallback generic 'GR' for items not already
+        tagged (covers anything the per-side modules above missed).
       - localWriteCode: tagged generically as 'LW'.
       - First-tag-wins under DirectToLds=1 where globalRead instructions
         ARE the local writes (same Instruction objects); the GR tag wins.
@@ -873,6 +881,26 @@ def build_id_to_category_per_iter(*, iteration, localReadCode, localWriteCode,
             return
         for item in mod.flatitems():
             id_to_category[id(item)] = category
+
+    def tag_module_setdefault(mod, category):
+        if mod is None:
+            return
+        for item in mod.flatitems():
+            id_to_category.setdefault(id(item), category)
+
+    # Most-specific GR-related tags first so they win over the generic
+    # 'GR' fallback below. The globalReadIncCode and globalReadA/B leaves
+    # are SHARED with globalReadCode (perIterGlobalRead) leaves via
+    # SIA.py:732 (extends GR-load list with GR-inc list and distributes
+    # across iters); tagging them by id() here pre-empts the fallback.
+    if globalReadIncACode is not None:
+        tag_module(globalReadIncACode, "GRIncA")
+    if globalReadIncBCode is not None:
+        tag_module(globalReadIncBCode, "GRIncB")
+    if globalReadA is not None:
+        tag_module_setdefault(globalReadA, "GRA")
+    if globalReadB is not None:
+        tag_module_setdefault(globalReadB, "GRB")
 
     if localReadCode is not None:
         for sub_name, cat_template in (
@@ -1584,7 +1612,14 @@ def build_dataflow_graph(four_part_capture):
             # cross-graph topology diff. Per-edge correctness for waits/
             # barriers is checked in diagnose_missing_edge by walking the
             # sidecar.
-            if not (_is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst)):
+            #
+            # LCC (loop-counter code) is also excluded: CMS bakes it into
+            # the macro body, but the default-side scheduler emits it
+            # OUTSIDE _loopBody (in closeLoop). The two paths capture
+            # different scopes for loop-counter ops, so cross-graph
+            # comparison should ignore them.
+            if (not (_is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst))
+                    and node.identity[0] != "LCC"):
                 nodes_by_identity[node.identity] = node
 
             # FIFO / edge-formation logic. Instructions whose Python class

@@ -3674,6 +3674,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       capture_id_to_cat = None
       if capture is not None:
         from Tensile.Components.ScheduleCapture import build_id_to_category_per_iter
+        # Pull GR-inc sub-modules from globalReadIncrements so the helper can
+        # tag GR-inc items as GRIncA/GRIncB (matching CMS's idMap), instead of
+        # lumping them under generic 'GR' alongside actual buffer-loads. The
+        # leaves in these modules are SHARED with leaves in
+        # self.codes.perIterGlobalRead[u] via SIA.py:732, so id() lookup hits
+        # the same Python objects.
+        gri_root = getattr(self.codes, 'globalReadIncrements', None)
+        gri_a = gri_root.findNamedItem("globalReadIncrementA") if gri_root is not None else None
+        gri_b = gri_root.findNamedItem("globalReadIncrementB") if gri_root is not None else None
         capture_id_to_cat = build_id_to_category_per_iter(
           iteration=u,
           localReadCode=localReads,
@@ -3681,6 +3690,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           globalReadCode=self.codes.perIterGlobalRead[u] if u < len(self.codes.perIterGlobalRead) else None,
           packCode=pack[packIdx],
           packPreCode=packPre[packPreIdx],
+          globalReadA=getattr(self.codes, 'globalReadA', None),
+          globalReadB=getattr(self.codes, 'globalReadB', None),
+          globalReadIncACode=gri_a,
+          globalReadIncBCode=gri_b,
           inner_unroll_max=kernel["InnerUnroll"],
         )
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
