@@ -71,12 +71,18 @@ class _FakeLR(_FakeInstBase):
     dst: RegisterContainer       # vgpr range written
     lds_offset: int              # immediate LDS offset
 
+    def __str__(self):
+        return f"ds_read {self.dst}, lds[{self.lds_offset}]"
+
 
 @dataclass
 class _FakeLW(_FakeInstBase):
     """Stand-in for a DSStore (LW) instruction."""
     src: RegisterContainer
     lds_offset: int
+
+    def __str__(self):
+        return f"ds_write lds[{self.lds_offset}], {self.src}"
 
 
 @dataclass
@@ -86,6 +92,9 @@ class _FakeGR(_FakeInstBase):
     srd: RegisterContainer       # sgpr SRD
     immediate_offset: int
 
+    def __str__(self):
+        return f"buffer_load {self.dst}, {self.srd}, off={self.immediate_offset}"
+
 
 @dataclass
 class _FakeMFMA(_FakeInstBase):
@@ -93,6 +102,9 @@ class _FakeMFMA(_FakeInstBase):
     c_dst: RegisterContainer
     a_src: RegisterContainer
     b_src: RegisterContainer
+
+    def __str__(self):
+        return f"v_mfma {self.c_dst}, {self.a_src}, {self.b_src}, {self.c_dst}"
 
 
 @dataclass
@@ -102,11 +114,16 @@ class _FakeSWait(_FakeInstBase):
     vlcnt: int = -1
     vscnt: int = -1
 
+    def __str__(self):
+        return f"s_waitcnt(dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt})"
+
 
 @dataclass
 class _FakeSBarrier(_FakeInstBase):
     """Stand-in for SBarrier — no fields, only its presence matters."""
-    pass
+
+    def __str__(self):
+        return "s_barrier"
 
 
 # =============================================================================

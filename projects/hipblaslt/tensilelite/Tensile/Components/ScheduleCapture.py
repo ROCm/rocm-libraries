@@ -1017,46 +1017,89 @@ def _inst_dsstore_src(inst):
     return _get_param(inst, 1)
 
 
+_COMMENT_STRIP_RE = None  # lazy-compiled
+
+
+def _canonical_render(inst) -> str:
+    """Return a normalized render-string for an instruction.
+
+    Used as the identity-defining payload so the comparison is robust to
+    register-naming differences (symbolic / numeric / mixed). Two
+    instructions producing the same canonical render-string represent
+    the same GPU operation, regardless of how their constructor was
+    invoked.
+
+    Normalizations applied:
+      - strip trailing comment ('// ...')
+      - strip leading/trailing whitespace
+      - collapse runs of whitespace to a single space
+
+    Symbolic registers (vgpr("ValuA_X0_I0", 4)) render as
+    'v[vgprValuA_X0_I0:vgprValuA_X0_I0+3]'; numeric registers
+    (vgpr(8, 4)) render as 'v[8:11]'. The same instruction emitted by
+    two different code paths in the SAME kernel writer build will have
+    identical renders because both paths consume the same writer state.
+    Cross-kernel comparison would still differ on numeric allocation
+    but that's not a use case here (compare_graphs operates within one
+    build).
+    """
+    global _COMMENT_STRIP_RE
+    if _COMMENT_STRIP_RE is None:
+        import re as _re
+        _COMMENT_STRIP_RE = _re.compile(r"//.*$", _re.MULTILINE)
+    s = str(inst)
+    s = _COMMENT_STRIP_RE.sub("", s).strip()
+    # Collapse internal whitespace to single spaces for consistent matching
+    return " ".join(s.split())
+
+
+def _class_tag(inst) -> str:
+    """Return the stable class tag (LR/LW/GR/MFMA/SWAIT/SBARRIER) for an
+    instruction. Used as the first element of the identity tuple so
+    diagnostic categorization works without parsing the render-string.
+    """
+    if _is_lr(inst):
+        return "LR"
+    if _is_lw(inst):
+        return "LW"
+    if _is_gr(inst):
+        return "GR"
+    if _is_mfma(inst):
+        return "MFMA"
+    if _is_swait(inst):
+        return "SWAIT"
+    if _is_sbarrier(inst):
+        return "SBARRIER"
+    raise CaptureUnknownInstructionError(
+        f"_class_tag: cannot classify instruction class "
+        f"{type(inst).__name__!r}."
+    )
+
+
 def _identity_for(inst, body_label: str) -> tuple:
     """Build a content-based identity tuple for an instruction.
 
-    Format: (class_tag, loop_index, signature_tuple).
+    Format: (class_tag, loop_index, canonical_render).
 
-    class_tag is a stable string (LR/LW/GR/MFMA/etc.) so the identity is
-    invariant across rocisa class variants (DSLoadB128 vs DSLoadB64 still
-    map to 'LR' if both appear in the same role — though typically a given
-    schedule uses one width consistently per category).
+    Render-string identity (rather than a per-class structured signature
+    of register fields) makes the comparison robust to register-naming
+    variations: an MFMA emitted as
+        v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:...], v[74:75], ...
+    has a stable identity regardless of whether the schedulers happen
+    to spell its inputs symbolically, numerically, or mixed — the
+    rendered assembly is what the GPU sees, and that's what we compare
+    on.
+
+    class_tag (LR/LW/GR/MFMA/SWAIT/SBARRIER) is preserved as the first
+    element so the identity-mismatch diagnostic in compare_graphs can
+    still categorize differences by kind.
+
+    Raises CaptureUnknownInstructionError when an instruction class
+    isn't one of the recognized kinds.
     """
     loop_idx = BODY_LABEL_TO_LOOP_INDEX[body_label]
-    if _is_lr(inst):
-        return ("LR", loop_idx,
-                _reg_signature(_inst_dst(inst)),
-                _inst_lds_offset(inst))
-    if _is_lw(inst):
-        return ("LW", loop_idx,
-                _reg_signature(_inst_dsstore_src(inst)),
-                _inst_lds_offset(inst))
-    if _is_gr(inst):
-        return ("GR", loop_idx,
-                _reg_signature(_inst_dst(inst)),
-                _reg_signature(_inst_buffer_srd(inst)),
-                _inst_buffer_offset(inst))
-    if _is_mfma(inst):
-        return ("MFMA", loop_idx,
-                _reg_signature(_inst_mfma_acc(inst)),
-                _reg_signature(_inst_mfma_a(inst)),
-                _reg_signature(_inst_mfma_b(inst)))
-    if _is_swait(inst):
-        return ("SWAIT", loop_idx,
-                getattr(inst, "dscnt", -1),
-                getattr(inst, "vlcnt", -1),
-                getattr(inst, "vscnt", -1))
-    if _is_sbarrier(inst):
-        return ("SBARRIER", loop_idx)
-    raise CaptureUnknownInstructionError(
-        f"_identity_for: cannot identify instruction class "
-        f"{type(inst).__name__!r} (body={body_label})."
-    )
+    cls_tag = _class_tag(inst)
+    return (cls_tag, loop_idx, _canonical_render(inst))
 
 
 def _writes(inst):

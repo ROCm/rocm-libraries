@@ -305,6 +305,117 @@ class TestIdentityCoverage:
 
 
 # =============================================================================
+# Render-string identity robustness
+# =============================================================================
+# Identity is built from canonical render-strings, NOT from structured
+# register-field tuples. This makes the comparison robust to:
+# - register naming variations (symbolic vs numeric vs mixed) — the
+#   render-string IS the canonical form
+# - cosmetic differences (comment text, whitespace) — stripped/normalized
+#   in _canonical_render
+
+
+class TestRenderStringIdentity:
+    def test_identity_is_assembly_text(self):
+        """The identity tuple's third element should be the canonical
+        rendered assembly. This is what makes identity robust to
+        register-naming variations."""
+        from Tensile.Components.ScheduleCapture import _identity_for
+        lr = make_lr(8, 4, 64, slot=0, category="LRA0").inst
+        ident = _identity_for(lr, BODY_LABEL_ML)
+        assert ident[0] == "LR"             # class tag
+        assert isinstance(ident[1], int)    # loop_index
+        assert isinstance(ident[2], str)    # render-string
+        # The render contains a vgpr reference and the LDS offset.
+        # Synthetic fixtures construct RegisterContainer with a RegName,
+        # so the render uses the symbolic form (v8 is the name we chose).
+        assert "vgpr" in ident[2] or "v[" in ident[2]
+        assert "lds[64]" in ident[2]
+
+    def test_comment_differences_dont_change_identity(self):
+        """Two instructions with identical operations but different
+        comments (e.g. 'init' vs 'reload') should have the same identity.
+        Confirms that _canonical_render strips comments."""
+        from Tensile.Components.ScheduleCapture import _canonical_render
+
+        # Use real rocisa instances to test the comment-stripping path.
+        from rocisa.instruction import DSLoadB128
+        from rocisa.container import vgpr
+        a = DSLoadB128(dst=vgpr(8, 4), src=vgpr(0), comment="init")
+        b = DSLoadB128(dst=vgpr(8, 4), src=vgpr(0), comment="reload")
+        # render-strings might or might not include comment in str();
+        # _canonical_render strips it either way.
+        assert _canonical_render(a) == _canonical_render(b)
+
+    def test_whitespace_normalization(self):
+        """Multiple spaces / tabs / newlines collapse to single spaces."""
+        from Tensile.Components.ScheduleCapture import _canonical_render
+
+        class _Spaced:
+            def __str__(self):
+                return "v_mfma  v[0:3], \tv[8:9], \n v[32:33]"
+
+        result = _canonical_render(_Spaced())
+        # No double spaces, no tabs, no newlines
+        assert "  " not in result
+        assert "\t" not in result
+        assert "\n" not in result
+        assert result == "v_mfma v[0:3], v[8:9], v[32:33]"
+
+    def test_mixed_symbolic_numeric_registers_in_same_inst(self):
+        """An instruction with MIXED symbolic and numeric registers (the
+        F32X TF32 emulation pattern: symbolic ValuA_T + numeric scratch +
+        symbolic ValuA_X) renders consistently. If both captures emit the
+        same inst with the same register identifiers, identities match."""
+        from Tensile.Components.ScheduleCapture import _identity_for, _canonical_render
+        from rocisa.instruction import MFMAInstruction
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+
+        # Construct two identical mixed-register MFMAs (same args).
+        def _build():
+            return MFMAInstruction(
+                instType=InstType.INST_BF16, accType=InstType.INST_F32,
+                variant=[4, 4, 4, 16], mfma1k=False,
+                acc=vgpr("ValuA_T0_I0", 4),       # symbolic
+                a=vgpr(74, 2),                    # numeric scratch
+                b=vgpr("ValuA_X0_I0", 2),         # symbolic
+            )
+
+        a = _build()
+        b = _build()
+        # Even though the MFMA mixes symbolic and numeric register kinds,
+        # the rendered string is deterministic; both instances render
+        # identically; identities match.
+        assert _canonical_render(a) == _canonical_render(b)
+        assert _identity_for(a, BODY_LABEL_ML) == _identity_for(b, BODY_LABEL_ML)
+        # Sanity check: render contains all three reg kinds.
+        rendered = _canonical_render(a)
+        assert "vgprValuA_T0_I0" in rendered    # symbolic acc
+        assert "v[74:75]" in rendered           # numeric a
+        assert "vgprValuA_X0_I0" in rendered    # symbolic b
+
+    def test_symbolic_and_numeric_for_same_logical_reg_unchanged(self):
+        """DOCUMENTED LIMITATION: if two captures construct the SAME
+        logical register with DIFFERENT identifiers (one symbolic, one
+        numeric for the same physical reg), the render-strings differ
+        and identities differ. This case doesn't arise in practice
+        because both captures consume the same kernel writer state, but
+        it's worth pinning down expected behavior."""
+        from Tensile.Components.ScheduleCapture import _canonical_render
+        from rocisa.instruction import DSLoadB128
+        from rocisa.container import vgpr
+
+        sym = DSLoadB128(dst=vgpr("ValuA_X0_I0", 4), src=vgpr(0))
+        num = DSLoadB128(dst=vgpr(8, 4), src=vgpr(0))
+        # Different render-strings -> different identities. This is by
+        # design: a name-resolution table would be required to canonicalize
+        # them as equivalent, and that's a known follow-up if a real
+        # use case emerges.
+        assert _canonical_render(sym) != _canonical_render(num)
+
+
+# =============================================================================
 # Phase-0 missing-node defense in diagnose_missing_edge
 # =============================================================================
 
