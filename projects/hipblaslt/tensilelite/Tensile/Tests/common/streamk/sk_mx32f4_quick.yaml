@@ -96,6 +96,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - SourceSwap: [1]
         - StreamK: [3]
+        - UseSubtileImpl: [1] # TODO: enable subtile
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

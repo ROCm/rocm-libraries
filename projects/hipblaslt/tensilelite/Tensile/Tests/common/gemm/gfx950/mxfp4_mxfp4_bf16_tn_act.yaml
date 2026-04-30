@@ -74,6 +74,7 @@ BenchmarkProblems:
         - LdsPadA: [4]
         - LdsPadB: [4]
         - WorkGroupMapping: [64]
+        - UseSubtileImpl: [1] # TODO: enable subtile
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
