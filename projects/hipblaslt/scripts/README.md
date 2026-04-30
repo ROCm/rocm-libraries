@@ -4,7 +4,7 @@ For full build prerequisites and installation, see the [project README](../READM
 
 ## run_tensile_logic_check.py
 
-Runs **TensileLogic --check-all** on the library logic YAMLs (same check as the pre-build gate). Cross-platform (Windows and Unix).
+Runs **TensileLogic --check-all** on the library logic YAMLs (same check as the pre-build gate). This file is cross-platform (Windows and Unix).
 
 ### How to run
 
