@@ -58,24 +58,23 @@ template <typename AsDataType_,
           ck_tile::index_t NumDimM_,
           ck_tile::index_t NumDimN_,
           ck_tile::index_t NumDimK_>
-struct BatchedContractionMultiABDProblem
-    : detail::BatchedContractionMultiABDBase<AsDataType_,
-                                             BsDataType_,
-                                             DsDataType_,
-                                             EDataType_,
-                                             NumDimG_,
-                                             NumDimM_,
-                                             NumDimN_,
-                                             NumDimK_>
+struct BatchedContractionMultiABDProblem : detail::BatchedContractionMultiABDBase<AsDataType_,
+                                                                                  BsDataType_,
+                                                                                  DsDataType_,
+                                                                                  EDataType_,
+                                                                                  NumDimG_,
+                                                                                  NumDimM_,
+                                                                                  NumDimN_,
+                                                                                  NumDimK_>
 {
     using Base = detail::BatchedContractionMultiABDBase<AsDataType_,
-                                                       BsDataType_,
-                                                       DsDataType_,
-                                                       EDataType_,
-                                                       NumDimG_,
-                                                       NumDimM_,
-                                                       NumDimN_,
-                                                       NumDimK_>;
+                                                        BsDataType_,
+                                                        DsDataType_,
+                                                        EDataType_,
+                                                        NumDimG_,
+                                                        NumDimM_,
+                                                        NumDimN_,
+                                                        NumDimK_>;
 
     using AsDataType = ck_tile::remove_cvref_t<AsDataType_>;
     using BsDataType = ck_tile::remove_cvref_t<BsDataType_>;

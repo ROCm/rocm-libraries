@@ -232,9 +232,10 @@ struct BatchedContractionKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_A_GridDescriptor_M_K(
-                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{},
-                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{}));
+                                       VectorSizeE>::
+                     Make_A_GridDescriptor_M_K(
+                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{},
+                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{}));
     using BGridDesc_N_K_ =
         decltype(TensorDescriptorUtils<NumDimG,
                                        NumDimM,
@@ -242,9 +243,10 @@ struct BatchedContractionKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_B_GridDescriptor_N_K(
-                                           std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{},
-                                           std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{}));
+                                       VectorSizeE>::
+                     Make_B_GridDescriptor_N_K(
+                         std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{},
+                         std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{}));
     using EGridDesc_M_N_ =
         decltype(TensorDescriptorUtils<NumDimG,
                                        NumDimM,
@@ -252,9 +254,10 @@ struct BatchedContractionKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_E_GridDescriptor_M_N(
-                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{},
-                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{}));
+                                       VectorSizeE>::
+                     Make_E_GridDescriptor_M_N(
+                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{},
+                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{}));
 
     AGridDesc_M_K_ a_grid_desc_m_k; ///< Tensor descriptor for A[M, K] with actual strides
     BGridDesc_N_K_ b_grid_desc_n_k; ///< Tensor descriptor for B[N, K] with actual strides
@@ -388,10 +391,9 @@ struct BatchedContractionKernel
     }
 
     template <typename GStrides>
-    CK_TILE_DEVICE static ck_tile::index_t
-    GetBatchOffset(ck_tile::index_t i_batch_flat,
-                   const ck_tile::index_t (&g_dims)[NumDimG],
-                   const GStrides& g_strides)
+    CK_TILE_DEVICE static ck_tile::index_t GetBatchOffset(ck_tile::index_t i_batch_flat,
+                                                          const ck_tile::index_t (&g_dims)[NumDimG],
+                                                          const GStrides& g_strides)
     {
         if constexpr(NumDimG == 1)
         {
@@ -687,7 +689,7 @@ struct BatchedContractionKernel
 
         std::array<const void*, NumDTensor> ds_batch_ptr;
         static_for<0, NumDTensor, 1>{}([&](auto i) {
-            using DDataType           = typename std::tuple_element<i.value, DsDataType>::type;
+            using DDataType = typename std::tuple_element<i.value, DsDataType>::type;
             const auto batch_offset_D =
                 GetBatchOffset(i_batch_flat, kargs.G_dims, kargs.batch_strides_Ds[i]);
             ds_batch_ptr[i] = static_cast<const DDataType*>(kargs.ds_ptr[i]) + batch_offset_D;

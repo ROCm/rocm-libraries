@@ -32,19 +32,19 @@ struct BatchedContractionMultiABDHostArgs
     using BDims = std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>;
     using EDims = std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>;
 
-    CK_TILE_HOST BatchedContractionMultiABDHostArgs(
-        const std::array<const void*, NumATensor>& as_ptr_,
-        const std::array<const void*, NumBTensor>& bs_ptr_,
-        const std::array<const void*, NumDTensor>& ds_ptr_,
-        void* e_ptr_,
-        const std::array<ADims, NumATensor>& As_dims_,
-        const std::array<BDims, NumBTensor>& Bs_dims_,
-        const std::array<EDims, NumDTensor>& Ds_dims_,
-        const EDims& E_dims_,
-        const std::array<ADims, NumATensor>& As_strides_,
-        const std::array<BDims, NumBTensor>& Bs_strides_,
-        const std::array<EDims, NumDTensor>& Ds_strides_,
-        const EDims& E_strides_)
+    CK_TILE_HOST
+    BatchedContractionMultiABDHostArgs(const std::array<const void*, NumATensor>& as_ptr_,
+                                       const std::array<const void*, NumBTensor>& bs_ptr_,
+                                       const std::array<const void*, NumDTensor>& ds_ptr_,
+                                       void* e_ptr_,
+                                       const std::array<ADims, NumATensor>& As_dims_,
+                                       const std::array<BDims, NumBTensor>& Bs_dims_,
+                                       const std::array<EDims, NumDTensor>& Ds_dims_,
+                                       const EDims& E_dims_,
+                                       const std::array<ADims, NumATensor>& As_strides_,
+                                       const std::array<BDims, NumBTensor>& Bs_strides_,
+                                       const std::array<EDims, NumDTensor>& Ds_strides_,
+                                       const EDims& E_strides_)
         : as_ptr(as_ptr_),
           bs_ptr(bs_ptr_),
           ds_ptr(ds_ptr_),
@@ -124,9 +124,10 @@ struct BatchedContractionMultiABDKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_A_GridDescriptor_M_K(
-                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{},
-                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{}));
+                                       VectorSizeE>::
+                     Make_A_GridDescriptor_M_K(
+                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{},
+                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimK>{}));
     using BGridDesc_N_K_ =
         decltype(TensorDescriptorUtils<NumDimG,
                                        NumDimM,
@@ -134,9 +135,10 @@ struct BatchedContractionMultiABDKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_B_GridDescriptor_N_K(
-                                           std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{},
-                                           std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{}));
+                                       VectorSizeE>::
+                     Make_B_GridDescriptor_N_K(
+                         std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{},
+                         std::array<ck_tile::index_t, NumDimG + NumDimN + NumDimK>{}));
     using EGridDesc_M_N_ =
         decltype(TensorDescriptorUtils<NumDimG,
                                        NumDimM,
@@ -144,9 +146,10 @@ struct BatchedContractionMultiABDKernelArgs
                                        NumDimK,
                                        VectorSizeA,
                                        VectorSizeB,
-                                       VectorSizeE>::Make_E_GridDescriptor_M_N(
-                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{},
-                                           std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{}));
+                                       VectorSizeE>::
+                     Make_E_GridDescriptor_M_N(
+                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{},
+                         std::array<ck_tile::index_t, NumDimG + NumDimM + NumDimN>{}));
 
     std::array<AGridDesc_M_K_, NumATensor> as_grid_desc_m_k;
     std::array<BGridDesc_N_K_, NumBTensor> bs_grid_desc_n_k;
@@ -272,10 +275,9 @@ struct BatchedContractionMultiABDKernel
     }
 
     template <typename GStrides>
-    CK_TILE_DEVICE static ck_tile::index_t
-    GetBatchOffset(ck_tile::index_t i_batch_flat,
-                   const ck_tile::index_t (&g_dims)[NumDimG],
-                   const GStrides& g_strides)
+    CK_TILE_DEVICE static ck_tile::index_t GetBatchOffset(ck_tile::index_t i_batch_flat,
+                                                          const ck_tile::index_t (&g_dims)[NumDimG],
+                                                          const GStrides& g_strides)
     {
         if constexpr(NumDimG == 1)
         {
@@ -394,20 +396,20 @@ struct BatchedContractionMultiABDKernel
         EpiloguePipeline{}(e_block_window, c_block_tile, ds_block_windows, smem_ptr);
     }
 
-    CK_TILE_HOST static KernelArgs MakeKernelArgs(
-        const BatchedContractionMultiABDHostArgs<NumDimG,
-                                                 NumDimM,
-                                                 NumDimN,
-                                                 NumDimK,
-                                                 NumATensor,
-                                                 NumBTensor,
-                                                 NumDTensor>& host_args)
+    CK_TILE_HOST static KernelArgs
+    MakeKernelArgs(const BatchedContractionMultiABDHostArgs<NumDimG,
+                                                            NumDimM,
+                                                            NumDimN,
+                                                            NumDimK,
+                                                            NumATensor,
+                                                            NumBTensor,
+                                                            NumDTensor>& host_args)
     {
         KernelArgs kargs;
-        kargs.as_ptr  = host_args.as_ptr;
-        kargs.bs_ptr  = host_args.bs_ptr;
-        kargs.ds_ptr  = host_args.ds_ptr;
-        kargs.e_ptr   = host_args.e_ptr;
+        kargs.as_ptr = host_args.as_ptr;
+        kargs.bs_ptr = host_args.bs_ptr;
+        kargs.ds_ptr = host_args.ds_ptr;
+        kargs.e_ptr  = host_args.e_ptr;
 
         // Validate G dimensions are identical across all tensors (use first A tensor as reference)
         for(ck_tile::index_t i = 0; i < NumDimG; ++i)
@@ -559,9 +561,8 @@ struct BatchedContractionMultiABDKernel
             bs_batch_ptr[i] = static_cast<const BiDataType*>(kargs.bs_ptr[i]) + batch_offset;
         });
 
-        EDataType* e_ptr =
-            static_cast<EDataType*>(kargs.e_ptr) +
-            GetBatchOffset(i_batch_flat, kargs.G_dims, kargs.batch_strides_E);
+        EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr) +
+                           GetBatchOffset(i_batch_flat, kargs.G_dims, kargs.batch_strides_E);
 
         std::array<const void*, NumDTensor> ds_batch_ptr;
         static_for<0, NumDTensor, 1>{}([&](auto i) {

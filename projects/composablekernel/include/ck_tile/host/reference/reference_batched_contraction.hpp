@@ -79,9 +79,9 @@ CK_TILE_HOST std::size_t decode_strided_offset(const std::vector<std::size_t>& s
                                                const std::vector<ck_tile::index_t>& dim_sizes,
                                                ck_tile::index_t stride_offset = 0)
 {
-    std::size_t offset        = 0;
-    ck_tile::index_t temp     = flat_idx;
-    const auto num_dims       = static_cast<ck_tile::index_t>(dim_sizes.size());
+    std::size_t offset    = 0;
+    ck_tile::index_t temp = flat_idx;
+    const auto num_dims   = static_cast<ck_tile::index_t>(dim_sizes.size());
 
     for(ck_tile::index_t i = num_dims; i > 0; --i)
     {

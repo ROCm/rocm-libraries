@@ -24,17 +24,16 @@ class ContractionMultiABDProfiler
         return inst;
     }
 
-    void benchmark(
-        ContractionMultiABDProblem& problem,
-        std::function<float(
-            const ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
-                                                              NumDimM,
-                                                              NumDimN,
-                                                              NumDimK,
-                                                              NumATensor,
-                                                              NumBTensor,
-                                                              NumDTensor>&,
-            const ck_tile::stream_config&)> kernel_func)
+    void
+    benchmark(ContractionMultiABDProblem& problem,
+              std::function<float(const ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                                                    NumDimM,
+                                                                                    NumDimN,
+                                                                                    NumDimK,
+                                                                                    NumATensor,
+                                                                                    NumBTensor,
+                                                                                    NumDTensor>&,
+                                  const ck_tile::stream_config&)> kernel_func)
     {
         const auto g_dims = problem.g_dims_;
         const auto m_dims = problem.m_dims_;
@@ -94,9 +93,9 @@ class ContractionMultiABDProfiler
                                                                      NumATensor,
                                                                      NumBTensor,
                                                                      NumDTensor>;
-        using ADims = typename HostArgs::ADims;
-        using BDims = typename HostArgs::BDims;
-        using EDims = typename HostArgs::EDims;
+        using ADims    = typename HostArgs::ADims;
+        using BDims    = typename HostArgs::BDims;
+        using EDims    = typename HostArgs::EDims;
 
         std::array<const void*, NumATensor> as_ptr = {a0_dev.GetDeviceBuffer(),
                                                       a1_dev.GetDeviceBuffer()};
