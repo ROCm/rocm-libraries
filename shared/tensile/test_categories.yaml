@@ -1,5 +1,6 @@
 # Tensile Test Categories Configuration
 # Aligned with Math CI and pytest markers in pytest.ini
+# Includes both pytest tests and HostLibraryTests (TensileTests GTest binary)
 
 test_categories:
   quick:
@@ -14,11 +15,16 @@ test_categories:
       - "unit"
 
   standard:
-    description: "Pre-checkin validation (target: < 30 min)"
+    description: "Pre-checkin validation: unit tests + HostLibraryTests (target: < 30 min)"
     pytest_markers:
-      - "pre_checkin"
+      - "unit"
     exclude_markers:
       - "disabled"
+    # Also run TensileTests binary (HostLibraryTests) for standard
+    gtest_binaries:
+      - name: "TensileTests"
+        path: "bin/TensileTests"
+        filter: "--gtest_filter=-*Extended*"
     labels:
       - "standard"
       - "pr"
@@ -26,20 +32,25 @@ test_categories:
       - "pre_checkin"
 
   comprehensive:
-    description: "Extended/nightly tests (target: < 4 hours)"
+    description: "Extended/nightly tests + HostLibraryTests with Extended (target: < 4 hours)"
     pytest_markers:
       - "extended"
       - "nightly"
     exclude_markers:
       - "disabled"
       - "weekly"
+    # Run TensileTests with Extended tests included
+    gtest_binaries:
+      - name: "TensileTests"
+        path: "bin/TensileTests"
+        filter: ""  # Run all tests including Extended
     labels:
       - "comprehensive"
       - "nightly"
       - "extended"
 
   full:
-    description: "Complete test suite including weekly"
+    description: "Complete test suite including weekly + all HostLibraryTests"
     pytest_markers:
       - "pre_checkin"
       - "extended"
@@ -47,6 +58,10 @@ test_categories:
       - "weekly"
     exclude_markers:
       - "disabled"
+    gtest_binaries:
+      - name: "TensileTests"
+        path: "bin/TensileTests"
+        filter: ""
     labels:
       - "full"
       - "weekly"
