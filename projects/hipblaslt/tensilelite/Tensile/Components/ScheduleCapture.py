@@ -1018,23 +1018,39 @@ def _swait_drains(swait_node, counter: str):
     return v
 
 
-def waits_in_window(capture, start: GraphPosition, end: GraphPosition,
+def _all_nodes_in_order(subj_graph):
+    """Yield every node in execution order across all bodies.
+
+    Used by the wait/barrier helpers below to walk cross-body windows
+    (e.g. producer in body=ML-1, consumer in body=ML). Per-body
+    `_graph_nodes` is already in stream order; bodies are enumerated in
+    `_BODY_BUILD_ORDER` which matches GraphPosition.loop_index ordering,
+    so concatenating yields a globally-correct stream.
+    """
+    for label in _BODY_BUILD_ORDER:
+        cap = subj_graph.captures.get(label) if subj_graph is not None else None
+        if cap is None or not hasattr(cap, '_graph_nodes'):
+            continue
+        for node in cap._graph_nodes:
+            yield node
+
+
+def waits_in_window(subj_graph, start: GraphPosition, end: GraphPosition,
                     *, counter=None, exclude_counter=None):
     """Return SWaitCnt nodes (as GraphNodes) whose position is in [start, end)
     and whose counter field constrains the requested counter.
 
+    Walks across bodies via `subj_graph.captures` so cross-body windows
+    (producer in body=ML-1, consumer in body=ML) include SWaits from
+    every body that overlaps the window.
+
     Either `counter` or `exclude_counter` may be passed, not both. If both
     are None, returns all SWaits in the window regardless of counter.
-
-    Note: this helper takes a `capture` argument that is ALREADY a
-    LoopBodyCapture and a list of GraphNodes built over it; in practice
-    we walk the graph's nodes filtered by body. Implementation lives in
-    the graph builder's per-body cache.
     """
     if counter is not None and exclude_counter is not None:
         raise ValueError("counter and exclude_counter are mutually exclusive")
     out = []
-    for node in capture._graph_nodes if hasattr(capture, "_graph_nodes") else []:
+    for node in _all_nodes_in_order(subj_graph):
         if node.category != SWAIT_CATEGORY:
             continue
         if not (start <= node.position < end):
@@ -1050,12 +1066,15 @@ def waits_in_window(capture, start: GraphPosition, end: GraphPosition,
     return out
 
 
-def barriers_in_window(capture, start: GraphPosition, end: GraphPosition):
+def barriers_in_window(subj_graph, start: GraphPosition, end: GraphPosition):
     """Return SBarrier nodes whose position is in (start, end) — exclusive on
     both ends. A barrier at the producer's position doesn't cover the producer;
-    a barrier at the consumer's position doesn't precede the consumer."""
+    a barrier at the consumer's position doesn't precede the consumer.
+
+    Walks across bodies for the same reason as waits_in_window.
+    """
     out = []
-    for node in capture._graph_nodes if hasattr(capture, "_graph_nodes") else []:
+    for node in _all_nodes_in_order(subj_graph):
         if node.category != SBARRIER_CATEGORY:
             continue
         if start < node.position < end:
@@ -1964,16 +1983,20 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
         return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
 
     # Phase 2 — independent checks. Run all; collect failures.
+    # All wait/barrier helpers walk subj_graph cross-body: producer in
+    # body=ML-1 with consumer in body=ML must see the FIFO state from
+    # body=ML-1 forward. Passing only the consumer's body capture would
+    # exclude the producer from the simulated queue and mis-classify
+    # cross-body edges.
     failures: list = []
-    capture = subj_graph.captures[c_node.body_label]
 
     # Determine the counter that the producer requires.
     expected_counter = counter_for(p_node)
 
     # Look at SWaits in the window between producer.position and consumer.position.
-    waits = waits_in_window(capture, p_node.position, c_node.position,
+    waits = waits_in_window(subj_graph, p_node.position, c_node.position,
                             counter=expected_counter)
-    waits_other = waits_in_window(capture, p_node.position, c_node.position,
+    waits_other = waits_in_window(subj_graph, p_node.position, c_node.position,
                                   exclude_counter=expected_counter)
 
     wait_failure_emitted = False
@@ -1996,11 +2019,11 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
         wait_failure_emitted = True
     else:
         # At least one wait on the right counter. Check if any drains the producer.
-        if not _any_drains(waits, p_node, capture):
-            insufficient = _first_insufficient(waits, p_node, capture)
+        if not _any_drains(waits, p_node, subj_graph):
+            insufficient = _first_insufficient(waits, p_node, subj_graph)
             if insufficient is not None:
                 # Compute queue depth at the wait's position for diagnostic.
-                depth = _queue_depth_at(insufficient, p_node, capture)
+                depth = _queue_depth_at(insufficient, p_node, subj_graph)
                 cv = _swait_drains(insufficient, expected_counter)
                 failures.append(WaitInsufficientFailure(
                     producer=p_node,
@@ -2027,9 +2050,9 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
     # user's wait fix will cascade-restore barrier semantics on the next build.
     if (ref_edge.edge_kind in ("lr_to_gr_lds_reuse", "gr_to_lr_lds_reuse")
             and not wait_failure_emitted):
-        last_drain = _last_drain(waits, p_node, capture)
+        last_drain = _last_drain(waits, p_node, subj_graph)
         if last_drain is not None:
-            barriers = barriers_in_window(capture,
+            barriers = barriers_in_window(subj_graph,
                                           start=last_drain.position,
                                           end=c_node.position)
             if not barriers:
@@ -2059,12 +2082,16 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
     return failures
 
 
-def _queue_depth_at(wait_node, producer, capture) -> int:
-    """Replay the per-counter FIFO from start of body to wait_node.position
-    and return the queue depth at the wait's moment for the producer's counter."""
+def _queue_depth_at(wait_node, producer, subj_graph) -> int:
+    """Replay the per-counter FIFO from start of the graph to wait_node.position
+    and return the queue depth at the wait's moment for the producer's counter.
+
+    Walks across all bodies in execution order so cross-body queue state
+    is preserved (matches build_dataflow_graph's persistent-queue model).
+    """
     counter = counter_for(producer)
     depth = 0
-    for n in capture._graph_nodes:
+    for n in _all_nodes_in_order(subj_graph):
         if n.position >= wait_node.position:
             break
         if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
@@ -2079,12 +2106,13 @@ def _queue_depth_at(wait_node, producer, capture) -> int:
     return depth
 
 
-def _producer_queue_position(producer, capture) -> int:
+def _producer_queue_position(producer, subj_graph) -> int:
     """Return the producer's position in the per-counter FIFO at the moment
-    it joined (zero-indexed from the queue head AT THAT MOMENT)."""
+    it joined (zero-indexed from the queue head AT THAT MOMENT). Cross-body
+    aware via _all_nodes_in_order."""
     counter = counter_for(producer)
     queue_size = 0
-    for n in capture._graph_nodes:
+    for n in _all_nodes_in_order(subj_graph):
         if n is producer:
             return queue_size  # producer enters at this index
         if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
@@ -2098,20 +2126,23 @@ def _producer_queue_position(producer, capture) -> int:
     return queue_size
 
 
-def _wait_drains_producer(wait_node, producer, capture) -> bool:
+def _wait_drains_producer(wait_node, producer, subj_graph) -> bool:
     """True if `wait_node` drains `producer` — i.e. the wait's counter cap
     is low enough that the producer's slot in the FIFO falls inside the
-    drained range at the wait's moment."""
+    drained range at the wait's moment.
+
+    Walks the WHOLE-graph stream (cross-body) so a producer in body=ML-1
+    and a wait in body=ML correctly see each other in the simulation —
+    same persistent-queue model as build_dataflow_graph.
+    """
     counter = counter_for(producer)
     cap_value = _swait_drains(wait_node, counter)
     if cap_value is None:
         return False
-    # Walk the stream up to (and including) wait_node, simulating the FIFO.
-    # Track drained producers by id() since GraphNode is mutable (not hashable).
     queue = []        # list of producer GraphNodes
     drained_ids = set()
     target_id = id(producer)
-    for n in capture._graph_nodes:
+    for n in _all_nodes_in_order(subj_graph):
         if n.position > wait_node.position:
             break
         if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
@@ -2126,22 +2157,22 @@ def _wait_drains_producer(wait_node, producer, capture) -> bool:
     return target_id in drained_ids
 
 
-def _any_drains(waits, producer, capture) -> bool:
-    return any(_wait_drains_producer(w, producer, capture) for w in waits)
+def _any_drains(waits, producer, subj_graph) -> bool:
+    return any(_wait_drains_producer(w, producer, subj_graph) for w in waits)
 
 
-def _first_insufficient(waits, producer, capture):
+def _first_insufficient(waits, producer, subj_graph):
     """Return the first wait (in stream order) that does NOT drain the producer
     despite drainable counter. None if every wait drains, or no wait applies."""
     for w in waits:
-        if not _wait_drains_producer(w, producer, capture):
+        if not _wait_drains_producer(w, producer, subj_graph):
             return w
     return None
 
 
-def _last_drain(waits, producer, capture):
+def _last_drain(waits, producer, subj_graph):
     """Return the latest wait that drained the producer, else None."""
-    drainers = [w for w in waits if _wait_drains_producer(w, producer, capture)]
+    drainers = [w for w in waits if _wait_drains_producer(w, producer, subj_graph)]
     if not drainers:
         return None
     return max(drainers, key=lambda w: w.position)
