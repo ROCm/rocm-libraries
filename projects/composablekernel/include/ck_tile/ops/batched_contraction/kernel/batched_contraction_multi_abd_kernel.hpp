@@ -341,7 +341,7 @@ struct BatchedContractionMultiABDKernel
         EpiloguePipeline{}(e_block_window, c_block_tile, ds_block_windows, smem_ptr);
     }
 
-    CK_TILE_HOST static constexpr KernelArgs MakeKernelArgs(
+    CK_TILE_HOST static KernelArgs MakeKernelArgs(
         const BatchedContractionMultiABDHostArgs<NumATensor, NumBTensor, NumDTensor>& host_args)
     {
         const auto expected_A_dims = NumDimG + NumDimM + NumDimK;
