@@ -112,6 +112,7 @@ BenchmarkProblems:
           # 6. Small size with batch > 1
           ########################################
           - Exact: [32, 32, 8, 32]
+          - Exact: [32, 32, 8, 256]
 
           ########################################
           # 7. Medium size that doesn't divide evenly on CUs (stream-k)
