@@ -28,6 +28,6 @@
 
 #include <string>
 
-bool hipsparse_parse_data(int& argc, char** argv, const std::string& default_file = "");
+bool hipsparse_parse_data(const std::string& default_file = "");
 
 #endif // HIPSPARSE_PARSE_DATA_HPP
