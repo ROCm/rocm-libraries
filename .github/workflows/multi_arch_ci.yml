@@ -3,22 +3,14 @@
 
 # Multi-Arch CI for rocm-libraries
 #
-# This workflow replicates TheRock's multi-arch CI pipeline for rocm-libraries.
-# Unlike therock-ci.yml which builds per-project, this uses TheRock's sharded
-# multi-stage build pipeline (foundation -> compiler-runtime -> math-libs).
+# This workflow replicates TheRock's multi-arch CI pipeline by calling
+# TheRock's reusable workflows directly. It provides sharded, multi-stage
+# builds with per-architecture testing.
 #
-# Key features:
-# - Sharded builds across GPU architectures
-# - Stage-based artifact caching via S3
-# - Support for prebuilt stages to skip certain build stages
-#
-# Directory structure during build:
-# - /workspace (root)
-#   - rocm-libraries/ (this repo, checked out first)
-#   - TheRock/ (TheRock repo, checked out second)
-#     - build/ (cmake build directory)
-#
-# CMake is invoked with -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../../rocm-libraries
+# Key differences from therock-ci.yml:
+# - Uses TheRock's multi-arch sharded build pipeline (foundation -> compiler-runtime -> math-libs)
+# - Supports prebuilt stages to skip certain build stages
+# - Better parallelization across GPU architectures
 
 name: Multi-Arch CI
 
@@ -70,278 +62,72 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
 
-env:
-  THEROCK_REF: 88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
-
 jobs:
   setup:
-    name: Setup
-    runs-on: ubuntu-24.04
-    outputs:
-      enable_build_jobs: ${{ steps.configure.outputs.enable_build_jobs }}
-      linux_build_config: ${{ steps.configure.outputs.linux_build_config }}
-      windows_build_config: ${{ steps.configure.outputs.windows_build_config }}
-      test_type: ${{ steps.configure.outputs.test_type }}
-      linux_test_labels: ${{ steps.configure.outputs.linux_test_labels }}
-      windows_test_labels: ${{ steps.configure.outputs.windows_test_labels }}
-      rocm_package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
-    steps:
-      - name: Checkout rocm-libraries
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          path: rocm-libraries
-          fetch-depth: 2
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
+    with:
+      build_variant: "release"
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || '' }}
+      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || '' }}
+      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
+      windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
+      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      repository: ${{ github.repository }}
+      ref: ${{ github.sha }}
 
-      - name: Checkout TheRock
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: ${{ env.THEROCK_REF }}
-          path: TheRock
-
-      - name: Configure CI options
-        id: configure
-        working-directory: TheRock
-        env:
-          BUILD_VARIANT: release
-          LINUX_AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families }}
-          WINDOWS_AMDGPU_FAMILIES: ${{ inputs.windows_amdgpu_families }}
-          LINUX_TEST_LABELS: ${{ inputs.linux_test_labels }}
-          WINDOWS_TEST_LABELS: ${{ inputs.windows_test_labels }}
-          PREBUILT_STAGES: ${{ inputs.prebuilt_stages }}
-          BASELINE_RUN_ID: ${{ inputs.baseline_run_id }}
-        run: python ./build_tools/github_actions/configure_multi_arch_ci.py
-
-      - name: Compute package version
-        id: rocm_package_version
-        working-directory: TheRock
-        run: |
-          python ./build_tools/compute_rocm_package_version.py --release-type=dev
-
-  # ==========================================================================
-  # Linux Build Pipeline
-  # ==========================================================================
-  linux_build:
-    name: Linux Build (${{ matrix.stage }}${{ matrix.amdgpu_family && format(' - {0}', matrix.amdgpu_family) || '' }})
+  linux_build_and_test:
+    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
     needs: setup
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    runs-on: azure-linux-scale-rocm
-    timeout-minutes: 480
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
+    secrets: inherit
+    with:
+      build_config: ${{ needs.setup.outputs.linux_build_config }}
+      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
+      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      test_type: ${{ needs.setup.outputs.test_type }}
     permissions:
       contents: read
       id-token: write
-    container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
-      options: -v /runner/config:/home/awsconfig/
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Generic stages (no per-arch)
-          - stage: foundation
-            amdgpu_family: ""
-            needs_stages: ""
-          - stage: compiler-runtime
-            amdgpu_family: ""
-            needs_stages: "foundation"
-          # Per-arch stages - expand based on build config
-          # TODO: Dynamically generate matrix from linux_build_config
-          - stage: math-libs
-            amdgpu_family: gfx94X
-            needs_stages: "compiler-runtime"
-    env:
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
-      STAGE_NAME: ${{ matrix.stage }}
-      AMDGPU_FAMILIES: ${{ matrix.amdgpu_family }}
-      BUILD_DIR: TheRock/build
-      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
-      CACHE_DIR: ${{ github.workspace }}/.container-cache
-      TEATIME_FORCE_INTERACTIVE: 0
-    steps:
-      - name: Checkout rocm-libraries
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          path: rocm-libraries
 
-      - name: Checkout TheRock
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: ${{ env.THEROCK_REF }}
-          path: TheRock
+  windows_build_and_test:
+    name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
+    needs: setup
+    if: >-
+      ${{
+        needs.setup.outputs.windows_build_config != '' &&
+        needs.setup.outputs.enable_build_jobs == 'true'
+      }}
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
+    secrets: inherit
+    with:
+      build_config: ${{ needs.setup.outputs.windows_build_config }}
+      test_labels: ${{ needs.setup.outputs.windows_test_labels }}
+      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      test_type: ${{ needs.setup.outputs.test_type }}
+    permissions:
+      contents: read
+      id-token: write
 
-      - name: Install python deps
-        run: pip install -r TheRock/requirements.txt
-
-      - name: Adjust git config
-        run: |
-          git config --global --add safe.directory ${{ github.workspace }}/rocm-libraries
-          git config --global --add safe.directory ${{ github.workspace }}/TheRock
-          git config fetch.parallel 10
-
-      - name: Setup ccache
-        working-directory: TheRock
-        run: |
-          ./build_tools/setup_ccache.py \
-            --config-preset "github-oss-dev" \
-            --dir "$(dirname $CCACHE_CONFIGPATH)" \
-            --local-path "$CACHE_DIR/ccache"
-
-      - name: Runner health status
-        working-directory: TheRock
-        run: ./build_tools/health_status.py
-
-      - name: Pull DVC files for rocm-libraries
-        working-directory: rocm-libraries
-        run: |
-          if command -v dvc &> /dev/null; then
-            LOGNAME=github-runner dvc pull -v || true
-          fi
-
-      - name: Fetch inbound artifacts
-        working-directory: TheRock
-        run: |
-          python build_tools/artifact_manager.py fetch \
-            --run-id=${{ github.run_id }} \
-            --stage="${STAGE_NAME}" \
-            --amdgpu-families="${AMDGPU_FAMILIES}" \
-            --output-dir="build" \
-            --bootstrap
-
-      - name: Fetch sources
-        working-directory: TheRock
-        timeout-minutes: 30
-        run: |
-          ./build_tools/fetch_sources.py \
-            --stage ${STAGE_NAME} \
-            --jobs 12 \
-            --depth 1 \
-            --no-include-rocm-libraries
-
-      - name: Get stage configuration
-        id: stage_config
-        working-directory: TheRock
-        run: |
-          python build_tools/configure_stage.py \
-            --stage="${STAGE_NAME}" \
-            --amdgpu-families="${AMDGPU_FAMILIES}" \
-            --dist-amdgpu-families="${{ fromJSON(needs.setup.outputs.linux_build_config).dist_amdgpu_families }}" \
-            --manylinux \
-            --gha-output
-
-      - name: Install stage python deps
-        if: ${{ steps.stage_config.outputs.pip_install_cmd }}
-        run: pip install ${{ steps.stage_config.outputs.pip_install_cmd }}
-
-      - name: Configure
-        working-directory: TheRock
-        run: |
-          cmake -B build -S . -GNinja \
-            -DTHEROCK_PACKAGE_VERSION=${{ needs.setup.outputs.rocm_package_version }} \
-            -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }}/rocm-libraries \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            ${{ steps.stage_config.outputs.cmake_args }}
-
-      - name: Build stage
-        working-directory: TheRock
-        run: |
-          python build_tools/memory_monitor.py --phase Build -- \
-            cmake --build build --target stage-${STAGE_NAME} therock-artifacts -- -k 0
-
-      - name: Report
-        if: ${{ !cancelled() }}
-        run: |
-          echo "CCache Stats:"
-          ccache -s -v
-          echo "Artifacts:"
-          ls -lh TheRock/build/artifacts/*.tar.xz 2>/dev/null || echo "No artifacts found"
-
-      - name: Test Packaging
-        working-directory: TheRock
-        run: ctest --test-dir build --output-on-failure
-
-      - name: Configure AWS credentials
-        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
-        with:
-          aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
-
-      - name: Push stage artifacts
-        if: ${{ !github.event.pull_request.head.repo.fork }}
-        working-directory: TheRock
-        run: |
-          python build_tools/artifact_manager.py push \
-            --run-id=${{ github.run_id }} \
-            --stage="${STAGE_NAME}" \
-            --build-dir=build
-
-  # ==========================================================================
-  # Linux Tests
-  # ==========================================================================
-  linux_test:
-    name: Linux Test (${{ matrix.family_info.amdgpu_family }})
-    needs: [setup, linux_build]
-    if: ${{ !failure() && !cancelled() }}
-    runs-on: ${{ matrix.family_info.test_runs_on }}
-    strategy:
-      fail-fast: false
-      matrix:
-        family_info: ${{ fromJSON(needs.setup.outputs.linux_build_config).per_family_info }}
-    steps:
-      - name: Checkout TheRock
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: ${{ env.THEROCK_REF }}
-
-      - name: Configure AWS credentials
-        if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
-        with:
-          aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
-
-      - name: Fetch test artifacts
-        run: |
-          pip install boto3
-          python build_tools/artifact_manager.py fetch \
-            --run-id=${{ github.run_id }} \
-            --amdgpu-families="${{ matrix.family_info.amdgpu_family }}" \
-            --output-dir=build
-
-      - name: Run tests
-        env:
-          TEST_LABELS: ${{ needs.setup.outputs.linux_test_labels }}
-          TEST_TYPE: ${{ needs.setup.outputs.test_type }}
-        run: |
-          python build_tools/github_actions/run_tests.py \
-            --build-dir=build \
-            --test-type="${TEST_TYPE}" \
-            --test-labels="${TEST_LABELS}"
-
-  # ==========================================================================
-  # CI Summary
-  # ==========================================================================
   ci_summary:
     name: CI Summary
     if: always()
     needs:
       - setup
-      - linux_build
-      - linux_test
+      - linux_build_and_test
+      - windows_build_and_test
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout TheRock
+      - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ROCm/TheRock
-          ref: ${{ env.THEROCK_REF }}
+          repository: "ROCm/TheRock"
+          ref: 88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
