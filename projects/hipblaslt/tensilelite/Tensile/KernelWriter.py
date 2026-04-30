@@ -8322,6 +8322,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.addSgprVarToPool("SrdC")
     if kernel["StreamK"] and kernel["StreamKAtomic"] == 0:
       self.addSgprVarToPool("SrdWS")
+
+    if kernel["BAddrInterleave"]:
+      self.defineSgpr("BInterleaveG", 1)
+      self.addSgprVarToPool("BInterleaveG")
+    if kernel["KRingShift"]:
+      self.defineSgpr("KRingShift", 1)
+      self.addSgprVarToPool("KRingShift")
     # gfx1250 frees the SK constant SGPRs later in moveStreamKConstantsToVgpr
     # after their values have been copied to VGPRs. Freeing them here would let
     # temp allocs clobber kernel arguments before they are copied.
