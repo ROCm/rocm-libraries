@@ -696,6 +696,11 @@ class Solution(collections.abc.Mapping):
         if bytesLoaded < numBytesMXSB:
           reject(state, printRejectionReason, "Unable to load MXSB scales using one load per wave")
 
+      for tc in ("MXSA", "MXSB"):
+        if state["ProblemType"]["MXBlock" + tc[-1]]:
+          for field in ("LSC", "LSP", "NumLoadsCoalesced", "NumLoadsPerpendicular", "NumTotalPackedLoads"):
+            state["%s%s" % (field, tc)] = 0
+
       if state["PrefetchGlobalRead"] not in [0, 2]:
         reject(state, printRejectionReason,
                "UseSubtileImpl=1 requires PrefetchGlobalRead 0 or 2, got %d" % state["PrefetchGlobalRead"])
