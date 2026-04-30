@@ -31,6 +31,7 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 #define DEBUG_TYPE "StinkyBuildImplicitDependencyPass"
 
@@ -149,10 +150,7 @@ static std::unordered_set<const BasicBlock*> collectOptLevel3MemTokenCheckBlocks
     return checkBlocks;
 }
 
-static void checkConsistentMemTokens(const BasicBlock& bb,
-                                     const std::unordered_set<const BasicBlock*>& checkBlocks) {
-    if (!checkBlocks.count(&bb)) return;
-
+static void checkConsistentMemTokens(const BasicBlock& bb) {
     bool hasWithToken = false;
     bool hasWithoutToken = false;
 
@@ -182,7 +180,8 @@ static void checkConsistentMemTokens(const BasicBlock& bb,
                   << ")\n";
     }
 
-    assert(false && "inconsistent MemTokenData across ds_load/ds_store/tensor_load in basic block");
+    report_fatal_error(
+        "inconsistent MemTokenData across ds_load/ds_store/tensor_load in basic block");
 }
 
 void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
@@ -193,7 +192,7 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
         return;
     }
 
-    checkConsistentMemTokens(bb, checkBlocks);
+    checkConsistentMemTokens(bb);
 
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());

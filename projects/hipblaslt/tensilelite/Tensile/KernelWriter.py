@@ -2217,7 +2217,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             elif curPackIdx >= numPack:
               # when the number of inserted packs is >= the number of desired packs
               # check the last 2 inserted packs to see if we need to add extra instructions after the last inersted pack.
-              remainLatency = len(instPackLast)
+              remainLatency = 2 if len(instPackLast) > 0 else 0
               # Per-type pop counters: track how many packs of each type have been
               # popped (= how many extras of that type have already been accounted for).
               popCountA = popCountB = popCountM = 0
