@@ -1696,7 +1696,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd final : ConvOclDirectFwdLegacyEx
                                   const LegacyPerformanceConfig&) const override;
 };
 
-
 struct MIOPEN_INTERNALS_EXPORT ConvBinWinograd3x3U final : ConvSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<ConvBinWinograd3x3U>(); }
