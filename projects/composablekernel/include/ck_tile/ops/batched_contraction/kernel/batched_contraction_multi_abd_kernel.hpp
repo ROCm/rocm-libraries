@@ -103,10 +103,10 @@ struct BatchedContractionMultiABDKernelArgs
     std::array<const void*, NumDTensor> ds_ptr;
     void* e_ptr;
 
-    ck_tile::index_t M_dims[NumDimM];
-    ck_tile::index_t N_dims[NumDimN];
-    ck_tile::index_t K_dims[NumDimK];
-    ck_tile::index_t G_dims[NumDimG];
+    std::array<ck_tile::index_t, NumDimM> M_dims;
+    std::array<ck_tile::index_t, NumDimN> N_dims;
+    std::array<ck_tile::index_t, NumDimK> K_dims;
+    std::array<ck_tile::index_t, NumDimG> G_dims;
 
     std::array<std::array<ck_tile::index_t, NumDimG>, NumATensor> batch_strides_As;
     std::array<std::array<ck_tile::index_t, NumDimG>, NumBTensor> batch_strides_Bs;
@@ -213,9 +213,14 @@ struct BatchedContractionMultiABDKernel
                                                             GemmPipeline::GetVectorSizeB(),
                                                             EpiloguePipeline::GetVectorSizeC()>;
 
-    CK_TILE_HOST static constexpr auto GetKernelName()
+    [[nodiscard]] CK_TILE_HOST static const std::string GetKernelName()
     {
-        return "batched_contraction_multi_abd_kernel";
+        return concat('_',
+                      "batched_contraction_multi_abd_kernel",
+                      "dims",
+                      concat('x', NumDimG, NumDimM, NumDimN, NumDimK),
+                      "tensors",
+                      concat('x', NumATensor, NumBTensor, NumDTensor));
     }
 
     CK_TILE_HOST static constexpr bool IsSupportedArguments(const KernelArgs& kargs)
@@ -261,9 +266,10 @@ struct BatchedContractionMultiABDKernel
     }
 
     template <typename GStrides>
-    CK_TILE_DEVICE static ck_tile::index_t GetBatchOffset(ck_tile::index_t i_batch_flat,
-                                                          const ck_tile::index_t (&g_dims)[NumDimG],
-                                                          const GStrides& g_strides)
+    CK_TILE_DEVICE static ck_tile::index_t
+    GetBatchOffset(ck_tile::index_t i_batch_flat,
+                   const std::array<ck_tile::index_t, NumDimG>& g_dims,
+                   const GStrides& g_strides)
     {
         if constexpr(NumDimG == 1)
         {

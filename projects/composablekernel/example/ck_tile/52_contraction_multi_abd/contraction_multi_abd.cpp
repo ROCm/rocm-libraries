@@ -8,12 +8,13 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <utility>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/host.hpp"
-#include "ck_tile/ops/batched_contraction.hpp"
+#include "ck_tile/ops/batched_contraction_multi_abd.hpp"
 #include "contraction_multi_abd_utils.hpp"
 
 template <typename AsDataType_,
@@ -150,69 +151,202 @@ float contraction_multi_abd_impl(
     return ck_tile::launch_kernel(s, kernel);
 }
 
-#define HANDLE_CASE(G, M, N, K)                                                            \
-    if(num_g_dims == G && num_m_dims == M && num_n_dims == N && num_k_dims == K)           \
-    {                                                                                      \
-        using HostArgs = ck_tile::BatchedContractionMultiABDHostArgs<G,                    \
-                                                                     M,                    \
-                                                                     N,                    \
-                                                                     K,                    \
-                                                                     AsDataType_::size(),  \
-                                                                     BsDataType_::size(),  \
-                                                                     DsDataType_::size()>; \
-        using ADims    = typename HostArgs::ADims;                                         \
-        using BDims    = typename HostArgs::BDims;                                         \
-        using EDims    = typename HostArgs::EDims;                                         \
-        std::array<ADims, AsDataType_::size()> as_dims_fixed{};                            \
-        std::array<BDims, BsDataType_::size()> bs_dims_fixed{};                            \
-        std::array<EDims, DsDataType_::size()> ds_dims_fixed{};                            \
-        std::array<ADims, AsDataType_::size()> as_strides_fixed{};                         \
-        std::array<BDims, BsDataType_::size()> bs_strides_fixed{};                         \
-        std::array<EDims, DsDataType_::size()> ds_strides_fixed{};                         \
-        for(ck_tile::index_t i = 0; i < AsDataType_::size(); ++i)                          \
-        {                                                                                  \
-            as_dims_fixed[i]    = to_fixed_dims<G + M + K>(As_dims[i]);                    \
-            as_strides_fixed[i] = to_fixed_dims<G + M + K>(As_strides[i]);                 \
-        }                                                                                  \
-        for(ck_tile::index_t i = 0; i < BsDataType_::size(); ++i)                          \
-        {                                                                                  \
-            bs_dims_fixed[i]    = to_fixed_dims<G + N + K>(Bs_dims[i]);                    \
-            bs_strides_fixed[i] = to_fixed_dims<G + N + K>(Bs_strides[i]);                 \
-        }                                                                                  \
-        for(ck_tile::index_t i = 0; i < DsDataType_::size(); ++i)                          \
-        {                                                                                  \
-            ds_dims_fixed[i]    = to_fixed_dims<G + M + N>(Ds_dims[i]);                    \
-            ds_strides_fixed[i] = to_fixed_dims<G + M + N>(Ds_strides[i]);                 \
-        }                                                                                  \
-        HostArgs fixed_args{as_ptr,                                                        \
-                            bs_ptr,                                                        \
-                            ds_ptr,                                                        \
-                            e_ptr,                                                         \
-                            as_dims_fixed,                                                 \
-                            bs_dims_fixed,                                                 \
-                            ds_dims_fixed,                                                 \
-                            to_fixed_dims<G + M + N>(E_dims),                              \
-                            as_strides_fixed,                                              \
-                            bs_strides_fixed,                                              \
-                            ds_strides_fixed,                                              \
-                            to_fixed_dims<G + M + N>(E_strides)};                          \
-        return contraction_multi_abd_impl<AsDataType_,                                     \
-                                          BsDataType_,                                     \
-                                          DsDataType_,                                     \
-                                          AccDataType_,                                    \
-                                          EDataType_,                                      \
-                                          AsLayout,                                        \
-                                          BsLayout,                                        \
-                                          DsLayout,                                        \
-                                          ELayout,                                         \
-                                          G,                                               \
-                                          M,                                               \
-                                          N,                                               \
-                                          K,                                               \
-                                          AElementWise,                                    \
-                                          BElementWise,                                    \
-                                          CDEElementWise>(fixed_args, s);                  \
+template <ck_tile::index_t NumDimG_,
+          ck_tile::index_t NumDimM_,
+          ck_tile::index_t NumDimN_,
+          ck_tile::index_t NumDimK_>
+struct ContractionMultiABDDimCase
+{
+    static constexpr ck_tile::index_t NumDimG = NumDimG_;
+    static constexpr ck_tile::index_t NumDimM = NumDimM_;
+    static constexpr ck_tile::index_t NumDimN = NumDimN_;
+    static constexpr ck_tile::index_t NumDimK = NumDimK_;
+};
+
+// Supported runtime dimension-count combinations for this example:
+//   (G, M, N, K) = (1, 1, 1, 1), (1, 2, 2, 2), (2, 1, 1, 1), (2, 2, 2, 2).
+using SupportedContractionMultiABDDimCases = std::tuple<ContractionMultiABDDimCase<1, 1, 1, 1>,
+                                                        ContractionMultiABDDimCase<1, 2, 2, 2>,
+                                                        ContractionMultiABDDimCase<2, 1, 1, 1>,
+                                                        ContractionMultiABDDimCase<2, 2, 2, 2>>;
+
+template <typename DimCase,
+          typename AsDataType_,
+          typename BsDataType_,
+          typename DsDataType_,
+          typename AccDataType_,
+          typename EDataType_,
+          typename AsLayout,
+          typename BsLayout,
+          typename DsLayout,
+          typename ELayout,
+          typename AElementWise,
+          typename BElementWise,
+          typename CDEElementWise>
+bool try_contraction_multi_abd_case(
+    float& result,
+    const std::array<const void*, AsDataType_::size()>& as_ptr,
+    const std::array<const void*, BsDataType_::size()>& bs_ptr,
+    const std::array<const void*, DsDataType_::size()>& ds_ptr,
+    void* e_ptr,
+    const std::array<std::vector<ck_tile::index_t>, AsDataType_::size()>& As_dims,
+    const std::array<std::vector<ck_tile::index_t>, BsDataType_::size()>& Bs_dims,
+    const std::array<std::vector<ck_tile::index_t>, DsDataType_::size()>& Ds_dims,
+    const std::vector<ck_tile::index_t>& E_dims,
+    const std::array<std::vector<ck_tile::index_t>, AsDataType_::size()>& As_strides,
+    const std::array<std::vector<ck_tile::index_t>, BsDataType_::size()>& Bs_strides,
+    const std::array<std::vector<ck_tile::index_t>, DsDataType_::size()>& Ds_strides,
+    const std::vector<ck_tile::index_t>& E_strides,
+    const ck_tile::stream_config& s,
+    ck_tile::index_t num_g_dims,
+    ck_tile::index_t num_m_dims,
+    ck_tile::index_t num_n_dims,
+    ck_tile::index_t num_k_dims)
+{
+    constexpr ck_tile::index_t NumDimG = DimCase::NumDimG;
+    constexpr ck_tile::index_t NumDimM = DimCase::NumDimM;
+    constexpr ck_tile::index_t NumDimN = DimCase::NumDimN;
+    constexpr ck_tile::index_t NumDimK = DimCase::NumDimK;
+
+    if(num_g_dims != NumDimG || num_m_dims != NumDimM || num_n_dims != NumDimN ||
+       num_k_dims != NumDimK)
+    {
+        return false;
     }
+
+    using HostArgs = ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                                 NumDimM,
+                                                                 NumDimN,
+                                                                 NumDimK,
+                                                                 AsDataType_::size(),
+                                                                 BsDataType_::size(),
+                                                                 DsDataType_::size()>;
+    using ADims    = typename HostArgs::ADims;
+    using BDims    = typename HostArgs::BDims;
+    using EDims    = typename HostArgs::EDims;
+
+    std::array<ADims, AsDataType_::size()> as_dims_fixed{};
+    std::array<BDims, BsDataType_::size()> bs_dims_fixed{};
+    std::array<EDims, DsDataType_::size()> ds_dims_fixed{};
+    std::array<ADims, AsDataType_::size()> as_strides_fixed{};
+    std::array<BDims, BsDataType_::size()> bs_strides_fixed{};
+    std::array<EDims, DsDataType_::size()> ds_strides_fixed{};
+
+    for(ck_tile::index_t i = 0; i < AsDataType_::size(); ++i)
+    {
+        as_dims_fixed[i]    = to_fixed_dims<NumDimG + NumDimM + NumDimK>(As_dims[i]);
+        as_strides_fixed[i] = to_fixed_dims<NumDimG + NumDimM + NumDimK>(As_strides[i]);
+    }
+    for(ck_tile::index_t i = 0; i < BsDataType_::size(); ++i)
+    {
+        bs_dims_fixed[i]    = to_fixed_dims<NumDimG + NumDimN + NumDimK>(Bs_dims[i]);
+        bs_strides_fixed[i] = to_fixed_dims<NumDimG + NumDimN + NumDimK>(Bs_strides[i]);
+    }
+    for(ck_tile::index_t i = 0; i < DsDataType_::size(); ++i)
+    {
+        ds_dims_fixed[i]    = to_fixed_dims<NumDimG + NumDimM + NumDimN>(Ds_dims[i]);
+        ds_strides_fixed[i] = to_fixed_dims<NumDimG + NumDimM + NumDimN>(Ds_strides[i]);
+    }
+
+    HostArgs fixed_args{as_ptr,
+                        bs_ptr,
+                        ds_ptr,
+                        e_ptr,
+                        as_dims_fixed,
+                        bs_dims_fixed,
+                        ds_dims_fixed,
+                        to_fixed_dims<NumDimG + NumDimM + NumDimN>(E_dims),
+                        as_strides_fixed,
+                        bs_strides_fixed,
+                        ds_strides_fixed,
+                        to_fixed_dims<NumDimG + NumDimM + NumDimN>(E_strides)};
+
+    result = contraction_multi_abd_impl<AsDataType_,
+                                        BsDataType_,
+                                        DsDataType_,
+                                        AccDataType_,
+                                        EDataType_,
+                                        AsLayout,
+                                        BsLayout,
+                                        DsLayout,
+                                        ELayout,
+                                        NumDimG,
+                                        NumDimM,
+                                        NumDimN,
+                                        NumDimK,
+                                        AElementWise,
+                                        BElementWise,
+                                        CDEElementWise>(fixed_args, s);
+    return true;
+}
+
+template <typename AsDataType_,
+          typename BsDataType_,
+          typename DsDataType_,
+          typename AccDataType_,
+          typename EDataType_,
+          typename AsLayout,
+          typename BsLayout,
+          typename DsLayout,
+          typename ELayout,
+          typename AElementWise,
+          typename BElementWise,
+          typename CDEElementWise,
+          std::size_t... CaseIds>
+bool dispatch_contraction_multi_abd_cases(
+    float& result,
+    const std::array<const void*, AsDataType_::size()>& as_ptr,
+    const std::array<const void*, BsDataType_::size()>& bs_ptr,
+    const std::array<const void*, DsDataType_::size()>& ds_ptr,
+    void* e_ptr,
+    const std::array<std::vector<ck_tile::index_t>, AsDataType_::size()>& As_dims,
+    const std::array<std::vector<ck_tile::index_t>, BsDataType_::size()>& Bs_dims,
+    const std::array<std::vector<ck_tile::index_t>, DsDataType_::size()>& Ds_dims,
+    const std::vector<ck_tile::index_t>& E_dims,
+    const std::array<std::vector<ck_tile::index_t>, AsDataType_::size()>& As_strides,
+    const std::array<std::vector<ck_tile::index_t>, BsDataType_::size()>& Bs_strides,
+    const std::array<std::vector<ck_tile::index_t>, DsDataType_::size()>& Ds_strides,
+    const std::vector<ck_tile::index_t>& E_strides,
+    const ck_tile::stream_config& s,
+    ck_tile::index_t num_g_dims,
+    ck_tile::index_t num_m_dims,
+    ck_tile::index_t num_n_dims,
+    ck_tile::index_t num_k_dims,
+    std::index_sequence<CaseIds...>)
+{
+    return (try_contraction_multi_abd_case<
+                std::tuple_element_t<CaseIds, SupportedContractionMultiABDDimCases>,
+                AsDataType_,
+                BsDataType_,
+                DsDataType_,
+                AccDataType_,
+                EDataType_,
+                AsLayout,
+                BsLayout,
+                DsLayout,
+                ELayout,
+                AElementWise,
+                BElementWise,
+                CDEElementWise>(result,
+                                as_ptr,
+                                bs_ptr,
+                                ds_ptr,
+                                e_ptr,
+                                As_dims,
+                                Bs_dims,
+                                Ds_dims,
+                                E_dims,
+                                As_strides,
+                                Bs_strides,
+                                Ds_strides,
+                                E_strides,
+                                s,
+                                num_g_dims,
+                                num_m_dims,
+                                num_n_dims,
+                                num_k_dims) ||
+            ...);
+}
 
 template <typename AsDataType_,
           typename BsDataType_,
@@ -245,14 +379,47 @@ float contraction_multi_abd(
     ck_tile::index_t num_n_dims,
     ck_tile::index_t num_k_dims)
 {
-    HANDLE_CASE(1, 1, 1, 1);
-    HANDLE_CASE(1, 2, 2, 2);
-    HANDLE_CASE(2, 1, 1, 1);
-    HANDLE_CASE(2, 2, 2, 2);
+    float result = 0;
+    if(dispatch_contraction_multi_abd_cases<AsDataType_,
+                                            BsDataType_,
+                                            DsDataType_,
+                                            AccDataType_,
+                                            EDataType_,
+                                            AsLayout,
+                                            BsLayout,
+                                            DsLayout,
+                                            ELayout,
+                                            AElementWise,
+                                            BElementWise,
+                                            CDEElementWise>(
+           result,
+           as_ptr,
+           bs_ptr,
+           ds_ptr,
+           e_ptr,
+           As_dims,
+           Bs_dims,
+           Ds_dims,
+           E_dims,
+           As_strides,
+           Bs_strides,
+           Ds_strides,
+           E_strides,
+           s,
+           num_g_dims,
+           num_m_dims,
+           num_n_dims,
+           num_k_dims,
+           std::make_index_sequence<std::tuple_size_v<SupportedContractionMultiABDDimCases>>{}))
+    {
+        return result;
+    }
 
     throw std::runtime_error("Unsupported dimension combination: G=" + std::to_string(num_g_dims) +
                              ", M=" + std::to_string(num_m_dims) + ", N=" +
-                             std::to_string(num_n_dims) + ", K=" + std::to_string(num_k_dims));
+                             std::to_string(num_n_dims) + ", K=" + std::to_string(num_k_dims) +
+                             ". Supported combinations are (G,M,N,K): (1,1,1,1), (1,2,2,2), "
+                             "(2,1,1,1), (2,2,2,2).");
 }
 
 #include "run_contraction_multi_abd_example.inc"

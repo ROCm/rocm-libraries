@@ -10,7 +10,7 @@
 #include <functional>
 
 #include "ck_tile/host/device_prop.hpp"
-#include "ck_tile/ops/batched_contraction.hpp"
+#include "ck_tile/ops/batched_contraction_multi_abd.hpp"
 #include "ck_tile/host/reference/reference_batched_contraction.hpp"
 #include "contraction_multi_abd_benchmark.hpp"
 

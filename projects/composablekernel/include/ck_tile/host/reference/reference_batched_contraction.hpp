@@ -116,9 +116,6 @@ void compute_reference_batched_contraction(
     const std::vector<ck_tile::index_t>& N_dims,
     const std::vector<ck_tile::index_t>& K_dims)
 {
-    std::cout << "Calculating reference using stride-aware indexing with parallel processing..."
-              << std::endl;
-
     // Extract stride information from tensor descriptors
     const auto a_strides = a_full_dims.get_strides();
     const auto b_strides = b_full_dims.get_strides();
@@ -255,8 +252,6 @@ void compute_reference_batched_contraction_multi_abd(
     const std::vector<ck_tile::index_t>& N_dims,
     const std::vector<ck_tile::index_t>& K_dims)
 {
-    std::cout << "Calculating multi-ABD contraction reference..." << std::endl;
-
     // Collect per-tensor strides
     std::array<std::vector<std::size_t>, NumATensor> as_strides;
     for(ck_tile::index_t a = 0; a < NumATensor; ++a)

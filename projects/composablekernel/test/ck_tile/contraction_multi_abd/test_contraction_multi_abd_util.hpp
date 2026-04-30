@@ -13,7 +13,7 @@
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
-#include "ck_tile/ops/batched_contraction.hpp"
+#include "ck_tile/ops/batched_contraction_multi_abd.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 #include "ck_tile/host/reference/reference_batched_contraction.hpp"
 
@@ -145,15 +145,14 @@ class TestCkTileContractionMultiABD : public ::testing::Test
               bool kPadM = false,
               bool kPadN = false,
               bool kPadK = false>
-    bool invoke_kernel(
-        const ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
-                                                          NumDimM,
-                                                          NumDimN,
-                                                          NumDimK,
-                                                          NumATensor,
-                                                          NumBTensor,
-                                                          NumDTensor>& args,
-        const ck_tile::stream_config& s)
+    bool invoke_kernel(const ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                                         NumDimM,
+                                                                         NumDimN,
+                                                                         NumDimK,
+                                                                         NumATensor,
+                                                                         NumBTensor,
+                                                                         NumDTensor>& args,
+                       const ck_tile::stream_config& s)
     {
         constexpr ck_tile::index_t M_Tile = 128;
         constexpr ck_tile::index_t N_Tile = 128;
@@ -344,8 +343,8 @@ class TestCkTileContractionMultiABD : public ::testing::Test
         constexpr uint32_t seed = 11939;
         for(ck_tile::index_t a = 0; a < NumATensor; ++a)
         {
-            ck_tile::FillUniformDistribution<ADataType>{
-                -1.f, 1.f, static_cast<uint32_t>(seed + a)}(as_host[a]);
+            ck_tile::FillUniformDistribution<ADataType>{-1.f, 1.f, static_cast<uint32_t>(seed + a)}(
+                as_host[a]);
         }
         for(ck_tile::index_t b = 0; b < NumBTensor; ++b)
         {
@@ -387,19 +386,18 @@ class TestCkTileContractionMultiABD : public ::testing::Test
             return converted;
         };
 
-        std::vector<ck_tile::index_t> E_strides  = convert_strides(e_gpu_host.get_strides());
+        std::vector<ck_tile::index_t> E_strides = convert_strides(e_gpu_host.get_strides());
 
-        using HostArgs =
-            ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
-                                                        NumDimM,
-                                                        NumDimN,
-                                                        NumDimK,
-                                                        NumATensor,
-                                                        NumBTensor,
-                                                        NumDTensor>;
-        using ADims = typename HostArgs::ADims;
-        using BDims = typename HostArgs::BDims;
-        using EDims = typename HostArgs::EDims;
+        using HostArgs = ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
+                                                                     NumDimM,
+                                                                     NumDimN,
+                                                                     NumDimK,
+                                                                     NumATensor,
+                                                                     NumBTensor,
+                                                                     NumDTensor>;
+        using ADims    = typename HostArgs::ADims;
+        using BDims    = typename HostArgs::BDims;
+        using EDims    = typename HostArgs::EDims;
 
         std::array<const void*, NumATensor> as_ptr{};
         std::array<const void*, NumBTensor> bs_ptr{};
@@ -444,12 +442,13 @@ class TestCkTileContractionMultiABD : public ::testing::Test
                            Ds_strides,
                            to_fixed_dims<NumDimG + NumDimM + NumDimN>(E_strides)};
 
-        const bool supported = invoke_kernel<NumDimG, NumDimM, NumDimN, NumDimK, kPadM, kPadN, kPadK>(
-            host_args, ck_tile::stream_config{nullptr, false});
+        const bool supported =
+            invoke_kernel<NumDimG, NumDimM, NumDimN, NumDimK, kPadM, kPadN, kPadK>(
+                host_args, ck_tile::stream_config{nullptr, false});
         if(!supported)
         {
-            std::cout << "G=" << G_total << " M=" << M_total << " N=" << N_total
-                      << " K=" << K_total << " unsupported by multi-ABD kernel" << std::endl;
+            std::cout << "G=" << G_total << " M=" << M_total << " N=" << N_total << " K=" << K_total
+                      << " unsupported by multi-ABD kernel" << std::endl;
             return false;
         }
 
@@ -468,22 +467,21 @@ class TestCkTileContractionMultiABD : public ::testing::Test
                                                                  CDEElementWiseFn,
                                                                  NumATensor,
                                                                  NumBTensor,
-                                                                 NumDTensor>(
-            as_host,
-            bs_host,
-            ds_host,
-            e_ref_host,
-            G_total,
-            M_total,
-            N_total,
-            K_total,
-            AElementWiseFn{},
-            BElementWiseFn{},
-            CDEElementWiseFn{},
-            G_dims,
-            M_dims,
-            N_dims,
-            K_dims);
+                                                                 NumDTensor>(as_host,
+                                                                             bs_host,
+                                                                             ds_host,
+                                                                             e_ref_host,
+                                                                             G_total,
+                                                                             M_total,
+                                                                             N_total,
+                                                                             K_total,
+                                                                             AElementWiseFn{},
+                                                                             BElementWiseFn{},
+                                                                             CDEElementWiseFn{},
+                                                                             G_dims,
+                                                                             M_dims,
+                                                                             N_dims,
+                                                                             K_dims);
 
         const float max_accumulated_value =
             *std::max_element(e_ref_host.mData.begin(), e_ref_host.mData.end());

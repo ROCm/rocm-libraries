@@ -8,7 +8,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
-#include "ck_tile/ops/batched_contraction.hpp"
+#include "ck_tile/ops/batched_contraction_multi_abd.hpp"
 #include "common/utils.hpp"
 #include "contraction_multi_abd_common.hpp"
 
