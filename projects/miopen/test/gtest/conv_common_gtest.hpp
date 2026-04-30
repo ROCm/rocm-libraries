@@ -265,7 +265,7 @@ protected:
                     handle, problem, options.get(), solutions.data(), &found, solutions.size()));
         }
 
-        EXPECT_GE(found, 0);
+        EXPECT_GE(found, size_t{0});
 
         solutions.resize(found);
 
@@ -604,7 +604,8 @@ struct verify_forward_conv : conv_base<T, Tout>
                 }
                 count = filter.GetSolutionCount(ctx, problem);
 
-                EXPECT_NE(count, 0) << "FAILED: Using immediate mode error in GetSolutionCount.";
+                EXPECT_NE(count, size_t{0})
+                    << "FAILED: Using immediate mode error in GetSolutionCount.";
                 if(count == 0)
                 {
                     return {};
@@ -614,7 +615,7 @@ struct verify_forward_conv : conv_base<T, Tout>
                     filter.GetSolutions(ctx, problem, count, &fallback_path_taken);
                 count = solutions.size();
 
-                EXPECT_NE(count, 0)
+                EXPECT_NE(count, size_t{0})
                     << "FAILED: Immediate mode has no fallback for this configuration."
                     << " Solution count: " << count;
                 if(count == 0)
@@ -673,8 +674,9 @@ struct verify_forward_conv : conv_base<T, Tout>
 
                 count = filter.GetSolutionCount(ctx, problem);
 
-                EXPECT_NE(count, 0) << "FAILED: Using immediate mode error in GetSolutionCount.";
-                if(count == 0)
+                EXPECT_NE(count, size_t{0})
+                    << "FAILED: Using immediate mode error in GetSolutionCount.";
+                if(count == size_t{0})
                 {
                     return {};
                 }
@@ -683,10 +685,10 @@ struct verify_forward_conv : conv_base<T, Tout>
                 auto solutions = filter.GetSolutions(ctx, problem, count, &fallback_path_taken);
                 count          = solutions.size();
 
-                EXPECT_NE(count, 0)
+                EXPECT_NE(count, size_t{0})
                     << "FAILED: Immediate mode has no fallback for this configuration."
                     << " Solution count: " << count;
-                if(count == 0)
+                if(count == size_t{0})
                 {
                     return {};
                 }
@@ -1087,8 +1089,9 @@ struct verify_backward_conv : conv_base<T>
                 }
                 count = filter.GetSolutionCount(ctx, problem);
 
-                EXPECT_NE(count, 0) << "FAILED: Using immediate mode error in GetSolutionCount.";
-                if(count == 0)
+                EXPECT_NE(count, size_t{0})
+                    << "FAILED: Using immediate mode error in GetSolutionCount.";
+                if(count == size_t{0})
                 {
                     return {};
                 }
@@ -1098,10 +1101,10 @@ struct verify_backward_conv : conv_base<T>
                 auto solutions = filter.GetSolutions(ctx, problem, count, &fallback_path_taken);
                 count          = solutions.size();
 
-                EXPECT_NE(count, 0)
+                EXPECT_NE(count, size_t{0})
                     << "FAILED: Immediate mode has no fallback for this configuration."
                     << " Solution count: " << count;
-                if(count == 0)
+                if(count == size_t{0})
                 {
                     return {};
                 }
@@ -1152,8 +1155,9 @@ struct verify_backward_conv : conv_base<T>
                 }
                 count = filter.GetSolutionCount(ctx, problem);
 
-                EXPECT_NE(count, 0) << "FAILED: Using immediate mode error in GetSolutionCount.";
-                if(count == 0)
+                EXPECT_NE(count, size_t{0})
+                    << "FAILED: Using immediate mode error in GetSolutionCount.";
+                if(count == size_t{0})
                 {
                     return {};
                 }
@@ -1162,10 +1166,10 @@ struct verify_backward_conv : conv_base<T>
                 auto solutions = filter.GetSolutions(ctx, problem, count, &fallback_path_taken);
                 count          = solutions.size();
 
-                EXPECT_NE(count, 0)
+                EXPECT_NE(count, size_t{0})
                     << "FAILED: Immediate mode has no fallback for this configuration."
                     << " Solution count: " << count;
-                if(count == 0)
+                if(count == size_t{0})
                 {
                     return {};
                 }
@@ -1444,8 +1448,9 @@ struct verify_backward_weights_conv : conv_base<T>
 
             count = filter.GetSolutionCount(ctx, problem);
 
-            EXPECT_NE(count, 0) << "FAILED: Using immediate mode error in GetSolutionCount.";
-            if(count == 0)
+            EXPECT_NE(count, size_t{0})
+                << "FAILED: Using immediate mode error in GetSolutionCount.";
+            if(count == size_t{0})
             {
                 return {};
             }
@@ -1454,9 +1459,10 @@ struct verify_backward_weights_conv : conv_base<T>
             auto solutions = filter.GetSolutions(ctx, problem, count, &fallback_path_taken);
             count          = solutions.size();
 
-            EXPECT_NE(count, 0) << "FAILED: Immediate mode has no fallback for this configuration."
-                                << " Solution count: " << count;
-            if(count == 0)
+            EXPECT_NE(count, size_t{0})
+                << "FAILED: Immediate mode has no fallback for this configuration."
+                << " Solution count: " << count;
+            if(count == size_t{0})
             {
                 return {};
             }
@@ -1539,7 +1545,7 @@ struct verify_backward_weights_conv : conv_base<T>
             const auto solutions = filter.GetSolutions(ctx, problem, 1, &fallback_path_taken);
             count                = solutions.size();
 
-            if(count > 0)
+            if(count > size_t{0})
                 selected = std::move(solutions.front());
 
             break;
@@ -1561,7 +1567,7 @@ struct verify_backward_weights_conv : conv_base<T>
         default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
-        if(count != 0)
+        if(count != size_t{0})
         {
             stats->algorithm   = selected.algorithm;
             stats->solver_name = miopen::solver::Id(selected.solution_id).ToString();
@@ -1709,8 +1715,8 @@ struct verify_forward_conv_int8 : conv_base<T>
 
         auto count = filter.GetSolutionCount(ctx, problem);
 
-        EXPECT_NE(count, 0) << "FAILED: Using immediate mode error in GetSolutionCount.";
-        if(count == 0)
+        EXPECT_NE(count, size_t{0}) << "FAILED: Using immediate mode error in GetSolutionCount.";
+        if(count == size_t{0})
         {
             return {};
         }
@@ -1720,9 +1726,10 @@ struct verify_forward_conv_int8 : conv_base<T>
         auto solutions           = filter.GetSolutions(ctx, problem, count, &fallback_path_taken);
         count                    = solutions.size();
 
-        EXPECT_NE(count, 0) << "FAILED: Immediate mode has no fallback for this configuration."
-                            << " Solution count: " << count;
-        if(count == 0)
+        EXPECT_NE(count, size_t{0})
+            << "FAILED: Immediate mode has no fallback for this configuration."
+            << " Solution count: " << count;
+        if(count == size_t{0})
         {
             return {};
         }
@@ -1757,7 +1764,7 @@ struct verify_forward_conv_int8 : conv_base<T>
                                            wspace.size(),
                                            selected.solution_id);
 
-        if(count != 0)
+        if(count != size_t{0})
         {
             stats->algorithm   = selected.algorithm;
             stats->solver_name = miopen::solver::Id(selected.solution_id).ToString();
@@ -1923,7 +1930,8 @@ struct conv_test : public testing::TestWithParam<TestCase>
         {"CONV", miopenConvolution},
         {"TRANS", miopenTranspose},
         {"CONVOLUTION", miopenConvolution},
-        {"TRANSPOSE", miopenTranspose}};
+        {"TRANSPOSE", miopenTranspose},
+        {"CONVFP16", miopenConvolution}};
 
     const std::unordered_map<std::string, miopenPaddingMode_t> pmode_lookup = {
         {"SAME", miopenPaddingSame},
