@@ -2458,7 +2458,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvOclBwdWrW53 final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-
 struct MIOPEN_INTERNALS_EXPORT fft final : ConvSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<fft>(); }
