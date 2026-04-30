@@ -382,3 +382,80 @@ legacy `compare_captures` continues to gate assertions. The wiring at
   `compare_captures` data-movement count mismatches (`default=17 vs
   cms=16`). Replacing `compare_captures` with `compare_graphs` should
   resolve or refine these as per-edge Failures.
+
+## Future work — string register robustness (POST-MIGRATION)
+
+**Status: deferred until `compare_captures` → `compare_graphs` migration is complete.**
+
+The current render-string identity (commit *Render-string identity for
+register-type robustness*) handles the cases that arise in practice
+(symbolic + numeric + mixed registers within the same instruction
+render identically across captures because both consume the same
+kernel-writer state). But two related concerns about string-based
+registers remain unresolved and worth revisiting once the migration is
+done and `compare_graphs` is the authoritative comparison:
+
+### 1. Same logical register with different identifiers across captures
+
+**Pinned in `test_dataflow_graph_comparison.py::test_symbolic_and_numeric_for_same_logical_reg_unchanged`** as a documented limitation.
+
+If two captures construct the SAME physical register with DIFFERENT
+identifiers (one symbolic, one numeric for the same vgpr), render-strings
+differ and identities differ. Doesn't arise in current code paths
+because both captures consume the same writer state, but a future
+scheduler that constructs registers differently (or a kernel-writer
+refactor) could trigger it.
+
+Fix path: name-resolution table approach (option 1 in the brainstorm
+above) — build `{symbolic_name → numeric_idx}` from writer state and
+canonicalize all register references before identity construction.
+
+### 2. Topology equivalence — different register names, same dependency structure
+
+**Not yet pinned in a test; raised as a concern.**
+
+The user's concern: two graphs with the SAME topology (same
+instructions, same producer-consumer pairs, same edge kinds) but
+DIFFERENT register strings labeling those edges should be considered
+equivalent. The render-string identity treats them as different
+because the register name is part of the rendered text.
+
+Concrete example:
+- Graph A: `LR(writes "Foo")` → `SWait` → `MFMA(reads "Foo")`
+- Graph B: `LR(writes "Bar")` → `SWait` → `MFMA(reads "Bar")`
+- Same topology, different labels — currently considered different
+  identities, should be considered equivalent.
+
+This is essentially a constrained form of graph isomorphism (constrained
+because the bijection between nodes is known via emit order). Three
+approaches considered:
+- **Interpretation A — emit-order canonical IDs** + drop register from
+  edge equality key. Simple; matches the example. Risk: loses sensitivity
+  to actual register changes (a CMS bug where LR writes wrong register
+  could go undetected if the topology matches).
+- **Interpretation B — full graph-isomorphism** with register-name
+  renaming. Most pure; more code; slower.
+- **Interpretation C — per-graph register canonicalization** with
+  placeholders ("$reg0", "$reg1", ...) by first-appearance order.
+  Same effective behavior as A; different framing.
+
+Open questions to answer post-migration:
+- Is the topology-equivalence requirement defensive ("future-proof")
+  or does an actual scenario exist where the schedulers differ in
+  register names but match in structure?
+- How should the comparison handle "topology matches but registers
+  genuinely differ"?  Treat as equal? Treat as equal with warning?
+  Treat as equal only when registers are symbolic?
+- Should the canonical ordering be per-class-per-body or
+  per-category-per-body?  Per-category is more discriminating;
+  per-class is more permissive.
+- For diagnostic Failures whose `producer`/`consumer` carry register
+  info, which graph's register name should the formatter prefer when
+  they differ?
+
+**Why deferred:** until the migration completes, both `compare_captures`
+and `compare_graphs` run. The migration's blockers (Phase 5 capture-
+coverage gap) need fixing first; without those fixes, any
+topology-equivalence work would build on an unstable comparison base.
+After the migration, the topology-equivalence question can be answered
+with concrete test cases against a working authoritative comparison.
