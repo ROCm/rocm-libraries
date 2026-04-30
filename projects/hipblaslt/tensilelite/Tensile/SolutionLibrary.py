@@ -71,15 +71,31 @@ class PlaceholderLibrary:
         pass
 
     def merge(self, other):
-        raise RuntimeError(
-            "[PlaceholderLibrary.merge] COLLISION: two source YAMLs produced "
-            "different per-file libraries for the same dispatch slot.\n"
-            f"  self:  {self.filenamePrefix}\n"
-            f"  other: {getattr(other, 'filenamePrefix', other)!r}\n"
-            "  Likely cause: duplicate DeviceNames declarations or two YAMLs "
-            "covering the same (Hardware, OperationID, Metric, typed-Predicate) "
-            "tuple."
-        ) 
+        # When two YAMLs converge at the same dispatch slot in the predicate
+        # tree, both leaves carry the same deterministically-derived
+        # placeholder filename and reference the same lazy library; the
+        # actual content merge is handled at the master level
+        # (MasterSolutionLibrary.merge over lazyLibraries[name]). No work
+        # is required here.
+        #
+        # The original gfx942 orphan-leaf failure manifested as merge being
+        # called with DIFFERENT filenamePrefix values: the chip-id suffix
+        # gating bug let the placeholder filename diverge while the
+        # HardwarePredicate stayed equal, so PlaceholderLibrary.merge would
+        # silently drop one leaf and leave its .dat file unreferenced.
+        # Raise loudly in that case so the regression cannot recur.
+        otherName = getattr(other, 'filenamePrefix', None)
+        if otherName != self.filenamePrefix:
+            raise RuntimeError(
+                "[PlaceholderLibrary.merge] COLLISION: two source YAMLs "
+                "converge at the same dispatch slot but reference different "
+                "per-file libraries; one .dat will be orphaned.\n"
+                f"  self:  {self.filenamePrefix}\n"
+                f"  other: {otherName!r}\n"
+                "  Likely cause: chip-id placeholder-suffix gate is out of "
+                "sync with HardwarePredicate.FromHardware, or sibling YAMLs "
+                "declare divergent DeviceNames on a chip-id-unaware arch."
+            )
 
 
 class MatchingLibrary:
