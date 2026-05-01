@@ -811,6 +811,88 @@ TEST(TestEnginePluginResourceManager, SerializeExecutionContextRejectsEmptyPlugi
     }
 }
 
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextCopiesPluginPayload)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 3> engineConfigBytes{1, 2, 3};
+    const std::array<uint8_t, 4> payloadBytes{9, 8, 7, 6};
+    const hipdnnPluginConstData_t engineConfig{engineConfigBytes.data(), engineConfigBytes.size()};
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin,
+                serializeExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                                          hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                          &engineConfig,
+                                          _))
+        .WillOnce([&payloadBytes](hipdnnEnginePluginHandle_t,
+                                  hipdnnEnginePluginExecutionContext_t,
+                                  const hipdnnPluginConstData_t*,
+                                  hipdnnPluginConstData_t* serializedContext) {
+            *serializedContext = hipdnnPluginConstData_t{payloadBytes.data(), payloadBytes.size()};
+        });
+    EXPECT_CALL(*mockPlugin,
+                destroySerializedExecutionContext(hipdnnEnginePluginHandle_t(0xdeadbeef), _));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_NO_THROW(resourceManager.serializeExecutionContext(
+            100,
+            hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+            &engineConfig,
+            serializedContext));
+    }
+
+    ASSERT_EQ(serializedContext, std::vector<uint8_t>(payloadBytes.begin(), payloadBytes.end()));
+}
+
+TEST(TestEnginePluginResourceManager, SerializeExecutionContextRejectsInvalidInputs)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    const std::array<uint8_t, 3> engineConfigBytes{1, 2, 3};
+    const hipdnnPluginConstData_t engineConfig{engineConfigBytes.data(), engineConfigBytes.size()};
+    std::vector<uint8_t> serializedContext;
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(resourceManager.serializeExecutionContext(
+                                       100, nullptr, &engineConfig, serializedContext),
+                                   HIPDNN_STATUS_BAD_PARAM);
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.serializeExecutionContext(
+                100, hipdnnEnginePluginExecutionContext_t(0xcafebabe), nullptr, serializedContext),
+            HIPDNN_STATUS_BAD_PARAM);
+        ASSERT_THROW_HIPDNN_STATUS(resourceManager.serializeExecutionContext(
+                                       101,
+                                       hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                                       &engineConfig,
+                                       serializedContext),
+                                   HIPDNN_STATUS_INTERNAL_ERROR);
+    }
+}
+
 TEST(TestEnginePluginResourceManager, CreateExecutionContextFromSerializedFailsForUnsupportedPlugin)
 {
     const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
