@@ -178,6 +178,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     CHECK_ROCBLAS_ERROR(
         rocblas_get_stream( handle, &stream ) );
 
+using llong = long long;
 printf( "%s( n %lld, kd %lld, nb %lld )\n", __func__, llong(n), llong(kd), llong(nb) );
     // lwork for LAPACK hetrd_he2hb
     size_t lwork = n * kd + n * std::max<I>(kd, 128) + 2 * kd * kd;
@@ -370,6 +371,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
     // rocSolver 2nd stage needs 3*kd. LAPACK needs kd+1.
     // todo: get ldab from argus?
     I ldab = 3*kd;  //kd + 1;
+using llong = long long;
 printf( "%s( n %lld, kd %lld, nb %lld )\n",
         __func__, llong(n), llong(kd), llong(nb) );
 
