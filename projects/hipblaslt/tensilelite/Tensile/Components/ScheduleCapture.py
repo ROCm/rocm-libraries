@@ -493,23 +493,39 @@ class Failure:
 
 
 # ----------------------------------------------------------------------------
-# 1. OrderInvertedFailure — producer issued after consumer (same body only).
-#    Replaces: GR _validate_must_start_after early-issue branch, Pack early/late.
+# 1. OrderInvertedFailure — subject reverses the producer/consumer order
+#    that the default schedule established. Default IS the canonical reference;
+#    if subj emits the producer at a later stream position than the consumer
+#    while default emitted them in the opposite order, the subject violates
+#    a dataflow dependency.
 #    Emitted by: rules + dataflow comparison classifier.
 # ----------------------------------------------------------------------------
 @dataclass
 class OrderInvertedFailure(Failure):
-    producer: object  # GraphNode or ValidatorInstruction
-    consumer: object
+    producer: object  # GraphNode or ValidatorInstruction (subject-side)
+    consumer: object  # GraphNode or ValidatorInstruction (subject-side)
+    # Optional default-side positions for diagnostics. Populated by the
+    # cross-graph classifier (diagnose_missing_edge); rule-emitted Failures
+    # may leave them None.
+    default_producer_position: object = None  # SchedulePosition
+    default_consumer_position: object = None  # SchedulePosition
 
     def _format_canonical(self, capture=None) -> str:
         producer_pos = format_position(self.producer, capture)
         consumer_pos = format_position(self.consumer, capture)
+        suffix = ""
+        if self.default_producer_position is not None and self.default_consumer_position is not None:
+            suffix = (
+                f" Default schedule emitted producer @ "
+                f"{self.default_producer_position} and consumer @ "
+                f"{self.default_consumer_position}; subject reverses this order."
+            )
         return (
             f"{self.producer.category}[{getattr(self.producer, 'name', '')}] "
             f"{producer_pos} is issued after its consumer "
             f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
             f"{consumer_pos}. The producer must complete before the consumer can use it."
+            f"{suffix}"
         )
 
 
@@ -2476,7 +2492,8 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
 # edge that's missing from the subject graph.
 #
 # diagnose_missing_edge classifies a single missing edge into one of:
-#   OrderInvertedFailure       — same-body producer position > consumer position
+#   OrderInvertedFailure       — subject reverses producer/consumer order
+#                                 from default schedule (default is canonical)
 #   MissingWaitFailure         — no SWait on the right counter in the window
 #   WaitOnWrongCounterFailure  — SWait exists but drains the wrong counter
 #   WaitInsufficientFailure    — SWait counter value too lax
@@ -2596,18 +2613,31 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
             f"c_id={c_id} (found={c_node is not None})."
         )
 
-    # Phase 1 — gating: order check (same-body, same-iter only).
-    # CMS legitimately pipelines producers from one inner iteration into
-    # the stream slots of an earlier iteration's consumer; that's a
-    # cross-iter dependency, NOT a reorder. Stream-position inversion
-    # only signals a real reorder when both endpoints belong to the same
-    # iter — otherwise the ordering is fine by construction (the resolver
-    # only emits `producer.iter ≤ consumer.iter` edges).
-    if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
-        nmpi = subj_graph.num_mfma_per_iter
-        if _node_iter(p_node, nmpi) == _node_iter(c_node, nmpi):
-            return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
-        return []  # cross-iter pipelined dependency — legitimate
+    # Phase 1 — gating: order check, default schedule as canonical reference.
+    # The default schedule IS the canonical order. If default emitted the
+    # producer before the consumer and subject emitted them in the opposite
+    # relative order, the subject reordered a real dataflow dependency past
+    # its producer. Cross-body edges are skipped (different stream-position
+    # spaces — can't compare directly).
+    ref_p = ref_edge.producer
+    ref_c = ref_edge.consumer
+    if p_node.body_label == c_node.body_label:
+        default_p_before_c = ref_p.position < ref_c.position
+        subj_p_before_c = p_node.position < c_node.position
+        if default_p_before_c and not subj_p_before_c:
+            return [OrderInvertedFailure(
+                producer=p_node,
+                consumer=c_node,
+                default_producer_position=ref_p.position,
+                default_consumer_position=ref_c.position,
+            )]
+        if default_p_before_c and subj_p_before_c:
+            # Order preserved — fall through to wait/barrier coverage checks.
+            pass
+        # default has producer at-or-after consumer (e.g., kind_rank-induced
+        # edge from default's resolver). Don't flag — subj's order can't be
+        # judged against an artifactual default ordering. Falls through to
+        # Phase 2 wait coverage if applicable.
 
     # MFMA-as-producer: the dataflow graph models MFMA accumulator chains
     # so reorders are detectable, but those chains aren't gated by SWaitCnt
@@ -2880,8 +2910,14 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
     p_node = edge.producer
     c_node = edge.consumer
 
-    # Phase 1 — same-body, same-iter order check (see diagnose_missing_edge
-    # for the cross-iter rationale).
+    # Phase 1 — same-body order check.
+    # NOTE: this within-graph fallback can't reference the default schedule
+    # (validate_edge_wait_coverage is called with a single graph, no default
+    # available). It uses _node_iter to suppress cross-iter false positives,
+    # mirroring pre-9.6.1 behavior. Once Sub-B (rocm-libraries-wx9.4.2)
+    # rewrites the resolver to walk in stream order, the resolver no longer
+    # emits edges where producer.position > consumer.position by construction
+    # and this branch becomes dead code (cleanup in wx9.4.5 / wx9.6.3).
     if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
         nmpi = subj_graph.num_mfma_per_iter
         if _node_iter(p_node, nmpi) == _node_iter(c_node, nmpi):
