@@ -225,20 +225,21 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n", __func__, llong(n), llong(kd), llong
 
     if (debug_)
     {
+        I const ione = 1;
         printf( "LAPACK\n" );
         print_matrix( "hA",     n,    n, hA[0],     lda  );
         print_matrix( "hAband", ldab, n, hAband[0], ldab );
-        print_matrix( "hTau",   1, n-kd, hTau[0],   1    );
+        print_matrix( "hTau",   ione, n-kd, hTau[0], ione );
 
         //printf( "rocSolver\n" );
         //print_matrix( "dA",     n,    n, dA[0],     lda  );
         //print_matrix( "dAband", ldab, n, dAband[0], ldab );
-        //print_matrix( "dTau",   1, n-kd, dTau[0],   1    );
+        //print_matrix( "dTau",   ione, n-kd, dTau[0], ione );
 
         printf( "rocSolver\n" );
         print_matrix( "hARes",     n,    n, hARes[0],     lda  );
         print_matrix( "hAbandRes", ldab, n, hAbandRes[0], ldab );
-        print_matrix( "hTauRes",   1, n-kd, hTauRes[0],   1    );
+        print_matrix( "hTauRes",   ione, n-kd, hTauRes[0], ione );
     }
 
     // todo: report all errors (A, V).
