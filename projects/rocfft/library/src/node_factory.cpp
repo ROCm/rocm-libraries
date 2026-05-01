@@ -1077,15 +1077,26 @@ auto check_pp_restrictions =
     [](const NodeMetaData& nodeData, const size_t& batchLow, const size_t& batchHigh = 0) -> bool {
     size_t checkiDist = 0, checkoDist = 0;
 
-    auto inputLength = nodeData.length;
+    auto inputLength  = nodeData.length;
+    auto outputLength = nodeData.outputLength;
 
     // real-to-complex iDist check is in real units,
     // which is outputLength[0] * 2 * product of other lengths
     if(nodeData.placement == rocfft_placement_inplace
        && nodeData.inArrayType == rocfft_array_type_real)
-        inputLength[0] = nodeData.outputLength[0] * 2;
+    {
+        inputLength[0] = outputLength[0] * 2;
+    }
     checkiDist = product(inputLength.begin(), inputLength.end());
-    checkoDist = product(nodeData.outputLength.begin(), nodeData.outputLength.end());
+
+    // complex-to-real oDist check is in real units,
+    // which is inputLength[0] * 2 * product of other lengths
+    if(nodeData.placement == rocfft_placement_inplace
+       && nodeData.outArrayType == rocfft_array_type_real)
+    {
+        outputLength[0] = inputLength[0] * 2;
+    }
+    checkoDist = product(outputLength.begin(), outputLength.end());
 
     bool distCondition   = (nodeData.iDist == checkiDist && nodeData.oDist == checkoDist);
     bool strideCondition = (nodeData.inStride.size() && nodeData.inStride[0] == 1)
