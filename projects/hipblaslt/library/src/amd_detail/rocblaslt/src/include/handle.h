@@ -100,6 +100,11 @@ struct _rocblaslt_handle
     void* rocroller_handle = nullptr;
     int   useRocRoller     = -1;
 #endif
+
+    // Numerics-check mode read once from HIPBLASLT_CHECK_NUMERICS env var
+    // in the constructor. When non-zero, every hipblasLtMatmul() scans its
+    // output D matrix for NaN and reports per the bitmask.
+    hipblaslt_check_numerics_mode check_numerics = hipblaslt_check_numerics_mode_no_check;
 };
 
 /********************************************************************************

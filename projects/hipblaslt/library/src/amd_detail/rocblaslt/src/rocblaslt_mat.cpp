@@ -24,6 +24,7 @@
  *
  * ************************************************************************ */
 
+#include "check_numerics_matrix.hpp"
 #include "definitions.h"
 #include "handle.h"
 #include "rocblaslt_mat_utils.hpp"
@@ -222,7 +223,53 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         swizzleB,
                                         batch_mode};
 
-    return runContractionProblem(handle, algo, problem, gemmData);
+    rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+
+    // Optional post-GEMM NaN scan of output D, gated by HIPBLASLT_CHECK_NUMERICS.
+    if(st == rocblaslt_status_success && handle->check_numerics)
+    {
+        int64_t     algo_index = -1;
+        std::string solution_name;
+        std::string kernel_name;
+        // Names are only used to build the log line. Skip the lookup when
+        // neither info nor warn is set (e.g. mode=4 fail-only).
+        const bool need_names = (handle->check_numerics
+                                 & (hipblaslt_check_numerics_mode_info
+                                    | hipblaslt_check_numerics_mode_warn))
+                                != 0;
+        if(algo)
+        {
+            int32_t idx = 0;
+            std::memcpy(&idx, algo->data, sizeof(idx));
+            algo_index = static_cast<int64_t>(idx);
+            if(need_names)
+            {
+                solution_name = getSolutionNameFromAlgoIndex(handle, *algo);
+                kernel_name   = getKernelNameFromAlgoIndex(handle, *algo);
+            }
+        }
+
+        st = hipblaslt_check_numerics_output_D("hipblasLtMatmul",
+                                               stream,
+                                               m,
+                                               n,
+                                               k,
+                                               num_batches_a,
+                                               type_d,
+                                               D,
+                                               ldd,
+                                               batch_stride_d,
+                                               (matD->order == HIPBLASLT_ORDER_ROW),
+                                               opA,
+                                               opB,
+                                               epilogue,
+                                               algo_index,
+                                               solution_name,
+                                               kernel_name,
+                                               handle->check_numerics);
+    }
+
+    return st;
 }
 
 rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle           handle,

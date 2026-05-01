@@ -69,11 +69,13 @@ _rocblaslt_handle::_rocblaslt_handle()
         useRocRoller = -1;
     }
 #endif
+
+    // HIPBLASLT_CHECK_NUMERICS bitmask: 1 = info, 2 = warn, 4 = fail.
+    // Mask to known bits so e.g. =8 doesn't silently enable a no-op scanner.
+    if(const char* cn = std::getenv("HIPBLASLT_CHECK_NUMERICS"))
+        check_numerics = static_cast<hipblaslt_check_numerics_mode>(std::atoi(cn) & 0x7);
 }
 
-/*******************************************************************************
- * destructor
- ******************************************************************************/
 _rocblaslt_attribute::~_rocblaslt_attribute()
 {
     clear();

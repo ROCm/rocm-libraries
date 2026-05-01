@@ -34,6 +34,7 @@
  *****************************************************************************/
 
 #include "Debug.hpp"
+#include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
@@ -444,6 +445,68 @@ namespace
             throw std::runtime_error("Unsupported type.");
         }
         return HIP_R_32F;
+    }
+
+    // Run the post-GEMM NaN scanner on a single (sub-)problem's D matrix.
+    // Returns success when the scanner is disabled, the dtype is unsupported,
+    // or D is null -- the matmul itself already succeeded.
+    rocblaslt_status maybe_check_numerics_problem(
+        rocblaslt_handle                           handle,
+        const char*                                fn,
+        hipStream_t                                stream,
+        const TensileLite::ContractionProblemGemm& prob,
+        const void*                                D,
+        int64_t                                    algo_index,
+        const std::string&                         solution_name,
+        const std::string&                         kernel_name)
+    {
+        if(!handle->check_numerics || !D)
+            return rocblaslt_status_success;
+
+        // Whitelist the dtypes the scanner's switch in
+        // hipblaslt_check_numerics_output_D actually handles. Tensile DataType
+        // values not on this list (Int8/Int32/Float6/BFloat6/Float4) would
+        // either be no-ops (integers can't NaN) or throw from tensile2HipType
+        // for newer enums; filtering here keeps a clean matmul from being
+        // surfaced as a scanner exception.
+        const auto td = prob.d().dataType();
+        if(td != rocisa::DataType::Float && td != rocisa::DataType::Double
+           && td != rocisa::DataType::Half && td != rocisa::DataType::BFloat16
+           && td != rocisa::DataType::Float8_fnuz && td != rocisa::DataType::BFloat8_fnuz
+           && td != rocisa::DataType::Float8 && td != rocisa::DataType::BFloat8)
+            return rocblaslt_status_success;
+
+        const int64_t m        = prob.c().sizes()[0];
+        const int64_t n        = prob.c().sizes()[1];
+        const int64_t k        = prob.a().sizes()[prob.boundIndices()[0].a];
+        const int64_t ldd      = prob.d().strides()[1];
+        const int64_t stride_d = prob.d().strides()[2];
+        const int32_t batch    = static_cast<int32_t>(prob.batchSize(0));
+        // Tensile builds column-major strides; row-major D would have
+        // strides()[0] != 1.
+        const bool               row_major = (prob.d().strides()[0] != 1);
+        const hipDataType        type_d    = tensile2HipType(td);
+        const hipblasOperation_t opA = prob.transA() ? HIPBLAS_OP_T : HIPBLAS_OP_N;
+        const hipblasOperation_t opB = prob.transB() ? HIPBLAS_OP_T : HIPBLAS_OP_N;
+
+        return hipblaslt_check_numerics_output_D(fn,
+                                                 stream,
+                                                 m,
+                                                 n,
+                                                 k,
+                                                 batch,
+                                                 type_d,
+                                                 D,
+                                                 ldd,
+                                                 stride_d,
+                                                 row_major,
+                                                 opA,
+                                                 opB,
+                                                 ROCBLASLT_EPILOGUE_DEFAULT,
+                                                 algo_index,
+                                                 solution_name,
+                                                 kernel_name,
+                                                 handle->check_numerics);
     }
 
     rocisa::DataType roc2TensileType(rocblaslt_compute_type type, bool fallback = true)
@@ -3499,6 +3562,32 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
+
+            if(status == rocblaslt_status_success && handle->check_numerics)
+            {
+                std::string solName, kerName;
+                const bool  need_names = (handle->check_numerics
+                                         & (hipblaslt_check_numerics_mode_info
+                                            | hipblaslt_check_numerics_mode_warn))
+                                        != 0;
+                if(need_names)
+                {
+                    auto sol = library->getSolutionByIndex(*hardware, data->algoIndex);
+                    if(sol)
+                    {
+                        solName = sol->solutionName;
+                        kerName = sol->kernelName;
+                    }
+                }
+                status = maybe_check_numerics_problem(handle,
+                                                     "hipblasLtMatmul (ext)",
+                                                     stream,
+                                                     data->problem,
+                                                     data->inputs.d,
+                                                     data->algoIndex,
+                                                     solName,
+                                                     kerName);
+            }
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
         {
@@ -3553,6 +3642,37 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
+
+            if(status == rocblaslt_status_success && handle->check_numerics)
+            {
+                std::string solName, kerName;
+                const bool  need_names = (handle->check_numerics
+                                         & (hipblaslt_check_numerics_mode_info
+                                            | hipblaslt_check_numerics_mode_warn))
+                                        != 0;
+                if(need_names && solution)
+                {
+                    solName = solution->solutionName;
+                    kerName = solution->kernelName;
+                }
+                const size_t N = std::min(data->problem.gemms.size(),
+                                          data->inputs.grouped.size());
+                for(size_t i = 0; i < N; ++i)
+                {
+                    auto st = maybe_check_numerics_problem(handle,
+                                                           "hipblasLtMatmul (grouped)",
+                                                           stream,
+                                                           data->problem.gemms[i],
+                                                           data->inputs.grouped[i].d,
+                                                           data->algoIndex,
+                                                           solName,
+                                                           kerName);
+                    // First fail wins; keep scanning remaining gemms so each
+                    // sub-problem with NaN gets its own log line.
+                    if(st != rocblaslt_status_success && status == rocblaslt_status_success)
+                        status = st;
+                }
+            }
         }
         else
         {
@@ -3642,6 +3762,10 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
     return status;
 }
 
+// HIPBLASLT_CHECK_NUMERICS is intentionally NOT wired here: the kernel reads
+// per-gemm D pointers from `deviceUserArgs` (a GPU buffer), which may differ
+// from the host-side `data->inputs.grouped[i].d` captured at create time.
+// Scanning the wrong buffer is worse than not scanning. Tracked as known gap.
 rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       handle,
                                                      rocblaslt::RocGemmType gemmType,
                                                      std::shared_ptr<void>  gemmData,
@@ -3762,6 +3886,9 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
     return status;
 }
 
+// HIPBLASLT_CHECK_NUMERICS is intentionally NOT wired here: same reason as
+// runKernelFromNewDeviceUserArguments above -- D pointers come from
+// `deviceUserArgs` and may not match host-side records.
 rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             handle,
                                                   rocblaslt::RocGemmType       gemmType,
                                                   size_t                       gemmCount,

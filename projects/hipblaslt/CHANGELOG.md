@@ -7,6 +7,15 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * General Batched GEMM support.
+* `HIPBLASLT_CHECK_NUMERICS` environment variable: opt-in post-GEMM NaN
+  scanner for `hipblasLtMatmul` output (D matrix) that flags NaN with the
+  call's shape, dtype, op A/B, epilogue, algo index and solution/kernel
+  name. Bitmask -- `1` info, `2` warn-on-NaN, `4` return error on NaN.
+  Output goes to the standard hipBLASLt log sink (or `stderr` if no log
+  sink is configured). Adds `rocblaslt_status_check_numerics_fail` (= 14),
+  mapped to `HIPBLAS_STATUS_INVALID_VALUE` at the hipBLAS API boundary.
+  Debug-only: the scanner adds one device flag allocation, one kernel
+  launch, and one `hipStreamSynchronize` per matmul.
 
 ### Changed
 

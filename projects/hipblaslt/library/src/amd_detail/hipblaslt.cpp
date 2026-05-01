@@ -100,6 +100,10 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
         return HIPBLAS_STATUS_INVALID_VALUE;
     case rocblaslt_status_arch_mismatch:
         return HIPBLAS_STATUS_ARCH_MISMATCH;
+    case rocblaslt_status_check_numerics_fail:
+        // The matmul itself succeeded; HIPBLASLT_CHECK_NUMERICS scanner found
+        // a NaN in D and the customer enabled the fail bit.
+        return HIPBLAS_STATUS_INVALID_VALUE;
     default:
         throw HIPBLAS_STATUS_INVALID_ENUM;
     }

@@ -272,8 +272,23 @@ typedef enum rocblaslt_status_
     rocblaslt_status_not_initialized         = 10, /**< descriptor has not been initialized. */
     rocblaslt_status_type_mismatch           = 11, /**< index types do not match. */
     rocblaslt_status_requires_sorted_storage = 12, /**< sorted storage required. */
-    rocblaslt_status_continue                = 13 /**< nothing preventing function to proceed. */
+    rocblaslt_status_continue                = 13, /**< nothing preventing function to proceed. */
+    rocblaslt_status_check_numerics_fail     = 14  /**< output matrix contains NaN and HIPBLASLT_CHECK_NUMERICS fail bit is set. */
 } rocblaslt_status;
+
+/*! \ingroup types_module
+ *  \brief Bitmask controlling the post-GEMM NaN-check feature.
+ *
+ *  Set the env var \c HIPBLASLT_CHECK_NUMERICS to a bitwise-OR of these values
+ *  to enable scanning of every \c hipblasLtMatmul output (D) for NaN.
+ */
+typedef enum hipblaslt_check_numerics_mode_
+{
+    hipblaslt_check_numerics_mode_no_check = 0, /**< feature disabled (default). */
+    hipblaslt_check_numerics_mode_info     = 1, /**< always print check results. */
+    hipblaslt_check_numerics_mode_warn     = 2, /**< print only when NaN is found. */
+    hipblaslt_check_numerics_mode_fail     = 4, /**< return rocblaslt_status_check_numerics_fail on NaN. */
+} hipblaslt_check_numerics_mode;
 
 /*! \ingroup types_module
  *  \brief Specify the compute precision modes of the matrix
