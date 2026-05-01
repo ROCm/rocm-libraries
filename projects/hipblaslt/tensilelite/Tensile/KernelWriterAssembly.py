@@ -4351,6 +4351,14 @@ class KernelWriterAssembly(KernelWriter):
               divider = 8 if tP["isM"] else 2
               module.add(SLShiftRightB32(dst=sgpr(stmp), src=size, shiftHex=hex(int(log(divider,2))), comment="(size/%u)"%divider))
               module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=0x1, comment="(size/%u-1)"%divider))
+            elif tc == "MXSA":
+              mxBlock = kernel["ProblemType"]["MXBlockA"]
+              module.add(SLShiftRightB32(dst=sgpr(stmp), src=size, shiftHex=log2(mxBlock), comment="(size/%d-1)" %mxBlock))
+              module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=0x1, comment="(size/%d-1)" %mxBlock))
+            elif tc == "MXSB":
+              mxBlock = kernel["ProblemType"]["MXBlockB"]
+              module.add(SLShiftRightB32(dst=sgpr(stmp), src=size, shiftHex=log2(mxBlock), comment="(size/%d-1)" %mxBlock))
+              module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=0x1, comment="(size/%d-1)" %mxBlock))
             elif tP["isSwizzled"]:
               module.addModuleAsFlatItems(self.alignTo(stmp, "SizeL", tP["swizzleK"]))
               module.add(SSubU32(dst=sgpr(stmp), src0=sgpr(stmp), src1=1, comment="SWZ-%s align: (sizeL-1)"%tc))
@@ -9361,12 +9369,16 @@ class KernelWriterAssembly(KernelWriter):
         self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA, prefetchIndex)
       else:
         incCodeA.add(self.tdmIncrementAB(kernel, tPA))
+      if "MX" in tPA and not tdmA:
+        self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
     incCodeB = imod.add(Module("globalReadIncrementB"))
     if tPB != None:
       if not tdmB:
         self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB, prefetchIndex)
       else:
         incCodeB.add(self.tdmIncrementAB(kernel, tPB))
+      if "MX" in tPB and not tdmB:
+        self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB["MX"], prefetchIndex)
     return imod
 
   ##############################################################################

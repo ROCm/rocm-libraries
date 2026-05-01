@@ -1750,7 +1750,13 @@ namespace TensileLite
 
         void DataInitialization::initializeCPUInputs(ContractionProblemGemm const& problem)
         {
-            bool useMXGenerator = isMXFP4Problem(problem);
+            // Only the gfx950 subtile MX kernels need the mxDataGenerator (DGen) seeding
+            // of A/B and pre-swizzled E8 scales. Architectures that read canonical scales
+            // (e.g. gfx1250) must use the same plain initArray path develop uses, so the
+            // bytes the kernel sees are identical to the bytes the reference reads. We
+            // gate on m_mxScaleFormat > 0 because that is the user-visible signal that
+            // they opted into the subtile / pre-swizzle layout.
+            bool useMXGenerator = isMXFP4Problem(problem) && m_mxScaleFormat > 0;
             if(useMXGenerator)
                 initializeMXDataForFP4(problem);
 
