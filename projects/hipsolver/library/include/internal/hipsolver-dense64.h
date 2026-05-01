@@ -255,6 +255,39 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsyevBatched(hipsolverDnHandle_t h
                                                            int*                devInfo,
                                                            int64_t             batchSize);
 
+// sytrs
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsytrs_bufferSize(hipsolverDnHandle_t handle,
+                                                                hipsolverFillMode_t uplo,
+                                                                int64_t             n,
+                                                                int64_t             nrhs,
+                                                                hipDataType         dataTypeA,
+                                                                const void*         A,
+                                                                int64_t             lda,
+                                                                const int64_t*      devIpiv,
+                                                                hipDataType         dataTypeB,
+                                                                void*               B,
+                                                                int64_t             ldb,
+                                                                size_t*             lworkOnDevice,
+                                                                size_t*             lworkOnHost);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsytrs(hipsolverDnHandle_t handle,
+                                                     hipsolverFillMode_t uplo,
+                                                     int64_t             n,
+                                                     int64_t             nrhs,
+                                                     hipDataType         dataTypeA,
+                                                     const void*         A,
+                                                     int64_t             lda,
+                                                     const int64_t*      devIpiv,
+                                                     hipDataType         dataTypeB,
+                                                     void*               B,
+                                                     int64_t             ldb,
+                                                     void*               workOnDevice,
+                                                     size_t              lworkOnDevice,
+                                                     void*               workOnHost,
+                                                     size_t              lworkOnHost,
+                                                     int*                devInfo);
+
+
 #ifdef __cplusplus
 }
 #endif

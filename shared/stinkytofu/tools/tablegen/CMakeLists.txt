@@ -14,6 +14,9 @@ set(SOURCES
 )
 
 add_executable(tablegen "${SOURCES}")
+# tablegen compiles IRLexer/PatternParser directly (not via libstinkytofu),
+# so it needs stinkytofu_EXPORTS to get dllexport instead of dllimport.
+target_compile_definitions(tablegen PRIVATE stinkytofu_EXPORTS)
 
 target_link_libraries(tablegen PRIVATE gfxisa)
 

@@ -46,6 +46,10 @@
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
 namespace TensileLite
@@ -662,3 +666,5 @@ namespace TensileLite
                              ContractionSolution::ProjectedPerformance const& spm);
     std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

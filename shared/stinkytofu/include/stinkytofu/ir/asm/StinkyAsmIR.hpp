@@ -29,6 +29,7 @@
 #include <optional>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
@@ -44,7 +45,7 @@ namespace stinkytofu {
 #include "hardware/gfxIsa.inc"
 
 // Represents a single assembly instruction.
-struct StinkyInstruction : public IRBase {
+struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     friend class IRBase;
     friend class AsmIRBuilder;
     friend class DefUseChainUpdater;
@@ -258,7 +259,7 @@ struct StinkyInstruction : public IRBase {
 
 /// Builder for assembly-level IR.
 /// In passes, create StinkyInstruction only through this builder.
-class AsmIRBuilder : public IRBuilder {
+class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
    public:
     const GfxArchID arch;
 
@@ -309,9 +310,9 @@ class AsmIRBuilder : public IRBuilder {
     AsmIRBuilder(BasicBlock& bb, GfxArchID arch) : IRBuilder(bb), arch(arch) {}
 };
 
-const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
-const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
-uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
 
 // Processing StinkyTofu IR.
 class StinkyInstPass : public Pass {};
