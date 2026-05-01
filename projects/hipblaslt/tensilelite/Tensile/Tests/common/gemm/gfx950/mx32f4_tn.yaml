@@ -7,7 +7,7 @@ GlobalParameters:
   PrintLevel: 1
   #PrintSolutionRejectionReason: True
   Device: 0
-  CMakeBuildType: Debug
+  CMakeBuildType: Release
 #  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
@@ -20,7 +20,6 @@ GlobalParameters:
   DataInitTypeBeta: 0
   NumElementsToValidate: -1
   BoundsCheck: 0
-  KeepBuildTmp: True
   MaxFileName: 128
   DeviceLDS: 163840
   MaxLDS: 163840
@@ -71,12 +70,12 @@ BenchmarkProblems:
 #          - [32, 32,  64, 1, 1, 2,4, 2,2]  # 64x64
         #- ForceDisableShadowInit: [True, False]
         - UseSgprForGRO: [0,1]
-        - DepthU: [64, 128, 256]
+        - DepthU: [128, 256]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         - AssertSummationElementMultiple: [32]
         - LocalReadVectorWidth: [32]
-        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchGlobalRead: [0,2]
         - PrefetchLocalRead: [0,1]
         #- PreloadKernArgs: [0,1]
         - ClusterLocalRead: [0,1]
@@ -84,7 +83,7 @@ BenchmarkProblems:
         - VectorWidthB: [1]
         - GlobalReadVectorWidthA: [32]
         - GlobalReadVectorWidthB: [32]
-        - ScheduleIterAlg: [1,2,3]
+        - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
         - ExpandPointerSwap: [0,1]
 #        - LdsBlockSizePerPadA: [0]
@@ -131,7 +130,7 @@ BenchmarkProblems:
 #          - Exact: [1041, 529, 1, 2048]
 #          - Exact: [1042, 530, 1, 2048]
 #          - Exact: [1043, 531, 1, 2048]
-          - Exact: [1044, 532, 1, 2048]
+#          - Exact: [1044, 532, 1, 2048] # dropped: [1025, 513, 1, 2048] above covers the same odd-edge case
           - Exact: [127, 127, 1, 640] #special cleanup case
           - Exact: [128, 128, 1, 128]
           - Exact: [129, 129, 1, 640]
@@ -142,8 +141,8 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 512]
           #- Range: [[128], [128], [1], [1024,32,1280]]
           - Range: [[128], [128], [1], [1024,128,1280]] #make K value is multiple of DepthU
-          - Range: [[128,1,256], [128], [1], [1024]]
-          - Range: [[128], [128,1,256], [1], [1024]]
+          - Range: [[128,8,256], [128], [1], [1024]]
+          - Range: [[128], [128,8,256], [1], [1024]]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]

@@ -39,6 +39,7 @@
 #include <Tensile/TensorOps.hpp>
 #include <Tensile/Utils.hpp>
 
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -180,7 +181,7 @@ namespace TensileLite
         rocisa::DataType dataType;
     };
 
-    class ContractionProblem : public Problem
+    class TENSILE_API ContractionProblem : public Problem
     {
     public:
         ContractionProblem(size_t size, size_t workspaceSize = 0);
@@ -297,7 +298,7 @@ namespace TensileLite
      * summations, etc. This is decoupled from any particular pointers, which
      * are provided in ContractionInputs objects.
      */
-    class ContractionProblemGemm : public ContractionProblem
+    class TENSILE_API ContractionProblemGemm : public ContractionProblem
     {
     public:
         enum TENSOR : int
@@ -1560,3 +1561,4 @@ namespace TensileLite
      * @}
      */
 } // namespace TensileLite
+TENSILE_HIDDEN_END
