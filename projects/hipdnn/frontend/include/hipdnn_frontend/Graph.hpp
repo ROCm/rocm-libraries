@@ -1033,9 +1033,11 @@ public:
      * specified heuristic modes.
      *
      * @param modes Heuristic modes to use for engine selection
-     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
-     *         if the graph has not been built. Call get_message() for the
-     *         specific failure reason.
+     * @return ErrorCode::OK on success; ErrorCode::GRAPH_NOT_SUPPORTED if no
+     *         engine has an applicable solution for this graph on the current
+     *         device; ErrorCode::HIPDNN_BACKEND_ERROR if the graph has not
+     *         been built or on other backend failure. Call get_message() for
+     *         the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plans(const std::vector<HeuristicMode>& modes

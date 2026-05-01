@@ -48,7 +48,7 @@ inline Error
                                              0,
                                              &availableEngineCount,
                                              nullptr),
-        "Failed to get attribue from the engine heuristic descriptor.");
+        "Failed to get attribute from the engine heuristic descriptor.");
 
     if(availableEngineCount == 0)
     {

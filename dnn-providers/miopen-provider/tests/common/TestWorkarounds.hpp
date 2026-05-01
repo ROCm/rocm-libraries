@@ -49,8 +49,8 @@
 
 // Single source for the issue-6979 skip message — referenced by both SKIP
 // macros so wording stays in sync.
-#define WORKAROUND_ISSUE_6979_SKIP_MSG                                       \
-    "Skipping due to ROCm/rocm-libraries#6979 (no engine has an applicable " \
+#define WORKAROUND_ISSUE_6979_SKIP_MSG                                               \
+    "[#6979] Skipping due to ROCm/rocm-libraries#6979 (no engine has an applicable " \
     "solution for ConvBiasActiv fusion on the current device)"
 
 // Inline function (not a macro) so the argument is evaluated exactly once.
