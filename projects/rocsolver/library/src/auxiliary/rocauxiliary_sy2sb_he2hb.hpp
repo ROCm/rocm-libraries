@@ -37,12 +37,12 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 //------------------------------------------------------------------------------
-template <bool BATCHED, typename T>
+template <bool BATCHED, typename T, typename I>
 void rocsolver_sy2sb_he2hb_getMemorySize(
-    const rocblas_int n,
-    const rocblas_int kd,
-    const rocblas_int nb,
-    const rocblas_int batch_count,
+    const I n,
+    const I kd,
+    const I nb,
+    const I batch_count,
     size_t* size_scalars,
     size_t* size_D,
     size_t* size_V,
@@ -95,18 +95,18 @@ void rocsolver_sy2sb_he2hb_getMemorySize(
 // todo: this was template <typename T, typename S> with T A, S V, S W.
 // What's the difference between T and S? For complex, they are all complex, not real.
 // Why no pointers?
-template <typename T>
+template <typename T, typename I>
 rocblas_status rocsolver_sy2sb_he2hb_argCheck(
     rocblas_handle handle,
-    const rocblas_int n,
-    const rocblas_int kd,
-    const rocblas_int nb,
+    const I n,
+    const I kd,
+    const I nb,
     T* A,
-    const rocblas_int lda,
+    const I lda,
     T* Aband,
-    const rocblas_int ldab,
+    const I ldab,
     T* tau,
-    const rocblas_int batch_count = 1)
+    const I batch_count = 1)
 {
     // order is important for unit tests:
 
@@ -133,22 +133,22 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(
 /// Reduces A to Aband with bandwidth kd, using outer block size nb.
 /// Householder vectors overwrite A below bandwidth, with associated tau.
 /// T, U, V, W, Z are workspaces.
-template <bool BATCHED, bool STRIDED, typename T, typename U>
+template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_template(
     rocblas_handle handle,
-    const rocblas_int n,
-    const rocblas_int kd,
-    const rocblas_int nb,
+    const I n,
+    const I kd,
+    const I nb,
     U A,
-    const rocblas_int shiftA,
-    const rocblas_int lda,
+    const I shiftA,
+    const I lda,
     const rocblas_stride strideA,
     T* Aband,
-    const rocblas_int ldab,
+    const I ldab,
     const rocblas_stride strideAb,
     T* tau,
     const rocblas_stride strideTau,
-    const rocblas_int batch_count,
+    const I batch_count,
     T* scalars,
     T* D,
     T* V,
@@ -197,11 +197,11 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     if (debug_)
         print_matrix( "Aband_in", ldab, n, Aband, ldab );
 
-    rocblas_int ldd = nb;
-    rocblas_int ldv = n;
-    rocblas_int ldw = n;
-    rocblas_int ldx = n;
-    rocblas_int ldz = n;
+    I ldd = nb;
+    I ldv = n;
+    I ldw = n;
+    I ldx = n;
+    I ldz = n;
 
     rocblas_stride strideD = ldd*nb;
     rocblas_stride strideV = ldv*nb;
@@ -210,18 +210,18 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     rocblas_stride strideZ = ldz*nb;
 
     // Row of Aband that stores main diagonal.
-    rocblas_int idiag = kd - 1;
+    I idiag = kd - 1;
 
     // Index i tracks what sub-panels have been factored.
-    rocblas_int i = 0;
-    rocblas_int cpy_mblks, cpy_nblks;
+    I i = 0;
+    I cpy_mblks, cpy_nblks;
 
     // Loop over large blocks.
-    for (rocblas_int j = 0; j < n - kd; j += nb)
+    for (I j = 0; j < n - kd; j += nb)
     {
-        rocblas_int jm = n - kd - j;          // height of outer panel
-        rocblas_int jb = std::min( nb, jm );  // width  of outer panel
-        rocblas_int jend = j + jb;
+        I jm = n - kd - j;          // height of outer panel
+        I jb = std::min( nb, jm );  // width  of outer panel
+        I jend = j + jb;
 
         if (debug_)
             printf( "----------\nj = %d, jb = %d, jend = %d, jm = %d\n", j, jb, jend, jm );
@@ -231,7 +231,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         // Includes diagonal tile above panel and all kd columns.
         // (minor todo: could copy 1st diagonal tile (j:j+kb) to Aband instead,
         // but then later code to copy panel to Aband is more complex.)
-        rocblas_int jb_rnd = roundup( jb, kd );
+        I jb_rnd = roundup( jb, kd );
         cpy_mblks = ceildiv( n-j, 32 );
         cpy_nblks = ceildiv( jb_rnd, 32 );
         ROCSOLVER_LAUNCH_KERNEL(
@@ -248,8 +248,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         assert( i == j );
         while (i < jend)
         {
-            rocblas_int qm = n - i - kd;
-            rocblas_int qn = std::min( kd, qm );
+            I qm = n - i - kd;
+            I qn = std::min( kd, qm );
 
             if (debug_)
                 printf( "-----\ni = %d, qm = %d, qn = %d\n", i, qm, qn );

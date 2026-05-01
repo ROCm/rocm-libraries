@@ -29,15 +29,15 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
-                                          const rocblas_int n,
-                                          const rocblas_int kd,
-                                          const rocblas_int nb,
+                                          const I n,
+                                          const I kd,
+                                          const I nb,
                                           U A,
-                                          const rocblas_int lda,
+                                          const I lda,
                                           T* Aband,
-                                          const rocblas_int ldab,
+                                          const I ldab,
                                           T* tau)
 {
     ROCSOLVER_ENTER_TOP("sy2sb_he2hb", "-n", n, "-kd", kd, "-nb", nb,
@@ -53,13 +53,13 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
         return st;
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    I shiftA = 0;
 
     // normal (non-batched non-strided) execution
     rocblas_stride strideA = 0;
     rocblas_stride strideAb = 0;
     rocblas_stride strideTau = 0;
-    rocblas_int batch_count = 1;
+    I batch_count = 1;
 
     // memory workspace sizes:
     // size for constants in rocblas calls
@@ -68,7 +68,7 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
     size_t size_workArr;
     // extra requirements
     size_t size_D, size_V, size_W, size_X, size_Z, size_work;
-    rocsolver_sy2sb_he2hb_getMemorySize<false, T>(
+    rocsolver_sy2sb_he2hb_getMemorySize<false, T, I>(
             n, kd, nb, batch_count,
             &size_scalars, &size_D, &size_V, &size_W, &size_X, &size_Z,
             &size_work, &size_workArr);
@@ -100,7 +100,7 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
         init_scalars(handle, scalars);
 
     // execution
-    return rocsolver_sy2sb_he2hb_template<false, false, T>(
+    return rocsolver_sy2sb_he2hb_template<false, false, T, I>(
             handle, n, kd, nb,
             A, shiftA, lda, strideA,
             Aband, ldab, strideAb,
@@ -134,7 +134,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
                                 const rocblas_int ldab,
                                 float* tau)
 {
-    return rocsolver::rocsolver_sy2sb_he2hb_impl<float>(
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<float, rocblas_int>(
             handle, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
@@ -148,7 +148,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsy2sb(rocblas_handle handle,
                                 const rocblas_int ldab,
                                 double* tau)
 {
-    return rocsolver::rocsolver_sy2sb_he2hb_impl<double>(
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<double, rocblas_int>(
             handle, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
@@ -162,7 +162,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_che2hb(rocblas_handle handle,
                                 const rocblas_int ldab,
                                 rocblas_float_complex* tau)
 {
-    return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_float_complex>(
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_float_complex, rocblas_int>(
             handle, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
@@ -176,7 +176,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
                                 const rocblas_int ldab,
                                 rocblas_double_complex* tau)
 {
-    return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_double_complex>(
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_double_complex, rocblas_int>(
             handle, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
