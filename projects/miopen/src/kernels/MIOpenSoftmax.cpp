@@ -255,11 +255,10 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
             }
             else
             {
-                for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
-                {
+                loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
                     auto x_idx = i * STRIDE + offset + X_OFFSET;
                     tmp        = max(CVT_FLOAT2ACCUM(x[x_idx]), tmp);
-                }
+                });
             }
             if constexpr(LOCAL_SIZE > 1)
             {
@@ -320,8 +319,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         }
         else
         {
-            for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
-            {
+            loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
                 auto x_idx        = i * STRIDE + offset + X_OFFSET;
                 FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x[x_idx]) - channel_max;
                 if constexpr(USE_SOFTMAX_LOG)
@@ -332,7 +330,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 {
                     tmp += exp(value);
                 }
-            }
+            });
         }
         FLOAT_ACCUM channel_sum;
         if constexpr(LOCAL_SIZE > 1)
@@ -406,8 +404,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         }
         else
         {
-            for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
-            {
+            loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
                 auto x_idx        = i * STRIDE + offset + X_OFFSET;
                 auto y_idx        = i * STRIDE + offset + Y_OFFSET;
                 FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x[x_idx]) - channel_max;
@@ -426,7 +423,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 value = value * CVT_FP32_2ACCUM(alpha) +
                         CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
                 y[y_idx] = CVT_ACCUM2FLOAT(value);
-            }
+            });
         }
     }
     else // CSR-Stream like approach
@@ -480,8 +477,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         }
         else
         {
-            for(unsigned int i = batch_lid; i < INNER_SIZE; i += BATCH_SIZE)
-            {
+            loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
                 auto x_idx      = i * STRIDE + offset + X_OFFSET;
                 x_values[index] = CVT_FLOAT2ACCUM(x[x_idx]);
                 if constexpr(!USE_SOFTMAX_FAST)
@@ -489,7 +485,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                     tmp = max(x_values[index], tmp);
                 }
                 ++index;
-            }
+            });
         }
 
         FLOAT_ACCUM channel_max = 0;
@@ -544,8 +540,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         }
         else
         {
-            for(unsigned int i = batch_lid; i < INNER_SIZE; i += BATCH_SIZE)
-            {
+            loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
                 FLOAT_ACCUM x_value = x_values[index] - channel_max;
                 if constexpr(USE_SOFTMAX_LOG)
                 {
@@ -561,7 +556,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                     x_values[index] = x_value;
                 }
                 ++index;
-            }
+            });
         }
         FLOAT_ACCUM channel_sum;
         if constexpr(BATCH_SIZE > 1)
@@ -629,8 +624,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         }
         else
         {
-            for(unsigned int i = batch_lid; i < INNER_SIZE; i += BATCH_SIZE)
-            {
+            loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
                 auto y_idx = i * STRIDE + offset + Y_OFFSET;
                 if constexpr(USE_SOFTMAX_LOG)
                 {
@@ -647,7 +641,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                                   CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
                 y[y_idx] = CVT_ACCUM2FLOAT(x_values[index]);
                 ++index;
-            }
+            });
         }
     }
 }
@@ -715,8 +709,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         }
         else
         {
-            for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
-            {
+            loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
                 auto dy_idx       = i * STRIDE + offset + DY_OFFSET;
                 FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[dy_idx]);
                 if constexpr(!USE_SOFTMAX_LOG)
@@ -725,7 +718,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                     value *= CVT_FLOAT2ACCUM(y[y_idx]);
                 }
                 channel_dot += value;
-            }
+            });
         }
         if constexpr(LOCAL_SIZE > 1)
         {
@@ -786,8 +779,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         }
         else
         {
-            for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
-            {
+            loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
                 auto dy_idx       = i * STRIDE + offset + DY_OFFSET;
                 auto y_idx        = i * STRIDE + offset + Y_OFFSET;
                 auto dx_idx       = i * STRIDE + offset + DX_OFFSET;
@@ -803,7 +795,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 value = value * CVT_FP32_2ACCUM(alpha) +
                         CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
                 dx[dx_idx] = CVT_ACCUM2FLOAT(value);
-            }
+            });
         }
     }
     else // CSR-Stream like approach
@@ -871,8 +863,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         }
         else
         {
-            for(unsigned int i = batch_lid; i < INNER_SIZE; i += BATCH_SIZE)
-            {
+            loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
                 auto y_idx       = i * STRIDE + offset + Y_OFFSET;
                 auto dy_idx      = i * STRIDE + offset + DY_OFFSET;
                 y_values[index]  = CVT_FLOAT2ACCUM(y[y_idx]);
@@ -883,7 +874,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 }
                 channel_dot += dy_values[index];
                 ++index;
-            }
+            });
         }
         if constexpr(BATCH_SIZE > 1)
         {
@@ -939,8 +930,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         }
         else
         {
-            for(unsigned int i = batch_lid; i < INNER_SIZE; i += BATCH_SIZE)
-            {
+            loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
                 auto dx_idx = i * STRIDE + offset + DX_OFFSET;
                 if constexpr(USE_SOFTMAX_LOG)
                 {
@@ -953,7 +943,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 dx[dx_idx] = CVT_ACCUM2FLOAT(dy_values[index] * CVT_FP32_2ACCUM(alpha) +
                                              CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta));
                 ++index;
-            }
+            });
         }
     }
 }
