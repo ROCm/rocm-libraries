@@ -217,7 +217,6 @@ try
             "                           the number of super-diagonals and sub-diagonals.\n"
             "                           ")
 
-        // bandwidth options
         ("kl",
          value<rocblas_int>(),
             "Matrix/vector size parameter.\n"
@@ -225,8 +224,7 @@ try
             "                           the number of sub-diagonals.\n"
             "                           ")
 
-        // bandwidth options
-        ("kd",
+        ("ku",
          value<rocblas_int>(),
             "Matrix/vector size parameter.\n"
             "                           Upper bandwidth of general matrix,\n"
