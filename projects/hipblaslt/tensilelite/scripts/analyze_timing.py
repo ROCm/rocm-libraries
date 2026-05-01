@@ -74,6 +74,8 @@ TIMING_HIERARCHY = {
                 "python_wsol_prepare_cache": {},
                 "python_wsol_prepare_nocache": {},
             },
+            "python_wsol_header": {},
+            "python_wsol_dump": {},
         },
         "python_client_execution": {
             "hip_initialization": {},

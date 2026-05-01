@@ -29,6 +29,8 @@
 // Workaround: ROCm's amd_hip_ocp_host.hpp has a static_assert size mismatch
 // (fp6x32_packed vs __amd_fp6x32_storage_t) in its host-fallback path, which
 // is taken for all non-gfx950/gfx1250 device targets.
+#include <Tensile/Macros.hpp>
+
 #if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx950__) || defined(__gfx1250__)) && !defined(WIN32) && !defined(_WIN32)
 #define TENSILE_USE_FP4
 #endif
@@ -44,6 +46,8 @@
 #define HIP_DEVICE __device__
 
 #include <hip/hip_ext_ocp.h>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -149,5 +153,7 @@ namespace std
         return stream << static_cast<float>(result[0]) << " " << static_cast<float>(result[1]);
     }
 } // namespace std
+
+TENSILE_HIDDEN_END
 
 #endif // TENSILE_USE_FP4

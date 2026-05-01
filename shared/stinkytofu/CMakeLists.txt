@@ -21,6 +21,17 @@ endforeach()
 
 add_compile_options(-fno-rtti -fno-exceptions)
 
+# Hide all symbols by default; only STINKYTOFU_EXPORT symbols are visible.
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+# On Windows, DLLs must be next to executables at runtime. Place all
+# binaries in a single directory so tools/tests find stinkytofu.dll.
+if(WIN32)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+
 # set variable of the top level source directory to STINKYTOFU_TOP_DIR
 set(STINKYTOFU_TOP_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -94,15 +105,7 @@ set(STINKYTOFU_GENERATED_SOURCES
 # Mark generated files so CMake knows they will be created during build
 set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED TRUE)
 
-# TODO: Windows requires explicit __declspec(dllexport) on every symbol for
-# shared libraries with lld-link. Build as static on Windows temporarily until
-# all public API is properly annotated with STINKYTOFU_EXPORT.
-if(WIN32)
-    add_library(stinkytofu STATIC ${STINKYTOFU_GENERATED_SOURCES})
-    target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
-else()
-    add_library(stinkytofu SHARED ${STINKYTOFU_GENERATED_SOURCES})
-endif()
+add_library(stinkytofu SHARED ${STINKYTOFU_GENERATED_SOURCES})
 target_include_directories(stinkytofu
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -121,7 +124,9 @@ target_include_directories(stinkytofu
 add_dependencies(stinkytofu tablegen_generated)
 
 # dladdr() used in IntrinsicRegistry.cpp requires -ldl
-target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS})
+# Threads required for std::call_once (separate libpthread on glibc < 2.34)
+find_package(Threads REQUIRED)
+target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 
 # Add source files from src/ subdirectory
 add_subdirectory(src)

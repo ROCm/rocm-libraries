@@ -24,6 +24,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Function;
 class Pass;
@@ -53,12 +55,13 @@ struct DominanceInfo;
 ///                        fresh function that has no PHIs yet.
 ///
 /// Assumes: non-SSA form (physical registers), CFG already built.
-void insertPhiInstructions(Function& func, bool clearExisting);
+STINKYTOFU_EXPORT void insertPhiInstructions(Function& func, bool clearExisting);
 
 /// Overload that accepts pre-computed dominance info.
-void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool clearExisting);
+STINKYTOFU_EXPORT void insertPhiInstructions(Function& func, const DominanceInfo& domInfo,
+                                             bool clearExisting);
 
 /// Creates a Pass that inserts PHI instructions via insertPhiInstructions().
-std::unique_ptr<Pass> createInsertPhiPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertPhiPass();
 
 }  // namespace stinkytofu

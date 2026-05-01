@@ -84,6 +84,7 @@ set(UNIT_LOGICAL_TEST_FILES
 # Core Infrastructure Tests
 set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
+    unit/core/BackendRegistryTest.cpp
 )
 
 # Common/Shared Tests
