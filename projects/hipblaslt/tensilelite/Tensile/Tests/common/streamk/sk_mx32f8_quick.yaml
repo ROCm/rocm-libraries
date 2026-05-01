@@ -25,6 +25,7 @@ GlobalParameters:
   MaxFileName: 128
   DeviceLDS: 163840
   MaxLDS: 163840
+  MXScaleFormat: 1
 
 BenchmarkProblems:
   ########################################

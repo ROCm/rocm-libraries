@@ -16,6 +16,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   BoundsCheck: 2
+  MXScaleFormat: 1
 
 BenchmarkProblems:
   ########################################

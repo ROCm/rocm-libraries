@@ -30,6 +30,7 @@ GlobalParameters:
 #  PrintTensorC: True
 #  PrintTensorD: True
 #  PrintTensorRef: True
+  MXScaleFormat: 1
 
 BenchmarkProblems:
   ########################################
