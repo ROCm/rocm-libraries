@@ -76,7 +76,6 @@ void rocsolver_sy2sb_he2hb_getMemorySize(
     *size_workArr = BATCHED ? sizeof(T*) * 2 * batch_count : 0;
 
     // extra space for geqrf calls
-    /// todo: this was ignoring `w`?
     rocsolver_geqrf_getMemorySize<BATCHED, T>(n - kd, kd, batch_count, size_scalars, &w, &s1, &s2, &wa);
     *size_D = std::max(*size_D, s1);
     *size_Z = std::max(*size_Z, s2);
@@ -84,24 +83,19 @@ void rocsolver_sy2sb_he2hb_getMemorySize(
     *size_workArr = std::max(*size_workArr, wa);
 
     // extra space for larft calls
-    /// todo: was n-nb, but seems it should be n-kd.
     rocsolver_larft_getMemorySize<BATCHED, T>(n - kd, nb, batch_count, size_scalars, &w, &wa);
     *size_work = std::max(*size_work, w);
     *size_workArr = std::max(*size_workArr, wa);
 }
 
 //------------------------------------------------------------------------------
-/// Shouldn't these be T* A, tau instead of T A, tau?
-// todo: this was template <typename T, typename S> with T A, S V, S W.
-// What's the difference between T and S? For complex, they are all complex, not real.
-// Why no pointers?
-template <typename T, typename I>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_argCheck(
     rocblas_handle handle,
     const I n,
     const I kd,
     const I nb,
-    T* A,
+    U A,
     const I lda,
     T* Aband,
     const I ldab,
@@ -129,10 +123,9 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(
 }
 
 //------------------------------------------------------------------------------
-/// What's the point of types T and U? Isn't T == U always?
-/// Reduces A to Aband with bandwidth kd, using outer block size nb.
-/// Householder vectors overwrite A below bandwidth, with associated tau.
-/// T, U, V, W, Z are workspaces.
+// Reduces A to Aband with bandwidth kd, using outer block size nb.
+// Householder vectors overwrite A below bandwidth, with associated tau.
+// T, U, V, W, Z are workspaces.
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_template(
     rocblas_handle handle,
@@ -332,7 +325,6 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             }
 
             // Form corresponding matrix Ti = larft( Vi, tau_i ), stored above Vi.
-            // todo: why does T not have shift? Is just adding okay? Why not add everywher?
             rocsolver_larft_template<T>(
                 handle, rocblas_forward_direction, rocblas_column_wise,
                 qm, qn,

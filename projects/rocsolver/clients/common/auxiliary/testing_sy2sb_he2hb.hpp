@@ -101,14 +101,12 @@ void testing_sy2sb_he2hb_bad_arg()
 }
 
 //------------------------------------------------------------------------------
-// todo: Can dA and hA have different lda? Or does lda apply only to hA? Weird argument order.
 template <bool CPU,
           bool GPU,
           typename T,
           typename I,
           typename Td,
           typename Th>
-          //std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 void sy2sb_he2hb_initData(const rocblas_handle handle,
                           const I n,
                           const I kd,  // unused
