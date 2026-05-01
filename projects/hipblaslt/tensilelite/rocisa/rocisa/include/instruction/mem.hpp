@@ -1627,6 +1627,73 @@ namespace rocisa
         }
     };
 
+    struct GlobalLoadB96 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB96(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                      const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B96, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB96(const GlobalLoadB96& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB96>(*this);
+        }
+    };
+
+    struct GlobalLoadD16U8 : public GLOBALLoadInstruction
+    {
+        GlobalLoadD16U8(const std::shared_ptr<RegisterContainer>& dst,
+                        const std::shared_ptr<RegisterContainer>& vaddr,
+                        const std::shared_ptr<RegisterContainer>& saddr,
+                        std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                        const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_D16_U8, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadD16U8(const GlobalLoadD16U8& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadD16U8>(*this);
+        }
+    };
+
+    struct GlobalLoadD16HIU8 : public GLOBALLoadInstruction
+    {
+        GlobalLoadD16HIU8(const std::shared_ptr<RegisterContainer>& dst,
+                          const std::shared_ptr<RegisterContainer>& vaddr,
+                          const std::shared_ptr<RegisterContainer>& saddr,
+                          std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                          const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(
+                InstType::INST_D16_HI_U8, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadD16HIU8(const GlobalLoadD16HIU8& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadD16HIU8>(*this);
+        }
+    };
+
     struct BufferStoreB8 : public MUBUFStoreInstruction
     {
         BufferStoreB8(const std::shared_ptr<RegisterContainer>& src,
@@ -2134,6 +2201,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {vaddr, srcData, saddr};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {vaddr, srcData, saddr};
         }

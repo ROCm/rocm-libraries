@@ -67,8 +67,14 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
   VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
+<<<<<<< HEAD
   VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
   GlobalLoadB32, GlobalLoadB64, GlobalLoadB128, GlobalLoadD16B16, GlobalLoadD16HIB16, \
+=======
+  VPrngB32, VReadfirstlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
+  GlobalLoadB32, GlobalLoadB64, GlobalLoadB96, GlobalLoadB128, GlobalLoadD16B16, GlobalLoadD16HIB16, \
+  GlobalLoadD16U8, GlobalLoadD16HIU8, \
+>>>>>>> fb062b7c415 (Fixed compiling issues and added missing global instructions.)
   GlobalStoreB32, GlobalStoreB64, GlobalStoreB128, GlobalStoreD16B16, GlobalStoreD16HIB16
 
 from .Component import Component, TensorDataMover
@@ -1844,18 +1850,6 @@ class KernelWriterAssembly(KernelWriter):
             src1="v[\\vgprAddr+0]", \
             comment="add prepad for pointer shift"))
 
-      if tP is not None:
-        bpeGR = tP["bpeGR"] if not tP["isM"] else tP["bpe"]
-      else:
-        bpeGR = self.states.bpeCexternal
-      # addr *= bytes/element
-      if justOffset32:
-        macro.add(vectorStaticMultiply(vgpr("Addr+0", isMacro=True), vgpr("Addr+0", isMacro=True), bpeGR, None, "offset *= bytes/element"))
-      else:
-        macro.add(VLShiftLeftB64(dst=vgpr("Addr+0", 2, isMacro=True), \
-            shiftHex=hex(log2(bpeGR)), \
-            src="v[\\vgprAddr+0:\\vgprAddr+1]", \
-            comment="offset *= bytes/element"))
       module.add(macro)
 
     if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"] :
@@ -4009,8 +4003,9 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["BufferLoad"]:
           module.add(vectorMultiplyBpe(dest, dest, tP["bpeGR"]))
       else:
-          module.add(vectorMultiply64Bpe(dest, dest, tP["bpeGR"]))
-
+          startVgpr = self.startVgprGlobalReadAddressesA if tc == 'A' else self.startVgprGlobalReadAddressesB
+          destVgpr = startVgpr + graIdx
+          module.add(vectorMultiply64Bpe(destVgpr, destVgpr, tP["bpeGR"], tmp))
       with self.allocTmpSgpr(2) as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
 
@@ -15960,7 +15955,11 @@ class KernelWriterAssembly(KernelWriter):
     else:
       modifier = GLOBALModifiers(offset=0)
       saddr_off = vgpr("off", 1, False, False, True)
-      if bpl==2 and hi16:
+      if bpl==1 and hi16:
+        return GlobalLoadD16HIU8(dst=vgpr(destVgpr, rpv*4), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment)
+      elif bpl==1 and not hi16:
+        return GlobalLoadD16U8(dst=vgpr(destVgpr, rpv*4), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment)
+      elif bpl==2 and hi16:
         return GlobalLoadD16HIB16(dst=vgpr(destVgpr, rpv*2), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment)
       elif bpl==2 and not hi16:
         return GlobalLoadD16B16(dst=vgpr(destVgpr, rpv*2), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment)
@@ -15968,8 +15967,17 @@ class KernelWriterAssembly(KernelWriter):
         return GlobalLoadB32(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment)
       elif bpl==8:
         return GlobalLoadB64(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment)
+      elif bpl==12:
+        return GlobalLoadB96(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment)
       elif bpl==16:
         return GlobalLoadB128(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment)
+      elif bpl==24:
+        # emulate global_load_b192 as global_load_b128 + global_load_b64
+        rv = Module("emulated _global_load_b192")
+        rv.add(GlobalLoadB128(dst=vgpr(destVgpr, 4), vaddr=addr0, saddr=saddr_off, modifier=modifier, comment=comment))
+        modifier2 = GLOBALModifiers(offset=16)
+        rv.add(GlobalLoadB64(dst=vgpr(_vgprOffset(destVgpr, 4), 2), vaddr=addr0, saddr=saddr_off, modifier=modifier2, comment=comment))
+        return rv
       else:
         assert 0, "chooseGlobalRead: bad bpl"
 
