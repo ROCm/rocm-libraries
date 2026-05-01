@@ -13,7 +13,7 @@ inline bool isNaN<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes,
     uint8_t data  = *(dataBytes + dataIndex);
     uint8_t scale = *(scaleBytes + scaleIndex);
 
-    if(scale == Constants::E8M0_NAN)
+    if(scale == getScaleNan<ScaleType::E8M0>())
         return true;
 
     // set sign bit to 1
@@ -109,7 +109,7 @@ inline double toDouble<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes,
                                              ocp_e5m2_mxfp8::scaleInfo.mantissaBits,
                                              ocp_e5m2_mxfp8::scaleInfo.exponentBits);
 
-    return convertToDouble<uint8_t, OCP_E5M2_MXFP8_DATA, E8M0_SCALE_INFO>(data, scaleExp);
+    return convertToDouble<uint8_t, OCP_E5M2_MXFP8_DATA, ScaleInfo<ScaleType::E8M0>>(data, scaleExp);
 }
 
 template <>
@@ -147,7 +147,7 @@ inline float toFloat<ocp_e5m2_mxfp8>(uint8_t const* scaleBytes,
                                              ocp_e5m2_mxfp8::scaleInfo.mantissaBits,
                                              ocp_e5m2_mxfp8::scaleInfo.exponentBits);
 
-    return convertToFloat<uint8_t, OCP_E5M2_MXFP8_DATA, E8M0_SCALE_INFO>(data, scaleExp);
+    return convertToFloat<uint8_t, OCP_E5M2_MXFP8_DATA, ScaleInfo<ScaleType::E8M0>>(data, scaleExp);
 }
 
 template <>

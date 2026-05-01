@@ -143,8 +143,8 @@ class TestPreviewFilesFrontend:
 
     def test_frontend_file_count(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_FRONTEND)
-        # 2 files + 3 tests + 5 fragments = 10
-        assert len(files) == 10
+        # 2 files + 3 tests + 4 fragments = 9
+        assert len(files) == 9
 
     def test_frontend_contains_attributes_header(self, convolution_fwd_config):
         files = _preview_files(convolution_fwd_config, MODE_FRONTEND)
@@ -170,7 +170,6 @@ class TestPreviewFilesFrontend:
         files = _preview_files(convolution_fwd_config, MODE_FRONTEND)
         expected_fragments = [
             "fragments/graph_method.txt",
-            "fragments/deserialize_case.txt",
             "fragments/graph_includes.txt",
             "fragments/frontend_cmake_entries.txt",
         ]
@@ -330,9 +329,44 @@ class TestPreviewFilesWithRealConfigs:
         assert not any("mode_frontend_plumbing" in f for f in files)
 
     def test_matmul_backend_exact_count(self, matmul_config):
-        """Matmul backend: 9 files + 10 fragments = 19, no mode enums."""
+        """Matmul backend: 9 files + 10 fragments = 19, no mode enums.
+
+        matmul_config has constants_include set, so no constants file is generated.
+        """
         files = _preview_files(matmul_config, MODE_BACKEND)
         assert len(files) == 19
+
+
+class TestPreviewFilesConstants:
+    """Verify constants file presence in preview based on constants_include."""
+
+    def test_no_constants_when_constants_include_set(self, convolution_fwd_config):
+        """ConvFwd has constants_include set, no constants file in preview."""
+        files = _preview_files(convolution_fwd_config, MODE_BACKEND)
+        constants_files = [f for f in files if "constants/" in f]
+        assert len(constants_files) == 0
+
+    def test_constants_in_backend_when_not_set(self, load_test_config):
+        """Config without constants_include gets a constants file in backend preview."""
+        config = load_test_config("batchnorm_backward.yaml")
+        files = _preview_files(config, MODE_BACKEND)
+        constants_files = [f for f in files if "constants/" in f]
+        assert len(constants_files) == 1
+        assert "BatchnormBackwardConstants.hpp" in constants_files[0]
+
+    def test_constants_in_lift_only_when_not_set(self, load_test_config):
+        """Config without constants_include gets a constants file in lift-only preview."""
+        config = load_test_config("batchnorm_backward.yaml")
+        files = _preview_files(config, MODE_LIFT_ONLY)
+        constants_files = [f for f in files if "constants/" in f]
+        assert len(constants_files) == 1
+        assert "BatchnormBackwardConstants.hpp" in constants_files[0]
+
+    def test_no_constants_in_frontend_mode(self, convolution_fwd_config):
+        """Frontend mode never generates constants file."""
+        files = _preview_files(convolution_fwd_config, MODE_FRONTEND)
+        constants_files = [f for f in files if "constants/" in f]
+        assert len(constants_files) == 0
 
 
 # ---------------------------------------------------------------------------

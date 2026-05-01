@@ -7,9 +7,9 @@
 #include <iostream>
 #include <memory>
 
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
@@ -146,8 +146,36 @@ public:
             hipdnn_plugin_sdk::throwIfNull(callback);
             hipdnn_plugin_sdk::throwIfNull(getInstance());
 
-            hipdnn_data_sdk::logging::registerLoggingCallback(callback);
+            hipdnn_plugin_sdk::logging::initializeCallbackLogging(getInstance()->getPluginName(),
+                                                                  callback);
+
             LOG_API_SUCCESS(apiName, "callback registered");
+        });
+    }
+
+    static hipdnnPluginStatus_t pluginSetLogLevel(hipdnnSeverity_t level)
+    {
+        return hipdnn_plugin_sdk::tryCatch([&]() {
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            hipdnn_plugin_sdk::logging::setLogLevel(level);
+
+            // Log at the level being set so tests can positively verify the call
+            // and the level value for each severity
+            switch(level)
+            {
+            case HIPDNN_SEV_INFO:
+                HIPDNN_PLUGIN_LOG_INFO("TEST: pluginSetLogLevel level=" << level);
+                break;
+            case HIPDNN_SEV_WARN:
+                HIPDNN_PLUGIN_LOG_WARN("TEST: pluginSetLogLevel level=" << level);
+                break;
+            case HIPDNN_SEV_ERROR: // Not used by tests
+            case HIPDNN_SEV_FATAL: // Not used by tests
+            case HIPDNN_SEV_OFF:
+            default:
+                break;
+            }
         });
     }
 
@@ -274,7 +302,7 @@ public:
             }
 
             flatbuffers::FlatBufferBuilder builder;
-            auto newEngineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(
+            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
                 builder, getInstance()->getEngineId());
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
@@ -398,10 +426,10 @@ public:
                     "No engines available - cannot create execution context");
             }
 
-            const hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                                     opGraph->size);
-            const hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
-                engineConfig->ptr, engineConfig->size);
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
+                opGraph->ptr, opGraph->size);
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
+                engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
             *executionContext = new HipdnnEnginePluginExecutionContext();
 
@@ -501,6 +529,11 @@ private:
     hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)                \
     {                                                                                             \
         return TestPluginBase::pluginSetLoggingCallback(callback);                                \
+    }                                                                                             \
+                                                                                                  \
+    hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level)                          \
+    {                                                                                             \
+        return TestPluginBase::pluginSetLogLevel(level);                                          \
     }                                                                                             \
                                                                                                   \
     hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIds(int64_t* engineIds,                    \

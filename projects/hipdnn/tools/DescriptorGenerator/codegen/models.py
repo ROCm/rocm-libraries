@@ -19,7 +19,7 @@ class EnumValue:
 
     Attributes:
         name: Backend C-API suffix appended to ``EnumDef.backend_prefix``
-            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION``).
+            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CROSS_CORRELATION``).
         value: Numeric value in the backend C-API enum typedef.
         sentinel: If True, this value (typically UNSET/NOT_SET) is excluded from the
             backend C-API enum but appears as ``NOT_SET = 0`` in the frontend enum class.
@@ -182,6 +182,16 @@ class DataField:
     test_constant_name: str = ""
     test_backend_value: str = ""
 
+    # FBS optional qualifier: True when the FBS field uses (optional) qualifier.
+    # Controls whether bool fields use optional patterns or plain scalar patterns.
+    # FBS `bool field = false` -> fbs_optional: false (plain bool, use setScalar/getScalar)
+    # FBS `bool field (optional)` -> fbs_optional: true (Optional<bool>, use setOptionalScalar)
+    fbs_optional: bool = False
+
+    # Whether the frontend getter returns std::optional for mode fields.
+    # New codegen-generated frontend getters return optional; hand-written ones may not.
+    frontend_getter_returns_optional: bool = False
+
     # Mode-specific config (for conv_mode, pointwise_mode, etc.)
     backend_setter: str = ""
     backend_getter: str = ""
@@ -201,6 +211,18 @@ class DataField:
     def has_enum_def(self) -> bool:
         """Whether this field has a generatable enum definition."""
         return self.enum_def is not None and len(self.enum_def.values) > 0
+
+    @property
+    def effective_sentinel_value(self) -> str:
+        """Sentinel enum value for finalize() validation.
+
+        Returns the sentinel name from enum_def if available, otherwise 'NOT_SET'.
+        """
+        if self.enum_def:
+            for v in self.enum_def.values:
+                if v.sentinel:
+                    return v.effective_sdk_name
+        return "NOT_SET"
 
     @property
     def camel_name(self) -> str:
@@ -231,6 +253,8 @@ class DataField:
 
     @property
     def is_optional_scalar(self) -> bool:
+        if self.type == "bool":
+            return self.fbs_optional
         return self.is_scalar and not self.required
 
     @property
@@ -283,7 +307,7 @@ class DataField:
         """Frontend C++ type for mode/enum fields.
 
         Returns frontend_type if set, falls back to stripping the SDK namespace
-        from cpp_enum (e.g., 'hipdnn_data_sdk::data_objects::ConvMode' -> 'ConvMode').
+        from cpp_enum (e.g., 'hipdnn_flatbuffers_sdk::data_objects::ConvMode' -> 'ConvMode').
         """
         if self.frontend_type:
             return self.frontend_type
@@ -305,6 +329,20 @@ class DataField:
                 return "set_" + base[4:]
             return base
         return f"set_{self.name}"
+
+
+@dataclass
+class DataFieldsHelper:
+    """Configuration for shared data field packing/unpacking helpers.
+
+    When set on an OperationConfig, the packer and unpacker templates call
+    the named helper functions instead of emitting per-field inline code.
+    """
+
+    pack_function: str = ""
+    unpack_function: str = ""
+    include: str = ""
+    label: str = ""
 
 
 @dataclass
@@ -341,6 +379,7 @@ class TestData:
     tensor_configs: dict[str, TensorConfig] = field(default_factory=dict)
     field_values: dict[str, list] = field(default_factory=dict)
     constants_include: str = ""
+    tensor_const_prefix: Optional[str] = None
 
 
 @dataclass
@@ -509,6 +548,8 @@ class OperationConfig:
     data_fields: list[DataField] = field(default_factory=list)
     tensor_array_fields: list[TensorArrayField] = field(default_factory=list)
 
+    data_fields_helper: Optional[DataFieldsHelper] = None
+
     has_compute_data_type: bool = True
     compute_data_type_attr: str = ""
     compute_data_type_shared: bool = False
@@ -572,7 +613,7 @@ class OperationConfig:
 
     @property
     def fbs_namespace(self) -> str:
-        return "hipdnn_data_sdk::data_objects"
+        return "hipdnn_flatbuffers_sdk::data_objects"
 
     @property
     def fbs_t_type(self) -> str:
@@ -855,3 +896,29 @@ class OperationConfig:
         if self.frontend.graph_method_name:
             return self.frontend.graph_method_name
         return _to_snake_case(self.name)
+
+    @property
+    def effective_constants_include(self) -> str:
+        """Constants header name for test files.
+
+        Returns constants_include from test_data if set (for operations with
+        pre-existing constants headers), otherwise derives the name from the
+        operation name (e.g., 'BatchnormInference' -> 'BatchnormInferenceConstants').
+        """
+        if self.test_data.constants_include:
+            return self.test_data.constants_include
+        return f"{self.name}Constants"
+
+    @property
+    def tensor_const_prefix(self) -> str:
+        """Prefix for tensor constant names.
+
+        Returns the explicit override from test_data if set, otherwise
+        'K_' for pre-existing constants headers (backward compatible),
+        'K_{NAME}_' for new operations (avoids collisions).
+        """
+        if self.test_data and self.test_data.tensor_const_prefix:
+            return self.test_data.tensor_const_prefix
+        if self.test_data and self.test_data.constants_include:
+            return "K_"
+        return f"K_{self.name.upper()}_"

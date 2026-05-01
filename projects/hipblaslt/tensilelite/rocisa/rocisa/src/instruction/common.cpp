@@ -327,6 +327,18 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SOrB64& self, const nb::dict&) { return new rocisa::SOrB64(self); });
 
+    nb::class_<rocisa::SSubU64, rocisa::CommonInstruction>(m_common, "SSubU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::SSubU64& self, const nb::dict&) { return new rocisa::SSubU64(self); });
+
     nb::class_<rocisa::SGetPCB64, rocisa::CommonInstruction>(m_common, "SGetPCB64")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&, const std::string&>(),
              nb::arg("dst"),
@@ -618,6 +630,14 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SBarrier& self, nb::dict&) { return new rocisa::SBarrier(self); });
 
+    nb::class_<rocisa::SSchedulingFence, rocisa::Instruction>(m_common, "SSchedulingFence")
+        .def(nb::init<const std::string&>(), nb::arg("comment") = "")
+        .def("getParams", &rocisa::SSchedulingFence::getParams)
+        .def("__str__", &rocisa::SSchedulingFence::toString)
+        .def("__deepcopy__", [](const rocisa::SSchedulingFence& self, nb::dict&) {
+            return new rocisa::SSchedulingFence(self);
+        });
+
     nb::class_<rocisa::SDcacheWb, rocisa::Instruction>(m_common, "SDcacheWb")
         .def(nb::init<const std::string&>(), nb::arg("comment") = "")
         .def("getParams", &rocisa::SDcacheWb::getParams)
@@ -632,6 +652,13 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SNop& self, nb::dict&) { return new rocisa::SNop(self); });
 
+    nb::class_<rocisa::VNop, rocisa::Instruction>(m_common, "VNop")
+        .def(nb::init<int, const std::string&>(), nb::arg("count"), nb::arg("comment") = "")
+        .def("getParams", &rocisa::VNop::getParams)
+        .def("__str__", &rocisa::VNop::toString)
+        .def("__deepcopy__",
+             [](const rocisa::VNop& self, nb::dict&) { return new rocisa::VNop(self); });
+
     nb::class_<rocisa::SEndpgm, rocisa::Instruction>(m_common, "SEndpgm")
         .def(nb::init<const std::string&>(), nb::arg("comment") = "")
         .def("getParams", &rocisa::SEndpgm::getParams)
@@ -645,6 +672,15 @@ void common_inst(nb::module_ m_common)
         .def("__str__", &rocisa::SSleep::toString)
         .def("__deepcopy__",
              [](const rocisa::SSleep& self, nb::dict&) { return new rocisa::SSleep(self); });
+
+    nb::class_<rocisa::SSetVgprMsb, rocisa::Instruction>(m_common, "SSetVgprMsb")
+        .def(nb::init<const int, const std::string&>(), nb::arg("simm16"), nb::arg("comment") = "")
+        .def(nb::init<const int, const int, const int, const int, const std::string&>(),
+             nb::arg("msbSrc0"), nb::arg("msbSrc1"), nb::arg("msbSrc2"), nb::arg("msbDst"), nb::arg("comment") = "")
+        .def("getParams", &rocisa::SSetVgprMsb::getParams)
+        .def("__str__", &rocisa::SSetVgprMsb::toString)
+        .def("__deepcopy__",
+             [](const rocisa::SSetVgprMsb& self, nb::dict&) { return new rocisa::SSetVgprMsb(self); });
 
     nb::class_<rocisa::SGetRegB32, rocisa::CommonInstruction>(m_common, "SGetRegB32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
@@ -744,6 +780,14 @@ void common_inst(nb::module_ m_common)
         .def_rw("comment", &rocisa::SWaitCnt::comment)
         .def("__deepcopy__",
              [](const rocisa::SWaitCnt& self, nb::dict&) { return new rocisa::SWaitCnt(self); });
+
+    nb::class_<rocisa::SWaitTensorcnt, rocisa::Instruction>(m_common, "SWaitTensorcnt")
+        .def(nb::init<int, const std::string&>(), nb::arg("tensorcnt") = 0, nb::arg("comment") = "")
+        .def("getParams", &rocisa::SWaitTensorcnt::getParams)
+        .def("__str__", &rocisa::SWaitTensorcnt::toString)
+        .def("__deepcopy__", [](const rocisa::SWaitTensorcnt& self, nb::dict&) {
+            return new rocisa::SWaitTensorcnt(self);
+        });
 
     nb::class_<rocisa::SWaitAlu, rocisa::Instruction>(m_common, "SWaitAlu")
         .def(nb::init<int, int, int, int, int, int, int, const std::string&>(),

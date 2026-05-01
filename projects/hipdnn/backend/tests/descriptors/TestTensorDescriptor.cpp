@@ -9,8 +9,8 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 #include <array>
 #include <cstring>
@@ -18,7 +18,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 
 class TestTensorDescriptor : public ::testing::Test
 {
@@ -201,7 +201,7 @@ TEST_F(TestTensorDescriptor, SetAttributeDataType)
     ASSERT_NO_THROW(
         desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType));
 
-    ASSERT_EQ(desc->getData().data_type, hipdnn_data_sdk::data_objects::DataType::HALF);
+    ASSERT_EQ(desc->getData().data_type, hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 }
 
 TEST_F(TestTensorDescriptor, SetAttributeDataTypeWrongElementCount)
@@ -785,7 +785,7 @@ TEST_F(TestTensorDescriptor, IsByValueReturnsFalseWhenNoValueSet)
     bool isByValue = true;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
+        HIPDNN_ATTR_TENSOR_IS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
     EXPECT_FALSE(isByValue);
 }
 
@@ -800,7 +800,7 @@ TEST_F(TestTensorDescriptor, IsByValueReturnsTrueWhenValueSet)
     bool isByValue = false;
     int64_t count = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
+        HIPDNN_ATTR_TENSOR_IS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &count, &isByValue));
     EXPECT_TRUE(isByValue);
 }
 
@@ -851,6 +851,21 @@ TEST_F(TestTensorDescriptor, SetAttributeValueInt32)
     auto* stored = desc->getData().value.AsInt32Value();
     ASSERT_NE(stored, nullptr);
     ASSERT_EQ(stored->value(), 42);
+}
+
+TEST_F(TestTensorDescriptor, SetAttributeValueInt64)
+{
+    auto desc = getDescriptor();
+    auto dataType = HIPDNN_DATA_INT64;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+    int64_t val = 123456789012345LL;
+
+    ASSERT_NO_THROW(
+        desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(int64_t), &val));
+
+    auto* stored = desc->getData().value.AsInt64Value();
+    ASSERT_NE(stored, nullptr);
+    ASSERT_EQ(stored->value(), 123456789012345LL);
 }
 
 TEST_F(TestTensorDescriptor, SetAttributeValueFloat16)
@@ -1016,6 +1031,32 @@ TEST_F(TestTensorDescriptor, GetAttributeValueInt32)
 
     ASSERT_EQ(retrieved, 42);
     ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(int32_t)));
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeValueInt64)
+{
+    auto desc = getDescriptor();
+    auto dataType = HIPDNN_DATA_INT64;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+    int64_t setVal = 123456789012345LL;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(int64_t), &setVal);
+
+    std::vector<int64_t> dims = {1, 3, 32, 32};
+    std::vector<int64_t> strides = {3072, 1024, 32, 1};
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 4, dims.data());
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 4, strides.data());
+    desc->finalize();
+
+    int64_t retrieved = 0;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT,
+                                       HIPDNN_TYPE_CHAR,
+                                       sizeof(int64_t),
+                                       &elementCount,
+                                       &retrieved));
+
+    ASSERT_EQ(retrieved, 123456789012345LL);
+    ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(int64_t)));
 }
 
 TEST_F(TestTensorDescriptor, GetAttributeValueFloat16)
@@ -1191,7 +1232,8 @@ INSTANTIATE_TEST_SUITE_P(
                       DataTypeRoundTripParam{HIPDNN_DATA_UINT8, DataType::UINT8, "Uint8"},
                       DataTypeRoundTripParam{HIPDNN_DATA_BFLOAT16, DataType::BFLOAT16, "BFloat16"},
                       DataTypeRoundTripParam{HIPDNN_DATA_FP8_E4M3, DataType::FP8_E4M3, "Fp8E4M3"},
-                      DataTypeRoundTripParam{HIPDNN_DATA_FP8_E5M2, DataType::FP8_E5M2, "Fp8E5M2"}),
+                      DataTypeRoundTripParam{HIPDNN_DATA_FP8_E5M2, DataType::FP8_E5M2, "Fp8E5M2"},
+                      DataTypeRoundTripParam{HIPDNN_DATA_INT64, DataType::INT64, "Int64"}),
     [](const ::testing::TestParamInfo<DataTypeRoundTripParam>& info) { return info.param.name; });
 
 // =============================================================================
@@ -1321,4 +1363,36 @@ TEST_F(TestTensorDescriptor, SetGetValueFp8E5M2)
                                        &retrieved));
     ASSERT_EQ(retrieved.data, setVal.data);
     ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(retrieved)));
+}
+
+TEST_F(TestTensorDescriptor, SetGetValueInt64)
+{
+    auto desc = getDescriptor();
+    auto dataType = HIPDNN_DATA_INT64;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+
+    int64_t setVal = 9876543210LL;
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(int64_t), &setVal));
+
+    auto* stored = desc->getData().value.AsInt64Value();
+    ASSERT_NE(stored, nullptr);
+    ASSERT_EQ(stored->value(), 9876543210LL);
+
+    // Round-trip through getAttribute
+    std::vector<int64_t> dims = {1, 3, 32, 32};
+    std::vector<int64_t> strides = {3072, 1024, 32, 1};
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 4, dims.data());
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 4, strides.data());
+    desc->finalize();
+
+    int64_t retrieved = 0;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT,
+                                       HIPDNN_TYPE_CHAR,
+                                       sizeof(int64_t),
+                                       &elementCount,
+                                       &retrieved));
+    ASSERT_EQ(retrieved, 9876543210LL);
+    ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(int64_t)));
 }

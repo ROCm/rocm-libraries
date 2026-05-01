@@ -399,6 +399,8 @@ inline hipError_t run_length_encode(void*                   temporary_storage,
 /// In this example a device-level run-length encoding of non-trivial runs is performed on an array of
 /// integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_run_length_encode.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///

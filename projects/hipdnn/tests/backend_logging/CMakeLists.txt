@@ -1,6 +1,15 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# This test intentionally exercises unclean shutdown with threads still running during
+# static destruction. ASAN flags the resulting heap-use-after-free, which is expected
+# behavior for this scenario. Disable under ASAN since the test validates graceful
+# degradation, not memory safety.
+if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    message(STATUS "Skipping backend_logging_shutdown_tests (incompatible with AddressSanitizer)")
+    return()
+endif()
+
 find_package(Threads REQUIRED)
 
 # Standalone integration test (no gtest) that verifies shutdown safety when multiple

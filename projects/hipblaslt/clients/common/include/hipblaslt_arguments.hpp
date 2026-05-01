@@ -56,6 +56,11 @@ struct Arguments
         Scalar                  = 1,
         Vector                  = 2,
         Block_32_UE8M0          = 3,
+        Block_16_UE8M0          = 4,
+        Block_32_UE4M3          = 5,
+        Block_16_UE4M3          = 6,
+        Block_32_UE5M3          = 7,
+        Block_16_UE5M3          = 8,
         Block_32_UE8M0_32_8_EXT = 1001,
     };
 
@@ -91,6 +96,7 @@ struct Arguments
     int64_t lde[MAX_SUPPORTED_NUM_PROBLEMS];
 
     int32_t batch_count;
+    int32_t batch_mode;
 
     int32_t iters;
     int32_t cold_iters;
@@ -213,6 +219,7 @@ struct Arguments
     OPER(ldd) SEP                    \
     OPER(lde) SEP                    \
     OPER(batch_count) SEP            \
+    OPER(batch_mode) SEP             \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
     OPER(algo) SEP                   \

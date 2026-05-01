@@ -179,7 +179,6 @@ def _preview_files(config, mode: str) -> list[str]:
     ]
     frontend_fragments = [
         "fragments/graph_method.txt",
-        "fragments/deserialize_case.txt",
         "fragments/graph_includes.txt",
         "fragments/frontend_cmake_entries.txt",
         "fragments/node_type_enum.txt",
@@ -223,6 +222,12 @@ def _preview_files(config, mode: str) -> list[str]:
             files.append(f"fragments/mode_backend_plumbing_{df.name}.txt")
             files.append(f"fragments/mode_frontend_plumbing_{df.name}.txt")
             files.append(f"fragments/mode_frontend_tests_{df.name}.txt")
+
+    # Constants file (only when no pre-existing constants header)
+    if not config.test_data.constants_include:
+        constants_path = f"test_sdk/include/hipdnn_test_sdk/constants/{config.effective_constants_include}.hpp"
+        if mode in (MODE_BACKEND, MODE_FULL, MODE_LIFT_ONLY):
+            files.append(constants_path)
 
     return files
 

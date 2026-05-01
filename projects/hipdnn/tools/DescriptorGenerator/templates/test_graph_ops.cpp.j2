@@ -1,3 +1,4 @@
+{% from "macros.j2" import vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
@@ -13,25 +14,22 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-{% if op.test_data.constants_include %}
-#include <hipdnn_test_sdk/constants/{{ op.test_data.constants_include }}.hpp>
-{% endif %}
+#include <hipdnn_flatbuffers_sdk/data_objects/{{ op.fbs_generated_header }}>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
-{% if op.test_data.constants_include %}
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
-{% endif %}
 using hipdnn_tests::toVec;
 
 namespace
@@ -44,27 +42,23 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 {% for taf in op.tensor_array_fields %}
                           std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {}{% if not loop.last %},{% endif %}
 {% endfor %}{% endif %},
-                          hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+                          hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT,
+                          const std::string& name = "")
 {
     auto wrapper = createDescriptor<{{ op.class_name }}>();
     auto desc = wrapper->asDescriptor<{{ op.class_name }}>();
 
 {% for tf in op.tensor_fields %}
     desc->setAttribute(
-        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf.local_desc_name }});
+        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1,
+        static_cast<const void*>(&{{ tf.local_desc_name }}));
 {% endfor %}
 {% for df in op.required_data_fields %}
 {% if df.is_vector %}
-{% if op.test_data.constants_include %}
-{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+{% set const_name = vector_const_name(df, op) %}
 
     auto {{ df.camel_name }} = toVec({{ const_name }});
     desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, static_cast<int64_t>({{ df.camel_name }}.size()), {{ df.camel_name }}.data());
-{% else %}
-
-    std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
-    desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
-{% endif %}
 {% elif df.is_mode %}
 
     auto {{ df.camel_name }} = {{ df.test_backend_value }};
@@ -84,9 +78,18 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     {
         desc->setAttribute(
             {{ taf.attr_name }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-            static_cast<int64_t>({{ taf.name }}Descs.size()), {{ taf.name }}Descs.data());
+            static_cast<int64_t>({{ taf.name }}Descs.size()),
+            static_cast<const void*>({{ taf.name }}Descs.data()));
     }
 {% endfor %}
+
+    if(!name.empty())
+    {
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                           HIPDNN_TYPE_CHAR,
+                           static_cast<int64_t>(name.size()),
+                           name.data());
+    }
 
     desc->finalize();
     return wrapper;
@@ -104,7 +107,8 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1,
+                           static_cast<const void*>(&handle));
     }
 
     static const TensorAttributesT* findTensorByUid(const GraphT& graphT, int64_t uid)
@@ -126,7 +130,7 @@ public:
                              DataType expectedDataType,
                              bool expectedVirtual = false)
     {
-        ASSERT_NE(tensor, nullptr) << "Tensor with UID " << expectedUid << " not found";
+        ASSERT_NE(tensor, nullptr) << "Tensor with UID " << expectedUid << " not found"; // NOLINT(readability-implicit-bool-conversion)
         EXPECT_EQ(tensor->uid, expectedUid);
         EXPECT_EQ(tensor->dims, expectedDims);
         EXPECT_EQ(tensor->strides, expectedStrides);
@@ -200,16 +204,13 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
-{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-{% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
 {% endif %}
 {% endfor %}
     auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %});
@@ -219,7 +220,8 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1,
+        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
@@ -230,7 +232,7 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), {{ op.tensor_fields | length }});
@@ -239,22 +241,14 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
-{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     verifyTensor(findTensorByUid(*graphT, {{ uid_const }}),
                  {{ uid_const }},
                  toVec({{ dims_const }}),
                  toVec({{ strides_const }}),
                  DataType::FLOAT);
-{% else %}
-    verifyTensor(findTensorByUid(*graphT, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}),
-                 {{ op.test_data.tensor_uids.get(tf.name, loop.index) }},
-                 {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
-                 {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }},
-                 DataType::FLOAT);
-{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -265,25 +259,15 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
                       DataType::FLOAT,
 {% endif %}
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
                       {{ uid_const }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
 
-{% else %}
-                      {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
-
-{% endif %}
 {% endfor %}
 {% for df in op.graph_verifiable_data_fields %}
 {% if df.is_vector %}
-{% if op.test_data.constants_include %}
-{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+{% set const_name = vector_const_name(df, op) %}
                       toVec({{ const_name }}){% if not loop.last %},{% endif %}
 
-{% else %}
-                      std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }}{% if not loop.last %},{% endif %}
-
-{% endif %}
 {% elif df.is_mode %}
                       {{ df.enum_short_type }}::{{ df.test_enum_value }}{% if not loop.last %},{% endif %}
 
@@ -304,12 +288,8 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
 
     // Verify tensor UID references
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     EXPECT_EQ(attrs->{{ tf.uid_field }}, {{ uid_const }});
-{% else %}
-    EXPECT_EQ(attrs->{{ tf.uid_field }}, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endfor %}
 {% endif %}
 {% for taf in op.tensor_array_fields %}
@@ -328,16 +308,13 @@ TEST_F(TestGraphDescriptor{{ op.name }}, ComputeDataTypePreserved)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
-{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-{% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
 {% endif %}
 {% endfor %}
     auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, HIPDNN_DATA_HALF);
@@ -347,11 +324,12 @@ TEST_F(TestGraphDescriptor{{ op.name }}, ComputeDataTypePreserved)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1,
+        static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -365,16 +343,13 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildWith{{ taf.test_label or taf.name 
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
-{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-{% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
 {% endif %}
 {% endfor %}
 {% for uid in taf.test_uids %}
@@ -389,11 +364,12 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildWith{{ taf.test_label or taf.name 
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1,
+        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
@@ -415,21 +391,13 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
-{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-{% else %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
-{% else %}
-    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -440,7 +408,8 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
 {% for tf in op.tensor_fields %}
     HipdnnBackendDescriptor* {{ tf.name }}Ptr = {{ tf.local_desc_name }}.get();
     opDesc->setAttribute(
-        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf.name }}Ptr);
+        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1,
+        static_cast<const void*>(&{{ tf.name }}Ptr));
 {% endfor %}
 {% for df in op.data_fields %}
 {% if df.is_vector %}
@@ -466,7 +435,7 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
 {% endif %}
 
     // Set operation name
-    std::string opName = "test_{{ op.name | lower }}";
+    const std::string opName = "test_{{ op.name | lower }}";
     opDesc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                          HIPDNN_TYPE_CHAR,
                          static_cast<int64_t>(opName.size()),
@@ -478,11 +447,12 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1,
+        static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), {{ op.tensor_fields | length }});
@@ -491,22 +461,14 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
-{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
     verifyTensor(findTensorByUid(*graphT, {{ uid_const }}),
                  {{ uid_const }},
                  toVec({{ dims_const }}),
                  toVec({{ strides_const }}),
                  DataType::FLOAT);
-{% else %}
-    verifyTensor(findTensorByUid(*graphT, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}),
-                 {{ op.test_data.tensor_uids.get(tf.name, loop.index) }},
-                 {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }},
-                 {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }},
-                 DataType::FLOAT);
-{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -516,14 +478,9 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
                       DataType::FLOAT,
 {% endif %}
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
                       {{ uid_const }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
 
-{% else %}
-                      {{ op.test_data.tensor_uids.get(tf.name, loop.index) }}{% if not loop.last or op.graph_verifiable_data_fields %},{% endif %}
-
-{% endif %}
 {% endfor %}
 {% for df in op.graph_verifiable_data_fields %}
 {% if df.is_vector %}
@@ -544,5 +501,103 @@ TEST_F(TestGraphDescriptor{{ op.name }}, {{ op.name }}AttributesPreserved)
     EXPECT_EQ(graphT->nodes[0]->name, "test_{{ op.name | lower }}");
 }
 {% endif %}
+
+TEST_F(TestGraphDescriptor{{ op.name }}, OperationNamePreservedInSerialization)
+{
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
+{% endif %}
+{% endfor %}
+    auto opDesc = createFinalized{{ op.name }}Op(
+        {% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %},
+{% if op.has_tensor_array_fields %}
+{% for taf in op.tensor_array_fields %}
+        {}{% if not loop.last %},{% endif %}
+{% endfor %},
+{% endif %}
+        HIPDNN_DATA_FLOAT,
+        "test_{{ op.name | lower }}_name");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1,
+        static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1u);
+    EXPECT_EQ(graphT->nodes[0]->name, "test_{{ op.name | lower }}_name");
+}
+
+TEST_F(TestGraphDescriptor{{ op.name }}, OperationNameRoundTripThroughLifting)
+{
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }});
+{% endif %}
+{% endfor %}
+    auto opDesc = createFinalized{{ op.name }}Op(
+        {% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %},
+{% if op.has_tensor_array_fields %}
+{% for taf in op.tensor_array_fields %}
+        {}{% if not loop.last %},{% endif %}
+{% endfor %},
+{% endif %}
+        HIPDNN_DATA_FLOAT,
+        "test_{{ op.name | lower }}_lifting");
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1,
+        static_cast<const void*>(ops.data()));
+    desc->finalize();
+
+    // Serialize the graph
+    auto serialized = desc->getSerializedGraph();
+    std::vector<uint8_t> bytes(static_cast<const uint8_t*>(serialized.ptr),
+                               static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
+
+    // Deserialize into a new GraphDescriptor (lifting path)
+    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
+    liftedDesc->deserializeGraph(bytes.data(), bytes.size());
+
+    hipdnnHandle_t handle = &_mockHandle;
+    liftedDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                             HIPDNN_TYPE_HANDLE,
+                             1,
+                             static_cast<const void*>(&handle));
+    liftedDesc->finalize();
+
+    // Re-serialize and verify name survived the round-trip
+    auto reSerialized = liftedDesc->getSerializedGraph();
+    auto graphT = UnPackGraph(reSerialized.ptr);
+
+    ASSERT_EQ(graphT->nodes.size(), 1u);
+    EXPECT_EQ(graphT->nodes[0]->name, "test_{{ op.name | lower }}_lifting");
+}
 
 } // namespace

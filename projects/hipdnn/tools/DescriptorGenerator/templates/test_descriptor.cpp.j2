@@ -1,3 +1,4 @@
+{% from "macros.j2" import vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
@@ -12,25 +13,21 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-{% if op.test_data.constants_include %}
-#include <hipdnn_test_sdk/constants/{{ op.test_data.constants_include }}.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/{{ op.fbs_generated_header }}>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
-{% endif %}
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include <memory>
 #include <vector>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
-{% if op.test_data.constants_include %}
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
-{% endif %}
 
 class Test{{ op.class_name }} : public ::testing::Test
 {
@@ -54,10 +51,9 @@ public:
     void {{ op.effective_test_params_method_name }}() const
     {
         auto desc = getDescriptor();
-{% if op.test_data.constants_include %}
 {% for df in op.data_fields %}
 {% if df.is_vector %}
-{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+{% set const_name = vector_const_name(df, op) %}
         auto {{ df.camel_name }} = toVec({{ const_name }});
 {% endif %}
 {% endfor %}
@@ -68,20 +64,6 @@ public:
             {{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
 {% endif %}
 {% endfor %}
-{% else %}
-{% for df in op.data_fields %}
-{% if df.is_vector %}
-        std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
-{% endif %}
-{% endfor %}
-
-{% for df in op.data_fields %}
-{% if df.is_vector %}
-        desc->setAttribute(
-            {{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
-{% endif %}
-{% endfor %}
-{% endif %}
     }
 
     void setRequiredAttributes() const
@@ -129,22 +111,14 @@ protected:
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
-{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
-{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
         {{ tf.member_name }} = createFinalizedTensor(
             {{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
 {% else %}
-        {{ tf.member_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
-{% endif %}
-{% else %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
         {{ tf.member_name }} = createFinalizedTensor({{ uid_const }});
-{% else %}
-        {{ tf.member_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endif %}
 {% endfor %}
 {% for taf in op.tensor_array_fields %}
@@ -211,10 +185,9 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ df.name | replace('_', ' 
 {
     auto desc = getDescriptor();
     setTensors();
-{% if op.test_data.constants_include %}
 {% for df2 in op.required_data_fields %}
 {% if df2.name != df.name and df2.is_vector %}
-{% set const_name = df2.test_constant_name if df2.test_constant_name else ("K_CONV_" ~ (df2.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df2.name | upper)) %}
+{% set const_name = vector_const_name(df2, op) %}
     auto {{ df2.camel_name }} = toVec({{ const_name }});
 {% endif %}
 {% endfor %}
@@ -224,19 +197,6 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ df.name | replace('_', ' 
     desc->setAttribute({{ df2.attr_name }}, {{ df2.backend_type }}, {{ op.test_data.field_values.get(df2.name, [1, 1]) | length }}, {{ df2.camel_name }}.data());
 {% endif %}
 {% endfor %}
-{% else %}
-{% for df2 in op.required_data_fields %}
-{% if df2.name != df.name and df2.is_vector %}
-    std::vector<int64_t> {{ df2.camel_name }} = {{ '{' }}{{ op.test_data.field_values.get(df2.name, [1, 1]) | join(', ') }}{{ '}' }};
-{% endif %}
-{% endfor %}
-
-{% for df2 in op.required_data_fields %}
-{% if df2.name != df.name and df2.is_vector %}
-    desc->setAttribute({{ df2.attr_name }}, {{ df2.backend_type }}, {{ op.test_data.field_values.get(df2.name, [1, 1]) | length }}, {{ df2.camel_name }}.data());
-{% endif %}
-{% endfor %}
-{% endif %}
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -300,12 +260,8 @@ TEST_F(Test{{ op.class_name }}, SetTensorDescriptor{{ tf.pascal_name }})
 {% if loop.first %}
     // Verify UID extracted via getData()
 {% endif %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_EQ(desc->getData().{{ tf.uid_field }}, {{ uid_const }});
-{% else %}
-    ASSERT_EQ(desc->getData().{{ tf.uid_field }}, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
     ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
 }
 {% endfor %}
@@ -445,13 +401,9 @@ TEST_F(Test{{ op.class_name }}, SetComputeDataTypeWrongElementCount)
 TEST_F(Test{{ op.class_name }}, Set{{ op.effective_error_label | capitalize }}ParamsWrongType)
 {
     auto desc = getDescriptor();
-{% if op.test_data.constants_include %}
 {% set first_vf = op.vector_fields[0] %}
-{% set const_name = first_vf.test_constant_name if first_vf.test_constant_name else ("K_CONV_" ~ (first_vf.name | upper) if "conv" in op.effective_error_label else "K_" ~ (first_vf.name | upper)) %}
+{% set const_name = vector_const_name(first_vf, op) %}
     auto padding = toVec({{ const_name }});
-{% else %}
-    std::vector<int64_t> padding = {1, 1};
-{% endif %}
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -501,11 +453,11 @@ TEST_F(Test{{ op.class_name }}, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrieved{{ op.tensor_fields[0].pascal_name }}));
+                                       static_cast<void*>(&retrieved{{ op.tensor_fields[0].pascal_name }})));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrieved{{ op.tensor_fields[0].pascal_name }}, nullptr);
-    std::unique_ptr<HipdnnBackendDescriptor> guard{{ op.tensor_fields[0].pascal_name }}(retrieved{{ op.tensor_fields[0].pascal_name }});
+    const std::unique_ptr<HipdnnBackendDescriptor> guard{{ op.tensor_fields[0].pascal_name }}(retrieved{{ op.tensor_fields[0].pascal_name }});
 }
 
 // =============================================================================
@@ -536,12 +488,8 @@ TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.effective_error_label | capita
 {% else %}
     ASSERT_EQ({{ vf.camel_name }}Count, {{ tv | length }});
 {% endif %}
-{% if op.test_data.constants_include %}
-{% set const_name = vf.test_constant_name if vf.test_constant_name else ("K_CONV_" ~ (vf.name | upper) if "conv" in op.effective_error_label else "K_" ~ (vf.name | upper)) %}
+{% set const_name = vector_const_name(vf, op) %}
     EXPECT_EQ({{ vf.camel_name }}, toVec({{ const_name }}));
-{% else %}
-    EXPECT_EQ({{ vf.camel_name }}, (std::vector<int64_t>{{ '{' }}{{ tv | join(', ') }}{{ '}' }}));
-{% endif %}
 {% endfor %}
 {% for ef in op.enum_fields %}
 
@@ -721,13 +669,8 @@ TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.vector_fields[0].name | replac
                                        &retrievedCount,
                                        {{ op.vector_fields[0].camel_name }}.data()));
     ASSERT_EQ(retrievedCount, {{ fv_len }});
-{% if op.test_data.constants_include %}
-{% set const_name = op.vector_fields[0].test_constant_name if op.vector_fields[0].test_constant_name else ("K_CONV_" ~ (op.vector_fields[0].name | upper) if "conv" in op.effective_error_label else "K_" ~ (op.vector_fields[0].name | upper)) %}
+{% set const_name = vector_const_name(op.vector_fields[0], op) %}
     EXPECT_EQ({{ op.vector_fields[0].camel_name }}, toVec({{ const_name }}));
-{% else %}
-{% set fv = op.test_data.field_values.get(op.vector_fields[0].name, [1, 1]) %}
-    EXPECT_EQ({{ op.vector_fields[0].camel_name }}, (std::vector<int64_t>{{ '{' }}{{ fv | join(', ') }}{{ '}' }}));
-{% endif %}
 }
 {% endif %}
 
@@ -786,12 +729,8 @@ TEST_F(Test{{ op.class_name }}, FinalizePreservesTensorReferences)
 
     // Verify UIDs match
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
-{% else %}
-    ASSERT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endfor %}
 }
 
@@ -804,15 +743,11 @@ TEST_F(Test{{ op.class_name }}, ToStringContainsExpectedInfo)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("{{ op.class_name }}"), std::string::npos);
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_NE(str.find("{{ tf.name }}_uid=" + std::to_string({{ uid_const }})), std::string::npos);
-{% else %}
-    ASSERT_NE(str.find("{{ tf.name }}_uid={{ op.test_data.tensor_uids.get(tf.name, loop.index) }}"), std::string::npos);
-{% endif %}
 {% endfor %}
 {% if op.has_compute_data_type %}
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
@@ -831,12 +766,8 @@ TEST_F(Test{{ op.class_name }}, GetTensorDescriptorsReturnsAllTensors)
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), {{ op.tensor_fields | length }});
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_EQ(tensors[{{ loop.index0 }}]->getData().uid, {{ uid_const }});
-{% else %}
-    ASSERT_EQ(tensors[{{ loop.index0 }}]->getData().uid, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endfor %}
 }
 
@@ -861,21 +792,13 @@ TEST_F(Test{{ op.class_name }}, BuildNodeProducesCorrectNodeT)
     auto* {{ op.effective_build_node_attrs_var }} = node->attributes.As{{ op.fbs_table }}();
     ASSERT_NE({{ op.effective_build_node_attrs_var }}, nullptr);
 {% for tf in op.tensor_fields %}
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
     ASSERT_EQ({{ op.effective_build_node_attrs_var }}->{{ tf.uid_field }}, {{ uid_const }});
-{% else %}
-    ASSERT_EQ({{ op.effective_build_node_attrs_var }}->{{ tf.uid_field }}, {{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
-{% endif %}
 {% endfor %}
 {% for df in op.vector_fields %}
 {% if df.build_node_check %}
-{% if op.test_data.constants_include %}
-{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+{% set const_name = vector_const_name(df, op) %}
     EXPECT_EQ({{ op.effective_build_node_attrs_var }}->{{ df.fbs_field }}, toVec({{ const_name }}));
-{% else %}
-    EXPECT_EQ({{ op.effective_build_node_attrs_var }}->{{ df.fbs_field }}, (std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }}));
-{% endif %}
 {% endif %}
 {% endfor %}
 {% for ef in op.enum_fields %}
@@ -925,12 +848,8 @@ TEST_F(Test{{ op.class_name }}, TryAsInterfaceReturnsValidGraphOp)
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), {{ op.tensor_fields | length }});
-{% if op.test_data.constants_include %}
-{% set uid_const = "K_TENSOR_" ~ (op.tensor_fields[0].name | upper) ~ "_UID" %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (op.tensor_fields[0].name | upper) ~ "_UID" %}
     ASSERT_EQ(tensors[0]->getData().uid, {{ uid_const }});
-{% else %}
-    ASSERT_EQ(tensors[0]->getData().uid, {{ op.test_data.tensor_uids.get(op.tensor_fields[0].name, 1) }});
-{% endif %}
 }
 
 TEST_F(Test{{ op.class_name }}, TryAsInterfaceReturnsNullForWrongType)
@@ -1006,7 +925,7 @@ TEST_F(Test{{ op.class_name }}, Get{{ taf.test_label or taf.name | replace('_', 
     ASSERT_NE(retrieved[{{ loop.index0 }}], nullptr);
 {% endfor %}
 {% for uid in taf.test_uids %}
-    std::unique_ptr<HipdnnBackendDescriptor> guard{{ loop.index0 }}(retrieved[{{ loop.index0 }}]);
+    const std::unique_ptr<HipdnnBackendDescriptor> guard{{ loop.index0 }}(retrieved[{{ loop.index0 }}]);
 {% endfor %}
 }
 {% endif %}
@@ -1019,7 +938,7 @@ TEST_F(Test{{ op.class_name }}, Get{{ taf.test_label or taf.name | replace('_', 
 TEST_F(Test{{ op.class_name }}, SetAttributeNameSuccess)
 {
     auto desc = getDescriptor();
-    std::string name = "test_{{ op.name | lower }}_op";
+    const std::string name = "test_{{ op.name | lower }}_op";
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                                        HIPDNN_TYPE_CHAR,
@@ -1044,7 +963,7 @@ TEST_F(Test{{ op.class_name }}, SetAttributeNameSuccess)
 TEST_F(Test{{ op.class_name }}, GetAttributeNameQueryReturnsSizeInclNull)
 {
     auto desc = getDescriptor();
-    std::string name = "my_op";
+    const std::string name = "my_op";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(name.size()),
@@ -1067,7 +986,7 @@ TEST_F(Test{{ op.class_name }}, GetAttributeOperationTypeReturnsCorrectType)
     makeFinalized();
     auto desc = getDescriptor();
 
-    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &elementCount, &opType));
@@ -1093,7 +1012,7 @@ TEST_F(Test{{ op.class_name }}, BuildNodePreservesName)
     setRequiredAttributes();
     auto desc = getDescriptor();
 
-    std::string opName = "test_{{ op.name | lower }}";
+    const std::string opName = "test_{{ op.name | lower }}";
     desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(opName.size()),

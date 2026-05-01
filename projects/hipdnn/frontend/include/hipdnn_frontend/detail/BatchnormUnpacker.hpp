@@ -137,50 +137,20 @@ namespace hipdnn_frontend::detail
     }
 
     // Unpack peer_stats tensor array
-    auto [peerStatsDescs, peerStatsErr] = getDescriptorAttrDescArray(
-        opDesc, HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT, "batchnorm peer_stats tensors");
-    if(peerStatsErr.is_bad())
+    std::vector<std::shared_ptr<graph::TensorAttributes>> peerStatsTensors;
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensorArray(opDesc,
+                                                    HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT,
+                                                    tensorMap,
+                                                    peerStatsTensors,
+                                                    "batchnorm peer_stats tensors"));
+    if(!peerStatsTensors.empty())
     {
-        return peerStatsErr;
-    }
-    if(!peerStatsDescs.empty())
-    {
-        std::vector<std::shared_ptr<graph::TensorAttributes>> peerStatsTensors;
-        peerStatsTensors.reserve(peerStatsDescs.size());
-        for(auto& scopedDesc : peerStatsDescs)
-        {
-            if(scopedDesc.get() == nullptr)
-            {
-                continue;
-            }
-
-            // Read UID to check if tensor already exists in map
-            int64_t uid = 0;
-            HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(scopedDesc.get(),
-                                                       HIPDNN_ATTR_TENSOR_UNIQUE_ID,
-                                                       HIPDNN_TYPE_INT64,
-                                                       uid,
-                                                       "peer_stats tensor UID"));
-
-            auto it = tensorMap.find(uid);
-            if(it != tensorMap.end())
-            {
-                peerStatsTensors.push_back(it->second);
-            }
-            else
-            {
-                std::shared_ptr<graph::TensorAttributes> tensor;
-                HIPDNN_CHECK_ERROR(unpackTensorAttributes(scopedDesc.get(), tensor));
-                tensorMap[uid] = tensor;
-                peerStatsTensors.push_back(std::move(tensor));
-            }
-        }
         attributes.set_peer_stats(std::move(peerStatsTensors));
     }
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(
-        opDesc, HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, "batchnorm compute data type");
+        opDesc, HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, "batchnorm compute data type");
     if(dtErr.is_bad())
     {
         return dtErr;

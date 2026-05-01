@@ -3,40 +3,30 @@
 
 #pragma once
 
-#include <cstdlib>
-#include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <map>
-#include <nlohmann/json.hpp>
-#include <set>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+
+#include "harness/TestSettings.hpp"
 
 namespace hipdnn_integration_tests
 {
 
 // Methods for determining acceptable tolerance when comparing reference
 // implementation output to the selected engine's output.
-//
-// Example:
-//   [plugins.miopen]
-//   name = "miopen_provider_plugin"
-//   engines = ["MIOPEN_PLUGIN"]
-//
-//   [engines.MIOPEN_PLUGIN]
-//   tolerance = "gh_12678_tolerance_workaround"
-//
-// The example config would map to ToleranceMode::GH_12678_TOLERANCE_WORKAROUND
-// which uses default tolerance for all graphs besides batch norm backwards
-// operating on bfloat16 where it returns a wider tolerance.
 enum class ToleranceMode
 {
     DEFAULT,
 };
 
-// Singleton class for reading test configuration from JSON file.
+// Singleton class for storing CLI-based test configuration.
+// All arguments are independently optional:
+//   - articlePath: omit to use hipDNN's default plugin discovery
+//   - engineName: omit to let hipDNN select the engine
+//   - failOnUnsupported: when true, FAIL instead of SKIP for unsupported graphs
 class TestConfig
 {
 public:
@@ -52,111 +42,131 @@ public:
     TestConfig(TestConfig&&) = delete;
     TestConfig& operator=(TestConfig&&) = delete;
 
-    // Get tolerance mode for a given engine ID.
-    ToleranceMode getToleranceMode(int64_t engineId) const
+    // Initialize with CLI arguments. Must be called before any get() access.
+    static void initialize(std::optional<std::filesystem::path> articlePath,
+                           std::optional<std::string> engineName,
+                           bool failOnUnsupported = false,
+                           bool skipGraphValidation = false,
+                           std::optional<std::filesystem::path> configPath = std::nullopt)
     {
-        std::string engineName;
-        try
+        TestConfig& instance = get();
+        if(instance._initialized)
         {
-            engineName = std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(engineId));
+            throw std::runtime_error("TestConfig::initialize() called more than once");
         }
-        catch(const std::out_of_range&)
+        instance._articlePath = std::move(articlePath);
+        instance._engineName = std::move(engineName);
+        instance._failOnUnsupported = failOnUnsupported;
+        instance._skipGraphValidation = skipGraphValidation;
+
+        if(configPath.has_value())
         {
-            engineName = "Engine" + std::to_string(engineId);
+            instance._testSettings.emplace(*configPath);
         }
 
-        if(auto it = _engineTolerances.find(engineName); it != _engineTolerances.end())
+        instance._initialized = true;
+    }
+
+    bool hasArticlePath() const
+    {
+        throwIfNotInitialized();
+        return _articlePath.has_value();
+    }
+
+    bool hasEngineName() const
+    {
+        throwIfNotInitialized();
+        return _engineName.has_value();
+    }
+
+    bool failOnUnsupported() const
+    {
+        throwIfNotInitialized();
+        return _failOnUnsupported;
+    }
+
+    bool skipGraphValidation() const
+    {
+        throwIfNotInitialized();
+        return _skipGraphValidation;
+    }
+
+    // Get the article (plugin .so) path. Throws if not provided.
+    const std::filesystem::path& getArticlePath() const
+    {
+        throwIfNotInitialized();
+        if(!_articlePath.has_value())
         {
-            return it->second;
+            throw std::runtime_error("getArticlePath() called but --test-article was not provided");
         }
+        return _articlePath.value();
+    }
+
+    // Get the engine name string. Throws if not provided.
+    std::string_view getEngineName() const
+    {
+        throwIfNotInitialized();
+        if(!_engineName.has_value())
+        {
+            throw std::runtime_error("getEngineName() called but --test-engine was not provided");
+        }
+        return _engineName.value();
+    }
+
+    // Get the engine ID from the engine name. Throws if engine not provided.
+    int64_t getEngineId() const
+    {
+        throwIfNotInitialized();
+        if(!_engineName.has_value())
+        {
+            throw std::runtime_error("getEngineId() called but --test-engine was not provided");
+        }
+        return hipdnn_data_sdk::utilities::engineNameToId(_engineName.value());
+    }
+
+    // Get tolerance mode (always DEFAULT since only one mode exists)
+    ToleranceMode getToleranceMode() const
+    {
+        throwIfNotInitialized();
         return ToleranceMode::DEFAULT;
     }
 
-    // Check if a full GTest test name is in the expected failures list.
-    // Test name format: "TestSuite/Prefix.TestName/ParamName"
-    bool isExpectedFailure(const std::string& testName)
+    // Check if a test settings file was provided
+    bool hasTestSettings() const
     {
-        return _expectedFailures.contains(testName);
+        throwIfNotInitialized();
+        return _testSettings.has_value();
     }
 
-    // Get expected plugin names from config (e.g., {"fusilli_plugin",
-    // "miopen_provider_plugin"})
-    const std::set<std::string>& getExpectedPluginNames() const
+    // Find a tolerance override matching the given test name.
+    // Returns std::nullopt if no config loaded or no filter matches.
+    std::optional<ToleranceOverride> findToleranceOverride(std::string_view testName) const
     {
-        return _expectedPluginNames;
+        throwIfNotInitialized();
+        if(!_testSettings.has_value())
+        {
+            return std::nullopt;
+        }
+        return _testSettings->findToleranceOverride(testName);
     }
 
 private:
-    TestConfig()
+    TestConfig() = default;
+
+    void throwIfNotInitialized() const
     {
-        // Get config path
-        const char* configPathEnv = std::getenv("HIPDNN_TEST_CONFIG_PATH");
-        if(configPathEnv == nullptr || std::strlen(configPathEnv) == 0)
+        if(!_initialized)
         {
-            throw std::runtime_error("HIPDNN_TEST_CONFIG_PATH environment variable not set");
-        }
-
-        // Parse config
-        const std::filesystem::path configPath = std::filesystem::weakly_canonical(configPathEnv);
-        std::ifstream configFile(configPath);
-        if(!configFile.is_open())
-        {
-            throw std::runtime_error("Failed to open config file: " + configPath.string());
-        }
-        try
-        {
-            auto config = nlohmann::json::parse(configFile);
-
-            // Populate expected failures set from flattened list
-            if(config.contains("expected_failures"))
-            {
-                for(const auto& name : config["expected_failures"])
-                {
-                    _expectedFailures.insert(name.get<std::string>());
-                }
-            }
-
-            // Populate expected plugin names from plugin definitions
-            if(config.contains("plugins"))
-            {
-                for(const auto& [name, info] : config["plugins"].items())
-                {
-                    if(info.contains("name"))
-                    {
-                        _expectedPluginNames.insert(info["name"].get<std::string>());
-                    }
-                }
-            }
-
-            // Populate engine tolerance modes
-            if(config.contains("engines"))
-            {
-                for(const auto& [engineName, engineConfig] : config["engines"].items())
-                {
-                    if(engineConfig.contains("tolerance"))
-                    {
-                        auto val = engineConfig["tolerance"].get<std::string>();
-                        if(val == "default")
-                        {
-                            _engineTolerances[engineName] = ToleranceMode::DEFAULT;
-                        }
-                        else
-                        {
-                            throw std::runtime_error("Unknown tolerance mode: " + val);
-                        }
-                    }
-                }
-            }
-        }
-        catch(const nlohmann::json::parse_error& e)
-        {
-            throw std::runtime_error("Failed to parse config JSON: " + std::string(e.what()));
+            throw std::runtime_error("TestConfig not initialized");
         }
     }
 
-    std::set<std::string> _expectedFailures;
-    std::set<std::string> _expectedPluginNames;
-    std::map<std::string, ToleranceMode> _engineTolerances;
+    std::optional<std::filesystem::path> _articlePath;
+    std::optional<std::string> _engineName;
+    std::optional<TestSettings> _testSettings;
+    bool _failOnUnsupported = false;
+    bool _skipGraphValidation = false;
+    bool _initialized = false;
 };
 
 } // namespace hipdnn_integration_tests

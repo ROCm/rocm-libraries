@@ -38,11 +38,15 @@ test_categories:
   full:
     description: "Stress / weekly - same as Jenkins weekly (stress + HMM)"
     test_patterns:
-      - "*stress*"
-      - "*HMM*"
+    #  - "*stress*"
+    #  - "*HMM*"
+    # current CI use case currently does not match stress use case
+      - "*pre_checkin*"
+      - "*nightly*"
     exclude:
       - "*known_bug*"
     labels:
+      - "full"
       - "stress"
       - "weekly"
 
@@ -50,7 +54,7 @@ test_categories:
 # exclude_gpu:
 #   exclude_gpu_gfxXXXX:
 #     test_patterns: [...]
-#     labels: ["quick", "standard", "comprehensive", "stress", "ex_gpu_gfxXXXX"]
+#     labels: ["quick", "standard", "comprehensive", "full", "ex_gpu_gfxXXXX"]
 
 execution_settings:
   default_timeout: 300

@@ -1,0 +1,25 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyDAGSchedulerPass --print-output
+#
+# DS reads + WMMAs: all 4 ds_loads should be scheduled before the 2 WMMAs
+# because ds_load latency (56 cycles) means WMMAs are not ready until
+# the ds_reads have been issued.
+#
+# Converted from DAGSchedulerPassTest.DSReadAndWMMA_NoConsecutiveWMMA
+#
+# CHECK: v[8:11]{{.*}}ds_load_b128
+# CHECK: v[12:15]{{.*}}ds_load_b128
+# CHECK: v[16:19]{{.*}}ds_load_b128
+# CHECK: v[20:23]{{.*}}ds_load_b128
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}v[8:15]
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}v[16:23]
+# CHECK-NOT: ds_load_b128
+
+st.func @test() {
+^entry:
+  v[8:11] = "st.ds_load_b128"(v24) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[12:15] = "st.ds_load_b128"(v24) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[16:19] = "st.ds_load_b128"(v24) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[20:23] = "st.ds_load_b128"(v24) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 96, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], v[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[16:23], v[16:23], v[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+}

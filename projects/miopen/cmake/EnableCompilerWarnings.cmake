@@ -23,10 +23,6 @@
 # SOFTWARE.
 #
 ################################################################################
-# - Enable warning all for gcc/clang or use /W4 for visual studio
-
-## Strict warning level
-set(__msvc_cxx_compile_options /W4)
 
 set(__default_cxx_compile_options
     -Wall
@@ -42,7 +38,6 @@ set(__default_cxx_compile_options
     -Wundef
     -Wuninitialized
     -Wunreachable-code
-    -Wunused
     -Wno-ignored-qualifiers
     -Wno-sign-compare
 )
@@ -56,82 +51,48 @@ set(__clang_cxx_compile_options
     -Wno-exit-time-destructors
     -Wno-extra-semi
     -Wno-extra-semi-stmt
-    -Wno-float-conversion
-    -Wno-gnu-anonymous-struct
-    -Wno-gnu-zero-variadic-macro-arguments
     -Wno-missing-prototypes
-    -Wno-nested-anon-types
-    -Wno-option-ignored
     -Wno-padded
-    -Wno-return-std-move-in-c++11
-    -Wno-shorten-64-to-32
-    -Wno-sign-conversion
-    -Wno-unknown-warning-option
     -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
-    -Wno-unused-result
     -Wno-unsafe-buffer-usage
     -Wno-deprecated-declarations
-    -Wno-shadow-uncaptured-local
     -Wno-global-constructors
     -Wno-reserved-identifier
-    -Wno-zero-as-null-pointer-constant
-    -Wno-ignored-attributes
     -Wno-deprecated
-    -Wno-incompatible-pointer-types
     -Wno-old-style-cast
-    -Wno-unknown-attributes
-    -Wno-microsoft-cpp-macro
-    -Wno-microsoft-enum-value
-    -Wno-language-extension-token
     -Wno-c++11-narrowing
-    -Wno-float-equal
-    -Wno-redundant-parens
-    -Wno-format-nonliteral
-    -Wno-unused-template
-    -Wno-comma
-    -Wno-suggest-destructor-override
     -Wno-switch-enum
-    -Wno-shift-sign-overflow
     -Wno-suggest-override
-    -Wno-inconsistent-missing-destructor-override
-    -Wno-cast-function-type
     -Wno-nonportable-system-include-path
-    -Wno-incompatible-pointer-types
     -Wno-documentation
-    -Wno-deprecated-builtins
-    -Wno-enum-constexpr-conversion
-    -Wno-unused-parameter
-    -Wmissing-noreturn
-    -Wno-nrvo
-    -Wno-lifetime-safety
-    -Wno-lifetime-safety-suggestion
-    -Wno-lifetime-safety-intra-tu-suggestions
-    -Wno-lifetime-safety-cross-tu-suggestions)
+    -Wmissing-noreturn)
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options
         -Wno-unique-object-duplication
         -Wno-switch-default
         -Wno-nontrivial-memcall)
 endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23")
+    list(APPEND __clang_cxx_compile_options
+        -Wno-lifetime-safety
+        -Wno-lifetime-safety-suggestions
+        -Wno-lifetime-safety-intra-tu-suggestions
+        -Wno-lifetime-safety-cross-tu-suggestions)
+endif()
+
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
         -fms-extensions
         -fms-compatibility)
 endif()
 
-set(__gnu_cxx_compile_options
-    -Wno-missing-field-initializers
-)
-
 add_compile_options(
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:${__msvc_cxx_compile_options}>"
     "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${__default_cxx_compile_options};${__clang_cxx_compile_options}>"
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:${__default_cxx_compile_options};${__gnu_cxx_compile_options}>"
 )
 
-unset(__msvc_cxx_compile_options)
 unset(__default_cxx_compile_options)
-unset(__gnu_cxx_compile_options)
 unset(__clang_cxx_compile_options)

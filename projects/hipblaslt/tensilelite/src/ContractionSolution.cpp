@@ -36,6 +36,7 @@
 #include <Tensile/hip/HipHardware.hpp>
 
 #include <Tensile/UtilsOrigami.hpp>
+#include <iostream>
 #include <origami/streamk.hpp>
 
 #include <algorithm>
@@ -551,7 +552,9 @@ namespace TensileLite
         }
 
         TensorDescriptor const& a          = problem.a();
+        TensorDescriptor const& mxsa       = problem.mxsa();
         TensorDescriptor const& b          = problem.b();
+        TensorDescriptor const& mxsb       = problem.mxsb();
         TensorDescriptor const& c          = problem.c();
         TensorDescriptor const& d          = problem.d();
         TensorDescriptor const& e          = problem.tensor(ContractionProblemGemm::TENSOR::E);
@@ -578,6 +581,8 @@ namespace TensileLite
            && (problemType.computeType != problemType.dType
                || problemType.activationType != ActivationType::None))
             singleWSD = true;
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(gsu > 1 && sizeMapping.streamK == 0
            && ((singleWSD || sizeMapping.globalAccumulation == 2)
                || (sizeMapping.globalAccumulation == 3)))
@@ -618,8 +623,12 @@ namespace TensileLite
         {
             args.template append<void const*>(
                 "a", problemType.sparse == 1 ? inputs.compressed : inputs.a);
+            if(problemType.mxBlockA)
+                args.template append<void const*>("mxsa", inputs.mxsa);
             args.template append<void const*>(
                 "b", problemType.sparse == 2 ? inputs.compressed : inputs.b);
+            if(problemType.mxBlockB)
+                args.template append<void const*>("mxsb", inputs.mxsb);
         }
         else
         {
@@ -630,6 +639,8 @@ namespace TensileLite
         if(problemType.sparse)
             args.template append<unsigned char const*>("metadata", inputs.metadata);
 
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
         {
             // Assert hardware is not null
@@ -651,6 +662,8 @@ namespace TensileLite
         bool gsuWSStride
             = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
         bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(gsuWSStride || skWSStride)
         {
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
@@ -684,11 +697,19 @@ namespace TensileLite
             args.template append<uint32_t>(concatenate_if<T_Debug>("strideA", i), stride_a);
         }
 
+        if(problemType.mxBlockA)
+            for(size_t i = startStrideAB; i < mxsa.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSA", i), mxsa.strides()[i]);
+
         for(size_t i = startStrideAB; i < b.dimensions(); i++)
         {
             auto stride_b = problemType.sparse == 2 ? compressed.strides()[i] : b.strides()[i];
             args.template append<uint32_t>(concatenate_if<T_Debug>("strideB", i), stride_b);
         }
+
+        if(problemType.mxBlockB)
+            for(size_t i = startStrideAB; i < mxsb.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSB", i), mxsb.strides()[i]);
 
         if(problemType.sparse)
         {
@@ -707,7 +728,8 @@ namespace TensileLite
             if(problem.betaType() == rocisa::DataType::Half)
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
-
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(sizeMapping.streamK != 0)
         {
             // SK doesn't care gsu
@@ -724,6 +746,7 @@ namespace TensileLite
             // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
             auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
             auto     totalIters   = tiles * itersPerTile;
+
             uint32_t magicNumberItersPerTile;
             uint32_t magicShiftItersPerTile;
             magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
@@ -731,7 +754,12 @@ namespace TensileLite
             args.template append<uint32_t>("itersPerTile", itersPerTile);
             args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
             args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-            args.template append<uint32_t>("totalIters", totalIters);
+
+            // Custom kernels still use totalIters
+            if(!sizeMapping.customKernelName.empty())
+            {
+                args.template append<uint32_t>("totalIters", totalIters);
+            }
 
             if(sizeMapping.streamK == 1) // Basic SK
             {
@@ -1151,12 +1179,12 @@ namespace TensileLite
         if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
             defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
 
-        // Mapping should be in this range: [0, 1, 2, 3]
-        assert(defaultStaggerUMapping < 4);
+        // Mapping should be in this range: [0, 1, 2, 3, 4]
+        assert(defaultStaggerUMapping < 5);
         // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
         assert((defaultStaggerU & (defaultStaggerU - 1)) == 0 && defaultStaggerU < 65);
-        // StaggerUStrideShift should be in [0, 5] (shift of 5 = stride multiplier of 32)
-        assert(defaultStaggerUStrideShift <= 5);
+        // StaggerUStrideShift is packed in 5-bit field (bits [12:8]), valid range [0, 31]
+        assert(defaultStaggerUStrideShift <= 31);
 
         return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
     }
@@ -1167,6 +1195,7 @@ namespace TensileLite
         // if original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
         {
+            // std::cout<<"Returning the sizeMapping.globalsplitU value as autoGSU: "<<sizeMapping.globalSplitU<<"\n";
             return sizeMapping.globalSplitU;
         }
 
@@ -1206,7 +1235,13 @@ namespace TensileLite
         {
             uint32_t synchronizerUsage
                 = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
-            gsuVal = synchronizerUsage > 409600 ? 1 : gsuVal;
+
+            if (problem.groupedGemm() && (problem.groupedGemmCount() > 1))
+            {
+                gsuVal = synchronizerUsage > (409600 * 16 / problem.groupedGemmCount()) ? 1 : gsuVal;
+            }
+            else
+                gsuVal = synchronizerUsage > (409600 * 16) ? 1 : gsuVal;
         }
 
         // Avoid selecting a gsu value that would make launch grid over the limit
@@ -1389,7 +1424,8 @@ namespace TensileLite
         ContractionSolution::generateSingleCall(ContractionSolution::Problem const& problem,
                                                 ContractionInputs const&            inputs,
                                                 Hardware const&                     hardware,
-                                                StreamKSettings const&              sk) const
+                                                StreamKSettings const&              sk,
+                                                GSUSettings const&                  gsuSettings) const
     {
         KernelInvocation rv;
 
@@ -1417,7 +1453,7 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties (SWDEV-579719)
+        // Use arch from existing hardware to avoid repeated hipGetDeviceProperties
         auto removePrefix = [](const std::string& s) {
             size_t pos = s.find("gfx");
             if(pos != std::string::npos)
@@ -1454,27 +1490,50 @@ namespace TensileLite
                           << ", StaggerU: " << autoStaggerU
                           << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
             }
-            kernelArgs<T_Debug, false>(1,
-                                       0,
-                                       rv.args,
-                                       getNumWorkGroups(rv),
-                                       &hardware,
-                                       problem.getParams(),
-                                       autoWGM,
-                                       autoWGMXCC,
-                                       autoWGMXCCCHUNK,
-                                       autoStaggerUMapping,
-                                       autoStaggerU,
-                                       autoStaggerUStrideShift,
-                                       autoGsuVal);
+            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
+            {           
+                kernelArgs<T_Debug, false>( 1,
+                                            3,
+                                            rv.args,
+                                            getNumWorkGroups(rv),
+                                            &hardware,
+                                            problem.getParams(),
+                                            autoWGM,
+                                            autoWGMXCC,
+                                            autoWGMXCCCHUNK,
+                                            autoStaggerUMapping,
+                                            autoStaggerU,
+                                            autoStaggerUStrideShift,
+                                            autoGsuVal);                                           
+            }
+            else
+            {   
+                kernelArgs<T_Debug, false>( 1,
+                                            0,
+                                            rv.args,
+                                            getNumWorkGroups(rv),
+                                            &hardware,
+                                            problem.getParams(),
+                                            autoWGM,
+                                            autoWGMXCC,
+                                            autoWGMXCCCHUNK,
+                                            autoStaggerUMapping,
+                                            autoStaggerU,
+                                            autoStaggerUStrideShift,
+                                            autoGsuVal);
+            }            
         }
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
 
-        if(sizeMapping.globalAccumulation == 3)
+        if(gsuSettings.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
         {
             rv.args.append<void const*>("dstD", inputs.d);
-            rv.args.append<void const*>("Synchronizer", inputs.Synchronizer);
+            // MBSK: synchronizer address, MB: null address
+            rv.args.append<void const*>("Synchronizer",
+                                        gsuSettings.globalAccumulation == 3 
+                                        ? inputs.Synchronizer 
+                                        : NULL);
             rv.args.append<uint32_t>("GSUSync", 0);
         }
 
@@ -1616,11 +1675,14 @@ namespace TensileLite
                                                h_args,
                                                sk);
 
-                if(sizeMapping.globalAccumulation == 3)
+                if(sizeMapping.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
                 {
                     h_args.template append<void const*>("dstD", inputs.grouped[idx].d);
+                    // MBSK: synchronizer address, MB: null address
                     h_args.template append<void const*>("Synchronizer",
-                                                        inputs.grouped[idx].Synchronizer);
+                                                        sizeMapping.globalAccumulation == 3
+                                                        ? inputs.grouped[idx].Synchronizer
+                                                        : NULL);
                     h_args.template append<uint32_t>("GSUSync", 0);
                 }
 
@@ -1893,7 +1955,8 @@ namespace TensileLite
                                                        uint32_t const&        workspaceOffsetInByte,
                                                        KA&                    args,
                                                        StreamKSettings const& sk,
-                                                       uint32_t               autoGsuVal) const
+                                                       uint32_t               autoGsuVal,
+                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const                                                       
     {
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
@@ -2054,13 +2117,23 @@ namespace TensileLite
         if(sizeMapping.streamK > 0)
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            gsu        = sk.grid / tiles;
+            // Avoid 0 division when tiles is 0 (e.g. zero-sized dimension in grouped gemm)
+            if(tiles > 0)
+                gsu = sk.grid / tiles;
         }
 
         args.template append<uint32_t>(concatenate_if<T_Debug>("gsu"), gsu);
         if((useBias && problemType.useBias == 3) || problemType.useScaleAlphaVec)
         {
             args.template append<uint32_t>("factorDim", (uint32_t)problem.getParams().factorDim());
+        }
+        // Adding the batchmode kernel argument for post GSU kernel to determine 
+        // how to index the batch dimension in Strided Batch versus General Batched.
+        if(problemType.groupedGemm == false)
+        {
+            ContractionProblemGemm::BATCHMODE batchMode = problem.batchMode();
+            args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
+            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);        
         }
     }
 
@@ -2118,8 +2191,15 @@ namespace TensileLite
             gsu        = sk.grid / tiles;
         }
         rv.kernelName = outputConversionKernelName(problem, inputs, vw, gsu);
-
-        rv.numWorkGroups.x = CeilDivide(wiX * wiY * wiZ, rv.workGroupSize.x * vw);
+        int additionalPaddingPerBatchGeneralBatch = 0;
+        if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::STRIDED)
+            rv.numWorkGroups.x = CeilDivide(wiX * wiY * wiZ, rv.workGroupSize.x * vw);
+        else
+        {
+            rv.numWorkGroups.x = CeilDivide(wiX * wiY, rv.workGroupSize.x * vw) * wiZ;
+            int extra_work_items = (wiX * wiY) % (rv.workGroupSize.x * vw);
+            additionalPaddingPerBatchGeneralBatch = extra_work_items > 0 ? (rv.workGroupSize.x * vw) - extra_work_items : 0;
+        }
         rv.numWorkGroups.y = 1;
         rv.numWorkGroups.z = 1;
 
@@ -2127,7 +2207,7 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
-        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal);
+        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal, additionalPaddingPerBatchGeneralBatch);
 
         //@TODO determine if this is needed, may not end up in the same code object file
         rv.codeObjectFile = codeObjectFilename.load();
@@ -2518,7 +2598,8 @@ namespace TensileLite
         }
         else
         {
-            mt1 = int(problem.d().sizes()[1] / 2) * 2;
+            // MT1 should be the power of 2 to match setting in tensileLite
+            mt1 = static_cast<int>(pow(2, ceil(log2(mt1))));
             if(mt1 == 0)
                 mt1 = 1;
         }
@@ -2763,12 +2844,15 @@ namespace TensileLite
             }
         }
 
-        if(debug)
-            rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk));
-        else
-            rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk));
+        GSUSettings gsuSettings;
+        gsuSettings.globalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
-        if(((sizeMapping.globalAccumulation != 3) && gsu > 1 && sizeMapping.globalAccumulation)
+        if(debug)
+            rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk, gsuSettings));
+        else
+            rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk, gsuSettings));
+
+        if((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
            || sk.reduction == origami::reduction_t::parallel)
         {
             if(debug)
@@ -3050,26 +3134,26 @@ namespace TensileLite
         auto cInfo = DataTypeInfo::Get(problemType.cType);
         auto dInfo = DataTypeInfo::Get(problemType.dType);
 
-        spm.memReadBytesA = (NumBatches * M * N * K) / MT1 * aInfo.elementSize;
-        spm.memReadBytesB = (NumBatches * M * N * K) / MT0 * bInfo.elementSize;
-        spm.memReadBytesC = (NumBatches * M * N) * betaReads * cInfo.elementSize;
+        spm.memReadBytesA = multiplyElementSize((NumBatches * M * N * K) / MT1, aInfo.elementSize);
+        spm.memReadBytesB = multiplyElementSize((NumBatches * M * N * K) / MT0, bInfo.elementSize);
+        spm.memReadBytesC = multiplyElementSize((NumBatches * M * N) * betaReads, cInfo.elementSize);
 
         if(GlobalSplitU == 1)
-            spm.memWriteBytesD = (NumBatches * M * N) * (1 + betaWrites) * dInfo.elementSize;
+            spm.memWriteBytesD = multiplyElementSize((NumBatches * M * N) * (1 + betaWrites), dInfo.elementSize);
         else
         {
             bool   hardwareAtomic   = false; // TODO-model
             double atomicOperations = hardwareAtomic ? 2 : 3; // read-mod-write or cas  //TODO-model
             double atomicCollisions = 1.0; // TODO-could be based on K, GSU
-            spm.memWriteBytesD      = (NumBatches * M * N)
+            spm.memWriteBytesD      = multiplyElementSize((NumBatches * M * N)
                                  * (betaWrites + atomicOperations * atomicCollisions)
-                                 * dInfo.elementSize;
+                                 , dInfo.elementSize);
         }
         spm.memReadBytes   = spm.memReadBytesA + spm.memReadBytesB + spm.memReadBytesC;
-        spm.memGlobalReads = spm.memReadBytesA / aInfo.elementSize
-                             + spm.memReadBytesB / bInfo.elementSize
-                             + spm.memReadBytesC / cInfo.elementSize;
-        spm.memGlobalWrites = spm.memWriteBytesD / dInfo.elementSize;
+        spm.memGlobalReads = divideElementSize(spm.memReadBytesA, aInfo.elementSize)
+                             + divideElementSize(spm.memReadBytesB, bInfo.elementSize)
+                             + divideElementSize(spm.memReadBytesC, cInfo.elementSize);
+        spm.memGlobalWrites = divideElementSize(spm.memWriteBytesD, dInfo.elementSize);
 
         return spm;
     }
@@ -3214,7 +3298,7 @@ namespace TensileLite
         if(problemType.outputAmaxD)
         {
             auto numWGS = getNumWorkGroups(problem, sizeMapping);
-            size += problem.amaxd().elementBytes() * numWGS;
+            size += multiplyElementSize(numWGS, problem.amaxd().elementBytes());
         }
 
         return size;
@@ -3325,6 +3409,9 @@ namespace TensileLite
                        static_cast<size_t>(sizeMapping.depthU)},
             };
 
+
+            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+
             reductionStrat = origami::streamk::select_reduction(
                 origami_problem,
                 *(hipAMDGPU->analyticalHardware),
@@ -3388,7 +3475,7 @@ namespace TensileLite
                 .batch    = batch,
                 .a_dtype  = datatypeToAnalyticalDatatype(problem.alphaType()),
                 .b_dtype  = datatypeToAnalyticalDatatype(problem.betaType()),
-                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputType()),
+                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
             };
             origami::config_t origami_config = {
                 .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -3403,6 +3490,9 @@ namespace TensileLite
                 .workspace_size_per_elem_c = sizeMapping.workspaceSizePerElemC,
                 .reduction_strategy        = reductionStrat,
             };
+
+            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+
             skGrid = origami::streamk::select_grid_size(
                 origami_problem,
                 *(hipAMDGPU->analyticalHardware),
@@ -3652,7 +3742,7 @@ namespace TensileLite
 
     origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const& problem) const
     {
-        return datatypeToAnalyticalDatatype(problem.computeInputType());
+        return datatypeToAnalyticalDatatype(problem.computeInputTypeA());
     }
 
     std::ostream& operator<<(std::ostream&                                      stream,

@@ -283,9 +283,9 @@ class TestDescriptorLiftingAdditions:
         assert "finalizeDescriptor()" in output
 
     def test_graph_descriptor_test_reminder(self, convolution_fwd_config, generator):
-        """Output contains graph descriptor test update reminder."""
+        """Output contains graph descriptor name tests note."""
         output = generator._render_descriptor_lifting_additions(convolution_fwd_config)
-        assert "Graph Descriptor Test Update Required" in output
+        assert "Graph Descriptor Name Tests" in output
         assert "OperationNamePreservedInSerialization" in output
         assert "OperationNameRoundTripThroughLifting" in output
 
@@ -910,7 +910,7 @@ class TestDirectRenderMethods:
         assert len(result) == 19
 
     def test_render_lift_only_file_count(self, matmul_config, generator, tmp_path):
-        """render_lift_only produces exactly 10 outputs (3 files + 6 fragments + 1 additions)."""
+        """render_lift_only produces exactly 11 outputs (3 files + 7 fragments + 1 additions)."""
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_lift_only(matmul_config, output_dir)
@@ -920,12 +920,12 @@ class TestDirectRenderMethods:
     def test_render_frontend_file_count(
         self, convolution_fwd_config, generator, tmp_path
     ):
-        """render_frontend produces exactly 10 outputs (2 files + 3 tests + 5 fragments)."""
+        """render_frontend produces exactly 9 outputs (2 files + 3 tests + 4 fragments)."""
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = generator.render_frontend(convolution_fwd_config, output_dir)
-        # 2 file templates + 3 test templates + 5 fragment templates = 10
-        assert len(result) == 10
+        # 2 file templates + 3 test templates + 4 fragment templates = 9
+        assert len(result) == 9
 
     def test_render_dispatches_correctly(
         self, convolution_fwd_config, generator, tmp_path
@@ -1297,3 +1297,263 @@ class TestOptionalTensorTemplateOutput:
         # Optional tensor UIDs must be dereferenced with * in findTensorInMap calls
         assert "*attrs->in_1_tensor_uid" in content
         assert "*attrs->in_2_tensor_uid" in content
+
+
+# ---------------------------------------------------------------------------
+# Constants file generation
+# ---------------------------------------------------------------------------
+
+
+class TestConstantsGeneration:
+    """Test that the constants header file is generated correctly."""
+
+    def test_constants_generated_when_not_set(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Constants file IS generated for configs without constants_include."""
+        config = load_test_config("batchnorm_backward.yaml")
+        assert not config.test_data.constants_include
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        written = generator.render(config, output_dir, "backend")
+
+        constants_path = (
+            f"test_sdk/include/hipdnn_test_sdk/constants/"
+            f"{config.effective_constants_include}.hpp"
+        )
+        assert constants_path in written
+
+        # Verify the file exists and has correct content
+        full_path = output_dir / constants_path
+        assert full_path.exists()
+        content = full_path.read_text()
+        assert "#pragma once" in content
+        assert "namespace hipdnn_tests::constants" in content
+        prefix = config.tensor_const_prefix
+        assert f"{prefix}TENSOR_DY_UID" in content
+        assert f"{prefix}TENSOR_X_UID" in content
+
+    def test_constants_not_generated_when_set(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Constants file is NOT generated for configs with constants_include."""
+        assert (
+            convolution_fwd_config.test_data.constants_include == "ConvFpropConstants"
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        written = generator.render(convolution_fwd_config, output_dir, "backend")
+
+        constants_files = [f for f in written if "constants/" in f]
+        assert len(constants_files) == 0
+
+    def test_constants_generated_in_lift_only_mode(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Constants file IS generated in lift-only mode when not set."""
+        config = load_test_config("batchnorm_backward.yaml")
+        assert not config.test_data.constants_include
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        written = generator.render(config, output_dir, "lift-only")
+
+        constants_path = (
+            f"test_sdk/include/hipdnn_test_sdk/constants/"
+            f"{config.effective_constants_include}.hpp"
+        )
+        assert constants_path in written
+
+    def test_constants_not_generated_in_lift_only_when_set(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Constants file is NOT generated in lift-only mode when set."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        written = generator.render(convolution_fwd_config, output_dir, "lift-only")
+
+        constants_files = [f for f in written if "constants/" in f]
+        assert len(constants_files) == 0
+
+    def test_constants_has_tensor_uids(self, load_test_config, generator, tmp_path):
+        """Generated constants include UID constants for all tensors."""
+        config = load_test_config("batchnorm_inference.yaml")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        constants_path = (
+            output_dir
+            / "test_sdk/include/hipdnn_test_sdk/constants"
+            / f"{config.effective_constants_include}.hpp"
+        )
+        content = constants_path.read_text()
+
+        prefix = config.tensor_const_prefix
+        for tf in config.tensor_fields:
+            uid = config.test_data.tensor_uids.get(tf.name, 0)
+            assert f"{prefix}TENSOR_{tf.name.upper()}_UID = {uid}" in content
+
+    def test_constants_has_dims_and_strides(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Generated constants include dims/strides for tensors with configs."""
+        config = load_test_config("batchnorm_inference.yaml")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        constants_path = (
+            output_dir
+            / "test_sdk/include/hipdnn_test_sdk/constants"
+            / f"{config.effective_constants_include}.hpp"
+        )
+        content = constants_path.read_text()
+
+        prefix = config.tensor_const_prefix
+        assert f"{prefix}TENSOR_X_DIMS" in content
+        assert f"{prefix}TENSOR_X_STRIDES" in content
+
+    def test_all_test_files_reference_constants_header(
+        self, load_test_config, generator, tmp_path
+    ):
+        """All generated test files include the constants header."""
+        config = load_test_config("batchnorm_inference.yaml")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        expected_include = config.effective_constants_include
+
+        test_files = [
+            output_dir / "backend/tests/descriptors" / config.test_descriptor_filename,
+            output_dir / "backend/tests/descriptors" / config.test_graph_filename,
+            output_dir / "backend/tests/descriptors" / config.test_from_node_filename,
+            output_dir / "tests/frontend" / config.test_integration_filename,
+            output_dir / "tests/frontend" / config.test_integration_lifting_filename,
+        ]
+
+        for test_file in test_files:
+            content = test_file.read_text()
+            assert (
+                expected_include in content
+            ), f"{test_file.name} does not reference {expected_include}"
+
+
+class TestLiftingTemplateImprovements:
+    """Test ASSERT_EQ and auto-UIDs in lifting template."""
+
+    def test_lifting_uses_assert_eq_not_ge(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lifting test uses ASSERT_EQ for tensorMap.size(), not ASSERT_GE."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "ASSERT_GE(tensorMap.size()" not in content
+        assert "ASSERT_EQ(tensorMap.size()" in content
+
+    def test_lifting_has_auto_uid_test(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lifting test includes AutoAssignedUidsPreservedInLiftingRoundTrip."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "AutoAssignedUidsPreservedInLiftingRoundTrip" in content
+        assert "std::adjacent_find" in content
+        assert "std::set<int64_t>" in content
+
+    def test_lifting_includes_algorithm_and_set(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lifting test includes <algorithm> and <set> headers."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "#include <algorithm>" in content
+        assert "#include <set>" in content
+
+    def test_lifting_uses_constants_not_inline(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lifting test uses K_TENSOR_ constants, not K_TEST_ inline constants."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lifting_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_lifting_filename
+        )
+        content = lifting_path.read_text()
+
+        assert "K_TEST_" not in content
+        prefix = convolution_fwd_config.tensor_const_prefix
+        assert f"{prefix}TENSOR_X_UID" in content
+        assert "using namespace hipdnn_tests::constants;" in content
+
+    def test_lowering_uses_constants_not_inline(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lowering test uses K_TENSOR_ constants, not K_TEST_ inline constants."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lowering_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_filename
+        )
+        content = lowering_path.read_text()
+
+        assert "K_TEST_" not in content
+        prefix = convolution_fwd_config.tensor_const_prefix
+        assert f"{prefix}TENSOR_X_UID" in content
+        assert "using namespace hipdnn_tests::constants;" in content
+
+    def test_lowering_uses_assert_eq_not_ge(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        """Lowering test uses ASSERT_EQ for tensor count, not ASSERT_GE."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(convolution_fwd_config, output_dir, "backend")
+
+        lowering_path = (
+            output_dir
+            / "tests/frontend"
+            / convolution_fwd_config.test_integration_filename
+        )
+        content = lowering_path.read_text()
+
+        assert "ASSERT_GE(graphT.tensors.size()" not in content
+        assert "ASSERT_EQ(graphT.tensors.size()" in content

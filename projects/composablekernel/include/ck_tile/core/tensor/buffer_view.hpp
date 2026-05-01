@@ -17,15 +17,10 @@
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
 
-namespace ck_tile {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
-// buffer_load_dwordx3 to LDS uses a fixed 16-byte per-thread stride,
-// padding each 12-byte element to 16 bytes in LDS.
-template <typename T>
-CK_TILE_HOST_DEVICE constexpr index_t lds_padded_sizeof()
-{
-    return (sizeof(T) == 12) ? 16 : sizeof(T);
-}
+namespace ck_tile {
 
 // T may be scalar or vector
 // X may be scalar or vector
@@ -248,7 +243,8 @@ struct buffer_view<address_space_enum::global,
     {
     }
 
-    CK_TILE_HOST_DEVICE constexpr buffer_view(T* __restrict__ p_data, BufferSizeType buffer_size)
+    CK_TILE_HOST_DEVICE constexpr buffer_view([[clang::lifetimebound]] T* __restrict__ p_data,
+                                              BufferSizeType buffer_size)
         : p_data_{p_data},
           buffer_size_{buffer_size / PackedSize},
           cached_buf_res_{0},
@@ -638,7 +634,7 @@ struct buffer_view<address_space_enum::global,
             std::is_same_v<remove_cvref_t<scalar_t>, int32_t> ||
             std::is_same_v<remove_cvref_t<scalar_t>, float> ||
             (std::is_same_v<remove_cvref_t<scalar_t>, half_t> && scalar_per_x_vector % 2 == 0)
-#if defined(__gfx950__) // only gfx950 support atomic_pk_add_bf16
+#if defined(__gfx942__) || defined(__gfx950__) // only gfx942 and gfx950 support atomic_pk_add_bf16
             ||
             (std::is_same_v<remove_cvref_t<scalar_t>, bfloat16_t> && scalar_per_x_vector % 2 == 0)
 #endif
@@ -650,7 +646,7 @@ struct buffer_view<address_space_enum::global,
         bool constexpr use_amd_buffer_addressing =
             std::is_same_v<remove_cvref_t<scalar_t>, float> ||
             (std::is_same_v<remove_cvref_t<scalar_t>, half_t> && scalar_per_x_vector % 2 == 0)
-#if defined(__gfx950__) // only gfx950 support atomic_pk_add_bf16
+#if defined(__gfx942__) || defined(__gfx950__) // only gfx942 and gfx950 support atomic_pk_add_bf16
             ||
             (std::is_same_v<remove_cvref_t<scalar_t>, bfloat16_t> && scalar_per_x_vector % 2 == 0)
 #endif
@@ -778,12 +774,13 @@ struct buffer_view<address_space_enum::lds,
     {
     }
 
-    CK_TILE_HOST_DEVICE constexpr buffer_view(T* __restrict__ p_data, BufferSizeType buffer_size)
+    CK_TILE_HOST_DEVICE constexpr buffer_view([[clang::lifetimebound]] T* __restrict__ p_data,
+                                              BufferSizeType buffer_size)
         : p_data_{p_data}, buffer_size_{buffer_size}, invalid_element_value_{0}
     {
     }
 
-    CK_TILE_HOST_DEVICE constexpr buffer_view(T* __restrict__ p_data,
+    CK_TILE_HOST_DEVICE constexpr buffer_view([[clang::lifetimebound]] T* __restrict__ p_data,
                                               BufferSizeType buffer_size,
                                               T invalid_element_value)
         : p_data_{p_data}, buffer_size_{buffer_size}, invalid_element_value_{invalid_element_value}
@@ -848,10 +845,7 @@ struct buffer_view<address_space_enum::lds,
             {
                 using buf_t = ext_vector_t<typename vector_traits<remove_cvref_t<T>>::scalar_type,
                                            scalar_per_t_vector * scalar_per_x_vector>;
-                constexpr index_t padded_stride = lds_padded_sizeof<T>();
-                const char* base =
-                    reinterpret_cast<const char*>(p_data_) + (i + linear_offset) * padded_stride;
-                auto rtn = *c_style_pointer_cast<const buf_t*>(base);
+                auto rtn    = *c_style_pointer_cast<const buf_t*>(&p_data_[i + linear_offset]);
                 return bit_cast<X>(rtn);
             }
 #endif
@@ -883,8 +877,7 @@ struct buffer_view<address_space_enum::lds,
                                           bool /*is_valid_element*/,
                                           bool_constant<pre_nop> = {}) const
     {
-        constexpr index_t padded_stride = lds_padded_sizeof<T>();
-        smem_load<sizeof(X)>{}(dst, v_offset * padded_stride, i_offset * padded_stride);
+        smem_load<sizeof(X)>{}(dst, v_offset * sizeof(T), i_offset * sizeof(T));
     }
 
     template <typename X,
@@ -1296,7 +1289,8 @@ template <address_space_enum BufferAddressSpace,
           amd_buffer_coherence_enum Coherence = amd_buffer_coherence_enum::coherence_default,
           typename T,
           typename BufferSizeType>
-CK_TILE_HOST_DEVICE constexpr auto make_buffer_view(T* __restrict__ p, BufferSizeType buffer_size)
+CK_TILE_HOST_DEVICE constexpr auto make_buffer_view([[clang::lifetimebound]] T* __restrict__ p,
+                                                    BufferSizeType buffer_size)
 {
     return buffer_view<BufferAddressSpace, T, BufferSizeType, true, Coherence>{p, buffer_size};
 }
@@ -1337,3 +1331,5 @@ CK_TILE_HOST_DEVICE void print(const buffer_view<BufferAddressSpace,
 }
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

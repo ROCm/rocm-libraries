@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,8 @@
 
 #include <stdexcept>
 
-extern int    verbose;
-extern size_t ramgb;
-extern size_t vramgb;
-extern int    ngpus;
+extern int verbose;
+extern int ngpus;
 
 extern size_t n_random_tests;
 
@@ -44,6 +42,7 @@ extern double half_epsilon;
 extern double single_epsilon;
 extern double double_epsilon;
 extern bool   skip_runtime_fails;
+extern bool   fftw_compare;
 
 extern double max_linf_eps_double;
 extern double max_l2_eps_double;

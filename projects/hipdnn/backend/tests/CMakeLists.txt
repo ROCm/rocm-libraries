@@ -16,10 +16,17 @@ set(TEST_PLUGIN2_NAME "hipdnn_test_plugin2")
 set(TEST_NO_API_VERSION_PLUGIN_NAME "hipdnn_test_no_api_version_plugin_name")
 set(TEST_ENGINE_PLUGIN1_NAME "hipdnn_test_engine_plugin1")
 
+# Heuristic plugin test names (RFC 0007)
+# Match the names defined in tests/test_plugins/CMakeLists.txt
+set(TEST_GOOD_HEURISTIC_PLUGIN_NAME "test_good_heuristic_plugin")
+set(TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME "test_incomplete_heuristic_api_plugin")
+set(TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME "test_no_optional_heuristic_plugin")
+
 add_executable(
     hipdnn_backend_tests
     descriptors/TestBackendDescriptor.cpp
     descriptors/TestBlockScaleDequantizeOperationDescriptor.cpp
+    descriptors/TestBlockScaleDequantizeOperationFromNode.cpp
     descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
     descriptors/TestBlockScaleQuantizeOperationFromNode.cpp
     descriptors/TestDescriptorFactory.cpp
@@ -30,6 +37,7 @@ add_executable(
     descriptors/TestGraphDescriptor.cpp
     descriptors/TestTensorDescriptor.cpp
     descriptors/TestCustomOpOperationDescriptor.cpp
+    descriptors/TestCustomOpOperationFromNode.cpp
     descriptors/TestGraphDescriptorCustomOp.cpp
     descriptors/TestConvolutionFwdOperationDescriptor.cpp
     descriptors/TestConvolutionWrwOperationDescriptor.cpp
@@ -45,6 +53,7 @@ add_executable(
     descriptors/TestKnobDescriptor.cpp
     descriptors/TestKnobSettingDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationDescriptor.cpp
+    descriptors/TestBatchnormBackwardOperationFromNode.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
     descriptors/TestGraphDescriptorBlockScaleQuantize.cpp
     descriptors/TestMatmulOperationDescriptor.cpp
@@ -53,23 +62,29 @@ add_executable(
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
+    descriptors/TestBatchnormInferenceVarianceExtOperationFromNode.cpp
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorLayernorm.cpp
     descriptors/TestGraphDescriptorOps.cpp
     descriptors/TestGraphDescriptorLifting.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestGraphDescriptorRMSNorm.cpp
-    descriptors/TestGraphDescriptorSdpaFprop.cpp
+    descriptors/TestGraphDescriptorSdpaFwd.cpp
+    descriptors/TestConvolutionBwdOperationFromNode.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestLayernormOperationFromNode.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestPointwiseOperationFromNode.cpp
+    descriptors/TestReductionOperationDescriptor.cpp
+    descriptors/TestReductionOperationFromNode.cpp
+    descriptors/TestGraphDescriptorReduction.cpp
     descriptors/TestRMSNormOperationDescriptor.cpp
     descriptors/TestRMSNormOperationFromNode.cpp
-    descriptors/TestSdpaBpropOperationDescriptor.cpp
-    descriptors/TestSdpaBpropOperationFromNode.cpp
-    descriptors/TestSdpaFpropOperationDescriptor.cpp
-    descriptors/TestGraphDescriptorSdpaBprop.cpp
+    descriptors/TestSdpaBwdOperationDescriptor.cpp
+    descriptors/TestSdpaBwdOperationFromNode.cpp
+    descriptors/TestSdpaFwdOperationDescriptor.cpp
+    descriptors/TestSdpaFwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorSdpaBwd.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp
@@ -84,6 +99,10 @@ add_executable(
     TestHelpers.cpp
     TestBackendLogger.cpp
     TestGraphLogger.cpp
+    TestHeuristicPlugin.cpp
+    TestHeuristicPluginIntegration.cpp
+    TestHeuristicPluginManager.cpp
+    TestHeuristicPluginResourceManager.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestPlugin.cpp
@@ -108,6 +127,9 @@ target_compile_definitions(
             TEST_PLUGIN2_NAME="${TEST_PLUGIN2_NAME}"
             TEST_NO_API_VERSION_PLUGIN_NAME="${TEST_NO_API_VERSION_PLUGIN_NAME}"
             TEST_ENGINE_PLUGIN1_NAME="${TEST_ENGINE_PLUGIN1_NAME}"
+            TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
+            TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME="${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}"
+            TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME="${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}"
 )
 target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
@@ -177,6 +199,15 @@ set_target_properties(
 
 install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+)
+
+# Add dependencies on heuristic test plugins (built in tests/test_plugins/)
+# Note: These targets are forward references - they will be created when tests/test_plugins/
+# is processed later. CMake resolves these dependencies at build time.
+add_dependencies(hipdnn_backend_tests
+    ${TEST_GOOD_HEURISTIC_PLUGIN_NAME}
+    ${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}
+    ${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}
 )
 
 add_unit_test_target(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

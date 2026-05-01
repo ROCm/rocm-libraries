@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -476,6 +476,68 @@ void cgetrs_(char* trans,
              int* ldb,
              int* info);
 void zgetrs_(char* trans,
+             int* n,
+             int* nrhs,
+             rocblas_double_complex* A,
+             int* lda,
+             int* ipiv,
+             rocblas_double_complex* B,
+             int* ldb,
+             int* info);
+
+void ssytrs2_(char* uplo,
+              int* n,
+              int* nrhs,
+              float* A,
+              int* lda,
+              int* ipiv,
+              float* B,
+              int* ldb,
+              float* work,
+              int* info);
+void dsytrs2_(char* uplo,
+              int* n,
+              int* nrhs,
+              double* A,
+              int* lda,
+              int* ipiv,
+              double* B,
+              int* ldb,
+              double* work,
+              int* info);
+void csytrs2_(char* uplo,
+              int* n,
+              int* nrhs,
+              rocblas_float_complex* A,
+              int* lda,
+              int* ipiv,
+              rocblas_float_complex* B,
+              int* ldb,
+              rocblas_float_complex* work,
+              int* info);
+void zsytrs2_(char* uplo,
+              int* n,
+              int* nrhs,
+              rocblas_double_complex* A,
+              int* lda,
+              int* ipiv,
+              rocblas_double_complex* B,
+              int* ldb,
+              rocblas_double_complex* work,
+              int* info);
+
+void ssytrs_(char* uplo, int* n, int* nrhs, float* A, int* lda, int* ipiv, float* B, int* ldb, int* info);
+void dsytrs_(char* uplo, int* n, int* nrhs, double* A, int* lda, int* ipiv, double* B, int* ldb, int* info);
+void csytrs_(char* uplo,
+             int* n,
+             int* nrhs,
+             rocblas_float_complex* A,
+             int* lda,
+             int* ipiv,
+             rocblas_float_complex* B,
+             int* ldb,
+             int* info);
+void zsytrs_(char* uplo,
              int* n,
              int* nrhs,
              rocblas_double_complex* A,
@@ -5693,6 +5755,250 @@ void cpu_getrs<rocblas_double_complex>(rocblas_operation trans,
     zgetrs_(&transC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
 }
 
+// sytrs
+template <>
+void cpu_sytrs<float>(rocblas_fill uplo,
+                      rocblas_int n,
+                      rocblas_int nrhs,
+                      float* A,
+                      rocblas_int lda,
+                      rocblas_int* ipiv,
+                      float* B,
+                      rocblas_int ldb)
+{
+    rocblas_int info = 0;
+    char uploC = rocblas2char_fill(uplo);
+    ssytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
+    assert(info == 0);
+}
+
+template <>
+void cpu_sytrs<double>(rocblas_fill uplo,
+                       rocblas_int n,
+                       rocblas_int nrhs,
+                       double* A,
+                       rocblas_int lda,
+                       rocblas_int* ipiv,
+                       double* B,
+                       rocblas_int ldb)
+{
+    rocblas_int info = 0;
+    char uploC = rocblas2char_fill(uplo);
+    dsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
+    assert(info == 0);
+}
+
+template <>
+void cpu_sytrs<rocblas_float_complex>(rocblas_fill uplo,
+                                      rocblas_int n,
+                                      rocblas_int nrhs,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_int* ipiv,
+                                      rocblas_float_complex* B,
+                                      rocblas_int ldb)
+{
+    rocblas_int info = 0;
+    char uploC = rocblas2char_fill(uplo);
+    csytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
+    assert(info == 0);
+}
+
+template <>
+void cpu_sytrs<rocblas_double_complex>(rocblas_fill uplo,
+                                       rocblas_int n,
+                                       rocblas_int nrhs,
+                                       rocblas_double_complex* A,
+                                       rocblas_int lda,
+                                       rocblas_int* ipiv,
+                                       rocblas_double_complex* B,
+                                       rocblas_int ldb)
+{
+    rocblas_int info = 0;
+    char uploC = rocblas2char_fill(uplo);
+    zsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
+    assert(info == 0);
+}
+
+// sytrs2
+template <>
+void cpu_sytrs2<float>(rocblas_fill uplo,
+                       rocblas_int n,
+                       rocblas_int nrhs,
+                       float* A,
+                       rocblas_int lda,
+                       rocblas_int* ipiv,
+                       float* B,
+                       rocblas_int ldb)
+{
+    rocblas_int info = 0;
+
+    rocblas_int const lwork = n;
+    std::vector<float> work(lwork);
+
+    char uploC = rocblas2char_fill(uplo);
+    ssytrs2_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &(work[0]), &info);
+    assert(info == 0);
+}
+
+template <>
+void cpu_sytrs2<double>(rocblas_fill uplo,
+                        rocblas_int n,
+                        rocblas_int nrhs,
+                        double* A,
+                        rocblas_int lda,
+                        rocblas_int* ipiv,
+                        double* B,
+                        rocblas_int ldb)
+{
+    rocblas_int info = 0;
+
+    rocblas_int const lwork = n;
+    std::vector<double> work(lwork);
+
+    char uploC = rocblas2char_fill(uplo);
+    dsytrs2_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &(work[0]), &info);
+    assert(info == 0);
+}
+
+template <>
+void cpu_sytrs2<rocblas_float_complex>(rocblas_fill uplo,
+                                       rocblas_int n,
+                                       rocblas_int nrhs,
+                                       rocblas_float_complex* A,
+                                       rocblas_int lda,
+                                       rocblas_int* ipiv,
+                                       rocblas_float_complex* B,
+                                       rocblas_int ldb)
+{
+    rocblas_int info = 0;
+
+    rocblas_int const lwork = n;
+    std::vector<rocblas_float_complex> work(lwork);
+
+    char uploC = rocblas2char_fill(uplo);
+    csytrs2_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &(work[0]), &info);
+    assert(info == 0);
+}
+
+template <>
+void cpu_sytrs2<rocblas_double_complex>(rocblas_fill uplo,
+                                        rocblas_int n,
+                                        rocblas_int nrhs,
+                                        rocblas_double_complex* A,
+                                        rocblas_int lda,
+                                        rocblas_int* ipiv,
+                                        rocblas_double_complex* B,
+                                        rocblas_int ldb)
+{
+    rocblas_int info = 0;
+
+    rocblas_int const lwork = n;
+    std::vector<rocblas_double_complex> work(lwork);
+
+    char uploC = rocblas2char_fill(uplo);
+    zsytrs2_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &(work[0]), &info);
+    assert(info == 0);
+}
+// -----------------------------------------------------------------------
+// getrs_npvt
+//
+// The LAPACK routine GETRF computes the LU factorization with row pivoting
+// P * A = L * U, where the row permutation matrix P is encoded in the pivot vector
+// The LAPACK routine GETRS uses this decomposition for solving linear equations.
+//
+// The GETRS_NPVT routine is not available in LAPACK for using
+// the decomposition A = L * U.
+//
+// However, this capability can be emulated by treating
+// the permutation matrix P as the identity permutation.
+//
+// This requires setting the pivot vector  to match the identity permutation.
+// -----------------------------------------------------------------------
+template <>
+void cpu_getrs_npvt<float>(rocblas_operation trans,
+                           rocblas_int n,
+                           rocblas_int nrhs,
+                           float* A,
+                           rocblas_int lda,
+                           float* B,
+                           rocblas_int ldb)
+{
+    rocblas_int info;
+
+    std::vector<rocblas_int> ipiv(n);
+    for(rocblas_int i = 0; i < n; i++)
+    {
+        ipiv[i] = i + 1;
+    }
+
+    char transC = rocblas2char_operation(trans);
+    sgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
+}
+
+template <>
+void cpu_getrs_npvt<double>(rocblas_operation trans,
+                            rocblas_int n,
+                            rocblas_int nrhs,
+                            double* A,
+                            rocblas_int lda,
+                            double* B,
+                            rocblas_int ldb)
+{
+    rocblas_int info;
+
+    std::vector<rocblas_int> ipiv(n);
+    for(rocblas_int i = 0; i < n; i++)
+    {
+        ipiv[i] = i + 1;
+    }
+
+    char transC = rocblas2char_operation(trans);
+    dgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
+}
+
+template <>
+void cpu_getrs_npvt<rocblas_float_complex>(rocblas_operation trans,
+                                           rocblas_int n,
+                                           rocblas_int nrhs,
+                                           rocblas_float_complex* A,
+                                           rocblas_int lda,
+                                           rocblas_float_complex* B,
+                                           rocblas_int ldb)
+{
+    rocblas_int info;
+
+    std::vector<rocblas_int> ipiv(n);
+    for(rocblas_int i = 0; i < n; i++)
+    {
+        ipiv[i] = i + 1;
+    }
+
+    char transC = rocblas2char_operation(trans);
+    cgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
+}
+
+template <>
+void cpu_getrs_npvt<rocblas_double_complex>(rocblas_operation trans,
+                                            rocblas_int n,
+                                            rocblas_int nrhs,
+                                            rocblas_double_complex* A,
+                                            rocblas_int lda,
+                                            rocblas_double_complex* B,
+                                            rocblas_int ldb)
+{
+    rocblas_int info;
+
+    std::vector<rocblas_int> ipiv(n);
+    for(rocblas_int i = 0; i < n; i++)
+    {
+        ipiv[i] = i + 1;
+    }
+
+    char transC = rocblas2char_operation(trans);
+    zgetrs_(&transC, &n, &nrhs, A, &lda, ipiv.data(), B, &ldb, &info);
+}
+
 // gesv
 template <>
 void cpu_gesv<float>(rocblas_int n,
@@ -7600,6 +7906,7 @@ void cpu_sytf2<float>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     ssytf2_(&uploC, &n, A, &lda, ipiv, info);
+    assert(*info == 0);
 }
 
 template <>
@@ -7612,6 +7919,7 @@ void cpu_sytf2<double>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     dsytf2_(&uploC, &n, A, &lda, ipiv, info);
+    assert(*info == 0);
 }
 
 template <>
@@ -7624,6 +7932,7 @@ void cpu_sytf2<rocblas_float_complex>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     csytf2_(&uploC, &n, A, &lda, ipiv, info);
+    assert(*info == 0);
 }
 
 template <>
@@ -7636,6 +7945,7 @@ void cpu_sytf2<rocblas_double_complex>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     zsytf2_(&uploC, &n, A, &lda, ipiv, info);
+    assert(*info == 0);
 }
 
 // sytrf
@@ -7651,6 +7961,7 @@ void cpu_sytrf<float>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     ssytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
+    assert(*info == 0);
 }
 
 template <>
@@ -7665,6 +7976,7 @@ void cpu_sytrf<double>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     dsytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
+    assert(*info == 0);
 }
 
 template <>
@@ -7679,6 +7991,7 @@ void cpu_sytrf<rocblas_float_complex>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     csytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
+    assert(*info == 0);
 }
 
 template <>
@@ -7693,6 +8006,7 @@ void cpu_sytrf<rocblas_double_complex>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     zsytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
+    assert(*info == 0);
 }
 
 // bdsvdx

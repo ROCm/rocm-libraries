@@ -88,7 +88,7 @@ namespace hipdnn_frontend::detail
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(
-        opDesc, HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, "rmsnorm compute data type");
+        opDesc, HIPDNN_ATTR_RMSNORM_COMP_TYPE_EXT, "rmsnorm compute data type");
     if(dtErr.is_bad())
     {
         return dtErr;
