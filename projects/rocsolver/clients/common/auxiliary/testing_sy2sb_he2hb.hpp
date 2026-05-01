@@ -68,11 +68,11 @@ void sy2sb_he2hb_checkBadArgs(const rocblas_handle handle,
 
     // quick return with invalid pointers
     EXPECT_ROCBLAS_STATUS(
-        rocsolver_sy2sb_he2hb(handle, 0, kd, nb, (T) nullptr, lda, (T) nullptr, ldab, (T) nullptr),
+        rocsolver_sy2sb_he2hb(handle, I(0), kd, nb, (T) nullptr, lda, (T) nullptr, ldab, (T) nullptr),
         rocblas_status_success);
 
     EXPECT_ROCBLAS_STATUS(
-        rocsolver_sy2sb_he2hb(handle, n, 0, nb, (T) nullptr, lda, (T) nullptr, ldab, (T) nullptr),
+        rocsolver_sy2sb_he2hb(handle, n, I(0), nb, (T) nullptr, lda, (T) nullptr, ldab, (T) nullptr),
         rocblas_status_success);
 }
 
