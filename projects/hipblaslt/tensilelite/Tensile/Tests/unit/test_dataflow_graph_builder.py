@@ -622,12 +622,16 @@ class TestMultiWriteProducer:
         # the future MFMA-acc-write / VAddCO-dst+VCC cases.)
         wreg_a = vgpr(8, 4)
         wreg_b = vgpr(12, 4)
-        producers_sorted = [(producer.position, producer, [wreg_a, wreg_b])]
+        # Per-byte latest-writer map: v8..v11 from wreg_a, v12..v15 from wreg_b.
+        latest_writer = {}
+        for i in range(4):
+            latest_writer[("v", 8 + i)] = (producer, wreg_a)
+            latest_writer[("v", 12 + i)] = (producer, wreg_b)
 
         # Consumer reads v[8:15] — overlaps both writes.
         read_reg = vgpr(8, 8)
         results = list(_resolve_producers(
-            read_reg, consumer, producers_sorted,
+            read_reg, consumer, latest_writer,
         ))
 
         # Should yield TWO pairs, both attributing to `producer` but with
@@ -664,14 +668,17 @@ class TestMultiWriteProducer:
             body_label=BODY_LABEL_ML, name="narrow-read-MFMA",
         )
 
-        producers_sorted = [(
-            producer.position,
-            producer,
-            [vgpr(8, 4), vgpr(100, 4)],  # first overlaps, second doesn't
-        )]
+        # Per-byte map: v8..v11 from wreg_a; v100..v103 from wreg_b.
+        # Consumer reads v8..v9 — only v8/v9 are in latest_writer for the read.
+        wreg_a = vgpr(8, 4)
+        wreg_b = vgpr(100, 4)
+        latest_writer = {}
+        for i in range(4):
+            latest_writer[("v", 8 + i)] = (producer, wreg_a)
+            latest_writer[("v", 100 + i)] = (producer, wreg_b)
 
         results = list(_resolve_producers(
-            vgpr(8, 2), consumer, producers_sorted,
+            vgpr(8, 2), consumer, latest_writer,
         ))
         assert len(results) == 1
         assert results[0][1].regIdx == 8

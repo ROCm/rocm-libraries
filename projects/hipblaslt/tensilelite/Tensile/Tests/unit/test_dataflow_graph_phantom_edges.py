@@ -31,11 +31,9 @@ false-positive cross-side OrderInverted failures because Pack instructions
 reuse a small pool of scratch vgprs (e.g. v133) across PackA0 and PackB0
 chains.
 
-This file documents the bug as a unit-level fixture so the resolver
-rewrite (wx9.4.2 / Sub-B) has a fast feedback loop. Today the assertion
-fails because the resolver over-yields; the test is marked
-xfail(strict=True). When Sub-B lands, the test will XPASS — at which
-point the marker should be removed.
+This file pins the bug-fix-plus-no-regression invariant. The resolver
+rewrite (wx9.4.2 / Sub-B) makes both assertions pass; if a future
+change re-introduces the over-yield, these tests fail loudly.
 
 # Why a synthetic fixture instead of the real TF32 capture
 
@@ -51,8 +49,6 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Optional
-
-import pytest
 
 from rocisa.container import RegisterContainer
 
@@ -167,15 +163,6 @@ def _edges_keyed_by_consumer_and_resource(graph):
 # =============================================================================
 
 
-_PHANTOM_XFAIL_REASON = (
-    "Phantom-edge bug (wx9.4): _resolve_producers yields every prior writer "
-    "of each register, not just the latest in stream order. Pack scratch-vgpr "
-    "reuse (v133 across PackA/PackB chains) explodes into ~24,688 cross-side "
-    "false positives on real TF32 captures. Sub-B (wx9.4.2) rewrites the "
-    "resolver to per-byte latest-writer; this test will XPASS then."
-)
-
-
 class TestPhantomPackScratchReuse:
     """Reproduce the v133-scratch-reuse phantom-edge case."""
 
@@ -221,7 +208,6 @@ class TestPhantomPackScratchReuse:
                       slot=1, a_src_count=2, b_src_count=1),
         ])
 
-    @pytest.mark.xfail(reason=_PHANTOM_XFAIL_REASON, strict=True)
     def test_each_v133_reader_has_exactly_one_incoming_edge(self):
         """Tight assertion: with per-byte latest-writer (post-Sub-B), each
         v133 reader gets ONE incoming edge — to the most recent v133 writer
@@ -246,7 +232,6 @@ class TestPhantomPackScratchReuse:
             f"Collisions: {[(cid, len(es)) for cid, es in v133_collisions.items()]}"
         )
 
-    @pytest.mark.xfail(reason=_PHANTOM_XFAIL_REASON, strict=True)
     def test_total_v133_edge_count_is_linear_in_consumers(self):
         """Loose assertion: the total number of v133 edges scales with the
         number of v133 readers (one each), not with the cross-product of

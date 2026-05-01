@@ -1618,42 +1618,70 @@ def _node_iter(node, num_mfma_per_iter) -> int:
     return _split_category_iter(node.category)[1]
 
 
-def _resolve_producers(read_resource, consumer, producers_sorted):
-    """Resolve every producer of `read_resource` for `consumer`.
+def _byte_keys_for_resource(resource):
+    """Enumerate byte-grain keys covered by `resource`.
 
-    `read_resource` is either a RegisterContainer or a MemoryRegion.
-    `_intersection` is type-dispatched: register-vs-register uses
-    `_reg_intersection`, MemoryRegion-vs-MemoryRegion uses
-    `_memory_intersection`, mixed types never overlap (returns None).
+    Two resources that overlap return overlapping key sets; resources
+    that don't overlap have disjoint key sets. The keys are used as
+    indices into the per-byte latest-writer map maintained by
+    build_dataflow_graph Phase 2.
 
-    `producers_sorted` is a flat list of (position, node, written_resources)
-    tuples sorted ascending by position (stream order).
+    Numeric registers: one key per register index in the range
+        (regType, regIdx)
+    Symbolic registers: keyed by name root + offset within the named region
+        (regType, name, offset)
+    MemoryRegion: one key per byte in the slice
+        ("mem", space, buffer_id, offset_byte)
 
-    Yields (producer_node, overlap) pairs for each producer whose
-    stream position is strictly before consumer's AND whose written
-    resource overlaps `read_resource`. The yielded `overlap` is the
-    *intersection* — not the producer's full write — so:
-
-      - Diagnostic formatters that print `edge.resource` see the actual
-        sub-range the consumer reads, not the (possibly wider) write.
-      - A producer that emits multiple writes which each overlap the same
-        read yields one edge per overlapping write.
-
-    The two-narrower-writes-cover-one-wide-read case still works: a wide
-    read v[8:15] backed by LR_a writing v[8:11] and LR_b writing v[12:15]
-    yields BOTH edges.
+    Returns an empty tuple for unrecognized resource shapes.
     """
-    consumer_pos = consumer.position
-    for pos, prod_node, written_resources in producers_sorted:
-        if pos >= consumer_pos:
-            # producers_sorted is ascending; nothing later will be < consumer_pos.
-            break
-        for wresource in written_resources:
-            overlap = _intersection(read_resource, wresource)
-            if overlap is not None:
-                yield (prod_node, overlap)
-                # No `break`: a producer with multiple overlapping
-                # writes yields one edge per write.
+    from rocisa.container import RegisterContainer
+    if isinstance(resource, MemoryRegion):
+        return tuple(
+            ("mem", resource.space, resource.buffer_id, resource.offset + i)
+            for i in range(resource.byte_count)
+        )
+    if not isinstance(resource, RegisterContainer):
+        return ()
+    rt = resource.regType
+    count = resource.regNum or 1
+    if resource.regIdx >= 0:
+        return tuple((rt, resource.regIdx + i) for i in range(count))
+    name_obj = getattr(resource, "regName", None)
+    if name_obj is None:
+        return ()
+    name = name_obj.name
+    base = name_obj.getTotalOffsets() if hasattr(name_obj, "getTotalOffsets") else 0
+    return tuple((rt, name, base + i) for i in range(count))
+
+
+def _resolve_producers(read_resource, consumer, latest_writer):
+    """Yield (producer_node, overlap) pairs for `consumer`'s read of `read_resource`.
+
+    `latest_writer` is the per-byte map maintained by build_dataflow_graph
+    Phase 2: byte_key -> (writer_node, write_resource). For each byte the
+    read covers, look up the latest writer; group bytes by
+    (writer_node, write_resource) so distinct writes (e.g., a multi-write
+    producer feeding a wide read) each emit one edge.
+
+    The yielded `overlap` is the intersection of read_resource with the
+    writer's actual write_resource — same precision the old resolver
+    yielded, so diagnostic formatters and edge-set dedup still work.
+    """
+    writer_groups = {}  # (id(writer), id(write_res)) -> (writer_node, write_res)
+    for bk in _byte_keys_for_resource(read_resource):
+        entry = latest_writer.get(bk)
+        if entry is None:
+            continue
+        writer_node, write_res = entry
+        key = (id(writer_node), id(write_res))
+        if key not in writer_groups:
+            writer_groups[key] = (writer_node, write_res)
+
+    for writer_node, write_res in writer_groups.values():
+        overlap = _intersection(read_resource, write_res)
+        if overlap is not None:
+            yield (writer_node, overlap)
 
 
 def _identity_for(inst, body_label: str, category=None) -> tuple:
@@ -2187,29 +2215,27 @@ def build_dataflow_graph(four_part_capture):
     # Skip when nothing was captured — e.g., the no-op build_dataflow_graph(None)
     # contract holds but here we have an empty captures map after seeding.
     if nodes_by_identity:
-        # Single ascending-by-stream-position list of all producer nodes;
-        # _resolve_producers walks it and short-circuits when it passes
-        # the consumer's position.
-        producers_sorted = []
-        for node in nodes_by_identity.values():
-            wrapped = _ensure_wrapped(node.tagged_inst)
-            written = wrapped.writes
-            if not written:
-                continue
-            producers_sorted.append((node.position, node, written))
-        producers_sorted.sort(key=lambda triple: triple[0])
+        # Per-byte latest-writer construction. Walk all data-flow nodes in
+        # ascending stream-position order; for each node, first emit edges
+        # for its reads (consulting the current latest_writer state), then
+        # update latest_writer for its writes. A new write to a byte_key
+        # OVERWRITES the previous writer — exactly what "latest writer"
+        # means, and what kills the phantom-edge bug from scratch-vgpr
+        # reuse.
+        latest_writer = {}  # byte_key -> (writer_node, write_resource)
+        sorted_nodes = sorted(nodes_by_identity.values(), key=lambda n: n.position)
 
-        # Resolve each consumer's reads.
-        for node in nodes_by_identity.values():
+        for node in sorted_nodes:
             wrapped = _ensure_wrapped(node.tagged_inst)
-            reads = wrapped.reads
-            if not reads:
-                continue
-            for read_resource in reads:
+
+            # Phase 2a — reads first: emit one edge per distinct
+            # (writer, write_resource) that contributes any byte of any
+            # read of this node.
+            for read_resource in wrapped.reads:
                 if read_resource is None:
                     continue
                 for producer, overlap in _resolve_producers(
-                    read_resource, node, producers_sorted,
+                    read_resource, node, latest_writer,
                 ):
                     is_memory = isinstance(overlap, MemoryRegion)
                     edges.append(DataflowEdge(
@@ -2219,6 +2245,16 @@ def build_dataflow_graph(four_part_capture):
                         edge_kind=("lds_raw_intrawave" if is_memory
                                    else "raw_intrawave"),
                     ))
+
+            # Phase 2b — writes second: update latest_writer for every
+            # byte this node covers. Done AFTER reads so a single
+            # instruction reading and writing the same register sees its
+            # PREVIOUS writer, not itself.
+            for write_resource in wrapped.writes:
+                if write_resource is None:
+                    continue
+                for bk in _byte_keys_for_resource(write_resource):
+                    latest_writer[bk] = (node, write_resource)
 
     # =========================================================================
     # SBarrier-edge collectors (cross-wave LDS-reuse)
