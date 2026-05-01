@@ -298,7 +298,7 @@ class TestDataflowDataclasses:
         )
         edge = DataflowEdge(
             producer=producer, consumer=consumer,
-            register=vgpr(7), edge_kind="raw_intrawave",
+            resource=vgpr(7), edge_kind="raw_intrawave",
         )
         assert edge.producer.identity == ("LRA0", 1, ())
         assert edge.consumer.identity == ("MFMA", 1, ())

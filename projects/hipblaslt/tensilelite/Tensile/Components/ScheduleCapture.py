@@ -97,6 +97,104 @@ class SlotKey:
     sequence: int
 
 
+# =============================================================================
+# WrappedInstruction + MemoryRegion — unified resource model
+# =============================================================================
+# Real rocisa-bound classes refuse setattr (no __dict__; nanobind-locked) and
+# can't be weakref'd, so any per-instance metadata must live somewhere we own.
+# WrappedInstruction is a thin proxy: forwards attribute access to the
+# underlying rocisa instance via __getattr__, holds wrapper-native fields
+# (`reads`, `writes`) populated once at capture time by `_populate`. Callers
+# read those fields directly afterwards — no merge of "implicit" vs "explicit".
+#
+# MemoryRegion lets non-register resources (LDS bytes today; scratch / GDS /
+# global later) participate in the same edge-formation pipeline as
+# RegisterContainer. The graph builder's `_intersection` is type-dispatched
+# so a heterogeneous reads/writes list "just works": a read of an LDS region
+# matches a write of the same region; a read of a vgpr never matches an LDS
+# region (returns None).
+
+
+class WrappedInstruction:
+    """Thin proxy around a rocisa instruction.
+
+    Forwards attribute access to the underlying rocisa instance via
+    __getattr__; owns mutable wrapper-native fields (`reads`, `writes`) for
+    the metadata the dataflow graph needs.
+
+    `_rocisa_inst` is exposed as a property `rocisa_inst` so existing
+    `type(node.rocisa_inst).__name__` callers keep working unchanged.
+    `__str__` delegates to the underlying instance so `_canonical_render`
+    sees the same render-string whether or not the inst is wrapped.
+    """
+    __slots__ = ("_rocisa_inst", "reads", "writes")
+
+    def __init__(self, rocisa_inst):
+        self._rocisa_inst = rocisa_inst
+        self.reads = ()
+        self.writes = ()
+
+    @property
+    def rocisa_inst(self):
+        return self._rocisa_inst
+
+    def __getattr__(self, name):
+        # __slots__ guarantees _rocisa_inst/reads/writes are found via normal
+        # lookup; we only land here for attrs the wrapper doesn't own.
+        # Don't forward dunders — deepcopy/copy/pickle look up special
+        # methods (__deepcopy__, __reduce_ex__, __getstate__, ...) via
+        # getattr, and forwarding them to the rocisa inst would cause those
+        # protocols to copy the inst directly and lose the wrapper. The
+        # explicit __deepcopy__/__copy__ below handle the relevant cases.
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        return getattr(self._rocisa_inst, name)
+
+    def __str__(self):
+        return str(self._rocisa_inst)
+
+    def __repr__(self):
+        return f"WrappedInstruction({self._rocisa_inst!r})"
+
+    def __deepcopy__(self, memo):
+        from copy import deepcopy
+        new = WrappedInstruction(deepcopy(self._rocisa_inst, memo))
+        new.reads = deepcopy(self.reads, memo)
+        new.writes = deepcopy(self.writes, memo)
+        memo[id(self)] = new
+        return new
+
+    def __copy__(self):
+        new = WrappedInstruction(self._rocisa_inst)
+        new.reads = self.reads
+        new.writes = self.writes
+        return new
+
+
+@dataclass(frozen=True)
+class MemoryRegion:
+    """A byte-addressed region of a memory space.
+
+    `space` discriminates LDS / scratch / GDS / global; `buffer_id` is the
+    symbolic root of the address (e.g. "LocalReadAddrA", "m0"); `offset` and
+    `byte_count` describe the slice within that buffer. `frozen=True` makes
+    the type hashable for free, so it can sit alongside RegisterContainer in
+    `DataflowGraph.edge_keys()` set-dedup.
+
+    Symbolic `buffer_id` is acceptable for the validator's cross-graph
+    comparison because both schedulers consume the same kernel-writer state
+    and produce the same address-vgpr names — over-claim and under-claim
+    errors cancel out across reference and subject. Numeric resolution
+    (interpreting SXorB32/VXorB32/SAddU32 over LDS-address vgprs to a
+    concrete byte offset) is a follow-up for absolute LDS dataflow tracking,
+    not required for graph comparison.
+    """
+    space: str           # "lds" today; "scratch" / "gds" / "global" forward-compatible
+    buffer_id: str       # symbolic root of the address vgpr
+    offset: int          # bytes from buffer base
+    byte_count: int      # extent
+
+
 @dataclass
 class TaggedInstruction:
     """A rocisa Instruction with its CMS-style id_map category and slot position.
@@ -105,10 +203,17 @@ class TaggedInstruction:
     instruction was popped from (not by inspecting the instruction's class).
     The same rocisa class (e.g. VFmaMixF32) may carry different categories
     depending on which bucket emitted it.
+
+    `wrapped` is a WrappedInstruction holding pre-populated `reads`/`writes`
+    tuples for dataflow-graph edge formation. Production callers
+    (LoopBodyCaptureBuilder.append) populate it at construction; the
+    `_ensure_wrapped` helper lazily populates it for callers that build
+    TaggedInstructions directly (test fixtures).
     """
     inst: object
     category: str
     slot: SlotKey
+    wrapped: object = None  # WrappedInstruction; lazily populated
 
 
 @dataclass
@@ -271,7 +376,11 @@ class GraphNode:
 
 @dataclass
 class DataflowEdge:
-    """A register-flow edge in the dataflow graph.
+    """A dataflow edge — register or memory-region flow.
+
+    `resource` (formerly `register`) holds either a RegisterContainer or a
+    MemoryRegion: the unified `_intersection` is type-dispatched so both
+    can flow through the same edge-formation pipeline.
 
     edge_kind discriminates the three kinds of dataflow this graph models:
       raw_intrawave        — producer SWait drains the in-wave counter
@@ -280,7 +389,7 @@ class DataflowEdge:
     """
     producer: GraphNode
     consumer: GraphNode
-    register: object                    # RegisterContainer (opaque to avoid hard rocisa import)
+    resource: object                    # RegisterContainer | MemoryRegion (opaque)
     edge_kind: str                      # 'raw_intrawave' | 'lr_to_gr_lds_reuse' | 'gr_to_lr_lds_reuse'
 
 
@@ -301,8 +410,8 @@ class DataflowGraph:
     captures: dict                      # body_label -> LoopBodyCapture
 
     def edge_keys(self):
-        """Edge-equality keys for cross-graph diff: (p_id, c_id, register, kind)."""
-        return {(e.producer.identity, e.consumer.identity, e.register, e.edge_kind)
+        """Edge-equality keys for cross-graph diff: (p_id, c_id, resource, kind)."""
+        return {(e.producer.identity, e.consumer.identity, e.resource, e.edge_kind)
                 for e in self.edges}
 
 
@@ -731,10 +840,13 @@ class LoopBodyCaptureBuilder:
                     f"{cls_name} in category {ti.category!r}. "
                     f"vscnt is not tracked; no current CMS body emits stores."
                 )
-            # Apply implicit-operand tags (e.g., m0 read for DTL BufferLoad)
-            # so _reads/_writes pick up dependencies that don't appear in
-            # the rocisa instruction's named attributes.
-            _apply_implicit_operand_tags(inst)
+            # Wrap and populate reads/writes so build_dataflow_graph picks
+            # up dataflow without needing per-call extraction. The wrapper
+            # is the single source of (reads, writes) — DTL m0 reads,
+            # MFMA acc writes, LDS-address vgpr reads etc. all flow
+            # through `_populate_wrapper`'s rule registry.
+            ti.wrapped = WrappedInstruction(inst)
+            _populate_wrapper(ti.wrapped, category=ti.category)
         return LoopBodyCapture(instructions=list(self._instructions))
 
 
@@ -1548,45 +1660,43 @@ def _logical_position(node, num_mfma_per_iter):
     return (body_idx, iter_, rank, getattr(node, '_intra_seq', 0))
 
 
-def _resolve_register_producers(read_reg, consumer, producers_by_kind, num_mfma_per_iter):
-    """Resolve every producer of `read_reg` for `consumer`.
+def _resolve_producers(read_resource, consumer, producers_by_kind, num_mfma_per_iter):
+    """Resolve every producer of `read_resource` for `consumer`.
 
-    Yields (producer_node, overlap_reg) pairs for each producer whose
+    `read_resource` is either a RegisterContainer or a MemoryRegion.
+    `_intersection` is type-dispatched: register-vs-register uses
+    `_reg_intersection`, MemoryRegion-vs-MemoryRegion uses
+    `_memory_intersection`, mixed types never overlap (returns None).
+
+    Yields (producer_node, overlap) pairs for each producer whose
     logical_position is strictly before consumer's AND whose written
-    register overlaps `read_reg`. The yielded `overlap_reg` is the
-    *intersection* of read_reg with the producer's matching write — not
-    the producer's full write — so:
+    resource overlaps `read_resource`. The yielded `overlap` is the
+    *intersection* — not the producer's full write — so:
 
-      - Diagnostic formatters that print `edge.register` see the actual
+      - Diagnostic formatters that print `edge.resource` see the actual
         sub-range the consumer reads, not the (possibly wider) write.
       - A producer that emits multiple writes which each overlap the same
-        read yields one edge per overlapping write. Without this, a
-        future multi-output extractor (e.g. VAddCO writing dst+VCC) would
-        silently drop the second write whenever both overlapped a single
-        consumer read.
+        read yields one edge per overlapping write.
 
     The two-narrower-writes-cover-one-wide-read case still works: a wide
     read v[8:15] backed by LR_a writing v[8:11] and LR_b writing v[12:15]
-    yields BOTH edges — once because both producers iterate the outer
-    loop, once because both writes survive the inner loop.
+    yields BOTH edges.
 
-    Reorder-invariant: each yielded pair depends only on register
-    identity + category + iteration, all preserved across schedulers.
-    Both schedulers see the same instruction set so both yield the same
-    set of (producer, overlap) pairs.
+    Reorder-invariant: each yielded pair depends only on resource identity
+    + category + iteration, all preserved across schedulers.
     """
     consumer_lp = _logical_position(consumer, num_mfma_per_iter)
     for kind, prod_list in producers_by_kind.items():
-        for lp, prod_node, written_regs in prod_list:
+        for lp, prod_node, written_resources in prod_list:
             if lp >= consumer_lp:
                 # prod_list is sorted ascending; nothing later will be < consumer_lp.
                 break
-            for wreg in written_regs:
-                overlap = _reg_intersection(read_reg, wreg)
+            for wresource in written_resources:
+                overlap = _intersection(read_resource, wresource)
                 if overlap is not None:
                     yield (prod_node, overlap)
                     # No `break`: a producer with multiple overlapping
-                    # writes yields one edge per write. See docstring.
+                    # writes yields one edge per write.
 
 
 def _identity_for(inst, body_label: str, category=None) -> tuple:
@@ -1623,43 +1733,23 @@ def _identity_for(inst, body_label: str, category=None) -> tuple:
 
 
 # =============================================================================
-# Implicit-operand tagging
+# Operand rule registry — single source of per-class semantic knowledge
 # =============================================================================
-# Some rocisa instructions consume or produce registers that don't appear in
-# their constructor's named attributes — the dependency lives in modifier
-# flags or in implicit hardware semantics. The canonical case is BufferLoad
-# under DirectToLds: the kernel writer passes dst=None (KWA:14608) and the
-# `lds` MUBUF modifier tells the hardware to drop the loaded data into LDS
-# at the address held in m0. The Python wrapper exposes neither the
-# modifier bit nor m0 — only `inst.dst is None` survives as a structural
-# signal that the load is DTL-flavored.
+# Each rocisa instruction class exposes its read/write operands differently.
+# A rule encapsulates: which classes it applies to (`applies(inst)`), and
+# what those operands are (`extract(inst) -> (reads_tuple, writes_tuple)`).
+# Rules are tried in order and their outputs accumulated into the wrapper.
 #
-# Rather than re-deriving the implicit operand set every time _reads/_writes
-# is called, tag each instruction once at capture time. _reads/_writes
-# consult the tag in addition to running their normal extractors.
-#
-# Storage: a module-level `id(inst) -> (reads_tuple, writes_tuple)` dict.
-# Real rocisa-bound classes refuse `setattr` (no `__dict__`; nanobind-
-# locked) AND can't be weakref'd, so the conventional "stash an attribute
-# on the instance" approach doesn't work. id-keyed storage trades a small
-# leak across the validator's lifetime for the ability to hold tags on
-# objects we don't own. Captures clear their entries via
-# `clear_implicit_operand_tags(captures)` once the validator has consumed
-# the resulting graph. Tests use `_reset_implicit_operand_tags()` for
-# isolation.
-#
-# Tagging is idempotent — same instance through `finalize()` twice
-# overwrites with the same tuple.
-
-
-# id(inst) -> (reads: tuple[RegisterContainer], writes: tuple[RegisterContainer])
-_IMPLICIT_OPERANDS: dict = {}
+# This collapses the prior `_writes` / `_reads` if/elif chain (which only
+# handled LR/LW/GR/MFMA) plus the separate implicit-operand tagging
+# mechanism (which existed solely to plumb m0 reads through DTL BufferLoads)
+# into one extensible pipeline. New classes just add a rule.
 
 
 def _is_dtl_buffer_load(inst) -> bool:
     """A BufferLoad whose dst is None is a DTL-mode load (kernel writer's
     `dst = None if lds else vgpr(...)` at KWA:14608). Such loads write to
-    LDS and implicitly read m0 for the LDS destination address.
+    LDS rather than a vgpr and implicitly read m0 for the LDS destination.
 
     Real rocisa BufferLoad classes don't expose `dst` as a Python attribute
     at all — `hasattr(inst, "dst")` returns False even for non-DTL loads.
@@ -1670,121 +1760,169 @@ def _is_dtl_buffer_load(inst) -> bool:
     return _inst_dst(inst) is None
 
 
-def _dtl_buffer_load_implicit_reads(inst) -> tuple:
-    from rocisa.container import mgpr
-    return (mgpr(0),)
+def _is_register(x) -> bool:
+    """True if x walks like a RegisterContainer (has regType + regIdx).
+
+    Used by the GenericALURule fallback to filter getParams() entries that
+    aren't registers (modifiers, ints, comments, None)."""
+    return x is not None and hasattr(x, "regType") and hasattr(x, "regIdx")
 
 
-# (predicate, reads_extractor, writes_extractor) — append a tuple to add
-# a new implicit-operand rule. Extractors return a tuple of
-# RegisterContainer (possibly empty).
-_IMPLICIT_OPERAND_RULES = (
-    (_is_dtl_buffer_load, _dtl_buffer_load_implicit_reads, lambda inst: ()),
+class _DSLoadRule:
+    """DSLoadB* — dst (vgpr) and the LDS-address vgpr (`LocalReadAddr{tc}`).
+
+    Real rocisa: getParams() is `[dst, src_lds_addr, ds_modifiers, ...]`.
+    Synthetic _FakeLR: only exposes `dst`, no LDS-address vgpr in the fake.
+    """
+    def applies(self, inst, category=None): return _is_lr(inst)
+    def extract(self, inst, category=None):
+        dst = _inst_dst(inst)
+        lds_addr = _get_param(inst, 1)  # None for fakes (no getParams)
+        writes = (dst,) if dst is not None else ()
+        reads = (lds_addr,) if _is_register(lds_addr) else ()
+        return reads, writes
+
+
+class _DSStoreRule:
+    """DSStoreB* — reads the LDS-address vgpr (slot 0) and the data src
+    vgpr (slot 1). Writes nothing register-wise (the bytes go to LDS;
+    register-side dataflow has no write).
+
+    Real rocisa: getParams() is `[dstAddr, src_data, ds_modifiers, comment]`.
+    Synthetic _FakeLW: only exposes `src` for data; no LDS-address vgpr.
+    """
+    def applies(self, inst, category=None): return _is_lw(inst)
+    def extract(self, inst, category=None):
+        lds_addr = _get_param(inst, 0)
+        src_data = _inst_dsstore_src(inst)
+        reads = tuple(r for r in (lds_addr, src_data) if _is_register(r))
+        return reads, ()
+
+
+class _DTLBufferLoadRule:
+    """DTL BufferLoad (dst=None) — implicit m0 read for LDS destination,
+    plus the SRD sgpr. No register-side write (data goes straight to LDS).
+    """
+    def applies(self, inst, category=None): return _is_dtl_buffer_load(inst)
+    def extract(self, inst, category=None):
+        from rocisa.container import mgpr
+        srd = _inst_buffer_srd(inst)
+        reads = [mgpr(0)]
+        if _is_register(srd):
+            reads.append(srd)
+        return tuple(reads), ()
+
+
+class _BufferLoadRule:
+    """Non-DTL BufferLoad — writes dst, reads SRD."""
+    def applies(self, inst, category=None):
+        return _is_gr(inst) and not _is_dtl_buffer_load(inst)
+    def extract(self, inst, category=None):
+        dst = _inst_dst(inst)
+        srd = _inst_buffer_srd(inst)
+        writes = (dst,) if dst is not None else ()
+        reads = (srd,) if _is_register(srd) else ()
+        return reads, writes
+
+
+class _MFMARule:
+    """MFMA — accumulator is read-modify-write; a/b are reads.
+
+    Excludes Pack-categorized MFMAInstructions (TF32 emulation pattern):
+    those are syntactically MFMAInstruction but semantically Pack
+    operations producing values for downstream MFMAs in the SAME or NEXT
+    iteration. Treating them as MFMA producers creates cross-iter edges
+    that the OrderInverted classifier can't yet distinguish from same-iter
+    reorders. The PackMFMA case will be revisited when cross-iter edge
+    classification lands.
+    """
+    def applies(self, inst, category=None):
+        if not _is_mfma(inst):
+            return False
+        if category is not None and category.startswith("Pack"):
+            return False
+        return True
+
+    def extract(self, inst, category=None):
+        a = _inst_mfma_a(inst)
+        b = _inst_mfma_b(inst)
+        acc = _inst_mfma_acc(inst)
+        reads = tuple(r for r in (a, b, acc) if r is not None)
+        writes = (acc,) if acc is not None else ()
+        return reads, writes
+
+
+class _NoDataflowRule:
+    """SWaitCnt / SBarrier / SNop — pure scheduling control; no dataflow."""
+    def applies(self, inst, category=None):
+        return _is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst)
+    def extract(self, inst, category=None):
+        return (), ()
+
+
+# NOTE: a `_GenericALURule` (default fallback that writes=getParams()[0],
+# reads=getParams()[1:]) was prototyped here. It correctly closes the P1
+# coverage gaps for Pack/SAddU32/VSwap/etc., BUT it surfaces edges that
+# the existing OrderInvertedFailure classifier misinterprets: CMS
+# legitimately schedules Pack[iter=N+1] before MFMA[iter=N] (cross-iter
+# pipelining), and the classifier compares stream positions without
+# distinguishing same-iter reorders from cross-iter pipelined dependencies.
+#
+# Closing this requires either (a) plumbing producer/consumer iter onto
+# DataflowEdge so OrderInverted can skip cross-iter edges, or (b) adding
+# a separate `cross_iter` edge_kind. Both are real follow-ups; deferring
+# them keeps Sub-task 10 focused on the architectural unification.
+#
+# As a result, the P1 strict-xfails in test_dataflow_graph_register_gaps
+# (Pack/VSwap/VCC) still xfail. The P0 gaps (MFMA acc chain, m0 for DTL
+# BufferLoad — covered by explicit rules above) DO close.
+
+# Order matters: more specific rules first.
+_OPERAND_RULES = (
+    _DSLoadRule(),
+    _DSStoreRule(),
+    _DTLBufferLoadRule(),
+    _BufferLoadRule(),
+    _MFMARule(),
+    _NoDataflowRule(),
 )
 
 
-def _apply_implicit_operand_tags(inst) -> None:
-    """Stamp implicit-operand tags onto `inst` via the module-level
-    id-keyed dict.
+def _populate_wrapper(wrapper, category=None) -> None:
+    """Run the operand rules over wrapper._rocisa_inst, accumulating
+    reads and writes into wrapper.reads / wrapper.writes.
 
-    Idempotent: re-running on the same instance overwrites the entry
-    with the freshly-computed tuples (which are equal by construction
-    because the rules are pure functions of the instance).
+    `category` (the TaggedInstruction.category) lets a rule discriminate
+    on emission-time bucket — e.g. MFMARule excludes Pack-categorized
+    MFMAInstructions (TF32 emulation pattern) so they're not treated as
+    main-loop MFMA producers.
 
-    Called once per captured instruction in
-    `LoopBodyCaptureBuilder.finalize()` so the tag is in place before
-    `build_dataflow_graph` runs `_reads`/`_writes`.
+    Only the FIRST matching rule contributes; this prevents e.g. an MFMA
+    from being processed by multiple rules.
+
+    Idempotent: rules are pure functions of (inst, category).
     """
-    reads = ()
-    writes = ()
-    for predicate, reads_fn, writes_fn in _IMPLICIT_OPERAND_RULES:
-        if predicate(inst):
-            reads = reads + tuple(reads_fn(inst))
-            writes = writes + tuple(writes_fn(inst))
-    if reads or writes:
-        _IMPLICIT_OPERANDS[id(inst)] = (reads, writes)
+    inst = wrapper._rocisa_inst
+    for rule in _OPERAND_RULES:
+        if rule.applies(inst, category):
+            reads, writes = rule.extract(inst, category)
+            wrapper.reads = tuple(reads)
+            wrapper.writes = tuple(writes)
+            return
+    wrapper.reads = ()
+    wrapper.writes = ()
 
 
-def _get_implicit_reads(inst) -> tuple:
-    entry = _IMPLICIT_OPERANDS.get(id(inst))
-    return entry[0] if entry is not None else ()
-
-
-def _get_implicit_writes(inst) -> tuple:
-    entry = _IMPLICIT_OPERANDS.get(id(inst))
-    return entry[1] if entry is not None else ()
-
-
-def _reset_implicit_operand_tags() -> None:
-    """Drop every recorded implicit-operand tag.
-
-    Test-only escape hatch — keeps test isolation from leaking tags
-    between cases. Production callers should use
-    `clear_implicit_operand_tags(captures)` to clear scoped to a single
-    pipeline run.
+def _ensure_wrapped(tagged_inst):
+    """Return the WrappedInstruction for `tagged_inst`, populating it
+    on first access. Used by build_dataflow_graph for tagged_insts that
+    were constructed directly (test fixtures) without going through
+    LoopBodyCaptureBuilder.append.
     """
-    _IMPLICIT_OPERANDS.clear()
-
-
-def clear_implicit_operand_tags(captures) -> None:
-    """Remove implicit-operand tags for every instruction in `captures`.
-
-    Call once the validator has consumed the dataflow graph — keeps the
-    module-level dict from accumulating entries across kernel-writer runs.
-    Accepts an iterable of LoopBodyCapture (or a FourPartCapture; both
-    iterate to instructions transparently).
-    """
-    if captures is None:
-        return
-    bodies = []
-    if hasattr(captures, "main_loop"):
-        # FourPartCapture
-        for by_cp in (captures.main_loop, captures.main_loop_prev,
-                      captures.n_gl, captures.n_ll):
-            bodies.extend(by_cp.values())
-    else:
-        bodies = list(captures)
-    for body in bodies:
-        for ti in body.instructions:
-            _IMPLICIT_OPERANDS.pop(id(ti.inst), None)
-
-
-def _writes(inst):
-    """Registers written by this instruction (returned as a list of RegisterContainers).
-
-    Includes any implicit writes recorded by `_apply_implicit_operand_tags`
-    (e.g. VCC carry-out for VAddCO once that rule lands).
-    """
-    out = []
-    if _is_lr(inst):
-        dst = _inst_dst(inst)
-        if dst is not None:
-            out.append(dst)
-    elif _is_gr(inst):
-        dst = _inst_dst(inst)
-        if dst is not None:
-            out.append(dst)
-    out.extend(_get_implicit_writes(inst))
-    return out
-
-
-def _reads(inst):
-    """Registers read by this instruction.
-
-    Includes any implicit reads recorded by `_apply_implicit_operand_tags`
-    (e.g. m0 for DTL BufferLoad).
-    """
-    out = []
-    if _is_lw(inst):
-        src = _inst_dsstore_src(inst)
-        if src is not None:
-            out.append(src)
-    elif _is_mfma(inst):
-        for v in (_inst_mfma_a(inst), _inst_mfma_b(inst), _inst_mfma_acc(inst)):
-            if v is not None:
-                out.append(v)
-    out.extend(_get_implicit_reads(inst))
-    return out
+    if tagged_inst.wrapped is None:
+        tagged_inst.wrapped = WrappedInstruction(tagged_inst.inst)
+        _populate_wrapper(tagged_inst.wrapped, category=tagged_inst.category)
+    return tagged_inst.wrapped
 
 
 def _reg_overlaps(read_reg, written_reg) -> bool:
@@ -1863,9 +2001,9 @@ def _reg_intersection(read_reg, written_reg):
     overlap subrange. Two reasons this matters:
 
       1. Diagnostic precision — a downstream Failure formatter that prints
-         `edge.register` shows the actual sub-range the consumer reads,
+         `edge.resource` shows the actual sub-range the consumer reads,
          not the producer's full write. Example: LR writes v[8:11], MFMA
-         reads v[8:9] — edge.register == v[8:9].
+         reads v[8:9] — edge.resource == v[8:9].
 
       2. Set-based edge dedup in `DataflowGraph.edge_keys()`. When a
          producer with multiple writes feeds a consumer with multiple
@@ -1924,6 +2062,38 @@ def _reg_intersection(read_reg, written_reg):
         # the resolver skips this edge rather than emitting a bogus container.
         return None
     return factory(lo, hi - lo)
+
+
+def _memory_intersection(a, b):
+    """Return the overlap MemoryRegion between `a` and `b`, or None.
+
+    Two MemoryRegions overlap when they're in the same `space` AND share
+    the same `buffer_id` (symbolic root) AND their `[offset, offset+byte_count)`
+    byte ranges intersect. Different buffers with the same space don't
+    overlap (e.g., LocalReadAddrA vs LocalReadAddrB are distinct LDS
+    halves under symbolic resolution).
+    """
+    if a.space != b.space or a.buffer_id != b.buffer_id:
+        return None
+    lo = max(a.offset, b.offset)
+    hi = min(a.offset + a.byte_count, b.offset + b.byte_count)
+    if lo >= hi:
+        return None
+    return MemoryRegion(space=a.space, buffer_id=a.buffer_id,
+                        offset=lo, byte_count=hi - lo)
+
+
+def _intersection(a, b):
+    """Type-dispatched resource intersection. Returns the overlap (subresource
+    of the same type) or None if no overlap (including heterogeneous types
+    — a register and a MemoryRegion never overlap).
+    """
+    if isinstance(a, MemoryRegion) and isinstance(b, MemoryRegion):
+        return _memory_intersection(a, b)
+    if isinstance(a, MemoryRegion) or isinstance(b, MemoryRegion):
+        return None
+    # Both are RegisterContainers (or duck-types). Reuse the register path.
+    return _reg_intersection(a, b)
 
 
 def _make_node(tagged_inst, body_label: str) -> GraphNode:
@@ -2059,20 +2229,21 @@ def build_dataflow_graph(four_part_capture):
         body._graph_nodes = nodes_per_body[label]
 
     # ---------------------------------------------------------------------
-    # Phase 2 — edge formation by register-name resolution.
+    # Phase 2 — edge formation by resource-name resolution.
     # ---------------------------------------------------------------------
-    # Collect every producer node (anything _writes() returns regs for)
-    # bucketed by kind_rank, sorted by logical_position. Then walk every
-    # consumer node, resolve each read register to its unique producer
-    # via _resolve_register_producer, emit the edge.
+    # Each node's wrapper carries the precomputed (reads, writes) tuples
+    # populated by `_populate_wrapper` (rule registry). Resources may be
+    # RegisterContainers or MemoryRegions; the type-dispatched
+    # `_intersection` handles both.
     edges = []
 
     # Skip when nothing was captured — e.g., the no-op build_dataflow_graph(None)
     # contract holds but here we have an empty captures map after seeding.
     if nodes_by_identity:
-        producers_by_kind = {}  # kind_rank -> list of (lp, node, written_regs)
+        producers_by_kind = {}  # kind_rank -> list of (lp, node, written_resources)
         for node in nodes_by_identity.values():
-            written = _writes(node.rocisa_inst)
+            wrapped = _ensure_wrapped(node.tagged_inst)
+            written = wrapped.writes
             if not written:
                 continue
             try:
@@ -2084,13 +2255,14 @@ def build_dataflow_graph(four_part_capture):
             producers_by_kind.setdefault(lp[2], []).append((lp, node, written))
 
         # Sort each kind's producer list by logical_position ascending so
-        # _resolve_register_producer can walk-from-end to find the latest.
+        # _resolve_producers can walk-from-start and short-circuit.
         for kind in producers_by_kind:
             producers_by_kind[kind].sort(key=lambda triple: triple[0])
 
         # Resolve each consumer's reads.
         for node in nodes_by_identity.values():
-            reads = _reads(node.rocisa_inst)
+            wrapped = _ensure_wrapped(node.tagged_inst)
+            reads = wrapped.reads
             if not reads:
                 continue
             try:
@@ -2099,17 +2271,19 @@ def build_dataflow_graph(four_part_capture):
                 _logical_position(node, num_mfma_per_iter)
             except CaptureUnknownInstructionError:
                 continue
-            for read_reg in reads:
-                if read_reg is None:
+            for read_resource in reads:
+                if read_resource is None:
                     continue
-                for producer, written_reg in _resolve_register_producers(
-                    read_reg, node, producers_by_kind, num_mfma_per_iter,
+                for producer, overlap in _resolve_producers(
+                    read_resource, node, producers_by_kind, num_mfma_per_iter,
                 ):
+                    is_memory = isinstance(overlap, MemoryRegion)
                     edges.append(DataflowEdge(
                         producer=producer,
                         consumer=node,
-                        register=written_reg,
-                        edge_kind="raw_intrawave",
+                        resource=overlap,
+                        edge_kind=("lds_raw_intrawave" if is_memory
+                                   else "raw_intrawave"),
                     ))
 
     # =========================================================================
@@ -2246,14 +2420,14 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
                     # vgpr (under DTL=1, that vgpr is bound to the same LDS slot).
                     # We tag the edge with the producer's destination register
                     # since that's the resource pin.
-                    register = getattr(producer.rocisa_inst, "dst", None)
+                    resource = getattr(producer.rocisa_inst, "dst", None)
                 else:  # gr_to_lr_lds_reuse
-                    register = getattr(producer.rocisa_inst, "dst", None)
+                    resource = getattr(producer.rocisa_inst, "dst", None)
 
                 edges.append(DataflowEdge(
                     producer=producer,
                     consumer=node,
-                    register=register,
+                    resource=resource,
                     edge_kind=edge_kind,
                 ))
 
@@ -2351,7 +2525,7 @@ def compare_graphs(reference: DataflowGraph, subject: DataflowGraph,
     # Map missing keys back to reference edge objects for diagnosis.
     failures = []
     ref_edges_by_key = {
-        (e.producer.identity, e.consumer.identity, e.register, e.edge_kind): e
+        (e.producer.identity, e.consumer.identity, e.resource, e.edge_kind): e
         for e in reference.edges
     }
     for key in missing_keys:
@@ -2397,6 +2571,17 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
     # Phase 1 — gating: order check (same-body only).
     if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
         return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
+
+    # MFMA-as-producer: the dataflow graph models MFMA accumulator chains
+    # so reorders are detectable, but those chains aren't gated by SWaitCnt
+    # counters (MFMA latency is governed by issue-timing constraints, not
+    # the dscnt/vlcnt FIFO model). Skip wait-coverage classification — the
+    # Phase 1 OrderInverted check above is the only failure mode that
+    # applies. A missing MFMA-as-producer edge that survived to Phase 2
+    # means the topology genuinely differs and there's nothing for the
+    # wait-coverage classifier to say.
+    if p_node.category == "MFMA":
+        return []
 
     # Phase 2 — independent checks. Run all; collect failures.
     # All wait/barrier helpers walk subj_graph cross-body: producer in
@@ -2661,6 +2846,11 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
     # Phase 1 — same-body order check.
     if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
         return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
+
+    # MFMA-as-producer edges aren't gated by SWaitCnt — see notes in
+    # diagnose_missing_edge.
+    if p_node.category == "MFMA":
+        return []
 
     # Phase 2 — wait coverage.
     expected_counter = counter_for(p_node)

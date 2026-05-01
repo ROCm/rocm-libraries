@@ -61,9 +61,16 @@ from dataflow_fixtures import (
 
 
 def _wrap(ml_capture, *, ml_prev=None, ngl=None, nll=None):
+    _FILLER_RANGES = {
+        BODY_LABEL_ML_PREV: (200, 204, 208),
+        BODY_LABEL_NGL:     (220, 224, 228),
+        BODY_LABEL_NLL:     (240, 244, 248),
+    }
+
     def _filler(label):
+        c, a, b = _FILLER_RANGES[label]
         return make_capture(label, [make_mfma(
-            c_dst_start=200, a_src_start=204, b_src_start=208, slot=0,
+            c_dst_start=c, a_src_start=a, b_src_start=b, slot=0,
         )])
     return FourPartCapture(
         main_loop={0: ml_capture},
@@ -571,7 +578,7 @@ class TestDiagnoseMissingEdgeDefenses:
         )
         ref_edge = DataflowEdge(
             producer=ref_producer, consumer=ref_consumer,
-            register=None, edge_kind="raw_intrawave",
+            resource=None, edge_kind="raw_intrawave",
         )
         # Subject graph has no nodes — both lookups will fail.
         subj_graph = DataflowGraph(nodes={}, edges=[], captures={})

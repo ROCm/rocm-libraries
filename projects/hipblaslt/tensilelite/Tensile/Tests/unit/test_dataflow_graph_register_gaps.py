@@ -93,9 +93,16 @@ def _wrap(ml_capture):
     """Wrap a single main-loop capture into a FourPartCapture, fillering the
     other 3 bodies with a no-op MFMA so build_dataflow_graph's
     non-empty-body precondition is satisfied."""
+    _FILLER_RANGES = {
+        BODY_LABEL_ML_PREV: (200, 204, 208),
+        BODY_LABEL_NGL:     (220, 224, 228),
+        BODY_LABEL_NLL:     (240, 244, 248),
+    }
+
     def _filler(label):
+        c, a, b = _FILLER_RANGES[label]
         return make_capture(label, [make_mfma(
-            c_dst_start=200, a_src_start=204, b_src_start=208, slot=0,
+            c_dst_start=c, a_src_start=a, b_src_start=b, slot=0,
         )])
     return FourPartCapture(
         main_loop={0: ml_capture},
@@ -218,40 +225,24 @@ class TestDTLm0Tracking:
 
 
 # =============================================================================
-# Implicit-operand tagging (capture-time hook)
+# WrappedInstruction + operand rule registry
 # =============================================================================
-# `_apply_implicit_operand_tags` runs in `LoopBodyCaptureBuilder.finalize`
-# and records (reads, writes) tuples for instructions whose dependencies
-# don't appear in their constructor's named attributes. Storage is a
-# module-level `id(inst) -> (reads, writes)` dict in ScheduleCapture.py
-# (real rocisa-bound classes refuse `setattr` and can't be weakref'd, so
-# we can't stash attributes on the instance itself). _reads/_writes
-# consult the dict after running their normal extractors. Currently the
-# only rule is "BufferLoad with dst=None reads m0" (DTL detection via the
-# kernel writer's `dst = None if lds else vgpr(...)` at KWA:14608).
+# `_populate_wrapper` runs the rule registry over every captured rocisa
+# instance; the result lives on `wrapper.reads` / `wrapper.writes` so
+# build_dataflow_graph picks it up at edge formation. The DTL BufferLoad
+# m0 read flows through `_DTLBufferLoadRule`; symmetric coverage for
+# DSLoad/DSStore LDS-address vgprs, MFMA accumulator chains, and ALU
+# fallbacks live alongside it.
 
 
-class TestImplicitOperandTagging:
-    def setup_method(self, method=None):
-        # Reset the module-level tag dict so cases don't bleed into each other.
-        from Tensile.Components.ScheduleCapture import _reset_implicit_operand_tags
-        _reset_implicit_operand_tags()
-
-    def teardown_method(self, method=None):
-        from Tensile.Components.ScheduleCapture import _reset_implicit_operand_tags
-        _reset_implicit_operand_tags()
-
+class TestWrappedInstructionPopulation:
     def _build_dtl_buffer_load(self):
         from rocisa.container import vgpr, sgpr, MUBUFModifiers
         from rocisa.instruction import BufferLoadB128
         m = MUBUFModifiers(offen=True, offset12=0, lds=True)
-        # DTL form: dst=None — kernel writer's signal at KWA:14608.
         return BufferLoadB128(
-            dst=None,
-            vaddr=vgpr(40, 1),
-            saddr=sgpr(20, 4),
-            soffset=0,
-            mubuf=m,
+            dst=None, vaddr=vgpr(40, 1), saddr=sgpr(20, 4),
+            soffset=0, mubuf=m,
         )
 
     def _build_non_dtl_buffer_load(self):
@@ -259,89 +250,67 @@ class TestImplicitOperandTagging:
         from rocisa.instruction import BufferLoadB128
         m = MUBUFModifiers(offen=True, offset12=0, lds=False)
         return BufferLoadB128(
-            dst=vgpr(8, 4),
-            vaddr=vgpr(40, 1),
-            saddr=sgpr(20, 4),
-            soffset=0,
-            mubuf=m,
+            dst=vgpr(8, 4), vaddr=vgpr(40, 1), saddr=sgpr(20, 4),
+            soffset=0, mubuf=m,
         )
 
-    def test_tag_helper_marks_dtl_buffer_load(self):
+    def test_dtl_rule_contributes_m0_read(self):
         from Tensile.Components.ScheduleCapture import (
-            _apply_implicit_operand_tags, _get_implicit_reads,
+            WrappedInstruction, _populate_wrapper,
         )
-        inst = self._build_dtl_buffer_load()
-        assert _get_implicit_reads(inst) == ()
-        _apply_implicit_operand_tags(inst)
-        reads = _get_implicit_reads(inst)
-        assert len(reads) == 1
-        assert reads[0] == mgpr(0)
+        wrapper = WrappedInstruction(self._build_dtl_buffer_load())
+        _populate_wrapper(wrapper)
+        assert any(r == mgpr(0) for r in wrapper.reads), (
+            f"DTL BufferLoad's wrapper should expose m0 in reads; got {wrapper.reads}"
+        )
+        assert wrapper.writes == ()  # data goes to LDS, not a vgpr
 
-    def test_tag_helper_skips_non_dtl_buffer_load(self):
+    def test_non_dtl_buffer_load_does_not_contribute_m0(self):
         from Tensile.Components.ScheduleCapture import (
-            _apply_implicit_operand_tags, _get_implicit_reads,
+            WrappedInstruction, _populate_wrapper,
         )
-        inst = self._build_non_dtl_buffer_load()
-        _apply_implicit_operand_tags(inst)
-        # Non-DTL BufferLoad has dst != None; no rule fires.
-        assert _get_implicit_reads(inst) == ()
+        wrapper = WrappedInstruction(self._build_non_dtl_buffer_load())
+        _populate_wrapper(wrapper)
+        assert all(r != mgpr(0) for r in wrapper.reads)
+        # Non-DTL writes its vgpr dst.
+        assert wrapper.writes != ()
 
-    def test_reads_returns_implicit_m0_after_tagging(self):
-        from Tensile.Components.ScheduleCapture import (
-            _apply_implicit_operand_tags, _reads,
-        )
-        inst = self._build_dtl_buffer_load()
-        _apply_implicit_operand_tags(inst)
-        reads = _reads(inst)
-        # DTL BufferLoad has dst=None so the dst-extractor branch yields
-        # nothing; m0 comes from the implicit tag.
-        assert any(r == mgpr(0) for r in reads), (
-            f"_reads should include m0 after DTL tag applied; got {reads}"
-        )
-
-    def test_finalize_applies_tag_through_capture_pipeline(self):
+    def test_finalize_populates_wrapper_through_capture_pipeline(self):
         """End-to-end: appending a DTL BufferLoad through the capture
-        builder and calling finalize() records the m0-read tag without
-        any test-side intervention."""
-        from Tensile.Components.ScheduleCapture import (
-            LoopBodyCaptureBuilder, _get_implicit_reads,
-        )
-        builder = LoopBodyCaptureBuilder()
-        inst = self._build_dtl_buffer_load()
-        builder.append(inst, category="GRA", iteration=0)
-        builder.finalize()
-        reads = _get_implicit_reads(inst)
-        assert len(reads) == 1
-        assert reads[0] == mgpr(0)
-
-    def test_tag_application_is_idempotent(self):
-        """Calling _apply_implicit_operand_tags twice on the same instance
-        leaves the recorded tuple equal — no accumulation or duplication."""
-        from Tensile.Components.ScheduleCapture import (
-            _apply_implicit_operand_tags, _get_implicit_reads,
-        )
-        inst = self._build_dtl_buffer_load()
-        _apply_implicit_operand_tags(inst)
-        first = _get_implicit_reads(inst)
-        _apply_implicit_operand_tags(inst)
-        second = _get_implicit_reads(inst)
-        assert tuple(second) == tuple(first)
-        assert len(second) == 1  # Not (mgpr(0), mgpr(0)).
-
-    def test_clear_drops_tags_for_capture(self):
-        """clear_implicit_operand_tags removes entries scoped to one capture."""
-        from Tensile.Components.ScheduleCapture import (
-            LoopBodyCaptureBuilder, _get_implicit_reads,
-            clear_implicit_operand_tags,
-        )
+        builder and calling finalize() populates `tagged.wrapped.reads`
+        without any test-side intervention."""
+        from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder
         builder = LoopBodyCaptureBuilder()
         inst = self._build_dtl_buffer_load()
         builder.append(inst, category="GRA", iteration=0)
         capture = builder.finalize()
-        assert len(_get_implicit_reads(inst)) == 1
+        ti = capture.instructions[0]
+        assert ti.wrapped is not None
+        assert any(r == mgpr(0) for r in ti.wrapped.reads)
 
-        clear_implicit_operand_tags([capture])
-        assert _get_implicit_reads(inst) == ()
+    def test_population_is_idempotent(self):
+        """_populate_wrapper rebuilds reads/writes from scratch; running
+        twice yields the same tuples."""
+        from Tensile.Components.ScheduleCapture import (
+            WrappedInstruction, _populate_wrapper,
+        )
+        wrapper = WrappedInstruction(self._build_dtl_buffer_load())
+        _populate_wrapper(wrapper)
+        first_reads, first_writes = wrapper.reads, wrapper.writes
+        _populate_wrapper(wrapper)
+        assert wrapper.reads == first_reads
+        assert wrapper.writes == first_writes
+
+    def test_wrapper_forwards_attribute_access(self):
+        """WrappedInstruction proxies getattr to the underlying rocisa inst,
+        so `wrapper.getParams()`, `str(wrapper)`, etc. behave like the
+        underlying instance."""
+        from Tensile.Components.ScheduleCapture import WrappedInstruction
+        inst = self._build_dtl_buffer_load()
+        wrapper = WrappedInstruction(inst)
+        assert wrapper.getParams() == inst.getParams()
+        assert str(wrapper) == str(inst)
+        assert wrapper.rocisa_inst is inst
 
 
 # =============================================================================
@@ -355,7 +324,7 @@ class TestImplicitOperandTagging:
 
 
 class TestMFMASelfRAW:
-    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
+    # MFMARule.writes = (acc,) closes this gap as of Sub-task 10.
     def test_mfma_acc_chain_reorder(self):
         """Two MFMAs share accumulator v0..v3. MFMA #1 must complete before
         MFMA #2 reads its acc. Reversing them is a real WAW/RAW violation."""

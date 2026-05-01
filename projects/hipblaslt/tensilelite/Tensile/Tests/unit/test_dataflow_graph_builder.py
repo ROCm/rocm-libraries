@@ -87,11 +87,19 @@ def _wrap(ml_capture, *, ml_prev=None, ngl=None, nll=None):
     edges against producers in `ml_capture`. The test under examination must
     not place producers/consumers in the high-register range.
     """
+    # Filler MFMA per body uses a distinct high-vgpr range so the
+    # cross-body MFMA acc-chain edges (added when MFMARule started
+    # writing acc) don't pollute the test's own edge set.
+    _FILLER_RANGES = {
+        BODY_LABEL_ML_PREV: (200, 204, 208),
+        BODY_LABEL_NGL:     (220, 224, 228),
+        BODY_LABEL_NLL:     (240, 244, 248),
+    }
+
     def _filler(label):
-        # Filler MFMA reads from v[200:203] — high enough that real test
-        # producers won't overlap.
+        c, a, b = _FILLER_RANGES[label]
         return make_capture(label, [make_mfma(
-            c_dst_start=200, a_src_start=204, b_src_start=208, slot=0,
+            c_dst_start=c, a_src_start=a, b_src_start=b, slot=0,
         )])
     return FourPartCapture(
         main_loop={0: ml_capture},
@@ -106,7 +114,7 @@ def _edges_to_pairs(graph):
     """Return list of (producer.category, consumer.category, register tuple)."""
     return [
         (e.producer.category, e.consumer.category,
-         (e.register.regType, e.register.regIdx, e.register.regNum))
+         (e.resource.regType, e.resource.regIdx, e.resource.regNum))
         for e in graph.edges
     ]
 
@@ -115,7 +123,7 @@ def _has_edge(graph, p_cat, c_cat, reg_start=None):
     for e in graph.edges:
         if e.producer.category != p_cat or e.consumer.category != c_cat:
             continue
-        if reg_start is None or e.register.regIdx == reg_start:
+        if reg_start is None or e.resource.regIdx == reg_start:
             return True
     return False
 
@@ -137,7 +145,7 @@ class TestBasicDataflow:
         assert len(edges) == 1
         assert edges[0].producer.category == "LRA0"
         assert edges[0].consumer.category == "MFMA"
-        assert edges[0].register.regIdx == 8
+        assert edges[0].resource.regIdx == 8
 
     def test_two_lrs_one_consumer_resolves_each_read(self):
         """MFMA reads v[8:11] (LR_a) AND v[12:15] (LR_b) — register-name
@@ -151,7 +159,7 @@ class TestBasicDataflow:
         ])
         g = build_dataflow_graph(_wrap(cap))
         edges = [e for e in g.edges if e.edge_kind == "raw_intrawave"]
-        producers = sorted(e.register.regIdx for e in edges)
+        producers = sorted(e.resource.regIdx for e in edges)
         assert producers == [8, 12]
 
     def test_each_consumer_resolves_to_its_register_writer(self):
@@ -174,7 +182,7 @@ class TestBasicDataflow:
         ])
         g = build_dataflow_graph(_wrap(cap))
         # Both MFMAs get their producer edge by register resolution.
-        producer_regs = {e.register.regIdx for e in g.edges
+        producer_regs = {e.resource.regIdx for e in g.edges
                          if e.edge_kind == "raw_intrawave"}
         assert producer_regs == {8, 20}
 
@@ -224,7 +232,7 @@ class TestBasicDataflow:
         ])
         g = build_dataflow_graph(_wrap(cap))
         edges = [e for e in g.edges if e.edge_kind == "raw_intrawave"
-                 and e.register.regIdx == 8]
+                 and e.resource.regIdx == 8]
         # Both MFMAs (at vmfma_index 1 and 3) get an edge from LR_a.
         consumer_slots = sorted(e.consumer.position.vmfma_index for e in edges)
         assert consumer_slots == [1, 3]
@@ -372,7 +380,7 @@ class TestCrossBodyQueueState:
                       and e.producer.body_label == BODY_LABEL_ML_PREV
                       and e.consumer.body_label == BODY_LABEL_ML]
         assert len(cross_body) == 1
-        assert cross_body[0].register.regIdx == 8
+        assert cross_body[0].resource.regIdx == 8
 
     def test_cross_body_no_wait_emits_missing_wait_failure(self):
         """Producer in ML-1 with consumer in ML and NO SWait at the start
@@ -529,9 +537,9 @@ class TestStructuralProperties:
 
 
 # =============================================================================
-# Edge.register precision (Part 2 of resolver wrinkle)
+# Edge.resource precision (Part 2 of resolver wrinkle)
 # =============================================================================
-# `_resolve_register_producers` yields (producer, overlap_reg) where
+# `_resolve_producers` yields (producer, overlap_reg) where
 # overlap_reg is the *intersection* of the consumer's read with the
 # producer's write — not the producer's full write. Previously the full
 # write was emitted, overstating consumption when the read was narrower.
@@ -540,7 +548,7 @@ class TestStructuralProperties:
 class TestEdgeRegisterIntersection:
     def test_wide_write_narrow_read_yields_intersection(self):
         """LR writes v[8:11] (4 vgprs); MFMA reads v[8:9] (2 vgprs).
-        edge.register should be v[8:9], not v[8:11]."""
+        edge.resource should be v[8:9], not v[8:11]."""
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),       # writes v[8:11]
             make_swait(slot=1, dscnt=0),
@@ -552,10 +560,10 @@ class TestEdgeRegisterIntersection:
                  and e.producer.category == "LRA0"]
         assert len(edges) == 1
         e = edges[0]
-        assert e.register.regIdx == 8, "intersection starts at consumer's read base"
-        assert e.register.regNum == 2, (
+        assert e.resource.regIdx == 8, "intersection starts at consumer's read base"
+        assert e.resource.regNum == 2, (
             f"intersection width should be 2 (consumer's narrower read), "
-            f"got {e.register.regNum} (would be 4 under old wreg-as-edge.register)"
+            f"got {e.resource.regNum} (would be 4 under old wreg-as-edge.resource)"
         )
 
     def test_narrow_write_wide_read_yields_intersection(self):
@@ -571,14 +579,14 @@ class TestEdgeRegisterIntersection:
         edges = [e for e in g.edges if e.edge_kind == "raw_intrawave"
                  and e.producer.category == "LRA0"]
         assert len(edges) == 1
-        assert edges[0].register.regIdx == 10
-        assert edges[0].register.regNum == 4
+        assert edges[0].resource.regIdx == 10
+        assert edges[0].resource.regNum == 4
 
 
 # =============================================================================
 # Multi-write producer (Part 1 of resolver wrinkle)
 # =============================================================================
-# `_resolve_register_producers` previously had a `break` after the first
+# `_resolve_producers` previously had a `break` after the first
 # matching write per producer, so a producer with multiple writes could
 # only emit one edge per consumer-read. After the fix, each overlapping
 # write yields its own edge. Today no production extractor returns
@@ -594,7 +602,7 @@ class TestMultiWriteProducer:
         pairs — one per matching write — instead of breaking after the
         first match."""
         from Tensile.Components.ScheduleCapture import (
-            _resolve_register_producers, GraphPosition,
+            _resolve_producers, GraphPosition,
         )
         from rocisa.container import vgpr
 
@@ -631,7 +639,7 @@ class TestMultiWriteProducer:
 
         # Consumer reads v[8:15] — overlaps both writes.
         read_reg = vgpr(8, 8)
-        results = list(_resolve_register_producers(
+        results = list(_resolve_producers(
             read_reg, consumer, producers_by_kind, num_mfma_per_iter=1,
         ))
 
@@ -652,7 +660,7 @@ class TestMultiWriteProducer:
         Only the first write overlaps; only one edge should yield. Confirms
         the dropped-break doesn't over-yield when only one write matches."""
         from Tensile.Components.ScheduleCapture import (
-            _resolve_register_producers, GraphPosition,
+            _resolve_producers, GraphPosition,
         )
         from rocisa.container import vgpr
 
@@ -679,7 +687,7 @@ class TestMultiWriteProducer:
             )],
         }
 
-        results = list(_resolve_register_producers(
+        results = list(_resolve_producers(
             vgpr(8, 2), consumer, producers_by_kind, num_mfma_per_iter=1,
         ))
         assert len(results) == 1
