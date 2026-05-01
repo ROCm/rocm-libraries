@@ -132,18 +132,15 @@ const vector<vector<int>> large_blk_range = {
      run_tests<double>();
  }
 
-// todo: complex tests
-/*
- TEST_P(SY2SB_HE2HB, __float_complex)
- {
-     run_tests<rocblas_float_complex>();
- }
+TEST_P(SY2SB_HE2HB, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
 
- TEST_P(SY2SB_HE2HB, __double_complex)
- {
-     run_tests<rocblas_double_complex>();
- }
- */
+TEST_P(SY2SB_HE2HB, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
 
  INSTANTIATE_TEST_SUITE_P(daily_lapack,
                           SY2SB_HE2HB,
