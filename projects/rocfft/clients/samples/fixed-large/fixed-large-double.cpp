@@ -85,7 +85,7 @@ int main()
 
     if(workBufferSize > 0)
     {
-        printf("size of workbuffer=%zu\n", workBufferSize);
+        std::cout << "size of workbuffer=" << workBufferSize << "\n";
         if(hipMalloc(&workBuffer, workBufferSize) != hipSuccess)
             throw std::runtime_error("hipMalloc failed.");
         if(rocfft_execution_info_set_work_buffer(info, workBuffer, workBufferSize)

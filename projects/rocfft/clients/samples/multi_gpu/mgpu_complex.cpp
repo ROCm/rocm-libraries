@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <algorithm>
 #include <complex>
 #include <functional>
 #include <iostream>
@@ -58,8 +59,9 @@ int main(int argc, char* argv[])
 
     int deviceCount = devices.size();
     std::cout << "Using " << deviceCount << " device(s)\n";
-    int nDevices;
-    (void)hipGetDeviceCount(&nDevices);
+    int nDevices = 0;
+    if(hipGetDeviceCount(&nDevices) != hipSuccess)
+        throw std::runtime_error("hipGetDeviceCount failed.");
 
     std::cout << "Number of available GPUs: " << nDevices << " \n";
     if(nDevices <= static_cast<int>(*std::max_element(devices.begin(), devices.end())))
@@ -217,7 +219,9 @@ int main(int argc, char* argv[])
             std::cout << "\n";
             std::cout << "\tbuffer size: " << memSize << "\n";
 
-            (void)hipSetDevice(devices[idx]);
+            hiprc = hipSetDevice(devices[idx]);
+            if(hiprc != hipSuccess)
+                throw std::runtime_error("hipSetDevice failed");
 
             if(hipMalloc(&gpu_out[idx], memSize) != hipSuccess)
                 throw std::runtime_error("hipMalloc failed");
@@ -231,7 +235,9 @@ int main(int argc, char* argv[])
     }
 
     // Create a multi-gpu plan:
-    (void)hipSetDevice(devices[0]);
+    hiprc = hipSetDevice(devices[0]);
+    if(hiprc != hipSuccess)
+        throw std::runtime_error("hipSetDevice failed");
     rocfft_plan gpu_plan = nullptr;
     fftrc                = rocfft_plan_create(&gpu_plan,
                                place,
@@ -249,7 +255,9 @@ int main(int argc, char* argv[])
     std::vector<void*>    work_bufs(devices.size(), nullptr);
     for(size_t idx = 0; idx < devices.size(); ++idx)
     {
-        (void)hipSetDevice(devices[idx]);
+        hiprc = hipSetDevice(devices[idx]);
+        if(hiprc != hipSuccess)
+            throw std::runtime_error("hipSetDevice failed");
         size_t work_buf_size = 0;
         if(rocfft_plan_get_work_buffer_size(gpu_plan, &work_buf_size) != rocfft_status_success)
             throw std::runtime_error("rocfft_plan_get_work_buffer_size failed.");
@@ -267,7 +275,9 @@ int main(int argc, char* argv[])
     }
 
     // Reset the device back to where the plan was created before execution
-    (void)hipSetDevice(devices[0]);
+    hiprc = hipSetDevice(devices[0]);
+    if(hiprc != hipSuccess)
+        throw std::runtime_error("hipSetDevice failed");
 
     // Execute plan:
     fftrc = rocfft_execute(gpu_plan, (void**)gpu_in.data(), (void**)gpu_out.data(), planinfo);
@@ -321,11 +331,14 @@ int main(int argc, char* argv[])
     // Free work buffers and input/output buffers (indexed by brick, not device id)
     for(size_t idx = 0; idx < devices.size(); ++idx)
     {
-        (void)hipSetDevice(devices[idx]);
-        if(work_bufs[idx])
-            (void)hipFree(work_bufs[idx]);
-        (void)hipFree(gpu_in[idx]);
-        (void)hipFree(gpu_out[idx]);
+        if(hipSetDevice(devices[idx]) != hipSuccess)
+            throw std::runtime_error("hipSetDevice failed");
+        if(work_bufs[idx] && hipFree(work_bufs[idx]) != hipSuccess)
+            throw std::runtime_error("hipFree failed");
+        if(hipFree(gpu_in[idx]) != hipSuccess)
+            throw std::runtime_error("hipFree failed");
+        if(hipFree(gpu_out[idx]) != hipSuccess)
+            throw std::runtime_error("hipFree failed");
     }
 
     return 0;

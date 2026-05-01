@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -99,7 +99,7 @@ int main()
                                             onembed,
                                             ostride,
                                             odist,
-                                            HIPFFT_R2C, // Use HIPFFT_D2Z for double-precsion.
+                                            HIPFFT_R2C, // Use HIPFFT_D2Z for double-precision.
                                             howmany);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
@@ -140,7 +140,8 @@ int main()
     }
     std::cout << std::endl;
 
-    hipfftDestroy(hipForwardPlan);
+    if(hipfftDestroy(hipForwardPlan) != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftDestroy failed");
 
     hip_rt = hipFree(gpu_data);
     if(hip_rt != hipSuccess)

@@ -92,7 +92,8 @@ int main()
     }
     std::cout << std::endl;
 
-    hipfftDestroy(plan);
+    if(hipfftDestroy(plan) != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftDestroy failed");
 
     hip_rt = hipFree(x);
     if(hip_rt != hipSuccess)

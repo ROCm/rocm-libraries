@@ -38,8 +38,8 @@ int main(int argc, char* argv[])
 {
     std::cout << "rocfft example of 2 inplace transforms with 2 streams.\n" << std::endl;
 
-    size_t length      = 8;
-    size_t total_bytes = length * sizeof(double2);
+    const size_t length      = 8;
+    const size_t total_bytes = length * sizeof(double2);
 
     fft_fixture_t ffts[2];
 

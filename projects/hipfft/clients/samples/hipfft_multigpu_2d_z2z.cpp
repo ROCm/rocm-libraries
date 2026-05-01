@@ -76,10 +76,11 @@ int main()
 
     // Validate requested GPU ids
     int nDevices = 0;
-    (void)hipGetDeviceCount(&nDevices);
+    if(hipGetDeviceCount(&nDevices) != hipSuccess)
+        throw std::runtime_error("hipGetDeviceCount failed.");
     for(const auto g : gpus)
-        if(g >= nDevices)
-            throw std::runtime_error("device ID greater than number of available devices");
+        if(g < 0 || g >= nDevices)
+            throw std::runtime_error("requested GPU ID is out of range");
 
     // Create the multi-gpu plan
     hipLibXtDesc* desc = nullptr;
@@ -147,6 +148,10 @@ int main()
         }
         std::cout << std::endl;
     }
+
+    // Wait for any outstanding work on the FFT stream before tearing things down
+    if(hipStreamSynchronize(stream) != hipSuccess)
+        throw std::runtime_error("hipStreamSynchronize failed.");
 
     // Clean up
     if(hipfftXtFree(desc) != HIPFFT_SUCCESS)
