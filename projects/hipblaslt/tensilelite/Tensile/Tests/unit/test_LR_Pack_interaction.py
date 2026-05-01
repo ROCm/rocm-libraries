@@ -48,6 +48,7 @@ from rocisa.instruction import SWaitCnt
 from Tensile.Components.CMSValidator import (
     add_local_read_constraints, add_pack_constraints,
 )
+from Tensile.Components.ScheduleCapture import WaitTooLateFailure
 from cms_validation_base import CMSValidationTestBase
 
 
@@ -76,10 +77,13 @@ class TestLRAndPackAfterMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRA0"),
         ]
-        self.validate(
-            optSchedule, syncCode, 1, 2, 2, 0,
-            "LRA0 @ idx=5 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=6."
-        )
+        f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
+                          expected_failure=WaitTooLateFailure)
+        assert f.producer.name == "LRA0"
+        assert f.producer.issued_at.vmfma_index == 5
+        assert f.consumer.name == "MFMA"
+        assert f.consumer.issued_at.vmfma_index == 4
+        assert f.wait_position.vmfma_index == 6
 
     def test_LR0_baseline_passing(self):
         """Same skeleton with LRA0 and PackA0 at valid positions."""

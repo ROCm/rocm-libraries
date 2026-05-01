@@ -145,14 +145,16 @@ class CMSValidationTestBase:
         nglshift: int,
         nllshift: int,
         codePathIdx: int,
-        expected_message: Optional[str],
+        expected_message: Optional[str] = None,
         nllZeroDscnt: bool = False,
         mfmaReorder: list[int] = None,
         snopCode: list[Any] = None,
+        expected_failure: Optional[type] = None,
+        expected_fields: Optional[dict] = None,
     ):
         """
         Creates a ScheduleInfo and validates it using the validation function from the subclass.
-        
+
         Args:
             optSchedule: The schedule dictionary mapping instruction types to indices
             syncCode: List of sync instructions (SWaitCnt, SBarrier, etc.)
@@ -160,16 +162,28 @@ class CMSValidationTestBase:
             nglshift: NGL shift value
             nllshift: NLL shift value
             codePathIdx: Code path index to validate
-            expected_message: Expected error message (None if validation should pass, str if validation should fail)
+            expected_message: Expected error message string. None means validation
+                must pass. Legacy-string assertion path — prefer expected_failure
+                for new tests.
             nllZeroDscnt: Whether to use zero dscnt for NLL loop (default: False)
             mfmaReorder: List of MFMA reorder indices
             snopCode: List of SNOP instructions
+            expected_failure: Expected Failure subclass (e.g. PackTooEarlyFailure).
+                When set, the test asserts isinstance(timeline._last_failure,
+                expected_failure) AND that expected_fields (if given) match
+                attribute-by-attribute. Mutually exclusive with expected_message.
+            expected_fields: dict of {attr_name: expected_value} to assert on
+                the typed Failure. Use this with expected_failure to bind the
+                test to semantic state rather than message text.
         """
         if mfmaReorder is None:
             mfmaReorder = []
         if snopCode is None:
             snopCode = []
-        
+        assert not (expected_message is not None and expected_failure is not None), (
+            "pass either expected_message OR expected_failure, not both"
+        )
+
         sched = ScheduleInfo(numCodePaths, self.num_vmfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt, mfmaReorder, snopCode)
 
         if self._resolve_real_id_map_config() is not None:
@@ -198,10 +212,82 @@ class CMSValidationTestBase:
         if self.needs_timeline:
             timeline = create_unified_timeline(sched, self.kernel, codePathIdx, id_map=id_map, mfma_code=mfma_code)
         status, message = self.validation_function(sched, ctx, codePathIdx, timeline=timeline)
-        
+
+        if expected_failure is not None:
+            assert not status, "Schedule should have failed but passed."
+            failure = getattr(timeline, "_last_failure", None) if timeline else None
+            assert failure is not None, (
+                f"Expected typed Failure but timeline._last_failure is None. "
+                f"The rule may still emit a raw string. Got message: {message!r}"
+            )
+            assert isinstance(failure, expected_failure), (
+                f"Expected {expected_failure.__name__}, got {type(failure).__name__}: {message}"
+            )
+            for attr_name, expected_value in (expected_fields or {}).items():
+                actual_value = getattr(failure, attr_name)
+                assert actual_value == expected_value, (
+                    f"{type(failure).__name__}.{attr_name}: expected {expected_value!r}, got {actual_value!r}"
+                )
+            return failure
+
         if expected_message is None:
             assert status, f"Schedule should have passed validation but did not. {message}"
         else:
             assert not status, f"Schedule should have failed but passed."
             assert message == expected_message, f"Expected: {expected_message}, Got: {message}"
+
+    @staticmethod
+    def assert_order_inverted(failure, *, producer_name, producer_idx,
+                              consumer_name, consumer_idx):
+        """Assert OrderInvertedFailure carries the expected producer/consumer
+        identity AND vmfma_index positions. Pinning positions matters because
+        a name-only check passes if any of N similarly-named instructions
+        violate ordering — but we want to verify the *specific* schedule slot
+        the test set up is the one being flagged."""
+        assert failure.producer.name == producer_name, (
+            f"producer.name: expected {producer_name!r}, got {failure.producer.name!r}"
+        )
+        assert failure.producer.issued_at.vmfma_index == producer_idx, (
+            f"producer.issued_at.vmfma_index: expected {producer_idx}, "
+            f"got {failure.producer.issued_at.vmfma_index}"
+        )
+        assert failure.consumer.name == consumer_name, (
+            f"consumer.name: expected {consumer_name!r}, got {failure.consumer.name!r}"
+        )
+        assert failure.consumer.issued_at.vmfma_index == consumer_idx, (
+            f"consumer.issued_at.vmfma_index: expected {consumer_idx}, "
+            f"got {failure.consumer.issued_at.vmfma_index}"
+        )
+
+    @staticmethod
+    def assert_timing_too_close(failure, *, producer_name, producer_idx,
+                                consumer_name, consumer_idx,
+                                expected_quad_cycles, actual_quad_cycles):
+        """Assert TimingTooCloseFailure carries the expected producer/consumer
+        positions AND quad-cycle counts."""
+        assert failure.producer.name == producer_name
+        assert failure.producer.issued_at.vmfma_index == producer_idx
+        assert failure.consumer.name == consumer_name
+        assert failure.consumer.issued_at.vmfma_index == consumer_idx
+        assert failure.expected_quad_cycles == expected_quad_cycles, (
+            f"expected_quad_cycles: expected {expected_quad_cycles}, "
+            f"got {failure.expected_quad_cycles}"
+        )
+        assert failure.actual_quad_cycles == actual_quad_cycles, (
+            f"actual_quad_cycles: expected {actual_quad_cycles}, "
+            f"got {failure.actual_quad_cycles}"
+        )
+
+    @staticmethod
+    def assert_wrong_interleaving(failure, *, pack_name, pack_idx,
+                                  expected_next_name, expected_next_idx,
+                                  actual_next_name, actual_next_idx):
+        """Assert WrongInterleavingFailure carries the expected pack +
+        expected/actual successor identities and positions."""
+        assert failure.pack.name == pack_name
+        assert failure.pack.issued_at.vmfma_index == pack_idx
+        assert failure.expected_next.name == expected_next_name
+        assert failure.expected_next.issued_at.vmfma_index == expected_next_idx
+        assert failure.actual_next.name == actual_next_name
+        assert failure.actual_next.issued_at.vmfma_index == actual_next_idx
 

@@ -29,8 +29,32 @@ from Tensile.Components.CMSValidator import (
     add_local_read_constraints,
     index_for_force_unroll_sub_iter, lr_needed_by_mfma,
 )
+from Tensile.Components.ScheduleCapture import WaitTooLateFailure
 from cms_validation_base import CMSValidationTestBase
 from Tensile.Common import IsaVersion
+
+
+def _assert_wait_too_late(failure, *, producer_name, producer_idx,
+                          consumer_idx, wait_idx):
+    """Assert WaitTooLateFailure carries the expected LR/MFMA/wait positions."""
+    assert failure.producer.name == producer_name, (
+        f"producer.name: expected {producer_name!r}, got {failure.producer.name!r}"
+    )
+    assert failure.producer.issued_at.vmfma_index == producer_idx, (
+        f"producer.issued_at.vmfma_index: expected {producer_idx}, "
+        f"got {failure.producer.issued_at.vmfma_index}"
+    )
+    assert failure.consumer.name == "MFMA", (
+        f"consumer.name: expected 'MFMA', got {failure.consumer.name!r}"
+    )
+    assert failure.consumer.issued_at.vmfma_index == consumer_idx, (
+        f"consumer.issued_at.vmfma_index: expected {consumer_idx}, "
+        f"got {failure.consumer.issued_at.vmfma_index}"
+    )
+    assert failure.wait_position.vmfma_index == wait_idx, (
+        f"wait_position.vmfma_index: expected {wait_idx}, "
+        f"got {failure.wait_position.vmfma_index}"
+    )
 
 
 class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
@@ -54,17 +78,17 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
         optSchedule["LRA0"] = [[1, 6]]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 @ idx=6 issued too late, must be guaranteed before MFMA @ idx=5 but only guaranteed @ idx=3."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA0", producer_idx=6,
+                              consumer_idx=5, wait_idx=3)
 
         optSchedule["LRA0"] = [[1, 2]]
         optSchedule["LRB0"] = [[3, 6]]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRB0 @ idx=3 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=3."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRB0", producer_idx=3,
+                              consumer_idx=4, wait_idx=3)
 
     def test_simple_LR0_w_LR1(self):
         """
@@ -170,10 +194,10 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 @ idx=4 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=1."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA1", producer_idx=4,
+                              consumer_idx=0, wait_idx=1)
 
     def test_complex_LR1(self):
         """
@@ -197,10 +221,10 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
 
         # Failing case: LRA1 finishes too late
         optSchedule["LRA1"] = [[4, 5]]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 @ idx=5 issued too late, must be guaranteed before MFMA @ idx=1 (of next iteration) but only guaranteed @ idx=1."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA1", producer_idx=5,
+                              consumer_idx=1, wait_idx=1)
 
     def test_more_LRs(self):
         """
@@ -244,18 +268,18 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         ]
         
         # Failure case 1: Don't wait for any LRA0
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 @ idx=1 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=4."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA0", producer_idx=1,
+                              consumer_idx=4, wait_idx=4)
 
         # Failure case 2: Wait for only 1/4 LRA0 (need at least 2/4 LRA0) to do VMFMA 4.
         syncCode[0].dscnt = 3
         syncCode[0].comment = "Wait for LRB0 and 1/4 LRA0"
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 @ idx=1 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=4."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA0", producer_idx=1,
+                              consumer_idx=4, wait_idx=4)
 
         # Passing case: Correctly SWaitCnt for 2/4 LRA0 (i.e. 1/2 As) in time for VMFMA 4.
         syncCode[0].dscnt = 2
@@ -289,10 +313,10 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
 
         # Failure case
         optSchedule["SYNC"][0][0] = 8
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRB1 @ idx=19 issued too late, must be guaranteed before MFMA @ idx=8 (of next iteration) but only guaranteed @ idx=8."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRB1", producer_idx=19,
+                              consumer_idx=8, wait_idx=8)
 
     def test_handling_instruction_order(self):
         """
@@ -314,10 +338,10 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             "LRA1": [[7]],
             "LRB1": [[7]],
         }
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 @ idx=3 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=7."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA0", producer_idx=3,
+                              consumer_idx=4, wait_idx=7)
 
         # 2. SwaitCnt after LR0s but before LR1s
         # LR0s will now pass, but LR1s will fail
@@ -328,10 +352,10 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             "LRA1": [[7]],
             "LRB1": [[7]],
         }
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA1", producer_idx=7,
+                              consumer_idx=0, wait_idx=3)
 
         # 3. SwaitCnt after all LRs
         optSchedule = {
@@ -398,8 +422,11 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="LRA0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA0 @ idx=0 issued too late, must be guaranteed before MFMA @ idx=3 but only guaranteed @ idx=3.")
-    
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA0", producer_idx=0,
+                              consumer_idx=3, wait_idx=3)
+
     def test_LR0s_fail2(self):
         """
         Same as passing case, but LRB0 guaranteed too late.
@@ -415,7 +442,10 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="LRA0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRB0 @ idx=1 issued too late, must be guaranteed before MFMA @ idx=6 but only guaranteed @ idx=6.")
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRB0", producer_idx=1,
+                              consumer_idx=6, wait_idx=6)
 
     def test_LR3s_pass(self):
         """
@@ -674,7 +704,10 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR0s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA3 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3.")
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA3", producer_idx=7,
+                              consumer_idx=0, wait_idx=3)
 
 
 class TestIndexForForceUnrollSubIter:
@@ -1111,10 +1144,10 @@ class TestLRAfterMFMA(CMSValidationTestBase):
             "LRB0": [[0, 0]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 @ idx=6 issued too late, must be guaranteed before MFMA @ idx=5 but only guaranteed @ idx=3."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA0", producer_idx=6,
+                              consumer_idx=5, wait_idx=3)
 
     def test_LR0_B_waitcnt_after_consumer(self):
         assert self.num_vmfma == 8
@@ -1124,10 +1157,10 @@ class TestLRAfterMFMA(CMSValidationTestBase):
             "LRB0": [[0, 0]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 @ idx=0 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=6."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA0", producer_idx=0,
+                              consumer_idx=4, wait_idx=6)
 
     def test_LR0_baseline_passing(self):
         assert self.num_vmfma == 8
@@ -1148,10 +1181,10 @@ class TestLRAfterMFMA(CMSValidationTestBase):
             "LRA1": [[7, 7]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA1", producer_idx=7,
+                              consumer_idx=0, wait_idx=3)
 
     def test_LR1_B_waitcnt_after_consumer(self):
         assert self.num_vmfma == 8
@@ -1162,10 +1195,10 @@ class TestLRAfterMFMA(CMSValidationTestBase):
             "LRA1": [[4, 4]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 @ idx=4 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=1."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA1", producer_idx=4,
+                              consumer_idx=0, wait_idx=1)
 
 
 class TestLRAfterMFMA_LR3(CMSValidationTestBase):
@@ -1186,10 +1219,10 @@ class TestLRAfterMFMA_LR3(CMSValidationTestBase):
             "LRA3": [[15, 15]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA3 @ idx=15 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA3", producer_idx=15,
+                              consumer_idx=0, wait_idx=3)
 
     def test_LR3_B_waitcnt_after_consumer(self):
         assert self.num_vmfma == 16
@@ -1200,7 +1233,7 @@ class TestLRAfterMFMA_LR3(CMSValidationTestBase):
             "LRA3": [[7, 7]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "LRA3 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
-        )
+        f = self.validate(optSchedule, syncCode, 1, None, None, 0,
+                          expected_failure=WaitTooLateFailure)
+        _assert_wait_too_late(f, producer_name="LRA3", producer_idx=7,
+                              consumer_idx=0, wait_idx=3)

@@ -25,6 +25,9 @@
 from rocisa.instruction import SWaitCnt, SBarrier
 
 from Tensile.Components.CMSValidator import add_gr_finish_before_lr_constraints
+from Tensile.Components.ScheduleCapture import (
+    MissingBarrierFailure, MissingWaitFailure, WaitTooLateFailure,
+)
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
@@ -76,10 +79,11 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(
-            optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA @ idx=0 is not valid. There are no guarantees on when it will be done."
-        )
+        f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
+                          expected_failure=MissingWaitFailure)
+        assert f.producer.name == "GRA"
+        assert f.producer.issued_at.vmfma_index == 0
+        assert f.counter_kind == "vlcnt"
 
     def test_no_sbarrier(self): 
         """
@@ -102,10 +106,11 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(
-            optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA @ idx=0 is not valid. There is no SBarrier acting on it."
-        )
+        f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
+                          expected_failure=MissingBarrierFailure)
+        assert f.producer.name == "GRA"
+        assert f.producer.issued_at.vmfma_index == 0
+        assert f.role == "needed_by"
 
     def test_swait_after_sbarrier(self):
         """
@@ -129,10 +134,13 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(
-            optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA @ idx=0 is not valid. No SBarrier between SWait @ idx=3 and LRA1 @ idx=6. Order must be GRA -> SWait -> SBarrier -> LRA1."
-        )
+        f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
+                          expected_failure=MissingBarrierFailure)
+        assert f.producer.name == "GRA"
+        assert f.producer.issued_at.vmfma_index == 0
+        assert f.consumer.name == "LRA1"
+        assert f.consumer.issued_at.vmfma_index == 6
+        assert f.role == "needed_by"
 
     def test_guaranteed_after_first_lr1(self):
         """
@@ -157,10 +165,13 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
 
-        self.validate(
-            optSchedule, syncCode, 1, 4, 4, 0,
-            "GRA @ idx=0 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LRA1 @ idx=3. Order must be GRA -> SWait -> SBarrier -> LRA1."
-        )
+        f = self.validate(optSchedule, syncCode, 1, 4, 4, 0,
+                          expected_failure=WaitTooLateFailure)
+        assert f.producer.name == "GRA"
+        assert f.producer.issued_at.vmfma_index == 0
+        assert f.consumer.name == "LRA1"
+        assert f.consumer.issued_at.vmfma_index == 3
+        assert f.wait_position.vmfma_index == 4
 
     def test_less_than_1_full_iteration_to_complete(self):
         """
@@ -360,10 +371,13 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRBs (loading A)"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(
-            optSchedule, syncCode, 1, 2, 2, 0,
-            "GRB (Swapped, loading A) @ idx=3 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LRA1 @ idx=2. Order must be GRB (Swapped, loading A) -> SWait -> SBarrier -> LRA1."
-        )
+        f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
+                          expected_failure=WaitTooLateFailure)
+        assert f.producer.name == "GRB"
+        assert f.producer.issued_at.vmfma_index == 3
+        assert f.consumer.name == "LRA1"
+        assert f.consumer.issued_at.vmfma_index == 2
+        assert f.wait_position.vmfma_index == 4
 
     def test_fail_with_odd_number_of_grs(self):
         """

@@ -361,31 +361,15 @@ class Failure:
     No body_label field on the base — every concrete subclass carries
     producer/consumer GraphNode references (or equivalent), and
     GraphNode.body_label is the source of truth.
-
-    `_legacy_msg`: when set, format() returns it verbatim regardless of
-    subclass formatter logic. Used during Stack 1.3 migration to preserve
-    rule-specific legacy wording (e.g. LR's
-    "issued too late, must be guaranteed before X but only guaranteed @ Y")
-    while the rule emits a typed Failure for downstream consumers. New
-    code (Stack 2 graph comparison) leaves _legacy_msg=None so the
-    canonical subclass formatter is used.
     """
-    _legacy_msg: Optional[str] = field(default=None, init=False, repr=False, compare=False)
 
     def format(self, capture=None) -> str:
-        """Stable boundary method. Returns the legacy override if set,
-        otherwise the canonical subclass formatter."""
-        if self._legacy_msg is not None:
-            return self._legacy_msg
+        """Stable boundary method. Delegates to the subclass canonical
+        formatter."""
         return self._format_canonical(capture)
 
     def _format_canonical(self, capture=None) -> str:
         raise NotImplementedError("subclasses must implement _format_canonical()")
-
-    def with_legacy_msg(self, msg: str) -> "Failure":
-        """Set the legacy override message. Returns self for chaining."""
-        self._legacy_msg = msg
-        return self
 
 
 # ----------------------------------------------------------------------------
