@@ -121,7 +121,7 @@ void print_value( PrintOptions const& opts, T value )
     if constexpr (rocblas_is_complex<T>) {
         S re = std::abs( real( value ) );
         S im = std::abs( imag( value ) );
-        if (! std::isnan(re) && re == int(re) && im == 0) {
+        if (! std::isnan(re) && re == int64_t(re) && im == 0) {
             // Medium integers print as int, padded to align with decimal point.
             printf( "%#*.0f%*s",
                     w-p, real( value ), w+p+4, "" );
@@ -142,7 +142,7 @@ void print_value( PrintOptions const& opts, T value )
             printf( "%*.*e",
                     w, p-1, value );
         }
-        else if (re == int(re)) {
+        else if (re == int64_t(re)) {
             // Medium integers print as int, padded to align with decimal point.
             printf( "%#*.0f%*s",
                     w-p, value, p, "" );
@@ -171,7 +171,7 @@ void print_matrix(
     PrintOptions opts( p+6, p );
 
     T* hA;
-    int ldha;
+    I ldha;
 #ifdef HIP
     if (is_devptr( A )) {
         printf( "# copying device %s => host\n", label.c_str() );
@@ -190,9 +190,9 @@ void print_matrix(
             "%s = numpy.array([\n",
             label.c_str(), llong(m), llong(n), llong(lda),
             get_type_name<T>().c_str(), label.c_str() );
-    for (int i = 0; i < m; ++i) {
+    for (I i = 0; i < m; ++i) {
         printf( "  [  " );
-        for (int j = 0; j < n; ++j) {
+        for (I j = 0; j < n; ++j) {
             //printf( "  " );
             print_value( opts, hA[ i + j*ldha ] );
             printf( ",  " );
