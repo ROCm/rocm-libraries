@@ -1144,6 +1144,9 @@ class Solution(collections.abc.Mapping):
   ):
     isa = tuple(state["ISA"])
 
+    if state["WavefrontSize"] == -1:
+      state["WavefrontSize"] = 32 if isaInfoMap[isa].archCaps["HasWave32"] else 64
+
     if state["MaxLDS"] == -1:
       state["MaxLDS"] = isaInfoMap[isa].archCaps["DeviceLDS"]
 

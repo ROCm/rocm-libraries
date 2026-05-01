@@ -26,13 +26,19 @@
 #include <algorithm>
 #include <cctype>
 #include <climits>
+#include <cstring>
+#include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "IRLexer.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+
+#define DEBUG_TYPE "RawAsmParser"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
@@ -167,15 +173,77 @@ inline bool isHexSuffix(std::string_view id) {
     return true;
 }
 
+/// If the token stream starts with an arithmetic operator (`/`, `*`, `+`,
+/// `-`) followed by an int / hex / identifier token, append the chain to
+/// `base` so a bare arithmetic expression like `34816/2`, `vgprBase+0`,
+/// or `NumPersistIters-1` is preserved as a single LiteralString operand.
+///
+/// Two operator-shapes need to be handled because of an asymmetry in the
+/// IRLexer:
+///
+///   * `+`, `*`, `/` emit as Unknown one-character tokens, so the next
+///     token is the rhs operand.
+///   * `-` followed by a digit is special-cased in IRLexer.cpp (`case '-':`)
+///     and emitted as a single signed IntegerLiteral / HexLiteral / Float
+///     literal whose text already begins with `-`. There is no separate
+///     `-` token to detect, so we recognise such a literal as an implicit
+///     `-<num>` continuation and splice its text directly onto `base`.
+///
+/// Without both shapes, an expression like `NumPersistIters-1` would have
+/// `NumPersistIters` recovered as a LiteralString and the signed `-1`
+/// IntegerLiteral silently swallowed by parseModifiers as an "unknown
+/// token", producing `s_cmp_lt_u32 s[...], NumPersistIters` on round-trip.
+inline std::string gatherArithExprSuffix(IRLexer& lexer, std::string base) {
+    auto isArithOp = [](TokenKind k, std::string_view t) {
+        return k == TokenKind::Unknown && t.size() == 1 &&
+               (t[0] == '/' || t[0] == '*' || t[0] == '+' || t[0] == '-');
+    };
+    auto isSignedLiteral = [](TokenKind k, std::string_view t) {
+        return (k == TokenKind::IntegerLiteral || k == TokenKind::HexLiteral ||
+                k == TokenKind::FloatLiteral) &&
+               !t.empty() && t[0] == '-';
+    };
+    while (true) {
+        TokenKind k = lexer.peek().kind;
+        std::string_view tx = lexer.peek().text;
+        if (isArithOp(k, tx)) {
+            std::string opTxt(lexer.consume().text);
+            TokenKind nk = lexer.peek().kind;
+            if (nk != TokenKind::IntegerLiteral && nk != TokenKind::HexLiteral &&
+                nk != TokenKind::Identifier) {
+                // Trailing op with no rhs operand. Keep the op so any
+                // diagnostic still points at the malformed expression
+                // rather than silently swallowing it; further chaining
+                // stops here.
+                base += opTxt;
+                break;
+            }
+            base += opTxt;
+            base += std::string(lexer.consume().text);
+        } else if (isSignedLiteral(k, tx)) {
+            // The literal text already begins with "-"; append verbatim.
+            base += std::string(lexer.consume().text);
+        } else {
+            break;
+        }
+    }
+    return base;
+}
+
 /// Parse a single register operand from the lexer.
 /// Adapted from IRParser::parseRegister().
-std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable& syms) {
+std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable& syms,
+                                               bool preserveSymbolicNames) {
     TokenKind kind = lexer.peek().kind;
 
-    // Hex immediate: preserve as literal string
+    // Hex immediate: preserve as literal string. Also fold any trailing
+    // arithmetic suffix (e.g. `0xff/2`, `0xff-32`) into the same literal so
+    // it round-trips as one operand. gatherArithExprSuffix is a no-op when
+    // the next token is not an operator or signed-literal continuation.
     if (kind == TokenKind::HexLiteral) {
         const Token& tok = lexer.consume();
-        return StinkyRegister(std::string(tok.text));
+        std::string text = gatherArithExprSuffix(lexer, std::string(tok.text));
+        return StinkyRegister(text);
     }
 
     // Integer literal: numeric immediate
@@ -190,6 +258,15 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
                 return StinkyRegister(std::string("0") + id);
             }
         }
+        // Arithmetic expression on a literal source operand:
+        // e.g. `s_mul_i32 s86, s[sgprWaveId], 34816/2`, `34816-512`,
+        // `2*8704*2+32`. The lexer emits multi-operator chains as
+        // separate tokens (and signed numbers as a single signed literal
+        // — see gatherArithExprSuffix); without folding them back into
+        // a LiteralString the operand loop would only see the leading
+        // int and silently drop the rest.
+        std::string expr = gatherArithExprSuffix(lexer, num);
+        if (expr != num) return StinkyRegister(expr);
         auto val = safeAtoiStr(num);
         if (!val) return std::nullopt;
         return StinkyRegister(*val);
@@ -230,7 +307,15 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
 
     RegType regType = stringToRegType(regTypeStr);
 
-    // Unknown type → not a register, signal caller to stop operand parsing
+    // Unknown type → not a register, signal caller to stop operand parsing.
+    // The caller (parseInstLine) decides whether to:
+    //   * bail to TEXTBLOCK pass-through (when this is the first operand —
+    //     instructions such as `s_delay_alu instid0(VALU_DEP_2)` look like
+    //     "<mnemonic> <unknown-id>(...)" and must round-trip verbatim
+    //     because their custom operand syntax is not parsed here), or
+    //   * preserve the token as a LiteralString operand (when this is a
+    //     later operand — covers `.set` symbols used as immediates such
+    //     as `v_mov_b32 v2, MT0`).
     if (!isValidRegType(regType)) return std::nullopt;
 
     // Format: "v 12" (type and index as separate tokens)
@@ -294,10 +379,18 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
 
         if (si >= 0 && ei >= si) {
             int regNum = ei - si + 1;
-            // Store the symbolic name alongside the numeric index (matches rocisa flow).
+            // Store the symbolic name alongside the numeric index (matches rocisa flow)
+            // only when the caller asked for it via RawAsmParserOptions. Optimisation
+            // passes generally see only the numeric index, so omitting it by default
+            // avoids stale symbolic names surviving register rewrites.
+            //
+            // The emitter prepends regTypeStr + '[' and appends ']' itself, so we
+            // store ONLY the inner content (e.g. "vgprSerial-512" or
+            // "vgprFoo+0:vgprFoo+3"), not the wrapped "v[...]" form. Storing the
+            // wrapped form would double-wrap the output to "v[v[vgprSerial-512]]".
             StinkyRegister reg(regType, static_cast<uint32_t>(si), static_cast<uint16_t>(regNum),
                                offset);
-            reg.setSymbolicName(regTypeStr + "[" + bracketContent + "]");
+            if (preserveSymbolicNames) reg.setSymbolicName(bracketContent);
             return reg;
         }
     }
@@ -313,7 +406,17 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
 
 /// Parse trailing modifier tokens into inst.modifiers.
 /// modifier_key is determined by hwInstDesc->microcode and the instruction mnemonic.
-void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* hwInstDesc) {
+///
+/// Returns true if every modifier-shaped token sequence the parser consumed
+/// could be represented in inst.modifiers. Returns false if the parser saw a
+/// trailing token shape it cannot model (currently: a `key:value` where the
+/// value is an Identifier such as `th:TH_LOAD_NT`, or any modifier-bearing
+/// instruction whose microcode format has no modifier namespace mapped here
+/// — e.g. TENSOR-format `tensor_load_to_lds`). The caller (parseInstLine)
+/// uses this signal to bail out to TEXTBLOCK pass-through so the entire
+/// line round-trips verbatim instead of silently dropping the unmodelled
+/// modifier.
+bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* hwInstDesc) {
     using FieldMap = std::unordered_map<std::string, std::string>;
 
     const std::string& mnemonic = inst.opcodeStr;
@@ -352,7 +455,7 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
             lexer.consume();
             inst.modifiers["mod.swaitcnt"]["vlcnt"] = "0";
             inst.modifiers["mod.swaitcnt"]["dscnt"] = "0";
-            return;
+            return true;
         }
     }
 
@@ -362,11 +465,19 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
     if (isDelayAlu) {
         // Leave modifiers empty; the passes that need delay_alu data (e.g. wait-cnt
         // insertion) will re-insert the correct modifier after scheduling.
-        return;
+        return true;
     }
 
     // Collect key→value / key(value) / boolean-flag tokens
     FieldMap fields;
+    // Set when we see syntax we can parse but cannot represent: e.g.
+    // `key:Identifier_value` (`th:TH_LOAD_NT`, `scope:SCOPE_DEV`) or any
+    // modifier whose microcode format isn't mapped above. Tracked
+    // separately from `fields` so that we can still observe "had
+    // modifiers" even when they are all unrepresentable and the field map
+    // ends up empty.
+    bool sawUnrepresentable = false;
+    bool sawAnyModifier = false;
 
     while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
            lexer.peek().kind != TokenKind::Newline) {
@@ -384,11 +495,37 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         std::string tok(lexer.consume().text);
 
         if (lexer.peek().kind == TokenKind::Colon) {
-            // key:value format (e.g. offset:128)
+            // key:value format (e.g. offset:128, th:TH_LOAD_NT,
+            // offset:2*8704*2+32)
             lexer.consume();  // eat ':'
             TokenKind vk = lexer.peek().kind;
             if (vk == TokenKind::IntegerLiteral || vk == TokenKind::HexLiteral) {
-                fields[tok] = std::string(lexer.consume().text);
+                std::string val(lexer.consume().text);
+                // Arithmetic-expression value: e.g. `offset:2*8704*2+32`,
+                // `offset:34816-512`. Downstream consumers parse the
+                // value via `atoi` (see ModifierSerializer's `getInt`),
+                // which would silently truncate to the first integer.
+                // Drain the remainder of the expression so the lexer
+                // stays in sync, mark the line as unrepresentable, and
+                // let the caller fall back to TEXTBLOCK so the source
+                // expression round-trips verbatim. (gatherArithExprSuffix
+                // is a no-op when the next token is not an operator or
+                // signed-literal continuation, so simple `offset:0` /
+                // `offset:32` are unaffected.)
+                std::string folded = gatherArithExprSuffix(lexer, val);
+                if (folded != val) sawUnrepresentable = true;
+                fields[tok] = std::move(folded);
+                sawAnyModifier = true;
+            } else if (vk == TokenKind::Identifier) {
+                // `th:TH_LOAD_NT`, `scope:SCOPE_DEV`, `matrix_a_fmt:MATRIX_FMT_FP8`,
+                // etc. — gfx12+ memory-hint / matrix-format syntax. Not
+                // modelled by any of the existing modifier structs, so
+                // consume the rhs to keep the lexer in sync but signal
+                // that the line cannot be losslessly round-tripped via
+                // inst.modifiers; the caller will route to TEXTBLOCK.
+                lexer.consume();
+                sawUnrepresentable = true;
+                sawAnyModifier = true;
             }
         } else if (lexer.peek().kind == TokenKind::LeftParen) {
             // key(value) format (e.g. vmcnt(0), lgkmcnt(3))
@@ -412,13 +549,22 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
                     inst.modifiers["mod.swaitcnt"]["kmcnt"] = val;
             }
             // Other key(value) tokens (e.g. depctr_*) are currently ignored.
+            sawAnyModifier = true;
         } else {
             // Boolean flag: glc, slc, nt, lds, gds, offen, nv, etc.
             fields[tok] = "true";
+            sawAnyModifier = true;
         }
     }
 
-    if (modKey.empty() || fields.empty()) return;
+    // Modifier-bearing instruction with no modKey to put them into (e.g.
+    // TENSOR-format `tensor_load_to_lds offset:0`). Anything in `fields`
+    // would be silently discarded below at the `modKey.empty()` early-return,
+    // so flag the line as unrepresentable instead and let the caller fall
+    // back to TEXTBLOCK pass-through.
+    if (modKey.empty() && sawAnyModifier) sawUnrepresentable = true;
+
+    if (modKey.empty() || fields.empty()) return !sawUnrepresentable;
 
     // Map generic fields → modifier dict using the appropriate namespace key.
     auto& modFields = inst.modifiers[modKey];
@@ -457,6 +603,8 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         if (fields.count("glc")) modFields["glc"] = "true";
         if (fields.count("nv")) modFields["nv"] = "true";
     }
+
+    return !sawUnrepresentable;
 }
 
 //----------------------------------------------------------------------
@@ -467,7 +615,8 @@ void parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
 /// Returns nullptr for unknown mnemonics (caller stores as TEXTBLOCK).
 std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArchID arch,
                                                  std::vector<Diagnostic>& diags, unsigned lineNo,
-                                                 const SymbolTable& syms) {
+                                                 const SymbolTable& syms,
+                                                 bool preserveSymbolicNames) {
     IRLexer lexer(line);
     lexer.lex();
 
@@ -516,13 +665,54 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
             }
             firstOp = false;
 
-            auto reg = parseOneRegister(lexer, syms);
+            // Snapshot the lookahead so we can recover an unrecognised
+            // identifier as a LiteralString if parseOneRegister fails on a
+            // non-first operand (see recovery block below). For first
+            // operands we still want to fall through to TEXTBLOCK pass-
+            // through so instructions with custom textual syntax (e.g.
+            // `s_delay_alu instid0(VALU_DEP_2)`, `s_wait_alu depctr_va_vdst(0)`)
+            // round-trip verbatim instead of being half-parsed and then
+            // tripping the SDelayAluData/SWaitAluData asserts in the emitter.
+            TokenKind preKind = lexer.isAtEnd() ? TokenKind::Eof : lexer.peek().kind;
+            std::string preText =
+                preKind == TokenKind::Identifier ? std::string(lexer.peek().text) : std::string();
+            TokenKind preNextKind = lexer.peekAhead(1).kind;
+
+            auto reg = parseOneRegister(lexer, syms, preserveSymbolicNames);
             if (!reg) {
                 if (opIdx == 0) {
-                    // First operand failed (e.g. symbolic expression like v[sym-768:sym-765]).
-                    // parseOneRegister may have consumed tokens; safest to preserve the
-                    // entire line verbatim.
+                    // First operand failed (e.g. symbolic expression like
+                    // v[sym-768:sym-765] or a custom-syntax mnemonic such as
+                    // s_delay_alu / s_wait_alu). parseOneRegister may have
+                    // consumed tokens; safest to preserve the entire line
+                    // verbatim via TEXTBLOCK pass-through.
                     return nullptr;
+                }
+                // Non-first operand recovery: a `.set` symbol (or any other
+                // bare identifier) used as an immediate source — e.g.
+                // `v_mov_b32 v2, MT0` where `.set MT0, 64` was declared
+                // earlier — would otherwise be silently dropped, since
+                // parseInstLine breaks out of the operand loop on a
+                // nullopt. Preserve the consumed identifier as a
+                // LiteralString so the operand round-trips instead of
+                // truncating to `v_mov_b32 v2`. We restrict recovery to
+                // bare identifiers (no `[`) so malformed register
+                // expressions like `foo[12]` still trigger TEXTBLOCK
+                // fallback rather than getting silently mangled.
+                if (preKind == TokenKind::Identifier && !preText.empty() &&
+                    preNextKind != TokenKind::LeftBracket) {
+                    // Fold a trailing arithmetic suffix (e.g. `vgprBase+0`,
+                    // `MT0/2`) into the same LiteralString so the whole
+                    // expression round-trips as one operand. Same rationale
+                    // as the IntegerLiteral path in parseOneRegister.
+                    std::string text = gatherArithExprSuffix(lexer, preText);
+                    StinkyRegister litReg(text);
+                    if (opIdx < numDest)
+                        inst->destRegs.push_back(litReg);
+                    else
+                        inst->srcRegs.push_back(litReg);
+                    opIdx++;
+                    continue;
                 }
                 // Later operand failed → stop operand parsing, proceed to modifiers.
                 break;
@@ -536,8 +726,15 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
         }
     }
 
-    // Parse any trailing modifier tokens (offset:N, glc, vmcnt(N), etc.)
-    parseModifiers(lexer, *inst, hwInstDesc);
+    // Parse any trailing modifier tokens (offset:N, glc, vmcnt(N), etc.).
+    // If parseModifiers signals that it saw a token shape it cannot
+    // represent (e.g. `th:TH_LOAD_NT` on tensor_load_to_lds, or any
+    // modifier on a microcode format that has no namespace mapped above),
+    // bail to TEXTBLOCK pass-through so the line round-trips verbatim
+    // instead of dropping the unmodelled modifier on emission.
+    if (!parseModifiers(lexer, *inst, hwInstDesc)) {
+        return nullptr;
+    }
 
     return inst;
 }
@@ -598,7 +795,31 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
     std::array<int, 3> sgprWorkGroup = {1, 1, 1};
     int vgprWorkItem = 0;
     int kernArgsVersion = 2;
-    std::string codeObjectVersion = "COV4";
+    // SignatureCodeMeta::toString() emits the second "- 1" of amdhsa.version
+    // only when codeObjectVersion is "4" or "default"; "COV4" silently
+    // truncates the YAML list to a single entry.
+    std::string codeObjectVersion = "4";
+
+    // Optimization config (parsed from the "Optimizations and Config" comment
+    // block emitted between .end_amdhsa_kernel and .amdgpu_metadata, e.g.
+    //   /* ThreadTile= 32 x 8 */
+    //   /* SubGroup= 2 x 64 */
+    //   /* VectorWidthA=1 */ ... etc.
+    // Without these, SignatureKernelDescriptor regenerates the comment block
+    // with all-zero defaults.
+    std::array<int, 2> threadTile = {0, 0};
+    std::array<int, 2> subGroup = {0, 0};
+    std::array<int, 2> waveGroup = {0, 0};
+    int vectorWidthA = 0;
+    int vectorWidthB = 0;
+    int globalReadVectorWidthA = 0;
+    int globalReadVectorWidthB = 0;
+    bool directToLdsA = false;
+    bool directToLdsB = false;
+    int useSgprForGRO = 0;
+
+    // Verbatim .amdhsa_* lines that the structured fields don't model.
+    std::vector<std::string> extraAmdhsaDirectives;
 
     struct ArgInfo {
         std::string name;
@@ -614,6 +835,11 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
     enum class Section { None, AmdhsaKernel, AmdgpuMetadata };
     Section section = Section::None;
     bool inArgEntry = false;
+    // Track whether we have entered the YAML `.args:` block. Without this gate
+    // the kernel-level `  - .name: <kernelName>` line (the first entry under
+    // `amdhsa.kernels:`, BEFORE the args block) gets misidentified as an arg
+    // and ends up duplicated at the head of the regenerated arg list.
+    bool inArgsList = false;
     ArgInfo curArg;
 
     while (std::getline(ss, line)) {
@@ -637,6 +863,25 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
 
         // ── Fields inside .amdhsa_kernel block ───────────────────────────────────
         if (section == Section::AmdhsaKernel) {
+            // Track which directives are consumed by structured fields; any
+            // .amdhsa_* directive not in this set is captured verbatim and
+            // re-emitted by SignatureKernelDescriptor::toString().
+            static const char* const kKnown[] = {
+                ".amdhsa_user_sgpr_kernarg_segment_ptr",
+                ".amdhsa_next_free_vgpr",
+                ".amdhsa_next_free_sgpr",
+                ".amdhsa_group_segment_fixed_size",
+                ".amdhsa_wavefront_size32",
+                ".amdhsa_private_segment_fixed_size",
+                ".amdhsa_system_sgpr_workgroup_id_x",
+                ".amdhsa_system_sgpr_workgroup_id_y",
+                ".amdhsa_system_sgpr_workgroup_id_z",
+                ".amdhsa_system_vgpr_workitem_id",
+                ".amdhsa_float_denorm_mode_32",
+                ".amdhsa_float_denorm_mode_16_64",
+                ".amdhsa_accum_offset",
+            };
+
             if (auto v = parseDirectiveInt(trimmed, ".amdhsa_next_free_vgpr")) totalVgprs = *v;
             if (auto v = parseDirectiveInt(trimmed, ".amdhsa_next_free_sgpr")) totalSgprs = *v;
             if (auto v = parseDirectiveInt(trimmed, ".amdhsa_group_segment_fixed_size"))
@@ -657,6 +902,107 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
             if (trimmed.find(".amdhsa_system_vgpr_workitem_id") != std::string::npos)
                 if (auto v = parseDirectiveInt(trimmed, ".amdhsa_system_vgpr_workitem_id"))
                     vgprWorkItem = *v;
+
+            // If the directive is .amdhsa_* but not consumed above, save it
+            // verbatim for re-emission. Use the original (untrimmed) line so
+            // the original indentation survives.
+            if (trimmed.size() > 8 && trimmed.substr(0, 8) == ".amdhsa_") {
+                bool known = false;
+                for (const char* k : kKnown) {
+                    size_t klen = std::strlen(k);
+                    if (trimmed.size() >= klen && trimmed.compare(0, klen, k) == 0 &&
+                        (trimmed.size() == klen ||
+                         std::isspace(static_cast<unsigned char>(trimmed[klen])))) {
+                        known = true;
+                        break;
+                    }
+                }
+                if (!known) extraAmdhsaDirectives.push_back(stripComment(line));
+            }
+            continue;
+        }
+
+        // ── /* Optimizations and Config */ comment block ─────────────────────────
+        // Recover the optimization config (ThreadTile, SubGroup, VectorWidth*,
+        // GlobalReadVectorWidth*, DirectToLds*, UseSgprForGRO) that
+        // SignatureKernelDescriptor::toString() regenerates from those fields.
+        // Without this the round-trip emits "/* ThreadTile= 0 x 0 */" etc.
+        if (trimmed.size() >= 4 && trimmed.substr(0, 2) == "/*" &&
+            trimmed.substr(trimmed.size() - 2) == "*/") {
+            std::string body = trimmed.substr(2, trimmed.size() - 4);
+            trimStr(body);
+            auto parseTwoInts = [](const std::string& s, std::array<int, 2>& out) {
+                size_t eq = s.find('=');
+                if (eq == std::string::npos) return;
+                std::string rhs = s.substr(eq + 1);
+                size_t x = rhs.find('x');
+                if (x == std::string::npos) return;
+                std::string a = rhs.substr(0, x);
+                std::string b = rhs.substr(x + 1);
+                trimStr(a);
+                trimStr(b);
+                if (auto v = safeAtoiStr(a)) out[0] = *v;
+                if (auto v = safeAtoiStr(b)) out[1] = *v;
+            };
+            auto parseInt = [](const std::string& s, int& out) {
+                size_t eq = s.find('=');
+                if (eq == std::string::npos) return;
+                std::string rhs = s.substr(eq + 1);
+                trimStr(rhs);
+                if (auto v = safeAtoiStr(rhs)) out = *v;
+            };
+            auto parseBool = [](const std::string& s, bool& out) {
+                size_t eq = s.find('=');
+                if (eq == std::string::npos) return;
+                std::string rhs = s.substr(eq + 1);
+                trimStr(rhs);
+                out = (rhs == "True" || rhs == "true" || rhs == "1");
+            };
+            if (body.rfind("ThreadTile=", 0) == 0)
+                parseTwoInts(body, threadTile);
+            else if (body.rfind("SubGroup=", 0) == 0)
+                parseTwoInts(body, subGroup);
+            else if (body.rfind("WaveGroup=", 0) == 0)
+                parseTwoInts(body, waveGroup);
+            else if (body.rfind("VectorWidthA=", 0) == 0)
+                parseInt(body, vectorWidthA);
+            else if (body.rfind("VectorWidthB=", 0) == 0)
+                parseInt(body, vectorWidthB);
+            else if (body.rfind("DirectToLdsA=", 0) == 0)
+                parseBool(body, directToLdsA);
+            else if (body.rfind("DirectToLdsB=", 0) == 0)
+                parseBool(body, directToLdsB);
+            else if (body.rfind("UseSgprForGRO=", 0) == 0) {
+                bool ub = false;
+                parseBool(body, ub);
+                useSgprForGRO = ub ? 1 : 0;
+                // Some emitters write "UseSgprForGRO=N" (integer); honour that too.
+                size_t eq = body.find('=');
+                if (eq != std::string::npos) {
+                    std::string rhs = body.substr(eq + 1);
+                    trimStr(rhs);
+                    if (auto v = safeAtoiStr(rhs)) useSgprForGRO = *v;
+                }
+            } else if (body.rfind("GlobalReadVectorWidthA=", 0) == 0 ||
+                       body.find("GlobalReadVectorWidthA=") != std::string::npos) {
+                // The combined form is "GlobalReadVectorWidthA=N, GlobalReadVectorWidthB=M".
+                size_t pa = body.find("GlobalReadVectorWidthA=");
+                if (pa != std::string::npos) {
+                    std::string rest =
+                        body.substr(pa + std::string("GlobalReadVectorWidthA=").size());
+                    size_t comma = rest.find(',');
+                    std::string a = (comma != std::string::npos) ? rest.substr(0, comma) : rest;
+                    trimStr(a);
+                    if (auto v = safeAtoiStr(a)) globalReadVectorWidthA = *v;
+                }
+                size_t pb = body.find("GlobalReadVectorWidthB=");
+                if (pb != std::string::npos) {
+                    std::string rest =
+                        body.substr(pb + std::string("GlobalReadVectorWidthB=").size());
+                    trimStr(rest);
+                    if (auto v = safeAtoiStr(rest)) globalReadVectorWidthB = *v;
+                }
+            }
             continue;
         }
 
@@ -671,6 +1017,7 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
                 args.push_back(curArg);
                 inArgEntry = false;
             }
+            inArgsList = false;
             section = Section::None;
             continue;
         }
@@ -690,8 +1037,18 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
         }
 
         // ── Arg list parsing (simple YAML block) ─────────────────────────────────
-        // Each arg starts with "- .name:"
-        if (trimmed.substr(0, 8) == "- .name:") {
+        // The `.args:` line marks the boundary between the kernel-level YAML
+        // entry (which carries `.name`, `.symbol`, `.language`, `.args`, etc.)
+        // and the args block itself. Only after this boundary should `- .name:`
+        // be interpreted as an arg start; otherwise the kernel-level
+        // `  - .name: <kernelName>` line is mis-parsed as the first arg.
+        if (trimmed == ".args:" || trimmed.substr(0, 6) == ".args:") {
+            inArgsList = true;
+            continue;
+        }
+
+        // Each arg starts with "- .name:" — only when we are inside `.args:`.
+        if (inArgsList && trimmed.substr(0, 8) == "- .name:") {
             if (inArgEntry && !curArg.name.empty()) {
                 args.push_back(curArg);
             }
@@ -727,6 +1084,20 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
         kernelName, isaVersion, kernArgsVersion, codeObjectVersion, groupSegSize, sgprWorkGroup,
         vgprWorkItem, flatWgSize, wavefrontSize, totalVgprs, /*totalAgprs=*/0, totalSgprs);
 
+    // Restore the optimization-config comment block so the emitter regenerates
+    // the same /* ThreadTile= */ / /* SubGroup= */ / /* VectorWidth* */ /
+    // /* DirectToLds* */ / /* UseSgprForGRO= */ values that were in the source.
+    sig->setOptimizationConfig(threadTile, subGroup, waveGroup, vectorWidthA, vectorWidthB,
+                               globalReadVectorWidthA, globalReadVectorWidthB, directToLdsA,
+                               directToLdsB, useSgprForGRO);
+
+    // Pass-through .amdhsa_* directives (e.g. .amdhsa_user_sgpr_count,
+    // .amdhsa_fp16_overflow, .amdhsa_inst_pref_size,
+    // .amdhsa_user_sgpr_kernarg_preload_*) that the structured fields above
+    // don't model. The signature emitter writes each entry verbatim before
+    // .end_amdhsa_kernel, so the round-trip is lossless.
+    sig->kernelDescriptor.extraKernelDirectives = std::move(extraAmdhsaDirectives);
+
     // Map YAML value_kind → SignatureValueKind and add args
     for (const auto& a : args) {
         SignatureValueKind kind = SignatureValueKind::SIG_VALUE;
@@ -743,7 +1114,8 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
 // Public API
 //----------------------------------------------------------------------
 
-RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) {
+RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
+                                    const RawAsmParserOptions& options) {
     RawAsmParseResult result;
 
     // Try to extract the kernel metadata header (SignatureBase).
@@ -764,24 +1136,92 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
     std::string line;
     unsigned lineNo = 0;
 
-    // When a signature was extracted, skip the metadata header and the .macro/.endm blocks
-    // that precede the real kernel body. We detect the end of the header by looking for the
-    // kernel body label line: "<kernelName>:".
+    // When a signature was extracted, skip the metadata header up to the
+    // "<kernelName>:" body label.  .macro/.endm blocks must be preserved
+    // verbatim — both before and after the body label — so that template
+    // lines like "v_mul_hi_u32 v[\vgprDstIdx+1], \dividend, \magicNumber"
+    // (which contain backslash-prefixed macro arguments the instruction
+    // parser cannot decode) round-trip exactly. Inside a macro block every
+    // line is captured as a TEXTBLOCK directive.
     bool headerSkip = result.signature != nullptr;
     const std::string kernelBodyMarker =
         result.signature ? (result.signature->kernelDescriptor.kernelName + ":") : "";
-    bool inMacroBlock = false;  // inside .macro ... .endm
+    bool inMacroBlock = false;
 
     while (std::getline(ss, line)) {
         ++lineNo;
 
-        // Strip # comments (line starts with #), // comments, and ; comments
+        // .macro / .endm tracking and pass-through. Done BEFORE comment
+        // stripping so the verbatim text is preserved (a macro body is just
+        // text from our perspective). We also do it BEFORE the headerSkip
+        // gate because macros preceding the kernel-body label still need to
+        // be emitted (otherwise the macro definitions are lost).
+        std::string raw = line;
+        {
+            std::string probe = raw;
+            size_t s = probe.find_first_not_of(" \t\r");
+            size_t e = probe.find_last_not_of(" \t\r");
+            if (s != std::string::npos) probe = probe.substr(s, e - s + 1);
+
+            if (probe.size() >= 6 && probe.substr(0, 6) == ".macro" &&
+                (probe.size() == 6 || std::isspace(static_cast<unsigned char>(probe[6])))) {
+                inMacroBlock = true;
+                if (!headerSkip) block->instructions.push_back(makeTextBlock(raw));
+                continue;
+            }
+            if (inMacroBlock) {
+                if (probe == ".endm") {
+                    inMacroBlock = false;
+                    if (!headerSkip) block->instructions.push_back(makeTextBlock(raw));
+                    continue;
+                }
+                if (!headerSkip) block->instructions.push_back(makeTextBlock(raw));
+                continue;
+            }
+        }
+
+        // Strip # comments (line starts with #), // comments, and ; comments.
+        // When the option is set, capture the trailing "// ..." or ";" comment
+        // first so we can re-attach it to the parsed instruction/directive.
         if (!line.empty() && line[0] == '#') {
             continue;  // entire line is a comment
         }
         // Before stripping // comments, check for "// st.token:N,M,..." annotation.
         // This lets raw .s files carry token group hints without affecting the assembler.
         std::vector<int> lineTokens;
+
+        // When preserveComments is enabled, capture a trailing "// ..." or ";"
+        // comment so we can re-attach it to the parsed instruction/directive.
+        // Note: if the comment turns out to be a "st.token:" annotation we
+        // discard lineComment below (after the token parser populates
+        // lineTokens) so that hidden annotations are not echoed as comments.
+        std::string lineComment;
+        if (options.preserveComments) {
+            size_t pos = std::string::npos;
+            size_t skip = 0;
+            for (size_t i = 0; i + 1 < line.size(); ++i) {
+                if (line[i] == '/' && line[i + 1] == '/') {
+                    pos = i;
+                    skip = 2;
+                    break;
+                }
+            }
+            size_t semi = line.find(';');
+            if (semi != std::string::npos && (pos == std::string::npos || semi < pos)) {
+                pos = semi;
+                skip = 1;
+            }
+            if (pos != std::string::npos) {
+                lineComment = line.substr(pos + skip);
+                size_t f = lineComment.find_first_not_of(" \t");
+                if (f == std::string::npos)
+                    lineComment.clear();
+                else
+                    lineComment.erase(0, f);
+                size_t l = lineComment.find_last_not_of(" \t\r\n");
+                if (l != std::string::npos) lineComment.resize(l + 1);
+            }
+        }
         for (size_t i = 0; i + 1 < line.size(); ++i) {
             if (line[i] == '/' && line[i + 1] == '/') {
                 std::string comment = line.substr(i + 2);
@@ -825,30 +1265,31 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
 
         if (line.empty()) continue;
 
-        // ── Header / macro skip ──────────────────────────────────────────────────
-        // When a signature was extracted, skip everything up to (and including) the
-        // "<kernelName>:" label line.  Also skip .macro ... .endm blocks.
+        // ── Header skip ──────────────────────────────────────────────────────────
+        // When a signature was extracted, skip everything up to (and including)
+        // the "<kernelName>:" label line.
         if (headerSkip) {
-            if (line.substr(0, 6) == ".macro") {
-                inMacroBlock = true;
-                continue;
-            }
-            if (line == ".endm") {
-                inMacroBlock = false;
-                continue;
-            }
-            if (inMacroBlock) continue;
             // Detect the kernel body start: "KernelName:" or "KernelName:  /// ..."
+            // The kernel body label is intentionally NOT pushed into the IR
+            // here: SignatureCodeMeta::toString() ends its emission with
+            // "<kernelName>:\n", so the signature header itself provides the
+            // label. Pushing it again as a ParsedInstruction would duplicate
+            // it in the round-trip output (signature emits the label, then
+            // the function emit prints the same label).
             if (!kernelBodyMarker.empty() && line.size() >= kernelBodyMarker.size() &&
                 line.substr(0, kernelBodyMarker.size()) == kernelBodyMarker) {
                 headerSkip = false;
-                // Emit the kernel label as a ParsedInstruction label.
-                auto labelInst = std::make_unique<ParsedInstruction>(
-                    result.signature->kernelDescriptor.kernelName, true);
-                block->instructions.push_back(std::move(labelInst));
             }
             continue;
         }
+
+        // Helper: turn a stripped line back into a verbatim text-block, re-
+        // appending the captured trailing comment so non-`.set` directives
+        // (e.g. `.long X // hi`) and unparsable instructions still round-trip.
+        auto textBlockWithComment = [&](const std::string& base) {
+            if (lineComment.empty()) return makeTextBlock(base);
+            return makeTextBlock(base + "  // " + lineComment);
+        };
 
         // Directives: lines starting with '.'
         if (line[0] == '.') {
@@ -875,9 +1316,10 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
                     if (f != std::string::npos) sym = sym.substr(f);
                     inst->srcRegs.push_back(StinkyRegister(sym));
                 }
+                inst->comment = lineComment;
                 block->instructions.push_back(std::move(inst));
             } else {
-                block->instructions.push_back(makeTextBlock(line));
+                block->instructions.push_back(textBlockWithComment(line));
             }
             continue;
         }
@@ -898,6 +1340,7 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
                     if (labelOnly) {
                         std::string labelName(first.text);
                         auto labelInst = std::make_unique<ParsedInstruction>(labelName, true);
+                        labelInst->comment = lineComment;
                         block->instructions.push_back(std::move(labelInst));
                         continue;
                     }
@@ -906,7 +1349,8 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
         }
 
         // Real instruction
-        auto inst = parseInstLine(line, arch, result.diagnostics, lineNo, syms);
+        auto inst = parseInstLine(line, arch, result.diagnostics, lineNo, syms,
+                                  options.preserveSymbolicNames);
         if (inst) {
             if (!lineTokens.empty()) {
                 // Build "[N,M,...]" string for ModifierSerializer::deserialize
@@ -918,10 +1362,17 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch) 
                 tokStr += ']';
                 inst->modifiers["mod.memtoken"]["tokens"] = tokStr;
             }
+            // If the captured comment is a pure "st.token:" annotation, drop
+            // it so the hidden token hint does not get echoed back as a
+            // user-visible comment by the emitter.
+            if (lineComment.compare(0, 9, "st.token:") == 0) lineComment.clear();
+            inst->comment = lineComment;
             block->instructions.push_back(std::move(inst));
         } else {
             // Unknown mnemonic or parse failure → preserve verbatim
-            block->instructions.push_back(makeTextBlock(line));
+            DEBUG_WITH_TYPE("RawAsmParser", std::cerr << "[RawAsmParser] line " << lineNo
+                                                      << ": text block: " << line << "\n");
+            block->instructions.push_back(textBlockWithComment(line));
         }
     }
 

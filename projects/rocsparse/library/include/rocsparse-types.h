@@ -158,7 +158,7 @@ typedef struct _rocsparse_spmat_descr* rocsparse_spmat_descr;
  *  The rocSPARSE constant sparse matrix descriptor is a structure holding all properties of a sparse matrix.
  *  It must be initialized using rocsparse_create_const_coo_descr(),
  *  rocsparse_create_const_csr_descr(), rocsparse_create_const_csc_descr(),
- *  or rocsparse_create_const_bell_descr() and the returned
+ *  rocsparse_create_const_bsr_descr(), or rocsparse_create_const_bell_descr() and the returned
  *  descriptor must be passed to all subsequent generic API library calls that involve the sparse matrix.
  *  It should be destroyed at the end using rocsparse_destroy_spmat_descr().
  */

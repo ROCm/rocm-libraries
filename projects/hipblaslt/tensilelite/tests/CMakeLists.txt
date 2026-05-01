@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 find_package(GTest REQUIRED)
+include(GoogleTest)
 
 add_executable(tensilelite-tests)
 add_subdirectory(configs)
@@ -33,6 +34,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
 )
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -44,6 +46,7 @@ target_link_libraries(tensilelite-tests
     PRIVATE
         hip::device
         ${CMAKE_DL_LIBS}
+        ${hipblaslt_msgpack_target}
 )
 
 gtest_discover_tests(tensilelite-tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)

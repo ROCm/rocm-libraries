@@ -25,11 +25,13 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
 /// Creates a pass that schedules local reads earlier in the block to hide
 /// latency (schedule-first-LRs-with-latency heuristic).
-std::unique_ptr<Pass> createScheduleFirstLRsPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createScheduleFirstLRsPass();
 
 }  // namespace stinkytofu

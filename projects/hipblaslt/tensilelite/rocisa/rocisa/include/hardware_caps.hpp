@@ -494,7 +494,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
     rv["DSLow16NotPreserve"] = isaVersion[0] == 12;
     rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
-    rv["NoSDWA"]             = isaVersion[0] == 12;
+    rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});
     rv["VOP3ByteSel"]        = isaVersion[0] == 12;
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
