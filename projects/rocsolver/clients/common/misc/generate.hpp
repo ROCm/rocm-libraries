@@ -78,7 +78,8 @@ void gerand( rocblas_int m, rocblas_int n, T* A, rocblas_int lda )
 // In complex, the diagonal is real.
 // If uplo == rocblas_fill_lower, only lower triangle is set;
 // if uplo == rocblas_fill_upper, only upper triangle is set;
-// if uplo == rocblas_fill_full, both lower and upper triangles are set.
+// if uplo == rocblas_fill_full, both lower and upper triangles are set,
+// with upper being conjugate-transpose of lower.
 //
 // todo: pass dist into routine, with default = uniform [-1, 1]?
 //
@@ -87,8 +88,6 @@ void herand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
 {
     using S = decltype( std::real( T{} ) );
     std::uniform_real_distribution<S> dist( S(-1), S(1) );
-
-    using foo::conjugate;  // todo
 
     assert( n >= 0 );
     assert( lda >= n );
@@ -123,7 +122,7 @@ void herand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
             for (rocblas_int i = j+1; i < n; ++i)  // strictly lower
             {
                 A[i + j*lda] = rand_value<T>( dist );
-                A[j + i*lda] = conjugate( A[i + j*lda] );
+                A[j + i*lda] = sconj( A[i + j*lda] );
             }
         }
     }
@@ -144,8 +143,6 @@ void syrand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
 {
     using S = decltype( std::real( T{} ) );
     std::uniform_real_distribution<S> dist( S(-1), S(1) );
-
-    using foo::conjugate;  // todo
 
     assert( n >= 0 );
     assert( lda >= n );
@@ -199,8 +196,6 @@ void hbrand( rocblas_int n, rocblas_int kd,
     using S = decltype( std::real( T{} ) );
     std::uniform_real_distribution<S> dist( S(-1), S(1) );
 
-    using foo::conjugate;  // todo
-
     assert( n >= 0 );
     assert( kd >= 0 );
 
@@ -233,7 +228,7 @@ void hbrand( rocblas_int n, rocblas_int kd,
             if (i < kd)
             {
                 Aband[idiag - i + (j + i)*ldab]
-                    = conjugate( Aband[idiag + i + j*ldab] );
+                    = sconj( Aband[idiag + i + j*ldab] );
             }
         }
         // Zero out entries outside band where bulges will fill in.
