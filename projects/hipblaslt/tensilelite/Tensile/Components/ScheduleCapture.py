@@ -319,6 +319,17 @@ class GraphPosition:
     builder free of a hard CMSValidator import.
 
     Fields ordered for tuple-style comparison (loop_index, vmfma_index, sub_index).
+
+    TODO: replace with CMSValidator.SchedulePosition. The two classes are
+    functionally identical (same fields, same lexicographic comparison) and
+    GraphPosition exists only to avoid the cross-module import. Unifying
+    them eliminates the duplicate and gives the graph builder a single
+    source of truth for the documented vmfma_index=-1 semantics
+    ("wrap-around between iterations: before the first VMFMA in this loop
+    but after the last VMFMA of the previous loop"). Resolve the import
+    direction first — likely move SchedulePosition into a shared location
+    (e.g. a new Tensile/Common/SchedulePosition.py) so both modules can
+    consume it without a CMSValidator dependency.
     """
     loop_index: int
     vmfma_index: int
