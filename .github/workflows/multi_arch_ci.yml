@@ -58,17 +58,19 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@d66f1529a2a69cd8ffde5e1239d411a7b5e56277 # rocm-libraries-ci-support
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@75fb860c73661b3e558ecd703ab74ae5862260ca # rocm-libraries-ci-support
     with:
       build_variant: "release"
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || '' }}
-      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || '' }}
+      # Limit to gfx1151 and gfx94X-dcgpu for rocm-libraries CI
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx1151,gfx94X-dcgpu' }}
+      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
-      repository: ${{ github.repository }}
-      ref: ${{ github.sha }}
+      repository: ROCm/TheRock
+      ref: 75fb860c73661b3e558ecd703ab74ae5862260ca  # rocm-libraries-ci-support
+      external_repo_config: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}","checkout_path":"rocm-libraries","cmake_source_dir_var":"THEROCK_ROCM_LIBRARIES_SOURCE_DIR"}'
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
@@ -78,7 +80,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@d66f1529a2a69cd8ffde5e1239d411a7b5e56277 # rocm-libraries-ci-support
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@75fb860c73661b3e558ecd703ab74ae5862260ca # rocm-libraries-ci-support
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -86,6 +88,8 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      repository: ROCm/TheRock
+      ref: 75fb860c73661b3e558ecd703ab74ae5862260ca  # rocm-libraries-ci-support
     permissions:
       contents: read
       id-token: write
@@ -98,13 +102,16 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@d66f1529a2a69cd8ffde5e1239d411a7b5e56277 # rocm-libraries-ci-support
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@75fb860c73661b3e558ecd703ab74ae5862260ca # rocm-libraries-ci-support
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
+      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      repository: ROCm/TheRock
+      ref: 75fb860c73661b3e558ecd703ab74ae5862260ca  # rocm-libraries-ci-support
     permissions:
       contents: read
       id-token: write
@@ -122,7 +129,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: d66f1529a2a69cd8ffde5e1239d411a7b5e56277 # rocm-libraries-ci-support
+          ref: 75fb860c73661b3e558ecd703ab74ae5862260ca # rocm-libraries-ci-support
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
