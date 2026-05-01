@@ -2238,6 +2238,17 @@ def build_dataflow_graph(four_part_capture):
         # OVERWRITES the previous writer — exactly what "latest writer"
         # means, and what kills the phantom-edge bug from scratch-vgpr
         # reuse.
+        #
+        # NO subiter scoping. A vgpr is one physical register; whoever
+        # wrote it most recently in stream order is what every subsequent
+        # read sees, regardless of which subiter logically "owns" it.
+        # If a kernel writer mis-pipelines a prefetch (e.g., PackA1
+        # writes v133 before PackA0's subiter-0 consumer reads it), the
+        # resolver faithfully reports PackA1 as the producer — the same
+        # garbage value the GPU will read. compare_graphs then surfaces
+        # the divergence. Adding per-subiter scoping would HIDE such
+        # scheduling bugs to make diagnostics look cleaner — the wrong
+        # tradeoff.
         latest_writer = {}  # byte_key -> (writer_node, write_resource)
         sorted_nodes = sorted(nodes_by_identity.values(), key=lambda n: n.position)
 
