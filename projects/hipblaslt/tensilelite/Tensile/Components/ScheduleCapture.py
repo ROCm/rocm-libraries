@@ -3120,8 +3120,12 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
     # MFMA-as-producer: governed by quad-cycle issue-timing constraints,
     # not by the dscnt/vlcnt FIFO. Sub-C (wx9.4.3) replaces the prior
     # blanket exemption with an explicit gap check; an MFMA producer whose
-    # consumer fires too soon after it is a TimingTooClose violation.
-    if p_node.category == "MFMA":
+    # consumer fires too soon after it is a TimingTooClose violation. Sub-A
+    # of bead `e7w` widens the dispatch from `category == "MFMA"` to
+    # `_is_mfma_producer` so 4x4 PackMFMAs (categorized Pack* but
+    # syntactically MFMAInstruction) are routed here BEFORE the ALU
+    # exemption claims them.
+    if _is_mfma_producer(p_node):
         nmps = subj_graph.num_mfma_per_subiter
         ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps)
         if not ok:
@@ -3340,6 +3344,89 @@ def _any_drains(waits, producer, subj_graph) -> bool:
 # CDNA 4 ISA section 7.6.
 _QUAD_CYCLES_STANDARD_MFMA_FINISH = 3   # Standard MFMA: 3 quad-cycles to finish.
 _QUAD_CYCLES_MFMA_4X4_FINISH = 1        # 4x4 (Pack-flavored) MFMA: 1 quad-cycle.
+
+
+def _mfma_finish_cycles_for(rocisa_inst) -> int:
+    """Classify an MFMA-shaped rocisa instruction as standard (3 quad-cycles)
+    or 4x4 PackMFMA (1 quad-cycle).
+
+    The CMSValidator dataclasses (`MFMA`, `MFMAPack`) carry the canonical
+    `mfma_finish_cycles` ClassVar (3 vs 1) — but those live on the validator
+    side. The rocisa `MFMAInstruction` C++ class accepts a `variant` list at
+    construction (`[M, N, K, blk]`, e.g. `[4, 4, 4, 16]` for the 4x4 PackMFMA
+    family) but does NOT expose that field as a readable Python attribute via
+    the nanobind binding. The rendered assembly string IS canonical and
+    stable — every MFMA family renders as `..._<M>x<N>x<K>_<dtype>...`. We
+    discriminate the 4x4 family by parsing for the `_4x4x` substring.
+
+    Test fixtures (`_FakeMFMA`) expose a `variant` Python attribute directly
+    (default `[32, 32]` for standard MFMAs; tests pass `[4, 4, 4, ...]` to
+    model PackMFMAs). The attribute path is checked first so fixtures don't
+    have to roundtrip through `str()`.
+
+    Mirrors the validator-side ClassVar split (CMSValidator.py:367, 482) and
+    keeps ScheduleCapture import-free of CMSValidator. Returns the standard
+    value when the instance lacks both signals (defensive fallback).
+    """
+    if rocisa_inst is None:
+        return _QUAD_CYCLES_STANDARD_MFMA_FINISH
+    # Fast path: test fixtures expose `variant` directly.
+    variant = getattr(rocisa_inst, "variant", None)
+    if variant is not None:
+        try:
+            m, n = variant[0], variant[1]
+        except (IndexError, TypeError):
+            m = n = None
+        if m == 4 and n == 4:
+            return _QUAD_CYCLES_MFMA_4X4_FINISH
+        if m is not None:
+            return _QUAD_CYCLES_STANDARD_MFMA_FINISH
+    # Production rocisa MFMAInstruction does not expose `variant` as an
+    # attribute — discriminate by parsing the rendered assembly form.
+    try:
+        rendered = str(rocisa_inst)
+    except Exception:
+        return _QUAD_CYCLES_STANDARD_MFMA_FINISH
+    if "_4x4x" in rendered:
+        return _QUAD_CYCLES_MFMA_4X4_FINISH
+    return _QUAD_CYCLES_STANDARD_MFMA_FINISH
+
+
+def _is_mfma_pack_producer(producer) -> bool:
+    """Return True for a 4x4 PackMFMA producer.
+
+    PackMFMAs (TF32 4x4 emulation) are syntactically `MFMAInstruction` rocisa
+    objects but are categorized as `PackA*` / `PackB*` because the macro
+    classifier groups them with the surrounding CVT pack chain. Discrimination:
+    `category.startswith("Pack")` AND `rocisa_inst` is an MFMA-shaped class.
+
+    Used by `_is_mfma_producer` so PackMFMAs route to the quad-cycle gap
+    branch rather than the ALU-immediate-visibility branch — without this,
+    the original pre-e7w bug let PackMFMA producers skip timing checks
+    entirely (the ALU-producer exemption fired first).
+    """
+    if not getattr(producer, "category", "").startswith("Pack"):
+        return False
+    inst = getattr(producer, "rocisa_inst", None)
+    if inst is None:
+        return False
+    return _is_mfma(inst)
+
+
+def _is_mfma_producer(producer) -> bool:
+    """True for any producer subject to MFMA quad-cycle finish-time gating.
+
+    Two shapes:
+      - `category == "MFMA"` — the standard MFMA path (everything but the
+        TF32 4x4 emulation pack chain).
+      - PackMFMA — `category.startswith("Pack")` with an MFMA-shaped rocisa
+        instance. Sub-A of bead `e7w` added this branch so the dispatch in
+        `_classify_edge_coverage` and `diagnose_missing_edge` claims pack-
+        MFMA producers BEFORE the ALU-producer exemption fires.
+    """
+    if getattr(producer, "category", None) == "MFMA":
+        return True
+    return _is_mfma_pack_producer(producer)
 # Each MFMA slot in the schedule consumes (1 issue + finish_cycles) quad-cycles
 # of timeline; the next MFMA can start issuing at the producer's mfma_free_at
 # (see CMSValidator.precompute_issue_times). So the quad-cycle gap between the
@@ -3398,12 +3485,14 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
     `precompute_issue_times` into a shared module that both
     `ScheduleCapture` and `CMSValidator` import).
     """
-    # Pull mfma_finish_cycles off the rocisa instance if available; default
-    # to the standard MFMA family. Fixtures synthesize bare insts so the
-    # attribute may be absent — fall back gracefully.
-    finish = getattr(producer.rocisa_inst, "mfma_finish_cycles", None)
-    if finish is None:
-        finish = _QUAD_CYCLES_STANDARD_MFMA_FINISH
+    # Classify the producer's MFMA family from its rocisa shape (variant
+    # field). The pre-e7w implementation read `mfma_finish_cycles` off the
+    # rocisa instance — but that attribute is a ClassVar on the validator
+    # dataclasses (CMSValidator.MFMA / CMSValidator.MFMAPack), NOT on the
+    # rocisa MFMAInstruction C++ class. The getattr always returned None and
+    # silently fell through to the standard 3-quad-cycle threshold, even for
+    # 4x4 PackMFMAs whose true finish is 1.
+    finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None))
     expected = finish
 
     if producer.body_label != consumer.body_label:
@@ -3485,9 +3574,24 @@ def _is_alu_producer(producer):
     So: classify by category_first (Pack* / PackMFMA → ALU), then by
     instance class for the GR-categorized m0 setter, finally fall back
     to category for cases where rocisa_inst is None (test fixtures).
+
+    Sub-A of bead `e7w` carved out a special case for the TF32 4x4 PackMFMA:
+    those are categorized `Pack*` but the rocisa class is `MFMAInstruction`,
+    so they DO need the quad-cycle finish-time gap modelled (1 quad-cycle
+    for v_mfma_f32_4x4x4_*). Without the carve-out the ALU-immediate
+    exemption fired first, the quad-cycle branch never ran for PackMFMA
+    producers, and a same-slot PackMFMA->MFMA acc chain silently slipped
+    past the timing check. PackMFMAs now route to the MFMA branch via
+    `_is_mfma_pack_producer`; the rest of the Pack* category (CVT0/CVT1/
+    middle packs / SwapPacks) stays on the ALU exemption.
     """
     cat = producer.category
     if cat.startswith("Pack"):
+        # PackMFMA carve-out: pack-categorized but real MFMA → quad-cycle
+        # finish gating, not ALU-immediate. Other Pack* (CVT/Middle/Swap)
+        # behave as ALU.
+        if _is_mfma_pack_producer(producer):
+            return False
         return True
     if cat == "MFMA":
         return False
@@ -3592,8 +3696,12 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
 
     # MFMA-as-producer: gated by quad-cycle issue timing rather than
     # SWaitCnt (see diagnose_missing_edge). Sub-C (wx9.4.3) replaces the
-    # blanket exemption with a quad-cycle gap check.
-    if p_node.category == "MFMA":
+    # blanket exemption with a quad-cycle gap check. Sub-A of bead `e7w`
+    # widens the dispatch from `category == "MFMA"` to `_is_mfma_producer`
+    # so PackMFMAs (categorized Pack* but rocisa MFMAInstruction) reach
+    # this branch instead of getting silently exempted by `_is_alu_producer`
+    # below.
+    if _is_mfma_producer(p_node):
         nmps = subj_graph.num_mfma_per_subiter
         ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps)
         if not ok:

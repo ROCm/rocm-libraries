@@ -98,10 +98,18 @@ class _FakeGR(_FakeInstBase):
 
 @dataclass
 class _FakeMFMA(_FakeInstBase):
-    """Stand-in for an MFMA instruction."""
+    """Stand-in for an MFMA instruction.
+
+    `variant` mirrors `rocisa.MFMAInstruction.variant` (a small int list whose
+    first two entries are the matrix shape M and N). Default `[32, 32]` represents
+    the standard MFMA family; pass `[4, 4, 4, ...]` to model a 4x4 PackMFMA so
+    the finish-cycle classifier in ScheduleCapture identifies it as the 1-quad-
+    cycle Pack flavor instead of the standard 3-quad-cycle MFMA.
+    """
     c_dst: RegisterContainer
     a_src: RegisterContainer
     b_src: RegisterContainer
+    variant: list = field(default_factory=lambda: [32, 32])
 
     def __str__(self):
         return f"v_mfma {self.c_dst}, {self.a_src}, {self.b_src}, {self.c_dst}"
@@ -230,11 +238,13 @@ def make_dtl_buffer_load(vaddr_vgpr_start: int, srd_sgpr_start: int,
 
 def make_mfma(c_dst_start: int, a_src_start: int, b_src_start: int, slot: int,
               *, c_dst_count: int = 4, a_src_count: int = 2, b_src_count: int = 2,
-              category: str = "MFMA", sequence: int = 0) -> TaggedInstruction:
+              category: str = "MFMA", sequence: int = 0,
+              variant: Optional[list] = None) -> TaggedInstruction:
     inst = _FakeMFMA(
         c_dst=_vrange(c_dst_start, c_dst_count),
         a_src=_vrange(a_src_start, a_src_count),
         b_src=_vrange(b_src_start, b_src_count),
+        variant=list(variant) if variant is not None else [32, 32],
     )
     return TaggedInstruction(
         inst=inst,

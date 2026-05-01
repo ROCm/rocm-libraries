@@ -1057,6 +1057,153 @@ class TestMFMAQuadCycleGap:
                 f"residual failure."
             )
 
+    # -------------------------------------------------------------------------
+    # Sub-A of bead `e7w` — 4x4 PackMFMA finish-cycle and dispatch-routing fixes.
+    # Pre-fix bugs:
+    #   (1) `_quad_cycle_gap_ok` read `mfma_finish_cycles` off the rocisa
+    #       instance, but that attribute is a ClassVar on the validator
+    #       dataclasses (CMSValidator.MFMAPack), not on the rocisa
+    #       MFMAInstruction. The lookup always fell through to standard 3,
+    #       so a 4x4 PackMFMA's true 1-quad-cycle finish was never modelled.
+    #   (2) PackMFMAs are categorized "PackA*"/"PackB*" — `_is_alu_producer`
+    #       fired the ALU-immediate exemption first, so PackMFMA producers
+    #       never reached the MFMA quad-cycle branch even after Fix (1).
+    # -------------------------------------------------------------------------
+
+    def test_mfma_pack_acc_chain_zero_gap_emits_timing_too_close_finish_1(self):
+        """Producer is a 4x4 PackMFMA (variant=[4,4,...]) at slot=2; consumer
+        MFMA at the same vmfma_index reads the producer's accumulator. The
+        gap is zero quad-cycles. Post-e7w the finish-cycle classifier
+        identifies the producer as 4x4 (expected=1) and emits
+        TimingTooCloseFailure with expected=1, actual=0. Pre-e7w the lookup
+        defaulted to expected=3 OR (worse) the PackMFMA producer was routed
+        to the ALU-immediate exemption and never checked at all."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # Producer: 4x4 PackMFMA, variant=[4,4,4,16]. Categorized "MFMA"
+            # so the synthetic _MFMARule still claims it (the test fixture
+            # _FakeMFMA doesn't have getParams() — the production
+            # PackMFMA-as-Pack* path goes through _GenericALURule which we
+            # cover in the routing-regression test below).
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+            # Consumer reads v0..v1 at the same vmfma_index — overlaps
+            # producer's accumulator (zero-gap RAW).
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=2, sequence=1, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        mfma_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and f.producer.category == "MFMA"
+            and f.consumer.category == "MFMA"
+        ]
+        assert mfma_timing, (
+            f"Expected TimingTooCloseFailure on 4x4 PackMFMA->MFMA acc-chain "
+            f"at slot_delta==0 (finish=1), but got: "
+            f"{[type(f).__name__ for f in failures]}"
+        )
+        f = mfma_timing[0]
+        assert f.expected_quad_cycles == 1, (
+            f"4x4 PackMFMA producer should report expected=1 (1 quad-cycle "
+            f"finish), got expected={f.expected_quad_cycles}. The pre-e7w "
+            f"`mfma_finish_cycles` lookup on rocisa_inst always defaulted to "
+            f"the standard 3 — Sub-A's _mfma_finish_cycles_for classifier "
+            f"must identify 4x4 by variant or rendered name."
+        )
+        assert f.actual_quad_cycles == 0
+
+    def test_mfma_pack_acc_chain_meets_finish_1_no_failure(self):
+        """4x4 PackMFMA producer (finish=1) with a consumer at slot_delta=1
+        gives an actual gap of `slot_delta * (1 + finish) - 1 == 1` quad-cycle —
+        EXACTLY meets the 1-quad-cycle threshold, so no TimingTooCloseFailure
+        is emitted. Pre-e7w with the wrong finish=3 default this would have
+        been mis-flagged as too close."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+            # Consumer at next vmfma_index — slot_delta=1, finish=1 → actual=1.
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=3, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        assert not any(
+            isinstance(f, TimingTooCloseFailure)
+            and f.producer.category == "MFMA"
+            and f.consumer.category == "MFMA"
+            for f in failures
+        ), (
+            f"slot_delta=1 with 4x4 PackMFMA finish=1 gives actual=1 == "
+            f"expected=1 — should NOT emit TimingTooCloseFailure. Got: "
+            f"{failures}"
+        )
+
+    def test_mfma_pack_routed_through_quadcycle_not_alu(self):
+        """Regression for the `_is_alu_producer` exemption fix. A producer
+        that is BOTH categorized "PackA*" AND a real MFMA-shaped rocisa
+        instance (4x4 PackMFMA, the TF32 emulation pattern) must be classified
+        as an MFMA producer (routed to the quad-cycle branch), NOT silently
+        absorbed by the ALU-immediate exemption.
+
+        Pre-e7w `_is_alu_producer` returned True for any `cat.startswith
+        ("Pack")` producer, so a PackMFMA's outgoing edges took the no-op
+        ALU return and the quad-cycle gap check never fired. Post-e7w the
+        carve-out reroutes PackMFMA-shaped producers (Pack* category +
+        _is_mfma rocisa shape) to the MFMA branch.
+
+        Test isolates the dispatch decision: synthesize a TaggedInstruction
+        whose category is "PackA0" with an underlying _FakeMFMA, then assert
+        `_is_mfma_producer` claims it and `_is_alu_producer` does NOT."""
+        from Tensile.Components.ScheduleCapture import (
+            _is_alu_producer, _is_mfma_producer, _is_mfma_pack_producer,
+        )
+        # _FakeMFMA — no getParams(), but _is_mfma() returns True for it
+        # (its class name is in _MFMA_CLASS_NAMES).
+        pack_mfma_tagged = make_mfma(
+            c_dst_start=0, a_src_start=8, b_src_start=12, slot=2,
+            category="PackA0", variant=[4, 4, 4, 16],
+        )
+        # GraphNode shape: a stub object exposing the attributes the
+        # producer-classifier helpers read (category + rocisa_inst).
+        class _StubNode:
+            def __init__(self, tagged):
+                self.category = tagged.category
+                self.rocisa_inst = tagged.inst
+        node = _StubNode(pack_mfma_tagged)
+        assert _is_mfma_pack_producer(node), (
+            "_is_mfma_pack_producer must return True for a Pack*-categorized "
+            "MFMA-shaped producer (the TF32 4x4 PackMFMA pattern)."
+        )
+        assert _is_mfma_producer(node), (
+            "_is_mfma_producer must claim PackMFMA producers so the "
+            "quad-cycle branch fires for them."
+        )
+        assert not _is_alu_producer(node), (
+            "_is_alu_producer must NOT claim PackMFMA producers — they need "
+            "the quad-cycle finish-time gap check, not the ALU-immediate "
+            "exemption. Pre-e7w returning True here was the bug that hid "
+            "all PackMFMA timing violations."
+        )
+        # Sanity: a non-MFMA Pack* (e.g. CVTPack) still goes to the ALU branch.
+        cvt_pack_tagged = _tag(
+            VXorB32(dst=vgpr(50, 1), src0=vgpr(51, 1), src1=vgpr(52, 1)),
+            category="PackA0", mfma_index=2, sequence=3,
+        )
+        cvt_node = _StubNode(cvt_pack_tagged)
+        assert not _is_mfma_pack_producer(cvt_node)
+        assert _is_alu_producer(cvt_node), (
+            "Non-MFMA Pack* producers (CVT0/CVT1/Middle/Swap) must keep the "
+            "ALU-immediate exemption — the carve-out targets PackMFMA only."
+        )
+
 
 # =============================================================================
 # P0 — GRInc SRD WAW invisible to subsequent GR (BufferLoad)
