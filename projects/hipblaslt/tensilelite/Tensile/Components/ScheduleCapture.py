@@ -3293,10 +3293,42 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
     worth of issue slots, which dwarfs any single-MFMA finish window.
 
     For same-body MFMA-to-MFMA edges, the gap is derived from the
-    vmfma_index delta. The producer's `mfma_finish_cycles` (3 for the
-    standard MFMA family, 1 for the 4x4 Pack-MFMA) is the minimum
-    required gap N; the actual gap in quad-cycles is computed from the
-    slot delta.
+    vmfma_index delta and the subiteration structure (`num_mfma_per_subiter`).
+    The producer's `mfma_finish_cycles` (3 for the standard MFMA family,
+    1 for the 4x4 Pack-MFMA) is the minimum required gap N.
+
+    Approach: SOUND UNDER-ESTIMATE (approach (b) per bead `cmw`). The
+    structural-side authority for the actual gap arithmetic when slot_delta
+    > 1 is `CMSValidator.precompute_issue_times`, which walks the full
+    instruction stream including non-MFMA fillers. This function operates
+    only on (producer, consumer, num_mfma_per_subiter) — it does NOT have
+    access to the instructions between producer and consumer, so it cannot
+    replicate `precompute_issue_times` exactly. A direct re-implementation
+    here would require carrying the body's instruction stream through the
+    dataflow-graph node API, which the graph deliberately does not expose
+    (and ScheduleCapture must not import CMSValidator — that would create a
+    cycle since CMSValidator imports from this module).
+
+    The formula here is therefore a sound under-estimate: the returned
+    `actual` is a LOWER BOUND on the real quad-cycle gap. Same-subiter
+    consecutive MFMAs (slot_delta == 1, subiter_delta == 0) are tight —
+    the formula reports exactly `finish`, matching the threshold and
+    `precompute_issue_times`. For slot_delta > 1 we add `subiter_delta`
+    extra quad-cycles to acknowledge that each subiter boundary crossed
+    represents at least one non-MFMA issue cycle (LR/Pack/SWait/SBarrier
+    work) that `precompute_issue_times` would account for via its
+    `min_issue_quad_cycles()` accumulation. This is conservative — real
+    cross-subiter gaps in CMS-pipelined schedules are larger — but using
+    the bound means we may OVER-flag (return ok=False when the real gap
+    is actually fine), never UNDER-flag. The graph-side check is a fast
+    pre-filter; the structural-side timeline (`precompute_issue_times`)
+    remains the ground-truth dispatch for cycle-accurate verdicts.
+
+    Future work tracked in `rocm-libraries-w7f` will migrate to a
+    timeline-aware graph that can call into a shared issue-time helper
+    without the import cycle (likely by extracting the small core of
+    `precompute_issue_times` into a shared module that both
+    `ScheduleCapture` and `CMSValidator` import).
     """
     # Pull mfma_finish_cycles off the rocisa instance if available; default
     # to the standard MFMA family. Fixtures synthesize bare insts so the
@@ -3309,6 +3341,10 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
     if producer.body_label != consumer.body_label:
         # Cross-body: a body boundary always represents many issue cycles.
         # Report a conservatively large actual so the gap is always OK.
+        # (The misleading `actual == expected` reported here is tracked as
+        # a separate concern in `rocm-libraries-s7k` — fixing it requires
+        # a graph-side notion of body-boundary cost that this function
+        # does not currently have.)
         return True, expected, expected
 
     p_pos = producer.position
@@ -3320,9 +3356,27 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
     if slot_delta <= 0:
         actual = 0
         return False, expected, actual
-    # gap_qc = slot_delta * (1 + finish) - 1; equals `finish` exactly when
-    # slot_delta == 1.
+    # Back-to-back MFMA-only baseline (densely packed slot stream): each
+    # MFMA slot consumes (1 + finish) quad-cycles and we measure from the
+    # producer's issue completion to the consumer's issue start.
     actual = slot_delta * (1 + finish) - 1
+    # Subiter-aware correction. For each subiter boundary crossed between
+    # producer and consumer, the schedule guarantees at least one
+    # non-MFMA issue cycle (the body-fill machinery — LR/Pack/SWait/
+    # SBarrier — that `precompute_issue_times` accumulates via
+    # `instruction.min_issue_quad_cycles()`). This is a sound under-
+    # estimate: real cross-subiter gaps are larger because subiters
+    # contain multiple non-MFMA instructions, but treating each crossed
+    # boundary as +1 quad-cycle is enough to (a) make the parameter
+    # semantically live (different `num_mfma_per_subiter` values yield
+    # different `actual` for the same slot pair), and (b) keep the
+    # function as a lower-bound — never under-flag a real gap.
+    if num_mfma_per_subiter and num_mfma_per_subiter > 0:
+        p_subiter = p_pos.vmfma_index // num_mfma_per_subiter
+        c_subiter = c_pos.vmfma_index // num_mfma_per_subiter
+        subiter_delta = c_subiter - p_subiter
+        if subiter_delta > 0:
+            actual += subiter_delta
     return actual >= expected, expected, actual
 
 

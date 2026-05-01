@@ -449,20 +449,16 @@ class TestMFMAQuadCycleGap:
     # landed and the xfail marker should be dropped.
     # -------------------------------------------------------------------------
 
-    @pytest.mark.xfail(strict=True, reason=(
-        "exposes cmw — _quad_cycle_gap_ok ignores num_mfma_per_subiter and "
-        "applies slot_delta * (1 + finish) - 1 unconditionally. The formula "
-        "is only correct at slot_delta == 1; for slot_delta > 1 the actual "
-        "gap depends on subiter structure and is not a linear function of "
-        "slot_delta. Once cmw lands, the returned `actual` should differ "
-        "between num_mfma_per_subiter=1 and num_mfma_per_subiter=2 for the "
-        "same producer/consumer slot pair — but today it does not."
-    ))
     def test_mfma_acc_chain_slot_delta_2_uses_num_mfma_per_subiter(self):
         """Producer at vmfma=0, consumer at vmfma=2; vary num_mfma_per_subiter
-        between two builds of the same instruction sequence. Today the
-        returned `actual` is identical for both (the parameter is dead).
-        Post-fix, the actual should depend on subiter structure."""
+        between two builds of the same instruction sequence. Post-cmw
+        (sound under-estimate, approach (b)) the returned `actual` includes
+        a +1-per-subiter-boundary correction so it differs between
+        num_mfma_per_subiter=1 (subiter_delta=2 → actual=7+2=9) and
+        num_mfma_per_subiter=2 (subiter_delta=1 → actual=7+1=8) for the
+        same slot pair. The graph-side check remains a lower bound on the
+        real cross-subiter gap; the structural-side `precompute_issue_times`
+        retains ground truth for cycle-accurate verdicts."""
         # Same instruction layout in both fixtures; only num_mfma_per_subiter
         # differs at the FourPartCapture level.
         def _build_cap():
