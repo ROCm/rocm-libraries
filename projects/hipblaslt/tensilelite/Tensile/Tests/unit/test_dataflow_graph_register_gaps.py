@@ -605,3 +605,4 @@ class TestLWSAddrChain:
             "DSStoreB128 reading it — should have produced an "
             "OrderInvertedFailure on the LDS-address vgpr RAW edge."
         )
+

@@ -404,10 +404,16 @@ class DataflowGraph:
     nodes is keyed by identity; the comparison rule iterates the top-level
     edges list. Per-node adjacency is intentionally NOT stored — the
     diagnostic classifier walks captures[body_label].instructions instead.
+
+    `num_mfma_per_iter` is copied from FourPartCapture so the OrderInverted
+    classifier can derive an MFMA node's iter (`vmfma_index // n`) without
+    re-plumbing it through every classifier call. Non-MFMA nodes get iter
+    from their category trailing digits (`PackA0` → 0).
     """
     nodes: dict                         # identity -> GraphNode
     edges: list                         # list[DataflowEdge]
     captures: dict                      # body_label -> LoopBodyCapture
+    num_mfma_per_iter: int = 0          # copied from FourPartCapture; 0 ⇒ all-iter-0
 
     def edge_keys(self):
         """Edge-equality keys for cross-graph diff: (p_id, c_id, resource, kind)."""
@@ -1623,6 +1629,22 @@ def _split_category_iter(category):
     return base, (int(suffix) if suffix else 0)
 
 
+def _node_iter(node, num_mfma_per_iter) -> int:
+    """Inner-iteration index for a graph node.
+
+    For non-MFMA categories, parsed from the category trailing digits
+    (`PackA0` ⇒ 0). For MFMA, derived from `vmfma_index // num_mfma_per_iter`
+    (matches the iter calculation in `_logical_position`). When
+    `num_mfma_per_iter` is 0 (test fixtures that don't set it), MFMA iter
+    collapses to 0 — the OrderInverted gate then degenerates to "fire on
+    any same-body stream-position inversion", which matches pre-fix
+    behavior for those fixtures.
+    """
+    if node.category == "MFMA":
+        return node.position.vmfma_index // num_mfma_per_iter if num_mfma_per_iter else 0
+    return _split_category_iter(node.category)[1]
+
+
 def _logical_position(node, num_mfma_per_iter):
     """Return the reorder-invariant logical position for `node`.
 
@@ -2314,7 +2336,8 @@ def build_dataflow_graph(four_part_capture):
     barrier_edges = _collect_barrier_edges(all_nodes_in_order)
     edges.extend(barrier_edges)
 
-    return DataflowGraph(nodes=nodes_by_identity, edges=edges, captures=captures)
+    return DataflowGraph(nodes=nodes_by_identity, edges=edges, captures=captures,
+                         num_mfma_per_iter=num_mfma_per_iter)
 
 
 def _collect_barrier_edges(nodes_in_order):
@@ -2568,9 +2591,18 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
             f"c_id={c_id} (found={c_node is not None})."
         )
 
-    # Phase 1 — gating: order check (same-body only).
+    # Phase 1 — gating: order check (same-body, same-iter only).
+    # CMS legitimately pipelines producers from one inner iteration into
+    # the stream slots of an earlier iteration's consumer; that's a
+    # cross-iter dependency, NOT a reorder. Stream-position inversion
+    # only signals a real reorder when both endpoints belong to the same
+    # iter — otherwise the ordering is fine by construction (the resolver
+    # only emits `producer.iter ≤ consumer.iter` edges).
     if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
-        return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
+        nmpi = subj_graph.num_mfma_per_iter
+        if _node_iter(p_node, nmpi) == _node_iter(c_node, nmpi):
+            return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
+        return []  # cross-iter pipelined dependency — legitimate
 
     # MFMA-as-producer: the dataflow graph models MFMA accumulator chains
     # so reorders are detectable, but those chains aren't gated by SWaitCnt
@@ -2843,9 +2875,13 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
     p_node = edge.producer
     c_node = edge.consumer
 
-    # Phase 1 — same-body order check.
+    # Phase 1 — same-body, same-iter order check (see diagnose_missing_edge
+    # for the cross-iter rationale).
     if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
-        return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
+        nmpi = subj_graph.num_mfma_per_iter
+        if _node_iter(p_node, nmpi) == _node_iter(c_node, nmpi):
+            return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
+        return []  # cross-iter pipelined dependency — legitimate
 
     # MFMA-as-producer edges aren't gated by SWaitCnt — see notes in
     # diagnose_missing_edge.
