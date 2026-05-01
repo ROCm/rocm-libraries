@@ -1574,68 +1574,22 @@ def _class_tag_from_category(category, inst) -> str:
 
 
 # =============================================================================
-# --- Reorder-invariant logical position ---
+# --- Stream-position ordering ---
 # =============================================================================
-# Edge formation must be reorder-invariant: two captures of the same instruction
-# set should produce the same edges, regardless of how each scheduler placed
-# the instructions in the stream. The current FIFO-simulation model isn't
-# invariant — ready_writer's last-write-wins is sensitive to the order in
-# which producers drain. Instead, derive a "logical position" per node from
-# (body, iter, kind, sequence) where:
+# The resolver walks producers in stream-position order. SchedulePosition
+# (loop_index, vmfma_index, sub_index) lex-sorts to actual stream order by
+# construction (see SlotKey docstring + commit f06ffc4770), so node.position
+# is the canonical ordering key — no synthetic kind_rank table needed.
 #
-#   - body comes from BODY_LABEL_TO_LOOP_INDEX.
-#   - iter comes from the category suffix (LRA0 -> 0, PackB3 -> 3) for
-#     LR/Pack/MX*; from mfma_index // numMfmaPerIter for MFMA; 0 otherwise.
-#   - kind_rank is a small finite map of category-base -> integer.
-#   - sequence is the node's index within its (body, category) cohort —
-#     used as a tiebreaker; mostly irrelevant when each producer writes a
-#     unique register sub-range (the typical Tensile pattern).
-#
-# Every component is preserved across schedulers (they all derive from the
-# kernel writer's idMap/category structure, NOT from stream position).
+# _node_iter remains useful for the within-graph same-iter gate in
+# _classify_edge_coverage (which has no default reference). Iter is derived
+# from category trailing digits (LRA0 -> 0) for non-MFMA, or from
+# vmfma_index // num_mfma_per_iter for MFMA. Both are schedule-invariant
+# per identity (categories and vmfma_indices are kernel-writer-set, identical
+# across captures).
 
 import re as _re
 _TRAILING_DIGITS_RE = _re.compile(r"^(.*?)(\d*)$")
-
-# kind_rank assigns every category-base to a small integer. Order matters
-# only insofar as it determines which producer is "more recent" when two
-# share the same iter — typically Pack > LR is the natural pipeline order.
-# MFMA (rank 7) is encoded specially: its iter comes from mfma_index, not
-# from a category suffix.
-_KIND_RANK = {
-    # local reads (iter-suffixed)
-    "LRA":         0,
-    "LRB":         0,
-    "LRMXSA":      0,
-    "LRMXSB":      0,
-    "LRMetadata":  0,
-    # local read pointer ops (no iter suffix)
-    "LRSA":        1,
-    "LRSB":        1,
-    "LRS":         1,
-    # local writes (no iter suffix)
-    "LWA":         2,
-    "LWB":         2,
-    # local write pointer ops
-    "LWSA":        3,
-    "LWSB":        3,
-    "LWS":         3,
-    # global reads (no iter suffix)
-    "GRA":         4,
-    "GRB":         4,
-    "GR":          4,
-    "GRIncA":      4,
-    "GRIncB":      4,
-    # pack ops (iter-suffixed)
-    "PackA":       5,
-    "PackB":       5,
-    # MFMA handled specially in _logical_position; rank 6 used for it.
-    # SYNC / SBARRIER / SNOP / LCC don't get logical positions (they're
-    # excluded from the cross-graph identity set, hence excluded from
-    # edges).
-}
-
-_MFMA_KIND_RANK = 6
 
 
 def _split_category_iter(category):
@@ -1654,56 +1608,17 @@ def _node_iter(node, num_mfma_per_iter) -> int:
     """Inner-iteration index for a graph node.
 
     For non-MFMA categories, parsed from the category trailing digits
-    (`PackA0` ⇒ 0). For MFMA, derived from `vmfma_index // num_mfma_per_iter`
-    (matches the iter calculation in `_logical_position`). When
-    `num_mfma_per_iter` is 0 (test fixtures that don't set it), MFMA iter
+    (`PackA0` ⇒ 0). For MFMA, derived from `vmfma_index // num_mfma_per_iter`.
+    When `num_mfma_per_iter` is 0 (test fixtures that don't set it), MFMA iter
     collapses to 0 — the OrderInverted gate then degenerates to "fire on
-    any same-body stream-position inversion", which matches pre-fix
-    behavior for those fixtures.
+    any same-body stream-position inversion".
     """
     if node.category == "MFMA":
         return node.position.vmfma_index // num_mfma_per_iter if num_mfma_per_iter else 0
     return _split_category_iter(node.category)[1]
 
 
-def _logical_position(node, num_mfma_per_iter):
-    """Return the reorder-invariant logical position for `node`.
-
-    Format: (body_loop_index, iter, kind_rank, intra_seq).
-
-    intra_seq is the node's offset within its body's _graph_nodes list —
-    used only as a tiebreaker for the (typically rare) case where two
-    producers of the same kind write overlapping registers in the same
-    iteration. For most Tensile patterns each producer writes a unique
-    register sub-range, so resolution succeeds before intra_seq matters.
-
-    Raises if the node's category doesn't map to a known kind. SYNC /
-    SBARRIER / SNOP / LCC are excluded from edge formation upstream so
-    this function isn't called for them.
-    """
-    body_idx = node.position.loop_index
-    cat = node.category
-    if cat == "MFMA":
-        idx = node.position.vmfma_index
-        if num_mfma_per_iter and num_mfma_per_iter > 0:
-            iter_ = idx // num_mfma_per_iter
-            within = idx % num_mfma_per_iter
-        else:
-            iter_, within = 0, idx
-        return (body_idx, iter_, _MFMA_KIND_RANK, within)
-    base, iter_ = _split_category_iter(cat)
-    rank = _KIND_RANK.get(base)
-    if rank is None:
-        raise CaptureUnknownInstructionError(
-            f"_logical_position: category {cat!r} (base {base!r}) has no "
-            f"kind_rank entry; node={node.name!r} body={node.body_label!r}."
-        )
-    # intra_seq is the node's offset in its body's _graph_nodes list,
-    # filled in by the caller (build_dataflow_graph) since it's body-relative.
-    return (body_idx, iter_, rank, getattr(node, '_intra_seq', 0))
-
-
-def _resolve_producers(read_resource, consumer, producers_by_kind, num_mfma_per_iter):
+def _resolve_producers(read_resource, consumer, producers_sorted):
     """Resolve every producer of `read_resource` for `consumer`.
 
     `read_resource` is either a RegisterContainer or a MemoryRegion.
@@ -1711,8 +1626,11 @@ def _resolve_producers(read_resource, consumer, producers_by_kind, num_mfma_per_
     `_reg_intersection`, MemoryRegion-vs-MemoryRegion uses
     `_memory_intersection`, mixed types never overlap (returns None).
 
+    `producers_sorted` is a flat list of (position, node, written_resources)
+    tuples sorted ascending by position (stream order).
+
     Yields (producer_node, overlap) pairs for each producer whose
-    logical_position is strictly before consumer's AND whose written
+    stream position is strictly before consumer's AND whose written
     resource overlaps `read_resource`. The yielded `overlap` is the
     *intersection* — not the producer's full write — so:
 
@@ -1724,22 +1642,18 @@ def _resolve_producers(read_resource, consumer, producers_by_kind, num_mfma_per_
     The two-narrower-writes-cover-one-wide-read case still works: a wide
     read v[8:15] backed by LR_a writing v[8:11] and LR_b writing v[12:15]
     yields BOTH edges.
-
-    Reorder-invariant: each yielded pair depends only on resource identity
-    + category + iteration, all preserved across schedulers.
     """
-    consumer_lp = _logical_position(consumer, num_mfma_per_iter)
-    for kind, prod_list in producers_by_kind.items():
-        for lp, prod_node, written_resources in prod_list:
-            if lp >= consumer_lp:
-                # prod_list is sorted ascending; nothing later will be < consumer_lp.
-                break
-            for wresource in written_resources:
-                overlap = _intersection(read_resource, wresource)
-                if overlap is not None:
-                    yield (prod_node, overlap)
-                    # No `break`: a producer with multiple overlapping
-                    # writes yields one edge per write.
+    consumer_pos = consumer.position
+    for pos, prod_node, written_resources in producers_sorted:
+        if pos >= consumer_pos:
+            # producers_sorted is ascending; nothing later will be < consumer_pos.
+            break
+        for wresource in written_resources:
+            overlap = _intersection(read_resource, wresource)
+            if overlap is not None:
+                yield (prod_node, overlap)
+                # No `break`: a producer with multiple overlapping
+                # writes yields one edge per write.
 
 
 def _identity_for(inst, body_label: str, category=None) -> tuple:
@@ -2174,13 +2088,12 @@ def build_dataflow_graph(four_part_capture):
     bakes it into the macro). Per-body sidecar `_graph_nodes` is
     attached so wait/barrier helpers can find sync ops in stream order.
 
-    Phase 2 — edge formation by REGISTER-NAME RESOLUTION (reorder-
-    invariant). For each consumer's read register R, find the unique
-    producer P that writes R. Producer is the latest in LOGICAL ORDER
-    (body, iter, kind_rank, intra_seq) whose written register overlaps
-    R. Logical order is derived from category + mfma_index — preserved
-    by both schedulers — so two captures of the same instruction set
-    in different schedules produce IDENTICAL edges.
+    Phase 2 — edge formation by RESOURCE RESOLUTION. For each consumer's
+    read resource R, walk producers in stream-position order
+    (SchedulePosition: loop_index, vmfma_index, sub_index) and yield
+    every prior writer whose written resource overlaps R. The current
+    resolver yields ALL prior overlapping writers (the per-byte
+    latest-writer rewrite is tracked as wx9.4.2 / Sub-B).
 
     A separate barrier-edge collector (`_collect_barrier_edges`) emits
     LDS-reuse edges (lr_to_gr_lds_reuse, gr_to_lr_lds_reuse) over the
@@ -2229,15 +2142,10 @@ def build_dataflow_graph(four_part_capture):
     # ---------------------------------------------------------------------
     # Phase 1 — node construction + sidecar.
     # ---------------------------------------------------------------------
-    # Per-body intra_seq counters: keyed on category, used for the
-    # logical-position tiebreaker. The same item-within-category order is
-    # preserved by both schedulers because they consume from the same idMap
-    # source modules; intra_seq based on per-body cohort index works.
     for label in _BODY_BUILD_ORDER:
         if label not in captures:
             continue
         body = captures[label]
-        intra_seq_counter = {}  # category -> next sequence
 
         for tagged_inst in body.instructions:
             inst = tagged_inst.inst
@@ -2251,12 +2159,6 @@ def build_dataflow_graph(four_part_capture):
                     f"recognized category, or the instruction's class must be "
                     f"one of LR/LW/GR/MFMA/SWait/SBarrier. Inner: {e}"
                 ) from e
-
-            # Stamp intra_seq for logical-position tiebreaking.
-            cat = tagged_inst.category
-            seq = intra_seq_counter.get(cat, 0)
-            intra_seq_counter[cat] = seq + 1
-            node._intra_seq = seq
 
             # Per-body sidecar: every node lives here, including SWait/
             # SBarrier/SNop, so waits_in_window/barriers_in_window can
@@ -2285,24 +2187,17 @@ def build_dataflow_graph(four_part_capture):
     # Skip when nothing was captured — e.g., the no-op build_dataflow_graph(None)
     # contract holds but here we have an empty captures map after seeding.
     if nodes_by_identity:
-        producers_by_kind = {}  # kind_rank -> list of (lp, node, written_resources)
+        # Single ascending-by-stream-position list of all producer nodes;
+        # _resolve_producers walks it and short-circuits when it passes
+        # the consumer's position.
+        producers_sorted = []
         for node in nodes_by_identity.values():
             wrapped = _ensure_wrapped(node.tagged_inst)
             written = wrapped.writes
             if not written:
                 continue
-            try:
-                lp = _logical_position(node, num_mfma_per_iter)
-            except CaptureUnknownInstructionError:
-                # Producer's category not in _KIND_RANK — skip (can't
-                # participate in dataflow without a logical position).
-                continue
-            producers_by_kind.setdefault(lp[2], []).append((lp, node, written))
-
-        # Sort each kind's producer list by logical_position ascending so
-        # _resolve_producers can walk-from-start and short-circuit.
-        for kind in producers_by_kind:
-            producers_by_kind[kind].sort(key=lambda triple: triple[0])
+            producers_sorted.append((node.position, node, written))
+        producers_sorted.sort(key=lambda triple: triple[0])
 
         # Resolve each consumer's reads.
         for node in nodes_by_identity.values():
@@ -2310,17 +2205,11 @@ def build_dataflow_graph(four_part_capture):
             reads = wrapped.reads
             if not reads:
                 continue
-            try:
-                # _logical_position is required for the resolver's
-                # ordering check — skip if consumer's kind isn't ranked.
-                _logical_position(node, num_mfma_per_iter)
-            except CaptureUnknownInstructionError:
-                continue
             for read_resource in reads:
                 if read_resource is None:
                     continue
                 for producer, overlap in _resolve_producers(
-                    read_resource, node, producers_by_kind, num_mfma_per_iter,
+                    read_resource, node, producers_sorted,
                 ):
                     is_memory = isinstance(overlap, MemoryRegion)
                     edges.append(DataflowEdge(

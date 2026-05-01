@@ -636,8 +636,8 @@ class TestGRIncReorderDetection:
           #5 SSubU32     dst=s20, src1=s100             — RAW from #1
           #6 SSubBU32    dst=s21, src1=s101             — RAW from #2
 
-        category="GRIncA" tags every instruction so they share kind_rank=4
-        and intra_seq distinguishes them.
+        category="GRIncA" tags every instruction; their stream positions
+        (SchedulePosition.sub_index) distinguish them within the slot.
         """
         from rocisa.instruction import (
             SCSelectB32, SAddU32, SAddCU32, SSubU32, SSubBU32,

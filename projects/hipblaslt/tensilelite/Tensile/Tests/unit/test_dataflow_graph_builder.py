@@ -26,14 +26,11 @@
 
 Two-phase model:
 
-1. EDGE FORMATION is reorder-invariant: edges are derived purely from
-   register-name resolution. For each consumer's read, the producer is
-   the unique writer of that register, looked up by name (via
-   _reg_overlaps), with logical_position-based ordering (body, iter,
-   kind_rank, intra_seq) for tiebreaking. Whether an SWaitCnt sits
-   between producer and consumer in the captured stream does NOT
-   affect edge formation. Two captures of the same instruction set
-   in different schedules produce identical edges by construction.
+1. EDGE FORMATION resolves resources in stream-position order. For each
+   consumer's read, prior writers (those with SchedulePosition < consumer's)
+   whose written resource overlaps the read are yielded as producers.
+   Whether an SWaitCnt sits between producer and consumer in the captured
+   stream does NOT affect edge formation — that's the wait-coverage pass.
 
 2. WAIT COVERAGE is a separate validation pass, exposed as
    validate_edge_wait_coverage(graph). For each edge, it walks the
@@ -606,8 +603,7 @@ class TestMultiWriteProducer:
         )
         from rocisa.container import vgpr
 
-        # Build minimal nodes by hand. The resolver only reads
-        # node.position via _logical_position and node.category.
+        # Build minimal nodes by hand. The resolver only reads node.position.
         producer = GraphNode(
             identity=("LR", 1, ("v", 8, 4), 64),
             position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
@@ -620,27 +616,18 @@ class TestMultiWriteProducer:
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="wide-read-MFMA",
         )
-        # Stamp intra_seq so _logical_position succeeds.
-        producer._intra_seq = 0
-        consumer._intra_seq = 0
 
         # Producer writes v[8:11] AND v[12:15]. (No real instruction yields
         # two separate writes today, but the resolver must handle this for
         # the future MFMA-acc-write / VAddCO-dst+VCC cases.)
         wreg_a = vgpr(8, 4)
         wreg_b = vgpr(12, 4)
-        producers_by_kind = {
-            0: [(  # kind_rank 0 (LR), single producer, two writes
-                (1, 0, 0, 0),  # logical position tuple — strictly < consumer's
-                producer,
-                [wreg_a, wreg_b],
-            )],
-        }
+        producers_sorted = [(producer.position, producer, [wreg_a, wreg_b])]
 
         # Consumer reads v[8:15] — overlaps both writes.
         read_reg = vgpr(8, 8)
         results = list(_resolve_producers(
-            read_reg, consumer, producers_by_kind, num_mfma_per_iter=1,
+            read_reg, consumer, producers_sorted,
         ))
 
         # Should yield TWO pairs, both attributing to `producer` but with
@@ -676,19 +663,15 @@ class TestMultiWriteProducer:
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="narrow-read-MFMA",
         )
-        producer._intra_seq = 0
-        consumer._intra_seq = 0
 
-        producers_by_kind = {
-            0: [(
-                (1, 0, 0, 0),
-                producer,
-                [vgpr(8, 4), vgpr(100, 4)],  # first overlaps, second doesn't
-            )],
-        }
+        producers_sorted = [(
+            producer.position,
+            producer,
+            [vgpr(8, 4), vgpr(100, 4)],  # first overlaps, second doesn't
+        )]
 
         results = list(_resolve_producers(
-            vgpr(8, 2), consumer, producers_by_kind, num_mfma_per_iter=1,
+            vgpr(8, 2), consumer, producers_sorted,
         ))
         assert len(results) == 1
         assert results[0][1].regIdx == 8
