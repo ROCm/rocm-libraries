@@ -41,9 +41,8 @@
 
  // each blk_range is a {kd, nb}
 
- // case when n = 0, nb = 2, and b = 2 will also execute the bad arguments test
+ // case when n = 0, kd = 0 will also execute the bad arguments test
  // (null handle, null pointers and invalid values)
- // TODO: no checking arguments for now.
 
  // for checkin_lapack tests
  const vector<vector<int>> size_range = {
@@ -58,9 +57,10 @@
      {20, 20}};
 
  const vector<vector<int>> blk_range = {
+    // quick return
+    {0, 1},
     // invalid
     {4, 2},
-    {0, 1},
     // normal (valid) samples
     {1, 10},
     {10, 10},
@@ -113,9 +113,8 @@ const vector<vector<int>> large_blk_range = {
      {
          Arguments arg = sy2sb_he2hb_setup_arguments(GetParam());
 
-        //  if(arg.peek<rocblas_int>("nb") == 2 && arg.peek<rocblas_int>("n") == 0
-        //     && arg.peek<rocblas_int>("b") == 2)
-        //      testing_sy2sb_he2hb_bad_arg<T>();
+        if(arg.peek<rocblas_int>("n") == 0 && arg.peek<rocblas_int>("kd") == 0)
+            testing_sy2sb_he2hb_bad_arg<T>();
 
          testing_sy2sb_he2hb<T>(arg);
      }

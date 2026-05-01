@@ -38,6 +38,66 @@
 
 #include "print_matrix.hpp"
 
+template <typename T>
+void sy2sb_he2hb_checkBadArgs(const rocblas_handle handle,
+                               const rocblas_int n,
+                               const rocblas_int kd,
+                               const rocblas_int nb,
+                               T dA,
+                               const rocblas_int lda,
+                               T dAband,
+                               const rocblas_int ldab,
+                               T dTau)
+{
+    // handle
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sy2sb_he2hb(nullptr, n, kd, nb, dA, lda, dAband, ldab, dTau),
+        rocblas_status_invalid_handle);
+
+    // pointers
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sy2sb_he2hb(handle, n, kd, nb, (T) nullptr, lda, dAband, ldab, dTau),
+        rocblas_status_invalid_pointer);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sy2sb_he2hb(handle, n, kd, nb, dA, lda, (T) nullptr, ldab, dTau),
+        rocblas_status_invalid_pointer);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sy2sb_he2hb(handle, n, kd, nb, dA, lda, dAband, ldab, (T) nullptr),
+        rocblas_status_invalid_pointer);
+
+    // quick return with invalid pointers
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sy2sb_he2hb(handle, 0, kd, nb, (T) nullptr, lda, (T) nullptr, ldab, (T) nullptr),
+        rocblas_status_success);
+
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sy2sb_he2hb(handle, n, 0, nb, (T) nullptr, lda, (T) nullptr, ldab, (T) nullptr),
+        rocblas_status_success);
+}
+
+template <typename T>
+void testing_sy2sb_he2hb_bad_arg()
+{
+    // safe arguments
+    rocblas_local_handle handle;
+    rocblas_int n = 1;
+    rocblas_int kd = 1;
+    rocblas_int nb = 1;
+    rocblas_int lda = 1;
+    rocblas_int ldab = 3;
+
+    // memory allocations
+    device_strided_batch_vector<T> dA(1, 1, 1, 1);
+    device_strided_batch_vector<T> dAband(ldab, 1, ldab, 1);
+    device_strided_batch_vector<T> dTau(1, 1, 1, 1);
+    CHECK_HIP_ERROR(dA.memcheck());
+    CHECK_HIP_ERROR(dAband.memcheck());
+    CHECK_HIP_ERROR(dTau.memcheck());
+
+    // check bad arguments
+    sy2sb_he2hb_checkBadArgs(handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data());
+}
+
 //------------------------------------------------------------------------------
 // todo: Can dA and hA have different lda? Or does lda apply only to hA? Weird argument order.
 template <bool CPU,
