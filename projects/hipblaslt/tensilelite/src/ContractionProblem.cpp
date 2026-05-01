@@ -584,8 +584,6 @@ namespace TensileLite
             = TensorDescriptor("scaleAlphaVec");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::METADATA]   = TensorDescriptor("metadata");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::AMAXD]      = TensorDescriptor("amaxD");
-        gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSA]     = TensorDescriptor("mxScaleA");
-        gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSB]     = TensorDescriptor("mxScaleB");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED] = TensorDescriptor("compressed");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSA]       = TensorDescriptor("mx-a");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSB]       = TensorDescriptor("mx-b");
@@ -707,7 +705,7 @@ namespace TensileLite
             // process M in 32-element blocks have valid scale data for partial blocks.
             auto freeIdx = m_freeIndicesA[0].i;
             saSizes[freeIdx] = RoundUpToMultiple(saSizes[freeIdx], (size_t)32);
-            TensorDescriptor mxsa("mxScaleA", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
+            TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
         }
     }
@@ -730,7 +728,7 @@ namespace TensileLite
             // process N in 32-element blocks have valid scale data for partial blocks.
             auto freeIdx = m_freeIndicesB[0].i;
             sbSizes[freeIdx] = RoundUpToMultiple(sbSizes[freeIdx], (size_t)32);
-            TensorDescriptor mxsb("mxScaleB", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
+            TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
         }
     }
