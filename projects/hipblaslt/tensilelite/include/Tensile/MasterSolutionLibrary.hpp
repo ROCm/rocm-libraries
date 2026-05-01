@@ -191,7 +191,14 @@ namespace TensileLite
             }
             else
             {
-                std::cerr << "No library found for index " << index << std::endl;
+                // index is below the smallest key in this arch's mapping —
+                // a normal occurrence when consumers scan an index range that
+                // spans solutions belonging to other arches in a per-arch
+                // shard install. Gated behind the same debug flag as the
+                // success-path "Loading library for index" print above so it
+                // remains available for diagnosis without polluting stderr.
+                if(Debug::Instance().printDataInit())
+                    std::cout << "No library found for index " << index << std::endl;
             }
         }
 

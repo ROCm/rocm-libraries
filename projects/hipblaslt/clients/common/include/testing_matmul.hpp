@@ -3726,32 +3726,60 @@ void testing_matmul_with_bias(const Arguments& arg,
         heuristicResult.clear();
         heuristicTuningIndex.clear();
 
-        int algoIndexCount = 0;
-        int algoIndexInc   = 100;
+        // Discover the device's saveable solution indices once via getAllAlgos,
+        // then round-trip them through getAlgosFromIndex. Probing [0..N) blindly
+        // doesn't work on per-arch shard installs: the lazy library's solution
+        // indices are globally numbered, so a non-first-alphabetical arch's
+        // smallest valid index is well above 0 and the first batch hits nothing.
+        std::vector<int> validIndices;
+        if(arg.solution_index == -1)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> allAlgos;
+            EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
+                                                             gemmType,
+                                                             transA,
+                                                             transB,
+                                                             arg.a_type,
+                                                             arg.b_type,
+                                                             arg.c_type,
+                                                             arg.d_type,
+                                                             arg.compute_type,
+                                                             allAlgos),
+                                  HIPBLAS_STATUS_SUCCESS);
+            validIndices.reserve(allAlgos.size());
+            for(auto& a : allAlgos)
+                validIndices.push_back(hipblaslt_ext::getIndexFromAlgo(a.algo));
+        }
+
+        size_t batchStart  = 0;
+        int    algoIndexInc = 100;
         while(1)
         {
             std::vector<int>                              algoIndex;
             std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo;
             bool                                          foundAlgo = false;
+            bool                                          lastBatch = false;
             if(arg.solution_index == -1)
             {
-                // Get algos by index
-                // In real cases, the user can use the saved algo index to get the algorithm.
-                // isAlgoSupported is not necessary if the user is sure that the algo supports the problem.
-                algoIndex.resize(algoIndexInc);
-                std::iota(std::begin(algoIndex), std::end(algoIndex), algoIndexCount);
-                algoIndexCount += algoIndexInc;
+                if(batchStart >= validIndices.size())
+                    break;
+                size_t batchEnd = std::min<size_t>(batchStart + algoIndexInc,
+                                                   validIndices.size());
+                algoIndex.assign(validIndices.begin() + batchStart,
+                                 validIndices.begin() + batchEnd);
+                batchStart = batchEnd;
+                lastBatch  = (batchStart >= validIndices.size());
             }
             else
             {
-                // Specify the index
+                // Specify the index — the explicit-index path is single-shot;
+                // CHECK_SOLUTION_FOUND below decides pass/fail.
                 algoIndex.resize(1);
                 algoIndex[0] = arg.solution_index;
+                lastBatch    = true;
             }
 
-            // INVALID_VALUE means some indices exceeded the pool size; valid algos are still returned in tmpAlgo
-            bool lastBatch = (HIPBLAS_STATUS_INVALID_VALUE
-                              == hipblaslt_ext::getAlgosFromIndex(handle, algoIndex, tmpAlgo));
+            (void)hipblaslt_ext::getAlgosFromIndex(handle, algoIndex, tmpAlgo);
             if(tmpAlgo.empty())
             {
                 break;
