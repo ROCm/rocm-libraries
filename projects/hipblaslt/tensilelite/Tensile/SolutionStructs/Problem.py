@@ -1158,7 +1158,8 @@ class ProblemType(Mapping):
     # Special condition for some newly supported kernels:
     #   HHS, HSS, BSS and I8II kernels, use a clearer naming _TiToTc_
     # TODO: Distinguish all kernels by _TiToTc_ to be more consistent with rocblas
-    gemmType = (self["DataType"].toChar(),self["DestDataType"].toChar(),self["ComputeDataType"].toChar() )
+    gemmType = (self["MacDataTypeA"].toChar(), self["MacDataTypeB"].toChar(),
+                self["DestDataType"].toChar(), self["ComputeDataType"].toChar())
     if gemmType in _HPATypes:
       name[-1] += "".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()])
 

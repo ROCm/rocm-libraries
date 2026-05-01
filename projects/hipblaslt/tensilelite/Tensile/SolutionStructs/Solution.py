@@ -666,8 +666,12 @@ class Solution(collections.abc.Mapping):
 
     state["MfmaInitCVgprs"] = False
     # Only enable UseSubtileImpl on gfx950; ignore user request on other ISAs.
-    state["UseSubtileImpl"] = state["UseSubtileImpl"] and state["ISA"] == IsaVersion(9,5,0)
-    
+    isgfx950 = state["ISA"] == IsaVersion(9,5,0)
+    state["UseSubtileImpl"] = state["UseSubtileImpl"] and isgfx950
+
+    if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
+
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
