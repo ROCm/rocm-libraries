@@ -495,20 +495,23 @@ class Failure:
 
 
 # ----------------------------------------------------------------------------
-# 1. OrderInvertedFailure — subject reverses the producer/consumer order
-#    that the default schedule established. Default IS the canonical reference;
-#    if subj emits the producer at a later stream position than the consumer
-#    while default emitted them in the opposite order, the subject violates
-#    a dataflow dependency.
-#    Emitted by: rules + dataflow comparison classifier.
+# 1. OrderInvertedFailure — cross-graph reorder detection ONLY.
+#    Subject reverses the producer/consumer order that the default schedule
+#    established. The default schedule IS the canonical reference; if subj
+#    emits the producer at a later stream position than the consumer while
+#    default emitted them in the opposite order, the subject violates a
+#    real dataflow dependency.
+#    Emitted by: diagnose_missing_edge (compare_graphs) and the within-graph
+#    fallback in _classify_edge_coverage. NOT used by single-schedule
+#    constraint validators — those emit ConstraintViolationFailure (#13).
 # ----------------------------------------------------------------------------
 @dataclass
 class OrderInvertedFailure(Failure):
-    producer: object  # GraphNode or ValidatorInstruction (subject-side)
-    consumer: object  # GraphNode or ValidatorInstruction (subject-side)
-    # Optional default-side positions for diagnostics. Populated by the
-    # cross-graph classifier (diagnose_missing_edge); rule-emitted Failures
-    # may leave them None.
+    producer: object  # GraphNode (subject-side)
+    consumer: object  # GraphNode (subject-side)
+    # Default-side positions for diagnostics. Populated by the cross-graph
+    # classifier (diagnose_missing_edge); the within-graph fallback in
+    # _classify_edge_coverage may leave them None.
     default_producer_position: object = None  # SchedulePosition
     default_consumer_position: object = None  # SchedulePosition
 
@@ -778,6 +781,32 @@ class OutOfOrderSequenceFailure(Failure):
                 f"at issue_index {self.prev_value} but CVT1 starts at issue_index "
                 f"{self.bad_value}. CVT0 must precede CVT1 in the pack chain."
             )
+
+
+# ----------------------------------------------------------------------------
+# 13. ConstraintViolationFailure — declared producer/consumer dependency
+#     constraint violated within a single schedule. Emitted by single-schedule
+#     constraint validators (Pack.validate, GlobalRead._validate_must_start_after)
+#     where there is no default schedule reference: the producer/consumer pair
+#     and the violation are derived entirely from the schedule under test plus
+#     its declared constraints (must_start_after, needed_by).
+#     Distinct from OrderInvertedFailure (#1), which is reserved for cross-graph
+#     reorder detection against the canonical default schedule.
+# ----------------------------------------------------------------------------
+@dataclass
+class ConstraintViolationFailure(Failure):
+    producer: object  # ValidatorInstruction
+    consumer: object  # ValidatorInstruction
+
+    def _format_canonical(self, capture=None) -> str:
+        producer_pos = format_position(self.producer, capture)
+        consumer_pos = format_position(self.consumer, capture)
+        return (
+            f"{self.producer.category}[{getattr(self.producer, 'name', '')}] "
+            f"{producer_pos} is issued after its consumer "
+            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
+            f"{consumer_pos}. The producer must complete before the consumer can use it."
+        )
 
 
 # Class-name lists for finalize() guards. Class-name matching (not isinstance)

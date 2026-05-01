@@ -25,7 +25,7 @@
 
 from Tensile.Components.CMSValidator import add_gr_not_too_early_constraints
 from Tensile.Components.ScheduleCapture import (
-    OrderInvertedFailure, MissingBarrierFailure,
+    ConstraintViolationFailure, MissingBarrierFailure,
 )
 from rocisa.instruction import SBarrier, SWaitCnt
 from cms_validation_base import CMSValidationTestBase
@@ -86,7 +86,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            expected_failure=OrderInvertedFailure,
+            expected_failure=ConstraintViolationFailure,
         )
         self.assert_order_inverted(
             f, producer_name="GRIncA", producer_idx=5,
@@ -184,7 +184,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            expected_failure=OrderInvertedFailure,
+            expected_failure=ConstraintViolationFailure,
         )
         self.assert_order_inverted(
             f, producer_name="GRIncB", producer_idx=5,
@@ -231,7 +231,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            expected_failure=OrderInvertedFailure,
+            expected_failure=ConstraintViolationFailure,
         )
         self.assert_order_inverted(
             f, producer_name="GRIncB", producer_idx=6,
@@ -299,7 +299,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            expected_failure=OrderInvertedFailure,
+            expected_failure=ConstraintViolationFailure,
         )
         self.assert_order_inverted(
             f, producer_name="GRIncA", producer_idx=5,

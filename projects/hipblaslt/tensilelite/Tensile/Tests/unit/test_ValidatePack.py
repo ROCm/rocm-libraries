@@ -32,7 +32,7 @@ from Tensile.Components.CMSValidator import (
 )
 from Tensile.Components.CustomSchedule import ScheduleInfo
 from Tensile.Components.ScheduleCapture import (
-    OrderInvertedFailure, TimingTooCloseFailure, WrongInterleavingFailure,
+    ConstraintViolationFailure, TimingTooCloseFailure, WrongInterleavingFailure,
 )
 from cms_validation_base import CMSValidationTestBase
 from cms_test_utils import make_mock_id_map, make_mock_mfma_code
@@ -125,7 +125,7 @@ class TestValidatePackBF16(CMSValidationTestBase):
         ]
         # PackA0 @ idx=2 issued before LRA0 (issued @ 0) is guaranteed by SWaitCnt @ idx=3.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA0", producer_idx=0,
             consumer_name="PackA0", consumer_idx=2)
@@ -189,7 +189,7 @@ class TestValidatePackBF16MFMAReorder(CMSValidationTestBase):
         ]
         # PackA0 @ idx=2 issued before LRA0 (issued @ -1) is guaranteed @ idx=3 (mfmaReorder case).
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure,
+                          expected_failure=ConstraintViolationFailure,
                           mfmaReorder=self.mfma_reorder)
         self.assert_order_inverted(
             f, producer_name="LRA0", producer_idx=-1,
@@ -225,7 +225,7 @@ class TestValidatePackBF16MFMAReorder(CMSValidationTestBase):
         ]
         # PackA0 @ idx=4 issued too late, must be before MFMA @ idx=4.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure,
+                          expected_failure=ConstraintViolationFailure,
                           mfmaReorder=self.mfma_reorder)
         self.assert_order_inverted(
             f, producer_name="PackA0", producer_idx=4,
@@ -323,7 +323,7 @@ class TestValidatePackBF16PLRPack(CMSValidationTestBase):
         # PackA1 at index 5 is invalid because LRs are only guaranteed at index 6 (after SWaitCnt)
         # PackA1 @ idx=5 issued before LRA1 (issued @ 4) is guaranteed @ idx=6.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA1", producer_idx=4,
             consumer_name="PackA1", consumer_idx=5)
@@ -354,7 +354,7 @@ class TestValidatePackBF16PLRPack(CMSValidationTestBase):
         # PackA1 at index 5 is invalid because LRs are only guaranteed at index 6 (after SWaitCnt)
         # PackA1 @ idx=5 issued before LRA1 (issued @ 4) is guaranteed @ idx=6.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA1", producer_idx=4,
             consumer_name="PackA1", consumer_idx=5)
@@ -385,7 +385,7 @@ class TestValidatePackBF16PLRPack(CMSValidationTestBase):
         # PackA1 at index 5 is invalid because LRs are only guaranteed at index 6 (after SWaitCnt)
         # PackA1 @ idx=5 issued before LRA1 (issued @ 4) is guaranteed @ idx=6.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA1", producer_idx=4,
             consumer_name="PackA1", consumer_idx=5)
@@ -477,7 +477,7 @@ class TestValidatePackTF32(CMSValidationTestBase):
         
         # PackB0 @ idx=3 issued before LRB0 (issued @ 3) is guaranteed @ idx=5.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRB0", producer_idx=3,
             consumer_name="PackB0", consumer_idx=3)
@@ -507,7 +507,7 @@ class TestValidatePackTF32(CMSValidationTestBase):
         ]
         # PackA0 @ idx=5 issued too late, must be before MFMA @ idx=3.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="PackA0", producer_idx=5,
             consumer_name="MFMA", consumer_idx=3)
@@ -537,7 +537,7 @@ class TestValidatePackTF32(CMSValidationTestBase):
         ]
         # PackB0 @ idx=8 issued too late, must be before MFMA @ idx=6.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="PackB0", producer_idx=8,
             consumer_name="MFMA", consumer_idx=6)
@@ -671,7 +671,7 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         ]
         # PackB0 @ idx=1 issued before LRB0 (issued @ 0) is guaranteed @ idx=11 (mfmaReorder case).
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure,
+                          expected_failure=ConstraintViolationFailure,
                           mfmaReorder=self.mfma_reorder)
         self.assert_order_inverted(
             f, producer_name="LRB0", producer_idx=0,
@@ -1051,7 +1051,7 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
         
         # PackB0 @ idx=13 issued before LRB0 (issued @ 12) is guaranteed @ idx=23.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRB0", producer_idx=12,
             consumer_name="PackB0", consumer_idx=13)
@@ -1088,7 +1088,7 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
         ]
         # PackA0 @ idx=14 issued too late, must be before MFMA @ idx=13.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="PackA0", producer_idx=14,
             consumer_name="MFMA", consumer_idx=13)
@@ -1435,7 +1435,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
 
         # PackA0 @ idx=9 issued too late, must be before MFMA @ idx=9.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="PackA0", producer_idx=9,
             consumer_name="MFMA", consumer_idx=9)
@@ -1768,7 +1768,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         # PackA0 @ idx=0 issued before LRA0 (issued @ 0) is guaranteed @ idx=1.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA0", producer_idx=0,
             consumer_name="PackA0", consumer_idx=0)
@@ -1792,7 +1792,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
         # PackA0 @ idx=1 issued before PackA0 (swap, issued @ 2) is guaranteed @ idx=2.
         f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=OrderInvertedFailure)
+                          expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="PackA0", producer_idx=2,
             consumer_name="PackA0", consumer_idx=1)
@@ -1952,7 +1952,7 @@ class TestLRAfterPack(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=OrderInvertedFailure)
+            expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA0", producer_idx=1,
             consumer_name="PackA0", consumer_idx=0)
@@ -1978,7 +1978,7 @@ class TestLRAfterPack(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=OrderInvertedFailure)
+            expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA0", producer_idx=0,
             consumer_name="PackA0", consumer_idx=2)
@@ -2035,7 +2035,7 @@ class TestLRAfterPack_LR1(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=OrderInvertedFailure)
+            expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA1", producer_idx=5,
             consumer_name="PackA1", consumer_idx=4)
@@ -2061,7 +2061,7 @@ class TestLRAfterPack_LR1(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=OrderInvertedFailure)
+            expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA1", producer_idx=4,
             consumer_name="PackA1", consumer_idx=5)
@@ -2127,7 +2127,7 @@ class TestLRAfterPack_LR3(CMSValidationTestBase):
         opt["SYNC"] = [[self.q1s + 1, self.q2s + 1, self.q3s + 1, self.q4s + 2]]
         f = self.validate(
             opt, self._sync_code(), 1, 2, 2, 0,
-            expected_failure=OrderInvertedFailure)
+            expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA3", producer_idx=self.q4s + 1,
             consumer_name="PackA3", consumer_idx=self.q4s)
@@ -2140,7 +2140,7 @@ class TestLRAfterPack_LR3(CMSValidationTestBase):
         opt["SYNC"] = [[self.q1s + 1, self.q2s + 1, self.q3s + 1, self.q4s + 1]]
         f = self.validate(
             opt, self._sync_code(), 1, 2, 2, 0,
-            expected_failure=OrderInvertedFailure)
+            expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="LRA3", producer_idx=self.q4s,
             consumer_name="PackA3", consumer_idx=self.q4s)
@@ -2176,7 +2176,7 @@ class TestPackAfterMFMA(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=OrderInvertedFailure)
+            expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="PackA0", producer_idx=5,
             consumer_name="MFMA", consumer_idx=4)
@@ -2239,7 +2239,7 @@ class TestPackAfterMFMA_LR1(CMSValidationTestBase):
         ]
         f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=OrderInvertedFailure)
+            expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="PackA0", producer_idx=5,
             consumer_name="MFMA", consumer_idx=4)
@@ -2292,7 +2292,7 @@ class TestPackAfterMFMA_LR3(CMSValidationTestBase):
         ]
         f = self.validate(
             opt, syncCode, 1, 2, 2, 0,
-            expected_failure=OrderInvertedFailure)
+            expected_failure=ConstraintViolationFailure)
         self.assert_order_inverted(
             f, producer_name="PackA0", producer_idx=self.q2e,
             consumer_name="MFMA", consumer_idx=self.q2s)

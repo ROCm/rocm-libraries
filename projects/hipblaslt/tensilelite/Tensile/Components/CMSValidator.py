@@ -393,7 +393,7 @@ class Pack(ValidatorInstruction):
     def validate(self):
         """Stack 1.3: returns typed Failure or None."""
         from Tensile.Components.ScheduleCapture import (
-            OrderInvertedFailure, TimingTooCloseFailure,
+            ConstraintViolationFailure, TimingTooCloseFailure,
         )
         issued_at = self.issued_at.vmfma_index
 
@@ -406,12 +406,12 @@ class Pack(ValidatorInstruction):
             pass  # Ordering checks passed, fall through to timing check
         elif self.issued_at < effective_must_start_after.done_idx():
             # Issued too early
-            return OrderInvertedFailure(
+            return ConstraintViolationFailure(
                 producer=effective_must_start_after, consumer=self,
             )
         elif self.issued_at >= self.needed_by.issued_at:
             # Issued too late
-            return OrderInvertedFailure(
+            return ConstraintViolationFailure(
                 producer=self, consumer=self.needed_by,
             )
         else:
@@ -516,7 +516,7 @@ class GlobalRead(ValidatorInstruction):
     def _validate_must_start_after(self):
         """Validate all must_start_after constraints. Returns Failure or None."""
         from Tensile.Components.ScheduleCapture import (
-            OrderInvertedFailure, MissingBarrierFailure,
+            ConstraintViolationFailure, MissingBarrierFailure,
         )
         for constraint in self.must_start_after:
             if constraint.done_idx() == POSITION_NEG_INF:
@@ -526,7 +526,7 @@ class GlobalRead(ValidatorInstruction):
 
             # 1. Check ordering: GR must be issued after constraint is done
             if self.issued_at <= constraint_done:
-                return OrderInvertedFailure(
+                return ConstraintViolationFailure(
                     producer=constraint, consumer=self,
                 )
 
