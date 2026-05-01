@@ -674,6 +674,389 @@ class TestMFMAQuadCycleGap:
             f"{[type(f).__name__ for f in failures]}"
         )
 
+    # -------------------------------------------------------------------------
+    # Bead `rocm-libraries-cpe`: richer adversarial negative tests for the
+    # MFMA quad-cycle dispatch surface. Each test below ACTIVELY trips a
+    # discriminating dispatch condition rather than only pinning zero-gap
+    # behavior — see bead "What's still missing" for the 5 scenarios.
+    #
+    # Note on cmw formula: post-cmw, `_quad_cycle_gap_ok` returns
+    # `actual = slot_delta * (1 + finish) - 1 + subiter_delta` (sound
+    # under-estimate). For finish=3 (standard MFMA) this gives:
+    #     slot_delta=0 → actual=0   (FAIL: 0 < 3)
+    #     slot_delta=1 → actual=3   (PASS: meets threshold)
+    #     slot_delta=2 → actual=7   (PASS) +1 if subiter boundary crossed
+    # Therefore, the only failure-producing slot configuration in the
+    # current formula is slot_delta == 0 (or negative). Tests below
+    # discriminate via the `actual` field's exact value at the boundary,
+    # via cross-graph routing through diagnose_missing_edge, and via
+    # subiter-aware variations that change `actual` without changing pass.
+    # -------------------------------------------------------------------------
+
+    def test_mfma_acc_chain_diagnose_missing_edge_with_nonzero_gap(self):
+        """Cross-graph route: REF and SUBJ both contain three MFMAs and an
+        ALU. In REF, the resolver pairs P (MFMA, slot=2 sub=0, writes v0..v3)
+        with C (MFMA, slot=2 sub=1, reads v0..v1) — slot_delta == 0 → the
+        TimingTooCloseFailure that compare_graphs synthesizes via
+        diagnose_missing_edge MFMA branch carries `expected=3, actual=0`.
+
+        Discriminates from `test_mfma_acc_chain_zero_gap_via_diagnose_missing_edge`
+        on TWO axes the prior test did NOT exercise:
+          (a) REF and SUBJ have STRUCTURALLY different graphs — REF lacks
+              the shadowing ALU (proves the cross-graph diff isolates the
+              MFMA→MFMA edge as missing in subj rather than absent in both).
+          (b) Asserts the failure's discriminating fields
+              (expected_quad_cycles, actual_quad_cycles, producer.category,
+              consumer.category) — proving the gap arithmetic populates the
+              failure record correctly, not just that dispatch fires.
+
+        A non-zero `actual` would discriminate further but is currently
+        unreachable: the formula yields actual ≥ 3 for every slot_delta > 0,
+        so no slot configuration produces a failure with actual ∈ {1, 2}.
+        Tracked in `rocm-libraries-w7f` (timeline-aware migration)."""
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # REF: P writes v0..v3, C immediately reads v0..v1. NO shadowing
+            # ALU between them — P->C survives as the missing-from-subj edge.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=2, sequence=1, a_src_count=2),
+        ])
+        subj_alu = VXorB32(dst=vgpr(0, 2), src0=vgpr(40, 1), src1=vgpr(41, 1))
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # SUBJ: ALU reordered between P and C — becomes latest writer
+            # of v0..v1, so the per-byte resolver routes C's read to ALU
+            # instead of P. The MFMA->MFMA edge from REF is missing in SUBJ.
+            _tag(subj_alu, category="PackA0", mfma_index=2, sequence=1),
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=2, sequence=2, a_src_count=2),
+        ])
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        failures = compare_graphs(g_ref, g_subj, raise_on_unexplained=False)
+        mfma_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", None) == "MFMA"
+            and getattr(f.consumer, "category", None) == "MFMA"
+        ]
+        assert mfma_timing, (
+            f"Expected diagnose_missing_edge MFMA branch to emit "
+            f"TimingTooCloseFailure on the MFMA→MFMA edge missing in subj; "
+            f"got: {[type(f).__name__ for f in failures]}"
+        )
+        f = mfma_timing[0]
+        # Discriminating fields — the gap arithmetic must populate these:
+        assert f.expected_quad_cycles == 3, (
+            f"expected_quad_cycles should be QUAD_CYCLES_STANDARD_MFMA_FINISH "
+            f"(3), got {f.expected_quad_cycles}."
+        )
+        assert f.actual_quad_cycles == 0, (
+            f"actual_quad_cycles should be 0 for slot_delta == 0, got "
+            f"{f.actual_quad_cycles}."
+        )
+        assert f.producer.category == "MFMA"
+        assert f.consumer.category == "MFMA"
+
+    def test_mfma_acc_chain_just_meets_quad_cycle_gap(self):
+        """Boundary case: gap exactly equal to `expected` (slot_delta == 1
+        → actual == 3 == expected). The dispatch must NOT emit
+        TimingTooCloseFailure on this MFMA→MFMA edge — the inequality in
+        `_quad_cycle_gap_ok` is `actual >= expected` (inclusive at the
+        threshold). A regression that flipped to `actual > expected`
+        (strict) would over-flag every minimally-spaced consecutive MFMA
+        pair; this test catches that flip.
+
+        REF: identical to SUBJ — single P at slot=2 writing v0..v3, C at
+        slot=3 reading v0..v1. SUBJ is identical; we route through
+        compare_graphs to verify NEITHER the diagnose_missing_edge MFMA
+        branch nor _classify_edge_coverage emits a TimingTooClose on this
+        edge."""
+        def _build():
+            return make_capture(BODY_LABEL_ML, [
+                make_lr(8, 4, 64, slot=0, category="LRA0"),
+                make_swait(slot=1, dscnt=0),
+                # P at slot=2.
+                make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                          slot=2, sequence=0, a_src_count=2),
+                # C at slot=3 reads v0..v1 — slot_delta == 1, the threshold.
+                make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                          slot=3, sequence=0, a_src_count=2),
+            ])
+        g_ref = build_dataflow_graph(_wrap(_build()))
+        g_subj = build_dataflow_graph(_wrap(_build()))
+
+        # Cross-graph route: identical graphs ⇒ no missing edges ⇒ no
+        # diagnose_missing_edge dispatch ⇒ no TimingTooClose from that path.
+        failures_cross = compare_graphs(g_ref, g_subj,
+                                        raise_on_unexplained=False)
+        assert not any(
+            isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", None) == "MFMA"
+            and getattr(f.consumer, "category", None) == "MFMA"
+            for f in failures_cross
+        ), (
+            f"compare_graphs should NOT emit MFMA TimingTooClose at "
+            f"slot_delta==1 (actual==expected==3). Got: {failures_cross}"
+        )
+
+        # Within-graph route via _classify_edge_coverage: the dispatch must
+        # also accept the boundary case — `actual >= expected` inclusive.
+        failures_within = validate_edge_wait_coverage(g_subj)
+        assert not any(
+            isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", None) == "MFMA"
+            and getattr(f.consumer, "category", None) == "MFMA"
+            for f in failures_within
+        ), (
+            f"validate_edge_wait_coverage should NOT emit MFMA "
+            f"TimingTooClose at slot_delta==1 (boundary). Got: "
+            f"{failures_within}"
+        )
+
+        # Direct check on _quad_cycle_gap_ok: at the boundary, ok=True with
+        # actual == expected == 3. A future strict-inequality regression
+        # would flip ok to False here.
+        # Find the MFMA→MFMA edge for the direct invariant assertion.
+        acc_edge = None
+        for e in g_subj.edges:
+            if (getattr(e.producer, "category", None) == "MFMA"
+                    and getattr(e.consumer, "category", None) == "MFMA"):
+                acc_edge = e
+                break
+        assert acc_edge is not None, "expected MFMA→MFMA acc-chain edge"
+        ok, exp, act = _quad_cycle_gap_ok(
+            acc_edge.producer, acc_edge.consumer, 0)
+        assert ok, (
+            f"_quad_cycle_gap_ok must accept the boundary case "
+            f"(actual={act}, expected={exp}); ok was False."
+        )
+        assert exp == 3 and act == 3, (
+            f"At slot_delta==1, expected==actual==3; got "
+            f"expected={exp}, actual={act}."
+        )
+
+    def test_mfma_to_mfma_cross_subiter_routing(self):
+        """Cross-subiter MFMA→MFMA edge: producer at vmfma=0 (subiter 0),
+        consumer at vmfma=2 (subiter 1) with num_mfma_per_subiter=2. The
+        subiter-aware correction in `_quad_cycle_gap_ok` (post-cmw) adds
+        `subiter_delta` quad-cycles to `actual`, so the SAME (slot_delta=2)
+        configuration produces a DIFFERENT `actual` depending on whether
+        the two MFMAs lie in the same subiter or in different subiters.
+
+        This actively trips the cross-subiter routing path (cmw correction)
+        rather than the OrderInverted same-subiter gate from sub-task 11
+        (commit f594ff4b09): that gate applies only to ALU producers, not
+        to MFMA, so MFMA cross-subiter routing here is governed exclusively
+        by `_quad_cycle_gap_ok`'s subiter-delta term.
+
+        Discrimination point: actual_same_subiter (nmps=4, subiter_delta=0)
+        != actual_cross_subiter (nmps=2, subiter_delta=1) for the same
+        slot_delta=2. A regression that dropped the subiter_delta term
+        (the cmw fix) would collapse both to the same value."""
+        def _build_cap():
+            return make_capture(BODY_LABEL_ML, [
+                make_lr(8, 4, 64, slot=0, category="LRA0"),
+                make_swait(slot=1, dscnt=0),
+                # Producer at vmfma=0 (subiter 0 under both nmps values).
+                make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                          slot=0, sequence=0, a_src_count=2),
+                # Consumer at vmfma=2 reads v0..v1 (RAW on producer's acc).
+                # Under nmps=2 → subiter 1 (cross-subiter).
+                # Under nmps=4 → subiter 0 (same-subiter).
+                make_mfma(c_dst_start=20, a_src_start=0, b_src_start=32,
+                          slot=2, sequence=0, a_src_count=2),
+            ])
+
+        def _wrap_with_nmps(cap, nmps):
+            wrapped = _wrap(cap)
+            return FourPartCapture(
+                main_loop=wrapped.main_loop,
+                main_loop_prev=wrapped.main_loop_prev,
+                n_gl=wrapped.n_gl,
+                n_ll=wrapped.n_ll,
+                num_mfma=wrapped.num_mfma,
+                num_codepaths=wrapped.num_codepaths,
+                source=wrapped.source,
+                num_mfma_per_subiter=nmps,
+            )
+
+        g_same = build_dataflow_graph(_wrap_with_nmps(_build_cap(), 4))
+        g_cross = build_dataflow_graph(_wrap_with_nmps(_build_cap(), 2))
+
+        def _acc_edge(g):
+            for e in g.edges:
+                if (getattr(e.producer, "category", None) == "MFMA"
+                        and getattr(e.consumer, "category", None) == "MFMA"):
+                    return e
+            return None
+
+        e_same = _acc_edge(g_same)
+        e_cross = _acc_edge(g_cross)
+        assert e_same is not None and e_cross is not None, (
+            "Expected an MFMA→MFMA acc-chain edge in both graphs."
+        )
+
+        ok_s, exp_s, act_s = _quad_cycle_gap_ok(
+            e_same.producer, e_same.consumer, 4)
+        ok_c, exp_c, act_c = _quad_cycle_gap_ok(
+            e_cross.producer, e_cross.consumer, 2)
+
+        # Both pass (actual ≥ expected) — slot_delta=2 produces actual ≥ 7.
+        assert ok_s and ok_c, (
+            f"Both should pass: same-subiter actual={act_s}/exp={exp_s}, "
+            f"cross-subiter actual={act_c}/exp={exp_c}."
+        )
+        # Discriminator: routing differs — cross-subiter `actual` is HIGHER
+        # than same-subiter `actual` by the +subiter_delta correction.
+        assert act_c > act_s, (
+            f"Cross-subiter routing must add the subiter-delta correction: "
+            f"same-subiter actual={act_s}, cross-subiter actual={act_c}. "
+            f"A regression that dropped the +subiter_delta term would "
+            f"collapse both to the same value."
+        )
+        # And the difference equals the subiter_delta (1 boundary crossed).
+        assert act_c - act_s == 1, (
+            f"Cross-subiter correction should be exactly subiter_delta==1; "
+            f"got delta={act_c - act_s}."
+        )
+
+    def test_mfma_producer_multi_consumer_varied_gaps(self):
+        """A single MFMA producer feeds three consumer MFMAs at slot deltas
+        0, 1, 2 (i.e. gaps actual=0, 3, 7). The dispatch must short-circuit
+        per-edge — only the gap=0 consumer triggers TimingTooCloseFailure;
+        the gap=3 and gap=7 consumers pass.
+
+        This catches a regression that early-exits after the first failure
+        (e.g. bails out of `validate_edge_wait_coverage`'s edge loop on the
+        first TimingTooClose), or one that flags ALL edges from a producer
+        once any one of them fails.
+
+        Layout: P at slot=2 writes v0..v3. Three consumers pick up disjoint
+        slices of P's accumulator (v0..v1, v2..v3, v0..v1) at slots 2/3/4
+        respectively. Each consumer is a distinct MFMA (different c_dst)
+        so identities are unique."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # Producer at slot=2 writes v0..v3 (4-vgpr accumulator).
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # C1 at slot=2 sub=1 reads v0..v1 — gap=0 → MUST FAIL.
+            make_mfma(c_dst_start=40, a_src_start=0, b_src_start=32,
+                      slot=2, sequence=1, a_src_count=2),
+            # C2 at slot=3 reads v2..v3 — gap=3 → MUST PASS (boundary).
+            make_mfma(c_dst_start=44, a_src_start=2, b_src_start=32,
+                      slot=3, sequence=0, a_src_count=2),
+            # C3 at slot=4 reads v0..v1 — gap=7 → MUST PASS.
+            make_mfma(c_dst_start=48, a_src_start=0, b_src_start=32,
+                      slot=4, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        mfma_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", None) == "MFMA"
+            and getattr(f.consumer, "category", None) == "MFMA"
+        ]
+        # Exactly ONE MFMA→MFMA timing failure: the slot_delta==0 consumer.
+        actuals = [getattr(f, "actual_quad_cycles", None) for f in mfma_timing]
+        assert len(mfma_timing) == 1, (
+            f"Expected exactly 1 MFMA→MFMA TimingTooCloseFailure (the "
+            f"slot_delta==0 consumer); got {len(mfma_timing)} with "
+            f"actuals={actuals}"
+        )
+        f = mfma_timing[0]
+        assert f.actual_quad_cycles == 0, (
+            f"The single failure must be the gap=0 consumer; got "
+            f"actual={f.actual_quad_cycles}."
+        )
+        assert f.expected_quad_cycles == 3
+        # Sanity: at least 3 MFMA→MFMA edges exist in the graph (one per
+        # consumer). Confirms the dispatch saw all three edges, not just
+        # the first.
+        mfma_edges = [
+            e for e in g.edges
+            if (getattr(e.producer, "category", None) == "MFMA"
+                and getattr(e.consumer, "category", None) == "MFMA")
+        ]
+        assert len(mfma_edges) >= 3, (
+            f"Expected at least 3 MFMA→MFMA edges (one per consumer); "
+            f"got {len(mfma_edges)}."
+        )
+
+    def test_mfma_quadcycle_mutation_smell(self):
+        """Mutation smell-test: monkeypatch `_classify_edge_coverage` to a
+        no-op (returns []) and confirm at least one of the new
+        TimingTooClose tests no longer detects the failure. This proves the
+        new tests ACTIVELY exercise the dispatch logic — if they pass with
+        the dispatch disabled, they're pinning behavior unrelated to the
+        MFMA gap check.
+
+        Targets the within-graph route (`validate_edge_wait_coverage` →
+        `_classify_edge_coverage`). Cross-graph route (`compare_graphs` →
+        `diagnose_missing_edge`) has its own dispatch and is not affected
+        by this patch — that's the desired narrow scope of the mutation:
+        confirm `_classify_edge_coverage` is the source of the within-graph
+        TimingTooClose verdict.
+        """
+        from unittest.mock import patch
+
+        # Re-build the same fixture as test_mfma_producer_multi_consumer_varied_gaps:
+        # gap=0 consumer at slot=2 sub=1 must produce a TimingTooCloseFailure
+        # under the real dispatch.
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            make_mfma(c_dst_start=40, a_src_start=0, b_src_start=32,
+                      slot=2, sequence=1, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+
+        # Sanity: under the real dispatch, the failure fires.
+        real_failures = validate_edge_wait_coverage(g)
+        real_timing = [
+            f for f in real_failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", None) == "MFMA"
+        ]
+        assert real_timing, (
+            "Pre-mutation sanity: the real _classify_edge_coverage must "
+            "emit a TimingTooCloseFailure on the zero-gap fixture. If this "
+            "fails, the test's premise is wrong, not the dispatch."
+        )
+
+        # Mutation: patch _classify_edge_coverage to a no-op. The
+        # within-graph dispatch should now produce zero failures.
+        with patch(
+            "Tensile.Components.ScheduleCapture._classify_edge_coverage",
+            return_value=[],
+        ):
+            mutated_failures = validate_edge_wait_coverage(g)
+            mutated_timing = [
+                f for f in mutated_failures
+                if isinstance(f, TimingTooCloseFailure)
+                and getattr(f.producer, "category", None) == "MFMA"
+            ]
+            assert not mutated_timing, (
+                f"Mutation smell-test failed: after patching "
+                f"_classify_edge_coverage to a no-op, the dispatch still "
+                f"emitted {len(mutated_timing)} MFMA TimingTooCloseFailure "
+                f"failures. This means at least one of the new tests is "
+                f"NOT exercising _classify_edge_coverage — the dispatch "
+                f"path is elsewhere. Investigate the source of the "
+                f"residual failure."
+            )
+
 
 # =============================================================================
 # P0 — GRInc SRD WAW invisible to subsequent GR (BufferLoad)
