@@ -115,9 +115,10 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
                           const I lda,
                           Th& hA)
 {
+    using llong = long long;
     const bool debug_ = false;
     if (debug_)
-        printf( "%s( n %d, kd %d )\n", __func__, n, kd );
+        printf( "%s( n %lld, kd %lld )\n", __func__, llong(n), llong(kd) );
 
     if(CPU)
     {
@@ -177,7 +178,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     CHECK_ROCBLAS_ERROR(
         rocblas_get_stream( handle, &stream ) );
 
-printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
+printf( "%s( n %lld, kd %lld, nb %lld )\n", __func__, llong(n), llong(kd), llong(nb) );
     // lwork for LAPACK hetrd_he2hb
     size_t lwork = n * kd + n * std::max(kd, 128) + 2 * kd * kd;
     std::vector<T> hwork(lwork);
@@ -194,7 +195,8 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
         rocsolver_sy2sb_he2hb(
             handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data()));
     time = timer.end(stream);
-    printf( "n %d, kd %d, nb %d, getError time %.4f\n", n, kd, nb, time );
+    printf( "n %lld, kd %lld, nb %lld, getError time %.4f\n",
+            llong(n), llong(kd), llong(nb), time );
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hAbandRes.transfer_from(dAband));
     CHECK_HIP_ERROR(hTauRes.transfer_from(dTau));
@@ -212,7 +214,8 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
         hwork.data(),
         lwork);
     time = timer.end(stream);
-    printf( "n %d, kd %d, nb %d, getError time %.4f lapack\n", n, kd, nb, time );
+    printf( "n %lld, kd %lld, nb %lld, getError time %.4f lapack\n",
+            llong(n), llong(kd), llong(nb), time );
 
     // error is ||hARes - hAband|| / ||hAband||
     // using frobenius norm
@@ -275,7 +278,8 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
                        const bool profile_kernels,
                        const bool perf)
 {
-printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
+printf( "%s( n %lld, kd %lld, nb %lld )\n",
+        __func__, llong(n), llong(kd), llong(nb) );
     rocsolver_timer timer;
     double start, time;
     hipStream_t stream;
@@ -319,7 +323,8 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
                 dAband.data(), ldab,
                 dTau.data()));
         time = timer.end(stream);
-        printf( "n %d, kd %d, nb %d, cold iter %d, time %.4f\n", n, kd, nb, iter, time );
+        printf( "n %lld, kd %lld, nb %lld, cold iter %lld, time %.4f\n",
+                llong(n), llong(kd), llong(nb), llong(iter), time );
     }
     timer.reset();
 
@@ -345,7 +350,8 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
             dAband.data(), ldab,
             dTau.data());
         time = timer.end(stream);
-        printf( "n %d, kd %d, nb %d, hot  iter %d, time %.4f\n", n, kd, nb, iter, time );
+        printf( "n %lld, kd %lld, nb %lld, hot  iter %lld, time %.4f\n",
+                llong(n), llong(kd), llong(nb), llong(iter), time );
     }
     *gpu_time_used = timer.get_combined();
 }
@@ -363,7 +369,8 @@ void testing_sy2sb_he2hb(Arguments& argus)
     // rocSolver 2nd stage needs 3*kd. LAPACK needs kd+1.
     // todo: get ldab from argus?
     I ldab = 3*kd;  //kd + 1;
-printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
+printf( "%s( n %lld, kd %lld, nb %lld )\n",
+        __func__, llong(n), llong(kd), llong(nb) );
 
     rocblas_int hot_calls = argus.iters;
 

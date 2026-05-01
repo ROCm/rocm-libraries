@@ -162,9 +162,13 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                     "shiftA:", shiftA, "lda:", lda, "ldab:", ldab,
                     "bc:", batch_count);
 
+    using llong = long long;
     const bool debug_ = false;
     if (debug_)
-        printf( "he2hb n %d, kd %d, nb %d, lda %d, ldab %d\n", n, kd, nb, lda, ldab );
+    {
+        printf( "he2hb n %lld, kd %lld, nb %lld, lda %lld, ldab %lld\n",
+                llong(n), llong(kd), llong(nb), llong(lda), llong(ldab) );
+    }
 
     using S = decltype(std::real(T{}));
 
@@ -224,7 +228,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         I jend = j + jb;
 
         if (debug_)
-            printf( "----------\nj = %d, jb = %d, jend = %d, jm = %d\n", j, jb, jend, jm );
+        {
+            printf( "----------\nj = %lld, jb = %lld, jend = %lld, jm = %lld\n",
+                    llong(j), llong(jb), llong(jend), llong(jm) );
+        }
 
         // Copy panel to factor, to preserve A for hemm.
         // For copying purposes, round up to full kd.
@@ -252,7 +259,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             I qn = std::min( kd, qm );
 
             if (debug_)
-                printf( "-----\ni = %d, qm = %d, qn = %d\n", i, qm, qn );
+            {
+                printf( "-----\ni = %lld, qm = %lld, qn = %lld\n",
+                        llong(i), llong(qm), llong(qn) );
+            }
 
             if (i > j)
             {
