@@ -58,9 +58,11 @@ public:
         m_start_time = get_time_us_sync(stream);
     }
 
-    void end(hipStream_t stream)
+    double end(hipStream_t stream)
     {
-        m_times.push_back(get_time_us_sync(stream) - m_start_time);
+        double t = get_time_us_sync(stream) - m_start_time;
+        m_times.push_back(t);
+        return t;
     }
 
     double get_combined(average_type avg = median)
