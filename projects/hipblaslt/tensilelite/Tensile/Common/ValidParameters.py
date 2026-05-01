@@ -626,7 +626,7 @@ validParameters = { # we need to make sure this matches develop
     # Generally, the VW determines the consecutive a WI will work on, then it will skip ahead SG0*VW elements to get to the next row of VGPR inputs
     "ThreadTile": validThreadTiles,
     "MacroTile": validMacroTiles,  # MT0 = wg0*tt0, MT1 = wg1*tt1
-    "WavefrontSize": [32, 64],
+    "WavefrontSize": [-1, 32, 64],  # -1 = auto-detect from ISA archCaps["HasWave32"]
     # MatrixInstruction: (M x N x K x B)
     # XDLOPS tile definition, only valid for gfx908, gfx90a
     # MxNxKxB specifies matrix instruction variants
