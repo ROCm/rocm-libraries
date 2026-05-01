@@ -22,6 +22,9 @@
 
 from typing import Any, Optional
 from Tensile.Components.CMSValidator import add_gr_not_too_early_constraints
+from Tensile.Components.ScheduleCapture import (
+    OrderInvertedFailure, MissingBarrierFailure,
+)
 from rocisa.instruction import SBarrier, SWaitCnt
 from cms_validation_base import CMSValidationTestBase
 
@@ -53,7 +56,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRB0": [[1]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier(comment="")]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_lda_before_ldb_so_gra_safe(self):
         """
@@ -73,7 +76,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_lda_before_ldb_so_grb_unsafe(self):
         """
@@ -95,8 +98,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRB @ idx=2 is issued too early. "
-            "Must be issued after idx=5, which is when LRB0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_different_simd_codes(self):
@@ -115,7 +117,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier()
             ]
-        self.validate(optSchedule, syncCode, 2, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 2, None, None, 0)
 
     def test_negative_different_simd_codes(self):
         """
@@ -133,15 +135,14 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
 
         # Code path 0 should pass
-        self.validate(optSchedule, syncCode, 2, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 2, None, None, 0)
 
         # Code path 1 should fail: LRA0 at 4, SWaitCnt at 3 doesn't cover it.
         # LRA0's guaranteed_by stays inf until the SWaitCnt(dscnt=0) in ML loop which makes done_idx
         # very high. GRA's issued_at < must_start_after.done_idx() -> too early.
         self.validate(
             optSchedule, syncCode, 2, None, None, 1,
-            "GRA @ idx=5 is issued too early. "
-            "Must be issued after idx=3 (of next iteration), which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_negative_b_too_early(self):
@@ -160,8 +161,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         syncCode = [SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment=""), SBarrier(comment="")]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRB @ idx=6 is issued too early. "
-            "Must be issued after idx=3 (of next iteration), which is when LRB0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_negative_barrier_before_swait(self):
@@ -180,8 +180,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         syncCode = [SBarrier(comment=""), SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "There is an SBarrier missing between the SWaitCnt @ idx=3 (which guarantees LRA0 from idx=0 to done) and the GRA @ idx=5. "
-            "Order must be LRA0 -> SWait -> SBarrier -> GRA."
+            expected_failure=MissingBarrierFailure,
         )
 
     def test_interleave_separate_pairs(self):
@@ -203,7 +202,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_interleave_multiple_lr0s(self):
         """
@@ -224,7 +223,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_a_too_early(self):
         """
@@ -248,8 +247,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=5 is issued too early. "
-            "Must be issued after idx=6, which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_sync_and_gr_at_same_index(self):
@@ -272,7 +270,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_redundant_waitcnt(self):
         """
@@ -297,7 +295,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_swap_global_read_order(self):
         """
@@ -319,7 +317,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_swap_global_read_order(self):
         """
@@ -344,8 +342,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA (Swapped, loading B) @ idx=3 is issued too early. "
-            "Must be issued after idx=5, which is when LRB0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_ab_tiebreaking_lra0_before_lrb0(self):
@@ -366,8 +363,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRB @ idx=7 is issued too early. "
-            "Must be issued after idx=3 (of next iteration), which is when LRB0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_ab_tiebreaking_lrb0_before_lra0(self):
@@ -390,8 +386,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=4 is issued too early. "
-            "Must be issued after idx=3 (of next iteration), which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_waitcnt_barrier_relative_order_barrier_too_late_for_a(self):
@@ -415,8 +410,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SBarrier(),
         ]
         self.validate(optSchedule, syncCode, 1, None, None, 0,
-            "There is an SBarrier missing between the SWaitCnt @ idx=5 (which guarantees LRA0 from idx=5 to done) and the GRA @ idx=5. "
-            "Order must be LRA0 -> SWait -> SBarrier -> GRA."
+            expected_failure=MissingBarrierFailure,
         )
 
     def test_waitcnt_barrier_relative_order_barrier_too_late_for_b(self):
@@ -441,8 +435,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "There is an SBarrier missing between the SWaitCnt @ idx=5 (which guarantees LRB0 from idx=2 to done) and the GRB @ idx=5. "
-            "Order must be LRB0 -> SWait -> SBarrier -> GRB."
+            expected_failure=MissingBarrierFailure,
         )
 
     def test_within_mfma_index_order_local_reads_before_syncs_before_global_read(self):
@@ -459,7 +452,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "GRB": [[5,5]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_within_mfma_index_order_sync_after_global_read_for_b(self):
         """
@@ -476,8 +469,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRB @ idx=5 is issued too early. "
-            "Must be issued after idx=5, which is when LRB0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_within_mfma_index_order_sync_before_local_read_for_a(self):
@@ -496,8 +488,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=5 is issued too early. "
-            "Must be issued after idx=5 (of next iteration), which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_within_mfma_index_order_no_sync_for_global_read_a(self):
@@ -521,8 +512,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=5 is issued too early. "
-            "Must be issued after idx=6, which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_within_mfma_index_order_sync_after_gra_too_late(self):
@@ -542,8 +532,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "There is an SBarrier missing between the SWaitCnt @ idx=5 (which guarantees LRA0 from idx=5 to done) and the GRA @ idx=6. "
-            "Order must be LRA0 -> SWait -> SBarrier -> GRA."
+            expected_failure=MissingBarrierFailure,
         )
 
     def test_on_the_edge(self):
@@ -565,7 +554,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_on_the_edge_tipped_by_a(self):
         """
@@ -589,8 +578,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=5 is issued too early. "
-            "Must be issued after idx=6, which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_on_the_edge_tipped_by_a_saved_by_lr1(self):
@@ -613,7 +601,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_lr1_in_the_middle(self):
         """
@@ -634,8 +622,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=4 is issued too early. "
-            "Must be issued after idx=3 (of next iteration), which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_multiple_grs_all_safe(self):
@@ -651,7 +638,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "GRB": [[6, 7]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier(comment="")]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_one_gr_too_early(self):
         """
@@ -668,8 +655,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier(comment="")]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=2 is issued too early. "
-            "Must be issued after idx=3, which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_negative_lrb0_not_guaranteed_by_waitcnt_at_same_index_as_lra0(self):
@@ -712,8 +698,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         # Should FAIL: dscnt=1 leaves 1 LRB0 outstanding when GRB starts at 15.
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRB @ idx=3 is issued too early. "
-            "Must be issued after idx=-1 (of next iteration), which is when LRB0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
 
@@ -748,7 +733,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment="")
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_gr_before_same_iter_sync_safe(self):
         """
@@ -769,7 +754,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
             "GRB": [[6, 6]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier(comment="")]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_prev_iter_lr0_not_guaranteed(self):
         """
@@ -791,8 +776,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=2 is issued too early. "
-            "Must be issued after idx=3, which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_swap_global_read_order(self):
@@ -815,7 +799,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_swap_global_read_order(self):
         """
@@ -839,8 +823,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA (Swapped, loading B) @ idx=2 is issued too early. "
-            "Must be issued after idx=3, which is when LRB0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )
 
     def test_multiple_lr0s(self):
@@ -861,7 +844,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment="")
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_multiple_lr0s_one_not_guaranteed(self):
         """
@@ -883,6 +866,5 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=2 is issued too early. "
-            "Must be issued after idx=3, which is when LRA0 is guaranteed done."
+            expected_failure=OrderInvertedFailure,
         )

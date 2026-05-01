@@ -25,6 +25,9 @@ from rocisa.instruction import SWaitCnt, SBarrier
 from Tensile.Components.CMSValidator import (
     add_local_read_constraints, add_gr_finish_before_lr_constraints,
 )
+from Tensile.Components.ScheduleCapture import (
+    MissingWaitFailure, WaitTooLateFailure,
+)
 from cms_validation_base import CMSValidationTestBase
 
 
@@ -64,7 +67,7 @@ class TestValidateNgl(CMSValidationTestBase):
         """
         shift_value = 3 + 3  # 3 GRAs and 3 GRBs
         optSchedule, syncCode = self.make_simple_schedule_and_sync()
-        self.validate(optSchedule, syncCode, 1, shift_value, shift_value, 0, None)
+        self.validate(optSchedule, syncCode, 1, shift_value, shift_value, 0)
 
     def test_simple_case_failure(self):
         """
@@ -73,7 +76,7 @@ class TestValidateNgl(CMSValidationTestBase):
         shift_value = 3 + 3 - 1  # 3 GRAs and 3 GRBs - 1
         optSchedule, syncCode = self.make_simple_schedule_and_sync()
         self.validate(optSchedule, syncCode, 1, shift_value, shift_value, 0,
-                                         "GRB @ idx=2 is not valid. There are no guarantees on when it will be done.")
+                                         expected_failure=MissingWaitFailure)
 
     def test_simple_case_success_too_high(self):
         """
@@ -81,7 +84,7 @@ class TestValidateNgl(CMSValidationTestBase):
         """
         shift_value = 3 + 3 + 1  # 3 GRAs and 3 GRBs + 1
         optSchedule, syncCode = self.make_simple_schedule_and_sync()
-        self.validate(optSchedule, syncCode, 1, shift_value, shift_value, 0, None)
+        self.validate(optSchedule, syncCode, 1, shift_value, shift_value, 0)
 
 class TestValidateNll(CMSValidationTestBase):
     validator_passes = [add_local_read_constraints]
@@ -103,7 +106,7 @@ class TestValidateNll(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
         self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         "Loop NLL: LRB0 @ idx=0 issued too late, must be guaranteed before MFMA @ idx=6 but only guaranteed @ idx=7.")
+                                         expected_failure=WaitTooLateFailure)
 
     def test_lr0_swait_depends_on_lr1_realistic(self, useZeroDscnt: bool=False):
         """
@@ -147,8 +150,9 @@ class TestValidateNll(CMSValidationTestBase):
         }
         # We need to set nglshift and nllshift for the vlcnt adjustments
         num_gr = 2  # 2 GRs total (1 GRA + 1 GRB, but we only count the actual reads not the increments)
-        expected_error_message = None if useZeroDscnt else "Loop NLL: LRB0 @ idx=3 issued too late, must be guaranteed before MFMA @ idx=28 but only guaranteed @ idx=31."
-        self.validate(optSchedule, syncTable[1::2], 1, num_gr, num_gr, 0, expected_error_message, nllZeroDscnt=useZeroDscnt)
+        expected_failure = None if useZeroDscnt else WaitTooLateFailure
+        self.validate(optSchedule, syncTable[1::2], 1, num_gr, num_gr, 0,
+                      nllZeroDscnt=useZeroDscnt, expected_failure=expected_failure)
 
     def test_lr0_swait_depends_on_lr1_realistic_zero_dscnt(self):
         """

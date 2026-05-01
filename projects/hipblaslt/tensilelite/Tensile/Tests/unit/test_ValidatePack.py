@@ -71,7 +71,7 @@ class TestValidatePackBF16(CMSValidationTestBase):
 
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_passing_different_number_LRs(self):
         """
@@ -98,7 +98,7 @@ class TestValidatePackBF16(CMSValidationTestBase):
 
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_fail_too_early(self):
         """
@@ -168,7 +168,7 @@ class TestValidatePackBF16MFMAReorder(CMSValidationTestBase):
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s")
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None, mfmaReorder=self.mfma_reorder)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, mfmaReorder=self.mfma_reorder)
 
     def test_fail_too_early(self):
         """
@@ -269,7 +269,7 @@ class TestValidatePackBF16PLRPack(CMSValidationTestBase):
 
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_passing_plr_pack_different_number_LRs(self):
         """
@@ -295,7 +295,7 @@ class TestValidatePackBF16PLRPack(CMSValidationTestBase):
 
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_fail_too_early_plr_pack(self):
         """
@@ -449,7 +449,7 @@ class TestValidatePackTF32(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s")
         ]
 
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_failing_too_early(self):
         """
@@ -651,7 +651,7 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s")
         ]
 
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None, mfmaReorder=self.mfma_reorder)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, mfmaReorder=self.mfma_reorder)
 
     def test_failing_too_early(self):
         """
@@ -730,7 +730,7 @@ class TestValidatePackTF32CrossPackInterleaving(CMSValidationTestBase):
         }
 
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s")]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_failing_interleaved(self):
         """
@@ -850,7 +850,7 @@ class TestValidatePackTF32MultipleGroups(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
     
     def test_passing_two_groups_interleaved(self):
         """
@@ -879,7 +879,7 @@ class TestValidatePackTF32MultipleGroups(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_passing_two_groups_fully_interleaved(self):
         """
@@ -906,7 +906,7 @@ class TestValidatePackTF32MultipleGroups(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_failing_two_groups_fully_interleaved(self):
         """
@@ -1017,7 +1017,7 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s")
         ]
 
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_failing_too_early(self):
         """
@@ -1139,7 +1139,7 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
             SNop(waitState=1, comment="Needed to have 5 quad-cycle space between PackB0[5] and PackB0[6]."),
         ]
 
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None, snopCode=snopCode)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, snopCode=snopCode)
 
     def test_failing_not_enough_time_CVTO_MFMA(self):
         """
@@ -1347,7 +1347,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_passing_tile1_packs_after_tile0_deadline(self):
         """
@@ -1398,7 +1398,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_failing_tile1_packs_actually_too_late(self):
         """
@@ -1725,7 +1725,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
             packA0, packB0,
             pack_alt_a=pack_alt_a, pack_alt_b=pack_alt_b,
             n_lrs_a=n_lrs_a, n_lrs_b=n_lrs_b)
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_passing_multiple_groups_with_swaps(self):
         """VW_A=2, MIWaveTileA=4, MIWaveTileB=2. 2 groups of 10 regular packs + 4 swap packs on A, 2 groups on B."""
@@ -1754,7 +1754,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0+LRB0"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_fail_swap_before_lr_done(self):
         """SwapPacks issued before LR SWaitCnt. Expected: 'issued too early' error."""
@@ -1850,7 +1850,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=f"Wait for LRA{s}s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_cvt0_depends_on_specific_swaps_vw4(self):
         """VW=4: group 2's CVT0 packs depend on swaps that touch regs 16-23,
@@ -1908,7 +1908,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         pack_alt_a = [self.q4s+2] * 12 + self._make_valid_pack_group(self.q4s+2) * 4
 
         optSchedule, syncCode = self._make_base_schedule(packA0, packB0, pack_alt_a=pack_alt_a, n_lrs_a=8)
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
 
 
@@ -1950,10 +1950,12 @@ class TestLRAfterPack(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "PackA0 @ idx=0 issued too early, must be issued after idx=2 (because of LRA0 issued @ idx=1)."
-        )
+            expected_failure=OrderInvertedFailure)
+        self.assert_order_inverted(
+            f, producer_name="LRA0", producer_idx=1,
+            consumer_name="PackA0", consumer_idx=0)
 
     def test_LR0_B_waitcnt_after_Pack(self):
         """LRA0 at idx=0, PackA0[0] @ idx=2. SWaitCnt @ idx=3 sits AFTER PackA0[0].
@@ -1974,10 +1976,12 @@ class TestLRAfterPack(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "PackA0 @ idx=2 issued too early, must be issued after idx=3 (because of LRA0 issued @ idx=0)."
-        )
+            expected_failure=OrderInvertedFailure)
+        self.assert_order_inverted(
+            f, producer_name="LRA0", producer_idx=0,
+            consumer_name="PackA0", consumer_idx=2)
 
     def test_LR0_baseline_passing(self):
         """Same skeleton as variant B with PackA0[0] moved to a valid position."""
@@ -1997,7 +2001,7 @@ class TestLRAfterPack(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
 
 class TestLRAfterPack_LR1(CMSValidationTestBase):
@@ -2029,10 +2033,12 @@ class TestLRAfterPack_LR1(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "PackA1 @ idx=4 issued too early, must be issued after idx=6 (because of LRA1 issued @ idx=5)."
-        )
+            expected_failure=OrderInvertedFailure)
+        self.assert_order_inverted(
+            f, producer_name="LRA1", producer_idx=5,
+            consumer_name="PackA1", consumer_idx=4)
 
     def test_LR1_B_waitcnt_after_Pack(self):
         """LRA1 at idx=4, PackA1[0] @ idx=5. SWaitCnt for LR1 at idx=6 sits AFTER
@@ -2053,10 +2059,12 @@ class TestLRAfterPack_LR1(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "PackA1 @ idx=5 issued too early, must be issued after idx=6 (because of LRA1 issued @ idx=4)."
-        )
+            expected_failure=OrderInvertedFailure)
+        self.assert_order_inverted(
+            f, producer_name="LRA1", producer_idx=4,
+            consumer_name="PackA1", consumer_idx=5)
 
 
 class TestLRAfterPack_LR3(CMSValidationTestBase):
@@ -2108,7 +2116,7 @@ class TestLRAfterPack_LR3(CMSValidationTestBase):
 
     def test_LR3_baseline_passing(self):
         """Sanity: the base skeleton validates."""
-        self.validate(self._base_schedule(), self._sync_code(), 1, 2, 2, 0, None)
+        self.validate(self._base_schedule(), self._sync_code(), 1, 2, 2, 0)
 
     def test_LR3_A_LR_after_Pack(self):
         """Move LRA3 AFTER PackA3[0]: PackA3[0] at q4s, LRA3 at q4s+1.
@@ -2117,10 +2125,12 @@ class TestLRAfterPack_LR3(CMSValidationTestBase):
         opt["PackA3"] = [[self.q4s] + [self.q4e] * 23]
         opt["LRA3"] = [[self.q4s + 1] * 2]
         opt["SYNC"] = [[self.q1s + 1, self.q2s + 1, self.q3s + 1, self.q4s + 2]]
-        self.validate(
+        f = self.validate(
             opt, self._sync_code(), 1, 2, 2, 0,
-            f"PackA3 @ idx={self.q4s} issued too early, must be issued after idx={self.q4s + 2} (because of LRA3 issued @ idx={self.q4s + 1})."
-        )
+            expected_failure=OrderInvertedFailure)
+        self.assert_order_inverted(
+            f, producer_name="LRA3", producer_idx=self.q4s + 1,
+            consumer_name="PackA3", consumer_idx=self.q4s)
 
     def test_LR3_B_waitcnt_after_Pack(self):
         """Keep LRA3 at q4s; move PackA3[0] to q4s and the LRA3 SWaitCnt to q4s+1
@@ -2128,10 +2138,12 @@ class TestLRAfterPack_LR3(CMSValidationTestBase):
         opt = self._base_schedule()
         opt["PackA3"] = [[self.q4s] + [self.q4e] * 23]
         opt["SYNC"] = [[self.q1s + 1, self.q2s + 1, self.q3s + 1, self.q4s + 1]]
-        self.validate(
+        f = self.validate(
             opt, self._sync_code(), 1, 2, 2, 0,
-            f"PackA3 @ idx={self.q4s} issued too early, must be issued after idx={self.q4s + 1} (because of LRA3 issued @ idx={self.q4s})."
-        )
+            expected_failure=OrderInvertedFailure)
+        self.assert_order_inverted(
+            f, producer_name="LRA3", producer_idx=self.q4s,
+            consumer_name="PackA3", consumer_idx=self.q4s)
 
 
 class TestPackAfterMFMA(CMSValidationTestBase):
@@ -2162,10 +2174,12 @@ class TestPackAfterMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "PackA0 @ idx=5 issued too late, must be issued before MFMA @ idx=4."
-        )
+            expected_failure=OrderInvertedFailure)
+        self.assert_order_inverted(
+            f, producer_name="PackA0", producer_idx=5,
+            consumer_name="MFMA", consumer_idx=4)
 
     def test_LR0_baseline_passing(self):
         assert self.num_vmfma == 8
@@ -2184,7 +2198,7 @@ class TestPackAfterMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
 
 class TestPackAfterMFMA_LR1(CMSValidationTestBase):
@@ -2223,10 +2237,12 @@ class TestPackAfterMFMA_LR1(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1"),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "PackA0 @ idx=5 issued too late, must be issued before MFMA @ idx=4."
-        )
+            expected_failure=OrderInvertedFailure)
+        self.assert_order_inverted(
+            f, producer_name="PackA0", producer_idx=5,
+            consumer_name="MFMA", consumer_idx=4)
 
 
 class TestPackAfterMFMA_LR3(CMSValidationTestBase):
@@ -2274,7 +2290,9 @@ class TestPackAfterMFMA_LR3(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3s"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3s"),
         ]
-        self.validate(
+        f = self.validate(
             opt, syncCode, 1, 2, 2, 0,
-            f"PackA0 @ idx={self.q2e} issued too late, must be issued before MFMA @ idx={self.q2s}."
-        )
+            expected_failure=OrderInvertedFailure)
+        self.assert_order_inverted(
+            f, producer_name="PackA0", producer_idx=self.q2e,
+            consumer_name="MFMA", consumer_idx=self.q2s)

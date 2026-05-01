@@ -36,12 +36,12 @@ class TestValidateDescendingOrder(CMSValidationTestBase):
         """
         optSchedule = {"P": [[3, 2, 1]]}
         expected = "Non-descending-order rule failed, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
-        self.validate(optSchedule, [], 1, None, None, 0, expected)
+        self.validate(optSchedule, [], 1, None, None, 0, expected_message=expected)
 
     def test_non_descending_order_success(self):
         """
         Test that validation passes when instructions appear in non-descending order.
         """
         optSchedule = {"P": [[1, 1, 2]]}
-        self.validate(optSchedule, [], 1, None, None, 0, None)
+        self.validate(optSchedule, [], 1, None, None, 0)
 

@@ -325,6 +325,16 @@ class ValidatorInstruction(ABC):
     # ordering issues (non-default following default in subclasses).
     rocisa_inst: object = field(default=None, init=False, repr=False, compare=False)
 
+    @property
+    def category(self) -> str:
+        """Alias for `name`. Lets the typed-Failure canonical formatters in
+        ScheduleCapture.py — which were written against GraphNode (which has
+        both `category` and `name`) — accept ValidatorInstruction objects
+        without crashing. ValidatorInstruction's `name` already carries the
+        per-tensor / per-iter tag (e.g. 'LRA0', 'PackB1'), matching what
+        GraphNode.category holds."""
+        return self.name
+
     @abstractmethod
     def validate(self) -> Optional[str]:
         ...

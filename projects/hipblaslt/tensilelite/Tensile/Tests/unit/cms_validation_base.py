@@ -145,12 +145,12 @@ class CMSValidationTestBase:
         nglshift: int,
         nllshift: int,
         codePathIdx: int,
-        expected_message: Optional[str] = None,
         nllZeroDscnt: bool = False,
         mfmaReorder: list[int] = None,
         snopCode: list[Any] = None,
         expected_failure: Optional[type] = None,
         expected_fields: Optional[dict] = None,
+        expected_message: Optional[str] = None,
     ):
         """
         Creates a ScheduleInfo and validates it using the validation function from the subclass.
@@ -162,27 +162,34 @@ class CMSValidationTestBase:
             nglshift: NGL shift value
             nllshift: NLL shift value
             codePathIdx: Code path index to validate
-            expected_message: Expected error message string. None means validation
-                must pass. Legacy-string assertion path — prefer expected_failure
-                for new tests.
             nllZeroDscnt: Whether to use zero dscnt for NLL loop (default: False)
             mfmaReorder: List of MFMA reorder indices
             snopCode: List of SNOP instructions
-            expected_failure: Expected Failure subclass (e.g. PackTooEarlyFailure).
+            expected_failure: Expected Failure subclass (e.g. OrderInvertedFailure).
                 When set, the test asserts isinstance(timeline._last_failure,
                 expected_failure) AND that expected_fields (if given) match
-                attribute-by-attribute. Mutually exclusive with expected_message.
+                attribute-by-attribute. When unset, the test asserts validation
+                passed.
             expected_fields: dict of {attr_name: expected_value} to assert on
                 the typed Failure. Use this with expected_failure to bind the
                 test to semantic state rather than message text.
+            expected_message: Exact-string assertion path for rules that still
+                return raw strings (not typed Failures) — e.g.
+                `verify_scc_overlap`. Mutually exclusive with expected_failure.
+                Prefer expected_failure for any rule that emits typed Failures.
+
+        For tests where the rule raises a Python AssertionError before
+        validate_timeline is reached (e.g. preprocessing precondition
+        violations), call this without expected_failure inside a
+        pytest.raises(AssertionError, match=...) block.
         """
+        assert not (expected_failure is not None and expected_message is not None), (
+            "pass either expected_failure OR expected_message, not both"
+        )
         if mfmaReorder is None:
             mfmaReorder = []
         if snopCode is None:
             snopCode = []
-        assert not (expected_message is not None and expected_failure is not None), (
-            "pass either expected_message OR expected_failure, not both"
-        )
 
         sched = ScheduleInfo(numCodePaths, self.num_vmfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt, mfmaReorder, snopCode)
 
@@ -230,11 +237,14 @@ class CMSValidationTestBase:
                 )
             return failure
 
-        if expected_message is None:
-            assert status, f"Schedule should have passed validation but did not. {message}"
-        else:
-            assert not status, f"Schedule should have failed but passed."
-            assert message == expected_message, f"Expected: {expected_message}, Got: {message}"
+        if expected_message is not None:
+            assert not status, "Schedule should have failed but passed."
+            assert message == expected_message, (
+                f"Expected: {expected_message!r}, Got: {message!r}"
+            )
+            return None
+
+        assert status, f"Schedule should have passed validation but did not. {message}"
 
     @staticmethod
     def assert_order_inverted(failure, *, producer_name, producer_idx,

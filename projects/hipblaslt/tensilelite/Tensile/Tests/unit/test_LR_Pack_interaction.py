@@ -103,4 +103,4 @@ class TestLRAndPackAfterMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRA0"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)

@@ -22,6 +22,8 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
+import re
+import pytest
 from rocisa.instruction import SWaitCnt, SBarrier
 
 from Tensile.Components.CMSValidator import add_gr_finish_before_lr_constraints
@@ -55,7 +57,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_grs_not_swait(self):
         """
@@ -195,7 +197,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_some_grs_less_than_1_full_iteration_to_complete(self):
         """
@@ -219,7 +221,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 6, 6, 0, None)
+        self.validate(optSchedule, syncCode, 1, 6, 6, 0)
 
     def test_swait_and_sbarrier_in_preloop(self):
         """
@@ -243,7 +245,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_grs_in_preloop(self):
         """
@@ -266,7 +268,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_last_gr_swait_sbarrier_in_same_index(self):
         """
@@ -291,7 +293,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_swait_sbarrier_first_lr1_in_same_index(self):
         """
@@ -316,7 +318,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_swap_global_read_order_success(self):
         """
@@ -343,7 +345,7 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
             SBarrier(comment="For GRAs (loading B)"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_swap_global_read_order_failure(self):
         """
@@ -403,8 +405,12 @@ class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
         ]
 
         self.kernel["DirectToLds"] = True
-        expected_message = "Code path 0: GRA has an odd number of indices. Must be even if DirectToLds is True."
-        try:
-            self.validate(optSchedule, syncCode, 1, 2, 2, 0, expected_message)
-        except AssertionError as e:
-            assert str(e) == expected_message, f"Expected: {expected_message}, Got: {str(e)}"
+        # The rule's preprocessing (add_gr_finish_before_lr_constraints) raises
+        # a Python AssertionError on odd-GR-count under DirectToLds. The error
+        # bubbles up through validation_function before any typed Failure can
+        # be produced, so this is the one rule path checked via raw assertion.
+        expected_message = (
+            "Code path 0: GRA has an odd number of indices. Must be even if DirectToLds is True."
+        )
+        with pytest.raises(AssertionError, match=re.escape(expected_message)):
+            self.validate(optSchedule, syncCode, 1, 2, 2, 0)

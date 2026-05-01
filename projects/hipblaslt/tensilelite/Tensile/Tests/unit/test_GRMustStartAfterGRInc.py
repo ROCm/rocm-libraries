@@ -24,6 +24,9 @@
 ################################################################################
 
 from Tensile.Components.CMSValidator import add_gr_not_too_early_constraints
+from Tensile.Components.ScheduleCapture import (
+    OrderInvertedFailure, MissingBarrierFailure,
+)
 from rocisa.instruction import SBarrier, SWaitCnt
 from cms_validation_base import CMSValidationTestBase
 
@@ -60,7 +63,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_gr_before_grinc(self):
         """
@@ -81,11 +84,13 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=4 is issued too early. "
-            "Must be issued after idx=5, "
-            "which is when GRIncA is guaranteed done."
+            expected_failure=OrderInvertedFailure,
+        )
+        self.assert_order_inverted(
+            f, producer_name="GRIncA", producer_idx=5,
+            consumer_name="GRA", consumer_idx=4,
         )
 
     def test_grinc_tighter_than_lr0_with_barrier(self):
@@ -108,7 +113,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_grinc_tighter_but_no_barrier(self):
         """
@@ -131,10 +136,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "There is an SBarrier missing between the SWaitCnt "
-            "@ idx=3 (which guarantees LRA0 from idx=0 "
-            "to done) and the GRA @ idx=7. "
-            "Order must be LRA0 -> SWait -> SBarrier -> GRA."
+            expected_failure=MissingBarrierFailure,
         )
 
     def test_swap_grinc_before_gr(self):
@@ -158,7 +160,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_swap_wrong_pairing(self):
         """
@@ -180,11 +182,13 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA (Swapped, loading B) @ idx=4 is issued too early. "
-            "Must be issued after idx=5, "
-            "which is when GRIncB is guaranteed done."
+            expected_failure=OrderInvertedFailure,
+        )
+        self.assert_order_inverted(
+            f, producer_name="GRIncB", producer_idx=5,
+            consumer_name="GRA", consumer_idx=4,
         )
 
     def test_both_operands(self):
@@ -205,7 +209,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_b_before_grinc_b(self):
         """
@@ -225,11 +229,13 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRB @ idx=5 is issued too early. "
-            "Must be issued after idx=6, "
-            "which is when GRIncB is guaranteed done."
+            expected_failure=OrderInvertedFailure,
+        )
+        self.assert_order_inverted(
+            f, producer_name="GRIncB", producer_idx=6,
+            consumer_name="GRB", consumer_idx=5,
         )
 
     def test_no_grinc_in_schedule(self):
@@ -249,7 +255,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_grinc_and_gr_same_index_grinc_declared_first(self):
         """
@@ -270,7 +276,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_negative_grinc_and_gr_same_index_grinc_declared_after(self):
         """
@@ -291,11 +297,13 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(
+        f = self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "GRA @ idx=5 is issued too early. "
-            "Must be issued after idx=5, "
-            "which is when GRIncA is guaranteed done."
+            expected_failure=OrderInvertedFailure,
+        )
+        self.assert_order_inverted(
+            f, producer_name="GRIncA", producer_idx=5,
+            consumer_name="GRA", consumer_idx=5,
         )
 
     def test_multiple_grinc_instructions(self):
@@ -316,7 +324,7 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_swap_both_operands_cross_pairing(self):
         """
@@ -340,4 +348,4 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)

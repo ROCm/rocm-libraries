@@ -75,7 +75,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
         optSchedule["LRA0"] = [[1, 6]]
         f = self.validate(optSchedule, syncCode, 1, None, None, 0,
@@ -106,7 +106,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_complex_LR0(self):
         """
@@ -123,7 +123,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment=""),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_simple_LR1(self):
         """
@@ -142,7 +142,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_pre_loop_SWaitCnt(self):
         """
@@ -161,7 +161,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_pre_loop_LR(self):
         """
@@ -177,7 +177,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_simple_LR1_guaranteed_too_late(self):
         """
@@ -217,7 +217,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All of LRA0 and LRB0"),
             SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="2/2 LRA1 and 1/2 LRB1"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
         # Failing case: LRA1 finishes too late
         optSchedule["LRA1"] = [[4, 5]]
@@ -248,7 +248,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="4/4 LRB0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="2/4 LRA1 and 2/4 LRB1"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_more_LRs_failure(self):
         """
@@ -284,7 +284,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         # Passing case: Correctly SWaitCnt for 2/4 LRA0 (i.e. 1/2 As) in time for VMFMA 4.
         syncCode[0].dscnt = 2
         syncCode[0].comment = "Wait for LRB0 and 2/4 LRA0"
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
     
     def test_less_LRs(self):
         """
@@ -309,7 +309,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRA0 and LRB0"),
             SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="LRA1 and 1/2 LRB1"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
         # Failure case
         optSchedule["SYNC"][0][0] = 8
@@ -365,7 +365,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
             "LRB1": [[7]],
             "SYNC": [[3, 7]],
         }
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
 class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
     """
@@ -405,7 +405,7 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="LRA0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
     
     def test_LR0s_fail(self):
         """
@@ -465,7 +465,7 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRA3 and LRB3"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
 class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
     validator_passes = [add_local_read_constraints]
@@ -491,7 +491,7 @@ class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LR1s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None, mfmaReorder=mfmaReorder)
+        self.validate(optSchedule, syncCode, 1, None, None, 0, mfmaReorder=mfmaReorder)
 
     def test_complex_bf16(self):
         """
@@ -521,7 +521,7 @@ class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
             SWaitCnt(dscnt=2,vlcnt=-1, vscnt=-1, comment="1/2 LRB1 and 1/2 LRA1."),
         ]
 
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None, nllZeroDscnt=True, mfmaReorder=mfmaReorder)
+        self.validate(optSchedule, syncCode, 1, None, None, 0, nllZeroDscnt=True, mfmaReorder=mfmaReorder)
 
     def test_asymmetric_reorder_bf16(self):
         """
@@ -601,7 +601,7 @@ class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
         }
         syncCode = syncTable[1::2]
         
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None, mfmaReorder=mfmaReorder)
+        self.validate(optSchedule, syncCode, 1, None, None, 0, mfmaReorder=mfmaReorder)
 
     def test_tf32(self):
         """
@@ -630,7 +630,7 @@ class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LR1s"),
         ]
         
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None, mfmaReorder=mfmaReorder)
+        self.validate(optSchedule, syncCode, 1, None, None, 0, mfmaReorder=mfmaReorder)
 
 class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBase):
     """
@@ -686,7 +686,7 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR3s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_bf16_fail(self):
         """Same as above, but with the proper SWaitCnt for the LR3s."""
@@ -1170,7 +1170,7 @@ class TestLRAfterMFMA(CMSValidationTestBase):
             "LRB0": [[0, 0]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0)
 
     def test_LR1_A_positionally_late(self):
         assert self.num_vmfma == 8

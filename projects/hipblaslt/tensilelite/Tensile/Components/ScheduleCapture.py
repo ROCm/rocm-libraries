@@ -342,13 +342,16 @@ def format_position(node, capture=None) -> str:
     node is from a different body in the unified 4-body graph), the
     list-position suffix is silently omitted.
     """
-    base = f"@ idx={node.position.vmfma_index}"
+    # Accept GraphNode (has `position`) or ValidatorInstruction (has `issued_at`).
+    pos = getattr(node, "position", None) or node.issued_at
+    base = f"@ idx={pos.vmfma_index}"
     if capture is None or node.category == "MFMA":
         return base
-    if node.tagged_inst is None:
+    tagged_inst = getattr(node, "tagged_inst", None)
+    if tagged_inst is None:
         return base
     try:
-        list_pos = capture.instructions.index(node.tagged_inst)
+        list_pos = capture.instructions.index(tagged_inst)
     except ValueError:
         return base
     return f"{base} ({_ordinal(list_pos + 1)} entry in list)"

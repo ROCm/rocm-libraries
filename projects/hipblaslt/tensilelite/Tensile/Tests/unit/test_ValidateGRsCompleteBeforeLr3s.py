@@ -35,6 +35,9 @@ from typing import Any, Optional
 from rocisa.instruction import SWaitCnt, SBarrier
 
 from Tensile.Components.CMSValidator import add_gr_finish_before_lr_constraints
+from Tensile.Components.ScheduleCapture import (
+    MissingWaitFailure, MissingBarrierFailure, WaitTooLateFailure,
+)
 from cms_validation_base import CMSValidationTestBase
 
 
@@ -73,7 +76,7 @@ class TestValidateGRsCompleteBeforeLr3s(CMSValidationTestBase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR3s"),
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
 
     def test_LR3_grs_not_swait(self):
         """GR-wait has vlcnt=-1, so apply_swaits never sets GR.guaranteed_by.
@@ -98,7 +101,7 @@ class TestValidateGRsCompleteBeforeLr3s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA @ idx=0 is not valid. There are no guarantees on when it will be done."
+            expected_failure=MissingWaitFailure,
         )
 
     def test_LR3_no_sbarrier(self):
@@ -123,7 +126,7 @@ class TestValidateGRsCompleteBeforeLr3s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA @ idx=0 is not valid. There is no SBarrier acting on it."
+            expected_failure=MissingBarrierFailure,
         )
 
     def test_LR3_swait_after_sbarrier(self):
@@ -149,7 +152,7 @@ class TestValidateGRsCompleteBeforeLr3s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRA @ idx=0 is not valid. No SBarrier between SWait @ idx=3 and LRA3 @ idx=7. Order must be GRA -> SWait -> SBarrier -> LRA3."
+            expected_failure=MissingBarrierFailure,
         )
 
     def test_LR3_guaranteed_after_first_lr3(self):
@@ -176,7 +179,7 @@ class TestValidateGRsCompleteBeforeLr3s(CMSValidationTestBase):
 
         self.validate(
             optSchedule, syncCode, 1, 4, 4, 0,
-            "GRA @ idx=0 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LRA3 @ idx=3. Order must be GRA -> SWait -> SBarrier -> LRA3."
+            expected_failure=WaitTooLateFailure,
         )
 
     def test_LR3_swap_global_read_order_failure(self):
@@ -206,5 +209,5 @@ class TestValidateGRsCompleteBeforeLr3s(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, 2, 2, 0,
-            "GRB (Swapped, loading A) @ idx=3 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LRA3 @ idx=2. Order must be GRB (Swapped, loading A) -> SWait -> SBarrier -> LRA3."
+            expected_failure=WaitTooLateFailure,
         )
