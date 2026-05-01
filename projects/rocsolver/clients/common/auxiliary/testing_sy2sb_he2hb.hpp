@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 #include "common/misc/generate.hpp"
 
 #include "print_matrix.hpp"
@@ -185,19 +186,20 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
 
     // execute computations
     // GPU lapack
-    double start, time;
-    start = get_time_us_sync(stream);
+    rocsolver_timer timer;
+    double time;
+    timer.start(stream);
     CHECK_ROCBLAS_ERROR(
         rocsolver_sy2sb_he2hb(
             handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data()));
-    time = get_time_us_sync(stream) - start;
+    time = timer.end(stream);
     printf( "n %d, kd %d, nb %d, getError time %.4f\n", n, kd, nb, time );
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hAbandRes.transfer_from(dAband));
     CHECK_HIP_ERROR(hTauRes.transfer_from(dTau));
 
     // CPU lapack
-    start = get_time_us_sync(stream);
+    timer.start(stream);
     cpu_sy2sb_he2hb(rocblas_fill_lower,
         n,
         kd,
@@ -208,7 +210,7 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
         hTau[0],
         hwork.data(),
         lwork);
-    time = get_time_us_sync(stream) - start;
+    time = timer.end(stream);
     printf( "n %d, kd %d, nb %d, getError time %.4f lapack\n", n, kd, nb, time );
 
     // error is ||hARes - hAband|| / ||hAband||
@@ -273,6 +275,7 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
                        const bool perf)
 {
 printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
+    rocsolver_timer timer;
     double start, time;
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
@@ -307,16 +310,17 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     {
         sy2sb_he2hb_initData<false, true, T>(handle, n, kd, dA, lda, hA);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         CHECK_ROCBLAS_ERROR(
             rocsolver_sy2sb_he2hb(
                 handle, n, kd, nb,
                 dA.data(), lda,
                 dAband.data(), ldab,
                 dTau.data()));
-        time = get_time_us_sync(stream) - start;
+        time = timer.end(stream);
         printf( "n %d, kd %d, nb %d, cold iter %d, time %.4f\n", n, kd, nb, iter, time );
     }
+    timer.reset();
 
     // gpu-lapack performance
     if(profile > 0)
@@ -333,17 +337,16 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     {
         sy2sb_he2hb_initData<false, true, T>(handle, n, kd, dA, lda, hA);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_sy2sb_he2hb(
             handle, n, kd, nb,
             dA.data(), lda,
             dAband.data(), ldab,
             dTau.data());
-        time = get_time_us_sync(stream) - start;
-        *gpu_time_used += time;
+        time = timer.end(stream);
         printf( "n %d, kd %d, nb %d, hot  iter %d, time %.4f\n", n, kd, nb, iter, time );
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 //------------------------------------------------------------------------------
