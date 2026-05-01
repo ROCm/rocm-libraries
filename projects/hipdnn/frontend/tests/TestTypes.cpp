@@ -189,6 +189,10 @@ TEST(TestTypes, DataTypeStreamOperator)
     EXPECT_EQ(oss.str(), "int64");
     oss.str("");
 
+    oss << DataType::BOOLEAN;
+    EXPECT_EQ(oss.str(), "boolean");
+    oss.str("");
+
     oss << DataType::NOT_SET;
     EXPECT_EQ(oss.str(), "unknown");
 }

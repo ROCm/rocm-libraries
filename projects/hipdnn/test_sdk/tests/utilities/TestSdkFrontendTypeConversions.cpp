@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
+using hipdnn_test_sdk::utilities::createTensor;
 using hipdnn_test_sdk::utilities::frontendToSdkDataType;
 using hipdnn_test_sdk::utilities::frontendToSdkPointwiseMode;
 using hipdnn_test_sdk::utilities::sdkToFrontendDataType;
@@ -127,6 +128,23 @@ TEST(TestSdkFrontendTypeConversions, NotSetRoundTrip)
 {
     EXPECT_EQ(sdkToFrontendDataType(frontendToSdkDataType(fe::DataType::NOT_SET)),
               fe::DataType::NOT_SET);
+}
+
+// ============================================================================
+// createTensor tests
+// ============================================================================
+
+TEST(TestSdkFrontendTypeConversions, CreateTensorBoolean)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    auto tensor = createTensor(fe::DataType::BOOLEAN, dims, strides);
+
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), dims);
+    EXPECT_EQ(tensor->strides(), strides);
+    EXPECT_EQ(tensor->elementSize(), sizeof(bool));
 }
 
 // ============================================================================
