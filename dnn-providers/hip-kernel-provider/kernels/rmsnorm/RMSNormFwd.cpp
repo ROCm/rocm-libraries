@@ -6,9 +6,7 @@
 #include "Bfloat16Dev.hpp"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_RMSNORM_LOCAL_SIZE;
-constexpr size_t C_SIZE = HIP_PLUGIN_RMSNORM_C_SIZE;
-constexpr size_t C_STRIDE = HIP_PLUGIN_RMSNORM_C_STRIDE;
-constexpr size_t N_STRIDE = C_SIZE * C_STRIDE;
+constexpr unsigned int INNER_SIZE = HIP_PLUGIN_RMSNORM_INNER_SIZE;
 
 using InputType = HIP_PLUGIN_RMSNORM_INPUT_TYPE;
 using OutputType = HIP_PLUGIN_RMSNORM_OUTPUT_TYPE;
@@ -105,7 +103,7 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
         __syncthreads();
     }
 
-    pvar = ltmp[0] / C_SIZE;
+    pvar = ltmp[0] / INNER_SIZE;
     float prstd = rsqrtf(pvar + eps);
 
     if(lid == 0 && rstd)

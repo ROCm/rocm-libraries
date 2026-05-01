@@ -46,8 +46,10 @@ protected:
             .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(inputDataType);
 
-        auto xAttr = makeTensorAttributes(
-            "X", inputDataType, testCase.ioDims, generateStrides(testCase.ioDims, layout.strideOrder));
+        auto xAttr = makeTensorAttributes("X",
+                                          inputDataType,
+                                          testCase.ioDims,
+                                          generateStrides(testCase.ioDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto scaleDataType = getDataTypeEnumFromType<ScaleDataType>();
