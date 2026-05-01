@@ -671,18 +671,6 @@ class TestGRIncReorderDetection:
             ))
         return tagged
 
-    @pytest.mark.xfail(
-        reason=(
-            "Documented coverage gap: ScheduleCapture._writes/_reads only "
-            "handle LR/GR/LW/MFMA — scalar ALU register dependencies "
-            "(incLower/incUpper carry chain, ShadowLimit chain, etc.) form "
-            "no edges, so compare_graphs cannot see GRIncA reordering. "
-            "verify_ascending_order is the only safety net today. To remove "
-            "the xfail: extend _writes/_reads to handle SAddU32/SAddCU32/"
-            "SSubU32/SSubBU32/SCmpEQU32/SCSelectB32/SCMovB32 and rerun."
-        ),
-        strict=True,
-    )
     def test_reversed_grinc_chain_should_be_detected(self):
         # Reference: an LR -> SWait -> MFMA baseline plus a normal-order
         # GRInc-like chain in the same body.

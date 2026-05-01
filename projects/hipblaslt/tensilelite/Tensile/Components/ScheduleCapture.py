@@ -1890,26 +1890,59 @@ class _NoDataflowRule:
         return (), ()
 
 
-# NOTE: a `_GenericALURule` (default fallback that writes=getParams()[0],
-# reads=getParams()[1:]) is the missing piece for the P1 register-coverage
-# gaps in test_dataflow_graph_register_gaps (Pack/VSwap/VCC). It's tracked
-# in beads as wx9.4.4 (Sub-D), gated on:
-#
-#   - wx9.6.1 (DONE): OrderInverted now compares against default schedule,
-#     not the synthetic kind_rank "canonical" order. Cross-iter pipelining
-#     differences only flag when subj genuinely reverses default's order.
-#   - wx9.4.2 (Sub-B): per-byte latest-writer resolver eliminates phantom
-#     edges from scratch-vgpr reuse (e.g., v133 across PackA/PackB). This
-#     was the original blocker — _GenericALURule made every Pack publish
-#     reads/writes, and the over-yielding resolver turned scratch reuse
-#     into 24,688 false-positive cross-side OrderInverteds.
-#
-# Once Sub-B lands and the resolver yields one edge per (consumer, byte),
-# Sub-D re-enables _GenericALURule and the P1 strict-xfails XPASS.
-# The P0 gaps (MFMA acc chain, m0 for DTL BufferLoad — covered by explicit
-# rules above) already close.
+class _GenericALURule:
+    """Catch-all for vgpr/sgpr ALU instructions not absorbed by an earlier
+    rule.
 
-# Order matters: more specific rules first.
+    Covers the P1 register-coverage gaps the prior fallback `_writes(inst)
+    == [] / _reads(inst) == []` left wide open: Pack (VCvt*, VPack*, VLShift*,
+    VPerm*), VSwap, VAddCO/VAddCCO carry chains, VXor (LRS/LWS pointer-flip),
+    SAdd/SSub on sgpr/SRD (GRInc), SMov to m0 (DTL m0 setter), and any
+    other CommonInstruction-shaped ALU op.
+
+    Convention (matches Pack rocisa shape: dst at slot 0, srcs follow):
+      writes = (params[0],) iff params[0] walks like a register
+      reads  = tuple(p for p in params[1:] if _is_register(p))
+
+    Non-register positional params (modifiers, ints, comments, VCC, labels)
+    are filtered out by `_is_register`. Branch instructions whose only
+    param is a label string therefore yield (reads, writes) == ((), ()) —
+    no dataflow contribution, which is the desired behavior for control
+    flow.
+
+    Order: this rule MUST be last in `_OPERAND_RULES`. The earlier rules
+    (DSLoad/DSStore/DTL/BufferLoad/MFMA/NoDataflow) claim their classes;
+    everything left over with a `getParams()` shape lands here.
+
+    Pre-Sub-B this rule was deferred because the legacy resolver yielded
+    every prior writer for each reader of a scratch vgpr — Pack scratch
+    reuse (v133 across PackA/PackB) blew up to 24,688 false-positive
+    cross-side OrderInverteds. Sub-B's per-byte latest-writer resolver
+    eliminates that, so the rule is now safe to publish reads/writes for
+    every Pack-shaped instruction.
+    """
+    def applies(self, inst, category=None):
+        # Only real rocisa CommonInstruction-shaped objects expose
+        # getParams(). Synthetic _FakeInstBase subclasses in test fixtures
+        # do not — they fall through to the empty (reads, writes) default
+        # and rely on their own bespoke rules (e.g. _FakePackRule injected
+        # by tests via using_pack_rule()).
+        return hasattr(inst, "getParams")
+
+    def extract(self, inst, category=None):
+        try:
+            params = list(inst.getParams())
+        except Exception:
+            return (), ()
+        if not params:
+            return (), ()
+        writes = (params[0],) if _is_register(params[0]) else ()
+        reads = tuple(p for p in params[1:] if _is_register(p))
+        return reads, writes
+
+
+# Order matters: more specific rules first; _GenericALURule is the
+# catch-all and MUST come last so earlier rules claim their classes.
 _OPERAND_RULES = (
     _DSLoadRule(),
     _DSStoreRule(),
@@ -1917,6 +1950,7 @@ _OPERAND_RULES = (
     _BufferLoadRule(),
     _MFMARule(),
     _NoDataflowRule(),
+    _GenericALURule(),
 )
 
 
@@ -2608,6 +2642,20 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
         default_p_before_c = ref_p.position < ref_c.position
         subj_p_before_c = p_node.position < c_node.position
         if default_p_before_c and not subj_p_before_c:
+            # Cross-subiter ALU-producer edges are a known false-positive
+            # source: a PackA3 (subiter 3) writes a symbolic vgpr that an
+            # earlier-subiter MFMA reads under the same symbolic name. The
+            # default schedule emits all Packs before all MFMAs (linear
+            # within-body); CMS pipelines so subiter-N+1's Pack issues after
+            # subiter-N's MFMA — the order inversion across subiters is
+            # legitimate pipelining, not a real reorder of a same-subiter
+            # dependency. Mirrors the same-subiter gate
+            # _classify_edge_coverage uses in within-graph mode.
+            nmps = subj_graph.num_mfma_per_subiter
+            if (_is_alu_producer(p_node)
+                    and _node_subiter(p_node, nmps)
+                        != _node_subiter(c_node, nmps)):
+                return []  # cross-subiter pipelined dependency — legitimate
             return [OrderInvertedFailure(
                 producer=p_node,
                 consumer=c_node,
@@ -2727,6 +2775,18 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
                 ))
 
     if not failures:
+        # Cross-body edges where waits exist that DO drain the producer:
+        # this is a loop-carried dataflow handoff — the captured stream
+        # has the producer at body N's end, the consumer at body N+1's
+        # start, and the SWaitCnt that bridges them drains the producer's
+        # counter. The edge is "missing" from subj only because the
+        # symbolic register name is reused across iterations and the
+        # subj graph paired this consumer with a different (closer)
+        # producer. No real classifier bug; suppress.
+        if (p_node.body_label != c_node.body_label
+                and waits and _any_drains(waits, p_node, subj_graph)):
+            return []
+
         # Couldn't classify — capture pipeline bug or classifier bug.
         msg = (
             f"diagnose_missing_edge could not classify missing edge "
@@ -2737,11 +2797,13 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
         if raise_on_unexplained:
             raise UnexplainedMissingEdgeError(msg)
         # Soft-mode: return a synthetic Failure so production observability
-        # logs the issue without crashing the build.
-        unexplained = MissingWaitFailure(
+        # logs the issue without crashing the build. (The historic
+        # `.with_legacy_msg(...)` chained call referenced a setter that
+        # was planned but never implemented; the bare MissingWaitFailure
+        # carries enough info to be actionable.)
+        return [MissingWaitFailure(
             producer=p_node, consumer=c_node, counter_kind="unknown",
-        ).with_legacy_msg(f"[unclassified] {msg}")
-        return [unexplained]
+        )]
     return failures
 
 
@@ -2892,11 +2954,34 @@ def _is_alu_producer(producer):
 
     LR/LW (LDS) and GR (vector-memory) producers are NOT ALU — they have
     real wait counters and live outside this set.
+
+    Two category-vs-instance mismatches exist after wx9.4.4 added the
+    `_GenericALURule` catch-all:
+      - DTL m0 setter: category "GRA"/"GRB" (lives in the GRA emission
+        group) but the rocisa class is SMov/SAddU32 — a scalar ALU op
+        with no vlcnt to drain. Promote to ALU.
+      - TF32 Pack-MFMA: category "PackA0".."PackB3" but the rocisa class
+        is MFMAInstruction. _MFMARule excludes Pack-categorized MFMAs
+        from main-loop MFMA semantics, and _GenericALURule then publishes
+        their reads/writes; the producer behaves as ALU (immediate
+        visibility), not as a 4-cycle-finish main MFMA.
+
+    So: classify by category_first (Pack* / PackMFMA → ALU), then by
+    instance class for the GR-categorized m0 setter, finally fall back
+    to category for cases where rocisa_inst is None (test fixtures).
     """
     cat = producer.category
-    if cat in PRODUCER_CATEGORIES_LDS or cat in PRODUCER_CATEGORIES_GLOBAL:
-        return False
+    if cat.startswith("Pack"):
+        return True
     if cat == "MFMA":
+        return False
+    inst = getattr(producer, "rocisa_inst", None)
+    if inst is not None:
+        if _is_lr(inst) or _is_lw(inst) or _is_gr(inst) or _is_mfma(inst):
+            return False
+        # Real ALU instance regardless of category bucket.
+        return True
+    if cat in PRODUCER_CATEGORIES_LDS or cat in PRODUCER_CATEGORIES_GLOBAL:
         return False
     return True
 

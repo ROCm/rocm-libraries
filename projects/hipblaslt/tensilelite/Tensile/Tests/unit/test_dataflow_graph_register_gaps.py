@@ -124,12 +124,31 @@ def _tag(inst, *, category: str, mfma_index: int, sequence: int) -> TaggedInstru
     )
 
 
-_GAP_XFAIL_REASON = (
-    "Documented gap in ScheduleCapture._writes / _reads (lines 1607-1629). "
-    "Only LR/GR/LW/MFMA are tracked; this class returns [] from both. To "
-    "remove the xfail: extend _writes/_reads to handle the class, ensure "
-    "_reg_overlaps treats the affected register type symmetrically, and "
-    "verify the new edges don't break existing tests."
+# Historic note (kept for context): pre-wx9.4.4 every non-LR/LW/GR/MFMA
+# rocisa class returned [] from _writes/_reads. wx9.4.4 (Sub-D) added the
+# `_GenericALURule` catch-all to ScheduleCapture._OPERAND_RULES, which
+# publishes per-instance reads/writes for any CommonInstruction-shaped
+# ALU op (Pack/VSwap/VXor/SAdd/SMov/etc.). The PackRAW, GRIncSRD,
+# LRSAddrChain, and LWSAddrChain tests below now PASS; their xfail
+# markers were dropped along with the rule landing.
+#
+# The remaining xfails in this file are gated on test-fixture changes,
+# not production rule changes — see _FIXTURE_GAP_XFAIL_REASON below.
+
+_FIXTURE_GAP_XFAIL_REASON = (
+    "Detection requires a test-fixture extension that wx9.4.4 did NOT "
+    "deliver. The production `_GenericALURule` correctly publishes the "
+    "writer's reads/writes (e.g. m0, vgpr dsts), but: "
+    "(a) DTLm0Tracking uses dataflow_fixtures.make_gr / _FakeGR which "
+    "synthesizes a NON-DTL BufferLoad (has a vgpr dst) — so no instruction "
+    "in the fixture reads m0, and the m0 setter has no consumer to form "
+    "an edge with. Needs a real (lds=True) BufferLoadB128 in the fixture. "
+    "(b) VSwapPair / VCCCarryChain reorder two ALU instructions whose "
+    "writes are independent in the REFERENCE order; the broken dependency "
+    "only forms an edge in the SUBJECT order, but compare_graphs only "
+    "flags edges present in REFERENCE but missing from SUBJECT. Detecting "
+    "these requires either symmetric VSwap semantics (both regs are "
+    "read-AND-written) or a bidirectional edge comparison."
 )
 
 
@@ -153,7 +172,7 @@ class TestDTLm0Tracking:
     """The m0 register written by SMovB32/SAddU32 is implicitly read by the
     following BufferLoad. Reordering breaks LDS placement."""
 
-    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
+    @pytest.mark.xfail(reason=_FIXTURE_GAP_XFAIL_REASON, strict=True)
     def test_dtl_m0_update_before_buffer_load(self):
         # Reference: m0 set, then BufferLoad consumes m0.
         m0_set = SMovB32(dst=mgpr(0), src=sgpr("LocalWriteAddrA", 1))
@@ -183,7 +202,7 @@ class TestDTLm0Tracking:
         )
         assert any(isinstance(f, OrderInvertedFailure) for f in failures)
 
-    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
+    @pytest.mark.xfail(reason=_FIXTURE_GAP_XFAIL_REASON, strict=True)
     def test_dtl_m0_add_update_before_buffer_load(self):
         """Same as above but the m0 update is the SAddU32 form
         (DTL + IncLdsBufSwitch / DTL + ExpandPointerSwap path)."""
@@ -435,7 +454,6 @@ class TestMFMAQuadCycleGap:
 
 
 class TestGRIncSRDChain:
-    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
     def test_grinc_srd_waw_before_buffer_load(self):
         # Reference: SAddU32(Srd+0) then BufferLoad(reads Srd+0..3).
         srd_add = SAddU32(dst=sgpr(20, 1), src0=sgpr(20, 1), src1=sgpr(100, 1))
@@ -475,7 +493,6 @@ class TestGRIncSRDChain:
 
 
 class TestPackRAW:
-    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
     def test_pack_cvt_raw_from_lr(self):
         """LR writes v8..v11; pack VCvtPkF32toBF16 reads v8..v9. Reordering
         the pack before the LR consumes uninitialized data."""
@@ -514,7 +531,7 @@ class TestPackRAW:
 
 
 class TestVSwapPair:
-    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
+    @pytest.mark.xfail(reason=_FIXTURE_GAP_XFAIL_REASON, strict=True)
     def test_vswap_pair_reorder_invisible(self):
         sw1 = VSwapB32(dst=vgpr(0, 1), src=vgpr(1, 1))
         sw2 = VSwapB32(dst=vgpr(1, 1), src=vgpr(2, 1))
@@ -554,7 +571,7 @@ class TestVSwapPair:
 
 
 class TestVCCCarryChain:
-    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
+    @pytest.mark.xfail(reason=_FIXTURE_GAP_XFAIL_REASON, strict=True)
     def test_vcc_carry_chain_reorder(self):
         """Lower-half add writes v100; upper-half add (VAddCCOU32) reads
         the same vgpr position and the implicit VCC. Reorder breaks the
@@ -600,7 +617,6 @@ class TestVCCCarryChain:
 
 
 class TestLRSAddrChain:
-    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
     def test_lrs_vxor_before_lr_invisible(self):
         """LRS XOR-swap of `LocalReadAddrA` (vgpr 40) reordered after its
         consuming DSLoadB128 — load consumes pre-swap address, fetching the
@@ -643,7 +659,6 @@ class TestLRSAddrChain:
 
 
 class TestLWSAddrChain:
-    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
     def test_lws_vxor_before_lw_invisible(self):
         """LWS XOR-swap of `LocalWriteAddrA` (vgpr 50) reordered after its
         consuming DSStoreB128 — store writes to pre-swap LDS half."""
