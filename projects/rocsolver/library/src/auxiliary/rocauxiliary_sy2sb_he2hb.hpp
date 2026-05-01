@@ -114,7 +114,7 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(
     // N/A
 
     // 2. invalid size
-    if(n < 0 || (n > 0 && kd < 1) || nb < kd || nb % kd != 0 || lda < n || batch_count < 0)
+    if(n < 0 || kd < 1 || nb < kd || nb % kd != 0 || lda < n || ldab < 3*kd || batch_count < 0)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size
@@ -171,7 +171,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     bool const use_her2k = false;
 
     // quick return
-    if(n == 0 || kd == 0 || nb == 0 || batch_count == 0)
+    if(n == 0 || batch_count == 0)
         return rocblas_status_success;
 
     hipStream_t stream;
