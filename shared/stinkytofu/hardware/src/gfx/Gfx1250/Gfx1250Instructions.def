@@ -389,6 +389,11 @@ DEF_T(SSetVgprMsbInst, "s_set_vgpr_msb", .format = SOPP, .flags = {HasSideEffect
 DEF_T(SSleepInst, "s_sleep", .format = SOPP, .flags = {HasSideEffect}, .logical = "SSleep",
     .operand_fields = { {S0, simm16, sleep, 16} })
 
+// s_clause groups the following N instructions (N+1 = simm16) into an
+// uninterruptible clause; instruction-stream side effect, no operand reads.
+DEF_T(SClauseInst, "s_clause", .format = SOPP, .flags = {HasSideEffect}, .logical = "SClause",
+    .operand_fields = { {S0, simm16, simm16, 16} })
+
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
     .operand_fields = { {D0, simm16, hwreg, 16}, {S0, literal, simm32, 32} })
@@ -401,6 +406,14 @@ DEF_T(SGetregB32Inst, "s_getreg_b32", .format = SOPK, .flags = {HasSideEffect}, 
 DEF_BATCH(.format = SOP2,
     SAddI32Inst, "s_add_i32", .flags = {ImplicitWriteSCC}, .logical = "SAddI32",
     SAddU32Inst, "s_add_u32", .flags = {ImplicitWriteSCC}, .logical = "SAddU32",
+
+    // Canonical AMD ISA mnemonic is s_add_nc_u64; s_add_u64 is the
+    // historical alias and is still emitted by some assemblers.
+    SAddU64Inst, "s_add_u64", .logical = "SAddU64",
+        .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
+    SAddNcU64Inst, "s_add_nc_u64", .logical = "SAddU64",
+        .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
+
     SAddcU32Inst, "s_addc_u32", .flags = {ImplicitReadSCC, ImplicitWriteSCC}, .logical = "SAddCU32",
     SAndB32Inst, "s_and_b32", .flags = {ImplicitWriteSCC}, .logical = "SAndB32",
     SAndB64Inst, "s_and_b64", .flags = {ImplicitWriteSCC}, .logical = "SAndB64",
@@ -410,6 +423,15 @@ DEF_BATCH(.format = SOP2,
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     SAshrI32Inst, "s_ashr_i32", .flags = {ImplicitWriteSCC}, .logical = "SAShiftRightI32",
     SAshrI64Inst, "s_ashr_i64", .flags = {ImplicitWriteSCC},
+        .operand_fields = { {D0, .size=64}, {S0, .size=64} },
+
+    // s_bfe_u32 sdst, ssrc0, ssrc1 — scalar bit-field extract (unsigned 32);
+    // Writes SCC.
+    SBfeU32Inst, "s_bfe_u32", .flags = {ImplicitWriteSCC}, .logical = "SBfeU32",
+
+    // s_bfe_u64 sdst, ssrc0, ssrc1 — scalar bit-field extract (unsigned 64);
+    // Writes SCC.
+    SBfeU64Inst, "s_bfe_u64", .flags = {ImplicitWriteSCC}, .logical = "SBfeU64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64} },
     SBfmB32Inst, "s_bfm_b32", .logical = "SBfmB32",
 
@@ -1144,6 +1166,16 @@ DEF_T(VCvtScalePk8F16Fp8Inst, "v_cvt_scale_pk8_f16_fp8",
         {D0, vdst, vgpr, 128},
         {S0, src0, src_vgpr, 64},
         {S1, src1, src, 32},
+    },
+)
+// Stochastic-rounding pack-of-8 conversion (8x F32 -> 8x FP8) with F32 scale.
+DEF_T(VCvtScalef32SrPk8Fp8F32Inst, "v_cvt_scalef32_sr_pk8_fp8_f32",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 64},
+        {S0, src0, src_vgpr, 256},
+        {S1, src1, src, 32},
+        {S2, src2, src, 32},
     },
 )
 

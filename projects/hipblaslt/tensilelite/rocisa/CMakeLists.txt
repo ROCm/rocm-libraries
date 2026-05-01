@@ -128,6 +128,13 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
         COPYONLY
     )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/_build_info.py.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py"
+        @ONLY
+    )
+    # _build_info.py is intentionally NOT in install() rules so it is absent
+    # from wheels and pre-built packages, acting as the source-build sentinel.
 
     if(ROCISA_STANDALONE)
         # Install rules for scikit-build-core: place _rocisa.so, libstinkytofu.so,

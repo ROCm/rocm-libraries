@@ -12,8 +12,8 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerancesBatchNorm.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVariancePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
 
@@ -31,7 +31,21 @@ class TestBatchnormFwdWithVariancePlan : public ::testing::Test
 
 TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
 {
-    auto tolerance = batchnorm::getToleranceInference<float>();
+    // Tensor ranges from BatchnormFwdWithVarianceTensorBundle:
+    // x=[0,1], scale=[0,1], bias=[0,1], mean=[0,1], var=[0.1,1.0]
+    // epsilon = BATCHNORM_DEFAULT_EPSILON = 1e-5
+    auto tolerance = batchnorm::calculateBatchnormInferenceWithVarianceTolerance<float, float>(
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        0.1,
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
     const std::vector<int64_t> dims = {6, 3, 32, 32};
     const unsigned int seed = getGlobalTestSeed();
     auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
