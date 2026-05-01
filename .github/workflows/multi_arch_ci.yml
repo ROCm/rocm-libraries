@@ -19,6 +19,7 @@ on:
     branches:
       - develop
       - release/therock-*
+      - users/geomin12/multi-arch-ci  # temporary for testing
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
