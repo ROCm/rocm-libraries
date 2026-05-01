@@ -76,7 +76,9 @@ from Tensile.Components.ScheduleCapture import (
     TaggedInstruction,
     build_dataflow_graph,
     compare_graphs,
+    validate_edge_wait_coverage,
     OrderInvertedFailure,
+    TimingTooCloseFailure,
 )
 
 from dataflow_fixtures import (
@@ -355,6 +357,71 @@ class TestMFMASelfRAW:
             "returns []. Reordering two MFMAs that share an accumulator is "
             "silently undetectable."
         )
+
+
+class TestMFMAQuadCycleGap:
+    """Sub-C (wx9.4.3): the per-edge wait-coverage validator now applies a
+    quad-cycle gap check to MFMA-as-producer edges instead of silently
+    skipping them. When two MFMAs share an accumulator and the consumer
+    issues at the SAME vmfma_index as the producer (gap == 0 quad-cycles),
+    validate_edge_wait_coverage emits TimingTooCloseFailure rather than
+    waving the edge through unverified.
+    """
+
+    def test_mfma_acc_chain_zero_gap_emits_timing_too_close(self):
+        """Two MFMAs sharing accumulator v0..v3, both at the SAME mfma_index
+        (sub_index breaks the tie). The per-byte resolver builds the
+        producer->consumer edge; the gap check sees slot_delta == 0, expected
+        == QUAD_CYCLES_STANDARD_MFMA_FINISH (3), actual == 0 — emits
+        TimingTooCloseFailure."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # Producer: writes v0..v3.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # Consumer at the same mfma_index, ordered by sub_index. Reads
+            # v0..v1 — overlaps producer's accumulator.
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=2, sequence=1, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        # Find the MFMA->MFMA timing failure.
+        mfma_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and f.producer.category == "MFMA"
+            and f.consumer.category == "MFMA"
+        ]
+        assert mfma_timing, (
+            f"Expected TimingTooCloseFailure on MFMA->MFMA acc-chain at "
+            f"slot_delta==0 but got: {[type(f).__name__ for f in failures]}"
+        )
+        f = mfma_timing[0]
+        assert f.expected_quad_cycles == 3
+        assert f.actual_quad_cycles == 0
+
+    def test_mfma_acc_chain_consecutive_slots_no_failure(self):
+        """Two MFMAs at consecutive vmfma_index values (slot_delta == 1)
+        give exactly QUAD_CYCLES_STANDARD_MFMA_FINISH quad-cycles of gap —
+        meets the threshold, so no TimingTooCloseFailure is emitted."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, a_src_count=2),
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=3, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        assert not any(
+            isinstance(f, TimingTooCloseFailure)
+            and f.producer.category == "MFMA"
+            and f.consumer.category == "MFMA"
+            for f in failures
+        ), f"Unexpected MFMA acc-chain timing failure: {failures}"
 
 
 # =============================================================================

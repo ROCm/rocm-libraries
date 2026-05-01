@@ -2622,15 +2622,27 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
         # judged against an artifactual default ordering. Falls through to
         # Phase 2 wait coverage if applicable.
 
-    # MFMA-as-producer: the dataflow graph models MFMA accumulator chains
-    # so reorders are detectable, but those chains aren't gated by SWaitCnt
-    # counters (MFMA latency is governed by issue-timing constraints, not
-    # the dscnt/vlcnt FIFO model). Skip wait-coverage classification — the
-    # Phase 1 OrderInverted check above is the only failure mode that
-    # applies. A missing MFMA-as-producer edge that survived to Phase 2
-    # means the topology genuinely differs and there's nothing for the
-    # wait-coverage classifier to say.
+    # MFMA-as-producer: governed by quad-cycle issue-timing constraints,
+    # not by the dscnt/vlcnt FIFO. Sub-C (wx9.4.3) replaces the prior
+    # blanket exemption with an explicit gap check; an MFMA producer whose
+    # consumer fires too soon after it is a TimingTooClose violation.
     if p_node.category == "MFMA":
+        nmps = subj_graph.num_mfma_per_subiter
+        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps)
+        if not ok:
+            return [TimingTooCloseFailure(
+                producer=p_node,
+                consumer=c_node,
+                expected_quad_cycles=expected,
+                actual_quad_cycles=actual,
+            )]
+        return []
+
+    # ALU-as-producer (scalar/vector ALU, GRInc, m0 setters): result is
+    # immediately visible to the next issued instruction; no SWaitCnt drain
+    # applies. Phase 1 already classified any order inversion; nothing else
+    # to verify.
+    if _is_alu_producer(p_node):
         return []
 
     # Phase 2 — independent checks. Run all; collect failures.
@@ -2812,6 +2824,83 @@ def _any_drains(waits, producer, subj_graph) -> bool:
     return any(_wait_drains_producer(w, producer, subj_graph) for w in waits)
 
 
+# --- Quad-cycle constants (mirrored from CMSValidator.py:275-282) -------------
+# These are duplicated locally rather than imported because ScheduleCapture
+# must stay import-free of CMSValidator (CMSValidator imports from this
+# module — bringing CMSValidator's symbols in here would create a cycle).
+# CDNA 4 ISA section 7.6.
+_QUAD_CYCLES_STANDARD_MFMA_FINISH = 3   # Standard MFMA: 3 quad-cycles to finish.
+_QUAD_CYCLES_MFMA_4X4_FINISH = 1        # 4x4 (Pack-flavored) MFMA: 1 quad-cycle.
+# Each MFMA slot in the schedule consumes (1 issue + finish_cycles) quad-cycles
+# of timeline; the next MFMA can start issuing at the producer's mfma_free_at
+# (see CMSValidator.precompute_issue_times). So the quad-cycle gap between the
+# producer's issue completion and the consumer's issue start, expressed in the
+# vmfma_index domain, is approximately:
+#     gap_qc = (consumer.vmfma_index - producer.vmfma_index) * (1 + finish) - 1
+# For consecutive standard MFMAs (slot delta == 1) this gives 3 quad-cycles —
+# exactly matching QUAD_CYCLES_STANDARD_MFMA_FINISH, the threshold below.
+
+
+def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
+    """Verify that enough quad-cycles separate an MFMA producer from its
+    consumer for the producer's result to be visible.
+
+    Returns (ok, expected_quad_cycles, actual_quad_cycles).
+
+    Cross-body edges are treated as 'plenty of gap' — a body boundary in
+    the captured schedule represents at least a full pipelined iteration's
+    worth of issue slots, which dwarfs any single-MFMA finish window.
+
+    For same-body MFMA-to-MFMA edges, the gap is derived from the
+    vmfma_index delta. The producer's `mfma_finish_cycles` (3 for the
+    standard MFMA family, 1 for the 4x4 Pack-MFMA) is the minimum
+    required gap N; the actual gap in quad-cycles is computed from the
+    slot delta.
+    """
+    # Pull mfma_finish_cycles off the rocisa instance if available; default
+    # to the standard MFMA family. Fixtures synthesize bare insts so the
+    # attribute may be absent — fall back gracefully.
+    finish = getattr(producer.rocisa_inst, "mfma_finish_cycles", None)
+    if finish is None:
+        finish = _QUAD_CYCLES_STANDARD_MFMA_FINISH
+    expected = finish
+
+    if producer.body_label != consumer.body_label:
+        # Cross-body: a body boundary always represents many issue cycles.
+        # Report a conservatively large actual so the gap is always OK.
+        return True, expected, expected
+
+    p_pos = producer.position
+    c_pos = consumer.position
+    slot_delta = c_pos.vmfma_index - p_pos.vmfma_index
+    # Same vmfma_index: consumer issues immediately adjacent to producer
+    # (sub_index breaks the tie). Gap is effectively zero quad-cycles for
+    # accumulator/operand visibility purposes.
+    if slot_delta <= 0:
+        actual = 0
+        return False, expected, actual
+    # gap_qc = slot_delta * (1 + finish) - 1; equals `finish` exactly when
+    # slot_delta == 1.
+    actual = slot_delta * (1 + finish) - 1
+    return actual >= expected, expected, actual
+
+
+def _is_alu_producer(producer):
+    """Producers whose results are immediately visible (no SWaitCnt drain
+    required, no quad-cycle gap modeled). Includes scalar/vector ALU,
+    GRInc (SAdd-family on SRD), and m0 setters.
+
+    LR/LW (LDS) and GR (vector-memory) producers are NOT ALU — they have
+    real wait counters and live outside this set.
+    """
+    cat = producer.category
+    if cat in PRODUCER_CATEGORIES_LDS or cat in PRODUCER_CATEGORIES_GLOBAL:
+        return False
+    if cat == "MFMA":
+        return False
+    return True
+
+
 def _first_insufficient(waits, producer, subj_graph):
     """Return the first wait (in stream order) that does NOT drain the producer
     despite drainable counter. None if every wait drains, or no wait applies."""
@@ -2907,9 +2996,24 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
             return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
         return []  # cross-subiter pipelined dependency — legitimate
 
-    # MFMA-as-producer edges aren't gated by SWaitCnt — see notes in
-    # diagnose_missing_edge.
+    # MFMA-as-producer: gated by quad-cycle issue timing rather than
+    # SWaitCnt (see diagnose_missing_edge). Sub-C (wx9.4.3) replaces the
+    # blanket exemption with a quad-cycle gap check.
     if p_node.category == "MFMA":
+        nmps = subj_graph.num_mfma_per_subiter
+        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps)
+        if not ok:
+            return [TimingTooCloseFailure(
+                producer=p_node,
+                consumer=c_node,
+                expected_quad_cycles=expected,
+                actual_quad_cycles=actual,
+            )]
+        return []
+
+    # ALU-as-producer: results are immediately visible; no wait counter
+    # applies. Within-graph order inversions were already handled above.
+    if _is_alu_producer(p_node):
         return []
 
     # Phase 2 — wait coverage.
