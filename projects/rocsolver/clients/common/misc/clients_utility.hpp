@@ -130,22 +130,3 @@ void print_strided_batched(const char* name,
     std::fputs(s.c_str(), stdout);
     std::fflush(stdout);
 }
-
-//------------------------------------------------------------------------------
-// todo: where's a good place for these utilities? Ideally accessible from both
-// rocSolver lib and testers.
-//
-/// @return ceil( x / y ), for integers x, y.
-template <typename Ix, typename Iy>
-constexpr auto ceildiv( Ix x, Iy y )
-{
-    return (x + y - 1)/y;
-}
-
-//------------------------------------------------------------------------------
-/// @return y * ceil( x / y ), for integers x, y.
-template <typename Ix, typename Iy>
-constexpr auto roundup( Ix x, Iy y )
-{
-    return y * ceildiv( x, y );
-}

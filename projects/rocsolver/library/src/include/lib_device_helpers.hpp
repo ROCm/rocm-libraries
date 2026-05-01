@@ -55,22 +55,6 @@ ROCSOLVER_BEGIN_NAMESPACE
 // device functions that are used by many kernels
 // **********************************************************
 
-/// @return ceil( x / y ), for integers x, y.
-/// This formula returns 0 for x = 0, but may overflow for huge x + y.
-template <typename Ix, typename Iy>
-__device__ __host__ constexpr auto ceildiv(const Ix x, const Iy y)
-{
-    return (x + y - 1) / y;
-}
-
-/// @return ceil( x / y )*y, for integers x, y.
-/// That is, round x up to the next multiple of y.
-template <typename Ix, typename Iy>
-__device__ __host__ constexpr auto roundup( Ix x, Iy y )
-{
-    return y * ceildiv( x, y );
-}
-
 // NaN helpers
 template <typename T, std::enable_if_t<std::is_integral<T>{}, int> = 0>
 __device__ __host__ inline bool rocblas_isnan(T)
