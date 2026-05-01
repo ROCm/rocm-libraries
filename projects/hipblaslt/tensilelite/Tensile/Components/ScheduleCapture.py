@@ -1904,21 +1904,23 @@ class _NoDataflowRule:
 
 
 # NOTE: a `_GenericALURule` (default fallback that writes=getParams()[0],
-# reads=getParams()[1:]) was prototyped here. It correctly closes the P1
-# coverage gaps for Pack/SAddU32/VSwap/etc., BUT it surfaces edges that
-# the existing OrderInvertedFailure classifier misinterprets: CMS
-# legitimately schedules Pack[iter=N+1] before MFMA[iter=N] (cross-iter
-# pipelining), and the classifier compares stream positions without
-# distinguishing same-iter reorders from cross-iter pipelined dependencies.
+# reads=getParams()[1:]) is the missing piece for the P1 register-coverage
+# gaps in test_dataflow_graph_register_gaps (Pack/VSwap/VCC). It's tracked
+# in beads as wx9.4.4 (Sub-D), gated on:
 #
-# Closing this requires either (a) plumbing producer/consumer iter onto
-# DataflowEdge so OrderInverted can skip cross-iter edges, or (b) adding
-# a separate `cross_iter` edge_kind. Both are real follow-ups; deferring
-# them keeps Sub-task 10 focused on the architectural unification.
+#   - wx9.6.1 (DONE): OrderInverted now compares against default schedule,
+#     not the synthetic kind_rank "canonical" order. Cross-iter pipelining
+#     differences only flag when subj genuinely reverses default's order.
+#   - wx9.4.2 (Sub-B): per-byte latest-writer resolver eliminates phantom
+#     edges from scratch-vgpr reuse (e.g., v133 across PackA/PackB). This
+#     was the original blocker — _GenericALURule made every Pack publish
+#     reads/writes, and the over-yielding resolver turned scratch reuse
+#     into 24,688 false-positive cross-side OrderInverteds.
 #
-# As a result, the P1 strict-xfails in test_dataflow_graph_register_gaps
-# (Pack/VSwap/VCC) still xfail. The P0 gaps (MFMA acc chain, m0 for DTL
-# BufferLoad — covered by explicit rules above) DO close.
+# Once Sub-B lands and the resolver yields one edge per (consumer, byte),
+# Sub-D re-enables _GenericALURule and the P1 strict-xfails XPASS.
+# The P0 gaps (MFMA acc chain, m0 for DTL BufferLoad — covered by explicit
+# rules above) already close.
 
 # Order matters: more specific rules first.
 _OPERAND_RULES = (
