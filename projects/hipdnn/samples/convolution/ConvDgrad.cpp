@@ -64,7 +64,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto dxAttr = graph->conv_dgrad(dyAttr, wAttr, convAttributes);
     dxAttr->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> dyTensor(dyAttr->get_dim(), layout);

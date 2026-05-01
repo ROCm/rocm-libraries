@@ -44,7 +44,11 @@ enum class ErrorCode
     OK, ///< Operation completed successfully
     INVALID_VALUE, ///< An invalid value was provided
     HIPDNN_BACKEND_ERROR, ///< An error occurred in the hipDNN backend
-    ATTRIBUTE_NOT_SET ///< A required attribute was not set
+    ATTRIBUTE_NOT_SET, ///< A required attribute was not set
+    GRAPH_NOT_SUPPORTED ///< No engine accepted this graph: no applicable solution on the current device,
+    ///< likely because the requested dtype/shape/operation pattern is not supported
+    ///< by any engine. Distinct from validation errors -- the graph is well-formed,
+    ///< just not runnable by the available engines.
 };
 
 // NOLINTNEXTLINE(readability-identifier-naming)
@@ -60,6 +64,8 @@ inline std::string to_string(ErrorCode code)
         return "HIPDNN_BACKEND_ERROR";
     case ErrorCode::ATTRIBUTE_NOT_SET:
         return "ATTRIBUTE_NOT_SET";
+    case ErrorCode::GRAPH_NOT_SUPPORTED:
+        return "GRAPH_NOT_SUPPORTED";
     default:
         return "UNKNOWN_ERROR";
     }

@@ -5130,7 +5130,7 @@ TEST_F(TestGraph, IsSupportedReturnsFalseWhenNoEngines)
 
     auto result = graph.is_supported_ext(_handle);
     EXPECT_FALSE(result.is_good());
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED);
 }
 
 TEST_F(TestGraph, IsSupportedAutoBuildsGraphIfNotBuilt)
