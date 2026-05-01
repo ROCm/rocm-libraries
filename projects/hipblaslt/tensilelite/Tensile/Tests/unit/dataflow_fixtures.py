@@ -191,6 +191,43 @@ def make_gr(dst_vgpr_start: int, dst_vgpr_count: int,
     )
 
 
+def make_dtl_buffer_load(vaddr_vgpr_start: int, srd_sgpr_start: int,
+                         slot: int, *, category: str = "GRA",
+                         sequence: int = 0,
+                         immediate_offset: int = 0) -> TaggedInstruction:
+    """Build a real DTL-mode BufferLoadB128 wrapped in a TaggedInstruction.
+
+    Unlike `make_gr` (which uses the synthetic `_FakeGR` that always has a
+    vgpr `dst`), this factory constructs an actual `rocisa.instruction
+    .BufferLoadB128` with `dst=None` and `MUBUFModifiers(lds=True)`. That
+    is the structural signal `_is_dtl_buffer_load` checks for, so the
+    `_DTLBufferLoadRule` claims it and publishes `reads=(m0, srd)` —
+    enabling the dataflow graph to form an edge from any prior m0 setter
+    (SMovB32 / SAddU32) to this load.
+
+    Use this in any test that needs DTL-aware m0 tracking. Use `make_gr`
+    for plain (non-DTL) BufferLoad tests where the load writes a vgpr dst.
+    """
+    # Lazy imports — rocisa is a heavy C++-bound module; the fake-only
+    # tests in this file shouldn't pay its import cost.
+    from rocisa.container import MUBUFModifiers
+    from rocisa.instruction import BufferLoadB128
+    mubuf = MUBUFModifiers(offen=True, offset12=immediate_offset, lds=True)
+    inst = BufferLoadB128(
+        dst=None,
+        vaddr=vgpr(vaddr_vgpr_start, 1),
+        saddr=sgpr(srd_sgpr_start, 4),
+        soffset=0,
+        mubuf=mubuf,
+    )
+    return TaggedInstruction(
+        inst=inst,
+        category=category,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                     mfma_index=slot, sequence=sequence),
+    )
+
+
 def make_mfma(c_dst_start: int, a_src_start: int, b_src_start: int, slot: int,
               *, c_dst_count: int = 4, a_src_count: int = 2, b_src_count: int = 2,
               category: str = "MFMA", sequence: int = 0) -> TaggedInstruction:

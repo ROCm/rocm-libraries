@@ -82,7 +82,7 @@ from Tensile.Components.ScheduleCapture import (
 )
 
 from dataflow_fixtures import (
-    make_lr, make_gr, make_mfma, make_swait, make_capture,
+    make_lr, make_gr, make_dtl_buffer_load, make_mfma, make_swait, make_capture,
 )
 
 
@@ -172,14 +172,13 @@ class TestDTLm0Tracking:
     """The m0 register written by SMovB32/SAddU32 is implicitly read by the
     following BufferLoad. Reordering breaks LDS placement."""
 
-    @pytest.mark.xfail(reason=_FIXTURE_GAP_XFAIL_REASON, strict=True)
     def test_dtl_m0_update_before_buffer_load(self):
-        # Reference: m0 set, then BufferLoad consumes m0.
+        # Reference: m0 set, then DTL BufferLoad consumes m0.
         m0_set = SMovB32(dst=mgpr(0), src=sgpr("LocalWriteAddrA", 1))
         ref_cap = make_capture(BODY_LABEL_ML, [
             _tag(m0_set, category="GRA", mfma_index=0, sequence=0),
-            make_gr(8, 4, srd_sgpr_start=20, immediate_offset=0,
-                    slot=0, category="GRA", sequence=1),
+            make_dtl_buffer_load(vaddr_vgpr_start=40, srd_sgpr_start=20,
+                                 slot=0, category="GRA", sequence=1),
             make_swait(slot=1, dscnt=0),
             make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
@@ -187,8 +186,8 @@ class TestDTLm0Tracking:
         # The load sees stale m0.
         m0_set2 = SMovB32(dst=mgpr(0), src=sgpr("LocalWriteAddrA", 1))
         subj_cap = make_capture(BODY_LABEL_ML, [
-            make_gr(8, 4, srd_sgpr_start=20, immediate_offset=0,
-                    slot=0, category="GRA", sequence=0),
+            make_dtl_buffer_load(vaddr_vgpr_start=40, srd_sgpr_start=20,
+                                 slot=0, category="GRA", sequence=0),
             _tag(m0_set2, category="GRA", mfma_index=0, sequence=1),
             make_swait(slot=1, dscnt=0),
             make_mfma(0, 8, 32, slot=2, a_src_count=4),
@@ -202,7 +201,6 @@ class TestDTLm0Tracking:
         )
         assert any(isinstance(f, OrderInvertedFailure) for f in failures)
 
-    @pytest.mark.xfail(reason=_FIXTURE_GAP_XFAIL_REASON, strict=True)
     def test_dtl_m0_add_update_before_buffer_load(self):
         """Same as above but the m0 update is the SAddU32 form
         (DTL + IncLdsBufSwitch / DTL + ExpandPointerSwap path)."""
@@ -211,8 +209,8 @@ class TestDTLm0Tracking:
                          src1=sgpr("LDSBufferWriteInc", 1))
         ref_cap = make_capture(BODY_LABEL_ML, [
             _tag(m0_add, category="GRA", mfma_index=0, sequence=0),
-            make_gr(8, 4, srd_sgpr_start=20, immediate_offset=0,
-                    slot=0, category="GRA", sequence=1),
+            make_dtl_buffer_load(vaddr_vgpr_start=40, srd_sgpr_start=20,
+                                 slot=0, category="GRA", sequence=1),
             make_swait(slot=1, dscnt=0),
             make_mfma(0, 8, 32, slot=2, a_src_count=4),
         ])
@@ -220,8 +218,8 @@ class TestDTLm0Tracking:
                           src0=sgpr("LocalWriteAddrA", 1),
                           src1=sgpr("LDSBufferWriteInc", 1))
         subj_cap = make_capture(BODY_LABEL_ML, [
-            make_gr(8, 4, srd_sgpr_start=20, immediate_offset=0,
-                    slot=0, category="GRA", sequence=0),
+            make_dtl_buffer_load(vaddr_vgpr_start=40, srd_sgpr_start=20,
+                                 slot=0, category="GRA", sequence=0),
             _tag(m0_add2, category="GRA", mfma_index=0, sequence=1),
             make_swait(slot=1, dscnt=0),
             make_mfma(0, 8, 32, slot=2, a_src_count=4),
