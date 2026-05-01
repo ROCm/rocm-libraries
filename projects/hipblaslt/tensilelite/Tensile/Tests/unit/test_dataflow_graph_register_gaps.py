@@ -820,11 +820,17 @@ class TestVSwapPair:
 
 
 class TestVCCCarryChain:
-    @pytest.mark.xfail(reason=_FIXTURE_GAP_XFAIL_REASON, strict=True)
     def test_vcc_carry_chain_reorder(self):
-        """Lower-half add writes v100; upper-half add (VAddCCOU32) reads
-        the same vgpr position and the implicit VCC. Reorder breaks the
-        64-bit add even ignoring VCC, because the vgpr WAW is wrong."""
+        """Lower-half add (VAddCOU32) writes v100 and the carry-out VCC;
+        upper-half add (VAddCCOU32) writes v101 and reads the carry-in VCC.
+
+        The two instructions touch DISJOINT vgprs (lo: v100, v50; hi: v101,
+        v51), so without VCC tracking there is NO edge in the reference
+        graph between them and the reorder is invisible. With the wx9.9
+        `_VCCRule` publishing VCC as a synthetic resource, the reference
+        order forms a VCC RAW edge (lo → hi) that the subject's swapped
+        order destroys, surfacing as an `OrderInvertedFailure`.
+        """
         from rocisa.container import VCC
         lo = VAddCOU32(dst=vgpr(100, 1), dst1=VCC(),
                        src0=vgpr(100, 1), src1=vgpr(50, 1))
@@ -852,6 +858,59 @@ class TestVCCCarryChain:
             "VAddCO/VAddCCO 64-bit add pair reordered — VCC chain broken; "
             "graph cannot detect this."
         )
+
+    def test_vcc_rule_invariants(self):
+        """Lock down the wx9.9 contract: `_is_vcc` recognizes VCC sentinels,
+        `_vcc_resource()` is a singleton with regType="vcc"/regNum=2, and
+        `_VCCRule` publishes VCC as the carry-out write of VAddCOU32 and
+        the carry-in read of VAddCCOU32.
+        """
+        from rocisa.container import VCC
+        from Tensile.Components.ScheduleCapture import (
+            _is_vcc, _is_register, _vcc_resource, _VCCRule,
+        )
+
+        v = VCC()
+        # Inspection invariants — VCC is opaque to the generic resolver,
+        # so we identify it by class name.
+        assert _is_vcc(v) is True
+        assert _is_register(v) is False  # _is_register stays strict; that's the gate
+        # Regular registers must not be misclassified as VCC.
+        assert _is_vcc(vgpr(100, 1)) is False
+
+        # Singleton invariant — every VCC resource is the same object so
+        # producers and consumers hash to the same byte keys.
+        r1 = _vcc_resource()
+        r2 = _vcc_resource()
+        assert r1 is r2
+        assert r1.regType == "vcc"
+        assert r1.regIdx == 0
+        assert r1.regNum == 2
+
+        # _VCCRule produces correct (reads, writes) for VAddCOU32 (carry-out).
+        rule = _VCCRule()
+        lo = VAddCOU32(dst=vgpr(100, 1), dst1=VCC(),
+                       src0=vgpr(100, 1), src1=vgpr(50, 1))
+        assert rule.applies(lo)
+        reads, writes = rule.extract(lo)
+        # Writes: vgpr dst at slot 0, VCC dst1 at slot 1.
+        assert len(writes) == 2
+        assert writes[1] is _vcc_resource()
+        # Reads: vgpr src0, vgpr src1 — no VCC.
+        assert all(not _is_vcc(r) for r in reads)
+        assert len(reads) == 2
+
+        # _VCCRule produces correct (reads, writes) for VAddCCOU32 (carry chain).
+        hi = VAddCCOU32(dst=vgpr(101, 1), dst1=VCC(),
+                        src0=vgpr(101, 1), src1=vgpr(51, 1), src2=VCC())
+        assert rule.applies(hi)
+        reads, writes = rule.extract(hi)
+        # Writes: vgpr dst at slot 0, VCC dst1 at slot 1.
+        assert len(writes) == 2
+        assert writes[1] is _vcc_resource()
+        # Reads: src0, src1, and VCC src2 (carry-in) — exactly 3.
+        assert len(reads) == 3
+        assert reads[2] is _vcc_resource()
 
 
 # =============================================================================
