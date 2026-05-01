@@ -516,13 +516,6 @@ class TestMFMAQuadCycleGap:
             f"computed actual gap (cmw fix)."
         )
 
-    @pytest.mark.xfail(strict=True, reason=(
-        "exposes s7k — _quad_cycle_gap_ok cross-body early-return reports "
-        "actual=expected, which is misleading: the diagnostic claims the "
-        "actual gap exactly matches the threshold when in reality a body "
-        "boundary represents many issue cycles. Post-fix, `actual` should "
-        "reflect the real cross-body gap (much greater than expected)."
-    ))
     def test_mfma_acc_chain_cross_body_actual_reflects_real_gap(self):
         """Producer in body=ML, consumer in body=NGL sharing accumulator
         v0..v3. The cross-body early-return at ScheduleCapture.py:2922-2925

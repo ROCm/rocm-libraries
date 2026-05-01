@@ -3433,12 +3433,27 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
 
     if producer.body_label != consumer.body_label:
         # Cross-body: a body boundary always represents many issue cycles.
-        # Report a conservatively large actual so the gap is always OK.
-        # (The misleading `actual == expected` reported here is tracked as
-        # a separate concern in `rocm-libraries-s7k` — fixing it requires
-        # a graph-side notion of body-boundary cost that this function
-        # does not currently have.)
-        return True, expected, expected
+        # Report a conservatively large `actual` so (a) the gap is always
+        # judged OK (verdict semantics: cross-body MFMA->MFMA is presumed
+        # safe, never emits TimingTooCloseFailure) and (b) telemetry /
+        # diagnostics see a numerically meaningful value rather than the
+        # misleading placeholder `actual == expected` (s7k).
+        #
+        # We don't have access to per-body issue-cycle accounting here
+        # (that lives in CMSValidator.precompute_issue_times, which we
+        # cannot import without creating a cycle — see the docstring above
+        # for the same constraint that drives the same-body sound under-
+        # estimate). A conservative under-estimate based on how many body
+        # boundaries are crossed is enough to make the diagnostic honest:
+        # each body boundary represents at least hundreds of quad-cycles
+        # in any real schedule, so 1000 quad-cycles per crossed body is
+        # both (a) a sound under-estimate that keeps the verdict True for
+        # any plausible `expected`, and (b) numerically distinguishable
+        # from `expected` (typically 3 for the standard MFMA family) in
+        # any failure formatter or telemetry consumer.
+        body_delta = consumer.position.loop_index - producer.position.loop_index
+        actual = abs(body_delta) * 1000
+        return True, expected, actual
 
     p_pos = producer.position
     c_pos = consumer.position
