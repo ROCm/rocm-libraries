@@ -1105,7 +1105,7 @@ class TestDataflowGraphIntegration:
     or the build raises AssertionError.
     """
 
-    def _build_with_capture(self, isa_infrastructure):
+    def _build_with_capture(self, isa_infrastructure, **overrides):
         from cms_test_utils import _make_solution
         from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
 
@@ -1123,6 +1123,7 @@ class TestDataflowGraphIntegration:
             'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
             'SourceSwap': 1, 'StreamK': 0,
         }
+        config.update(overrides)
         solution = _make_solution(config, asm, isaInfoMap)
         writer = KernelWriterAssembly(asm, DebugConfig())
 
@@ -1141,6 +1142,42 @@ class TestDataflowGraphIntegration:
         16x16x32 4x4 with DepthU=32) both must report zero failures.
         """
         writer, solution = self._build_with_capture(isa_infrastructure)
+        writer._getKernelSource(solution)
+        assert writer._last_default_capture is not None
+        assert writer._last_cms_capture is not None
+
+    def test_dataflow_gating_passes_with_MIArchVgpr_true(self, isa_infrastructure):
+        """[bii] MIArchVgpr=True coverage for compare_graphs +
+        validate_edge_wait_coverage on the production graph-comparison path.
+
+        MIArchVgpr most aggressively reshapes register allocation
+        (KernelWriterAssembly:5256 / :7784 swap accvgpr <-> vgpr based on the
+        flag), so the writer-state-driven render-string identity used by
+        compare_graphs is precisely the surface most likely to develop a
+        symbolic-vs-numeric register-naming corner case under MIArchVgpr.
+
+        The MIArchVgpr=False sibling above already exercises the same
+        16x16x32 TF32 F32X CMS schedule (_get_schedule_128x128x32_TF32),
+        which has a registered MIArchVgpr=True variant in
+        custom_mainloop_scheduling_tf32.yaml. This test is the unit-level
+        pinning test for that production combination — if it ever fails with
+        UnexplainedMissingEdgeError or a wait-coverage assertion, that's a
+        real divergence between the default-side register allocator and the
+        CMS-side scheduler under MIArchVgpr=True.
+        """
+        writer, solution = self._build_with_capture(
+            isa_infrastructure, MIArchVgpr=True,
+        )
+        # Sanity-check: solution-config plumbing actually carried the flag
+        # through Solution construction. Without this the test would silently
+        # degrade to MIArchVgpr=False and provide no real coverage.
+        assert solution["MIArchVgpr"] is True, (
+            "MIArchVgpr override did not survive Solution construction; "
+            "test would not actually exercise MIArchVgpr=True codegen."
+        )
+        # Drives compare_graphs + validate_edge_wait_coverage end-to-end via
+        # KernelWriter.kernelBody. Either failing means the production
+        # assertion (KernelWriter.py:5202) would have fired on a real build.
         writer._getKernelSource(solution)
         assert writer._last_default_capture is not None
         assert writer._last_cms_capture is not None
