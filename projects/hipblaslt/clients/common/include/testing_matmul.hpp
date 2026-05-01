@@ -2257,8 +2257,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleA))
             {
-                // For MX format, use uin8_t for the scale (E8M0)
-                dScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * block_count, HMM);
+                // For MX format, use uint8_t for the scale (E8M0), allocate for all batches
+                dScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * num_batches[i] * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
@@ -2269,8 +2269,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleB))
             {
-                // For MX format, use uin8_t for the scale (E8M0)
-                dScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * block_count, HMM);
+                // For MX format, use uint8_t for the scale (E8M0), allocate for all batches
+                dScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * num_batches[i] * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
             if(arg.scaleC)
@@ -2321,7 +2321,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleA))
             {
-                hScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i]);
+                hScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * num_batches[i]);
             }
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
                || arg.scaleB == hipblaslt_scaling_format::Vector)
@@ -2330,7 +2330,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleB))
             {
-                hScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i]);
+                hScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * num_batches[i]);
             }
             if(arg.scaleC)
                 hScaleC.emplace_back(Talpha, 1);
@@ -3012,7 +3012,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
 
-                void* scaleA_addr = (void*)(dScaleA[i].buf());
+                size_t scaleA_block_size = isBlockScaling(arg.scaleA)
+                    ? size_scaleAVec[i] * num_batches[i]
+                    : size_scaleAVec[i];
+                void* scaleA_addr = (void*)(dScaleA[i].as<char>() + b * scaleA_block_size);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[0][i], attr, &scaleA_addr, sizeof(void*)));
 
@@ -3064,7 +3067,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
 
-                void* scaleB_addr = (void*)(dScaleB[i].buf());
+                size_t scaleB_block_size = isBlockScaling(arg.scaleB)
+                    ? size_scaleBVec[i] * num_batches[i]
+                    : size_scaleBVec[i];
+                void* scaleB_addr = (void*)(dScaleB[i].as<char>() + b * scaleB_block_size);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[0][i], attr, &scaleB_addr, sizeof(void*)));
 
