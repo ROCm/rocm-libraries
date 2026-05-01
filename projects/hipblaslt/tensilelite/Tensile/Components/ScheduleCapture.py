@@ -715,16 +715,9 @@ class InvalidCounterValueFailure(Failure):
 #     SCC consumer, displacing the producer's value before the consumer can
 #     read it.
 #
-#     Two construction shapes (transitional, until mrj.4 deletes the legacy
-#     verify_scc_overlap path):
-#
-#       - Graph-native (mrj.2): producer/consumer/intervening_writer are
-#         GraphNode references emitted by `diagnose_missing_edge` when an
-#         SCC-typed reference edge is missing from the subject graph.
-#       - Legacy structural (wx9.2 / pre-mrj): conflicting_name, grinc_name,
-#         conflicting_index, interval_start, interval_end emitted by
-#         `verify_scc_overlap` (CMSValidator.py) describing the structural
-#         interval an unrelated scalar instruction landed inside.
+#     Graph-native shape (mrj.2): producer/consumer/intervening_writer are
+#     GraphNode references emitted by `diagnose_missing_edge` when an
+#     SCC-typed reference edge is missing from the subject graph.
 #
 #     SCCConflictFailure is reserved for the CLOBBER case. Pure SCC reorder
 #     (no intervening writer, just consumer issued before producer) is
@@ -734,48 +727,30 @@ class InvalidCounterValueFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class SCCConflictFailure(Failure):
-    # Graph-native shape (mrj.2). All optional so the legacy constructor
-    # site keeps compiling until mrj.4 removes verify_scc_overlap.
     producer: object = None             # GraphNode (subject-side SCC writer the consumer SHOULD have read)
     consumer: object = None             # GraphNode (subject-side SCC reader)
     intervening_writer: object = None   # GraphNode (subject-side SCC writer that clobbered the producer)
-    # Legacy structural shape (wx9.2). Populated by verify_scc_overlap.
-    conflicting_name: str = None
-    grinc_name: str = None
-    conflicting_index: int = None
-    interval_start: int = None
-    interval_end: int = None
 
     def _format_canonical(self, capture=None) -> str:
-        # Graph-native shape branch — preferred when producer/consumer are
-        # populated (set by diagnose_missing_edge).
-        if self.producer is not None and self.consumer is not None:
-            producer_pos = format_position(self.producer, capture)
-            consumer_pos = format_position(self.consumer, capture)
-            inter_desc = ""
-            if self.intervening_writer is not None:
-                inter_pos = format_position(self.intervening_writer, capture)
-                inter_cls = type(getattr(self.intervening_writer,
-                                        "rocisa_inst", None)).__name__
-                inter_desc = (
-                    f" Intervening SCC writer "
-                    f"{self.intervening_writer.category}[{inter_cls}] "
-                    f"{inter_pos} clobbered the producer's SCC value."
-                )
-            producer_cls = type(getattr(self.producer, "rocisa_inst", None)).__name__
-            consumer_cls = type(getattr(self.consumer, "rocisa_inst", None)).__name__
-            return (
-                f"{self.consumer.category}[{consumer_cls}] "
-                f"{consumer_pos}'s SCC read should resolve to producer "
-                f"{self.producer.category}[{producer_cls}] {producer_pos}, "
-                f"but the subject schedule routes it elsewhere.{inter_desc}"
+        producer_pos = format_position(self.producer, capture)
+        consumer_pos = format_position(self.consumer, capture)
+        inter_desc = ""
+        if self.intervening_writer is not None:
+            inter_pos = format_position(self.intervening_writer, capture)
+            inter_cls = type(getattr(self.intervening_writer,
+                                    "rocisa_inst", None)).__name__
+            inter_desc = (
+                f" Intervening SCC writer "
+                f"{self.intervening_writer.category}[{inter_cls}] "
+                f"{inter_pos} clobbered the producer's SCC value."
             )
-        # Legacy structural shape (wx9.2) — kept until mrj.4 deletes
-        # verify_scc_overlap. Wording must match test_failure_formatters.
+        producer_cls = type(getattr(self.producer, "rocisa_inst", None)).__name__
+        consumer_cls = type(getattr(self.consumer, "rocisa_inst", None)).__name__
         return (
-            f"{self.conflicting_name} at index {self.conflicting_index} can't be "
-            f"between {self.grinc_name} {self.interval_start}-{self.interval_end} "
-            f"due to SCC usage."
+            f"{self.consumer.category}[{consumer_cls}] "
+            f"{consumer_pos}'s SCC read should resolve to producer "
+            f"{self.producer.category}[{producer_cls}] {producer_pos}, "
+            f"but the subject schedule routes it elsewhere.{inter_desc}"
         )
 
 

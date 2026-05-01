@@ -215,8 +215,8 @@ class CMSValidationTestBase:
         if expected_failure is not None:
             assert not status, "Schedule should have failed but passed."
             # Timeline rules stash their typed Failure on the Timeline;
-            # structural rules (verify_scc_overlap, verify_ascending_order)
-            # have no Timeline and instead stash on ValidationContext.
+            # structural rules (verify_ascending_order) have no Timeline and
+            # instead stash on ValidationContext.
             failure = getattr(timeline, "_last_failure", None) if timeline else None
             if failure is None:
                 failure = getattr(ctx, "_last_failure", None)
@@ -277,27 +277,6 @@ class CMSValidationTestBase:
         assert failure.actual_quad_cycles == actual_quad_cycles, (
             f"actual_quad_cycles: expected {actual_quad_cycles}, "
             f"got {failure.actual_quad_cycles}"
-        )
-
-    @staticmethod
-    def assert_scc_conflict(failure, *, conflicting_name, grinc_name,
-                            conflicting_index, interval_start, interval_end):
-        """Assert SCCConflictFailure carries the expected conflicting/GRInc
-        identities AND the SCC-protected interval bounds."""
-        assert failure.conflicting_name == conflicting_name, (
-            f"conflicting_name: expected {conflicting_name!r}, got {failure.conflicting_name!r}"
-        )
-        assert failure.grinc_name == grinc_name, (
-            f"grinc_name: expected {grinc_name!r}, got {failure.grinc_name!r}"
-        )
-        assert failure.conflicting_index == conflicting_index, (
-            f"conflicting_index: expected {conflicting_index}, got {failure.conflicting_index}"
-        )
-        assert failure.interval_start == interval_start, (
-            f"interval_start: expected {interval_start}, got {failure.interval_start}"
-        )
-        assert failure.interval_end == interval_end, (
-            f"interval_end: expected {interval_end}, got {failure.interval_end}"
         )
 
     @staticmethod

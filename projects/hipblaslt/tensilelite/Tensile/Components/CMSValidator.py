@@ -222,7 +222,7 @@ class StructuralRule(ABC):
     """A composable validation rule that operates on raw schedule data (no Timeline).
 
     The run() method returns a (bool, str) tuple. Migrated structural rules
-    (e.g. AscendingOrderRule, SCCOverlapRule) construct typed Failures
+    (e.g. AscendingOrderRule) construct typed Failures
     internally and call .format(capture=None) to produce the str — keeping
     the tuple shape stable for the existing isValid contract.
     """
@@ -3016,128 +3016,6 @@ def lr_needed_by_mfma(
 
 
 @dataclass
-class GRIncData:
-    """
-    Data structure representing GRInc-related information.
-    """
-    name: list[int]
-    intervals: list[tuple[int, int]]
-    insts: list[int]
-
-def verify_scc_overlap(scheduleInfo, context: 'ValidationContext', code_path: int) -> tuple[bool, str]:
-    """
-    Ensure we don't overlap scalar instructions modifying SCC for a single code path.
-    This can happen:
-        - between GRIncA and GRIncB
-        - between GRInc and GR when DLT is activated
-        - between GRInc and LWS
-
-    By default, GRInc instructions can be split into 3 distinct intervals where we shouldn't touch SCC
-      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
-      - s_add_u32, s_addc_u32 (2)
-      - s_sub_u32, s_subb_u32 (2)
-      - s_cmp_eq_u32, s_cselect_b32 (2)
-    With ShadowLimit disabled (`Use64bShadowLimit`):
-      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
-      - s_add_u32, s_addc_u32 (2)
-      - s_sub_u32  (2)
-
-        This function checks no other scalar instructions is inside the above intervals.
-    """
-    kernel = context.kernel
-    DTL = kernel["DirectToLds"]
-    ShadowLimit = kernel["Use64bShadowLimit"]
-
-    intervalSize = [3,2,2,2] if ShadowLimit else [3,2,1] # Values explained above
-    numElements = sum(intervalSize)
-
-    # Gets intervals from GRInc indices based on the above `intervalSize` value
-    def getIntervals(indices):
-        output = []
-        current_start = 0
-        for size in intervalSize:
-            current_end = current_start + size
-            min_val = indices[current_start]
-            max_val = indices[current_end - 1]
-            output.append([min_val, max_val])
-            current_start = current_end
-        return output
-
-    # Checks value is in [interval[0],interval[1]].
-    # if lhsGt : ]interval[0],interval[1]] else  [interval[0],interval[1][
-    def inInterval(value: int, interval: list[int], lhsGt: bool):
-        if lhsGt:
-            return value>interval[0] and value<=interval[1]
-        else:
-            return value>=interval[0] and value<interval[1]
-
-    def getDeclarationIndex(name):
-        return list(scheduleInfo.optSchedule).index(name)
-
-    GRIncNames = ["GRIncA", "GRIncB"]
-    names = ["LWSA", "LWSB"]
-    # We only care about GRA/B when DTL is activated (m0 usage)
-    if DTL:
-        names += ["GRA", "GRB"]
-
-    def verifyIndices(grIncData: GRIncData, name: str, indices: list[int]) -> Optional[str]:
-        from Tensile.Components.ScheduleCapture import SCCConflictFailure
-        dclIndex = getDeclarationIndex(name)
-        dclIndexGrInc = getDeclarationIndex(grIncData.name)
-        for v in indices:
-            for interval in grIncData.intervals:
-                if inInterval(v,interval, dclIndex<dclIndexGrInc):
-                    failure = SCCConflictFailure(
-                        conflicting_name=name,
-                        grinc_name=grIncData.name,
-                        conflicting_index=v,
-                        interval_start=interval[0],
-                        interval_end=interval[1],
-                    )
-                    # Stash typed Failure for test-side introspection. Return
-                    # shape stays (False, str) — see ValidationContext._last_failure.
-                    context._last_failure = failure
-                    return failure.format(capture=None)
-        return None
-
-    # SCC-overlap validation is only meaningful when the schedule emits GRIncA and GRIncB.
-    # Some schedule variants (e.g. wave32 PGR=2 schedules that bake the pointer increment
-    # into GRA/GRB themselves) do not emit separate GRInc groups; there is nothing to check
-    # in that case.
-    missing_grincs = [n for n in GRIncNames if n not in scheduleInfo.optSchedule]
-    if missing_grincs:
-        return True, ""
-
-    GRIncs = []
-    for GRIncName in GRIncNames:
-        GRInc = schedule_get(GRIncName, code_path, scheduleInfo)
-        assert numElements==len(GRInc), f"{GRIncName} expected size if {numElements}, given {len(GRInc)}."
-        GRIncs.append(GRIncData(name = GRIncName, insts = GRInc, intervals = getIntervals(GRInc)))
-
-    # First check GRIncA&B together
-    errorMessage = verifyIndices(GRIncs[0],GRIncs[1].name, GRIncs[1].insts)
-    if errorMessage:
-        return False, errorMessage
-
-    # Then, check GR and LW on all GRIncs. Skip names that are not emitted by this
-    # schedule variant: for example, schedules that use PGR=2 buffer alternation
-    # may not emit LWSA/LWSB swap instructions.
-    for grIncData in GRIncs:
-        for name in names:
-            if name not in scheduleInfo.optSchedule:
-                continue
-            insts = schedule_get(name, code_path, scheduleInfo)
-            # In case of GRA/GRB, just take m0 updates indices
-            if name.startswith("GR"):
-                insts = insts[0::2]
-            errorMessage = verifyIndices(grIncData, name, insts)
-            if errorMessage:
-                return False, errorMessage
-
-    return True, ""
-
-
-@dataclass
 class ValidationContext:
     """Typed context for CMS validation — replaces the raw context dict and ValidatorPassContext."""
     kernel: dict
@@ -3151,10 +3029,10 @@ class ValidationContext:
     default_capture: object = None
     cms_capture: object = None
     # Side-channel for typed Failure objects emitted by structural rules
-    # (verify_scc_overlap, verify_ascending_order). These rules return
-    # (False, str) for backward compatibility but stash the Failure here so
-    # test infrastructure can introspect typed fields. Reset to None at the
-    # top of each rule iteration in isValid to prevent cross-rule leakage.
+    # (verify_ascending_order). These rules return (False, str) for backward
+    # compatibility but stash the Failure here so test infrastructure can
+    # introspect typed fields. Reset to None at the top of each rule iteration
+    # in isValid to prevent cross-rule leakage.
     _last_failure: Optional[object] = None
 
     @property
@@ -3393,14 +3271,6 @@ class InstructionCountRule(StructuralRule):
         return verify_correct_number_of_instructions(schedule_info, context, code_path)
 
 
-class SCCOverlapRule(StructuralRule):
-    def concerns(self) -> set[ValidationConcern]:
-        return {ValidationConcern.SCALAR_REGISTER_SAFETY}
-
-    def run(self, schedule_info, context, code_path):
-        return verify_scc_overlap(schedule_info, context, code_path)
-
-
 class LRDataReadyRule(ValidationRule):
     def concerns(self) -> set[ValidationConcern]:
         return {ValidationConcern.LR_DATA_READY}
@@ -3447,7 +3317,6 @@ TIMELINE_RULES: list[ValidationRule] = [
 STRUCTURAL_RULES: list[StructuralRule] = [
     AscendingOrderRule(),
     InstructionCountRule(),
-    SCCOverlapRule(),
 ]
 
 

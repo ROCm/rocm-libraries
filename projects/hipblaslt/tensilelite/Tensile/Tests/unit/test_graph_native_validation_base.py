@@ -367,19 +367,6 @@ class TestLiftedHelpers(GraphNativeValidationTest):
             expected_quad_cycles=2, actual_quad_cycles=1,
         )
 
-    def test_assert_scc_conflict(self):
-        f = SCCConflictFailure(
-            conflicting_name="SBranch",
-            grinc_name="GRIncA",
-            conflicting_index=5,
-            interval_start=2,
-            interval_end=8,
-        )
-        self.assert_scc_conflict(
-            f, conflicting_name="SBranch", grinc_name="GRIncA",
-            conflicting_index=5, interval_start=2, interval_end=8,
-        )
-
     def test_assert_out_of_order_sequence(self):
         f = OutOfOrderSequenceFailure(
             kind="sequence",

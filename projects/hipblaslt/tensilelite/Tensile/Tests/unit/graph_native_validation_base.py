@@ -434,27 +434,6 @@ class GraphNativeValidationTest:
         )
 
     @staticmethod
-    def assert_scc_conflict(failure, *, conflicting_name, grinc_name,
-                            conflicting_index, interval_start, interval_end):
-        """Assert SCCConflictFailure carries the expected conflicting/GRInc
-        identities AND the SCC-protected interval bounds."""
-        assert failure.conflicting_name == conflicting_name, (
-            f"conflicting_name: expected {conflicting_name!r}, got {failure.conflicting_name!r}"
-        )
-        assert failure.grinc_name == grinc_name, (
-            f"grinc_name: expected {grinc_name!r}, got {failure.grinc_name!r}"
-        )
-        assert failure.conflicting_index == conflicting_index, (
-            f"conflicting_index: expected {conflicting_index}, got {failure.conflicting_index}"
-        )
-        assert failure.interval_start == interval_start, (
-            f"interval_start: expected {interval_start}, got {failure.interval_start}"
-        )
-        assert failure.interval_end == interval_end, (
-            f"interval_end: expected {interval_end}, got {failure.interval_end}"
-        )
-
-    @staticmethod
     def assert_out_of_order_sequence(failure, *, schedule_key, sequence,
                                      bad_value, bad_index, prev_value):
         """Assert OutOfOrderSequenceFailure (kind='sequence') carries the

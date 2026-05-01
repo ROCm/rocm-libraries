@@ -302,22 +302,6 @@ def test_invalid_counter_value_failure_format():
     assert ">= -1" in msg
 
 
-def test_scc_conflict_failure_format_legacy_shape():
-    """Legacy structural shape (wx9.2) — populated by verify_scc_overlap.
-    Kept until mrj.4 deletes the legacy CMSValidator path."""
-    failure = SCCConflictFailure(
-        conflicting_name="LWSA",
-        grinc_name="GRIncA",
-        conflicting_index=7,
-        interval_start=4,
-        interval_end=6,
-    )
-    msg = failure.format(capture=None)
-    assert "LWSA at index 7" in msg
-    assert "GRIncA 4-6" in msg
-    assert "SCC usage" in msg
-
-
 def test_scc_conflict_failure_format_graph_shape():
     """Graph-native shape (mrj.2) — populated by diagnose_missing_edge
     when an SCC reference edge is missing from the subject graph due to

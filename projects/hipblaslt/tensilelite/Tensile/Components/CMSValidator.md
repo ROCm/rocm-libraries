@@ -135,22 +135,17 @@ min_quad_cycles <= estimated_quad_cycles   (for CVT instructions)
 
 ---
 
-### 7. `verify_scc_overlap`
+### 7. SCC clobber (graph-native)
 
-**Purpose**: Ensures scalar instructions that modify SCC (Status/Condition Code) don't overlap improperly.
+**Purpose**: Ensures scalar instructions that modify SCC (Status/Condition Code) don't clobber an in-flight SCC value before its consumer reads it.
 
-**How it works**:
-- GRInc (Global Read Increment) instructions use multiple scalar ops that depend on SCC
-- These form distinct intervals where SCC must not be modified:
-  - `s_cmp_eq_u32, s_cselect_b32, s_cselect_b32` (3 instructions)
-  - `s_add_u32, s_addc_u32` (2 instructions)
-  - `s_sub_u32, s_subb_u32` (2 instructions, or just 1 without ShadowLimit)
-  - `s_cmp_eq_u32, s_cselect_b32` (2 instructions)
-
-**Checked for conflicts**:
-- GRIncA vs GRIncB
-- GRIncA/B vs GRA/GRB (when DirectToLds enabled)
-- GRIncA/B vs LWSA/LWSB (Local Write Store)
+**How it works** (mrj epic): Graph-native — the dataflow graph builder tracks
+SCC reads/writes as reference edges. `diagnose_missing_edge` emits an
+`SCCConflictFailure` when the subject schedule contains an SCC writer
+between an SCC producer and its consumer (clobber case). Pure SCC reorder
+(consumer before producer, no intervening writer) is reported via
+`OrderInvertedFailure`. This replaced the prior structural
+`verify_scc_overlap` check, which hardcoded GRInc interval shapes.
 
 ---
 

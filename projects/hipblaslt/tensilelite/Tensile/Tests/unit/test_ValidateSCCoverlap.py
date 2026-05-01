@@ -22,48 +22,34 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""SCC clobber detection — graph-native rewrite (bead mrj.3).
+"""SCC clobber detection — graph-native (bead mrj.3 rewrite, mrj.4 cleanup).
 
-Migrated from the structural ``verify_scc_overlap`` interface to the
-graph-based ``compare_graphs`` -> ``diagnose_missing_edge`` ->
-``SCCConflictFailure`` path landed in mrj.1 / mrj.2.
+Tests use the graph-based ``compare_graphs`` -> ``diagnose_missing_edge`` ->
+``SCCConflictFailure`` path landed in mrj.1 / mrj.2. The prior structural
+SCC overlap check and its ``SCCConflictFailure`` structural fields were
+removed in mrj.4.
 
-The legacy version of this file built synthetic ``optSchedule`` dicts
-keyed by category (``GRA``, ``GRIncA``, ``LWSA``, ...) and called
-``verify_scc_overlap(scheduleInfo, ctx, code_path=0)`` directly. Each
-case asserted the legacy ``conflicting_name`` / ``grinc_name`` /
-``conflicting_index`` / ``interval_start`` / ``interval_end`` shape on
-``SCCConflictFailure``.
-
-Every legacy case represented a SHAPE: an SCC producer + SCC consumer
-chain with an unrelated SCC writer landing inside the producer/consumer
-window, displacing the producer's SCC value before the consumer could
-read it. The rewrite expresses that shape directly at the rocisa /
-dataflow-graph level: build a default body (producer immediately followed
-by consumer) and a subject body (producer + clobber + consumer); call
-``compare_graphs`` and assert ``SCCConflictFailure`` with
+The shape under test: an SCC producer + SCC consumer chain with an
+unrelated SCC writer landing inside the producer/consumer window,
+displacing the producer's SCC value before the consumer could read it.
+Each case builds a default body (producer immediately followed by
+consumer) and a subject body (producer + clobber + consumer); calls
+``compare_graphs`` and asserts ``SCCConflictFailure`` with
 ``intervening_writer`` pointing at the clobber's rocisa class.
 
-Test inventory (12 conflict assertions across 6 methods, mirroring the
-legacy file):
+Test inventory (12 conflict assertions across 6 methods):
 
-  test_gr_simple                  -> 2 conflicts (rl 81, 91)
-  test_gr_declaration_order       -> 2 conflicts (rl 127, 136)
-  test_gr_interval                -> 3 conflicts (rl 173, 180, 190)
-  test_gr_noshadow                -> 2 conflicts (rl 221, 237)
-  test_lws                        -> 2 conflicts (rl 269, 279)
-  test_gr_inc_together            -> 1 conflict  (rl 311)
+  test_gr_simple                  -> 2 conflicts
+  test_gr_declaration_order       -> 2 conflicts
+  test_gr_interval                -> 3 conflicts
+  test_gr_noshadow                -> 2 conflicts
+  test_lws                        -> 2 conflicts
+  test_gr_inc_together            -> 1 conflict
                                   ----
                                     12
 
-Each test method also retains the positive paths from the legacy file
-(default schedule + post-fix schedule each pass cleanly with no SCC
-failures), so the count of test methods stays at 6 but the conflict
-coverage stays at 12 — the same as the legacy structural assertions.
-
-NOTE: ``verify_scc_overlap`` and its STRUCTURAL_RULES registration are
-intentionally NOT removed here — that's bead mrj.4. This file only
-exercises the new graph-native path.
+Each test method also retains positive paths (default schedule + post-fix
+schedule each pass cleanly with no SCC failures).
 """
 
 from typing import Optional
@@ -161,10 +147,9 @@ def _clobber_factory(opcode: str):
 class TestValidateSCCOverlap(GraphNativeValidationTest):
     """SCC clobber detection at the dataflow-graph level.
 
-    Each method below mirrors a legacy ``verify_scc_overlap`` test method
-    with the same name; the assertion count per method matches the
-    legacy file's conflict count so the migration preserves coverage
-    one-for-one (see file docstring inventory).
+    Each method below corresponds to a SHAPE that the prior structural
+    overlap check covered; the assertion count per method preserves that
+    coverage one-for-one (see file docstring inventory).
     """
 
     # =========================================================================

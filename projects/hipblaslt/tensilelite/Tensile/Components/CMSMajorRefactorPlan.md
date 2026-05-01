@@ -405,7 +405,7 @@ TF32_4X4_MFMA_END = 6
 - **Schedule format**: `optSchedule` dict structure unchanged. CMS authors still write `PackA0: [5, 5, 7, 9, ...]`.
 - **Schedule names**: `"PackA0"`, `"GRA"`, `"SYNC"`, etc. — unchanged.
 - **idMap construction** in `CustomSchedule.py` — unchanged (it already builds the right data).
-- **Structural checks** (`verify_correct_number_of_instructions`, `verify_ascending_order`, `verify_scc_overlap`) — unchanged, they already work correctly.
+- **Structural checks** (`verify_correct_number_of_instructions`, `verify_ascending_order`) — unchanged, they already work correctly. (`verify_scc_overlap` removed in mrj.4; SCC clobber is now graph-native.)
 - **Timeline loop structure** (ML-1, ML, NGL, NLL) — unchanged.
 - **MFMA handling** — MFMAs are explicitly added to the timeline, not from idMap. Unchanged.
 - **`_should_add` filtering** — still uses name strings for loop membership. Unchanged.
@@ -960,7 +960,7 @@ MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4
 - **`_handle_min_pack_quad_cycles`**: Sets the timing thresholds. Still needed.
 - **`apply_swaits`**: Walks SWaitCnts backward through the timeline to set `guaranteed_by`. The structure stays, but gains a new **counter verification** sub-pass.
 - **`apply_barriers` / `apply_must_start_after_barriers`**: SBarrier constraint logic. Unchanged.
-- **Structural checks** (`verify_correct_number_of_instructions`, `verify_ascending_order`, `verify_scc_overlap`): Unchanged.
+- **Structural checks** (`verify_correct_number_of_instructions`, `verify_ascending_order`): Unchanged. (`verify_scc_overlap` removed in mrj.4; SCC clobber is now graph-native.)
 - **Timeline loop structure** (ML-1, ML, NGL, NLL) and `_should_add` filtering: Unchanged.
 - **MiddlePack pair constraint** (`pair_consumer` / `next_scheduled_middle_16`): The constraint is about shared temp VGPRs. With rocisa registers, the pair detection becomes register-based instead of positional, but the validation logic stays.
 
@@ -1225,7 +1225,6 @@ Each existing pass becomes one or more rules:
 |---|---|---|
 | `VERIFY_ASCENDING_ORDER` | `AscendingOrderRule` | `{INSTRUCTION_ORDERING}` |
 | `VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS` | `InstructionCountRule` | `{SCHEDULE_COMPLETENESS}` |
-| `VERIFY_SCC_OVERLAP` | `SCCOverlapRule` | `{SCALAR_REGISTER_SAFETY}` |
 | `ADD_LOCAL_READ_CONSTRAINTS` | `LRDataReadyRule` | `{LR_DATA_READY}` |
 | `ADD_PACK_CONSTRAINTS` | `PackDataReadyRule` | `{PACK_DATA_READY, QUAD_CYCLE_TIMING}` |
 | `ADD_GR_NOT_TOO_EARLY_CONSTRAINTS` | `GRAfterLRRule` (DTL=1 variant) | `{LDS_WRITE_AFTER_READ}` |
@@ -1259,7 +1258,6 @@ TIMELINE_RULES: list[ValidationRule] = [
 STRUCTURAL_RULES: list[StructuralRule] = [
     AscendingOrderRule(),
     InstructionCountRule(),
-    SCCOverlapRule(),
 ]
 ```
 
