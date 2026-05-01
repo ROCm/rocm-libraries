@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 
@@ -91,7 +92,7 @@ namespace stinkytofu {
  *   std::string asm = module->emitAssembly();
  * @endcode
  */
-class StinkyAsmModule {
+class STINKYTOFU_EXPORT StinkyAsmModule {
    public:
     /**
      * @brief Options for the StinkyAsmModule
