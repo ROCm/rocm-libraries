@@ -430,8 +430,6 @@ _defaultProblemType = {
     "UseScaleAlphaVec": 0,  # =1 support alpha vector on M direction, =2 support bias vector on N direction, =3 support alpha vector on both M,N direction
     "HighPrecisionAccumulate": False,  # f32 += f16*f16
     "SilentHighPrecisionAccumulate": False,  # Keep kernel names the same for HPA mode.  Useful for testing.
-    "MXBlockA": 0,  # MX block size for A (0=disabled, 32=MX32)
-    "MXBlockB": 0,  # MX block size for B (0=disabled, 32=MX32)
     "Sparse": 0,  # 4:2 Structured Sparse A Matrix, 0=Non Sparse, 1=Sparse Matrix A, 2=Sparse Matrix B
     "ComplexConjugateA": False,  # complex data should be conjugated for "C" transpose case
     "ComplexConjugateB": False,

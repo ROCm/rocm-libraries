@@ -15216,7 +15216,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if len(factorDims) == 1:
       isDeferredReturn = "Deferred" in endLabel.getLabelName()
-      if currentInstLength >= 16384 or isDeferredReturn:
+      if currentInstLength >= self.states.asmCaps["ShortBranchMaxLength"] or isDeferredReturn:
         posLabel = self.labels.getNameInc("DeferredReturnDir")
         with self.allocTmpSgpr(3) as tmpSgprInfo:
           edgeModule.add(SLongBranch(endLabel, tmpSgprInfo, posLabel, comment="jump to end"))
