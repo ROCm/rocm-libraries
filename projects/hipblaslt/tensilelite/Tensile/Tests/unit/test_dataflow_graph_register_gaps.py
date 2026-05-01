@@ -44,6 +44,8 @@ Audit summary that produced this list:
   - `m0` write before BufferLoad in DTL              -> test_dtl_m0_update_before_buffer_load
                                                         + test_dtl_m0_add_update_before_buffer_load
   - `GRInc` SCC chain & SRD WAW vs subsequent GR     -> test_grinc_srd_waw_before_buffer_load
+  - LR LDS-address vgpr read (LRS -> LR RAW)         -> test_lrs_vxor_before_lr_invisible
+  - LW LDS-address vgpr read (LWS -> LW RAW)         -> test_lws_vxor_before_lw_invisible
 - **P1** (uncatchable scheduling bugs)
   - `Pack` VCvt*/VLShift*/VPerm/VPack RAW from LR    -> test_pack_cvt_raw_from_lr
   - `VSwap` bidirectional RMW reorder                -> test_vswap_pair_reorder_invisible
@@ -60,6 +62,7 @@ from rocisa.instruction import (
     SMovB32, SAddU32, SAddCU32, SSubU32, SSubBU32,
     SCmpEQU32, SCSelectB32, SCMovB32,
     VAddCOU32, VAddCCOU32, VSwapB32,
+    DSLoadB128, DSStoreB128, VXorB32,
 )
 
 from Tensile.Components.ScheduleCapture import (
@@ -546,4 +549,90 @@ class TestVCCCarryChain:
         assert compare_graphs(g_ref, g_subj), (
             "VAddCO/VAddCCO 64-bit add pair reordered — VCC chain broken; "
             "graph cannot detect this."
+        )
+
+
+# =============================================================================
+# P0 — LR LDS-address vgpr read (LRS -> LR RAW)
+# =============================================================================
+# DSLoadB* takes (dst, src, ds=None, comment=''). The `src` operand is the
+# LDS-address vgpr (`LocalReadAddr{tc}` in the kernel writer). LRS modifies
+# that vgpr via VXorB32/VAddU32 (KWA:11678-11691). Today `_reads(LR)` returns
+# nothing for LR — neither the LDS-address vgpr nor the LDS bytes themselves.
+# So an LRS pointer-flip reordered AFTER its consuming DSLoad is invisible:
+# the load reads the wrong half of LDS.
+
+
+class TestLRSAddrChain:
+    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
+    def test_lrs_vxor_before_lr_invisible(self):
+        """LRS XOR-swap of `LocalReadAddrA` (vgpr 40) reordered after its
+        consuming DSLoadB128 — load consumes pre-swap address, fetching the
+        wrong LDS half."""
+        # Reference: LRS swap, then DSLoad reading the just-swapped vgpr.
+        lrs = VXorB32(dst=vgpr(40, 1), src0=vgpr(60, 1), src1=vgpr(40, 1))
+        ld_ref = DSLoadB128(dst=vgpr(8, 4), src=vgpr(40, 1))
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            _tag(lrs, category="LRSA0", mfma_index=0, sequence=0),
+            _tag(ld_ref, category="LRA0", mfma_index=0, sequence=1),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=2, a_src_count=4),
+        ])
+        # Subject: same instructions, swap reordered after the load.
+        lrs2 = VXorB32(dst=vgpr(40, 1), src0=vgpr(60, 1), src1=vgpr(40, 1))
+        ld_subj = DSLoadB128(dst=vgpr(8, 4), src=vgpr(40, 1))
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            _tag(ld_subj, category="LRA0", mfma_index=0, sequence=0),
+            _tag(lrs2, category="LRSA0", mfma_index=0, sequence=1),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=2, a_src_count=4),
+        ])
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        assert compare_graphs(g_ref, g_subj), (
+            "LRS VXorB32 writing LocalReadAddrA reordered after the "
+            "DSLoadB128 reading it — should have produced an OrderInvertedFailure "
+            "on the LDS-address vgpr RAW edge."
+        )
+
+
+# =============================================================================
+# P0 — LW LDS-address vgpr read (LWS -> LW RAW)
+# =============================================================================
+# DSStoreB* takes (dstAddr, src, ds, comment). `dstAddr` (slot 0) is the
+# LDS-address vgpr (`LocalWriteAddr{tc}`). LWS modifies that vgpr via
+# VXorB32/VAddU32 (KWA:10542-10546). Today `_reads(LW)` returns only the
+# data src (slot 1), not the LDS-address vgpr (slot 0). So an LWS pointer-flip
+# reordered AFTER its consuming DSStore writes to the wrong LDS half.
+
+
+class TestLWSAddrChain:
+    @pytest.mark.xfail(reason=_GAP_XFAIL_REASON, strict=True)
+    def test_lws_vxor_before_lw_invisible(self):
+        """LWS XOR-swap of `LocalWriteAddrA` (vgpr 50) reordered after its
+        consuming DSStoreB128 — store writes to pre-swap LDS half."""
+        # Reference: LWS swap, then DSStore using the just-swapped vgpr.
+        lws = VXorB32(dst=vgpr(50, 1), src0=vgpr(70, 1), src1=vgpr(50, 1))
+        st_ref = DSStoreB128(dstAddr=vgpr(50, 1), src=vgpr(8, 4))
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            _tag(lws, category="LWSA", mfma_index=0, sequence=0),
+            _tag(st_ref, category="LWA", mfma_index=0, sequence=1),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 100, 32, slot=2, a_src_count=4),
+        ])
+        # Subject: store before swap.
+        lws2 = VXorB32(dst=vgpr(50, 1), src0=vgpr(70, 1), src1=vgpr(50, 1))
+        st_subj = DSStoreB128(dstAddr=vgpr(50, 1), src=vgpr(8, 4))
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            _tag(st_subj, category="LWA", mfma_index=0, sequence=0),
+            _tag(lws2, category="LWSA", mfma_index=0, sequence=1),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 100, 32, slot=2, a_src_count=4),
+        ])
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        assert compare_graphs(g_ref, g_subj), (
+            "LWS VXorB32 writing LocalWriteAddrA reordered after the "
+            "DSStoreB128 reading it — should have produced an "
+            "OrderInvertedFailure on the LDS-address vgpr RAW edge."
         )
