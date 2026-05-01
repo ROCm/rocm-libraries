@@ -499,7 +499,7 @@ namespace hipsparse
             return rocsparse_spmv_alg_csr_adaptive;
         // case HIPSPARSE_CSRMV_ALG2:
         case HIPSPARSE_SPMV_CSR_ALG2:
-            return rocsparse_spmv_alg_csr_stream;
+            return rocsparse_spmv_alg_csr_rowsplit;
         case HIPSPARSE_SPMV_SELL_ALG1:
             return rocsparse_spmv_alg_sell;
         default:
