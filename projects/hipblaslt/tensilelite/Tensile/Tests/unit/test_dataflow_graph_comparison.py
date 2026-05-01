@@ -727,3 +727,82 @@ class TestGRIncReorderDetection:
         # we just confirm the message identifies the offending key.
         assert "GRIncA" in msg
         assert "0" in msg  # the bad value
+
+
+class TestVgprChainReorderDetection:
+    """Coverage proof for non-GRIncA categories — bead wx9.10 task #4.
+
+    Mirrors `TestGRIncReorderDetection` but exercises a vgpr ALU chain
+    with a different category tag (`LRA0`, modeling a Local Read Address
+    advancement sequence). The point is to demonstrate that the
+    scalar-ALU coverage in `_GenericALURule` is operand-shape-driven and
+    not GRIncA-specific: any reversed RAW chain across vgpr or sgpr
+    registers should be caught by `compare_graphs` once the producer is
+    issued after the consumer.
+    """
+
+    def _make_vgpr_chain(self, *, base_slot: int, reversed_order: bool):
+        """3-instruction vgpr RAW chain.
+
+          #1 VAddU32   dst=v100, src0=v50, src1=v51       — produces v100
+          #2 VAddU32   dst=v101, src0=v100, src1=v52      — RAW from #1
+          #3 VAddU32   dst=v102, src0=v101, src1=v53      — RAW from #2
+        """
+        from rocisa.instruction import VAddU32
+        from rocisa.container import vgpr
+        from Tensile.Components.ScheduleCapture import (
+            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+        )
+
+        i1 = VAddU32(dst=vgpr(100), src0=vgpr(50), src1=vgpr(51))
+        i2 = VAddU32(dst=vgpr(101), src0=vgpr(100), src1=vgpr(52))
+        i3 = VAddU32(dst=vgpr(102), src0=vgpr(101), src1=vgpr(53))
+
+        chain = [i1, i2, i3]
+        if reversed_order:
+            chain = list(reversed(chain))
+
+        tagged = []
+        for seq, inst in enumerate(chain):
+            tagged.append(TaggedInstruction(
+                inst=inst,
+                category="LRA0",
+                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                             mfma_index=base_slot, sequence=seq),
+            ))
+        return tagged
+
+    def test_reversed_vgpr_chain_should_be_detected(self):
+        """A reversed vgpr RAW chain (different category, different op
+        family from GRIncA) must also surface as `OrderInvertedFailure`.
+        Proves the wx9.10 coverage isn't GRIncA-specific.
+        """
+        ref_chain = self._make_vgpr_chain(base_slot=0, reversed_order=False)
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            *ref_chain,
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=2, a_src_count=4),
+        ])
+        subj_chain = self._make_vgpr_chain(base_slot=0, reversed_order=True)
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            *subj_chain,
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=2, a_src_count=4),
+        ])
+
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        failures = compare_graphs(g_ref, g_subj)
+
+        assert failures, (
+            "compare_graphs should have flagged the reversed vgpr chain "
+            "(producer VAddU32 issued after consumer VAddU32) but "
+            "returned no failures — coverage of vgpr ALU dependencies "
+            "regressed."
+        )
+        assert any(isinstance(f, OrderInvertedFailure) for f in failures), (
+            "Expected at least one OrderInvertedFailure for the reversed "
+            f"vgpr chain; got {[type(f).__name__ for f in failures]}."
+        )

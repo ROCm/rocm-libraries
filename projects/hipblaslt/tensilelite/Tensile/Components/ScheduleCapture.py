@@ -1915,6 +1915,26 @@ class _GenericALURule:
     cross-side OrderInverteds. Sub-B's per-byte latest-writer resolver
     eliminates that, so the rule is now safe to publish reads/writes for
     every Pack-shaped instruction.
+
+    Scalar-ALU coverage (bead wx9.10): SCSelectB32, SAddU32, SAddCU32,
+    SSubU32, SSubBU32, SCmpEQU32 and similar SOP1/SOP2 instructions land
+    here. Their sgpr dst (params[0]) and sgpr srcs are tracked, so a
+    reversed GRInc-style chain forms RAW edges that `compare_graphs`
+    flips into `OrderInvertedFailure`. This is what allows
+    `verify_ascending_order` (CMSValidator.py) to be retired in bead
+    wx9.11. Coverage proven by
+    `test_dataflow_graph_comparison.py::TestGRIncReorderDetection` and
+    `::TestVgprChainReorderDetection`.
+
+    NOT covered here (deliberate scope cut, see downstream beads):
+      - VCC carry-out / carry-in (regType=None) — bead wx9.9.
+      - SCC implicit read/write — bead mrj.1 (adds dedicated _SCCRule).
+      - VSwap symmetric R+W (both operands read AND written) — bead wx9.8.
+      - SCmp* writing only SCC and no sgpr dst — the generic rule will
+        misclassify src0 as a "write" because it sits at params[0]; that
+        false write is harmless for now (no consumer reads sgpr 50/51 in
+        practice as a comparison-output) but will be cleaned up by
+        mrj.1's per-opcode flag table.
     """
     def applies(self, inst, category=None):
         # Only real rocisa CommonInstruction-shaped objects expose
