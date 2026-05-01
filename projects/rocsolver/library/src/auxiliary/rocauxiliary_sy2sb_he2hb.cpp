@@ -180,4 +180,76 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
             handle, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssy2sb_64(rocblas_handle handle,
+                                const int64_t n,
+                                const int64_t kd,
+                                const int64_t nb,
+                                float* A,
+                                const int64_t lda,
+                                float* Aband,
+                                const int64_t ldab,
+                                float* tau)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<float, int64_t>(
+            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsy2sb_64(rocblas_handle handle,
+                                const int64_t n,
+                                const int64_t kd,
+                                const int64_t nb,
+                                double* A,
+                                const int64_t lda,
+                                double* Aband,
+                                const int64_t ldab,
+                                double* tau)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<double, int64_t>(
+            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_che2hb_64(rocblas_handle handle,
+                                const int64_t n,
+                                const int64_t kd,
+                                const int64_t nb,
+                                rocblas_float_complex* A,
+                                const int64_t lda,
+                                rocblas_float_complex* Aband,
+                                const int64_t ldab,
+                                rocblas_float_complex* tau)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_float_complex, int64_t>(
+            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zhe2hb_64(rocblas_handle handle,
+                                const int64_t n,
+                                const int64_t kd,
+                                const int64_t nb,
+                                rocblas_double_complex* A,
+                                const int64_t lda,
+                                rocblas_double_complex* Aband,
+                                const int64_t ldab,
+                                rocblas_double_complex* tau)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_double_complex, int64_t>(
+            handle, n, kd, nb, A, lda, Aband, ldab, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
 } // extern C

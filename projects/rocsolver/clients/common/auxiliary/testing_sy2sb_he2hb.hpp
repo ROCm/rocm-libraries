@@ -39,15 +39,15 @@
 
 #include "print_matrix.hpp"
 
-template <typename T>
+template <typename T, typename I>
 void sy2sb_he2hb_checkBadArgs(const rocblas_handle handle,
-                               const rocblas_int n,
-                               const rocblas_int kd,
-                               const rocblas_int nb,
+                               const I n,
+                               const I kd,
+                               const I nb,
                                T dA,
-                               const rocblas_int lda,
+                               const I lda,
                                T dAband,
-                               const rocblas_int ldab,
+                               const I ldab,
                                T dTau)
 {
     // handle
@@ -76,16 +76,16 @@ void sy2sb_he2hb_checkBadArgs(const rocblas_handle handle,
         rocblas_status_success);
 }
 
-template <typename T>
+template <typename T, typename I>
 void testing_sy2sb_he2hb_bad_arg()
 {
     // safe arguments
     rocblas_local_handle handle;
-    rocblas_int n = 1;
-    rocblas_int kd = 1;
-    rocblas_int nb = 1;
-    rocblas_int lda = 1;
-    rocblas_int ldab = 3;
+    I n = 1;
+    I kd = 1;
+    I nb = 1;
+    I lda = 1;
+    I ldab = 3;
 
     // memory allocations
     device_strided_batch_vector<T> dA(1, 1, 1, 1);
@@ -96,7 +96,7 @@ void testing_sy2sb_he2hb_bad_arg()
     CHECK_HIP_ERROR(dTau.memcheck());
 
     // check bad arguments
-    sy2sb_he2hb_checkBadArgs(handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data());
+    sy2sb_he2hb_checkBadArgs<T, I>(handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data());
 }
 
 //------------------------------------------------------------------------------
@@ -104,14 +104,15 @@ void testing_sy2sb_he2hb_bad_arg()
 template <bool CPU,
           bool GPU,
           typename T,
+          typename I,
           typename Td,
           typename Th>
           //std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 void sy2sb_he2hb_initData(const rocblas_handle handle,
-                          const rocblas_int n,
-                          const rocblas_int kd,  // unused
+                          const I n,
+                          const I kd,  // unused
                           Td& dA,
-                          const rocblas_int lda,
+                          const I lda,
                           Th& hA)
 {
     const bool debug_ = false;
@@ -150,16 +151,16 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
 // hAband   -- output band matrix on CPU, ldab-by-n, ldab >= kd+1
 // hTau     -- output vector on CPU, length n-kd
 //
-template <typename T, typename Td, typename Th>
+template <typename T, typename I, typename Td, typename Th>
 void sy2sb_he2hb_getError(const rocblas_handle handle,
-                    const rocblas_int n,
-                    const rocblas_int kd,
-                    const rocblas_int nb,
+                    const I n,
+                    const I kd,
+                    const I nb,
 
                     Td& dA,
-                    const rocblas_int lda,
+                    const I lda,
                     Td& dAband,
-                    const rocblas_int ldab,
+                    const I ldab,
                     Td& dTau,
 
                     Th& hARes,
@@ -182,7 +183,7 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     std::vector<T> hwork(lwork);
 
     // input data initialization
-    sy2sb_he2hb_initData<true, true, T>(handle, n, kd, dA, lda, hA);
+    sy2sb_he2hb_initData<true, true, T, I>(handle, n, kd, dA, lda, hA);
 
     // execute computations
     // GPU lapack
@@ -254,15 +255,15 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
 // dA       -- matrix on GPU, lda-by-n, lda >= n
 // dAband   -- output band matrix on GPU, ldab-by-n, ldab >= 3 kd (size needed for 2nd stage)
 // hA       -- matrix on CPU, lda-by-n, lda >= n
-template <typename T, typename Td, typename Th>
+template <typename T, typename I, typename Td, typename Th>
 void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
-                       const rocblas_int n,
-                       const rocblas_int kd,
-                       const rocblas_int nb,
+                       const I n,
+                       const I kd,
+                       const I nb,
                        Td& dA,
-                       const rocblas_int lda,
+                       const I lda,
                        Td& dAband,
-                       const rocblas_int ldab,
+                       const I ldab,
                        Td& dTau,
                        Th& hA,
                        Th& hAband,
@@ -282,7 +283,7 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
 
     if(!perf)
     {
-        sy2sb_he2hb_initData<true, false, T>(handle, n, kd, dA, lda, hA);
+        sy2sb_he2hb_initData<true, false, T, I>(handle, n, kd, dA, lda, hA);
 
         // lwork for LAPACK hetrd_he2hb
         size_t lwork = n * kd + n * std::max(kd, 128) + 2 * kd * kd;
@@ -303,12 +304,12 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    sy2sb_he2hb_initData<true, false, T>(handle, n, kd, dA, lda, hA);
+    sy2sb_he2hb_initData<true, false, T, I>(handle, n, kd, dA, lda, hA);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        sy2sb_he2hb_initData<false, true, T>(handle, n, kd, dA, lda, hA);
+        sy2sb_he2hb_initData<false, true, T, I>(handle, n, kd, dA, lda, hA);
 
         timer.start(stream);
         CHECK_ROCBLAS_ERROR(
@@ -335,7 +336,7 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        sy2sb_he2hb_initData<false, true, T>(handle, n, kd, dA, lda, hA);
+        sy2sb_he2hb_initData<false, true, T, I>(handle, n, kd, dA, lda, hA);
 
         timer.start(stream);
         rocsolver_sy2sb_he2hb(
@@ -350,18 +351,18 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
 }
 
 //------------------------------------------------------------------------------
-template <typename T>
+template <typename T, typename I>
 void testing_sy2sb_he2hb(Arguments& argus)
 {
     // get arguments
     rocblas_local_handle handle;
-    rocblas_int n = argus.get<rocblas_int>("n");
-    rocblas_int kd = argus.get<rocblas_int>("kd", 1);
-    rocblas_int nb = argus.get<rocblas_int>("nb", kd);
-    rocblas_int lda = argus.get<rocblas_int>("lda", n);
+    I n = argus.get<I>("n");
+    I kd = argus.get<I>("kd", 1);
+    I nb = argus.get<I>("nb", kd);
+    I lda = argus.get<I>("lda", n);
     // rocSolver 2nd stage needs 3*kd. LAPACK needs kd+1.
     // todo: get ldab from argus?
-    rocblas_int ldab = 3*kd;  //kd + 1;
+    I ldab = 3*kd;  //kd + 1;
 printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
 
     rocblas_int hot_calls = argus.iters;
@@ -453,7 +454,7 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     // check computations
     if(argus.unit_check || argus.norm_check)
     {
-        sy2sb_he2hb_getError<T>(
+        sy2sb_he2hb_getError<T, I>(
             handle, n, kd, nb,
             dA, lda, dAband, ldab, dTau,
             hARes, hAbandRes, hTauRes,
@@ -464,7 +465,7 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     // collect performance data
     if(argus.timing && hot_calls > 0)
     {
-        sy2sb_he2hb_getPerfData<T>(
+        sy2sb_he2hb_getPerfData<T, I>(
             handle, n, kd, nb,
             dA, lda, dAband, ldab, dTau, hA, hAband, hTau,
             &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
@@ -512,4 +513,4 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
 
 #define EXTERN_TESTING_SY2SB_HE2HB(...) extern template void testing_sy2sb_he2hb<__VA_ARGS__>(Arguments&);
 
-INSTANTIATE(EXTERN_TESTING_SY2SB_HE2HB, FOREACH_SCALAR_TYPE, APPLY_STAMP)
+INSTANTIATE(EXTERN_TESTING_SY2SB_HE2HB, FOREACH_SCALAR_TYPE, FOREACH_INT_TYPE, APPLY_STAMP)

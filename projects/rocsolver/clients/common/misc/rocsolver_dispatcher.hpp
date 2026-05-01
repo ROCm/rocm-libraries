@@ -374,7 +374,8 @@ class rocsolver_dispatcher
             {"sterf", testing_sterf<T>},
             {"stebz", testing_stebz<T>},
             {"bdsvdx", testing_bdsvdx<T>},
-            {"sy2sb", testing_sy2sb_he2hb<T>},
+            {"sy2sb", testing_sy2sb_he2hb<T, rocblas_int>},
+            {"sy2sb_64", testing_sy2sb_he2hb<T, int64_t>},
             // orgxx
             {"org2r", testing_orgxr_ungxr<T, 0>},
             {"orgqr", testing_orgxr_ungxr<T, 1>},
@@ -483,7 +484,8 @@ class rocsolver_dispatcher
             // auxiliaries
             {"lacgv", testing_lacgv<T, rocblas_int>},
             {"lacgv_64", testing_lacgv<T, int64_t>},
-            {"he2hb", testing_sy2sb_he2hb<T>},
+            {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},
+            {"he2hb_64", testing_sy2sb_he2hb<T, int64_t>},
             // ungxx
             {"ung2r", testing_orgxr_ungxr<T, 0>},
             {"ungqr", testing_orgxr_ungxr<T, 1>},
