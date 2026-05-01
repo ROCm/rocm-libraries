@@ -70,7 +70,7 @@ struct ParsedFunction {
 };
 
 /// Result of parsing IR source, including instructions and diagnostics.
-struct ParseResult {
+struct STINKYTOFU_EXPORT ParseResult {
     std::vector<Diagnostic> diagnostics;
 
     /// Parsed function (hierarchical or flat). Flat format has a single block "entry".

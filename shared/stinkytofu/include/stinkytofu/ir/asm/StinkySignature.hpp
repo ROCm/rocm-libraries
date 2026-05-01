@@ -30,6 +30,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 /***************************************
  * Enum for Signature Value Kind
@@ -332,7 +334,7 @@ struct SignatureCodeMeta {
 /***************************************
  * Signature Base (Main Class)
  ***************************************/
-struct SignatureBase {
+struct STINKYTOFU_EXPORT SignatureBase {
     SignatureKernelDescriptor kernelDescriptor;
     SignatureCodeMeta codeMeta;
 
