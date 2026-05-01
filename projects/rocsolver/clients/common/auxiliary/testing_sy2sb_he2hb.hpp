@@ -180,7 +180,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
 
 printf( "%s( n %lld, kd %lld, nb %lld )\n", __func__, llong(n), llong(kd), llong(nb) );
     // lwork for LAPACK hetrd_he2hb
-    size_t lwork = n * kd + n * std::max(kd, 128) + 2 * kd * kd;
+    size_t lwork = n * kd + n * std::max<I>(kd, 128) + 2 * kd * kd;
     std::vector<T> hwork(lwork);
 
     // input data initialization
@@ -244,9 +244,9 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n", __func__, llong(n), llong(kd), llong
     double err;
     *max_err = 0;
     err = norm_error('F', kd+1, n, ldab, hAband[0], hAbandRes[0] + kd - 1);
-    *max_err = std::max( err, *max_err );
+    *max_err = std::max<I>( err, *max_err );
     err = norm_error('F', 1, n-kd, 1, hTau[0], hTauRes[0]);
-    *max_err = std::max( err, *max_err );
+    *max_err = std::max<I>( err, *max_err );
 
     // TODO: Check V and tau. Check orthogonality of Q using unmtr/ungtr.
 }
@@ -291,7 +291,7 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n",
         sy2sb_he2hb_initData<true, false, T, I>(handle, n, kd, dA, lda, hA);
 
         // lwork for LAPACK hetrd_he2hb
-        size_t lwork = n * kd + n * std::max(kd, 128) + 2 * kd * kd;
+        size_t lwork = n * kd + n * std::max<I>(kd, 128) + 2 * kd * kd;
         std::vector<T> hwork(lwork);
 
         // cpu-lapack performance (only if not in perf mode)
@@ -381,7 +381,7 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n",
     // determine sizes
     size_t size_A = lda * n;
     size_t size_Aband = ldab * n;
-    size_t size_tau = std::max( n - kd, 0 );
+    size_t size_tau = std::max<I>( n - kd, 0 );
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes     = (argus.unit_check || argus.norm_check) ? size_A     : 0;
