@@ -95,10 +95,10 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
                                                        idxBase,
                                                        dataType),
                                     "success");
-    verify_hipsparse_status_success(
-        hipsparseCreateDnVec(&x, nb * block_dim, dx, dataType), "success");
-    verify_hipsparse_status_success(
-        hipsparseCreateDnVec(&y, mb * block_dim, dy, dataType), "success");
+    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, nb * block_dim, dx, dataType),
+                                    "success");
+    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, mb * block_dim, dy, dataType),
+                                    "success");
 
     // SpMV buffer
     verify_hipsparse_status_invalid_handle(
@@ -307,8 +307,8 @@ void testing_spmv_bsr(Arguments argus)
     T* d_beta       = (T*)d_beta_managed.get();
 
     // copy data from CPU to device
-    CHECK_HIP_ERROR(hipMemcpy(
-        dbsr_row_ptr, hbsr_row_ptr.data(), sizeof(I) * (mb + 1), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(dbsr_row_ptr, hbsr_row_ptr.data(), sizeof(I) * (mb + 1), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(
         hipMemcpy(dbsr_col_ind, hbsr_col_ind.data(), sizeof(J) * nnzb, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dbsr_val,
@@ -416,12 +416,11 @@ void testing_spmv_bsr(Arguments argus)
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
-        double gflop_count = spmv_gflop_count(
-            static_cast<J>(mb * block_dim),
-            static_cast<I>(nnzb * block_dim * block_dim),
-            h_beta != make_DataType<T>(0.0));
-        double gbyte_count = bsrmv_gbyte_count<T>(mb, nb, nnzb, block_dim,
-                                                  h_beta != make_DataType<T>(0.0));
+        double gflop_count = spmv_gflop_count(static_cast<J>(mb * block_dim),
+                                              static_cast<I>(nnzb * block_dim * block_dim),
+                                              h_beta != make_DataType<T>(0.0));
+        double gbyte_count
+            = bsrmv_gbyte_count<T>(mb, nb, nnzb, block_dim, h_beta != make_DataType<T>(0.0));
 
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
