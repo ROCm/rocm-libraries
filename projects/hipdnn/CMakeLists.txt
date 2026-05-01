@@ -284,7 +284,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        ".*deps.*|.*tests.*|.*data_sdk.*data_objects.*|.*HipErrorHandler.*"
+        ".*deps.*|.*tests.*|.*data_objects.*|.*HipErrorHandler.*"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
