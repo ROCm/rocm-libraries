@@ -72,7 +72,6 @@ if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
     echo "Building and installing hipDNN and providers..."
     cd "$WORKSPACE_ROOT"
     cmake --preset hipdnn-providers
-    cmake --build build
     cmake --install build
     cd "$SCRIPT_DIR"
 fi
