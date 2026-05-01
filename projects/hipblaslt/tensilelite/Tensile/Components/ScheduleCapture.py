@@ -287,14 +287,15 @@ class FourPartCapture:
     num_mfma: int
     num_codepaths: int
     source: str  # 'cms' or 'default-sia3'
-    # numMfmaPerIter — used by build_dataflow_graph to derive per-MFMA
-    # iteration index (mfma_index // num_mfma_per_iter). Both default-side
-    # and CMS-side construction sites should pass writer.states.numMfmaPerIter
-    # so the two graphs derive matching logical positions for the same MFMA.
-    # Defaults to 0 ("don't split MFMAs by iter"); the resolver then keeps
-    # all MFMAs at iter 0, which loses cross-iter PLR dataflow edges. Test
-    # fixtures may safely leave it unset.
-    num_mfma_per_iter: int = 0
+    # Inner-unroll subiterations per MFMA group — used by build_dataflow_graph
+    # to derive each MFMA's subiter index (vmfma_index // num_mfma_per_subiter).
+    # Both default-side and CMS-side construction sites should pass
+    # writer.states.numMfmaPerIter (upstream Tensile naming retains "Iter"
+    # but it refers to the inner unroll subiteration here).
+    # Defaults to 0 ("don't split MFMAs by subiter"); the resolver then keeps
+    # all MFMAs at subiter 0, which loses cross-subiter PLR dataflow edges.
+    # Test fixtures may safely leave it unset.
+    num_mfma_per_subiter: int = 0
 
 
 # =============================================================================
@@ -407,15 +408,16 @@ class DataflowGraph:
     edges list. Per-node adjacency is intentionally NOT stored — the
     diagnostic classifier walks captures[body_label].instructions instead.
 
-    `num_mfma_per_iter` is copied from FourPartCapture so the OrderInverted
-    classifier can derive an MFMA node's iter (`vmfma_index // n`) without
-    re-plumbing it through every classifier call. Non-MFMA nodes get iter
-    from their category trailing digits (`PackA0` → 0).
+    `num_mfma_per_subiter` is copied from FourPartCapture so the
+    OrderInverted classifier can derive an MFMA node's inner-unroll
+    subiteration (`vmfma_index // n`) without re-plumbing it through every
+    classifier call. Non-MFMA nodes get subiter from their category trailing
+    digits (`PackA0` → 0).
     """
-    nodes: dict                         # identity -> GraphNode
-    edges: list                         # list[DataflowEdge]
-    captures: dict                      # body_label -> LoopBodyCapture
-    num_mfma_per_iter: int = 0          # copied from FourPartCapture; 0 ⇒ all-iter-0
+    nodes: dict                            # identity -> GraphNode
+    edges: list                            # list[DataflowEdge]
+    captures: dict                         # body_label -> LoopBodyCapture
+    num_mfma_per_subiter: int = 0          # copied from FourPartCapture; 0 ⇒ all-subiter-0
 
     def edge_keys(self):
         """Edge-equality keys for cross-graph diff: (p_id, c_id, resource, kind)."""
@@ -1581,12 +1583,20 @@ def _class_tag_from_category(category, inst) -> str:
 # construction (see SlotKey docstring + commit f06ffc4770), so node.position
 # is the canonical ordering key — no synthetic kind_rank table needed.
 #
-# _node_iter remains useful for the within-graph same-iter gate in
-# _classify_edge_coverage (which has no default reference). Iter is derived
-# from category trailing digits (LRA0 -> 0) for non-MFMA, or from
-# vmfma_index // num_mfma_per_iter for MFMA. Both are schedule-invariant
-# per identity (categories and vmfma_indices are kernel-writer-set, identical
-# across captures).
+# Two "iter" axes exist in this codebase; do not conflate them:
+#   1. Outer iteration / body — which body the node belongs to
+#      (ml_prev, ml, ngl, nll). Encoded in SchedulePosition.loop_index
+#      and node.body_label. Cross-body comparison happens naturally via
+#      stream-position lex sort (loop_index is the first component).
+#   2. Inner-unroll subiteration ("subiter") — which inner unroll iteration
+#      within a single body. Encoded in category trailing digits (LRA0,
+#      PackB3) for non-MFMA, or in vmfma_index // num_mfma_per_subiter
+#      for MFMA. Computed by _node_subiter.
+#
+# _node_subiter is used by the within-graph same-subiter gate in
+# _classify_edge_coverage (which has no default reference). Both subiter
+# derivations are schedule-invariant per identity (categories and
+# vmfma_indices are kernel-writer-set, identical across captures).
 
 import re as _re
 _TRAILING_DIGITS_RE = _re.compile(r"^(.*?)(\d*)$")
@@ -1604,17 +1614,22 @@ def _split_category_iter(category):
     return base, (int(suffix) if suffix else 0)
 
 
-def _node_iter(node, num_mfma_per_iter) -> int:
-    """Inner-iteration index for a graph node.
+def _node_subiter(node, num_mfma_per_subiter) -> int:
+    """Inner-unroll subiteration index for a graph node.
+
+    "Subiter" = which inner unroll subiteration this node belongs to within
+    its body. NOT the outer loop iteration (those are encoded in
+    SchedulePosition.loop_index and the body label ml_prev / ml / ngl / nll).
 
     For non-MFMA categories, parsed from the category trailing digits
-    (`PackA0` ⇒ 0). For MFMA, derived from `vmfma_index // num_mfma_per_iter`.
-    When `num_mfma_per_iter` is 0 (test fixtures that don't set it), MFMA iter
-    collapses to 0 — the OrderInverted gate then degenerates to "fire on
-    any same-body stream-position inversion".
+    (`PackA0` ⇒ 0). For MFMA, derived from
+    `vmfma_index // num_mfma_per_subiter`. When `num_mfma_per_subiter` is 0
+    (test fixtures that don't set it), MFMA subiter collapses to 0 — the
+    OrderInverted gate then degenerates to "fire on any same-body
+    stream-position inversion".
     """
     if node.category == "MFMA":
-        return node.position.vmfma_index // num_mfma_per_iter if num_mfma_per_iter else 0
+        return node.position.vmfma_index // num_mfma_per_subiter if num_mfma_per_subiter else 0
     return _split_category_iter(node.category)[1]
 
 
@@ -1816,10 +1831,11 @@ class _MFMARule:
     Excludes Pack-categorized MFMAInstructions (TF32 emulation pattern):
     those are syntactically MFMAInstruction but semantically Pack
     operations producing values for downstream MFMAs in the SAME or NEXT
-    iteration. Treating them as MFMA producers creates cross-iter edges
-    that the OrderInverted classifier can't yet distinguish from same-iter
-    reorders. The PackMFMA case will be revisited when cross-iter edge
-    classification lands.
+    inner-unroll subiteration. Treating them as MFMA producers creates
+    cross-subiter edges that the legacy OrderInverted classifier couldn't
+    distinguish from same-subiter reorders. After 9.6.1 (default-as-canonical
+    OrderInverted) the legacy gate no longer applies; PackMFMA inclusion can
+    be revisited as a follow-up.
     """
     def applies(self, inst, category=None):
         if not _is_mfma(inst):
@@ -2162,7 +2178,7 @@ def build_dataflow_graph(four_part_capture):
             )
         captures[label] = body
 
-    num_mfma_per_iter = getattr(four_part_capture, 'num_mfma_per_iter', 0) or 0
+    num_mfma_per_subiter = getattr(four_part_capture, 'num_mfma_per_subiter', 0) or 0
 
     nodes_by_identity = {}
     nodes_per_body = {label: [] for label in _BODY_BUILD_ORDER}
@@ -2285,7 +2301,7 @@ def build_dataflow_graph(four_part_capture):
     edges.extend(barrier_edges)
 
     return DataflowGraph(nodes=nodes_by_identity, edges=edges, captures=captures,
-                         num_mfma_per_iter=num_mfma_per_iter)
+                         num_mfma_per_subiter=num_mfma_per_subiter)
 
 
 def _collect_barrier_edges(nodes_in_order):
@@ -2840,16 +2856,16 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
     # Phase 1 — same-body order check.
     # NOTE: this within-graph fallback can't reference the default schedule
     # (validate_edge_wait_coverage is called with a single graph, no default
-    # available). It uses _node_iter to suppress cross-iter false positives,
-    # mirroring pre-9.6.1 behavior. Once Sub-B (rocm-libraries-wx9.4.2)
-    # rewrites the resolver to walk in stream order, the resolver no longer
+    # available). It uses _node_subiter to suppress cross-subiter false
+    # positives, mirroring pre-9.6.1 behavior. After Sub-B (wx9.4.2)
+    # rewrote the resolver to walk in stream order, the resolver no longer
     # emits edges where producer.position > consumer.position by construction
-    # and this branch becomes dead code (cleanup in wx9.4.5 / wx9.6.3).
+    # and this branch is essentially dead code (cleanup in wx9.4.5 / wx9.6.3).
     if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
-        nmpi = subj_graph.num_mfma_per_iter
-        if _node_iter(p_node, nmpi) == _node_iter(c_node, nmpi):
+        nmps = subj_graph.num_mfma_per_subiter
+        if _node_subiter(p_node, nmps) == _node_subiter(c_node, nmps):
             return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
-        return []  # cross-iter pipelined dependency — legitimate
+        return []  # cross-subiter pipelined dependency — legitimate
 
     # MFMA-as-producer edges aren't gated by SWaitCnt — see notes in
     # diagnose_missing_edge.
@@ -3098,7 +3114,7 @@ def expand_cms_macro(macro, id_value, useGR, usePLR, useGRInc, useLoop,
 
 def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
                                   sync_class, snop_class, mfma_classes,
-                                  num_mfma_per_iter=0):
+                                  num_mfma_per_subiter=0):
     """Expand a CMS MAINLOOP macro four ways and assemble a FourPartCapture.
 
     main_loop[cp] expands with all flags=1 and \\ID=cp for each cp.
@@ -3148,5 +3164,5 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
         num_mfma=num_mfma,
         num_codepaths=num_codepaths,
         source="cms",
-        num_mfma_per_iter=num_mfma_per_iter,
+        num_mfma_per_subiter=num_mfma_per_subiter,
     )

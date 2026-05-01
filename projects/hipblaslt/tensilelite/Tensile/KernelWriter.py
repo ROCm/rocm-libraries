@@ -5992,7 +5992,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             num_mfma=num_mfma,
             num_codepaths=1,
             source="default-sia3",
-            num_mfma_per_iter=self.states.numMfmaPerIter,
+            num_mfma_per_subiter=self.states.numMfmaPerIter,
           )
           if ctx.cms is not None:
             kernel_label = (

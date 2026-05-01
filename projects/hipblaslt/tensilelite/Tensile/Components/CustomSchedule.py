@@ -523,8 +523,10 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         mfma_classes=mfma_classes,
         # Same numMfmaPerIter the writer used during emission. Both
         # default-side and CMS-side captures need the same value so
-        # build_dataflow_graph derives matching MFMA-iter logical positions.
-        num_mfma_per_iter=getattr(writer.states, 'numMfmaPerIter', 0),
+        # build_dataflow_graph derives matching MFMA-subiter classifications.
+        # (Upstream Tensile naming uses "Iter" but this is the inner unroll
+        # subiteration count.)
+        num_mfma_per_subiter=getattr(writer.states, 'numMfmaPerIter', 0),
     )
     writer._last_opt1_for_capture = opt1_for_capture
 
