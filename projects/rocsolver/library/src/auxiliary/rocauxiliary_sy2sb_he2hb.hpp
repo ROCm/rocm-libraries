@@ -285,7 +285,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 &tau[ i ], strideTau,                      // tau_i
                 batch_count, scalars, work, D, Z, workArr );
 
-            if (debug_) {
+            if (debug_)
+            {
                 print_matrix( "Vi (R)", n, nb, V, ldv, 3, stream );
                 //print_matrix( "Vi (R)", n, kd, V + idx2D( 0, i-j, ldv ), ldv, 3, stream );
             }
@@ -314,7 +315,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
                 batch_count );
 
-            if (debug_) {
+            if (debug_)
+            {
                 print_matrix( "Vi (I)", n, nb, V, ldv, 3, stream );
                 //print_matrix( "Vi (I)", n, kd, V + idx2D( 0, i-j, ldv ), ldv, 3, stream );
             }
@@ -376,7 +378,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // Prepare Hermitian rank-2k update.
             // Xi = A Wi
             // Because Wi is coupled with Wj, it is jm rows tall instead of qm.
-            if constexpr (use_her2k) {
+            if constexpr (use_her2k)
+            {
                 rocsolver_hemm(
                     handle, rocblas_side_left, rocblas_fill_lower,
                     jm, qn,
@@ -385,7 +388,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                     &zero, X, idx2D( j+kd, i-j,  ldx ), ldx, strideX,  // Xi
                     batch_count, workArr );
             }
-            else {
+            else
+            {
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_none,
                     jm, qn, jm,
@@ -444,7 +448,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         // Several gemms require V to have explicit 1's and 0's.
         // * These steps apply fact that A is Hermitian.
         assert( i < n );
-        if constexpr (use_her2k) {
+        if constexpr (use_her2k)
+        {
             // A -= ZV^H + VZ^H
             rocsolver_her2k(
                 handle, rocblas_fill_lower, rocblas_operation_none,
@@ -454,7 +459,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 &one,    A, idx2D( i, i, lda ), lda,  // Ai
                 batch_count, workArr);
         }
-        else {
+        else
+        {
             // A -= VZ^H
             rocsolver_gemm(
                 handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
@@ -498,7 +504,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         Aband, idx2D( idiag, i, ldab ),      ldab-1, strideAb,  // Aband_ii
         no_mask{}, rocblas_fill_lower );
 
-    if (debug_) {
+    if (debug_)
+    {
         print_matrix( "A", n, n, A, lda );
         print_matrix( "Aband", ldab, n, Aband, ldab );
     }

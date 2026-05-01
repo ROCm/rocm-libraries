@@ -216,7 +216,8 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY
     // ISSUES. IT MIGHT BE REVISITED IN THE FUTURE)
 
-    if (debug_) {
+    if (debug_)
+    {
         printf( "LAPACK\n" );
         print_matrix( "hA",     n,    n, hA[0],     lda  );
         print_matrix( "hAband", ldab, n, hAband[0], ldab );
@@ -447,7 +448,8 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     }
 
     // check computations
-    if(argus.unit_check || argus.norm_check) {
+    if(argus.unit_check || argus.norm_check)
+    {
         sy2sb_he2hb_getError<T>(
             handle, n, kd, nb,
             dA, lda, dAband, ldab, dTau,
@@ -457,7 +459,8 @@ printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     }
 
     // collect performance data
-    if(argus.timing && hot_calls > 0) {
+    if(argus.timing && hot_calls > 0)
+    {
         sy2sb_he2hb_getPerfData<T>(
             handle, n, kd, nb,
             dA, lda, dAband, ldab, dTau, hA, hAband, hTau,

@@ -73,7 +73,8 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
             &size_scalars, &size_D, &size_V, &size_W, &size_X, &size_Z,
             &size_work, &size_workArr);
 
-    if(rocblas_is_device_memory_size_query(handle)) {
+    if(rocblas_is_device_memory_size_query(handle))
+    {
         return rocblas_set_optimal_device_memory_size(
                 handle, size_scalars, size_D, size_V, size_W, size_X, size_Z,
                 size_work, size_workArr);
