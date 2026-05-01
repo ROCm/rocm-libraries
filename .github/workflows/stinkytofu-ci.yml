@@ -1,0 +1,115 @@
+name: StinkyTofu CI
+
+on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+    paths:
+      - 'shared/stinkytofu/**'
+      - '.github/workflows/stinkytofu-ci.yml'
+  pull_request:
+    paths:
+      - 'shared/stinkytofu/**'
+      - '.github/workflows/stinkytofu-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  Linux:
+    runs-on: azure-linux-scale-rocm
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r shared/stinkytofu/requirements.txt
+          pip install boto3
+
+      - name: Checkout TheRock
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: dc88ae1f34e0ac09d46f0147df82c1184abd6ae4 # 2026-04-22
+          path: TheRock
+          sparse-checkout: build_tools
+
+      - name: Install ROCm
+        run: |
+          python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+            --latest-release \
+            --amdgpu-family gfx94X-dcgpu \
+            --output-dir /opt/rocm \
+            --base-only
+
+      - name: Build
+        working-directory: shared/stinkytofu
+        env:
+          ROCM_PATH: /opt/rocm
+        run: invoke build
+
+      - name: Debug stinkytofu-opt
+        working-directory: shared/stinkytofu/build
+        run: |
+          ldd tools/stinkytofu-opt/stinkytofu-opt
+          ./tools/stinkytofu-opt/stinkytofu-opt --list-passes
+
+      - name: Test
+        working-directory: shared/stinkytofu/build
+        run: ctest --output-on-failure
+
+  Windows:
+    runs-on: azure-windows-scale-rocm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Configure git long paths
+        run: git config --global core.longpaths true
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r shared/stinkytofu/requirements.txt
+          pip install boto3
+
+      - name: Checkout TheRock
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: dc88ae1f34e0ac09d46f0147df82c1184abd6ae4 # 2026-04-22
+          path: TheRock
+          sparse-checkout: build_tools
+
+      - name: Install ROCm
+        run: |
+          python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+            --latest-release \
+            --amdgpu-family gfx1151 \
+            --output-dir C:/ROCm \
+            --base-only
+          echo "ROCM_PATH=C:/ROCm" >> $GITHUB_ENV
+
+      - name: Build
+        working-directory: shared/stinkytofu
+        run: invoke build
+
+      - name: Test
+        working-directory: shared/stinkytofu/build
+        run: ctest --output-on-failure

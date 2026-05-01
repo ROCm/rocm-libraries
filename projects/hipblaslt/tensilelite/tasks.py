@@ -36,6 +36,25 @@ def get_gpu_arch(c):
 
 @task(
     help={
+        "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
+    }
+)
+def rocisa(c, rocisa_dir=None):
+    """Install rocisa as an editable pip package.
+
+    Run once after cloning, or after changes to rocisa's pyproject.toml or
+    CMakeLists.txt. C++ source changes do not require re-running this task —
+    the staleness check in rocisa/__init__.py will catch them and tell you to
+    rebuild with cmake.
+    """
+    import pathlib
+
+    src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else pathlib.Path(__file__).parent / "rocisa"
+    c.run(f"pip install -e {shlex.quote(str(src))}")
+
+
+@task(
+    help={
         "clean": "Remove the client build directory before building.",
         "configure": "Run CMake configuration for the client.",
         "build": "Build the tensilelite-client executable.",
@@ -61,6 +80,11 @@ def build_client(
     bundle_python_deps=False,
     enable_rocprof=False,
 ):
+    """Build the tensilelite-client C++ executable.
+
+    To run Tensile after building, use: Tensile/bin/Tensile <args>
+    rocisa must be installed separately via: invoke rocisa
+    """
 
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
