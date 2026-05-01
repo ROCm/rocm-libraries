@@ -524,12 +524,18 @@ class TestPackRAW:
 # A pair of VSwaps that share a register has a meaningful dependency:
 #   VSwap(v0, v1)        # after: v0=old_v1, v1=old_v0
 #   VSwap(v1, v2)        # after: v1=old_v2, v2=old_v0  (uses output of swap1)
-# Reversing them changes the final state. Today VSwap returns [] from both
-# _writes and _reads.
+# Reversing them changes the final state.
+#
+# Bead wx9.8: `_VSwapRule` (ScheduleCapture.py, before `_GenericALURule`)
+# publishes both operands as reads AND writes. With the symmetric model the
+# shared register carries WAR/WAW/RAW edges in BOTH orderings, and swapping
+# the pair flips which instruction is producer vs consumer on each edge —
+# so the edge KEY (producer.identity, consumer.identity, register, kind)
+# differs between REF and SUBJ and the one-directional `compare_graphs`
+# (`missing = ref - subj`) detects the reorder. xfail marker dropped.
 
 
 class TestVSwapPair:
-    @pytest.mark.xfail(reason=_FIXTURE_GAP_XFAIL_REASON, strict=True)
     def test_vswap_pair_reorder_invisible(self):
         sw1 = VSwapB32(dst=vgpr(0, 1), src=vgpr(1, 1))
         sw2 = VSwapB32(dst=vgpr(1, 1), src=vgpr(2, 1))

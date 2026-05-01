@@ -1885,6 +1885,60 @@ class _NoDataflowRule:
         return (), ()
 
 
+class _VSwapRule:
+    """VSwapB32 (and any v_swap_* variant) — symmetric R+W on both operands.
+
+    `v_swap_b32 dst, src` exchanges the two registers: BOTH are read AND
+    BOTH are written. Modelling this with the asymmetric
+    `_GenericALURule` shape (`writes=(params[0],)`, `reads=params[1:]`)
+    drops one of the four edge classes. Concretely, given:
+
+        sw1: VSwap(v0, v1)   # ref position
+        sw2: VSwap(v1, v2)
+
+    under the asymmetric model sw1 publishes write=v0/read=v1 and sw2
+    publishes write=v1/read=v2 — they share v1 only as
+    sw1.read + sw2.write, which is a WAR edge sw1->sw2. Reverse the pair
+    and the edge becomes RAW sw2->sw1: the SUBJECT graph gains a NEW
+    edge that REF lacks. Because `compare_graphs`
+    (ScheduleCapture.py:~2598, `missing = ref - subj`) is one-directional,
+    the reorder is invisible.
+
+    Symmetric model: `reads = writes = (regs...)`. Now BOTH orderings of
+    the pair carry both a WAR edge (sw_first.read + sw_second.write on
+    the shared reg) AND a WAW edge (both write the shared reg) AND a
+    RAW edge (sw_first.write + sw_second.read). Swapping the pair flips
+    which instruction is producer/consumer on each of those edges, so
+    the edge KEY (producer.identity, consumer.identity, register, kind)
+    differs between REF and SUBJ — `missing = ref - subj` finds at least
+    one such key and `compare_graphs` flags the reorder.
+
+    Order: MUST come before `_GenericALURule` so VSwap is claimed by this
+    rule and not the asymmetric fallback.
+
+    Bead: rocm-libraries-wx9.8.
+    """
+    def applies(self, inst, category=None):
+        # Match rocisa VSwapB32 today and any future v_swap_* width
+        # variant (e.g. VSwapB16) by class-name prefix. Keeps us decoupled
+        # from a hardcoded opcode allowlist that needs maintenance per
+        # ISA addition.
+        return type(inst).__name__.startswith("VSwap")
+
+    def extract(self, inst, category=None):
+        try:
+            params = list(inst.getParams())
+        except Exception:
+            return (), ()
+        # First two positional params are the swapped operands. Filter
+        # non-registers defensively (modifiers, comments) — a well-formed
+        # VSwap will have two register params, but we don't want a stray
+        # int/None to crash the rule.
+        regs = tuple(p for p in params[:2] if _is_register(p))
+        # Symmetric: both operands are read AND both are written.
+        return regs, regs
+
+
 class _GenericALURule:
     """Catch-all for vgpr/sgpr ALU instructions not absorbed by an earlier
     rule.
@@ -1929,7 +1983,8 @@ class _GenericALURule:
     NOT covered here (deliberate scope cut, see downstream beads):
       - VCC carry-out / carry-in (regType=None) — bead wx9.9.
       - SCC implicit read/write — bead mrj.1 (adds dedicated _SCCRule).
-      - VSwap symmetric R+W (both operands read AND written) — bead wx9.8.
+      - VSwap symmetric R+W — handled by `_VSwapRule` (bead wx9.8),
+        which precedes this rule in `_OPERAND_RULES`.
       - SCmp* writing only SCC and no sgpr dst — the generic rule will
         misclassify src0 as a "write" because it sits at params[0]; that
         false write is harmless for now (no consumer reads sgpr 50/51 in
@@ -1965,6 +2020,7 @@ _OPERAND_RULES = (
     _BufferLoadRule(),
     _MFMARule(),
     _NoDataflowRule(),
+    _VSwapRule(),
     _GenericALURule(),
 )
 
