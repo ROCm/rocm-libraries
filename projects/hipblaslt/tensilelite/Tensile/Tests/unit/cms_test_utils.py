@@ -531,21 +531,26 @@ def kernel_to_solution_config(kernel):
         pt_config["TransposeA"] = True
         pt_config["TransposeB"] = False
 
+    # Use `... if key in kernel else default` rather than `kernel.get(key) or default`
+    # because `or` clobbers valid 0 / False values (e.g., TransposeLDS=0 for NT layouts).
+    def _override(key, default):
+        return kernel[key] if key in kernel else default
+
     config = {
         "ProblemType": pt_config,
         "MatrixInstruction": mi4 + [1, wave_tile_a, wave_tile_b] + wave_group,
         "DepthU": depth_u,
-        "PrefetchGlobalRead": kernel.get("PrefetchGlobalRead") or 2,
-        "PrefetchLocalRead": kernel.get("PrefetchLocalRead") or 1,
-        "DirectToLds": kernel.get("DirectToLds") or 1,
-        "TransposeLDS": kernel.get("TransposeLDS") or 1,
-        "LocalReadVectorWidth": kernel.get("LocalReadVectorWidth") or (8 if dtype == "H" else 4),
-        "GlobalReadVectorWidthA": kernel.get("GlobalReadVectorWidthA") or (8 if dtype == "H" else 4),
-        "GlobalReadVectorWidthB": kernel.get("GlobalReadVectorWidthB") or (8 if dtype == "H" else 4),
+        "PrefetchGlobalRead": _override("PrefetchGlobalRead", 2),
+        "PrefetchLocalRead": _override("PrefetchLocalRead", 1),
+        "DirectToLds": _override("DirectToLds", 1),
+        "TransposeLDS": _override("TransposeLDS", 1),
+        "LocalReadVectorWidth": _override("LocalReadVectorWidth", 8 if dtype == "H" else 4),
+        "GlobalReadVectorWidthA": _override("GlobalReadVectorWidthA", 8 if dtype == "H" else 4),
+        "GlobalReadVectorWidthB": _override("GlobalReadVectorWidthB", 8 if dtype == "H" else 4),
         "UseCustomMainLoopSchedule": 1,
-        "StreamK": kernel.get("StreamK") or 0,
-        "SourceSwap": kernel.get("SourceSwap", 1),
-        "ExpandPointerSwap": kernel.get("ExpandPointerSwap", 0),
+        "StreamK": _override("StreamK", 0),
+        "SourceSwap": _override("SourceSwap", 1),
+        "ExpandPointerSwap": _override("ExpandPointerSwap", 0),
     }
 
     if "ISA" in kernel:

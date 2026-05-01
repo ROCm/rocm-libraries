@@ -731,6 +731,10 @@ class LoopBodyCaptureBuilder:
                     f"{cls_name} in category {ti.category!r}. "
                     f"vscnt is not tracked; no current CMS body emits stores."
                 )
+            # Apply implicit-operand tags (e.g., m0 read for DTL BufferLoad)
+            # so _reads/_writes pick up dependencies that don't appear in
+            # the rocisa instruction's named attributes.
+            _apply_implicit_operand_tags(inst)
         return LoopBodyCapture(instructions=list(self._instructions))
 
 
@@ -1618,29 +1622,169 @@ def _identity_for(inst, body_label: str, category=None) -> tuple:
     return (cls_tag, loop_idx, _canonical_render(inst))
 
 
+# =============================================================================
+# Implicit-operand tagging
+# =============================================================================
+# Some rocisa instructions consume or produce registers that don't appear in
+# their constructor's named attributes — the dependency lives in modifier
+# flags or in implicit hardware semantics. The canonical case is BufferLoad
+# under DirectToLds: the kernel writer passes dst=None (KWA:14608) and the
+# `lds` MUBUF modifier tells the hardware to drop the loaded data into LDS
+# at the address held in m0. The Python wrapper exposes neither the
+# modifier bit nor m0 — only `inst.dst is None` survives as a structural
+# signal that the load is DTL-flavored.
+#
+# Rather than re-deriving the implicit operand set every time _reads/_writes
+# is called, tag each instruction once at capture time. _reads/_writes
+# consult the tag in addition to running their normal extractors.
+#
+# Storage: a module-level `id(inst) -> (reads_tuple, writes_tuple)` dict.
+# Real rocisa-bound classes refuse `setattr` (no `__dict__`; nanobind-
+# locked) AND can't be weakref'd, so the conventional "stash an attribute
+# on the instance" approach doesn't work. id-keyed storage trades a small
+# leak across the validator's lifetime for the ability to hold tags on
+# objects we don't own. Captures clear their entries via
+# `clear_implicit_operand_tags(captures)` once the validator has consumed
+# the resulting graph. Tests use `_reset_implicit_operand_tags()` for
+# isolation.
+#
+# Tagging is idempotent — same instance through `finalize()` twice
+# overwrites with the same tuple.
+
+
+# id(inst) -> (reads: tuple[RegisterContainer], writes: tuple[RegisterContainer])
+_IMPLICIT_OPERANDS: dict = {}
+
+
+def _is_dtl_buffer_load(inst) -> bool:
+    """A BufferLoad whose dst is None is a DTL-mode load (kernel writer's
+    `dst = None if lds else vgpr(...)` at KWA:14608). Such loads write to
+    LDS and implicitly read m0 for the LDS destination address.
+
+    Real rocisa BufferLoad classes don't expose `dst` as a Python attribute
+    at all — `hasattr(inst, "dst")` returns False even for non-DTL loads.
+    The actual dst lives at `getParams()[0]`, which is None for DTL and a
+    RegisterContainer otherwise. We use that as the structural signal."""
+    if not _is_gr(inst):
+        return False
+    return _inst_dst(inst) is None
+
+
+def _dtl_buffer_load_implicit_reads(inst) -> tuple:
+    from rocisa.container import mgpr
+    return (mgpr(0),)
+
+
+# (predicate, reads_extractor, writes_extractor) — append a tuple to add
+# a new implicit-operand rule. Extractors return a tuple of
+# RegisterContainer (possibly empty).
+_IMPLICIT_OPERAND_RULES = (
+    (_is_dtl_buffer_load, _dtl_buffer_load_implicit_reads, lambda inst: ()),
+)
+
+
+def _apply_implicit_operand_tags(inst) -> None:
+    """Stamp implicit-operand tags onto `inst` via the module-level
+    id-keyed dict.
+
+    Idempotent: re-running on the same instance overwrites the entry
+    with the freshly-computed tuples (which are equal by construction
+    because the rules are pure functions of the instance).
+
+    Called once per captured instruction in
+    `LoopBodyCaptureBuilder.finalize()` so the tag is in place before
+    `build_dataflow_graph` runs `_reads`/`_writes`.
+    """
+    reads = ()
+    writes = ()
+    for predicate, reads_fn, writes_fn in _IMPLICIT_OPERAND_RULES:
+        if predicate(inst):
+            reads = reads + tuple(reads_fn(inst))
+            writes = writes + tuple(writes_fn(inst))
+    if reads or writes:
+        _IMPLICIT_OPERANDS[id(inst)] = (reads, writes)
+
+
+def _get_implicit_reads(inst) -> tuple:
+    entry = _IMPLICIT_OPERANDS.get(id(inst))
+    return entry[0] if entry is not None else ()
+
+
+def _get_implicit_writes(inst) -> tuple:
+    entry = _IMPLICIT_OPERANDS.get(id(inst))
+    return entry[1] if entry is not None else ()
+
+
+def _reset_implicit_operand_tags() -> None:
+    """Drop every recorded implicit-operand tag.
+
+    Test-only escape hatch — keeps test isolation from leaking tags
+    between cases. Production callers should use
+    `clear_implicit_operand_tags(captures)` to clear scoped to a single
+    pipeline run.
+    """
+    _IMPLICIT_OPERANDS.clear()
+
+
+def clear_implicit_operand_tags(captures) -> None:
+    """Remove implicit-operand tags for every instruction in `captures`.
+
+    Call once the validator has consumed the dataflow graph — keeps the
+    module-level dict from accumulating entries across kernel-writer runs.
+    Accepts an iterable of LoopBodyCapture (or a FourPartCapture; both
+    iterate to instructions transparently).
+    """
+    if captures is None:
+        return
+    bodies = []
+    if hasattr(captures, "main_loop"):
+        # FourPartCapture
+        for by_cp in (captures.main_loop, captures.main_loop_prev,
+                      captures.n_gl, captures.n_ll):
+            bodies.extend(by_cp.values())
+    else:
+        bodies = list(captures)
+    for body in bodies:
+        for ti in body.instructions:
+            _IMPLICIT_OPERANDS.pop(id(ti.inst), None)
+
+
 def _writes(inst):
-    """Registers written by this instruction (returned as a list of RegisterContainers)."""
+    """Registers written by this instruction (returned as a list of RegisterContainers).
+
+    Includes any implicit writes recorded by `_apply_implicit_operand_tags`
+    (e.g. VCC carry-out for VAddCO once that rule lands).
+    """
+    out = []
     if _is_lr(inst):
         dst = _inst_dst(inst)
-        return [dst] if dst is not None else []
-    if _is_gr(inst):
+        if dst is not None:
+            out.append(dst)
+    elif _is_gr(inst):
         dst = _inst_dst(inst)
-        return [dst] if dst is not None else []
-    return []
+        if dst is not None:
+            out.append(dst)
+    out.extend(_get_implicit_writes(inst))
+    return out
 
 
 def _reads(inst):
-    """Registers read by this instruction."""
+    """Registers read by this instruction.
+
+    Includes any implicit reads recorded by `_apply_implicit_operand_tags`
+    (e.g. m0 for DTL BufferLoad).
+    """
+    out = []
     if _is_lw(inst):
         src = _inst_dsstore_src(inst)
-        return [src] if src is not None else []
-    if _is_mfma(inst):
-        out = []
+        if src is not None:
+            out.append(src)
+    elif _is_mfma(inst):
         for v in (_inst_mfma_a(inst), _inst_mfma_b(inst), _inst_mfma_acc(inst)):
             if v is not None:
                 out.append(v)
-        return out
-    return []
+    out.extend(_get_implicit_reads(inst))
+    return out
 
 
 def _reg_overlaps(read_reg, written_reg) -> bool:
