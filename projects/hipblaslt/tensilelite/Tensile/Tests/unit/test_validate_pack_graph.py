@@ -216,16 +216,18 @@ class TestLRAfterPackGraph(GraphNativeValidationTest):
         )
 
     def test_LR0_baseline_passing(self):
-        """Canonical placement: LR @ 0, SWait(dscnt=0) @ 2, Pack @ 3, MFMA @ 4.
+        """Canonical placement: LR @ 0, SWait(dscnt=0) @ 2, Pack @ 3, MFMA @ 6.
         validate_edge_wait_coverage finds the dscnt drain in the window
-        between LR and Pack and emits no failure.
+        between LR and Pack and emits no failure. MFMA is slotted with a
+        2-cycle settle window after the CVTPack producer (35z's
+        QUAD_CYCLES_CVT_BEFORE_MFMA = 2 requirement).
         """
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
             make_swait(slot=2, dscnt=0),
             _pack_vcvt(out_vgpr=40, lr_vgpr=8, slot=3, category="PackA0"),
             make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
-                      slot=4, a_src_count=1),
+                      slot=6, a_src_count=1),
         ])
         failures = self.validate_waits(self.build_graph(
             self.wrap_single_body(cap)))
