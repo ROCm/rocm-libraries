@@ -87,9 +87,11 @@ def get_feature_engine(operation: str, **hw_kwargs):
     """Get the appropriate feature engine for the operation type."""
     if operation == "gemm_universal":
         from feature_engine import GemmUniversalFeatureEngine
+
         return GemmUniversalFeatureEngine(**hw_kwargs)
     elif operation == "grouped_conv":
         from feature_engine_grouped_conv import GroupedConvFeatureEngine
+
         return GroupedConvFeatureEngine(**hw_kwargs)
     elif operation == "fmha":
         raise NotImplementedError("FMHA feature engine not yet implemented")
@@ -197,10 +199,12 @@ def compute_group_keys(df: pd.DataFrame, operation: str) -> np.ndarray:
             df["m"].astype(str) + "_" + df["n"].astype(str) + "_" + df["k"].astype(str)
         ).values
     elif operation == "grouped_conv":
-        # Group by problem configuration
+        # Group by problem configuration (including 3D and dilation for FWD/BWD_DATA/BWD_WEIGHT)
         return df.apply(
-            lambda r: f"{r['N']}_{r['C']}_{r['K']}_{r['G']}_{r['Hi']}_{r['Wi']}_{r['Y']}_{r['X']}",
-            axis=1
+            lambda r: f"{r['N']}_{r['C']}_{r['K']}_{r['G']}_{r['Hi']}_{r['Wi']}_{r['Y']}_{r['X']}_"
+            f"{r.get('Di', 1)}_{r.get('Z', 1)}_"
+            f"{r.get('dilation_h', 1)}_{r.get('dilation_w', 1)}",
+            axis=1,
         ).values
     elif operation == "fmha":
         raise NotImplementedError("FMHA group key computation not yet implemented")
@@ -233,7 +237,10 @@ def compute_tflops_efficiency(
         groupby_cols = ["m", "n", "k"]
         tflops_col = "measured_tflops"
     elif operation == "grouped_conv":
-        groupby_cols = ["N", "C", "K", "G", "Hi", "Wi", "Y", "X"]
+        # Group by all problem parameters including 3D and dilation
+        base_cols = ["N", "C", "K", "G", "Hi", "Wi", "Y", "X"]
+        optional_cols = ["Di", "Z", "dilation_h", "dilation_w"]
+        groupby_cols = base_cols + [col for col in optional_cols if col in df.columns]
         tflops_col = "tflops"
     elif operation == "fmha":
         raise NotImplementedError("FMHA efficiency computation not yet implemented")
@@ -257,10 +264,18 @@ def compute_tflops_efficiency(
         if operation == "gemm_universal":
             result.update({"m": shape_key[0], "n": shape_key[1], "k": shape_key[2]})
         elif operation == "grouped_conv":
-            result.update({
-                "N": shape_key[0], "C": shape_key[1], "K": shape_key[2], "G": shape_key[3],
-                "Hi": shape_key[4], "Wi": shape_key[5], "Y": shape_key[6], "X": shape_key[7]
-            })
+            result.update(
+                {
+                    "N": shape_key[0],
+                    "C": shape_key[1],
+                    "K": shape_key[2],
+                    "G": shape_key[3],
+                    "Hi": shape_key[4],
+                    "Wi": shape_key[5],
+                    "Y": shape_key[6],
+                    "X": shape_key[7],
+                }
+            )
 
         results.append(result)
 
@@ -496,12 +511,12 @@ def main():
         "--operation",
         default="gemm_universal",
         choices=["gemm_universal", "grouped_conv", "fmha"],
-        help="Operation type (gemm_universal, grouped_conv, fmha)"
+        help="Operation type (gemm_universal, grouped_conv, fmha)",
     )
     parser.add_argument(
         "--op",
         default=None,
-        help="Deprecated: use --operation instead. Kept for backward compatibility."
+        help="Deprecated: use --operation instead. Kept for backward compatibility.",
     )
     parser.add_argument("--dtype", default="fp8", help="Data type filter")
     parser.add_argument("--arch", default="gfx950", help="Architecture")
@@ -537,7 +552,7 @@ def main():
     # Handle backward compatibility for --op flag
     operation = args.operation
     if args.op is not None:
-        print(f"WARNING: --op is deprecated, use --operation instead")
+        print("WARNING: --op is deprecated, use --operation instead")
         operation = args.op
 
     out_dir = Path(args.out_dir)
@@ -557,7 +572,9 @@ def main():
     if operation == "gemm_universal":
         print(f"  Unique shapes: {df.groupby(['m', 'n', 'k']).ngroups}")
     elif operation == "grouped_conv":
-        print(f"  Unique shapes: {df.groupby(['N', 'C', 'K', 'G', 'Hi', 'Wi', 'Y', 'X']).ngroups}")
+        print(
+            f"  Unique shapes: {df.groupby(['N', 'C', 'K', 'G', 'Hi', 'Wi', 'Y', 'X']).ngroups}"
+        )
 
     print(f"  Unique kernels: {df['kernel_name'].nunique()}")
     print()
@@ -659,7 +676,13 @@ def main():
         print(f"\n  Training final {target} model on all data...")
         t0 = time.time()
         model = train_final_model(
-            df, fe, target, params, operation, init_model=init_model_path, use_log=use_log
+            df,
+            fe,
+            target,
+            params,
+            operation,
+            init_model=init_model_path,
+            use_log=use_log,
         )
         train_time = time.time() - t0
 
@@ -695,7 +718,9 @@ def main():
     if operation == "gemm_universal":
         unique_shapes = int(df.groupby(["m", "n", "k"]).ngroups)
     elif operation == "grouped_conv":
-        unique_shapes = int(df.groupby(["N", "C", "K", "G", "Hi", "Wi", "Y", "X"]).ngroups)
+        unique_shapes = int(
+            df.groupby(["N", "C", "K", "G", "Hi", "Wi", "Y", "X"]).ngroups
+        )
     else:
         unique_shapes = 0  # Unknown operation
 

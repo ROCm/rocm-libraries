@@ -27,23 +27,20 @@ from typing import Dict, List, Tuple
 # Only tiles that successfully compile are included
 COMMON_TILES: List[Tuple[int, int, int]] = [
     # Using warp_tile [16,16,16]: tile_m = wave_m × 16
-    (16, 64, 64),     # 1 × 16 = 16, wave=(1,4,1)
-    (32, 64, 64),     # 2 × 16 = 32, wave=(2,2,1)
-    (64, 64, 64),     # 4 × 16 = 64, wave=(4,1,1)
+    (16, 64, 64),  # 1 × 16 = 16, wave=(1,4,1)
+    (32, 64, 64),  # 2 × 16 = 32, wave=(2,2,1)
+    (64, 64, 64),  # 4 × 16 = 64, wave=(4,1,1)
     # (128, 64, 64),  # 8 × 16 = 128, wave=(8,2,1) - EXCLUDED: Compile error
-
     # Using warp_tile [32,32,16]: tile_m = wave_m × 32
-    (32, 128, 64),    # 1 × 32 = 32, wave=(1,4,1)
-    (64, 128, 64),    # 2 × 32 = 64, wave=(2,2,1)
-    (128, 128, 64),   # 4 × 32 = 128, wave=(4,4,1) - NEW!
+    (32, 128, 64),  # 1 × 32 = 32, wave=(1,4,1)
+    (64, 128, 64),  # 2 × 32 = 64, wave=(2,2,1)
+    (128, 128, 64),  # 4 × 32 = 128, wave=(4,4,1) - NEW!
     # Note: 256x64x64 excluded - compilation issues
-
     # Using warp_tile [16,16,32]: tile_m = wave_m × 16
-    (16, 64, 128),    # 1 × 16 = 16, wave=(1,4,1)
-    (32, 64, 128),    # 2 × 16 = 32, wave=(2,2,1)
-    (64, 64, 128),    # 4 × 16 = 64, wave=(4,1,1)
-    (128, 64, 128),   # 8 × 16 = 128, wave=(8,2,1) - NEW!
-
+    (16, 64, 128),  # 1 × 16 = 16, wave=(1,4,1)
+    (32, 64, 128),  # 2 × 16 = 32, wave=(2,2,1)
+    (64, 64, 128),  # 4 × 16 = 64, wave=(4,1,1)
+    (128, 64, 128),  # 8 × 16 = 128, wave=(8,2,1) - NEW!
     # Note: Excluded tiles:
     # - 128x64x64: wave=8x2x1, warp=16x16x16 - compile error
     # - 32x128x128, 64x128x128, 128x128x128, 256x128x128 (warp_tile 32x32x32) - compv4 issues
@@ -59,12 +56,10 @@ TILE_TO_WAVE: Dict[Tuple[int, int, int], Tuple[int, int, int]] = {
     (16, 64, 64): (1, 4, 1),
     (32, 64, 64): (2, 2, 1),
     (64, 64, 64): (4, 1, 1),
-
     # warp_tile [32,32,16]
     (32, 128, 64): (1, 4, 1),
     (64, 128, 64): (2, 2, 1),
     (128, 128, 64): (4, 4, 1),  # NEW - balanced 4x4 wave
-
     # warp_tile [16,16,32]
     (16, 64, 128): (1, 4, 1),
     (32, 64, 128): (2, 2, 1),
@@ -79,12 +74,10 @@ TILE_TO_WARP: Dict[Tuple[int, int, int], Tuple[int, int, int]] = {
     (16, 64, 64): (16, 16, 16),
     (32, 64, 64): (16, 16, 16),
     (64, 64, 64): (16, 16, 16),
-
     # warp_tile [32,32,16]
     (32, 128, 64): (32, 32, 16),
     (64, 128, 64): (32, 32, 16),
     (128, 128, 64): (32, 32, 16),  # NEW
-
     # warp_tile [16,16,32]
     (16, 64, 128): (16, 16, 32),
     (32, 64, 128): (16, 16, 32),
@@ -106,6 +99,71 @@ TILE_TO_VECTOR: Dict[Tuple[int, int, int], Tuple[int, int, int]] = {
     (64, 64, 128): (4, 8, 8),
     (128, 64, 128): (4, 8, 8),
 }
+
+# =============================================================================
+# Pipeline Variant Suffixes (single source of truth)
+# =============================================================================
+# Empirically verified valid (pipeline, wave_mode, has_dsb, has_si) combinations
+# observed in the 2D and 3D bf16 gfx950 benchmark CSVs. 30 entries total per ndim.
+# Each tuple: (pipeline, wave_mode, has_dsb, has_si)
+#   wave_mode: "intrawave" | "interwave"
+#   has_dsb:   1 if "_dsb" suffix present (double smem buffer), else 0
+#   has_si:    1 if "_si"  suffix present (store immediate),    else 0
+PIPELINE_VARIANTS: List[Tuple[str, str, int, int]] = [
+    # basic_v1: both intra/inter × {∅, dsb, si, dsb_si} = 8 combos
+    ("basic_v1", "intrawave", 0, 0),
+    ("basic_v1", "intrawave", 1, 0),
+    ("basic_v1", "intrawave", 0, 1),
+    ("basic_v1", "intrawave", 1, 1),
+    ("basic_v1", "interwave", 0, 0),
+    ("basic_v1", "interwave", 1, 0),
+    ("basic_v1", "interwave", 0, 1),
+    ("basic_v1", "interwave", 1, 1),
+    # compv3: intrawave × {∅, dsb, si, dsb_si} = 4 combos
+    ("compv3", "intrawave", 0, 0),
+    ("compv3", "intrawave", 1, 0),
+    ("compv3", "intrawave", 0, 1),
+    ("compv3", "intrawave", 1, 1),
+    # compv4: intrawave × {dsb, dsb_si} only = 2 combos
+    ("compv4", "intrawave", 1, 0),
+    ("compv4", "intrawave", 1, 1),
+    # compv5: intrawave × {∅, dsb, si, dsb_si} = 4 combos
+    ("compv5", "intrawave", 0, 0),
+    ("compv5", "intrawave", 1, 0),
+    ("compv5", "intrawave", 0, 1),
+    ("compv5", "intrawave", 1, 1),
+    # compv6: intrawave × {∅, dsb, si, dsb_si} = 4 combos
+    ("compv6", "intrawave", 0, 0),
+    ("compv6", "intrawave", 1, 0),
+    ("compv6", "intrawave", 0, 1),
+    ("compv6", "intrawave", 1, 1),
+    # mem: both intra/inter × {∅, dsb, si, dsb_si} = 8 combos
+    ("mem", "intrawave", 0, 0),
+    ("mem", "intrawave", 1, 0),
+    ("mem", "intrawave", 0, 1),
+    ("mem", "intrawave", 1, 1),
+    ("mem", "interwave", 0, 0),
+    ("mem", "interwave", 1, 0),
+    ("mem", "interwave", 0, 1),
+    ("mem", "interwave", 1, 1),
+]
+
+
+def iter_pipeline_variants(pipelines: List[str] = None):
+    """Iterate (pipeline, wave_mode, has_dsb, has_si) tuples, optionally filtered.
+
+    Args:
+        pipelines: optional list of pipeline names to keep. If None, yield all.
+    """
+    if pipelines is None:
+        for entry in PIPELINE_VARIANTS:
+            yield entry
+        return
+    keep = set(pipelines)
+    for entry in PIPELINE_VARIANTS:
+        if entry[0] in keep:
+            yield entry
+
 
 # Valid pipelines per variant
 # All 8 pipelines (basic_v1, mem, compv3-6, comp_async, basic_async_v1) successfully
@@ -153,7 +211,6 @@ COMPV4_COMPATIBLE_TILES: List[Tuple[int, int, int]] = [
     (32, 64, 64),
     (64, 64, 64),
     # (128, 64, 64),  # Excluded: wave=8x2x1 fails for compv4
-
     # warp_tile [16,16,32] - all work with compv4
     (16, 64, 128),
     (32, 64, 128),
@@ -165,33 +222,32 @@ COMPV4_COMPATIBLE_TILES: List[Tuple[int, int, int]] = [
 # Testing all tiles to verify which ones actually work
 BWD_WEIGHT_TILES: List[Tuple[int, int, int]] = [
     # warp_tile [16,16,16]
-    (16, 64, 64),   # Known working config
-    (32, 64, 64),   # Test
-    (64, 64, 64),   # Test
-
+    (16, 64, 64),  # Known working config
+    (32, 64, 64),  # Test
+    (64, 64, 64),  # Test
     # warp_tile [32,32,16]
     (32, 128, 64),  # Test
     (64, 128, 64),  # Test
-    (128, 128, 64), # Test
-
+    (128, 128, 64),  # Test
     # warp_tile [16,16,32]
     (16, 64, 128),  # Test
     (32, 64, 128),  # Test
     (64, 64, 128),  # Test
-    (128, 64, 128), # Test
+    (128, 64, 128),  # Test
 ]
 
 # =============================================================================
 # Validation
 # =============================================================================
 
+
 def validate_tile_config(tile_m: int, tile_n: int, tile_k: int) -> bool:
     """Check if a tile configuration is valid and registered."""
     tile_key = (tile_m, tile_n, tile_k)
     return (
-        tile_key in TILE_TO_WAVE and
-        tile_key in TILE_TO_WARP and
-        tile_key in TILE_TO_VECTOR
+        tile_key in TILE_TO_WAVE
+        and tile_key in TILE_TO_WARP
+        and tile_key in TILE_TO_VECTOR
     )
 
 
@@ -230,6 +286,7 @@ def get_tile_full_config(tile_m: int, tile_n: int, tile_k: int) -> dict:
 # Summary Statistics
 # =============================================================================
 
+
 def print_summary():
     """Print summary of available tile configurations."""
     print("=" * 80)
@@ -243,7 +300,9 @@ def print_summary():
         m, n, k = tile
         wave = TILE_TO_WAVE[tile]
         warp = TILE_TO_WARP[tile]
-        print(f"  {m:3}×{n:3}×{k:3}  wave={wave[0]}×{wave[1]}×{wave[2]}  warp={warp[0]}×{warp[1]}×{warp[2]}")
+        print(
+            f"  {m:3}×{n:3}×{k:3}  wave={wave[0]}×{wave[1]}×{wave[2]}  warp={warp[0]}×{warp[1]}×{warp[2]}"
+        )
     print("=" * 80)
 
 

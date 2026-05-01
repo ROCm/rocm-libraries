@@ -69,13 +69,10 @@ Validate ML model performance on unseen shapes:
 ```bash
 cd ../../dispatcher/heuristics/validation/grouped_conv
 
-# Forward model validation (hardware)
-python validate_generalization.py --direction forward
-
-# Quick prediction quality check (no GPU)
+# Quick sanity check on training shapes (hardware)
 python validate_training_shapes.py --direction forward
 
-# Backward models validation
+# Backward models validation (no GPU)
 python validate_backward_models.py
 ```
 
@@ -241,9 +238,9 @@ python train.py \
   --op grouped_conv \
   --variant forward
 
-# 5. Validate
+# 5. Validate (sanity check on training shapes)
 cd validation/grouped_conv
-python validate_generalization.py --direction forward
+python validate_training_shapes.py --direction forward
 ```
 
 ---
@@ -288,11 +285,10 @@ See [dispatcher/heuristics/GROUPED_CONV_ML_SUMMARY.md](../../dispatcher/heuristi
 
 **For Forward Pass**: Production-ready, integrate into runtime dispatcher
 
-**For Backward Passes**: Run hardware validation
+**For Backward Passes**: Run prediction-quality check
 ```bash
 cd ../../dispatcher/heuristics/validation/grouped_conv
-python validate_generalization.py --direction bwd_data
-python validate_generalization.py --direction bwd_weight
+python validate_backward_models.py
 ```
 
 Target: >85% mean efficiency on unseen shapes before production deployment.

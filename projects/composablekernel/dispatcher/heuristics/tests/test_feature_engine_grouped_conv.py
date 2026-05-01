@@ -32,11 +32,15 @@ class TestGroupedConvFeatureEngine(unittest.TestCase):
         self.engine = GroupedConvFeatureEngine()
 
     def test_feature_names_count(self):
-        """Test that feature names list has correct length."""
+        """Test that feature names list has correct length.
+
+        After the suffix-aware kernel-feature expansion the engine emits 97
+        features (was 83): the 3 wave/dsb/si flags plus the 3 added pipeline
+        one-hots (basic_v1, compv6, mem) extend the kernel-features block by
+        6 entries, plus 8 more interaction/spatial features added previously.
+        """
         names = self.engine.get_feature_names()
-        # Expected: 38 problem + 21 kernel + 18 interaction + 12 hardware = 89
-        # But actual is 83 based on GROUPED_CONV_ML_SUMMARY.md
-        self.assertEqual(len(names), 83, f"Expected 83 features, got {len(names)}")
+        self.assertEqual(len(names), 97, f"Expected 97 features, got {len(names)}")
 
     def test_categorical_features(self):
         """Test categorical features identification."""
@@ -71,8 +75,8 @@ class TestGroupedConvFeatureEngine(unittest.TestCase):
 
         features = self.engine.extract(problem, kernel)
 
-        # Should return numpy array with 83 features
-        self.assertEqual(features.shape, (83,))
+        # Should return numpy array with 97 features (post suffix-aware update)
+        self.assertEqual(features.shape, (97,))
         self.assertFalse(np.any(np.isnan(features)), "Features should not contain NaN")
         self.assertFalse(np.any(np.isinf(features)), "Features should not contain Inf")
 
@@ -148,8 +152,8 @@ class TestGroupedConvFeatureEngine(unittest.TestCase):
 
         features = self.engine.extract_batch(df)
 
-        # Should return (2, 83) array
-        self.assertEqual(features.shape, (2, 83))
+        # Should return (2, 97) array (post suffix-aware update)
+        self.assertEqual(features.shape, (2, 97))
         self.assertFalse(np.any(np.isnan(features)), "Features should not contain NaN")
 
     def test_extract_batch_with_dilation(self):
@@ -211,7 +215,7 @@ class TestGroupedConvFeatureEngine(unittest.TestCase):
 
         # Should not raise error, should default to dilation=1
         features = self.engine.extract_batch(df)
-        self.assertEqual(features.shape, (1, 83))
+        self.assertEqual(features.shape, (1, 97))
 
         # Ho should be computed with dilation=1
         # Ho = (32 + 2*1 - 3) // 1 + 1 = 32
@@ -242,7 +246,7 @@ class TestGroupedConvFeatureEngine(unittest.TestCase):
         )
 
         features = self.engine.extract_batch(df)
-        self.assertEqual(features.shape, (3, 83))
+        self.assertEqual(features.shape, (3, 97))
 
         # Verify arithmetic_intensity differs for different dtypes
         feature_names = self.engine.get_feature_names()
@@ -253,9 +257,14 @@ class TestGroupedConvFeatureEngine(unittest.TestCase):
         ai_fp32 = features[2, ai_idx]
 
         # bf16 and fp16 have same bpe=2, fp32 has bpe=4
-        self.assertAlmostEqual(ai_bf16, ai_fp16, places=2, msg="bf16 and fp16 should have same AI")
         self.assertAlmostEqual(
-            ai_fp32, ai_bf16 / 2, places=2, msg="fp32 AI should be half of bf16 (2x bpe)"
+            ai_bf16, ai_fp16, places=2, msg="bf16 and fp16 should have same AI"
+        )
+        self.assertAlmostEqual(
+            ai_fp32,
+            ai_bf16 / 2,
+            places=2,
+            msg="fp32 AI should be half of bf16 (2x bpe)",
         )
 
     def test_depthwise_convolution_features(self):
@@ -291,7 +300,9 @@ class TestGroupedConvFeatureEngine(unittest.TestCase):
         feature_names = self.engine.get_feature_names()
         is_depthwise_idx = feature_names.index("is_depthwise")
         self.assertEqual(
-            features[is_depthwise_idx], 1.0, "is_depthwise should be 1.0 for depthwise conv"
+            features[is_depthwise_idx],
+            1.0,
+            "is_depthwise should be 1.0 for depthwise conv",
         )
 
     def test_1x1_and_3x3_flags(self):

@@ -73,7 +73,9 @@ a given problem. Requires the `lightgbm` Python package.
   (forward, bwd_data, bwd_weight all available).
 * Feature engine: `dispatcher/heuristics/feature_engine_grouped_conv.py`.
 * Training entry point: `dispatcher/heuristics/train.py`.
-* Prediction CLI: `dispatcher/heuristics/predict_grouped_conv.py`.
+* Prediction: `dispatcher/heuristics/predict.py` (use `Predictor` with
+  `GroupedConvFeatureEngine`; build the candidate kernel pool from a
+  training/holdout parquet via `df["kernel_name"].unique()`).
 
 Typical training flow:
 

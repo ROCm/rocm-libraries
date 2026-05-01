@@ -52,58 +52,66 @@ from typing import Dict, Any, Optional, Set
 
 # Known metric/metadata columns (will be excluded from problem features)
 METRIC_COLUMNS: Set[str] = {
-    'kernel', 'kernel_name',
-    'latency_ms', 'tflops', 'bandwidth_gb_s',
-    'non_zero', 'problem_idx', 'run_id',
-    'is_valid', 'error_msg'
+    "kernel",
+    "kernel_name",
+    "latency_ms",
+    "tflops",
+    "bandwidth_gb_s",
+    "non_zero",
+    "problem_idx",
+    "run_id",
+    "is_valid",
+    "error_msg",
 }
 
 
 # Hardware profiles for different architectures
 HW_PROFILES = {
-    'gfx950': {  # MI300 series
-        'hw_num_cus': 256,
-        'hw_simds_per_cu': 4,
-        'hw_shader_engines': 32,
-        'hw_max_clock_mhz': 2400,
-        'hw_max_waves_per_cu': 32,
-        'hw_wavefront_size': 64,
-        'hw_lds_capacity': 65536,
-        'hw_l1_cache_kb': 32,
-        'hw_l2_cache_kb': 4096,
-        'hw_l3_cache_kb': 262144,
-        'hw_num_xcd': 8,
+    "gfx950": {  # MI300 series
+        "hw_num_cus": 256,
+        "hw_simds_per_cu": 4,
+        "hw_shader_engines": 32,
+        "hw_max_clock_mhz": 2400,
+        "hw_max_waves_per_cu": 32,
+        "hw_wavefront_size": 64,
+        "hw_lds_capacity": 65536,
+        "hw_l1_cache_kb": 32,
+        "hw_l2_cache_kb": 4096,
+        "hw_l3_cache_kb": 262144,
+        "hw_num_xcd": 8,
     },
-    'gfx942': {  # MI300A
-        'hw_num_cus': 228,
-        'hw_simds_per_cu': 4,
-        'hw_shader_engines': 28,
-        'hw_max_clock_mhz': 2100,
-        'hw_max_waves_per_cu': 32,
-        'hw_wavefront_size': 64,
-        'hw_lds_capacity': 65536,
-        'hw_l1_cache_kb': 32,
-        'hw_l2_cache_kb': 4096,
-        'hw_l3_cache_kb': 262144,
-        'hw_num_xcd': 8,
+    "gfx942": {  # MI300A
+        "hw_num_cus": 228,
+        "hw_simds_per_cu": 4,
+        "hw_shader_engines": 28,
+        "hw_max_clock_mhz": 2100,
+        "hw_max_waves_per_cu": 32,
+        "hw_wavefront_size": 64,
+        "hw_lds_capacity": 65536,
+        "hw_l1_cache_kb": 32,
+        "hw_l2_cache_kb": 4096,
+        "hw_l3_cache_kb": 262144,
+        "hw_num_xcd": 8,
     },
-    'gfx90a': {  # MI250X
-        'hw_num_cus': 110,
-        'hw_simds_per_cu': 4,
-        'hw_shader_engines': 8,
-        'hw_max_clock_mhz': 1700,
-        'hw_max_waves_per_cu': 32,
-        'hw_wavefront_size': 64,
-        'hw_lds_capacity': 65536,
-        'hw_l1_cache_kb': 16,
-        'hw_l2_cache_kb': 8192,
-        'hw_l3_cache_kb': 131072,
-        'hw_num_xcd': 1,
+    "gfx90a": {  # MI250X
+        "hw_num_cus": 110,
+        "hw_simds_per_cu": 4,
+        "hw_shader_engines": 8,
+        "hw_max_clock_mhz": 1700,
+        "hw_max_waves_per_cu": 32,
+        "hw_wavefront_size": 64,
+        "hw_lds_capacity": 65536,
+        "hw_l1_cache_kb": 16,
+        "hw_l2_cache_kb": 8192,
+        "hw_l3_cache_kb": 131072,
+        "hw_num_xcd": 1,
     },
 }
 
 
-def parse_kernel_name_generic(kernel_name: str, pattern: Optional[str] = None) -> Dict[str, Any]:
+def parse_kernel_name_generic(
+    kernel_name: str, pattern: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Parse kernel name to extract configuration features.
 
@@ -120,7 +128,7 @@ def parse_kernel_name_generic(kernel_name: str, pattern: Optional[str] = None) -
     Returns:
         Dictionary with extracted features
     """
-    result = {'kernel_name': kernel_name}
+    result = {"kernel_name": kernel_name}
 
     if pattern:
         # Use custom pattern
@@ -132,54 +140,81 @@ def parse_kernel_name_generic(kernel_name: str, pattern: Optional[str] = None) -
     # Auto-detect common patterns
 
     # Pattern 1: grouped_conv_{variant}_{dtype}_{ndim}d_{block}x{m}x{n}_{pipeline}
-    grouped_conv_pattern = r'grouped_conv_([a-z_]+)_([a-z0-9]+)_(\d+)d_(\d+)x(\d+)x(\d+)_([a-z0-9]+)'
+    #   [_{wave_mode}] [_dsb] [_si]
+    # Pipeline alternation is explicit so the suffix tokens do not get swallowed
+    # by the [a-z0-9]+ pipeline group.
+    grouped_conv_pattern = (
+        r"grouped_conv_([a-z_]+)_([a-z0-9]+)_(\d+)d_(\d+)x(\d+)x(\d+)_"
+        r"(basic_v\d+|basic_async_v\d+|comp_async|compv\d+|mem|preshufflev\d+)"
+        r"(?:_(intrawave|interwave))?(_dsb)?(_si)?$"
+    )
     match = re.match(grouped_conv_pattern, kernel_name)
     if match:
-        variant, dtype, ndim, block_size, gemm_m, gemm_n, pipeline = match.groups()
-        result.update({
-            'op_type': 'grouped_conv',
-            'variant': variant,
-            'dtype': dtype,
-            'ndim_spatial': int(ndim),
-            'block_size': int(block_size),
-            'gemm_m_per_block': int(gemm_m),
-            'gemm_n_per_block': int(gemm_n),
-            'pipeline': pipeline,
-        })
+        (
+            variant,
+            dtype,
+            ndim,
+            block_size,
+            gemm_m,
+            gemm_n,
+            pipeline,
+            wave_mode,
+            dsb_tok,
+            si_tok,
+        ) = match.groups()
+        result.update(
+            {
+                "op_type": "grouped_conv",
+                "variant": variant,
+                "dtype": dtype,
+                "ndim_spatial": int(ndim),
+                "block_size": int(block_size),
+                "gemm_m_per_block": int(gemm_m),
+                "gemm_n_per_block": int(gemm_n),
+                "pipeline": pipeline,
+                "wave_mode": wave_mode if wave_mode else "intrawave",
+                "has_dsb": 1 if dsb_tok else 0,
+                "has_si": 1 if si_tok else 0,
+            }
+        )
         return result
 
     # Pattern 2: gemm_universal_{dtype}_{layout}_{tiles}_{pipeline}_{scheduler}
-    gemm_pattern = r'gemm_universal_([a-z0-9]+)_([a-z]+)_(\d+x\d+x\d+)_([a-z0-9]+)_([a-z]+)'
+    gemm_pattern = (
+        r"gemm_universal_([a-z0-9]+)_([a-z]+)_(\d+x\d+x\d+)_([a-z0-9]+)_([a-z]+)"
+    )
     match = re.match(gemm_pattern, kernel_name)
     if match:
         dtype, layout, tiles, pipeline, scheduler = match.groups()
-        tile_parts = tiles.split('x')
-        result.update({
-            'op_type': 'gemm_universal',
-            'dtype': dtype,
-            'layout': layout,
-            'tile_m': int(tile_parts[0]) if len(tile_parts) > 0 else 0,
-            'tile_n': int(tile_parts[1]) if len(tile_parts) > 1 else 0,
-            'tile_k': int(tile_parts[2]) if len(tile_parts) > 2 else 0,
-            'pipeline': pipeline,
-            'scheduler': scheduler,
-        })
+        tile_parts = tiles.split("x")
+        result.update(
+            {
+                "op_type": "gemm_universal",
+                "dtype": dtype,
+                "layout": layout,
+                "tile_m": int(tile_parts[0]) if len(tile_parts) > 0 else 0,
+                "tile_n": int(tile_parts[1]) if len(tile_parts) > 1 else 0,
+                "tile_k": int(tile_parts[2]) if len(tile_parts) > 2 else 0,
+                "pipeline": pipeline,
+                "scheduler": scheduler,
+            }
+        )
         return result
 
     # Pattern 3: Generic fallback - extract dtype, pipeline from common suffixes
     # Look for common patterns like _bf16_, _fp16_, _compv3, _mem
-    dtype_match = re.search(r'_(bf16|fp16|fp8|fp32|int8)', kernel_name)
+    dtype_match = re.search(r"_(bf16|fp16|fp8|fp32|int8)", kernel_name)
     if dtype_match:
-        result['dtype'] = dtype_match.group(1)
+        result["dtype"] = dtype_match.group(1)
 
-    pipeline_match = re.search(r'_(compv\d+|mem|async)', kernel_name)
+    pipeline_match = re.search(r"_(compv\d+|mem|async)", kernel_name)
     if pipeline_match:
-        result['pipeline'] = pipeline_match.group(1)
+        result["pipeline"] = pipeline_match.group(1)
 
     # Extract operation type from prefix
-    op_match = re.match(r'^([a-z_]+?)_', kernel_name)
+    op_match = re.match(r"^([a-z_]+?)_", kernel_name)
     if op_match:
-        result['op_type'] = op_match.group(1)
+        result["op_type"] = op_match.group(1)
 
     return result
 
@@ -239,7 +274,7 @@ def convert_csv_to_parquet(
     kernel_configs = {}
     parse_errors = 0
 
-    for kernel_name in df['kernel'].unique():
+    for kernel_name in df["kernel"].unique():
         try:
             config = parse_kernel_name_generic(kernel_name, kernel_pattern)
             kernel_configs[kernel_name] = config
@@ -247,7 +282,7 @@ def convert_csv_to_parquet(
             parse_errors += 1
             if parse_errors <= 3:  # Show first 3 errors
                 print(f"  Warning: Could not fully parse '{kernel_name}': {e}")
-            kernel_configs[kernel_name] = {'kernel_name': kernel_name}
+            kernel_configs[kernel_name] = {"kernel_name": kernel_name}
 
     if parse_errors > 3:
         print(f"  ... and {parse_errors - 3} more parsing warnings")
@@ -259,29 +294,28 @@ def convert_csv_to_parquet(
     hw_profile = HW_PROFILES.get(arch, {})
     if not hw_profile:
         print(f"Warning: No hardware profile for {arch}, using defaults")
-        hw_profile = HW_PROFILES['gfx950']
+        hw_profile = HW_PROFILES["gfx950"]
 
     # Build parquet rows
     rows = []
     for _, row in df.iterrows():
-        kernel_name = row['kernel']
+        kernel_name = row["kernel"]
         kernel_cfg = kernel_configs.get(kernel_name, {})
 
         # Build parquet row
         pq_row = {
             # Kernel info
-            'kernel_name': kernel_name,
-
+            "kernel_name": kernel_name,
             # Performance metrics
-            'latency_ms': float(row['latency_ms']),
-            'tflops': float(row['tflops']),
+            "latency_ms": float(row["latency_ms"]),
+            "tflops": float(row["tflops"]),
         }
 
         # Add optional columns if they exist
-        if 'non_zero' in row:
-            pq_row['non_zero'] = int(row['non_zero'])
-        if 'problem_idx' in row:
-            pq_row['problem_idx'] = int(row['problem_idx'])
+        if "non_zero" in row:
+            pq_row["non_zero"] = int(row["non_zero"])
+        if "problem_idx" in row:
+            pq_row["problem_idx"] = int(row["problem_idx"])
 
         # Add all problem features (auto-detected)
         for col in problem_cols:
@@ -292,21 +326,21 @@ def convert_csv_to_parquet(
 
         # Add metadata overrides
         if op_type:
-            pq_row['op_type'] = op_type
+            pq_row["op_type"] = op_type
         if dtype:
-            pq_row['dtype'] = dtype
+            pq_row["dtype"] = dtype
         if variant:
-            pq_row['variant'] = variant
+            pq_row["variant"] = variant
 
         # Add architecture
-        pq_row['arch'] = arch
+        pq_row["arch"] = arch
 
         # Add hardware profile
         pq_row.update(hw_profile)
 
         # Add validity flag
-        pq_row['is_valid'] = True
-        pq_row['run_id'] = 0
+        pq_row["is_valid"] = True
+        pq_row["run_id"] = 0
 
         rows.append(pq_row)
 
@@ -336,32 +370,42 @@ def convert_csv_to_parquet(
 
     # Performance metrics
     print("Performance metrics:")
-    print(f"  Latency (ms): {result_df['latency_ms'].min():.4f} - {result_df['latency_ms'].max():.4f}")
-    print(f"  TFLOPS: {result_df['tflops'].min():.2f} - {result_df['tflops'].max():.2f}")
+    print(
+        f"  Latency (ms): {result_df['latency_ms'].min():.4f} - {result_df['latency_ms'].max():.4f}"
+    )
+    print(
+        f"  TFLOPS: {result_df['tflops'].min():.2f} - {result_df['tflops'].max():.2f}"
+    )
     print(f"  Mean TFLOPS: {result_df['tflops'].mean():.2f}")
     print(f"  Median TFLOPS: {result_df['tflops'].median():.2f}")
     print()
 
     # Pipeline distribution (if available)
-    if 'pipeline' in result_df.columns:
+    if "pipeline" in result_df.columns:
         print("Pipeline distribution:")
-        print(result_df['pipeline'].value_counts())
+        print(result_df["pipeline"].value_counts())
         print()
 
     # Operation type distribution (if available)
-    if 'op_type' in result_df.columns:
+    if "op_type" in result_df.columns:
         print("Operation type distribution:")
-        print(result_df['op_type'].value_counts())
+        print(result_df["op_type"].value_counts())
         print()
 
     # Show sample best results
     print("Sample best kernels per problem:")
     # Group by problem columns if available
     if problem_cols:
-        best_per_problem = result_df.loc[result_df.groupby(problem_cols)['tflops'].idxmax()]
+        best_per_problem = result_df.loc[
+            result_df.groupby(problem_cols)["tflops"].idxmax()
+        ]
         for i, (idx, row) in enumerate(best_per_problem.head(5).iterrows()):
-            prob_desc = ', '.join([f"{col}={row[col]}" for col in problem_cols[:4]])  # Show first 4 params
-            print(f"  {prob_desc}... → {row['tflops']:.1f} TFLOPS ({row['kernel_name']})")
+            prob_desc = ", ".join(
+                [f"{col}={row[col]}" for col in problem_cols[:4]]
+            )  # Show first 4 params
+            print(
+                f"  {prob_desc}... → {row['tflops']:.1f} TFLOPS ({row['kernel_name']})"
+            )
     print()
 
     return result_df
@@ -374,32 +418,31 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        "--input", type=str, required=True,
-        help="Input CSV file from benchmark"
+        "--input", type=str, required=True, help="Input CSV file from benchmark"
+    )
+    parser.add_argument("--output", type=str, required=True, help="Output parquet file")
+    parser.add_argument(
+        "--arch", type=str, default="gfx950", help="GPU architecture (default: gfx950)"
     )
     parser.add_argument(
-        "--output", type=str, required=True,
-        help="Output parquet file"
+        "--dtype",
+        type=str,
+        help="Data type override (default: auto-detect from kernel name)",
     )
     parser.add_argument(
-        "--arch", type=str, default="gfx950",
-        help="GPU architecture (default: gfx950)"
+        "--variant",
+        type=str,
+        help="Operation variant override (default: auto-detect from kernel name)",
     )
     parser.add_argument(
-        "--dtype", type=str,
-        help="Data type override (default: auto-detect from kernel name)"
+        "--op-type",
+        type=str,
+        help="Operation type override (default: auto-detect from kernel name)",
     )
     parser.add_argument(
-        "--variant", type=str,
-        help="Operation variant override (default: auto-detect from kernel name)"
-    )
-    parser.add_argument(
-        "--op-type", type=str,
-        help="Operation type override (default: auto-detect from kernel name)"
-    )
-    parser.add_argument(
-        "--kernel-pattern", type=str,
-        help="Custom regex pattern for parsing kernel names (use named groups)"
+        "--kernel-pattern",
+        type=str,
+        help="Custom regex pattern for parsing kernel names (use named groups)",
     )
 
     args = parser.parse_args()

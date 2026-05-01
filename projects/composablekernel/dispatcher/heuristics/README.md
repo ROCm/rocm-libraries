@@ -334,7 +334,9 @@ Models are automatically decompressed on first use.
 ### Usage
 
 ```python
-from predict_grouped_conv import predict_best_kernel
+import pandas as pd
+from predict import Predictor
+from feature_engine_grouped_conv import GroupedConvFeatureEngine
 
 # Define problem
 problem = {
@@ -345,15 +347,23 @@ problem = {
     'dtype': 'bf16'
 }
 
-# Get best kernel for backward data gradient
-best_kernel = predict_best_kernel(
-    problem=problem,
-    variant='bwd_data',
-    arch='gfx950'
+# Load model with the grouped-conv feature engine
+predictor = Predictor(
+    "models/grouped_conv_bwd_data_bf16_gfx950",
+    feature_engine=GroupedConvFeatureEngine(),
 )
 
-print(f"Best kernel: {best_kernel['name']}")
-print(f"Predicted TFLOPS: {best_kernel['tflops']:.2f}")
+# Build the candidate kernel pool from a training/holdout parquet
+# (each row carries kernel_name + every kernel-config column the engine needs).
+df = pd.read_parquet("data/grouped_conv_bwd_data/bwd_data.parquet")
+configs = [df[df["kernel_name"] == kn].iloc[0].to_dict()
+           for kn in df["kernel_name"].unique()]
+
+# Rank candidates by predicted TFLOPS
+ranked = predictor.rank_kernels(problem, configs)
+best_name, best_tflops = ranked[0]
+print(f"Best kernel: {best_name}")
+print(f"Predicted TFLOPS: {best_tflops:.2f}")
 ```
 
 ### Validation
@@ -425,7 +435,7 @@ python validation/grouped_conv/validate_training_shapes.py
 dispatcher/heuristics/
 ├── train.py                           # Training script
 ├── feature_engine_grouped_conv.py     # Feature engineering
-├── predict_grouped_conv.py            # Prediction CLI
+├── predict.py                         # Generic Predictor (use with GroupedConvFeatureEngine)
 ├── models/
 │   ├── grouped_conv_forward_bf16_gfx950/
 │   │   ├── model_tflops.lgbm.gz       # Compressed model
