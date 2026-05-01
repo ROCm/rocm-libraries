@@ -99,6 +99,31 @@ def resetTypeMismatchCollector():
   _typeMismatchCollector.clear()
 
 
+def getTypeMismatchCollector():
+  """Return a copy of the current collector state.
+
+  Used by worker processes to return their collected mismatch data to the
+  main process after parallel YAML parsing.
+  """
+  return {k: {"count": v["count"], "values": set(v["values"]), "files": set(v["files"])}
+          for k, v in _typeMismatchCollector.items()}
+
+
+def mergeTypeMismatchCollector(data):
+  """Merge mismatch data returned from a worker process into the main collector.
+
+  Args:
+      data: A dict in the same format as ``_typeMismatchCollector``, as
+            returned by ``getTypeMismatchCollector()`` in a worker process.
+  """
+  for key, entry in data.items():
+    if key not in _typeMismatchCollector:
+      _typeMismatchCollector[key] = {"count": 0, "values": set(), "files": set()}
+    _typeMismatchCollector[key]["count"] += entry["count"]
+    _typeMismatchCollector[key]["values"] |= entry["values"]
+    _typeMismatchCollector[key]["files"] |= entry["files"]
+
+
 def validateParameterTypes(state, srcFile=""):
   """Validate that every solution parameter has the correct Python type.
 
@@ -139,18 +164,24 @@ def validateParameterTypes(state, srcFile=""):
         entry["files"].add(srcFile)
 
 
-def printTypeMismatchSummary():
-  """Print a summary of all collected type mismatches to stderr.
+def printTypeMismatchSummary(numFiles=0):
+  """Print a summary of all collected type mismatches.
 
-  If no mismatches have been collected, this function prints nothing and
-  returns 0.  Otherwise it emits a WARNING block to stderr with one line
-  per unique (parameter, actual_type) combination showing the count,
-  observed values, and expected type.
+  If no mismatches have been collected, prints a confirmation message
+  showing how many files were checked cleanly, and returns 0.  Otherwise
+  it emits a WARNING block with one line per unique (parameter,
+  actual_type) combination showing the count, observed values, and
+  expected type.
+
+  Args:
+      numFiles: Total number of YAML logic files that were checked.
 
   Returns:
       int: The total number of individual mismatches (0 if clean).
   """
   if not _typeMismatchCollector:
+    if numFiles > 0:
+      print(f"Checked {numFiles} YAML logic files - no type mismatches found.", flush=True)
     return 0
 
   totalCount = sum(e["count"] for e in _typeMismatchCollector.values())
@@ -174,7 +205,7 @@ def printTypeMismatchSummary():
     valuesStr = ", ".join(sorted(entry["values"]))
     lines.append(
       f"  {paramName}: found {actualType} in {entry['count']} solutions "
-      f"(values: {valuesStr}) — expected {expectedStr}"
+      f"(values: {valuesStr}) - expected {expectedStr}"
     )
 
   lines.append("-----------------------------------------------------------")
@@ -183,7 +214,7 @@ def printTypeMismatchSummary():
   lines.append("  Fix these to prevent future build failures.")
   lines.append("===========================================================")
 
-  print("\n".join(lines), file=sys.stderr)
+  print("\n".join(lines), flush=True)
   return totalCount
 
 
@@ -1178,6 +1209,10 @@ class Solution(collections.abc.Mapping):
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
     state["_GlobalAccumulation"] = None
     computeName  = state["ProblemType"]["ComputeDataType"].toName()
+    if state["UseDotInstruction"] and state["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel':
+      # dot2 kernel does not support MBSK
+      state["GlobalSplitUAlgorithm"] = 'MultipleBuffer'
+      state["MbskPrefetchMethod"] = 0
     if state["StreamK"] > 0 and state["StreamKAtomic"] == 0:
       # StreamK Workspace size
       state["_GlobalAccumulation"] = 'PartialsBuffer'
@@ -1206,6 +1241,7 @@ class Solution(collections.abc.Mapping):
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
+      state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
       # if state["PersistentKernel"]:
@@ -1864,9 +1900,10 @@ class Solution(collections.abc.Mapping):
       return
 
     if tdmInst > 0:
-      if state["PrefetchGlobalRead"] > 1:
-        reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
-        return
+      # TODO: remove this restriction when PGR=2 is fully supported
+      # if state["PrefetchGlobalRead"] > 1:
+      #   reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
+      #   return
 
       if (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
         reject(state, printRejectionReason, "Currently TDM only supports TN")
@@ -1914,7 +1951,7 @@ class Solution(collections.abc.Mapping):
         state["UseDirect32XEmulation"] = False
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
-    backup_UsePLRPack = state["UsePLRPack"] 
+    backup_UsePLRPack = state["UsePLRPack"]
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       # initialize CMS related config parameters (for CMS only)
@@ -2040,7 +2077,7 @@ class Solution(collections.abc.Mapping):
         if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
           return
-        
+
         # Currently we only support fp4 edge with AssertFree0(1)ElementMultiple = 2.
         # TODO: Enalbe edge with arbitrary number
         state["AssertFree0ElementMultiple"] = 2
@@ -2302,7 +2339,7 @@ class Solution(collections.abc.Mapping):
           vw = state["VectorWidthA"] if "A" in tc else state["VectorWidthB"]
           LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * bpe * vw), multiple)
         return LdsBlockSizePerPad
-      
+
       def getLdsBpe(tc: str) -> float:
         return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
 
@@ -3806,7 +3843,7 @@ class Solution(collections.abc.Mapping):
         state["NumElementsPerBatchStore"] = 16 if not state["ProblemType"]["DataType"].numBytes() == 8 else 1
 
     # Mbsk prefetch optimization
-    if state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
+    if state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel' and state["AdaptiveGemmGSUA"] == 0:
         state["MbskPrefetchMethod"] = 0
     elif state["MbskPrefetchMethod"] == -1:
       numStoreElements = state["NumElementsPerThread"] // state["StoreVectorWidth"]
@@ -4218,7 +4255,7 @@ class Solution(collections.abc.Mapping):
               not state["ClusterLocalRead"] and \
               not state["InnerUnroll"] >= state["LocalReadVectorWidth"] // state["MIInputPerThread"]:
             reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
-                    
+
 
     if state["GlobalReadPerMfma"] > 1 and state["PrefetchGlobalRead"] >= 2:
       reject(state, printRejectionReason, "GlobalReadPerMfma need to be 1 if PGR>=2")

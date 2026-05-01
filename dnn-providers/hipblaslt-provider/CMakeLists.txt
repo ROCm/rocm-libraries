@@ -9,8 +9,10 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(HIPBLASLT_PLUGIN "0.0.1")
-project(hipblaslt-provider VERSION ${HIPBLASLT_PLUGIN} LANGUAGES CXX)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+dnn_provider_setup_version(hipblaslt_provider ${CMAKE_CURRENT_LIST_DIR})
+
+project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 
 if(NOT WIN32)
     # Only set if not already specified by user
@@ -74,6 +76,10 @@ if(NOT TARGET hipdnn_data_sdk)
     find_package(hipdnn_data_sdk CONFIG REQUIRED)
 endif()
 
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+endif()
+
 if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
@@ -118,11 +124,8 @@ add_library(
     HipblasltMatrixLayout.cpp
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-# Use hip::device to match hipBLASLt's own build configuration on Windows.
-# hip::host triggers a hard ambiguous operator<< error in upstream hipBLASLt
-# headers (hipblaslt_e5m3.h / hipblaslt_e8.h) due to missing MSVC ABI flags.
-# See: https://github.com/ROCm/rocm-libraries/issues/6404
-target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_plugin_sdk hip::device)
+dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
+target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 

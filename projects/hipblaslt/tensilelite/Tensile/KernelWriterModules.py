@@ -21,7 +21,7 @@
 ################################################################################
 
 from rocisa.code import Label, Module
-from rocisa.container import vgpr, sgpr, accvgpr, Holder
+from rocisa.container import vgpr, sgpr, accvgpr, Holder, MemTokenData
 from rocisa.instruction import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SWaitTensorcnt,\
   VAccvgprReadB32, VAccvgprWriteB32, VFmaF32, VFmaF64, VLShiftLeftB64, VMovB32, \
   VMulF32, VMulF64, VMulLOU32, VMulPKF16
@@ -135,7 +135,7 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
 ##############################################################################
 # SyncThreads
 ##############################################################################
-def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False):
+def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, memoryToken=None):
     imod = Module("syncThreads")
     if kernel["NumThreads"] > kernel["WavefrontSize"]:
         if asmCaps["SeparateVscnt"]:
@@ -147,7 +147,10 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False):
         elif archCaps["Waitcnt0Disabled"]:
             imod.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment="force waitcnt0"))
 
-        imod.add(SBarrier(comment=comment))
+        _barrier = SBarrier(comment=comment)
+        if memoryToken != None:
+            _barrier.setMemToken(MemTokenData(memoryToken))
+        imod.add(_barrier)
     else:
         imod.addComment("Skip barrier: NumThreads=%s"%(kernel["NumThreads"]) + \
                 comment)

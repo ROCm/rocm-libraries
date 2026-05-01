@@ -17,7 +17,7 @@
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 
@@ -158,12 +158,11 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
     // Execute the graph using CPU graph executor
-    CpuReferenceGraphExecutor graphExecutor;
     // Serialize the frontend graph to flatbuffer format
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    // Execute with correct 3-parameter signature
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     // Compute reference result manually: (conv(X, W) + 5.0) * 2.0
     // Step 1: Perform convolution

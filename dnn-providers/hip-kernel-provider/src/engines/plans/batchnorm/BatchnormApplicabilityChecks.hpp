@@ -5,24 +5,24 @@
 
 #include "engines/plans/ApplicabilityChecks.hpp"
 #include <array>
-#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 
 namespace hip_kernel_provider
 {
 
 class BatchnormValidator : public IValidator
 {
-private:
     // --- Activation Mode Validators ---
-
+public:
     static void checkFwdActivationModeSupported(
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr);
 
+private:
     static void checkBwdActivationModeSupported(
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr);
 
     // --- Validation Utilities ---
 
@@ -50,28 +50,35 @@ private:
 
 public:
     BatchnormValidator(
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMapLocal)
         : IValidator(tensorMapLocal) {};
 
     // --- High-Level Configuration Validators ---
 
     void checkInferenceTensorConfigSupported(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr);
 
     void checkInferenceVarianceExtTensorConfigSupported(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+            bnInfAttr);
 
     void checkInferenceActivationTensorConfigSupported(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr);
 
     void checkInferenceVarianceExtActivationTensorConfigSupported(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+            bnInfAttr,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr);
 
     void checkFwdTrainingTensorConfigSupported(
-        const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr);
+
+    void checkFwdTrainingActivationTensorConfigSupported(
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr);
 };
 
 // --- Batchnorm Type Configuration ---
@@ -81,15 +88,15 @@ public:
 // - Affine/Stat/Intermediate tensors: FLOAT only
 struct BnTensorTypes
 {
-    hipdnn_data_sdk::data_objects::DataType io;
-    hipdnn_data_sdk::data_objects::DataType affine;
-    hipdnn_data_sdk::data_objects::DataType stat;
-    hipdnn_data_sdk::data_objects::DataType intermediate;
+    hipdnn_flatbuffers_sdk::data_objects::DataType io;
+    hipdnn_flatbuffers_sdk::data_objects::DataType affine;
+    hipdnn_flatbuffers_sdk::data_objects::DataType stat;
+    hipdnn_flatbuffers_sdk::data_objects::DataType intermediate;
 };
 
 namespace bn_type_configs
 {
-using DT = hipdnn_data_sdk::data_objects::DataType;
+using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 inline constexpr BnTensorTypes ALL_FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::FLOAT};
 inline constexpr BnTensorTypes HALF_IO = {DT::HALF, DT::FLOAT, DT::FLOAT, DT::FLOAT};
@@ -97,10 +104,10 @@ inline constexpr BnTensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT
 
 inline constexpr std::array<BnTensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOAT16_IO};
 
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIoTypes();
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedAffineTypes();
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedStatTypes();
-std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIntermediateTypes();
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedIoTypes();
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedAffineTypes();
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedStatTypes();
+std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedIntermediateTypes();
 
 } // namespace bn_type_configs
 

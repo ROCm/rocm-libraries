@@ -3,32 +3,35 @@
 
 #include "BatchnormFwdTrainingPlan.hpp"
 #include "BatchnormCommon.hpp"
+#include "hip/HipKernelCompileOptions.hpp"
 
 #include "HipKernelUtils.hpp"
 #include "hip/IKernelCompiler.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::batchnorm
 {
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
     , _y(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
     , _scale(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.scale_tensor_uid())))
     , _bias(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
+    , _activationOut(nullptr)
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        epsilonTensorAttr, "Epsilon");
 
     // Save mean and inv_variance are optional
     if(attributes.mean_tensor_uid().has_value())
@@ -51,7 +54,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     {
         // Extract momentum value from pass-by-value tensor (cast to double for kernel compatibility)
         auto momentumTensorAttr = tensorMap.at(attributes.momentum_tensor_uid().value());
-        _momentumValue = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        _momentumValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
             momentumTensorAttr, "Momentum");
 
         _prevRunningMean = &(hip_kernel_utils::findTensorAttributes(
@@ -66,22 +69,45 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     }
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::x() const
+BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+    : BatchnormFwdTrainingParams(attributes, tensorMap)
+{
+    // Initialize activation attributes
+    _optActivation = hip_kernel_utils::parseActivation(pointwiseAttributes);
+    _activationOut = tensorMap.at(pointwiseAttributes.out_0_tensor_uid());
+
+    // Validate that activation input matches batchnorm output
+    if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "BatchnormFwdTrainingParams: Activation input must match batchnorm output");
+    }
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::x() const
 {
     return _x;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::y() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::y() const
 {
     return _y;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::scale() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdTrainingParams::scale() const
 {
     return _scale;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::bias() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdTrainingParams::bias() const
 {
     return _bias;
 }
@@ -96,12 +122,13 @@ bool BatchnormFwdTrainingParams::hasSaveMeanVariance() const
     return (_mean != nullptr) && (_invVariance != nullptr);
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes* BatchnormFwdTrainingParams::mean() const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdTrainingParams::mean() const
 {
     return _mean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::invVariance() const
 {
     return _invVariance;
@@ -112,13 +139,13 @@ bool BatchnormFwdTrainingParams::hasRunningStats() const
     return _hasRunningStats;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::prevRunningMean() const
 {
     return _prevRunningMean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::prevRunningVariance() const
 {
     return _prevRunningVariance;
@@ -129,16 +156,28 @@ double BatchnormFwdTrainingParams::momentumValue() const
     return _momentumValue.value();
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::nextRunningMean() const
 {
     return _nextRunningMean;
 }
 
-const hipdnn_data_sdk::data_objects::TensorAttributes*
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     BatchnormFwdTrainingParams::nextRunningVariance() const
 {
     return _nextRunningVariance;
+}
+
+const std::optional<hip_kernel_utils::ActivationParams>&
+    BatchnormFwdTrainingParams::optActivation() const
+{
+    return _optActivation;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    BatchnormFwdTrainingParams::activationOut() const
+{
+    return _activationOut;
 }
 
 BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams)
@@ -164,10 +203,10 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     // FP16 IO and FP16 scale/bias data types, the hip kernel plugin
     // applicability checks require the scale and bias tensors to be FP32.
     // So we are not using the USE_FP16 path in the kernel for now.
-    bool useFp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::HALF
-                       && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    bool useBfp16Mix = (xDataType == hipdnn_data_sdk::data_objects::DataType::BFLOAT16
-                        && scaleDataType == hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    bool useFp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+                       && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    bool useBfp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+                        && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     bool useFp32 = !useFp16Mix && !useBfp16Mix;
 
     // Extract dimensions from x tensor
@@ -350,62 +389,46 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     // Get activation mode
     int nrnOpId = 0;
 
-    // Prepare compilation options
-    std::vector<std::string> options;
-    auto rocmPath
-        = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
-    if(!rocmPath.empty())
+    if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
     {
-        auto rocmIncludeArg = "-I" + rocmPath + "/include";
-        options.emplace_back(rocmIncludeArg);
-        HIPDNN_PLUGIN_LOG_INFO(
-            "BatchnormFwdTrainingPlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
+        const auto& activation = *_trainingParams.optActivation();
+        nrnOpId = static_cast<int>(activation.mode);
     }
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
-    options.emplace_back(
-        "-DHIP_PLUGIN_USE_FP16=0"); // Not using this path due to scale/bias data type requirements
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_FPMIX=") + (useFp16Mix ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFPMIX=") + (useBfp16Mix ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_SAVE_MEAN_VARIANCE=")
-                         + (_trainingParams.hasSaveMeanVariance() ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_RUNNING_RESULT=")
-                         + (_trainingParams.hasRunningStats() ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_VARIANT=") + std::to_string(variant));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_LDS_SIZE=") + std::to_string(ldsnogcn));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_LDSGCN_SIZE=") + std::to_string(ldsgcn));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_N=") + std::to_string(n));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_C=") + std::to_string(c));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_HW=") + std::to_string(inCstride));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NHW=") + std::to_string(inNhw));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_CHW=") + std::to_string(c * inCstride));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NCHW=") + std::to_string(c * inNhw));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NGRPS=")
-                         + std::to_string(ygridsize / ylocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_NGRPS2=")
-                         + std::to_string(zgridsize / zlocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_N_ELEMENTS=") + std::to_string(nelements));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP0=") + std::to_string(xlocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP1=") + std::to_string(ylocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP2=") + std::to_string(zlocalsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP0_FINAL=")
-                         + std::to_string(xlocalsizeFinal));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP1_FINAL=")
-                         + std::to_string(ylocalsizeFinal));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GRP2_FINAL=")
-                         + std::to_string(zlocalsizeFinal));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX103X=") + (isGfx103X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX110X=") + (isGfx110X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115X ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_LAYOUT_NHWC=")
-                         + std::to_string(static_cast<int>(isLayoutNHWC)));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_VECTORIZE=")
-                         + std::to_string(static_cast<int>(vectorsize > 1)));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_VEC_SIZE=") + std::to_string(vectorsize));
-    options.emplace_back(std::string("-DHIP_PLUGIN_BN_STASH_METHOD=")
-                         + std::to_string(stashMethod));
-    options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
-    options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
+
+    // Prepare compilation options
+    HipKernelCompileOptions options(_trainingParams.x(), deviceProperties);
+    options.add("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
+    options.add("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    options.update("HIP_PLUGIN_USE_FP16",
+                   0); // Not using this path due to scale/bias data type requirements
+    options.add("HIP_PLUGIN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
+    options.add("HIP_PLUGIN_RUNNING_RESULT", _trainingParams.hasRunningStats());
+    options.add("HIP_PLUGIN_BN_VARIANT", variant);
+    options.add("HIP_PLUGIN_BN_LDS_SIZE", ldsnogcn);
+    options.add("HIP_PLUGIN_BN_LDSGCN_SIZE", ldsgcn);
+    options.add("HIP_PLUGIN_BN_N", n);
+    options.add("HIP_PLUGIN_BN_C", c);
+    options.add("HIP_PLUGIN_BN_HW", inCstride);
+    options.add("HIP_PLUGIN_BN_NHW", inNhw);
+    options.add("HIP_PLUGIN_BN_CHW", c * inCstride);
+    options.add("HIP_PLUGIN_BN_NCHW", c * inNhw);
+    options.add("HIP_PLUGIN_BN_NGRPS", ygridsize / ylocalsize);
+    options.add("HIP_PLUGIN_BN_NGRPS2", zgridsize / zlocalsize);
+    options.add("HIP_PLUGIN_BN_N_ELEMENTS", nelements);
+    options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
+    options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
+    options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
+    options.add("HIP_PLUGIN_BN_GRP0_FINAL", xlocalsizeFinal);
+    options.add("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
+    options.add("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
+    options.add("HIP_PLUGIN_BN_GFX103X", isGfx103X);
+    options.add("HIP_PLUGIN_BN_GFX110X", isGfx110X);
+    options.add("HIP_PLUGIN_BN_GFX120X", isGfx120X);
+    options.add("HIP_PLUGIN_BN_GFX115X", isGfx115X);
+    options.add("HIP_PLUGIN_BN_VECTORIZE", vectorsize > 1);
+    options.add("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
+    options.add("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
+    options.add("HIP_PLUGIN_NRN_OP_ID", nrnOpId);
 
     // Compile the kernel and configure launch parameters based on the selected variant
     _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", options);
@@ -472,8 +495,6 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
     // Get device buffer pointers
     auto xBuffer = hip_kernel_utils::findDeviceBuffer(
         _trainingParams.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer = hip_kernel_utils::findDeviceBuffer(
-        _trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
     auto scaleBuffer = hip_kernel_utils::findDeviceBuffer(
         _trainingParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
     auto biasBuffer = hip_kernel_utils::findDeviceBuffer(
@@ -533,9 +554,24 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
             "BatchnormFwdTrainingPlan: expAvgFactor (momentum) = " << expAvgFactor);
     }
 
-    // Get activation parameters
+    // Get output buffer and activation parameters
     float activationAlpha = 0.0f;
     float activationBeta = 0.0f;
+    hipdnnPluginDeviceBuffer_t yBuffer = {-1, nullptr};
+    if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
+    {
+        yBuffer = hip_kernel_utils::findDeviceBuffer(
+            _trainingParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
+
+        const auto& activation = *_trainingParams.optActivation();
+        activationAlpha = static_cast<float>(activation.alpha);
+        activationBeta = static_cast<float>(activation.beta);
+    }
+    else
+    {
+        yBuffer = hip_kernel_utils::findDeviceBuffer(
+            _trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+    }
 
     if(_kernelVariant != 2)
     {

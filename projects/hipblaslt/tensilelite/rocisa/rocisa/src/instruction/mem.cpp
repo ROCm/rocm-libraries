@@ -41,6 +41,16 @@ namespace rocisa
             NB_OVERRIDE_PURE(getParams);
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            NB_OVERRIDE_PURE(getDstParams);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            NB_OVERRIDE_PURE(getSrcParams);
+        }
+
         std::string toString() const override
         {
             NB_OVERRIDE_PURE(toString);
@@ -53,6 +63,16 @@ namespace rocisa
         std::vector<InstructionInput> getParams() const override
         {
             NB_OVERRIDE_PURE(getParams);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            NB_OVERRIDE_PURE(getDstParams);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            NB_OVERRIDE_PURE(getSrcParams);
         }
 
         std::string toString() const override
@@ -69,6 +89,16 @@ namespace rocisa
             NB_OVERRIDE_PURE(getParams);
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            NB_OVERRIDE_PURE(getDstParams);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            NB_OVERRIDE_PURE(getSrcParams);
+        }
+
         std::string toString() const override
         {
             NB_OVERRIDE_PURE(toString);
@@ -81,6 +111,16 @@ namespace rocisa
         std::vector<InstructionInput> getParams() const override
         {
             NB_OVERRIDE_PURE(getParams);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            NB_OVERRIDE_PURE(getDstParams);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            NB_OVERRIDE_PURE(getSrcParams);
         }
 
         std::string toString() const override
@@ -97,6 +137,16 @@ namespace rocisa
             NB_OVERRIDE_PURE(getParams);
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            NB_OVERRIDE_PURE(getDstParams);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            NB_OVERRIDE_PURE(getSrcParams);
+        }
+
         std::string toString() const override
         {
             NB_OVERRIDE_PURE(toString);
@@ -109,6 +159,16 @@ namespace rocisa
         std::vector<InstructionInput> getParams() const override
         {
             NB_OVERRIDE_PURE(getParams);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            NB_OVERRIDE_PURE(getDstParams);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            NB_OVERRIDE_PURE(getSrcParams);
         }
 
         std::string toString() const override
@@ -229,7 +289,7 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("base"),
              nb::arg("soffset"),
              nb::arg("smem")    = std::nullopt,
-             nb::arg("comment") = "")
+             nb::arg("comment") = "")                        
         .def("getParams", &rocisa::SMemLoadInstruction::getParams)
         .def("__str__", &rocisa::SMemLoadInstruction::toString);
 
@@ -1041,7 +1101,6 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::DSLoadB64(self);
         });
 
-    
     nb::class_<rocisa::DSLoadB96TrB6, rocisa::DSLoadInstruction>(m_mem, "DSLoadB96TrB6")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,

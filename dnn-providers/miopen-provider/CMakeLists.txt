@@ -11,10 +11,10 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Include version utilities (must be before project() call)
-include(${CMAKE_CURRENT_LIST_DIR}/cmake/VersionUtils.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
 
 # Version handling
-miopen_provider_setup_version(miopen_provider)
+dnn_provider_setup_version(miopen_provider ${CMAKE_CURRENT_LIST_DIR})
 
 # Set project with version
 project(miopen-provider VERSION ${MIOPEN_PROVIDER_VERSION} LANGUAGES CXX)
@@ -108,6 +108,9 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
     if(NOT TARGET hipdnn_data_sdk)
         find_package(hipdnn_data_sdk CONFIG REQUIRED)
     endif()
+    if(NOT TARGET hipdnn_flatbuffers_sdk)
+        find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+    endif()
     if(NOT TARGET hipdnn_plugin_sdk)
         find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
     endif()
@@ -167,7 +170,7 @@ add_library(
     MiopenPluginPublic.cpp
 )
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 target_compile_options(miopen_plugin_impl PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
@@ -182,10 +185,10 @@ clang_tidy_check(miopen_plugin_impl)
 add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_include_directories(miopen_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Link to miopen_plugin_impl to inherit its PUBLIC properties
-target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk miopen_plugin_impl)
+target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk miopen_plugin_impl)
 
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
-target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 if(NOT WIN32)
     target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
@@ -210,7 +213,7 @@ set_target_properties(miopen_plugin PROPERTIES
     THEROCK_INSTALL_RPATH_ORIGIN "lib/hipdnn_plugins/engines")
 
 # Generate version header
-miopen_provider_generate_version_header(miopen_provider miopen_plugin_impl)
+dnn_provider_generate_version_header(miopen_provider miopen_plugin_impl ${CMAKE_CURRENT_LIST_DIR})
 
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
     add_subdirectory(tests)

@@ -28,9 +28,11 @@
 #include "DataInitialization.hpp"
 #include "Tensile/TensorDescriptor_fwd.hpp"
 #include "Tensile/Utils.hpp"
+#include "TimingInstrumentation.hpp"
 #include "TypedId.hpp"
 
 #include <cstddef>
+#include <iostream>
 #include <omp.h>
 
 #define MAX_OMP_THREADS 64
@@ -817,24 +819,25 @@ namespace TensileLite
             throw std::runtime_error("Unsupported input type.");
         }
 
-        // Solve combinations of f16, bf16, f32 gemm problems using efficient CPU code.
-        // This versions only solves for a subset of geometries. The set of geometries
-        // supported should be extended as new bottlenecks in validation are discovered.
-        bool solveCPUFastInF32(ContractionProblemGemm const& problem,
-                               ContractionInputs const&      inputs)
+        bool isFastPathEligible(ContractionProblemGemm const& problem)
         {
 
             // For more precise numerical correctness with XFloat32, skip this fast path.
             // If we knew at this point that the data was initialized as whole number floats,
             // we could continue down this fast path, because there would be no rounding
             // errors incurred by f32 accumulation. But we do not.
+            auto rejectFast = [](const char* reason) {
+                if (false) {  // Re-enable when testing to find reason.
+                    std::clog << "FAST_PATH_REJECT: " << reason << std::endl;
+                }
+                return false;
+            };
+
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
             {
-                return false;
+                return rejectFast("XFloat32");
             }
 
-            // Guard rails to check that the fast path is appropriate to use.
-            // Some of these can be relaxed  as support on this path is generalized.
             auto isSupportedType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
                        || t == rocisa::DataType::BFloat16;
@@ -844,48 +847,80 @@ namespace TensileLite
                || !isSupportedType(problem.c().dataType())
                || !isSupportedType(problem.d().dataType()))
             {
-                return false;
+                std::string detail = "unsupported_type"
+                    " A=" + TensileLite::ToString(problem.a().dataType())
+                    + " B=" + TensileLite::ToString(problem.b().dataType())
+                    + " C=" + TensileLite::ToString(problem.c().dataType())
+                    + " D=" + TensileLite::ToString(problem.d().dataType());
+                return rejectFast(detail.c_str());
             }
 
             if(problem.batchIndices().empty())
             {
-                return false;
+                return rejectFast("no_batch_indices");
             }
 
             if(problem.useGradient())
             {
-                return false;
+                return rejectFast("gradient");
             }
 
             if(problem.outputAmaxD())
             {
-                return false;
+                return rejectFast("amaxD");
             }
 
             if(problem.useE())
             {
-                return false;
+                return rejectFast("useE");
             }
 
             if(problem.useScaleCD())
             {
-                return false;
-            }
-
-            if(problem.useScaleAB() == "Scalar")
-            {
-                return false;
-            }
-
-            if(problem.useScaleAB() == "Vector")
-            {
-                return false;
+                return rejectFast("scaleCD");
             }
 
             if(problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1
                || problem.freeIndicesB().size() != 1)
             {
-                return false;
+                return rejectFast("multi_index");
+            }
+
+            // Layout validation — index accesses are safe because the
+            // index-structure check above verified exactly 1 element in each.
+            size_t indexMA = problem.freeIndicesA()[0].i;
+            size_t indexKA = problem.boundIndices()[0].a;
+            size_t indexNB = problem.freeIndicesB()[0].i;
+            size_t indexKB = problem.boundIndices()[0].b;
+            size_t indexMD = problem.freeIndices()[0].d;
+
+            size_t strideMA = problem.a().strides()[indexMA];
+            size_t strideKA = problem.a().strides()[indexKA];
+            size_t strideNB = problem.b().strides()[indexNB];
+            size_t strideKB = problem.b().strides()[indexKB];
+
+            bool isPackedA = (strideMA == 1 || strideKA == 1);
+            bool isPackedB = (strideNB == 1 || strideKB == 1);
+            bool isPackedD = (problem.d().strides()[indexMD] == 1);
+            if(!isPackedA || !isPackedB || !isPackedD)
+            {
+                return rejectFast("layout");
+            }
+
+            return true;
+        }
+
+        // Solve combinations of f16, bf16, f32 gemm problems using efficient CPU code.
+        // This function assumes the problem is eligible for the fast path — callers
+        // must check isFastPathEligible() first.
+        void solveCPUFastInF32(ContractionProblemGemm const& problem,
+                               ContractionInputs const&      inputs)
+        {
+            if(!isFastPathEligible(problem))
+            {
+                throw std::runtime_error(
+                    "solveCPUFastInF32 called on an ineligible problem. "
+                    "Callers must check isFastPathEligible() first.");
             }
 
             bool               doActivation = false;
@@ -909,15 +944,6 @@ namespace TensileLite
             size_t strideKA = problem.a().strides()[indexKA];
             size_t strideNB = problem.b().strides()[indexNB];
             size_t strideKB = problem.b().strides()[indexKB];
-
-            // Layout validation
-            bool isPackedA = (strideMA == 1 || strideKA == 1);
-            bool isPackedB = (strideNB == 1 || strideKB == 1);
-            bool isPackedD = (problem.d().strides()[indexMD] == 1);
-            if(!isPackedA || !isPackedB || !isPackedD)
-            {
-                return false;
-            }
 
             size_t indexND  = problem.freeIndices()[1].d;
             size_t strideND = problem.d().strides()[indexND];
@@ -962,6 +988,27 @@ namespace TensileLite
             size_t sizeK     = problem.boundSize(0);
             size_t sizeM     = problem.freeSizeA(0);
             size_t sizeN     = problem.freeSizeB(0);
+
+            enum class ScaleABMode { None, Scalar, Vector };
+            ScaleABMode  scaleABMode = ScaleABMode::None;
+            ShadowBuffer shadowScaleA, shadowScaleB;
+            float        scaleABScalar = 1.0f; // pre-multiplied scalar for Scalar mode
+            {
+                std::string useScaleAB = problem.useScaleAB();
+                if(useScaleAB == "Vector")
+                {
+                    scaleABMode  = ScaleABMode::Vector;
+                    shadowScaleA = ShadowBuffer(inputs.scaleA, problem.alphaType(), sizeM);
+                    shadowScaleB = ShadowBuffer(inputs.scaleB, problem.alphaType(), sizeN);
+                }
+                else if(useScaleAB == "Scalar")
+                {
+                    scaleABMode = ScaleABMode::Scalar;
+                    ShadowBuffer tmpA(inputs.scaleA, problem.alphaType(), 1);
+                    ShadowBuffer tmpB(inputs.scaleB, problem.alphaType(), 1);
+                    scaleABScalar = tmpA[0] * tmpB[0];
+                }
+            }
 
             constexpr size_t BLOCK_M = 32;
             constexpr size_t BLOCK_N = 32;
@@ -1088,6 +1135,15 @@ namespace TensileLite
                                     auto   startingC = curBatchC[idxC];
                                     auto   current   = curBatchD[idxD];
                                     float  alpha     = originalAlpha;
+                                    if(scaleABMode == ScaleABMode::Vector)
+                                    {
+                                        alpha *= shadowScaleA[global_m];
+                                        alpha *= shadowScaleB[global_n];
+                                    }
+                                    else if(scaleABMode == ScaleABMode::Scalar)
+                                    {
+                                        alpha *= scaleABScalar;
+                                    }
                                     if(useScaleAlphaVec)
                                     {
                                         if(factorDim == 1)
@@ -1184,7 +1240,6 @@ namespace TensileLite
                     inputs.d, shadowD, problem.d().totalAllocatedElements());
             }
 
-            return true;
         }
 
         template <typename Accumulator,
@@ -2556,13 +2611,18 @@ namespace TensileLite
                 isDenseEnoughForFastPath = false;
             }
 
-            if(tryFastPath && isDenseEnoughForFastPath && solveCPUFastInF32(problem, inputs))
+            if(tryFastPath && isDenseEnoughForFastPath && isFastPathEligible(problem))
             {
+                ScopedTimer timer("solve_cpu_fast");
+                solveCPUFastInF32(problem, inputs);
                 return;
             }
 
-            auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
-            SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
+            {
+                ScopedTimer timer("solve_cpu_slow");
+                auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
+                SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
+            }
         }
 
         void SolveCPU(ContractionProblem const* problem,

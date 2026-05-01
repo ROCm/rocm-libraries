@@ -27,8 +27,7 @@ test_categories:
   comprehensive:
     description: "Extended - same as Jenkins extended/nightly (timeout: 8 hours)"
     test_patterns:
-      - "*quick*"
-      - "*pre_checkin*"
+      - "*nightly*"
     exclude:
       - "*known_bug*"
     labels:
@@ -39,8 +38,11 @@ test_categories:
   full:
     description: "Stress / weekly - same as Jenkins weekly (stress + HMM)"
     test_patterns:
-      - "*quick*"
+    #  - "*stress*"
+    #  - "*HMM*"
+    # current CI use case currently does not match stress use case
       - "*pre_checkin*"
+      - "*nightly*"
     exclude:
       - "*known_bug*"
     labels:

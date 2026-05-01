@@ -1,4 +1,4 @@
-// Copyright (C) 2020 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,31 +36,11 @@
 #include "fft_params.h"
 #include "fftw_transform.h"
 #include "gpubuf.h"
+#include "reference_fft_data.h"
 #include "rocfft_against_fftw.h"
 #include "sys_mem.h"
 #include "test_callbacks.h"
 #include "test_params.h"
-
-extern int  verbose;
-extern bool fftw_compare;
-
-// Remember the results of the last FFT we computed with FFTW.  Tests
-// are ordered so that later cases can often reuse this result.
-struct last_cpu_fft_cache
-{
-    // keys to the cache
-    std::vector<size_t> length;
-    size_t              nbatch         = 0;
-    fft_transform_type  transform_type = fft_transform_type_complex_forward;
-    bool                run_callbacks  = false;
-    fft_precision       precision      = fft_precision_single;
-    double              scale_factor   = 1.0;
-
-    // FFTW input/output
-    std::vector<hostbuf> cpu_input;
-    std::vector<hostbuf> cpu_output;
-};
-extern last_cpu_fft_cache last_cpu_fft_data;
 
 // Perform several checks to make sure buffers will fit in device memory
 template <class Tparams>
@@ -84,24 +64,23 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
             throw ROCFFT_FAIL{ss.str()};
         }
     }
-    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes(dev_id);
+    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes_all_devices();
 
     // First try a quick estimation of vram footprint, to speed up skipping tests
     // that are too large to fit in the gpu (no plan created with the rocFFT backend)
-    const auto raw_vram_footprint
-        = params.fft_params_vram_footprint() + twiddle_table_vram_footprint(params);
+    const auto io_vram_footprint = params.io_vram_footprint();
 
-    if(!vram_fits_problem(raw_vram_footprint, vram_avail))
+    if(!vram_fits_problem(io_vram_footprint, vram_avail))
     {
         std::stringstream ss;
-        ss << "Raw problem size (" << byte_size_to_str(raw_vram_footprint)
-           << ") exceeds usable memory on device (" << byte_size_to_str(vram_avail) << ")";
+        ss << "Raw problem size (" << byte_sizes_to_str(io_vram_footprint)
+           << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 
     if(verbose > 2)
     {
-        std::cout << "Raw problem size: " << raw_vram_footprint << std::endl;
+        std::cout << "Raw problem size: " << byte_sizes_to_str(io_vram_footprint) << std::endl;
     }
 
     // If it passed the quick estimation test, go for the more
@@ -115,8 +94,8 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
             std::cout << "Problem raw data won't fit on device; skipped." << std::endl;
         }
         std::stringstream ss;
-        ss << "Problem size (" << byte_size_to_str(vram_footprint)
-           << ") exceeds usable memory on device (" << byte_size_to_str(vram_avail) << ")";
+        ss << "Problem size (" << byte_sizes_to_str(vram_footprint)
+           << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail) << ")";
         throw ROCFFT_SKIP{ss.str()};
     }
 }
@@ -148,55 +127,6 @@ public:
         return info.param.token();
     }
 };
-
-static auto allocate_cpu_fft_buffer(const fft_precision        precision,
-                                    const fft_array_type       type,
-                                    const std::vector<size_t>& size)
-{
-    // FFTW does not support half-precision, so we do single instead.
-    // So if we need to do a half-precision FFTW transform, allocate
-    // enough buffer for single-precision instead.
-    return allocate_host_buffer(
-        precision == fft_precision_half ? fft_precision_single : precision, type, size);
-}
-
-template <typename Tfloat>
-inline void execute_cpu_fft(fft_params&                  params,
-                            fft_params&                  contiguous_params,
-                            fftw_plan_wrapper_t<Tfloat>& cpu_plan,
-                            std::vector<hostbuf>&        cpu_input,
-                            std::vector<hostbuf>&        cpu_output)
-{
-    // CPU output might not be allocated already for us, if FFTW never
-    // needed an output buffer during planning
-    if(cpu_output.empty())
-        cpu_output = allocate_cpu_fft_buffer(
-            contiguous_params.precision, contiguous_params.otype, contiguous_params.osize);
-
-    // If this is either C2R or callbacks are enabled, the
-    // input will be modified.  So we need to modify the copy instead.
-    std::vector<hostbuf>  cpu_input_copy(cpu_input.size());
-    std::vector<hostbuf>* input_ptr = &cpu_input;
-    if(params.run_callbacks || contiguous_params.transform_type == fft_transform_type_real_inverse)
-    {
-        for(size_t i = 0; i < cpu_input.size(); ++i)
-        {
-            cpu_input_copy[i] = cpu_input[i].copy();
-        }
-
-        input_ptr = &cpu_input_copy;
-    }
-
-    // run FFTW (which may destroy CPU input)
-    apply_load_callback(params, *input_ptr);
-    params.apply_host_load_ops(*input_ptr);
-    fftw_run<Tfloat>(contiguous_params.transform_type, cpu_plan, *input_ptr, cpu_output);
-    // ask FFTW to fully clean up, since it tries to cache plan details
-    cpu_plan.reset();
-    fftw_cleanup();
-    params.apply_host_store_ops(cpu_output);
-    apply_store_callback(params, cpu_output);
-}
 
 // execute the GPU transform
 template <class Tparams>
@@ -469,7 +399,7 @@ inline void run_round_trip_inverse(Tparams&              params,
     catch(fft_params::work_buffer_alloc_failure& e)
     {
         std::stringstream ss;
-        ss << "Failed to allocate work buffer (size: " << e.attempted_size << ")";
+        ss << "Failed to allocate work buffer (size: " << byte_size_to_str(e.attempted_size) << ")";
         ++n_hip_failures;
         if(skip_runtime_fails)
         {
@@ -529,12 +459,12 @@ inline void run_round_trip_inverse(Tparams&              params,
 
 // compare rocFFT inverse transform with forward transform input
 template <class Tparams>
-inline void compare_round_trip_inverse(Tparams&              params,
-                                       fft_params&           contiguous_params,
-                                       std::vector<hostbuf>& gpu_output,
-                                       std::vector<hostbuf>& cpu_input,
-                                       const VectorNorms&    cpu_input_norm,
-                                       size_t                total_length)
+inline void compare_round_trip_inverse(Tparams&                    params,
+                                       const fft_params&           contiguous_params,
+                                       std::vector<hostbuf>&       gpu_output,
+                                       const std::vector<hostbuf>& cpu_input,
+                                       const VectorNorms&          cpu_input_norm,
+                                       size_t                      total_length)
 {
     if(params.check_output_strides)
     {
@@ -634,23 +564,6 @@ inline void compare_round_trip_inverse(Tparams&              params,
         << params.str();
 }
 
-// RAII type to put data into the cache when this object leaves scope
-struct StoreCPUDataToCache
-{
-    StoreCPUDataToCache(std::vector<hostbuf>& cpu_input, std::vector<hostbuf>& cpu_output)
-        : cpu_input(cpu_input)
-        , cpu_output(cpu_output)
-    {
-    }
-    ~StoreCPUDataToCache()
-    {
-        last_cpu_fft_data.cpu_output.swap(cpu_output);
-        last_cpu_fft_data.cpu_input.swap(cpu_input);
-    }
-    std::vector<hostbuf>& cpu_input;
-    std::vector<hostbuf>& cpu_output;
-};
-
 // run CPU + rocFFT transform with the given params and compare
 template <class Tfloat, class Tparams>
 inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
@@ -662,50 +575,33 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     // Make sure that the parameters make sense:
     ASSERT_TRUE(params.valid(verbose));
 
-    auto ibuffer_sizes = params.ibuffer_sizes();
-    auto obuffer_sizes = params.obuffer_sizes();
-
+    // Create reference results as early as possible so that system memory is reserved for (an
+    // estimation of) the possible FFTW plan's workspace (if needed), providing some guard against
+    // OOM kills thereafter.
+    // If reference results need to be computed, computation should be launched as soon as possible.
+    // This helps with respect to management of system-memory usage due to
+    // - more reliable accounting: once the FFTW plan's workspace is actually used, that may trigger
+    //   a difference in the system's reported free memory (if not reported already) which better
+    //   reflects its actual size. This is most relevant to better guard against OOM kills, if our
+    //   estimated reservation was too optimistic (too small);
+    // - releasing system memory related to the needs for computing reference results as soon as
+    //   possible, alleviating pressure for subsequent operations.
+    // TODO: make this object an std::optional<reference_fft_data_t>, set only when `fftw_compare`
+    // is true when cpu data sets are no longer needed for unrelated aspects.
+    reference_fft_data_t reference_results{params.make_params_for_reference_cpu()};
+    if(fftw_compare)
+    {
+        if(reference_results.needs_input_initialization() && is_host_generator(params.igen))
+            reference_results.initialize_input(params.igen);
+        if(reference_results.needs_computing() && !reference_results.needs_input_initialization())
+            reference_results.launch_async_compute();
+    }
     // Make sure FFT buffers fit in device memory
     check_problem_fits_device_memory(params, verbose);
 
-    // Create FFT plan - this will also allocate work buffer, but
-    // will throw a specific exception if that step fails
-    auto plan_status = fft_status_success;
-    try
-    {
-        plan_status = params.create_plan();
-    }
-    catch(fft_params::work_buffer_alloc_failure& e)
-    {
-        ++n_hip_failures;
-        std::stringstream ss;
-        ss << "Work buffer allocation failed with size: " << e.attempted_size;
-        if(skip_runtime_fails)
-        {
-            throw ROCFFT_SKIP{ss.str()};
-        }
-        else
-        {
-            throw ROCFFT_FAIL{ss.str()};
-        }
-    }
-    ASSERT_EQ(plan_status, fft_status_success) << "plan creation failed";
-
-    auto contiguous_params = params.make_params_for_reference_cpu();
-
-    contiguous_params.validate();
-
-    if(!contiguous_params.valid(verbose))
-    {
-        throw std::runtime_error("Invalid contiguous params");
-    }
-
-    if(verbose > 3)
-    {
-        std::cout << "CPU params:\n";
-        std::cout << contiguous_params.str("\n\t") << std::endl;
-    }
-
+    auto ibuffer_sizes = params.ibuffer_sizes();
+    auto obuffer_sizes = params.obuffer_sizes();
+    // Allocate device input buffer(s)
     std::vector<gpubuf> ibuffer(ibuffer_sizes.size());
     std::vector<void*>  pibuffer(ibuffer_sizes.size());
     for(unsigned int i = 0; i < ibuffer.size(); ++i)
@@ -721,8 +617,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             }
             else
             {
-                ss << "hipMalloc failure for input buffer " << i << " size " << ibuffer_sizes[i]
-                   << "(" << byte_size_to_str(ibuffer_sizes[i]) << ") with code "
+                ss << "hipMalloc failure for input buffer " << i
+                   << " (size: " << byte_size_to_str(ibuffer_sizes[i]) << ") with code "
                    << hipError_to_string(hip_status);
             }
             ++n_hip_failures;
@@ -738,370 +634,53 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         pibuffer[i] = ibuffer[i].data();
     }
 
-    // allocation counts in elements, ibuffer_sizes is in bytes
-    auto ibuffer_sizes_elems = ibuffer_sizes;
-    for(auto& buf : ibuffer_sizes_elems)
-        buf /= var_size<size_t>(params.precision, params.itype);
-
-    // Check cache first - nbatch is a >= comparison because we compute
-    // the largest batch size and cache it.  Smaller batch runs can
-    // compare against the larger data.
-    std::vector<hostbuf>                 cpu_input;
-    std::vector<hostbuf>                 cpu_output;
-    std::shared_future<void>             convert_cpu_output_precision;
-    std::shared_future<void>             convert_cpu_input_precision;
-    bool                                 run_fftw = true;
-    std::unique_ptr<StoreCPUDataToCache> store_to_cache;
-    if(fftw_compare && last_cpu_fft_data.length == params.length
-       && last_cpu_fft_data.transform_type == params.transform_type
-       && last_cpu_fft_data.run_callbacks == params.run_callbacks
-       && last_cpu_fft_data.scale_factor == params.scale_factor
-       && last_cpu_fft_data.precision >= params.precision)
+    // Initialize input data buffer(s) on device
+    if(!reference_results.needs_input_initialization() || is_host_generator(params.igen))
     {
-        if(last_cpu_fft_data.nbatch >= params.nbatch)
+        if(reference_results.needs_input_initialization())
         {
-            // use the cached input/output
-            cpu_input.swap(last_cpu_fft_data.cpu_input);
-            cpu_output.swap(last_cpu_fft_data.cpu_output);
-            run_fftw = false;
-
-            store_to_cache = std::make_unique<StoreCPUDataToCache>(cpu_input, cpu_output);
-
-            if(params.precision != last_cpu_fft_data.precision)
-            {
-                // Tests should be ordered so we do wider first, then narrower.
-                switch(params.precision)
-                {
-                case fft_precision_double:
-                    std::cerr
-                        << "test ordering is incorrect: double precision follows a narrower one"
-                        << std::endl;
-                    abort();
-                    break;
-                case fft_precision_single:
-                    if(last_cpu_fft_data.precision != fft_precision_double)
-                    {
-                        std::cerr
-                            << "test ordering is incorrect: float precision follows a narrower one"
-                            << std::endl;
-                        abort();
-                    }
-                    // convert the input/output to single-precision
-                    convert_cpu_output_precision = std::async(std::launch::async, [&]() {
-                        narrow_precision_inplace<double, float>(cpu_output.front());
-                    });
-                    convert_cpu_input_precision  = std::async(std::launch::async, [&]() {
-                        narrow_precision_inplace<double, float>(cpu_input.front());
-                    });
-                    break;
-                case fft_precision_half:
-                    // convert to half precision
-                    if(last_cpu_fft_data.precision == fft_precision_double)
-                    {
-                        convert_cpu_output_precision = std::async(std::launch::async, [&]() {
-                            narrow_precision_inplace<double, rocfft_fp16>(cpu_output.front());
-                        });
-                        convert_cpu_input_precision  = std::async(std::launch::async, [&]() {
-                            narrow_precision_inplace<double, rocfft_fp16>(cpu_input.front());
-                        });
-                    }
-                    else if(last_cpu_fft_data.precision == fft_precision_single)
-                    {
-                        convert_cpu_output_precision = std::async(std::launch::async, [&]() {
-                            narrow_precision_inplace<float, rocfft_fp16>(cpu_output.front());
-                        });
-                        convert_cpu_input_precision  = std::async(std::launch::async, [&]() {
-                            narrow_precision_inplace<float, rocfft_fp16>(cpu_input.front());
-                        });
-                    }
-                    else
-                    {
-                        std::cerr << "unhandled previous precision, cannot convert to half"
-                                  << std::endl;
-                        abort();
-                    }
-                    break;
-                }
-                last_cpu_fft_data.precision = params.precision;
-            }
+            reference_results.initialize_input(params.igen);
+            if(fftw_compare && reference_results.needs_computing())
+                reference_results.launch_async_compute();
         }
-        // If the last result has a smaller batch than the new
-        // params, that might be a developer error - tests should be
-        // ordered to generate the bigger batch first.  But if tests
-        // got filtered or skipped due to insufficient memory, we
-        // might never have tried to generate the bigger batch first.
-        // So just fall through and redo the CPU FFT.
+        reference_results.copy_input_data_in_device_buffers(ibuffer, params);
     }
     else
     {
-        // Clear cache explicitly so that even if we didn't get a hit,
-        // we're not uselessly holding on to cached cpu input/output
-        last_cpu_fft_data = last_cpu_fft_cache();
+        params.compute_input(ibuffer);
+        reference_results.initialize_input_using(ibuffer, params);
     }
+    if(fftw_compare && reference_results.needs_computing())
+        reference_results.launch_async_compute();
 
-    // Allocate CPU input
-    if(run_fftw)
+    // Create FFT plan - this will also allocate work buffer, but
+    // will throw a specific exception if that step fails
+    auto plan_status = fft_status_success;
+    try
     {
-        cpu_input = allocate_cpu_fft_buffer(
-            contiguous_params.precision, contiguous_params.itype, contiguous_params.isize);
+        plan_status = params.create_plan();
     }
-
-    // Create FFTW plan - this may write to input, but that's fine
-    // since there's nothing in there right now
-    fftw_plan_wrapper_t<Tfloat> cpu_plan = fftw_trait<Tfloat>::make_wrapper(nullptr);
-
-    if(run_fftw)
+    catch(fft_params::work_buffer_alloc_failure& e)
     {
-        // Normally, we would want to defer allocation of CPU output
-        // buffer until when we actually do the CPU FFT.  But if we're
-        // using FFTW wisdom, FFTW needs an output buffer at plan
-        // creation time.
-        if(use_fftw_wisdom)
+        ++n_hip_failures;
+        std::stringstream ss;
+        ss << "Work buffer allocation failed (size: " << byte_size_to_str(e.attempted_size) << ")";
+        if(skip_runtime_fails)
         {
-            cpu_output = allocate_cpu_fft_buffer(
-                contiguous_params.precision, contiguous_params.otype, contiguous_params.osize);
+            throw ROCFFT_SKIP{ss.str()};
         }
-        cpu_plan = fftw_plan_via_rocfft<Tfloat>(contiguous_params.length,
-                                                contiguous_params.istride,
-                                                contiguous_params.ostride,
-                                                contiguous_params.nbatch,
-                                                contiguous_params.idist,
-                                                contiguous_params.odist,
-                                                contiguous_params.transform_type,
-                                                cpu_input,
-                                                cpu_output);
-    }
-
-    // Host-side buffer used to store input to transfer to GPU, copy GPU input
-    // to contiguous layout for FFTW, and reused to store IFFT output.
-    std::vector<hostbuf> gpu_input_data;
-
-    auto is_host_gen = (params.igen == fft_input_generator_host
-                        || params.igen == fft_input_random_generator_host);
-
-    // allocate and populate the input buffer (cpu/gpu)
-    if(run_fftw)
-    {
-        gpu_input_data = allocate_host_buffer(params.precision, params.itype, ibuffer_sizes_elems);
-
-        if(!is_host_gen)
+        else
         {
-            // generate the input directly on the gpu
-            params.compute_input(ibuffer);
-
-            // Copy the input to CPU
-            if(params.itype != contiguous_params.itype
-               || params.istride != contiguous_params.istride
-               || params.idist != contiguous_params.idist
-               || params.isize != contiguous_params.isize)
-            {
-                // Copy input to CPU
-                for(unsigned int idx = 0; idx < ibuffer.size(); ++idx)
-                {
-                    hip_status = hipMemcpy(gpu_input_data.at(idx).data(),
-                                           ibuffer[idx].data(),
-                                           ibuffer_sizes[idx],
-                                           hipMemcpyDeviceToHost);
-                    if(hip_status != hipSuccess)
-                    {
-                        ++n_hip_failures;
-                        std::stringstream ss;
-                        ss << "hipMemcpy failure with error " << hip_status;
-                        if(skip_runtime_fails)
-                        {
-                            throw ROCFFT_SKIP{ss.str()};
-                        }
-                        else
-                        {
-                            throw ROCFFT_FAIL{ss.str()};
-                        }
-                    }
-                }
-
-                copy_buffers(gpu_input_data,
-                             cpu_input,
-                             params.ilength(),
-                             params.nbatch,
-                             params.precision,
-                             params.itype,
-                             params.istride,
-                             params.idist,
-                             contiguous_params.itype,
-                             contiguous_params.istride,
-                             contiguous_params.idist,
-                             params.ioffset,
-                             contiguous_params.ioffset);
-            }
-            else
-            {
-                // Copy input to CPU
-                for(unsigned int idx = 0; idx < ibuffer.size(); ++idx)
-                {
-                    hip_status = hipMemcpy(cpu_input.at(idx).data(),
-                                           ibuffer[idx].data(),
-                                           ibuffer_sizes[idx],
-                                           hipMemcpyDeviceToHost);
-                    if(hip_status != hipSuccess)
-                    {
-                        ++n_hip_failures;
-                        std::stringstream ss;
-                        ss << "hipMemcpy failure with error " << hip_status;
-                        if(skip_runtime_fails)
-                        {
-                            throw ROCFFT_SKIP{ss.str()};
-                        }
-                        else
-                        {
-                            throw ROCFFT_FAIL{ss.str()};
-                        }
-                    }
-                }
-            }
-        }
-
-        if(is_host_gen)
-        {
-            params.compute_input(gpu_input_data);
-            // Copy the input to CPU
-            if(params.itype != contiguous_params.itype
-               || params.istride != contiguous_params.istride
-               || params.idist != contiguous_params.idist
-               || params.isize != contiguous_params.isize)
-            {
-                // Copy input to CPU and make input contiguous
-                copy_buffers(gpu_input_data,
-                             cpu_input,
-                             params.ilength(),
-                             params.nbatch,
-                             params.precision,
-                             params.itype,
-                             params.istride,
-                             params.idist,
-                             contiguous_params.itype,
-                             contiguous_params.istride,
-                             contiguous_params.idist,
-                             params.ioffset,
-                             contiguous_params.ioffset);
-            }
-            else
-            {
-                // Direct copy input to cpu_input as is
-                for(unsigned int idx = 0; idx < gpu_input_data.size(); ++idx)
-                {
-                    hip_status = hipMemcpy(cpu_input.at(idx).data(),
-                                           gpu_input_data.at(idx).data(),
-                                           gpu_input_data.at(idx).size(),
-                                           hipMemcpyHostToHost);
-                    if(hip_status != hipSuccess)
-                    {
-                        ++n_hip_failures;
-                        std::stringstream ss;
-                        ss << "hipMemcpy failure with error " << hip_status;
-                        if(skip_runtime_fails)
-                        {
-                            throw ROCFFT_SKIP{ss.str()};
-                        }
-                        else
-                        {
-                            throw ROCFFT_FAIL{ss.str()};
-                        }
-                    }
-                }
-            }
-            // Copy input to GPU
-            for(unsigned int idx = 0; idx < gpu_input_data.size(); ++idx)
-            {
-                hip_status = hipMemcpy(ibuffer[idx].data(),
-                                       gpu_input_data.at(idx).data(),
-                                       ibuffer_sizes[idx],
-                                       hipMemcpyHostToDevice);
-            }
+            throw ROCFFT_FAIL{ss.str()};
         }
     }
-    else if(fftw_compare)
-    {
-        gpu_input_data = allocate_host_buffer(params.precision, params.itype, ibuffer_sizes_elems);
-
-        // In case the cached cpu input needed conversion, wait for it
-        if(convert_cpu_input_precision.valid())
-            convert_cpu_input_precision.get();
-
-        // gets a pre-computed gpu input buffer from the cpu cache
-        std::vector<hostbuf>* gpu_input = &cpu_input;
-
-        if(params.itype != contiguous_params.itype || params.istride != contiguous_params.istride
-           || params.idist != contiguous_params.idist || params.isize != contiguous_params.isize)
-        {
-            copy_buffers(cpu_input,
-                         gpu_input_data,
-                         params.ilength(),
-                         params.nbatch,
-                         params.precision,
-                         contiguous_params.itype,
-                         contiguous_params.istride,
-                         contiguous_params.idist,
-                         params.itype,
-                         params.istride,
-                         params.idist,
-                         {0},
-                         params.ioffset);
-            gpu_input = &gpu_input_data;
-        }
-
-        // Copy input to GPU
-        for(unsigned int idx = 0; idx < gpu_input->size(); ++idx)
-        {
-            hip_status = hipMemcpy(ibuffer[idx].data(),
-                                   gpu_input->at(idx).data(),
-                                   ibuffer_sizes[idx],
-                                   hipMemcpyHostToDevice);
-
-            if(hip_status != hipSuccess)
-            {
-                ++n_hip_failures;
-                std::stringstream ss;
-                ss << "hipMemcpy failure with error " << hip_status;
-                if(skip_runtime_fails)
-                {
-                    throw ROCFFT_SKIP{ss.str()};
-                }
-                else
-                {
-                    throw ROCFFT_FAIL{ss.str()};
-                }
-            }
-        }
-    }
+    ASSERT_EQ(plan_status, fft_status_success) << "plan creation failed";
 
     if(verbose > 3)
-    {
-        std::cout << "CPU input:\n";
-        contiguous_params.print_ibuffer(cpu_input);
-    }
+        reference_results.print_data<fft_io::fft_io_in>();
 
     // compute input norm
-    std::shared_future<VectorNorms> cpu_input_norm;
-    if(fftw_compare)
-        cpu_input_norm = std::async(std::launch::async, [&]() {
-            // in case the cached cpu input needed conversion, wait for it
-            if(convert_cpu_input_precision.valid())
-                convert_cpu_input_precision.get();
-
-            auto input_norm = norm(cpu_input,
-                                   contiguous_params.ilength(),
-                                   contiguous_params.nbatch,
-                                   contiguous_params.precision,
-                                   contiguous_params.itype,
-                                   contiguous_params.istride,
-                                   contiguous_params.idist,
-                                   contiguous_params.ioffset);
-            if(verbose > 2)
-            {
-                std::cout << "CPU Input Linf norm:  " << input_norm.l_inf << "\n";
-                std::cout << "CPU Input L2 norm:    " << input_norm.l_2 << "\n";
-            }
-            return input_norm;
-        });
+    auto cpu_input_norm = reference_results.get_norm<fft_io::fft_io_in>(params.nbatch);
 
     std::vector<gpubuf>  obuffer_data;
     std::vector<gpubuf>* obuffer = &obuffer_data;
@@ -1124,8 +703,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             {
                 ++n_hip_failures;
                 std::stringstream ss;
-                ss << "hipMalloc failure for output buffer " << i << " size " << obuffer_sizes[i]
-                   << "(" << byte_size_to_str(obuffer_sizes[i]) << ") with code "
+                ss << "hipMalloc failure for output buffer " << i
+                   << " (size: " << byte_size_to_str(obuffer_sizes[i]) << ") with code "
                    << hipError_to_string(hip_status);
                 if(skip_runtime_fails)
                 {
@@ -1168,45 +747,16 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         pobuffer[i] = obuffer->at(i).data();
     }
     // scatter data out to multi-GPUs if this is a multi-GPU test
-    params.multi_gpu_prepare(cpu_input, ibuffer, pibuffer, pobuffer);
+    params.multi_gpu_prepare(
+        reference_results.get_buffers<fft_io::fft_io_in>(), ibuffer, pibuffer, pobuffer);
 
-    // Run CPU transform
-    //
-    // NOTE: This must happen after input is copied to GPU and input
-    // norm is computed, since the CPU FFT may overwrite the input.
-    VectorNorms              cpu_output_norm;
-    std::shared_future<void> cpu_fft;
+    std::shared_future<VectorNorms> cpu_output_norm;
     if(fftw_compare)
-        cpu_fft = std::async(std::launch::async, [&]() {
-            // wait for input norm to finish, since we might overwrite input
-            cpu_input_norm.get();
-
-            if(run_fftw)
-                execute_cpu_fft<Tfloat>(params, contiguous_params, cpu_plan, cpu_input, cpu_output);
-            // in case the cached cpu output needed conversion, wait for it
-            else if(convert_cpu_output_precision.valid())
-                convert_cpu_output_precision.get();
-
-            if(verbose > 3)
-            {
-                std::cout << "CPU output:\n";
-                contiguous_params.print_obuffer(cpu_output);
-            }
-
-            cpu_output_norm = norm(cpu_output,
-                                   params.olength(),
-                                   params.nbatch,
-                                   params.precision,
-                                   contiguous_params.otype,
-                                   contiguous_params.ostride,
-                                   contiguous_params.odist,
-                                   contiguous_params.ooffset);
-            if(verbose > 2)
-            {
-                std::cout << "CPU Output Linf norm: " << cpu_output_norm.l_inf << "\n";
-                std::cout << "CPU Output L2 norm:   " << cpu_output_norm.l_2 << "\n";
-            }
-        });
+    {
+        if(verbose > 3)
+            reference_results.print_data<fft_io::fft_io_out>();
+        cpu_output_norm = reference_results.get_norm<fft_io::fft_io_out>(params.nbatch);
+    }
 
     // execute GPU transform
     std::vector<hostbuf> gpu_output
@@ -1251,18 +801,17 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     std::shared_future<void> compare_output;
     if(fftw_compare)
         compare_output = std::async(std::launch::async, [&]() {
-            cpu_fft.get();
             linf_cutoff
-                = type_epsilon(params.precision) * cpu_output_norm.l_inf * log(total_length);
+                = type_epsilon(params.precision) * cpu_output_norm.get().l_inf * log(total_length);
 
-            diff = distance(cpu_output,
+            diff = distance(reference_results.get_buffers<fft_io::fft_io_out>(),
                             gpu_output,
                             params.olength(),
                             params.nbatch,
                             params.precision,
-                            contiguous_params.otype,
-                            contiguous_params.ostride,
-                            contiguous_params.odist,
+                            reference_results.get_params().otype,
+                            reference_results.get_params().ostride,
+                            reference_results.get_params().odist,
                             params.otype,
                             params.ostride,
                             params.odist,
@@ -1272,43 +821,20 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                             params.ooffset);
         });
 
-    // Update the cache if this current transform is different from
-    // what's stored.  But if this transform only has a smaller batch
-    // than what's cached, we can still keep the cache around since
-    // the input/output we already have is still valid.
-    const bool update_last_cpu_fft_data
-        = last_cpu_fft_data.length != params.length
-          || last_cpu_fft_data.transform_type != params.transform_type
-          || last_cpu_fft_data.run_callbacks != params.run_callbacks
-          || last_cpu_fft_data.precision != params.precision
-          || last_cpu_fft_data.scale_factor != params.scale_factor
-          || params.nbatch > last_cpu_fft_data.nbatch;
-
-    // store cpu output in cache
-    if(update_last_cpu_fft_data)
-    {
-        last_cpu_fft_data.length         = params.length;
-        last_cpu_fft_data.nbatch         = params.nbatch;
-        last_cpu_fft_data.transform_type = params.transform_type;
-        last_cpu_fft_data.run_callbacks  = params.run_callbacks;
-        last_cpu_fft_data.precision      = params.precision;
-        last_cpu_fft_data.scale_factor   = params.scale_factor;
-    }
-
     if(compare_output.valid())
         compare_output.get();
 
-    if(!store_to_cache)
-        store_to_cache = std::make_unique<StoreCPUDataToCache>(cpu_input, cpu_output);
-
-    Tparams params_inverse;
+    Tparams              params_inverse;
+    std::vector<hostbuf> roundtrip_output_buffers;
 
     if(round_trip)
     {
         params_inverse.inverse_from_forward(params);
+        params_inverse.compute_osize();
+        roundtrip_output_buffers = allocate_host_buffer(params_inverse.obuffer_sizes());
 
         run_round_trip_inverse<Tparams>(
-            params_inverse, *obuffer, pobuffer, pibuffer, gpu_input_data);
+            params_inverse, *obuffer, pobuffer, pibuffer, roundtrip_output_buffers);
     }
 
     if(fftw_compare)
@@ -1316,8 +842,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         ASSERT_TRUE(std::isfinite(cpu_input_norm.get().l_2));
         ASSERT_TRUE(std::isfinite(cpu_input_norm.get().l_inf));
 
-        ASSERT_TRUE(std::isfinite(cpu_output_norm.l_2));
-        ASSERT_TRUE(std::isfinite(cpu_output_norm.l_inf));
+        ASSERT_TRUE(std::isfinite(cpu_output_norm.get().l_2));
+        ASSERT_TRUE(std::isfinite(cpu_output_norm.get().l_inf));
 
         if(verbose > 1)
         {
@@ -1334,60 +860,57 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
 
         EXPECT_TRUE(std::isfinite(gpu_norm.get().l_inf)) << params.str();
         EXPECT_TRUE(std::isfinite(gpu_norm.get().l_2)) << params.str();
-    }
 
-    switch(params.precision)
-    {
-    case fft_precision_half:
-        max_linf_eps_half
-            = std::max(max_linf_eps_half, diff.l_inf / cpu_output_norm.l_inf / log(total_length));
-        max_l2_eps_half
-            = std::max(max_l2_eps_half, diff.l_2 / cpu_output_norm.l_2 * sqrt(log2(total_length)));
-        break;
-    case fft_precision_single:
-        max_linf_eps_single
-            = std::max(max_linf_eps_single, diff.l_inf / cpu_output_norm.l_inf / log(total_length));
-        max_l2_eps_single = std::max(max_l2_eps_single,
-                                     diff.l_2 / cpu_output_norm.l_2 * sqrt(log2(total_length)));
-        break;
-    case fft_precision_double:
-        max_linf_eps_double
-            = std::max(max_linf_eps_double, diff.l_inf / cpu_output_norm.l_inf / log(total_length));
-        max_l2_eps_double = std::max(max_l2_eps_double,
-                                     diff.l_2 / cpu_output_norm.l_2 * sqrt(log2(total_length)));
-        break;
-    }
+        switch(params.precision)
+        {
+        case fft_precision_half:
+            max_linf_eps_half = std::max(
+                max_linf_eps_half, diff.l_inf / cpu_output_norm.get().l_inf / log(total_length));
+            max_l2_eps_half = std::max(
+                max_l2_eps_half, diff.l_2 / cpu_output_norm.get().l_2 * sqrt(log2(total_length)));
+            break;
+        case fft_precision_single:
+            max_linf_eps_single = std::max(
+                max_linf_eps_single, diff.l_inf / cpu_output_norm.get().l_inf / log(total_length));
+            max_l2_eps_single = std::max(
+                max_l2_eps_single, diff.l_2 / cpu_output_norm.get().l_2 * sqrt(log2(total_length)));
+            break;
+        case fft_precision_double:
+            max_linf_eps_double = std::max(
+                max_linf_eps_double, diff.l_inf / cpu_output_norm.get().l_inf / log(total_length));
+            max_l2_eps_double = std::max(
+                max_l2_eps_double, diff.l_2 / cpu_output_norm.get().l_2 * sqrt(log2(total_length)));
+            break;
+        }
 
-    if(verbose > 1)
-    {
-        std::cout << "L2 diff: " << diff.l_2 << "\n";
-        std::cout << "Linf diff: " << diff.l_inf << "\n";
-    }
+        if(verbose > 1)
+        {
+            std::cout << "L2 diff: " << diff.l_2 << "\n";
+            std::cout << "Linf diff: " << diff.l_inf << "\n";
+        }
 
-    if(fftw_compare)
-    {
         EXPECT_TRUE(diff.l_inf <= linf_cutoff)
             << "Linf test failed.  Linf:" << diff.l_inf
-            << "\tnormalized Linf: " << diff.l_inf / cpu_output_norm.l_inf
+            << "\tnormalized Linf: " << diff.l_inf / cpu_output_norm.get().l_inf
             << "\tcutoff: " << linf_cutoff << "\n"
             << params.str();
 
-        EXPECT_TRUE(diff.l_2 / cpu_output_norm.l_2
+        EXPECT_TRUE(diff.l_2 / cpu_output_norm.get().l_2
                     <= sqrt(log2(total_length)) * type_epsilon(params.precision))
             << "L2 test failed. L2: " << diff.l_2
-            << "\tnormalized L2: " << diff.l_2 / cpu_output_norm.l_2
+            << "\tnormalized L2: " << diff.l_2 / cpu_output_norm.get().l_2
             << "\tepsilon: " << sqrt(log2(total_length)) * type_epsilon(params.precision) << "\n"
             << params.str();
-    }
 
-    if(round_trip && fftw_compare)
-    {
-        compare_round_trip_inverse<Tparams>(params_inverse,
-                                            contiguous_params,
-                                            gpu_input_data,
-                                            cpu_input,
-                                            cpu_input_norm.get(),
-                                            total_length);
+        if(round_trip)
+        {
+            compare_round_trip_inverse<Tparams>(params_inverse,
+                                                reference_results.get_params(),
+                                                roundtrip_output_buffers,
+                                                reference_results.get_buffers<fft_io::fft_io_in>(),
+                                                cpu_input_norm.get(),
+                                                total_length);
+        }
     }
 }
 

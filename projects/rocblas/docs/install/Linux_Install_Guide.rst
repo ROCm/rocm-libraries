@@ -159,6 +159,14 @@ Use the following commands for a sparse checkout:
    git sparse-checkout set projects/rocblas shared/tensile
    git checkout develop # or use the branch you want to work with
 
+The checkout above omits other top-level trees (for example ``shared/ctest``). If you build the test
+client (``BUILD_CLIENTS_TESTS=ON``) and want YAML-based CTest labels and the installed
+``CTestTestfile.cmake`` from the shared categorization helpers, add ``shared/ctest`` to the
+``git sparse-checkout set`` list (or use a full clone). Without ``shared/ctest`` present under
+``ROCM_LIBRARIES_ROOT``, ``ROCBLAS_ENABLE_CTEST`` defaults to OFF. If you turn
+``ROCBLAS_ENABLE_CTEST`` ON explicitly, configuration requires both ``clients/gtest/test_categories.yaml``
+and ``shared/ctest/TestCategories.cmake`` to exist.
+
 .. note::
 
    To build ROCm 6.4 and older, use the rocBLAS repository at `<https://github.com/ROCm/rocBLAS>`_.
@@ -291,3 +299,22 @@ one of these commands.
 
    "``./install.sh --clients-only``", "Build the rocBLAS clients and use the installed rocBLAS library at ``ROCM_PATH`` (defaults to ``/opt/rocm`` if not specified)."
    "``./install.sh --clients-only --library-path /path/to/rocBLAS``", "Build the rocBLAS clients and use the rocBLAS library at the specified location."
+
+Using the rocBLAS Docker images
+------------------------------------------
+
+The rocBLAS Docker images provide a reproducible, ready-to-use development environment to simplify
+the set-up process. The Dockerfiles install all system dependencies, such as Clang, LLVM,
+zstd, and the development libraries, schedule update alternatives, and configure the environment.
+Two Dockerfiles are available for Ubuntu 24.04:
+
+*  ``Dockerfile.ubuntu24.prebuilt``: Downloads a prebuilt ROCm nightly tarball from the `ROCm nightly builds <https://rocm.nightlies.amd.com>`_.
+   This solution is faster to build and suitable for most development work. It lets you configure the target ASIC,
+   nightly tag, tarball filename, and tarball source URL.
+*  ``Dockerfile.ubuntu24.fullbuild``: Clones `<https://github.com/ROCm/TheRock>`_ and builds ROCm from source.
+   It's the best choice for when a prebuilt tarball is unavailable or custom build options are required.
+   The configuration options include the target ASIC, specific commit hash, build type (release, debug, or preset), CMake presets,
+   and parallel job count.
+   
+For more information on how to download and use these images, see the
+`rocBLAS Docker documentation <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/docker/README.md>`_.
