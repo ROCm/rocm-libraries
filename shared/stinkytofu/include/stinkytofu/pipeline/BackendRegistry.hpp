@@ -67,8 +67,20 @@ class STINKYTOFU_EXPORT BackendRegistry {
     /// Remove all registered entries for \p arch.
     static void clearArch(const std::array<int, 3>& arch);
 
-    /// Format arch as arch name.
+    /// Return arch keys for all registered architectures (e.g. {"gfx1250"}).
+    static std::vector<std::string> getRegisteredArchKeys();
+
+    /// Format arch triple as "gfxMNS" string (stepping is a hex digit, e.g. gfx90a).
     static std::string makeArchKey(const std::array<int, 3>& arch);
+
+    /// Parse "gfxMNS" string back into {major, minor, stepping}.
+    /// Returns false if the format is invalid.
+    static bool parseArchKey(const std::string& archStr, std::array<int, 3>& out);
+
+    /// Ensure all backend TUs are linked. Call from main() or module init
+    /// to prevent the linker from dead-stripping self-registering backends
+    /// in static builds.
+    static void registerAllBackends();
 
    private:
     BackendRegistry() = default;
