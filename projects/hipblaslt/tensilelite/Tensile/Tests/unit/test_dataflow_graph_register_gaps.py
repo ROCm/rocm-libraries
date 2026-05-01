@@ -63,6 +63,7 @@ from rocisa.instruction import (
     SCmpEQU32, SCSelectB32, SCMovB32,
     VAddCOU32, VAddCCOU32, VSwapB32,
     DSLoadB128, DSStoreB128, VXorB32,
+    VCvtPkF32toBF16,
 )
 
 from Tensile.Components.ScheduleCapture import (
@@ -1203,6 +1204,191 @@ class TestMFMAQuadCycleGap:
             "Non-MFMA Pack* producers (CVT0/CVT1/Middle/Swap) must keep the "
             "ALU-immediate exemption — the carve-out targets PackMFMA only."
         )
+
+    # -------------------------------------------------------------------------
+    # Sub-B of bead `35z` — CVTPack -> MFMA 2-quad-cycle settle window.
+    # CDNA 4 ISA section 7.6: a CVT pack (`v_cvt_pk_bf16_f32` family,
+    # validator class CVTPack) writing a vgpr that a downstream MFMA reads
+    # must have at least `QUAD_CYCLES_CVT_BEFORE_MFMA == 2` quad-cycles
+    # between issue completion and consumer issue start. Pre-35z this rule
+    # was enforced only on the structural side (CMSValidator.py:1786-1788
+    # sets `min_quad_cycles_before_result_used = 2` on every CVTPack;
+    # `Pack.validate` at CMSValidator.py:423-429 emits TimingTooCloseFailure
+    # if `estimated_quad_cycles_before_result_used < min`). The graph-side
+    # check was missing entirely — `_is_alu_producer` returned True for any
+    # `Pack*`-categorized producer, so CVTPack edges took the ALU-immediate
+    # exemption and skipped the gap check.
+    # -------------------------------------------------------------------------
+
+    def test_cvt_pack_to_mfma_zero_gap_emits_timing_too_close(self):
+        """CVTPack producer (`v_cvt_pk_bf16_f32`) writes v40; MFMA consumer at
+        the same vmfma_index reads v40..v41. The graph-side dispatch must
+        route the CVT->MFMA edge through `_cvt_to_mfma_gap_ok` (NOT the ALU
+        exemption) and emit TimingTooCloseFailure with expected=2, actual=0
+        (zero quad-cycle gap at slot_delta == 0)."""
+        # CVTPack writes v40 (single-vgpr dst). Categorized "PackA0" — this
+        # is the production category for CVT0 packs in the LRA0 group. The
+        # generic ALU rule publishes (writes=v40, reads=v50,v51) for this
+        # rocisa instance.
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(50, 1), src1=vgpr(51, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(50, 2, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
+            # MFMA at the SAME vmfma_index — sub_index breaks the tie.
+            # Reads v40..v41 (a_src spans v40..v41 with a_src_count=2),
+            # which RAW-overlaps the CVT's write of v40.
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=2, sequence=1, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        cvt_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.consumer, "category", None) == "MFMA"
+            and getattr(f.producer, "category", "").startswith("Pack")
+        ]
+        assert cvt_timing, (
+            f"Expected TimingTooCloseFailure on CVTPack->MFMA edge at "
+            f"slot_delta == 0 (the new 35z dispatch branch must claim it "
+            f"BEFORE the ALU exemption). Got failures: "
+            f"{[type(f).__name__ for f in failures]}"
+        )
+        f = cvt_timing[0]
+        assert f.expected_quad_cycles == 2, (
+            f"CVTPack producer should report expected=2 "
+            f"(QUAD_CYCLES_CVT_BEFORE_MFMA), got "
+            f"expected={f.expected_quad_cycles}."
+        )
+        assert f.actual_quad_cycles == 0, (
+            f"slot_delta=0 should give actual=0 quad-cycles, got "
+            f"actual={f.actual_quad_cycles}."
+        )
+
+    def test_cvt_pack_to_mfma_meets_2_cycle_gap_no_failure(self):
+        """CVTPack producer at slot=2; MFMA consumer at slot=5 (slot_delta=3).
+        With finish=0 the same-body formula gives
+        `actual = slot_delta * (1 + 0) - 1 = 2`, exactly meeting the
+        2-quad-cycle CVT->MFMA threshold. No TimingTooCloseFailure should
+        be emitted."""
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(50, 1), src1=vgpr(51, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(50, 2, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
+            # MFMA at slot=5 — slot_delta == 3, gap = 3*1 - 1 = 2 quad-cycles,
+            # exactly meeting the 2-cycle CVT->MFMA threshold.
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=5, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        cvt_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.consumer, "category", None) == "MFMA"
+            and getattr(f.producer, "category", "").startswith("Pack")
+        ]
+        assert not cvt_timing, (
+            f"slot_delta=2 with CVT finish=0 should meet the 2-quad-cycle "
+            f"threshold (no TimingTooCloseFailure). Got: {failures}"
+        )
+
+    def test_cvt_pack_routed_to_quadcycle_not_alu(self):
+        """Regression-pin for the 35z dispatch carve-out. Synthesize the
+        producer/consumer classification in isolation: a Pack*-categorized
+        producer with an underlying VCvtPkF32toBF16 rocisa instance must
+        be claimed by `_is_cvt_pack_producer`, and the dispatch in
+        `_classify_edge_coverage` (and `diagnose_missing_edge`) must route
+        a CVT->MFMA pair to the new branch BEFORE `_is_alu_producer` would
+        absorb it.
+
+        Mirrors the e7w `test_mfma_pack_routed_through_quadcycle_not_alu`
+        shape — but for the CVTPack carve-out, with one extra check: the
+        carve-out is consumer-aware (CVT->MFMA only). A CVT producer
+        feeding a non-MFMA consumer (e.g. another Pack) must STILL hit the
+        ALU exemption — only the MFMA-consuming edge carries the timing
+        constraint."""
+        from Tensile.Components.ScheduleCapture import (
+            _is_alu_producer, _is_cvt_pack, _is_cvt_pack_producer,
+            _is_mfma_producer, _classify_edge_coverage,
+        )
+        # Producer: real VCvtPkF32toBF16 wrapped in a Pack*-categorized
+        # TaggedInstruction (the production CVT0 emission shape).
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(50, 1), src1=vgpr(51, 1))
+        cvt_tagged = _tag(cvt, category="PackA0", mfma_index=2, sequence=0)
+
+        class _StubNode:
+            def __init__(self, tagged):
+                self.category = tagged.category
+                self.rocisa_inst = tagged.inst
+        cvt_node = _StubNode(cvt_tagged)
+
+        # Class-name-set predicate matches the production rocisa class.
+        assert _is_cvt_pack(cvt), (
+            "_is_cvt_pack must return True for VCvtPkF32toBF16 instances."
+        )
+        # Producer-classifier sees Pack* category + CVT-class shape.
+        assert _is_cvt_pack_producer(cvt_node), (
+            "_is_cvt_pack_producer must claim Pack*-categorized CVT-shaped "
+            "producers (the v_cvt_pk_bf16_f32 emission pattern)."
+        )
+        # ALU-immediate must NOT claim the CVTPack on its own — but note
+        # the carve-out for CVT lives in the dispatch, not in
+        # _is_alu_producer (the consumer-awareness needs both nodes).
+        # _is_alu_producer correctly still returns True here in isolation;
+        # the dispatch ordering (CVTPack-MFMA branch BEFORE ALU branch in
+        # _classify_edge_coverage / diagnose_missing_edge) is what routes
+        # the edge correctly. The end-to-end assertion below verifies that.
+        assert _is_alu_producer(cvt_node), (
+            "_is_alu_producer is producer-only and (intentionally) still "
+            "returns True for CVTPack — the consumer-aware dispatch is "
+            "what carves out the CVT->MFMA edge."
+        )
+
+        # End-to-end dispatch assertion: build a CVT->MFMA edge and run it
+        # through the full classifier. Must emit TimingTooCloseFailure
+        # (expected=2, actual=0), which proves the dispatch reached the
+        # 35z branch — not the ALU exemption (which would have returned
+        # an empty failure list).
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(50, 2, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            _tag(VCvtPkF32toBF16(dst=vgpr(60, 1),
+                                 src0=vgpr(50, 1), src1=vgpr(51, 1)),
+                 category="PackA0", mfma_index=2, sequence=0),
+            make_mfma(c_dst_start=0, a_src_start=60, b_src_start=32,
+                      slot=2, sequence=1, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        cvt_to_mfma_edges = [
+            e for e in g.edges
+            if getattr(e.producer, "category", "").startswith("Pack")
+            and getattr(e.consumer, "category", None) == "MFMA"
+            and _is_cvt_pack_producer(e.producer)
+            and _is_mfma_producer(e.consumer)
+        ]
+        assert cvt_to_mfma_edges, (
+            "Expected at least one CVTPack->MFMA edge in the graph — the "
+            "per-byte resolver should pair the MFMA's read of v60 with "
+            "the CVT's write."
+        )
+        edge = cvt_to_mfma_edges[0]
+        edge_failures = _classify_edge_coverage(edge, g)
+        timing = [f for f in edge_failures
+                  if isinstance(f, TimingTooCloseFailure)]
+        assert timing, (
+            f"_classify_edge_coverage on a zero-gap CVT->MFMA edge must "
+            f"emit TimingTooCloseFailure — proves the 35z dispatch branch "
+            f"claimed the edge BEFORE the ALU exemption. Got: "
+            f"{[type(f).__name__ for f in edge_failures]}"
+        )
+        assert timing[0].expected_quad_cycles == 2
+        assert timing[0].actual_quad_cycles == 0
 
 
 # =============================================================================
