@@ -71,19 +71,6 @@ class PlaceholderLibrary:
         pass
 
     def merge(self, other):
-        # When two YAMLs converge at the same dispatch slot in the predicate
-        # tree, both leaves carry the same deterministically-derived
-        # placeholder filename and reference the same lazy library; the
-        # actual content merge is handled at the master level
-        # (MasterSolutionLibrary.merge over lazyLibraries[name]). No work
-        # is required here.
-        #
-        # The original gfx942 orphan-leaf failure manifested as merge being
-        # called with DIFFERENT filenamePrefix values: the chip-id suffix
-        # gating bug let the placeholder filename diverge while the
-        # HardwarePredicate stayed equal, so PlaceholderLibrary.merge would
-        # silently drop one leaf and leave its .dat file unreferenced.
-        # Raise loudly in that case so the regression cannot recur.
         otherName = getattr(other, 'filenamePrefix', None)
         if otherName != self.filenamePrefix:
             raise RuntimeError(
