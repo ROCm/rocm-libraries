@@ -128,7 +128,7 @@ class TestLoopBodyCaptureBuilder:
         """The sequence counter is keyed on (slot_kind, mfma_index) ONLY.
 
         It is SHARED across subiters within the same bucket so that
-        GraphPosition's (loop_index, vmfma_index, sub_index) tuple — which
+        SchedulePosition's (loop_index, vmfma_index, sub_index) tuple — which
         drops the subiter field — encodes stream-emission order without
         collisions. A new (slot_kind, mfma_index) starts at sequence=0;
         the same bucket continues from where it left off across subiters.
@@ -292,15 +292,15 @@ class TestDataflowGraphShape:
 class TestDataflowDataclasses:
     def test_edge_construction(self):
         from Tensile.Components.ScheduleCapture import (
-            GraphNode, GraphPosition, BODY_LABEL_ML,
+            GraphNode, SchedulePosition, BODY_LABEL_ML,
         )
         producer = GraphNode(
-            identity=("LRA0", 1, ()), position=GraphPosition(1, 0, 0),
+            identity=("LRA0", 1, ()), position=SchedulePosition(1, 0, 0),
             category="LRA0", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="LRA0[0]",
         )
         consumer = GraphNode(
-            identity=("MFMA", 1, ()), position=GraphPosition(1, 1, 0),
+            identity=("MFMA", 1, ()), position=SchedulePosition(1, 1, 0),
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="MFMA[1]",
         )

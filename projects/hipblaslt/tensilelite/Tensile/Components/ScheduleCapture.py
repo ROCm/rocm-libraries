@@ -28,6 +28,7 @@ default scheduler (SIA3) and the CMS scheduler so the two can be diffed for
 discrepancies. See plans/then-let-s-work-on-jaunty-reddy.md for design context.
 """
 
+import functools
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Optional
@@ -92,7 +93,7 @@ class SlotKey:
     instruction belongs to. Multiple instructions can share the same
     (slot_kind, mfma_index); `sequence` disambiguates them in stream-
     emission order, continuing across subiters within the same bucket
-    so that GraphPosition's (loop_index, vmfma_index, sub_index) tuple
+    so that SchedulePosition's (loop_index, vmfma_index, sub_index) tuple
     encodes stream order without needing the subiter field.
     """
     subiter: int
@@ -317,52 +318,38 @@ BODY_LABEL_TO_LOOP_INDEX = {
 }
 
 
+@functools.total_ordering
 @dataclass(frozen=True)
-class GraphPosition:
-    """Like CMSValidator.SchedulePosition but defined here to keep the graph
-    builder free of a hard CMSValidator import.
-
-    Fields ordered for tuple-style comparison (loop_index, vmfma_index, sub_index).
-
-    TODO: replace with CMSValidator.SchedulePosition. The two classes are
-    functionally identical (same fields, same lexicographic comparison) and
-    GraphPosition exists only to avoid the cross-module import. Unifying
-    them eliminates the duplicate and gives the graph builder a single
-    source of truth for the documented vmfma_index=-1 semantics
-    ("wrap-around between iterations: before the first VMFMA in this loop
-    but after the last VMFMA of the previous loop"). Resolve the import
-    direction first — likely move SchedulePosition into a shared location
-    (e.g. a new Tensile/Common/SchedulePosition.py) so both modules can
-    consume it without a CMSValidator dependency.
-    """
+class SchedulePosition:
+    """Position in the instruction schedule. Fields ordered for tuple-style comparison."""
+    # Which loop iteration this instruction belongs (larger index means later iteration)
     loop_index: int
+    # Which VMFMA slot within the loop
+    #   * 0 to num_vmfma-1 for normal positions
+    #   * -1 for wrap-around between iterations
+    #     (occurs before the first VMFMA in this loop but after the last VMFMA of the previous loop)
     vmfma_index: int
+    # Ordering among instructions issued at the same (loop_index, vmfma_index).
+    # Multiple instructions can share a VMFMA slot; this field breaks ties.
     sub_index: int
 
-    def __lt__(self, other) -> bool:
-        return (self.loop_index, self.vmfma_index, self.sub_index) < \
-               (other.loop_index, other.vmfma_index, other.sub_index)
-
-    def __le__(self, other) -> bool:
-        return (self.loop_index, self.vmfma_index, self.sub_index) <= \
-               (other.loop_index, other.vmfma_index, other.sub_index)
-
-    def __gt__(self, other) -> bool:
-        return (self.loop_index, self.vmfma_index, self.sub_index) > \
-               (other.loop_index, other.vmfma_index, other.sub_index)
-
-    def __ge__(self, other) -> bool:
-        return (self.loop_index, self.vmfma_index, self.sub_index) >= \
-               (other.loop_index, other.vmfma_index, other.sub_index)
+    def __lt__(self, other: 'SchedulePosition') -> bool:
+        if self.loop_index == other.loop_index:
+            if self.vmfma_index == other.vmfma_index:
+                return self.sub_index < other.sub_index
+            else:
+                return self.vmfma_index < other.vmfma_index
+        else:
+            return self.loop_index < other.loop_index
 
 
-def make_position(body_label, slot) -> GraphPosition:
-    """Construct a GraphPosition from a TaggedInstruction.slot SlotKey.
+def make_position(body_label, slot) -> SchedulePosition:
+    """Construct a SchedulePosition from a TaggedInstruction.slot SlotKey.
 
     The body_label maps to loop_index via BODY_LABEL_TO_LOOP_INDEX so cross-body
     ordering is well-defined.
     """
-    return GraphPosition(
+    return SchedulePosition(
         loop_index=BODY_LABEL_TO_LOOP_INDEX[body_label],
         vmfma_index=slot.mfma_index,
         sub_index=slot.sequence,
@@ -381,7 +368,7 @@ class GraphNode:
     underlying TaggedInstruction.slot is preserved on tagged_inst.
     """
     identity: tuple                     # (rocisa_class_name, loop_index, signature_tuple)
-    position: GraphPosition
+    position: SchedulePosition
     category: str                       # propagated from TaggedInstruction
     rocisa_inst: object                 # back-reference to the rocisa instruction
     tagged_inst: TaggedInstruction      # back-reference for stream-position lookup
@@ -577,7 +564,7 @@ class WaitOnWrongCounterFailure(Failure):
 class WaitTooLateFailure(Failure):
     producer: object
     consumer: object
-    wait_position: object  # SchedulePosition
+    wait_position: SchedulePosition
 
     def _format_canonical(self, capture=None) -> str:
         return (
@@ -803,7 +790,7 @@ class LoopBodyCaptureBuilder:
 
     Owns a `sequence` counter that increments per-append within the same
     (slot_kind, mfma_index) bucket. The counter is SHARED across subiters
-    because GraphPosition's tuple — (loop_index, vmfma_index, sub_index) —
+    because SchedulePosition's tuple — (loop_index, vmfma_index, sub_index) —
     drops `subiter`; sub_index must therefore continue across subiters
     so positions encode stream-emission order without collisions.
 
@@ -1199,7 +1186,7 @@ def _all_nodes_in_order(subj_graph):
     Used by the wait/barrier helpers below to walk cross-body windows
     (e.g. producer in body=ML-1, consumer in body=ML). Per-body
     `_graph_nodes` is already in stream order; bodies are enumerated in
-    `_BODY_BUILD_ORDER` which matches GraphPosition.loop_index ordering,
+    `_BODY_BUILD_ORDER` which matches SchedulePosition.loop_index ordering,
     so concatenating yields a globally-correct stream.
     """
     for label in _BODY_BUILD_ORDER:
@@ -1210,7 +1197,7 @@ def _all_nodes_in_order(subj_graph):
             yield node
 
 
-def waits_in_window(subj_graph, start: GraphPosition, end: GraphPosition,
+def waits_in_window(subj_graph, start: SchedulePosition, end: SchedulePosition,
                     *, counter=None, exclude_counter=None):
     """Return SWaitCnt nodes (as GraphNodes) whose position is in [start, end)
     and whose counter field constrains the requested counter.
@@ -1241,7 +1228,7 @@ def waits_in_window(subj_graph, start: GraphPosition, end: GraphPosition,
     return out
 
 
-def barriers_in_window(subj_graph, start: GraphPosition, end: GraphPosition):
+def barriers_in_window(subj_graph, start: SchedulePosition, end: SchedulePosition):
     """Return SBarrier nodes whose position is in (start, end) — exclusive on
     both ends. A barrier at the producer's position doesn't cover the producer;
     a barrier at the consumer's position doesn't precede the consumer.

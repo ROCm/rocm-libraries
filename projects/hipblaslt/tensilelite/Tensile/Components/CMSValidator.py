@@ -36,31 +36,8 @@ from rocisa.instruction import (
     BufferLoadB128, BufferLoadB64, BufferLoadB32,
 )
 from Tensile.Common.Utilities import printWarning
+from Tensile.Components.ScheduleCapture import SchedulePosition
 
-
-@functools.total_ordering
-@dataclass(frozen=True)
-class SchedulePosition:
-    """Position in the instruction schedule. Fields ordered for tuple-style comparison."""
-    # Which loop iteration this instruction belongs (larger index means later iteration)
-    loop_index: int
-    # Which VMFMA slot within the loop
-    #   * 0 to num_vmfma-1 for normal positions
-    #   * -1 for wrap-around between iterations 
-    #     (occurs before the first VMFMA in this loop but after the last VMFMA of the previous loop)
-    vmfma_index: int
-    # Ordering among instructions issued at the same (loop_index, vmfma_index).
-    # Multiple instructions can share a VMFMA slot; this field breaks ties.
-    sub_index: int
-
-    def __lt__(self, other: 'SchedulePosition') -> bool:
-        if self.loop_index == other.loop_index:
-            if self.vmfma_index == other.vmfma_index:
-                return self.sub_index < other.sub_index
-            else:
-                return self.vmfma_index < other.vmfma_index
-        else:
-            return self.loop_index < other.loop_index
 
 # Sentinel values for "infinitely far" positions. Values chosen to be well beyond
 # any realistic schedule size (num_vmfma is typically ~48-200).

@@ -155,7 +155,7 @@ and does not verify NGL/NLL behavior under each codepath. It should:
   `ScheduleCapture.py`. Pinning tests in `test_failure_formatters.py`.
 - Unified 4-body `DataflowGraph` (single graph, cross-body edges
   represented natively) with `GraphNode` / `DataflowEdge` /
-  `GraphPosition`. `BODY_LABEL_TO_LOOP_INDEX` maps body labels to
+  `SchedulePosition`. `BODY_LABEL_TO_LOOP_INDEX` maps body labels to
   `loop_index` so cross-body order is well-defined.
 - `build_dataflow_graph(four_part_capture)` with FIFO drain semantics
   for `raw_intrawave` edges and SBarrier collectors for the two

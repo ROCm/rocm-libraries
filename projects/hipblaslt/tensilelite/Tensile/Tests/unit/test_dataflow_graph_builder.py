@@ -602,7 +602,7 @@ class TestMultiWriteProducer:
         pairs — one per matching write — instead of breaking after the
         first match."""
         from Tensile.Components.ScheduleCapture import (
-            _resolve_producers, GraphPosition,
+            _resolve_producers, SchedulePosition,
         )
         from rocisa.container import vgpr
 
@@ -610,13 +610,13 @@ class TestMultiWriteProducer:
         # node.position via _logical_position and node.category.
         producer = GraphNode(
             identity=("LR", 1, ("v", 8, 4), 64),
-            position=GraphPosition(loop_index=1, vmfma_index=0, sub_index=0),
+            position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
             category="LRA0", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="multi-write-LR",
         )
         consumer = GraphNode(
             identity=("MFMA", 1, ("v", 8, 8)),
-            position=GraphPosition(loop_index=1, vmfma_index=2, sub_index=0),
+            position=SchedulePosition(loop_index=1, vmfma_index=2, sub_index=0),
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="wide-read-MFMA",
         )
@@ -660,19 +660,19 @@ class TestMultiWriteProducer:
         Only the first write overlaps; only one edge should yield. Confirms
         the dropped-break doesn't over-yield when only one write matches."""
         from Tensile.Components.ScheduleCapture import (
-            _resolve_producers, GraphPosition,
+            _resolve_producers, SchedulePosition,
         )
         from rocisa.container import vgpr
 
         producer = GraphNode(
             identity=("LR", 1, ("v", 8, 4), 64),
-            position=GraphPosition(loop_index=1, vmfma_index=0, sub_index=0),
+            position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
             category="LRA0", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="multi-write-LR",
         )
         consumer = GraphNode(
             identity=("MFMA", 1, ("v", 8, 2)),
-            position=GraphPosition(loop_index=1, vmfma_index=2, sub_index=0),
+            position=SchedulePosition(loop_index=1, vmfma_index=2, sub_index=0),
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="narrow-read-MFMA",
         )
