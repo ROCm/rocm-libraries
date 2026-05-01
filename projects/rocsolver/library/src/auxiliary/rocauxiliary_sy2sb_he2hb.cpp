@@ -98,25 +98,18 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
     if(size_scalars > 0)
         init_scalars(handle, scalars);
 
-    // todo: stride for tau. Do Aband, tau need shift?
-    // TODO: do D, V, W, X, Z need strides?
     // execution
-    rocblas_int ldd = nb;
-    rocblas_int ldv = n;
-    rocblas_int ldw = n;
-    rocblas_int ldx = n;
-    rocblas_int ldz = n;
     return rocsolver_sy2sb_he2hb_template<false, false, T>(
             handle, n, kd, nb,
             A, shiftA, lda, strideA,
             Aband, ldab, strideAb,
             tau, strideTau,
             batch_count, scalars,
-            D, ldd,
-            V, ldv,
-            W, ldw,
-            X, ldx,
-            Z, ldz,
+            D,
+            V,
+            W,
+            X,
+            Z,
             work, workArr);
 }
 

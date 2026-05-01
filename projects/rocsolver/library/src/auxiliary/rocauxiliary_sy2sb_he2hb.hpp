@@ -150,11 +150,11 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     const rocblas_stride strideTau,
     const rocblas_int batch_count,
     T* scalars,
-    T* D, const rocblas_int ldd,
-    T* V, const rocblas_int ldv,
-    T* W, const rocblas_int ldw,
-    T* X, const rocblas_int ldx,
-    T* Z, const rocblas_int ldz,
+    T* D,
+    T* V,
+    T* W,
+    T* X,
+    T* Z,
     T* work,
     T** workArr)
 {
@@ -196,6 +196,12 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         batch_count );
     if (debug_)
         print_matrix( "Aband_in", ldab, n, Aband, ldab );
+
+    rocblas_int ldd = nb;
+    rocblas_int ldv = n;
+    rocblas_int ldw = n;
+    rocblas_int ldx = n;
+    rocblas_int ldz = n;
 
     rocblas_stride strideD = ldd*nb;
     rocblas_stride strideV = ldv*nb;
