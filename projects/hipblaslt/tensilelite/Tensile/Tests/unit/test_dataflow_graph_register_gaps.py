@@ -76,9 +76,11 @@ from Tensile.Components.ScheduleCapture import (
     TaggedInstruction,
     build_dataflow_graph,
     compare_graphs,
+    diagnose_missing_edge,
     validate_edge_wait_coverage,
     OrderInvertedFailure,
     TimingTooCloseFailure,
+    _quad_cycle_gap_ok,
 )
 
 from dataflow_fixtures import (
@@ -439,6 +441,249 @@ class TestMFMAQuadCycleGap:
             and f.consumer.category == "MFMA"
             for f in failures
         ), f"Unexpected MFMA acc-chain timing failure: {failures}"
+
+    # -------------------------------------------------------------------------
+    # TDD-first negative-test additions for bead d6e — these expose untested
+    # paths in `_quad_cycle_gap_ok`. They are XFAIL today; xpass under strict
+    # will signal that the relevant fix bead (cmw / s7k / dispatch gap) has
+    # landed and the xfail marker should be dropped.
+    # -------------------------------------------------------------------------
+
+    @pytest.mark.xfail(strict=True, reason=(
+        "exposes cmw — _quad_cycle_gap_ok ignores num_mfma_per_subiter and "
+        "applies slot_delta * (1 + finish) - 1 unconditionally. The formula "
+        "is only correct at slot_delta == 1; for slot_delta > 1 the actual "
+        "gap depends on subiter structure and is not a linear function of "
+        "slot_delta. Once cmw lands, the returned `actual` should differ "
+        "between num_mfma_per_subiter=1 and num_mfma_per_subiter=2 for the "
+        "same producer/consumer slot pair — but today it does not."
+    ))
+    def test_mfma_acc_chain_slot_delta_2_uses_num_mfma_per_subiter(self):
+        """Producer at vmfma=0, consumer at vmfma=2; vary num_mfma_per_subiter
+        between two builds of the same instruction sequence. Today the
+        returned `actual` is identical for both (the parameter is dead).
+        Post-fix, the actual should depend on subiter structure."""
+        # Same instruction layout in both fixtures; only num_mfma_per_subiter
+        # differs at the FourPartCapture level.
+        def _build_cap():
+            return make_capture(BODY_LABEL_ML, [
+                make_lr(8, 4, 64, slot=0, category="LRA0"),
+                make_swait(slot=1, dscnt=0),
+                # Producer writes v0..v3.
+                make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                          slot=2, sequence=0, a_src_count=2),
+                # Consumer at slot=4 (slot_delta == 2) reads v0..v1 (RAW on
+                # producer's accumulator).
+                make_mfma(c_dst_start=20, a_src_start=0, b_src_start=32,
+                          slot=4, sequence=0, a_src_count=2),
+            ])
+
+        def _wrap_with_nmps(cap, nmps):
+            wrapped = _wrap(cap)
+            return FourPartCapture(
+                main_loop=wrapped.main_loop,
+                main_loop_prev=wrapped.main_loop_prev,
+                n_gl=wrapped.n_gl,
+                n_ll=wrapped.n_ll,
+                num_mfma=wrapped.num_mfma,
+                num_codepaths=wrapped.num_codepaths,
+                source=wrapped.source,
+                num_mfma_per_subiter=nmps,
+            )
+
+        g_nmps1 = build_dataflow_graph(_wrap_with_nmps(_build_cap(), 1))
+        g_nmps2 = build_dataflow_graph(_wrap_with_nmps(_build_cap(), 2))
+
+        # Find the MFMA->MFMA acc-chain edge in each graph.
+        def _acc_edge(g):
+            for e in g.edges:
+                if (getattr(e.producer, "category", None) == "MFMA"
+                        and getattr(e.consumer, "category", None) == "MFMA"):
+                    return e
+            return None
+
+        e1 = _acc_edge(g_nmps1)
+        e2 = _acc_edge(g_nmps2)
+        assert e1 is not None and e2 is not None, (
+            "Expected an MFMA->MFMA acc-chain edge in both graphs."
+        )
+
+        ok1, exp1, act1 = _quad_cycle_gap_ok(e1.producer, e1.consumer, 1)
+        ok2, exp2, act2 = _quad_cycle_gap_ok(e2.producer, e2.consumer, 2)
+
+        # Today: the formula ignores num_mfma_per_subiter, so act1 == act2.
+        # Post-fix: the actual should reflect subiter-aware timing and differ.
+        assert act1 != act2, (
+            f"_quad_cycle_gap_ok ignored num_mfma_per_subiter: "
+            f"actual={act1} for nmps=1 and actual={act2} for nmps=2 "
+            f"(slot_delta=2). Expected the parameter to influence the "
+            f"computed actual gap (cmw fix)."
+        )
+
+    @pytest.mark.xfail(strict=True, reason=(
+        "exposes s7k — _quad_cycle_gap_ok cross-body early-return reports "
+        "actual=expected, which is misleading: the diagnostic claims the "
+        "actual gap exactly matches the threshold when in reality a body "
+        "boundary represents many issue cycles. Post-fix, `actual` should "
+        "reflect the real cross-body gap (much greater than expected)."
+    ))
+    def test_mfma_acc_chain_cross_body_actual_reflects_real_gap(self):
+        """Producer in body=ML, consumer in body=NGL sharing accumulator
+        v0..v3. The cross-body early-return at ScheduleCapture.py:2922-2925
+        reports `(True, expected, expected)`; the diagnostic is misleading
+        because `actual` should be much larger than `expected` (a full body
+        boundary's worth of issue cycles)."""
+        ml_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # Producer writes v0..v3 in ML.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+        ])
+        ngl_cap = make_capture(BODY_LABEL_NGL, [
+            # Consumer in NGL reads v0..v1 (RAW on ML producer's acc).
+            make_mfma(c_dst_start=20, a_src_start=0, b_src_start=32,
+                      slot=0, sequence=0, a_src_count=2),
+        ])
+        # Fillers for ML_PREV and NLL only — ML and NGL are user-provided.
+        ml_prev_filler = make_capture(BODY_LABEL_ML_PREV, [make_mfma(
+            c_dst_start=200, a_src_start=204, b_src_start=208, slot=0)])
+        nll_filler = make_capture(BODY_LABEL_NLL, [make_mfma(
+            c_dst_start=240, a_src_start=244, b_src_start=248, slot=0)])
+        four = FourPartCapture(
+            main_loop={0: ml_cap},
+            main_loop_prev={0: ml_prev_filler},
+            n_gl={0: ngl_cap},
+            n_ll={0: nll_filler},
+            num_mfma=1, num_codepaths=1, source="cms",
+        )
+        g = build_dataflow_graph(four)
+
+        # Find the cross-body MFMA->MFMA edge.
+        cross = [e for e in g.edges
+                 if getattr(e.producer, "category", None) == "MFMA"
+                 and getattr(e.consumer, "category", None) == "MFMA"
+                 and e.producer.body_label != e.consumer.body_label]
+        assert cross, (
+            "Expected a cross-body MFMA->MFMA acc-chain edge "
+            "(ML producer -> NGL consumer)."
+        )
+        edge = cross[0]
+        ok, expected, actual = _quad_cycle_gap_ok(edge.producer, edge.consumer, 0)
+
+        # s7k: today actual == expected (misleading). Post-fix, actual should
+        # reflect the real cross-body gap and exceed expected.
+        assert ok, "Cross-body edge should always pass the gap check."
+        assert actual > expected, (
+            f"Cross-body _quad_cycle_gap_ok reported actual={actual} == "
+            f"expected={expected}; this is the misleading early-return s7k "
+            f"flags. Expected actual to reflect the real cross-body gap "
+            f"(many issue cycles)."
+        )
+
+    def test_mfma_acc_chain_zero_gap_via_diagnose_missing_edge(self):
+        """Regression-pin test for current correct behavior: the
+        diagnose_missing_edge MFMA branch correctly fires the quad-cycle gap
+        check on a missing zero-gap acc-chain edge and emits
+        TimingTooCloseFailure. This locks in today's behavior so a future
+        refactor cannot silently regress the cross-graph MFMA-producer route.
+
+        Richer negative tests that exercise this dispatch path with NON-zero
+        gaps (and would actually expose mis-handling rather than just pinning
+        zero-gap behavior) are tracked in follow-up bead `rocm-libraries-cpe`.
+
+        Reference: P (MFMA writes v0..v3) at slot=2, then C (MFMA reads
+        v0..v1) at slot=2 sub=1 — edge P->C present, slot_delta == 0.
+        An ALU op writing v0..v1 sits AFTER C (does not shadow the
+        latest-writer for C's read; P->C edge survives).
+        Subject: same {P, C, ALU} identities, but the ALU is reordered to
+        sit BETWEEN P and C — now ALU is the latest writer of v0..v1, so
+        the edge becomes ALU->C and P->C is missing.
+        compare_graphs sees the missing P->C edge in subj -> routes through
+        diagnose_missing_edge whose MFMA branch fires the quad-cycle check
+        and emits TimingTooCloseFailure (slot_delta == 0)."""
+        # ALU dst spans v0..v1 (8 bytes) so it fully shadows the consumer's
+        # 8-byte read of v0..v1; otherwise the per-byte resolver would split
+        # the read across two writers (ALU on bytes 0-3, MFMA-P on bytes 4-7)
+        # and the P->C edge would persist.
+        ref_alu = VXorB32(dst=vgpr(0, 2), src0=vgpr(40, 1), src1=vgpr(41, 1))
+        subj_alu = VXorB32(dst=vgpr(0, 2), src0=vgpr(40, 1), src1=vgpr(41, 1))
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # P: writes v0..v3.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # C: reads v0..v1 — overlaps P's accumulator (zero-gap RAW).
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=2, sequence=1, a_src_count=2),
+            # ALU after C — does NOT shadow P's write of v0..v1.
+            _tag(ref_alu, category="PackA0", mfma_index=2, sequence=2),
+        ])
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # ALU reordered to sit BETWEEN P and C — now latest writer of v0.
+            _tag(subj_alu, category="PackA0", mfma_index=2, sequence=1),
+            # C reads v0..v1 — sees the ALU's write, not P's. No P->C edge.
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=2, sequence=2, a_src_count=2),
+        ])
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        # Soft mode so an unexplained miss doesn't crash before assertion.
+        failures = compare_graphs(g_ref, g_subj, raise_on_unexplained=False)
+        mfma_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", None) == "MFMA"
+            and getattr(f.consumer, "category", None) == "MFMA"
+        ]
+        assert mfma_timing, (
+            f"Expected diagnose_missing_edge MFMA branch to emit "
+            f"TimingTooCloseFailure for the missing zero-gap acc-chain "
+            f"edge, but got: {[type(f).__name__ for f in failures]}"
+        )
+
+    def test_mfma_to_alu_consumer_zero_gap_emits_timing_too_close(self):
+        """Regression-pin test for current correct behavior: an MFMA producer
+        with a same-iter ALU consumer at zero gap routes through the MFMA
+        branch in `_classify_edge_coverage` (ScheduleCapture.py:3072) and
+        emits TimingTooCloseFailure — it is NOT silently exempted by the ALU
+        branch (ScheduleCapture.py:3086). This locks in today's branch
+        priority so a future refactor that swaps the branch order or adds an
+        early ALU-consumer exemption would be caught.
+
+        Richer negative tests that would expose mis-routing with NON-zero
+        gaps on this MFMA->ALU dispatch path are tracked in follow-up bead
+        `rocm-libraries-cpe`.
+
+        MFMA producer writes v0..v3 at slot=2; ALU consumer (VXorB32) at the
+        same slot reads v0 — overlaps the MFMA producer's accumulator."""
+        alu_consumer = VXorB32(dst=vgpr(20, 1), src0=vgpr(0, 1), src1=vgpr(21, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # Same vmfma_index, sub_index 1 — zero gap. ALU consumer reads v0
+            # which overlaps the MFMA producer's accumulator v0..v3.
+            _tag(alu_consumer, category="PackA0", mfma_index=2, sequence=1),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        mfma_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", None) == "MFMA"
+        ]
+        assert mfma_timing, (
+            f"Expected TimingTooCloseFailure on MFMA->ALU zero-gap edge "
+            f"(MFMA producer must dominate ALU-consumer dispatch), but got: "
+            f"{[type(f).__name__ for f in failures]}"
+        )
 
 
 # =============================================================================
