@@ -278,6 +278,7 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
                        const bool profile_kernels,
                        const bool perf)
 {
+using llong = long long;
 printf( "%s( n %lld, kd %lld, nb %lld )\n",
         __func__, llong(n), llong(kd), llong(nb) );
     rocsolver_timer timer;
