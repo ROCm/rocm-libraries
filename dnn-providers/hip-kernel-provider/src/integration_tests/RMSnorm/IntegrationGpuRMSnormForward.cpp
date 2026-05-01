@@ -34,10 +34,7 @@ protected:
     {
         const RMSnormTestCase& testCase = this->GetParam();
 
-        auto derivedDims = getDerivedShape(testCase.dims);
-
         hipdnn_frontend::graph::Graph graphObj;
-
         graphObj.set_name("RMSnormTest");
 
         auto dataType = getDataTypeEnumFromType<IODataType>();
@@ -46,17 +43,17 @@ protected:
             .set_io_data_type(dataType);
 
         auto xAttr = makeTensorAttributes(
-            "X", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
+            "X", dataType, testCase.ioDims, generateStrides(testCase.ioDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto computeDataType = getDataTypeEnumFromType<ComputeDataType>();
         auto scaleAttr = makeTensorAttributes(
-            "scale", computeDataType, derivedDims, generateStrides(derivedDims));
+            "scale", computeDataType, testCase.scaleDims, generateStrides(testCase.scaleDims));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         // type must match scale
         auto biasAttr = makeTensorAttributes(
-            "bias", computeDataType, derivedDims, generateStrides(derivedDims));
+            "bias", computeDataType, testCase.scaleDims, generateStrides(testCase.scaleDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         auto epsilon = std::make_shared<TensorAttributes>(1e-5f);

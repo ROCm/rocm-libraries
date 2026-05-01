@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
 #define TENSILE_USE_BF6
 
 #ifdef TENSILE_USE_BF6
@@ -52,6 +54,8 @@ namespace TensileLite
 #include <hip/hip_ext_ocp.h>
 
 #include <cstdint>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -306,6 +310,8 @@ namespace std
         return stream << to_string(a);
     }
 } // namespace std
+
+TENSILE_HIDDEN_END
 
 #endif // _WIN32
 

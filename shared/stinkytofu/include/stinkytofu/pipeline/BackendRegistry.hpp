@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 
 namespace stinkytofu {
@@ -42,7 +43,7 @@ class StinkyAsmModule;
 /// // Static registrar (runs when TU is linked)
 /// BackendRegistry::setArchPipeline({12, 5, 0}, {myBuilder, {"group0", "group1"}});
 /// @endcode
-class BackendRegistry {
+class STINKYTOFU_EXPORT BackendRegistry {
    public:
     /// Function type: builds the pipeline for a module into a PassManager.
     /// Returns true if passes were added, false if nothing to do.

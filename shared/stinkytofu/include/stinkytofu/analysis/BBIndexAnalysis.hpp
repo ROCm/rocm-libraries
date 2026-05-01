@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/AnalysisManager.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
@@ -38,15 +39,7 @@ struct BBIndexMap {
 
 /// Analysis pass that computes an RPO-indexed BasicBlock map.
 struct BBIndexAnalysis {
-    static inline AnalysisKey Key;
-
-    static AnalysisKey* ID() {
-        return &Key;
-    }
-
-    static const char* name() {
-        return "BBIndexAnalysis";
-    }
+    STINKYTOFU_ANALYSIS_KEY("BBIndexAnalysis")
 
     using Result = BBIndexMap;
 

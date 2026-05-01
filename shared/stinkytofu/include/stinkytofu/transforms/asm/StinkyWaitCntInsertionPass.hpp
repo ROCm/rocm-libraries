@@ -25,6 +25,8 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 
@@ -36,6 +38,7 @@ class Pass;
  *
  * @param insertTensorWaitCnt Whether to insert tensor waitcnt instructions.
  */
-std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(bool insertTensorWaitCnt = false);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(
+    bool insertTensorWaitCnt = false);
 
 }  // namespace stinkytofu

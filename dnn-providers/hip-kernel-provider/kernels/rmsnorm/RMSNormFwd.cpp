@@ -3,9 +3,7 @@
 #include "FloatTypes.h"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_RMSNORM_LOCAL_SIZE;
-constexpr size_t C_SIZE = HIP_PLUGIN_RMSNORM_C_SIZE;
-constexpr size_t C_STRIDE = HIP_PLUGIN_RMSNORM_C_STRIDE;
-constexpr size_t N_STRIDE = C_SIZE * C_STRIDE;
+constexpr unsigned int INNER_SIZE = HIP_PLUGIN_RMSNORM_INNER_SIZE;
 
 using IOType = HIP_PLUGIN_RMSNORM_IO_TYPE;
 
@@ -18,16 +16,14 @@ extern "C" __global__ void RMSnormFwd(const IOType* __restrict__ x,
 {
     const unsigned int gid = blockIdx.x;
     const unsigned int lid = threadIdx.x;
-    const unsigned int o = gid / C_STRIDE;
-    const unsigned int s = gid % C_STRIDE;
 
     FLOAT_ACCUM pvar(0);
     __shared__ FLOAT_ACCUM ltmp[LOCAL_SIZE];
 
     // reduce sum
-    for(unsigned int i = lid; i < C_SIZE; i += LOCAL_SIZE)
+    for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
-        size_t x_idx = (o * N_STRIDE) + (i * C_STRIDE) + s;
+        size_t x_idx = gid * INNER_SIZE + i;
         FLOAT_ACCUM tmp = CVT_FLOAT2ACCUM(x[x_idx]);
         pvar += tmp * tmp;
     }
@@ -43,7 +39,7 @@ extern "C" __global__ void RMSnormFwd(const IOType* __restrict__ x,
         __syncthreads();
     }
 
-    pvar = ltmp[0] / C_SIZE;
+    pvar = ltmp[0] / INNER_SIZE;
     FLOAT_ACCUM prstd = rsqrt(pvar + FLOAT_ACCUM(eps));
 
     if(lid == 0 && rstd)
@@ -52,9 +48,10 @@ extern "C" __global__ void RMSnormFwd(const IOType* __restrict__ x,
     }
 
     // forward calculation
-    for(unsigned int i = lid; i < C_SIZE; i += LOCAL_SIZE)
+    for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
-        size_t idx = (o * N_STRIDE) + (i * C_STRIDE) + s;
+        size_t idx = gid * INNER_SIZE + i;
+
         FLOAT_ACCUM y_val = (CVT_FLOAT2ACCUM(x[idx])) * prstd * weight[i];
         if(bias != nullptr)
         {
