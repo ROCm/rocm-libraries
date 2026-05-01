@@ -302,7 +302,9 @@ def test_invalid_counter_value_failure_format():
     assert ">= -1" in msg
 
 
-def test_scc_conflict_failure_format():
+def test_scc_conflict_failure_format_legacy_shape():
+    """Legacy structural shape (wx9.2) — populated by verify_scc_overlap.
+    Kept until mrj.4 deletes the legacy CMSValidator path."""
     failure = SCCConflictFailure(
         conflicting_name="LWSA",
         grinc_name="GRIncA",
@@ -314,6 +316,54 @@ def test_scc_conflict_failure_format():
     assert "LWSA at index 7" in msg
     assert "GRIncA 4-6" in msg
     assert "SCC usage" in msg
+
+
+def test_scc_conflict_failure_format_graph_shape():
+    """Graph-native shape (mrj.2) — populated by diagnose_missing_edge
+    when an SCC reference edge is missing from the subject graph due to
+    an intervening SCC writer."""
+    class _FakeInst:
+        pass
+    producer_inst = type("SCmpEQU32", (_FakeInst,), {})()
+    intervening_inst = type("SAddU32", (_FakeInst,), {})()
+    consumer_inst = type("SCSelectB32", (_FakeInst,), {})()
+    producer = _make_node("GRIncA", "scc_producer", 4)
+    producer.rocisa_inst = producer_inst
+    intervening = _make_node("GRIncA", "scc_clobber", 5)
+    intervening.rocisa_inst = intervening_inst
+    consumer = _make_node("GRIncA", "scc_consumer", 6)
+    consumer.rocisa_inst = consumer_inst
+    failure = SCCConflictFailure(
+        producer=producer,
+        consumer=consumer,
+        intervening_writer=intervening,
+    )
+    msg = failure.format(capture=None)
+    assert "GRIncA[SCSelectB32]" in msg
+    assert "@ idx=6" in msg
+    assert "GRIncA[SCmpEQU32]" in msg
+    assert "@ idx=4" in msg
+    assert "Intervening SCC writer" in msg
+    assert "GRIncA[SAddU32]" in msg
+    assert "@ idx=5" in msg
+
+
+def test_scc_conflict_failure_format_graph_shape_no_clobber():
+    """Graph-native shape with no identifiable intervening writer — should
+    still render producer/consumer info without an Intervening clause."""
+    producer = _make_node("GRIncA", "scc_producer", 4)
+    producer.rocisa_inst = type("SCmpEQU32", (), {})()
+    consumer = _make_node("GRIncA", "scc_consumer", 6)
+    consumer.rocisa_inst = type("SCSelectB32", (), {})()
+    failure = SCCConflictFailure(
+        producer=producer,
+        consumer=consumer,
+        intervening_writer=None,
+    )
+    msg = failure.format(capture=None)
+    assert "Intervening SCC writer" not in msg
+    assert "GRIncA[SCmpEQU32]" in msg
+    assert "GRIncA[SCSelectB32]" in msg
 
 
 def test_swait_count_exceeds_outstanding_failure_format_dscnt():

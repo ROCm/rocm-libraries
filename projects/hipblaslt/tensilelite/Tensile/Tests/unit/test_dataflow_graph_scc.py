@@ -49,8 +49,10 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     SLOT_KIND_MFMA,
     SlotKey,
+    SCCConflictFailure,
     TaggedInstruction,
     build_dataflow_graph,
+    compare_graphs,
     _SCC_OPCODE_FLAGS,
     _get_scc_sentinel,
     _populate_wrapper,
@@ -351,4 +353,104 @@ class TestSCCEdgeFormation:
         assert "SCmpEQU32" not in consumer_inputs, (
             "SCmpEQU32's SCC write should have been clobbered by the "
             f"intervening SAddU32; got inputs: {consumer_inputs}"
+        )
+
+
+# =============================================================================
+# Failure-shape wiring (bead mrj.2): compare_graphs(default, subj) classifies
+# an SCC clobber as SCCConflictFailure with producer/consumer/intervening_writer.
+# =============================================================================
+
+
+class TestSCCClobberFailure:
+    """Build matched default + subject graphs differing only in an
+    intervening SCC writer; verify diagnose_missing_edge classifies the
+    missing producer->consumer SCC edge as SCCConflictFailure carrying
+    the intervening clobber as `intervening_writer`.
+
+    The default graph has NO clobber: producer SCmpEQU32 writes SCC,
+    consumer SCSelectB32 reads it. The subject graph inserts an
+    intervening SAddU32 between them — the per-byte latest-writer
+    resolver re-routes the consumer's SCC read to SAddU32, breaking the
+    producer->consumer edge.
+    """
+
+    def _build_pair(self, with_clobber):
+        """Return (default_graph, subject_graph) for a producer/consumer
+        SCC chain, optionally with an intervening clobber in the subject.
+
+        Both graphs share the same SCmpEQU32 (producer) and SCSelectB32
+        (consumer) sgpr operands so their identity tuples match across
+        graphs (compare_graphs only requires LR/LW/GR/MFMA identity
+        coverage; SCC/ALU instructions are unconstrained, but matching
+        identities are needed for the edge keys to align).
+        """
+        producer = SCmpEQU32(sgpr(50, 1), sgpr(51, 1))
+        consumer = SCSelectB32(dst=sgpr(100, 1), src0=sgpr(50, 1), src1=sgpr(51, 1))
+
+        default_cap = make_capture(BODY_LABEL_ML, [
+            _tag(producer, slot_idx=0, sequence=0, category="GRIncA"),
+            _tag(consumer, slot_idx=0, sequence=1, category="GRIncA"),
+        ])
+        default = build_dataflow_graph(_wrap_single_body(default_cap))
+
+        if with_clobber:
+            # Same producer + consumer instances; insert clobber between.
+            producer2 = SCmpEQU32(sgpr(50, 1), sgpr(51, 1))
+            consumer2 = SCSelectB32(dst=sgpr(100, 1), src0=sgpr(50, 1),
+                                    src1=sgpr(51, 1))
+            clobber = SAddU32(dst=sgpr(80, 1), src0=sgpr(80, 1),
+                              src1=sgpr(81, 1))
+            subj_cap = make_capture(BODY_LABEL_ML, [
+                _tag(producer2, slot_idx=0, sequence=0, category="GRIncA"),
+                _tag(clobber, slot_idx=0, sequence=1, category="GRIncA"),
+                _tag(consumer2, slot_idx=0, sequence=2, category="GRIncA"),
+            ])
+        else:
+            producer2 = SCmpEQU32(sgpr(50, 1), sgpr(51, 1))
+            consumer2 = SCSelectB32(dst=sgpr(100, 1), src0=sgpr(50, 1),
+                                    src1=sgpr(51, 1))
+            subj_cap = make_capture(BODY_LABEL_ML, [
+                _tag(producer2, slot_idx=0, sequence=0, category="GRIncA"),
+                _tag(consumer2, slot_idx=0, sequence=1, category="GRIncA"),
+            ])
+        subj = build_dataflow_graph(_wrap_single_body(subj_cap))
+        return default, subj
+
+    def test_clobber_yields_scc_conflict_failure(self):
+        """Negative path: with an intervening SAddU32 in subj, the
+        SCC edge SCmpEQU32 -> SCSelectB32 is missing, and
+        diagnose_missing_edge surfaces SCCConflictFailure with
+        intervening_writer pointing at SAddU32."""
+        default, subj = self._build_pair(with_clobber=True)
+        failures = compare_graphs(default, subj, raise_on_unexplained=False)
+        scc_failures = [f for f in failures if isinstance(f, SCCConflictFailure)]
+        assert len(scc_failures) >= 1, (
+            f"Expected at least one SCCConflictFailure; got "
+            f"{[type(f).__name__ for f in failures]}"
+        )
+        # All graph-shape SCCConflictFailures must carry populated nodes.
+        f = scc_failures[0]
+        assert f.producer is not None
+        assert f.consumer is not None
+        assert f.intervening_writer is not None
+        # Class identities of the wrapped rocisa instructions.
+        assert type(f.producer.rocisa_inst).__name__ == "SCmpEQU32"
+        assert type(f.consumer.rocisa_inst).__name__ == "SCSelectB32"
+        assert type(f.intervening_writer.rocisa_inst).__name__ == "SAddU32"
+        # Format must mention the intervening writer.
+        msg = f.format(capture=None)
+        assert "Intervening SCC writer" in msg
+        assert "SAddU32" in msg
+
+    def test_no_clobber_yields_no_scc_conflict_failure(self):
+        """Positive path: without an intervening writer, the SCC edge is
+        present in both graphs — compare_graphs must NOT emit any
+        SCCConflictFailure."""
+        default, subj = self._build_pair(with_clobber=False)
+        failures = compare_graphs(default, subj, raise_on_unexplained=False)
+        scc_failures = [f for f in failures if isinstance(f, SCCConflictFailure)]
+        assert scc_failures == [], (
+            f"Expected no SCCConflictFailure on the no-clobber path; got "
+            f"{scc_failures}"
         )

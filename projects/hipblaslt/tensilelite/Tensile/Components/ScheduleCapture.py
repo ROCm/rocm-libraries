@@ -710,17 +710,68 @@ class InvalidCounterValueFailure(Failure):
 
 
 # ----------------------------------------------------------------------------
-# 10. SCCConflictFailure — GRInc SCC overlap window.
+# 10. SCCConflictFailure — SCC clobber window.
+#     An SCC writer (`intervening_writer`) sits between an SCC producer and
+#     SCC consumer, displacing the producer's value before the consumer can
+#     read it.
+#
+#     Two construction shapes (transitional, until mrj.4 deletes the legacy
+#     verify_scc_overlap path):
+#
+#       - Graph-native (mrj.2): producer/consumer/intervening_writer are
+#         GraphNode references emitted by `diagnose_missing_edge` when an
+#         SCC-typed reference edge is missing from the subject graph.
+#       - Legacy structural (wx9.2 / pre-mrj): conflicting_name, grinc_name,
+#         conflicting_index, interval_start, interval_end emitted by
+#         `verify_scc_overlap` (CMSValidator.py) describing the structural
+#         interval an unrelated scalar instruction landed inside.
+#
+#     SCCConflictFailure is reserved for the CLOBBER case. Pure SCC reorder
+#     (no intervening writer, just consumer issued before producer) is
+#     surfaced by `OrderInvertedFailure` via the existing Phase-1 order
+#     check — SCC reads/writes are tracked since mrj.1 so the same machinery
+#     covers SCC operands.
 # ----------------------------------------------------------------------------
 @dataclass
 class SCCConflictFailure(Failure):
-    conflicting_name: str
-    grinc_name: str
-    conflicting_index: int
-    interval_start: int
-    interval_end: int
+    # Graph-native shape (mrj.2). All optional so the legacy constructor
+    # site keeps compiling until mrj.4 removes verify_scc_overlap.
+    producer: object = None             # GraphNode (subject-side SCC writer the consumer SHOULD have read)
+    consumer: object = None             # GraphNode (subject-side SCC reader)
+    intervening_writer: object = None   # GraphNode (subject-side SCC writer that clobbered the producer)
+    # Legacy structural shape (wx9.2). Populated by verify_scc_overlap.
+    conflicting_name: str = None
+    grinc_name: str = None
+    conflicting_index: int = None
+    interval_start: int = None
+    interval_end: int = None
 
     def _format_canonical(self, capture=None) -> str:
+        # Graph-native shape branch — preferred when producer/consumer are
+        # populated (set by diagnose_missing_edge).
+        if self.producer is not None and self.consumer is not None:
+            producer_pos = format_position(self.producer, capture)
+            consumer_pos = format_position(self.consumer, capture)
+            inter_desc = ""
+            if self.intervening_writer is not None:
+                inter_pos = format_position(self.intervening_writer, capture)
+                inter_cls = type(getattr(self.intervening_writer,
+                                        "rocisa_inst", None)).__name__
+                inter_desc = (
+                    f" Intervening SCC writer "
+                    f"{self.intervening_writer.category}[{inter_cls}] "
+                    f"{inter_pos} clobbered the producer's SCC value."
+                )
+            producer_cls = type(getattr(self.producer, "rocisa_inst", None)).__name__
+            consumer_cls = type(getattr(self.consumer, "rocisa_inst", None)).__name__
+            return (
+                f"{self.consumer.category}[{consumer_cls}] "
+                f"{consumer_pos}'s SCC read should resolve to producer "
+                f"{self.producer.category}[{producer_cls}] {producer_pos}, "
+                f"but the subject schedule routes it elsewhere.{inter_desc}"
+            )
+        # Legacy structural shape (wx9.2) — kept until mrj.4 deletes
+        # verify_scc_overlap. Wording must match test_failure_formatters.
         return (
             f"{self.conflicting_name} at index {self.conflicting_index} can't be "
             f"between {self.grinc_name} {self.interval_start}-{self.interval_end} "
@@ -3048,6 +3099,48 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
         # edge from default's resolver). Don't flag — subj's order can't be
         # judged against an artifactual default ordering. Falls through to
         # Phase 2 wait coverage if applicable.
+
+    # SCC-typed missing edge (bead mrj.2): if the reference edge's resource
+    # is the SCC sentinel and Phase-1's order check passed, the most likely
+    # cause is a CLOBBER — an unrelated SCC writer issued between the
+    # producer and consumer in the subject schedule, displacing the
+    # producer's SCC value. Find that intervening writer in the subject
+    # graph (the new SCC producer the consumer pairs with) and emit a
+    # typed SCCConflictFailure carrying the producer/consumer/clobber
+    # triple.
+    #
+    # If no intervening SCC writer exists in the subject graph (e.g. the
+    # consumer simply lost its SCC edge to the producer for an unrelated
+    # reason), fall through to the ALU-producer early-return below — the
+    # missing edge is a non-clobber phenomenon that this branch can't
+    # classify, and a soft return matches the prior behavior for
+    # ALU-immediate producers.
+    ref_resource = ref_edge.resource
+    if getattr(ref_resource, "regType", None) == "scc":
+        # Same-body only. SCC is a single-bit hw status register that is
+        # NOT preserved across loop iterations by any compiler convention,
+        # so a cross-body SCC edge in the default graph is an aliasing
+        # artifact of the per-byte latest-writer resolver running over the
+        # SCC sentinel — not a real dataflow dependency. Suppress to
+        # avoid false-positive failures on cross-body SCC handoffs.
+        if p_node.body_label != c_node.body_label:
+            return []
+        intervening_writer = None
+        for e in subj_graph.edges:
+            if (e.consumer.identity == c_id
+                    and getattr(e.resource, "regType", None) == "scc"
+                    and e.producer.identity != p_id):
+                intervening_writer = e.producer
+                break
+        if intervening_writer is not None:
+            return [SCCConflictFailure(
+                producer=p_node,
+                consumer=c_node,
+                intervening_writer=intervening_writer,
+            )]
+        # No intervening SCC writer found — the consumer's SCC slot is
+        # simply unsourced in subj. Fall through to the generic ALU early
+        # return so we don't double-emit on a non-clobber miss.
 
     # MFMA-as-producer: governed by quad-cycle issue-timing constraints,
     # not by the dscnt/vlcnt FIFO. Sub-C (wx9.4.3) replaces the prior
