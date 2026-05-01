@@ -3196,7 +3196,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def _emitNoLoadLoopBodyCMSMacro(self, kernel, isNGLL):
     """Emit the CMS-mode tail-loop body — a single MAINLOOP macro invocation
     parameterized for nGL or nLL flag values. Extracted from noLoadLoopBody
-    to keep the dispatcher seam clean."""
+    to keep the dispatcher seam clean.
+
+    Why \\ID is hard-coded to 0 here (intentional, see bead rocm-libraries-9sh):
+
+    The main-loop dispatcher (simdSpecDispatch in KernelWriterAssembly.py)
+    branches each SIMD to one of numCodePath MAINLOOP invocations with
+    \\ID = 0 .. numCodePath-1. Per CustomSchedule.py:489-497, code-paths
+    differ ONLY in slot/schedule order for the multi-stream case — they
+    emit the SAME instruction set, with the same source/dest registers,
+    against the same LDS regions. By the time control reaches the NGL/NLL
+    tail bodies, every SIMD has converged to identical architectural state
+    (vgpr contents, LDS contents, address regs, loop counter, accumulator
+    state). Running code-path 0's schedule on every SIMD for NGL/NLL is
+    therefore correctness-safe regardless of which code-path each SIMD ran
+    in the main loop. There is no `simdSpecDispatch` wrapper around the
+    tail bodies because no per-SIMD divergence is needed.
+
+    Validation note: build_cms_four_part_capture (ScheduleCapture.py) keys
+    n_gl/n_ll as {0: body} only, mirroring this single emission. compare_graphs
+    therefore validates one NGL/NLL schedule against the default-side
+    capture. Code-paths 1+ NGL/NLL are not validated — but they are not
+    emitted, so there is nothing additional to validate. If a future change
+    introduces per-code-path NGL/NLL behavior (e.g. divergent LDS region
+    usage across code-paths), this hard-code will need to be replaced with
+    a tail-side simdSpecDispatch and the capture machinery extended to
+    iterate code-paths for n_gl/n_ll just like it does for main_loop.
+    """
     strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
     module = Module()
     if isNGLL:

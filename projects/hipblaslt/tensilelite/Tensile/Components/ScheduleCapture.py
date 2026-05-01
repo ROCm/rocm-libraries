@@ -274,7 +274,10 @@ class FourPartCapture:
     main_loop and main_loop_prev are keyed by codepath (under CMS, len ==
     num_codepaths; under default-side capture, always {0: body}).
     n_gl and n_ll are always {0: body} since CMS hard-codes \\ID=0 for the
-    tail loops at KernelWriter.py:2858-2866.
+    tail loops in _emitNoLoadLoopBodyCMSMacro (intentional — code-paths
+    differ only in main-loop scheduling order, all SIMDs converge to
+    identical architectural state at the loop boundary; see that method's
+    docstring and bead rocm-libraries-9sh).
 
     num_mfma is a kernel-level invariant (all four bodies share the same MFMA
     sequence; only non-MFMA categories are stripped/added between them) and is
@@ -3337,8 +3340,12 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
     n_ll[0] expands with useGR=0, usePLR=0, useGRInc=0, useLoop=0, \\ID=0.
 
     These flag assignments mirror the CMS dispatch sites at:
-      - simdSpecDispatch (KernelWriterAssembly.py:16175) for main_loop
-      - noLoadLoopBody CMS shortcut (KernelWriter.py:2858-2866) for n_gl/n_ll
+      - simdSpecDispatch (KernelWriterAssembly.py, simdSpecDispatch) for main_loop
+      - _emitNoLoadLoopBodyCMSMacro (KernelWriter.py) for n_gl/n_ll
+
+    n_gl/n_ll are keyed only at {0: body} because the CMS tail-loop emission
+    hard-codes \\ID=0 (see _emitNoLoadLoopBodyCMSMacro docstring for the
+    correctness rationale and bead rocm-libraries-9sh for the audit trail).
     """
     main_loop = {}
     main_loop_prev = {}
