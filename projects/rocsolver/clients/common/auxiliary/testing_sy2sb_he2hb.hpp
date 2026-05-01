@@ -96,7 +96,8 @@ void testing_sy2sb_he2hb_bad_arg()
     CHECK_HIP_ERROR(dTau.memcheck());
 
     // check bad arguments
-    sy2sb_he2hb_checkBadArgs<T, I>(handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data());
+    sy2sb_he2hb_checkBadArgs(handle, n, kd, nb, dA.data(), lda,
+                             dAband.data(), ldab, dTau.data());
 }
 
 //------------------------------------------------------------------------------
