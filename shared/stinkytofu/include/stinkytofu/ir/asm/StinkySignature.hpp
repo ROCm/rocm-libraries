@@ -287,6 +287,15 @@ struct SignatureKernelDescriptor {
     bool directToLdsB = false;
     int useSgprForGRO = 0;
 
+    // Pass-through .amdhsa_* directives that the structured fields above do
+    // not model (e.g. .amdhsa_user_sgpr_count, .amdhsa_fp16_overflow,
+    // .amdhsa_inst_pref_size, .amdhsa_user_sgpr_kernarg_preload_*).
+    // RawAsmParser appends raw text here when round-tripping; toString()
+    // emits each entry verbatim before .end_amdhsa_kernel. Empty by default
+    // so rocisa-driven flows (which populate the structured fields directly)
+    // are unaffected.
+    std::vector<std::string> extraKernelDirectives;
+
     SignatureKernelDescriptor(const std::string& name, const std::array<int, 3>& isaVersion,
                               int groupSegSize, const std::array<int, 3>& sgprWorkGroup,
                               int vgprWorkItem, int wavefrontSize = 64, int totalVgprs = 0,
