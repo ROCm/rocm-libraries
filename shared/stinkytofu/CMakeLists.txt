@@ -105,15 +105,7 @@ set(STINKYTOFU_GENERATED_SOURCES
 # Mark generated files so CMake knows they will be created during build
 set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED TRUE)
 
-# TODO: Windows requires explicit __declspec(dllexport) on every symbol for
-# shared libraries with lld-link. Build as static on Windows temporarily until
-# all public API is properly annotated with STINKYTOFU_EXPORT.
-if(WIN32)
-    add_library(stinkytofu STATIC ${STINKYTOFU_GENERATED_SOURCES})
-    target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
-else()
-    add_library(stinkytofu SHARED ${STINKYTOFU_GENERATED_SOURCES})
-endif()
+add_library(stinkytofu SHARED ${STINKYTOFU_GENERATED_SOURCES})
 target_include_directories(stinkytofu
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
