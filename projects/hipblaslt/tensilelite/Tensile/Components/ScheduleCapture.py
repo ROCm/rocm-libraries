@@ -88,10 +88,14 @@ SLOT_KIND_POST_LOOP = "post_loop"
 class SlotKey:
     """Canonical ordering position for a captured instruction.
 
-    Multiple instructions can share the same (iteration, slot_kind, mfma_index);
-    `sequence` disambiguates them in emission order.
+    `subiter` is the inner-unroll subiteration (0..LoopIters-1) the
+    instruction belongs to. Multiple instructions can share the same
+    (slot_kind, mfma_index); `sequence` disambiguates them in stream-
+    emission order, continuing across subiters within the same bucket
+    so that GraphPosition's (loop_index, vmfma_index, sub_index) tuple
+    encodes stream order without needing the subiter field.
     """
-    iteration: int
+    subiter: int
     slot_kind: str
     mfma_index: int
     sequence: int
@@ -798,7 +802,10 @@ class LoopBodyCaptureBuilder:
     """Accumulates TaggedInstructions across multiple emission calls.
 
     Owns a `sequence` counter that increments per-append within the same
-    (iteration, slot_kind, mfma_index) triple to produce deterministic SlotKeys.
+    (slot_kind, mfma_index) bucket. The counter is SHARED across subiters
+    because GraphPosition's tuple — (loop_index, vmfma_index, sub_index) —
+    drops `subiter`; sub_index must therefore continue across subiters
+    so positions encode stream-emission order without collisions.
 
     finalize() runs capture-pipeline guards before returning the capture:
       - rocisa wiring: every TaggedInstruction.inst is non-None
@@ -812,14 +819,14 @@ class LoopBodyCaptureBuilder:
 
     def __init__(self):
         self._instructions = []
-        self._seq_counter = {}  # (iteration, slot_kind, mfma_index) -> next sequence
+        self._seq_counter = {}  # (slot_kind, mfma_index) -> next sequence
 
-    def append(self, inst, category, iteration, slot_kind=SLOT_KIND_MFMA, mfma_index=-1):
-        key = (iteration, slot_kind, mfma_index)
+    def append(self, inst, category, subiter, slot_kind=SLOT_KIND_MFMA, mfma_index=-1):
+        key = (slot_kind, mfma_index)
         seq = self._seq_counter.get(key, 0)
         self._seq_counter[key] = seq + 1
         slot = SlotKey(
-            iteration=iteration,
+            subiter=subiter,
             slot_kind=slot_kind,
             mfma_index=mfma_index,
             sequence=seq,
@@ -1004,19 +1011,19 @@ def structural_clone(item):
     return new_mod
 
 
-def build_id_to_category_per_iter(*, iteration, localReadCode, localWriteCode,
+def build_id_to_category_per_iter(*, subiter, localReadCode, localWriteCode,
                                   globalReadCode, packCode, packPreCode,
                                   globalReadA=None, globalReadB=None,
                                   globalReadIncACode=None, globalReadIncBCode=None,
                                   inner_unroll_max=8):
-    """Build {id(item) -> category} for one SIA3 iteration's combined modules.
+    """Build {id(item) -> category} for one SIA3 subiter's combined modules.
 
     Companion to build_idmap. Two factories, one schema, two input shapes:
 
     - build_idmap + invert_idmap_to_id_to_category: when the caller has
       per-category source modules (LRCodeAAllIters[u] etc.). Used by the
       main-loop capture path in _loopBody.
-    - build_id_to_category_per_iter: when the caller has per-iteration
+    - build_id_to_category_per_iter: when the caller has per-subiter
       combined modules (localReads, pack[packIdx], packPre[packPreIdx])
       with named A/B/MXSA/MXSB/Metadata sub-modules. Used by the NLL/NGL
       capture path in _noLoadLoopBodyDefault.
@@ -1032,10 +1039,10 @@ def build_id_to_category_per_iter(*, iteration, localReadCode, localWriteCode,
       - globalReadA / globalReadB (optional): items tagged GRA / GRB.
         Splits the buffer-load instructions by tensor side.
       - localReadCode: per-tensor (A/B/MXSA/MXSB/Metadata) sub-modules
-        named LocalReadDo{Tensor}_I{iui}; tag as LR{Tensor}{iteration}.
+        named LocalReadDo{Tensor}_I{iui}; tag as LR{Tensor}{subiter}.
       - packCode/packPreCode: per-side (A/B) sub-modules named
         pack{A,B}_I{iui} (and "pack{A,B}_I{iui} Pre"); tag as
-        Pack{A,B}{iteration}.
+        Pack{A,B}{subiter}.
       - globalReadCode: fallback generic 'GR' for items not already
         tagged (covers anything the per-side modules above missed).
       - localWriteCode: tagged generically as 'LW'.
@@ -1078,7 +1085,7 @@ def build_id_to_category_per_iter(*, iteration, localReadCode, localWriteCode,
             ("LocalReadDoMXSB",     "LRMXSB{}"),
             ("LocalReadDoMetadata", "LRMetadata{}"),
         ):
-            cat = cat_template.format(iteration)
+            cat = cat_template.format(subiter)
             for iui in range(inner_unroll_max):
                 sub = localReadCode.findNamedItem(f"{sub_name}_I{iui}")
                 if sub is not None:
@@ -1099,10 +1106,10 @@ def build_id_to_category_per_iter(*, iteration, localReadCode, localWriteCode,
             for prefix, side in (("packA", "A"), ("packB", "B")):
                 sub = pack_mod.findNamedItem(f"{prefix}_I{iui}")
                 if sub is not None:
-                    tag_module(sub, f"Pack{side}{iteration}")
+                    tag_module(sub, f"Pack{side}{subiter}")
                 sub_pre = pack_mod.findNamedItem(f"{prefix}_I{iui} Pre")
                 if sub_pre is not None:
-                    tag_module(sub_pre, f"Pack{side}{iteration}")
+                    tag_module(sub_pre, f"Pack{side}{subiter}")
 
     return id_to_category
 
@@ -3131,7 +3138,7 @@ def expand_cms_macro(macro, id_value, useGR, usePLR, useGRInc, useLoop,
         builder.append(
             inst=item,
             category=category,
-            iteration=0,  # CMS macro is iteration-flattened; iteration is encoded in category (e.g. LRA0 vs LRA1)
+            subiter=0,  # CMS macro is subiter-flattened; subiter is encoded in category (e.g. LRA0 vs LRA1)
             slot_kind=slot_kind,
             mfma_index=mfma_index,
         )

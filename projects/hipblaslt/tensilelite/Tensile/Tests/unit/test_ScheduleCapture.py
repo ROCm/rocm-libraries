@@ -89,16 +89,16 @@ class TestRegisterContainerHashability:
 
 class TestSlotKey:
     def test_construction(self):
-        s = SlotKey(iteration=2, slot_kind=SLOT_KIND_MFMA, mfma_index=7, sequence=0)
-        assert s.iteration == 2
+        s = SlotKey(subiter=2, slot_kind=SLOT_KIND_MFMA, mfma_index=7, sequence=0)
+        assert s.subiter == 2
         assert s.slot_kind == SLOT_KIND_MFMA
         assert s.mfma_index == 7
         assert s.sequence == 0
 
     def test_frozen(self):
-        s = SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA, mfma_index=0, sequence=0)
+        s = SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA, mfma_index=0, sequence=0)
         with pytest.raises(Exception):
-            s.iteration = 1
+            s.subiter = 1
 
     def test_equality_is_value_based(self):
         a = SlotKey(0, SLOT_KIND_MFMA, 0, 0)
@@ -118,33 +118,41 @@ class TestLoopBodyCaptureBuilder:
 
     def test_sequence_increments_within_same_slot(self):
         b = LoopBodyCaptureBuilder()
-        b.append(inst="i0", category="LRA0", iteration=0, mfma_index=3)
-        b.append(inst="i1", category="LRA0", iteration=0, mfma_index=3)
-        b.append(inst="i2", category="LRA0", iteration=0, mfma_index=3)
+        b.append(inst="i0", category="LRA0", subiter=0, mfma_index=3)
+        b.append(inst="i1", category="LRA0", subiter=0, mfma_index=3)
+        b.append(inst="i2", category="LRA0", subiter=0, mfma_index=3)
         body = b.finalize()
         assert [ti.slot.sequence for ti in body.instructions] == [0, 1, 2]
 
-    def test_sequence_resets_per_slot_triple(self):
+    def test_sequence_resets_per_slot_kind_mfma_index_pair(self):
+        """The sequence counter is keyed on (slot_kind, mfma_index) ONLY.
+
+        It is SHARED across subiters within the same bucket so that
+        GraphPosition's (loop_index, vmfma_index, sub_index) tuple — which
+        drops the subiter field — encodes stream-emission order without
+        collisions. A new (slot_kind, mfma_index) starts at sequence=0;
+        the same bucket continues from where it left off across subiters.
+        """
         b = LoopBodyCaptureBuilder()
-        b.append(inst="i0", category="LRA0", iteration=0, mfma_index=3)
-        b.append(inst="i1", category="LRA0", iteration=0, mfma_index=4)  # diff mfma
-        b.append(inst="i2", category="LRA0", iteration=1, mfma_index=3)  # diff iter
+        b.append(inst="i0", category="LRA0", subiter=0, mfma_index=3)  # bucket(MFMA,3) seq=0
+        b.append(inst="i1", category="LRA0", subiter=0, mfma_index=4)  # bucket(MFMA,4) seq=0
+        b.append(inst="i2", category="LRA0", subiter=1, mfma_index=3)  # bucket(MFMA,3) seq=1
         body = b.finalize()
-        assert all(ti.slot.sequence == 0 for ti in body.instructions)
+        assert [ti.slot.sequence for ti in body.instructions] == [0, 0, 1]
 
     def test_emission_order_preserved_in_instructions_list(self):
         b = LoopBodyCaptureBuilder()
-        b.append(inst="first", category="GRA", iteration=0, mfma_index=0)
-        b.append(inst="second", category="LRA0", iteration=0, mfma_index=1)
-        b.append(inst="third", category="MFMA", iteration=0, mfma_index=1)
+        b.append(inst="first", category="GRA", subiter=0, mfma_index=0)
+        b.append(inst="second", category="LRA0", subiter=0, mfma_index=1)
+        b.append(inst="third", category="MFMA", subiter=0, mfma_index=1)
         body = b.finalize()
         assert [ti.inst for ti in body.instructions] == ["first", "second", "third"]
 
     def test_finalize_returns_independent_copy(self):
         b = LoopBodyCaptureBuilder()
-        b.append(inst="i0", category="GRA", iteration=0, mfma_index=0)
+        b.append(inst="i0", category="GRA", subiter=0, mfma_index=0)
         body = b.finalize()
-        b.append(inst="i1", category="GRB", iteration=0, mfma_index=0)
+        b.append(inst="i1", category="GRB", subiter=0, mfma_index=0)
         assert len(body.instructions) == 1
 
 
@@ -156,7 +164,7 @@ def _make_body(num_mfma):
     """Build a LoopBodyCapture with `num_mfma` MFMA-tagged entries."""
     b = LoopBodyCaptureBuilder()
     for i in range(num_mfma):
-        b.append(inst=f"mfma_{i}", category="MFMA", iteration=0, mfma_index=i)
+        b.append(inst=f"mfma_{i}", category="MFMA", subiter=0, mfma_index=i)
     return b.finalize()
 
 
@@ -174,13 +182,13 @@ def _make_capture(source, num_mfma, num_codepaths=1, extra_main_cats=None):
             builder = LoopBodyCaptureBuilder()
             for ti in main_b.instructions:
                 builder.append(inst=ti.inst, category=ti.category,
-                               iteration=ti.slot.iteration,
+                               subiter=ti.slot.subiter,
                                slot_kind=ti.slot.slot_kind,
                                mfma_index=ti.slot.mfma_index)
             for cat, count in extra_main_cats:
                 for j in range(count):
                     builder.append(inst=f"{cat}_{j}", category=cat,
-                                   iteration=0, mfma_index=0)
+                                   subiter=0, mfma_index=0)
             main_b = builder.finalize()
         main_bodies[cp] = main_b
         main_prev_bodies[cp] = clone_loop_body(main_b)
@@ -221,7 +229,7 @@ class TestFourPartCaptureShape:
 class TestCloneLoopBody:
     def test_clone_is_deep(self):
         b = LoopBodyCaptureBuilder()
-        b.append(inst="x", category="GRA", iteration=0, mfma_index=0)
+        b.append(inst="x", category="GRA", subiter=0, mfma_index=0)
         original = b.finalize()
         cloned = clone_loop_body(original)
         assert cloned is not original
@@ -230,11 +238,11 @@ class TestCloneLoopBody:
 
     def test_clone_preserves_tags(self):
         b = LoopBodyCaptureBuilder()
-        b.append(inst="x", category="GRA", iteration=2, mfma_index=5)
+        b.append(inst="x", category="GRA", subiter=2, mfma_index=5)
         original = b.finalize()
         cloned = clone_loop_body(original)
         assert cloned.instructions[0].category == "GRA"
-        assert cloned.instructions[0].slot.iteration == 2
+        assert cloned.instructions[0].slot.subiter == 2
         assert cloned.instructions[0].slot.mfma_index == 5
 
 
@@ -800,7 +808,7 @@ class TestSIA3CaptureMachinery:
             _captureSubIterToBuilder = KernelWriter._captureSubIterToBuilder
         stub = _Stub()
         stub._captureSubIterToBuilder(
-            iterCode=iterCode, capture=builder, iteration=0,
+            iterCode=iterCode, capture=builder, subiter=0,
             numMfmaPerIter=4, id_to_category=id_to_category)
 
         body = builder.finalize()

@@ -2641,23 +2641,38 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self._captureSubIterToBuilder(
         iterCode=iterCode,
         capture=capture,
-        iteration=iteration,
+        subiter=iteration,
         numMfmaPerIter=self.states.numMfmaPerIter,
         id_to_category=capture_id_to_category,
       )
 
     return iterCode
 
-  def _captureSubIterToBuilder(self, iterCode, capture, iteration,
+  def _captureSubIterToBuilder(self, iterCode, capture, subiter,
                                  numMfmaPerIter, id_to_category):
     """Walk iterCode.flatitems() and append TaggedInstructions to capture.
 
-    mfma_index assignment: tracks the most recently emitted MFMA's local index
-    (0..numMfmaPerIter-1), then converts to absolute via
-    iteration * numMfmaPerIter. Instructions before the first MFMA carry
-    slot_kind=PRE_LOOP and mfma_index=-1. SYNC/SNOP/MFMA category fallback via
-    isinstance for items not in id_to_category (synthetic SNops added by SIA3
-    for pack-latency padding, MFMAs themselves, in-line SWaitCnts).
+    mfma_index assignment:
+      - For each MFMA, increment a local index (0..numMfmaPerIter-1) and
+        convert to absolute via subiter * numMfmaPerIter.
+      - For non-MFMA instructions emitted BEFORE the first MFMA of this
+        subiter:
+          * If subiter==0: this is the very first instruction group in
+            the body; tag with slot_kind=PRE_LOOP and mfma_index=-1.
+            (-1 is reserved for "before the first MFMA of the body";
+            its tuple-comparison position correctly sorts before vmfma=0.)
+          * If subiter>0: these instructions are scheduled BETWEEN the
+            previous subiter's last MFMA (absolute index
+            subiter*numMfmaPerIter - 1) and this subiter's first MFMA
+            (absolute index subiter*numMfmaPerIter). Tag them with
+            mfma_index = subiter*numMfmaPerIter - 1; the LoopBodyCapture-
+            Builder's shared sub_index counter places them after the
+            previous subiter's last MFMA's bracket and before this
+            subiter's first MFMA at vmfma=subiter*numMfmaPerIter.
+
+    SYNC/SNOP/MFMA category fallback via isinstance for items not in
+    id_to_category (synthetic SNops added by SIA3 for pack-latency
+    padding, MFMAs themselves, in-line SWaitCnts).
     """
     from rocisa.code import TextBlock
     from rocisa.instruction import (
@@ -2694,14 +2709,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
         local_mfma_idx += 1
 
       if local_mfma_idx == -1:
-        slot_kind = SLOT_KIND_PRE_LOOP
-        mfma_index = -1
+        if subiter == 0:
+          # Very first instruction group in the body: pre-loop slot.
+          slot_kind = SLOT_KIND_PRE_LOOP
+          mfma_index = -1
+        else:
+          # Between subiter (N-1)'s last MFMA and subiter N's first MFMA.
+          # Position relative to previous subiter's last MFMA; the shared
+          # sub_index counter in LoopBodyCaptureBuilder orders these
+          # instructions after that MFMA's bracket.
+          slot_kind = SLOT_KIND_MFMA
+          mfma_index = subiter * numMfmaPerIter - 1
       else:
         slot_kind = SLOT_KIND_MFMA
-        mfma_index = iteration * numMfmaPerIter + local_mfma_idx
+        mfma_index = subiter * numMfmaPerIter + local_mfma_idx
 
       capture.append(
-        inst=item, category=category, iteration=iteration,
+        inst=item, category=category, subiter=subiter,
         slot_kind=slot_kind, mfma_index=mfma_index,
       )
 
@@ -3717,7 +3741,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         gri_a = gri_root.findNamedItem("globalReadIncrementA") if gri_root is not None else None
         gri_b = gri_root.findNamedItem("globalReadIncrementB") if gri_root is not None else None
         capture_id_to_cat = build_id_to_category_per_iter(
-          iteration=u,
+          subiter=u,
           localReadCode=localReads,
           localWriteCode=self.codes.perIterLocalWrite[u][1] if u < len(self.codes.perIterLocalWrite) else None,
           globalReadCode=self.codes.perIterGlobalRead[u] if u < len(self.codes.perIterGlobalRead) else None,
@@ -4822,7 +4846,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 continue
               builder.append(
                 inst=leaf, category=cat,
-                iteration=kernel["LoopIters"],
+                subiter=kernel["LoopIters"],
                 slot_kind=SLOT_KIND_POST_LOOP, mfma_index=-1,
               )
           self._capture_context.default_main = builder.finalize()

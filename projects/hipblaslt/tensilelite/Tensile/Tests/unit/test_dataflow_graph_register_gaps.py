@@ -117,7 +117,7 @@ def _tag(inst, *, category: str, mfma_index: int, sequence: int) -> TaggedInstru
     return TaggedInstruction(
         inst=inst,
         category=category,
-        slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=mfma_index, sequence=sequence),
     )
 
@@ -282,7 +282,7 @@ class TestWrappedInstructionPopulation:
         from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder
         builder = LoopBodyCaptureBuilder()
         inst = self._build_dtl_buffer_load()
-        builder.append(inst, category="GRA", iteration=0)
+        builder.append(inst, category="GRA", subiter=0)
         capture = builder.finalize()
         ti = capture.instructions[0]
         assert ti.wrapped is not None

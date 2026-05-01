@@ -91,7 +91,7 @@ class TestFinalizeWiring:
 
         b = LoopBodyCaptureBuilder()
         b.append(inst=_FakeLR(dst=_vrange(8, 4), lds_offset=64),
-                 category="LRA0", iteration=0, mfma_index=0)
+                 category="LRA0", subiter=0, mfma_index=0)
         result = b.finalize()
         assert isinstance(result, LoopBodyCapture)
         assert len(result.instructions) == 1
@@ -99,7 +99,7 @@ class TestFinalizeWiring:
     def test_finalize_raises_capture_wiring_error_when_inst_is_none(self):
         b = LoopBodyCaptureBuilder()
         # Append with inst=None — rocisa wiring failed.
-        b.append(inst=None, category="LRA0", iteration=0, mfma_index=0)
+        b.append(inst=None, category="LRA0", subiter=0, mfma_index=0)
         with pytest.raises(CaptureWiringError) as exc:
             b.finalize()
         assert "LRA0" in str(exc.value)
@@ -114,7 +114,7 @@ class TestFinalizeSMEMGuard:
     def test_smem_load_raises_capture_smem_error(self):
         b = LoopBodyCaptureBuilder()
         b.append(inst=SLoadB128(), category="OTHER",
-                 iteration=0, mfma_index=0)
+                 subiter=0, mfma_index=0)
         with pytest.raises(CaptureSMEMError) as exc:
             b.finalize()
         assert "SLoadB128" in str(exc.value)
@@ -122,7 +122,7 @@ class TestFinalizeSMEMGuard:
     def test_smem_load_b64_raises(self):
         b = LoopBodyCaptureBuilder()
         b.append(inst=SLoadB64(), category="OTHER",
-                 iteration=0, mfma_index=0)
+                 subiter=0, mfma_index=0)
         with pytest.raises(CaptureSMEMError):
             b.finalize()
 
@@ -136,7 +136,7 @@ class TestFinalizeFlatGuard:
     def test_flat_load_raises_capture_flat_error(self):
         b = LoopBodyCaptureBuilder()
         b.append(inst=FlatLoadB128(), category="OTHER",
-                 iteration=0, mfma_index=0)
+                 subiter=0, mfma_index=0)
         with pytest.raises(CaptureFlatError) as exc:
             b.finalize()
         assert "FlatLoadB128" in str(exc.value)
@@ -151,7 +151,7 @@ class TestFinalizeStoreGuard:
     def test_buffer_store_raises_capture_store_error(self):
         b = LoopBodyCaptureBuilder()
         b.append(inst=BufferStoreB128(), category="OTHER",
-                 iteration=0, mfma_index=0)
+                 subiter=0, mfma_index=0)
         with pytest.raises(CaptureStoreError) as exc:
             b.finalize()
         assert "BufferStoreB128" in str(exc.value)
@@ -159,7 +159,7 @@ class TestFinalizeStoreGuard:
     def test_global_store_raises(self):
         b = LoopBodyCaptureBuilder()
         b.append(inst=GlobalStoreB128(), category="OTHER",
-                 iteration=0, mfma_index=0)
+                 subiter=0, mfma_index=0)
         with pytest.raises(CaptureStoreError):
             b.finalize()
 

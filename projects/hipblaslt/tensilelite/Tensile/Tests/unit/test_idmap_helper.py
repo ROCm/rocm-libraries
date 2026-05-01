@@ -222,7 +222,7 @@ def test_per_iter_helper_splits_grinc_from_gr():
         perIterGR.add(it)
 
     out = build_id_to_category_per_iter(
-        iteration=0,
+        subiter=0,
         localReadCode=None, localWriteCode=None,
         globalReadCode=perIterGR,
         packCode=None, packPreCode=None,
@@ -245,7 +245,7 @@ def test_per_iter_helper_falls_back_to_generic_gr():
     behavior, preserved for back-compat."""
     perIterGR, leaves = _mk_module("perIterGR", 3)
     out = build_id_to_category_per_iter(
-        iteration=0,
+        subiter=0,
         localReadCode=None, localWriteCode=None,
         globalReadCode=perIterGR,
         packCode=None, packPreCode=None,
@@ -261,7 +261,7 @@ def test_per_iter_helper_grinc_overrides_gr_when_shared():
     m_gri_a = Module("globalReadIncrementA"); m_gri_a.add(shared)
     perIterGR = Module("perIterGR"); perIterGR.add(shared)
     out = build_id_to_category_per_iter(
-        iteration=0,
+        subiter=0,
         localReadCode=None, localWriteCode=None,
         globalReadCode=perIterGR,
         packCode=None, packPreCode=None,

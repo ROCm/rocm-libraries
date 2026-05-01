@@ -146,7 +146,7 @@ def _srange(start: int, count: int = 1) -> RegisterContainer:
 # =============================================================================
 # TaggedInstruction builders
 # =============================================================================
-# Slot is constructed with iteration=0 (the macro is iteration-flattened in
+# Slot is constructed with subiter=0 (the macro is iteration-flattened in
 # real captures too); body_label is encoded in the test via make_capture, not
 # on the SlotKey. Slot's `sequence` field defaults to 0; tests can pass a
 # different value when they need to disambiguate two instructions at the
@@ -159,7 +159,7 @@ def make_lr(dst_vgpr_start: int, dst_vgpr_count: int, lds_offset: int, slot: int
     return TaggedInstruction(
         inst=inst,
         category=category,
-        slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
     )
 
@@ -170,7 +170,7 @@ def make_lw(src_vgpr_start: int, src_vgpr_count: int, lds_offset: int, slot: int
     return TaggedInstruction(
         inst=inst,
         category=category,
-        slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
     )
 
@@ -186,7 +186,7 @@ def make_gr(dst_vgpr_start: int, dst_vgpr_count: int,
     return TaggedInstruction(
         inst=inst,
         category=category,
-        slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
     )
 
@@ -202,7 +202,7 @@ def make_mfma(c_dst_start: int, a_src_start: int, b_src_start: int, slot: int,
     return TaggedInstruction(
         inst=inst,
         category=category,
-        slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
     )
 
@@ -213,7 +213,7 @@ def make_swait(slot: int, *, dscnt: int = -1, vlcnt: int = -1, vscnt: int = -1,
     return TaggedInstruction(
         inst=inst,
         category="SYNC",
-        slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
     )
 
@@ -223,7 +223,7 @@ def make_sbarrier(slot: int, *, sequence: int = 0) -> TaggedInstruction:
     return TaggedInstruction(
         inst=inst,
         category="BARRIER",
-        slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
     )
 

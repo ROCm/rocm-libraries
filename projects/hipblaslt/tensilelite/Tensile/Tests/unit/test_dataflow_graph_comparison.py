@@ -173,7 +173,7 @@ class TestCleanComparison:
         ti_lcc = TaggedInstruction(
             inst=_LccInst(),
             category="LCC",
-            slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+            slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                          mfma_index=0, sequence=0),
         )
         # Reference has the LCC; subject doesn't (mirrors CMS vs default).
@@ -666,7 +666,7 @@ class TestGRIncReorderDetection:
             tagged.append(TaggedInstruction(
                 inst=inst,
                 category="GRIncA",
-                slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                              mfma_index=base_slot, sequence=seq),
             ))
         return tagged

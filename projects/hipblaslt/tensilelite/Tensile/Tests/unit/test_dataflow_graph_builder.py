@@ -477,7 +477,7 @@ class TestStructuralProperties:
         ti = TaggedInstruction(
             inst=_UnknownInst(),
             category="WHATEVER",  # not a recognized prefix or exact match
-            slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+            slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                          mfma_index=0, sequence=0),
         )
         cap = make_capture(BODY_LABEL_ML, [ti])
@@ -507,7 +507,7 @@ class TestStructuralProperties:
         ti_pack = TaggedInstruction(
             inst=_PackInst(),
             category="PackA0",
-            slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+            slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                          mfma_index=0, sequence=0),
         )
         cap = make_capture(BODY_LABEL_ML, [
