@@ -132,12 +132,15 @@ class _FakeSBarrier(_FakeInstBase):
 
 
 def _vrange(start: int, count: int = 1) -> RegisterContainer:
-    """Build a vgpr range starting at `start` covering `count` registers."""
-    return RegisterContainer("vgpr", RegName(f"v{start}", []), start, count)
+    """Build a vgpr range starting at `start` covering `count` registers.
+
+    Uses regType="v" — real rocisa's canonical single-character form.
+    """
+    return RegisterContainer("v", RegName(f"v{start}", []), start, count)
 
 
 def _srange(start: int, count: int = 1) -> RegisterContainer:
-    return RegisterContainer("sgpr", RegName(f"s{start}", []), start, count)
+    return RegisterContainer("s", RegName(f"s{start}", []), start, count)
 
 
 # =============================================================================

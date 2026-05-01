@@ -403,9 +403,10 @@ class TestRenderStringIdentity:
         assert isinstance(ident[1], int)    # loop_index
         assert isinstance(ident[2], str)    # render-string
         # The render contains a vgpr reference and the LDS offset.
-        # Synthetic fixtures construct RegisterContainer with a RegName,
-        # so the render uses the symbolic form (v8 is the name we chose).
-        assert "vgpr" in ident[2] or "v[" in ident[2]
+        # Synthetic fixtures construct RegisterContainer with regType="v"
+        # and a symbolic RegName (e.g. "v8"), so the render is something
+        # like `v[vgprv8:vgprv8+3]`.
+        assert "v[" in ident[2]
         assert "lds[64]" in ident[2]
 
     def test_comment_differences_dont_change_identity(self):
@@ -555,14 +556,15 @@ class TestDiagnoseMissingEdgeDefenses:
             DataflowGraph, DataflowEdge, GraphNode, GraphPosition,
         )
         # A reference edge that references identities the subject doesn't have.
+        # Use the canonical short-form regType "v" (matches real rocisa).
         ref_producer = GraphNode(
-            identity=("LR", 1, ("vgpr", 8, 4), 64),
+            identity=("LR", 1, ("v", 8, 4), 64),
             position=GraphPosition(1, 0, 0),
             category="LRA0", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="LRA0[0]",
         )
         ref_consumer = GraphNode(
-            identity=("MFMA", 1, ("vgpr", 0, 4), ("vgpr", 8, 2), ("vgpr", 32, 2)),
+            identity=("MFMA", 1, ("v", 0, 4), ("v", 8, 2), ("v", 32, 2)),
             position=GraphPosition(1, 2, 0),
             category="MFMA", rocisa_inst=None, tagged_inst=None,
             body_label=BODY_LABEL_ML, name="MFMA",
@@ -575,3 +577,158 @@ class TestDiagnoseMissingEdgeDefenses:
         subj_graph = DataflowGraph(nodes={}, edges=[], captures={})
         with pytest.raises(CaptureConsistencyError):
             diagnose_missing_edge(ref_edge, subj_graph)
+
+
+# =============================================================================
+# Coverage gap — reversed GRIncA scalar chain is invisible to compare_graphs
+# =============================================================================
+#
+# `verify_ascending_order` (CMSValidator.py:3345) catches CMS schedules that
+# emit category instructions out of order — e.g. GRIncA at vmfma_indices
+# [3,2,1,0] instead of [0,1,2,3]. The scheduler walks the optSchedule list
+# left-to-right with no sort (CustomSchedule.py:400-423), so reversal silently
+# emits the chain in reverse order.
+#
+# A reversed GRIncA chain has real dataflow violations:
+#   #2 SCSelectB32 writes incLower; #4 SAddU32 reads incLower (RAW)
+#   #6 SSubU32 writes ShadowLimit+0; #9 SCSelectB32 reads ShadowLimit+0 (RAW)
+# Reversal puts the consumers before the producers — wrong code.
+#
+# Today the dataflow graph cannot see this. `_writes()` and `_reads()` in
+# ScheduleCapture.py only handle LR/GR/LW/MFMA — scalar ALU instructions
+# return [] from both, so they form no edges. compare_graphs therefore
+# treats reversed and normal GRIncA as identical graphs.
+#
+# This test asserts the *desired* behavior (compare_graphs detects the
+# reversal) so the failure documents the gap. If/when `_writes` and `_reads`
+# are extended to recognize scalar ALU registers, this test starts passing
+# and `verify_ascending_order` becomes a redundant defense.
+
+
+class TestGRIncReorderDetection:
+    """Document that compare_graphs is blind to reversed GRIncA chains.
+
+    Builds a reference capture with a normal-order GRInc-like scalar chain
+    and a subject capture with the same instructions reversed. Under correct
+    behavior, compare_graphs would surface either an OrderInvertedFailure on
+    the intra-chain RAW edges or a missing-edge diagnostic. Today it returns
+    [] because scalar ALU writes/reads aren't tracked.
+    """
+
+    def _make_grinc_chain(self, *, base_slot: int, reversed_order: bool):
+        """Build a 6-instruction GRIncA-like chain with intra-chain RAW deps.
+
+        Real GRIncA (with Use64bShadowLimit=1) emits 9 SCC-coupled
+        instructions. We model the simplest 4-step subset that has clear
+        register-level RAW edges:
+
+          #1 SCSelectB32 dst=s100 (incLower)            — producer of incLower
+          #2 SCSelectB32 dst=s101 (incUpper)            — producer of incUpper
+          #3 SAddU32     dst=s10, src1=s100             — RAW from #1
+          #4 SAddCU32    dst=s11, src1=s101             — RAW from #2
+          #5 SSubU32     dst=s20, src1=s100             — RAW from #1
+          #6 SSubBU32    dst=s21, src1=s101             — RAW from #2
+
+        category="GRIncA" tags every instruction so they share kind_rank=4
+        and intra_seq distinguishes them.
+        """
+        from rocisa.instruction import (
+            SCSelectB32, SAddU32, SAddCU32, SSubU32, SSubBU32,
+        )
+        from rocisa.container import sgpr
+        from Tensile.Components.ScheduleCapture import (
+            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+        )
+
+        # Producers of incLower / incUpper.
+        i1 = SCSelectB32(dst=sgpr(100, 1), src0=sgpr(50, 1), src1=sgpr(51, 1))
+        i2 = SCSelectB32(dst=sgpr(101, 1), src0=sgpr(52, 1), src1=sgpr(53, 1))
+        # Carry chain: SAddU32 reads incLower; SAddCU32 reads incUpper.
+        i3 = SAddU32(dst=sgpr(10, 1), src0=sgpr(10, 1), src1=sgpr(100, 1))
+        i4 = SAddCU32(dst=sgpr(11, 1), src0=sgpr(11, 1), src1=sgpr(101, 1))
+        # Borrow chain: SSubU32 reads incLower; SSubBU32 reads incUpper.
+        i5 = SSubU32(dst=sgpr(20, 1), src0=sgpr(20, 1), src1=sgpr(100, 1))
+        i6 = SSubBU32(dst=sgpr(21, 1), src0=sgpr(21, 1), src1=sgpr(101, 1))
+
+        chain = [i1, i2, i3, i4, i5, i6]
+        if reversed_order:
+            chain = list(reversed(chain))
+
+        tagged = []
+        for seq, inst in enumerate(chain):
+            tagged.append(TaggedInstruction(
+                inst=inst,
+                category="GRIncA",
+                slot=SlotKey(iteration=0, slot_kind=SLOT_KIND_MFMA,
+                             mfma_index=base_slot, sequence=seq),
+            ))
+        return tagged
+
+    @pytest.mark.xfail(
+        reason=(
+            "Documented coverage gap: ScheduleCapture._writes/_reads only "
+            "handle LR/GR/LW/MFMA — scalar ALU register dependencies "
+            "(incLower/incUpper carry chain, ShadowLimit chain, etc.) form "
+            "no edges, so compare_graphs cannot see GRIncA reordering. "
+            "verify_ascending_order is the only safety net today. To remove "
+            "the xfail: extend _writes/_reads to handle SAddU32/SAddCU32/"
+            "SSubU32/SSubBU32/SCmpEQU32/SCSelectB32/SCMovB32 and rerun."
+        ),
+        strict=True,
+    )
+    def test_reversed_grinc_chain_should_be_detected(self):
+        # Reference: an LR -> SWait -> MFMA baseline plus a normal-order
+        # GRInc-like chain in the same body.
+        ref_chain = self._make_grinc_chain(base_slot=0, reversed_order=False)
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            *ref_chain,
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=2, a_src_count=4),
+        ])
+
+        # Subject: same instructions, GRInc chain reversed in stream order.
+        # The 4 RAW edges within the chain (incLower -> add/sub, incUpper ->
+        # addc/subb) now have producer issued AFTER consumer — should
+        # produce OrderInvertedFailure or missing-edge diagnostic.
+        subj_chain = self._make_grinc_chain(base_slot=0, reversed_order=True)
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            *subj_chain,
+            make_swait(slot=1, dscnt=0),
+            make_mfma(0, 8, 32, slot=2, a_src_count=4),
+        ])
+
+        g_ref = build_dataflow_graph(_wrap(ref_cap))
+        g_subj = build_dataflow_graph(_wrap(subj_cap))
+        failures = compare_graphs(g_ref, g_subj)
+
+        # The DESIRED behavior: graph detects intra-chain order inversion.
+        assert failures, (
+            "compare_graphs should have flagged the reversed GRIncA chain "
+            "(producer SCSelectB32 issued after consumer SAddU32) but "
+            "returned no failures — the dataflow graph is blind to scalar "
+            "ALU register dependencies."
+        )
+        assert any(isinstance(f, OrderInvertedFailure) for f in failures), (
+            "Expected at least one OrderInvertedFailure for the reversed "
+            f"GRIncA chain; got {[type(f).__name__ for f in failures]}."
+        )
+
+    def test_ascending_order_rule_does_catch_reversed_grinc(self):
+        """Companion: prove that the structural rule `verify_ascending_order`
+        DOES catch the same kind of error at the optSchedule level. This is
+        why the rule remains necessary even after the dataflow-graph
+        comparison is in place."""
+        from Tensile.Components.CMSValidator import verify_ascending_order
+        from Tensile.Components.ScheduleCapture import OutOfOrderSequenceFailure
+
+        class _FakeSchedInfo:
+            optSchedule = {"GRIncA": [[5, 4, 3, 2, 1, 0]]}
+
+        ok, msg = verify_ascending_order(_FakeSchedInfo(), context=None, code_path=0)
+        assert not ok, "verify_ascending_order should have rejected reversed GRIncA"
+        # The rule constructs an OutOfOrderSequenceFailure internally; here
+        # we just confirm the message identifies the offending key.
+        assert "GRIncA" in msg
+        assert "0" in msg  # the bad value

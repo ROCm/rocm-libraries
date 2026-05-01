@@ -526,3 +526,244 @@ class TestStructuralProperties:
         )
         with pytest.raises(CaptureEmptyBodyError):
             build_dataflow_graph(cap)
+
+
+# =============================================================================
+# Edge.register precision (Part 2 of resolver wrinkle)
+# =============================================================================
+# `_resolve_register_producers` yields (producer, overlap_reg) where
+# overlap_reg is the *intersection* of the consumer's read with the
+# producer's write — not the producer's full write. Previously the full
+# write was emitted, overstating consumption when the read was narrower.
+
+
+class TestEdgeRegisterIntersection:
+    def test_wide_write_narrow_read_yields_intersection(self):
+        """LR writes v[8:11] (4 vgprs); MFMA reads v[8:9] (2 vgprs).
+        edge.register should be v[8:9], not v[8:11]."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),       # writes v[8:11]
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, a_src_count=2),                  # reads v[8:9]
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        edges = [e for e in g.edges if e.edge_kind == "raw_intrawave"
+                 and e.producer.category == "LRA0"]
+        assert len(edges) == 1
+        e = edges[0]
+        assert e.register.regIdx == 8, "intersection starts at consumer's read base"
+        assert e.register.regNum == 2, (
+            f"intersection width should be 2 (consumer's narrower read), "
+            f"got {e.register.regNum} (would be 4 under old wreg-as-edge.register)"
+        )
+
+    def test_narrow_write_wide_read_yields_intersection(self):
+        """LR writes v[10:13] (4 vgprs); MFMA reads v[8:15] (8 vgprs).
+        Intersection is v[10:13] — the narrower of the two."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(10, 4, 64, slot=0, category="LRA0"),      # writes v[10:13]
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, a_src_count=8),                  # reads v[8:15]
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        edges = [e for e in g.edges if e.edge_kind == "raw_intrawave"
+                 and e.producer.category == "LRA0"]
+        assert len(edges) == 1
+        assert edges[0].register.regIdx == 10
+        assert edges[0].register.regNum == 4
+
+
+# =============================================================================
+# Multi-write producer (Part 1 of resolver wrinkle)
+# =============================================================================
+# `_resolve_register_producers` previously had a `break` after the first
+# matching write per producer, so a producer with multiple writes could
+# only emit one edge per consumer-read. After the fix, each overlapping
+# write yields its own edge. Today no production extractor returns
+# multiple writes from `_writes(inst)`, so we exercise the resolver
+# directly with a synthesized producers_by_kind map.
+
+
+class TestMultiWriteProducer:
+    def test_multi_write_producer_yields_one_edge_per_overlapping_write(self):
+        """Synthesize a producer node whose written_regs list has TWO
+        non-overlapping entries that both fall within the consumer's
+        wide read. The resolver should yield two (producer, overlap)
+        pairs — one per matching write — instead of breaking after the
+        first match."""
+        from Tensile.Components.ScheduleCapture import (
+            _resolve_register_producers, GraphPosition,
+        )
+        from rocisa.container import vgpr
+
+        # Build minimal nodes by hand. The resolver only reads
+        # node.position via _logical_position and node.category.
+        producer = GraphNode(
+            identity=("LR", 1, ("v", 8, 4), 64),
+            position=GraphPosition(loop_index=1, vmfma_index=0, sub_index=0),
+            category="LRA0", rocisa_inst=None, tagged_inst=None,
+            body_label=BODY_LABEL_ML, name="multi-write-LR",
+        )
+        consumer = GraphNode(
+            identity=("MFMA", 1, ("v", 8, 8)),
+            position=GraphPosition(loop_index=1, vmfma_index=2, sub_index=0),
+            category="MFMA", rocisa_inst=None, tagged_inst=None,
+            body_label=BODY_LABEL_ML, name="wide-read-MFMA",
+        )
+        # Stamp intra_seq so _logical_position succeeds.
+        producer._intra_seq = 0
+        consumer._intra_seq = 0
+
+        # Producer writes v[8:11] AND v[12:15]. (No real instruction yields
+        # two separate writes today, but the resolver must handle this for
+        # the future MFMA-acc-write / VAddCO-dst+VCC cases.)
+        wreg_a = vgpr(8, 4)
+        wreg_b = vgpr(12, 4)
+        producers_by_kind = {
+            0: [(  # kind_rank 0 (LR), single producer, two writes
+                (1, 0, 0, 0),  # logical position tuple — strictly < consumer's
+                producer,
+                [wreg_a, wreg_b],
+            )],
+        }
+
+        # Consumer reads v[8:15] — overlaps both writes.
+        read_reg = vgpr(8, 8)
+        results = list(_resolve_register_producers(
+            read_reg, consumer, producers_by_kind, num_mfma_per_iter=1,
+        ))
+
+        # Should yield TWO pairs, both attributing to `producer` but with
+        # different overlap registers (v[8:11] and v[12:15]).
+        assert len(results) == 2, (
+            f"multi-write producer should yield one edge per overlapping "
+            f"write; got {len(results)} pair(s)"
+        )
+        assert all(p is producer for p, _ in results)
+        overlap_starts = sorted(reg.regIdx for _, reg in results)
+        assert overlap_starts == [8, 12]
+        overlap_widths = sorted(reg.regNum for _, reg in results)
+        assert overlap_widths == [4, 4]
+
+    def test_multi_write_producer_only_one_overlap_yields_one_edge(self):
+        """Producer writes v[8:11] AND v[100:103]. Consumer reads v[8:9].
+        Only the first write overlaps; only one edge should yield. Confirms
+        the dropped-break doesn't over-yield when only one write matches."""
+        from Tensile.Components.ScheduleCapture import (
+            _resolve_register_producers, GraphPosition,
+        )
+        from rocisa.container import vgpr
+
+        producer = GraphNode(
+            identity=("LR", 1, ("v", 8, 4), 64),
+            position=GraphPosition(loop_index=1, vmfma_index=0, sub_index=0),
+            category="LRA0", rocisa_inst=None, tagged_inst=None,
+            body_label=BODY_LABEL_ML, name="multi-write-LR",
+        )
+        consumer = GraphNode(
+            identity=("MFMA", 1, ("v", 8, 2)),
+            position=GraphPosition(loop_index=1, vmfma_index=2, sub_index=0),
+            category="MFMA", rocisa_inst=None, tagged_inst=None,
+            body_label=BODY_LABEL_ML, name="narrow-read-MFMA",
+        )
+        producer._intra_seq = 0
+        consumer._intra_seq = 0
+
+        producers_by_kind = {
+            0: [(
+                (1, 0, 0, 0),
+                producer,
+                [vgpr(8, 4), vgpr(100, 4)],  # first overlaps, second doesn't
+            )],
+        }
+
+        results = list(_resolve_register_producers(
+            vgpr(8, 2), consumer, producers_by_kind, num_mfma_per_iter=1,
+        ))
+        assert len(results) == 1
+        assert results[0][1].regIdx == 8
+        assert results[0][1].regNum == 2  # intersection of v[8:11] and v[8:9]
+
+
+# =============================================================================
+# _reg_intersection direct unit tests
+# =============================================================================
+
+
+class TestRegIntersection:
+    def test_numeric_full_overlap(self):
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr
+        r = _reg_intersection(vgpr(8, 4), vgpr(8, 4))
+        assert r is not None
+        assert (r.regType, r.regIdx, r.regNum) == ("v", 8, 4)
+
+    def test_numeric_partial_overlap(self):
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr
+        # v[8:11] intersected with v[10:13] -> v[10:11]
+        r = _reg_intersection(vgpr(8, 4), vgpr(10, 4))
+        assert r is not None
+        assert (r.regIdx, r.regNum) == (10, 2)
+
+    def test_numeric_no_overlap_returns_none(self):
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr
+        assert _reg_intersection(vgpr(8, 4), vgpr(20, 4)) is None
+
+    def test_cross_type_returns_none(self):
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr, sgpr
+        assert _reg_intersection(vgpr(8, 4), sgpr(8, 4)) is None
+
+    def test_none_inputs_return_none(self):
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr
+        assert _reg_intersection(None, vgpr(8, 4)) is None
+        assert _reg_intersection(vgpr(8, 4), None) is None
+
+    def test_symbolic_full_overlap(self):
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr
+        # vgpr("ValuA", 4) intersected with itself -> same
+        a = vgpr("ValuA", 4)
+        b = vgpr("ValuA", 4)
+        r = _reg_intersection(a, b)
+        assert r is not None
+        assert r.regName.name == "ValuA"
+        assert r.regNum == 4
+
+    def test_symbolic_partial_overlap(self):
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr
+        # ValuA+0..3 intersected with ValuA+2..5 -> ValuA+2..3 (regNum=2)
+        a = vgpr("ValuA", 4)             # offset 0, count 4
+        b = vgpr("ValuA+2", 4)           # offset 2, count 4
+        r = _reg_intersection(a, b)
+        assert r is not None
+        assert r.regName.name == "ValuA"
+        assert r.regName.getTotalOffsets() == 2
+        assert r.regNum == 2
+
+    def test_symbolic_different_names_no_overlap(self):
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr
+        assert _reg_intersection(vgpr("ValuA", 4), vgpr("ValuB", 4)) is None
+
+    def test_mixed_symbolic_numeric_returns_none(self):
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr
+        assert _reg_intersection(vgpr("ValuA", 4), vgpr(8, 4)) is None
+
+    def test_intersection_is_hashable_and_dedups(self):
+        """Two intersections produced from equivalent inputs must compare
+        equal so DataflowGraph.edge_keys()'s set dedup works."""
+        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from rocisa.container import vgpr
+        r1 = _reg_intersection(vgpr(8, 4), vgpr(10, 4))
+        r2 = _reg_intersection(vgpr(8, 4), vgpr(10, 4))
+        assert r1 == r2
+        assert hash(r1) == hash(r2)
+        assert {r1, r2} == {r1}

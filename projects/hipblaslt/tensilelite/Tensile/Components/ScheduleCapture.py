@@ -1547,17 +1547,29 @@ def _logical_position(node, num_mfma_per_iter):
 def _resolve_register_producers(read_reg, consumer, producers_by_kind, num_mfma_per_iter):
     """Resolve every producer of `read_reg` for `consumer`.
 
-    Yields (producer_node, written_reg) pairs for each producer whose
+    Yields (producer_node, overlap_reg) pairs for each producer whose
     logical_position is strictly before consumer's AND whose written
-    register overlaps `read_reg`. A wide read (e.g. MFMA reading
-    v[8:15]) covered by two narrower writes (LR_a writes v[8:11],
-    LR_b writes v[12:15]) yields BOTH edges — both producers
-    genuinely contribute data the consumer reads.
+    register overlaps `read_reg`. The yielded `overlap_reg` is the
+    *intersection* of read_reg with the producer's matching write — not
+    the producer's full write — so:
+
+      - Diagnostic formatters that print `edge.register` see the actual
+        sub-range the consumer reads, not the (possibly wider) write.
+      - A producer that emits multiple writes which each overlap the same
+        read yields one edge per overlapping write. Without this, a
+        future multi-output extractor (e.g. VAddCO writing dst+VCC) would
+        silently drop the second write whenever both overlapped a single
+        consumer read.
+
+    The two-narrower-writes-cover-one-wide-read case still works: a wide
+    read v[8:15] backed by LR_a writing v[8:11] and LR_b writing v[12:15]
+    yields BOTH edges — once because both producers iterate the outer
+    loop, once because both writes survive the inner loop.
 
     Reorder-invariant: each yielded pair depends only on register
     identity + category + iteration, all preserved across schedulers.
-    Both schedulers see the same instruction set so both yield the
-    same set of (producer, register) pairs.
+    Both schedulers see the same instruction set so both yield the same
+    set of (producer, overlap) pairs.
     """
     consumer_lp = _logical_position(consumer, num_mfma_per_iter)
     for kind, prod_list in producers_by_kind.items():
@@ -1566,9 +1578,11 @@ def _resolve_register_producers(read_reg, consumer, producers_by_kind, num_mfma_
                 # prod_list is sorted ascending; nothing later will be < consumer_lp.
                 break
             for wreg in written_regs:
-                if _reg_overlaps(read_reg, wreg):
-                    yield (prod_node, wreg)
-                    break  # this producer matched once; one edge per producer per read
+                overlap = _reg_intersection(read_reg, wreg)
+                if overlap is not None:
+                    yield (prod_node, overlap)
+                    # No `break`: a producer with multiple overlapping
+                    # writes yields one edge per write. See docstring.
 
 
 def _identity_for(inst, body_label: str, category=None) -> tuple:
@@ -1670,6 +1684,102 @@ def _reg_overlaps(read_reg, written_reg) -> bool:
     b_lo = written_reg.regIdx
     b_hi = b_lo + (written_reg.regNum or 1)
     return a_lo < b_hi and b_lo < a_hi
+
+
+# Lazy-populated factory map: regType character -> RegisterContainer factory
+# function (idx, count) -> RegisterContainer. Populated on first call to
+# _reg_intersection so this module stays free of a top-level rocisa import.
+# vgpr/sgpr/accvgpr factories produce the canonical regName=None numeric
+# form that compares equal under value-based __eq__/__hash__; that property
+# is what makes the set-based dedup in DataflowGraph.edge_keys() work after
+# we start emitting intersection-precise registers on edges.
+_NUMERIC_REG_FACTORIES = None
+
+
+def _ensure_numeric_factories():
+    global _NUMERIC_REG_FACTORIES
+    if _NUMERIC_REG_FACTORIES is not None:
+        return
+    from rocisa.container import vgpr, sgpr, mgpr, accvgpr
+    _NUMERIC_REG_FACTORIES = {
+        "v": vgpr,
+        "s": sgpr,
+        "acc": accvgpr,
+        # mgpr's count is fixed at 1 in practice (m0). Wrap for uniform call shape.
+        "m": lambda idx, count=1: mgpr(idx),
+    }
+
+
+def _reg_intersection(read_reg, written_reg):
+    """Return a new RegisterContainer covering the overlap between
+    `read_reg` and `written_reg`, or None if they don't overlap or have
+    incompatible naming.
+
+    Mirrors the structure of `_reg_overlaps` but constructs the precise
+    overlap subrange. Two reasons this matters:
+
+      1. Diagnostic precision — a downstream Failure formatter that prints
+         `edge.register` shows the actual sub-range the consumer reads,
+         not the producer's full write. Example: LR writes v[8:11], MFMA
+         reads v[8:9] — edge.register == v[8:9].
+
+      2. Set-based edge dedup in `DataflowGraph.edge_keys()`. When a
+         producer with multiple writes feeds a consumer with multiple
+         reads, the per-(producer,consumer,register) tuple needs the
+         register field to reflect the actual overlap to remain a stable
+         hashable identity. Numeric containers built via vgpr/sgpr/...
+         factories use regName=None and compare equal to other
+         factory-built containers with the same (regIdx, regNum); that's
+         what set dedup relies on.
+
+    Symbolic intersections preserve the regName.name root and adjust the
+    offset list to point at the intersection's start.
+    """
+    if read_reg is None or written_reg is None:
+        return None
+    if read_reg.regType != written_reg.regType:
+        return None
+
+    a_named = read_reg.regIdx == -1 and getattr(read_reg, "regName", None) is not None
+    b_named = written_reg.regIdx == -1 and getattr(written_reg, "regName", None) is not None
+
+    if a_named != b_named:
+        return None
+
+    if a_named:
+        if read_reg.regName.name != written_reg.regName.name:
+            return None
+        a_off = read_reg.regName.getTotalOffsets() if hasattr(read_reg.regName, "getTotalOffsets") else 0
+        b_off = written_reg.regName.getTotalOffsets() if hasattr(written_reg.regName, "getTotalOffsets") else 0
+        a_lo, a_hi = a_off, a_off + (read_reg.regNum or 1)
+        b_lo, b_hi = b_off, b_off + (written_reg.regNum or 1)
+        lo, hi = max(a_lo, b_lo), min(a_hi, b_hi)
+        if lo >= hi:
+            return None
+        # Symbolic: same name root, offset = lo, count = hi-lo.
+        from rocisa.container import RegisterContainer, RegName
+        return RegisterContainer(
+            read_reg.regType,
+            RegName(read_reg.regName.name, [lo]),
+            -1,
+            hi - lo,
+        )
+
+    # Numeric.
+    a_lo = read_reg.regIdx
+    a_hi = a_lo + (read_reg.regNum or 1)
+    b_lo = written_reg.regIdx
+    b_hi = b_lo + (written_reg.regNum or 1)
+    lo, hi = max(a_lo, b_lo), min(a_hi, b_hi)
+    if lo >= hi:
+        return None
+    _ensure_numeric_factories()
+    factory = _NUMERIC_REG_FACTORIES.get(read_reg.regType)
+    if factory is None:
+        # Unknown regType (shouldn't happen for v/s/m/acc). Return None so
+        # the resolver skips this edge rather than emitting a bogus container.
+        return None
+    return factory(lo, hi - lo)
 
 
 def _make_node(tagged_inst, body_label: str) -> GraphNode:
