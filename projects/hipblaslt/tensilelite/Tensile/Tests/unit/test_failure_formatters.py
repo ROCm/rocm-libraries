@@ -159,13 +159,20 @@ def test_format_position_includes_list_suffix_for_mfmapack():
 def test_order_inverted_failure_format():
     producer = _make_node("LRA0", "LRA0[0]", 23)
     consumer = _make_node("MFMA", "MFMA", 20)
-    failure = OrderInvertedFailure(producer=producer, consumer=consumer)
+    failure = OrderInvertedFailure(
+        producer=producer,
+        consumer=consumer,
+        default_producer_position=_Pos(vmfma_index=18),
+        default_consumer_position=_Pos(vmfma_index=21),
+    )
     msg = failure.format(capture=None)
     assert "LRA0" in msg
     assert "MFMA" in msg
     assert "@ idx=23" in msg
     assert "@ idx=20" in msg
     assert "issued after its consumer" in msg
+    assert "Default schedule emitted producer" in msg
+    assert "subject reverses this order" in msg
 
 
 def test_missing_wait_failure_format():

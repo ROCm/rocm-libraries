@@ -501,36 +501,28 @@ class Failure:
 #    emits the producer at a later stream position than the consumer while
 #    default emitted them in the opposite order, the subject violates a
 #    real dataflow dependency.
-#    Emitted by: diagnose_missing_edge (compare_graphs) and the within-graph
-#    fallback in _classify_edge_coverage. NOT used by single-schedule
-#    constraint validators — those emit ConstraintViolationFailure (#13).
+#    Emitted exclusively by diagnose_missing_edge (compare_graphs). NOT
+#    used by single-schedule constraint validators — those emit
+#    ConstraintViolationFailure (#13).
 # ----------------------------------------------------------------------------
 @dataclass
 class OrderInvertedFailure(Failure):
     producer: object  # GraphNode (subject-side)
     consumer: object  # GraphNode (subject-side)
-    # Default-side positions for diagnostics. Populated by the cross-graph
-    # classifier (diagnose_missing_edge); the within-graph fallback in
-    # _classify_edge_coverage may leave them None.
-    default_producer_position: object = None  # SchedulePosition
-    default_consumer_position: object = None  # SchedulePosition
+    default_producer_position: object  # SchedulePosition (default-side, for diagnostics)
+    default_consumer_position: object  # SchedulePosition (default-side, for diagnostics)
 
     def _format_canonical(self, capture=None) -> str:
         producer_pos = format_position(self.producer, capture)
         consumer_pos = format_position(self.consumer, capture)
-        suffix = ""
-        if self.default_producer_position is not None and self.default_consumer_position is not None:
-            suffix = (
-                f" Default schedule emitted producer @ "
-                f"{self.default_producer_position} and consumer @ "
-                f"{self.default_consumer_position}; subject reverses this order."
-            )
         return (
             f"{self.producer.category}[{getattr(self.producer, 'name', '')}] "
             f"{producer_pos} is issued after its consumer "
             f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
             f"{consumer_pos}. The producer must complete before the consumer can use it."
-            f"{suffix}"
+            f" Default schedule emitted producer @ "
+            f"{self.default_producer_position} and consumer @ "
+            f"{self.default_consumer_position}; subject reverses this order."
         )
 
 
@@ -3067,19 +3059,12 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
     p_node = edge.producer
     c_node = edge.consumer
 
-    # Phase 1 — same-body order check.
-    # NOTE: this within-graph fallback can't reference the default schedule
-    # (validate_edge_wait_coverage is called with a single graph, no default
-    # available). It uses _node_subiter to suppress cross-subiter false
-    # positives, mirroring pre-9.6.1 behavior. After Sub-B (wx9.4.2)
-    # rewrote the resolver to walk in stream order, the resolver no longer
-    # emits edges where producer.position > consumer.position by construction
-    # and this branch is essentially dead code (cleanup in wx9.4.5 / wx9.6.3).
-    if p_node.body_label == c_node.body_label and p_node.position > c_node.position:
-        nmps = subj_graph.num_mfma_per_subiter
-        if _node_subiter(p_node, nmps) == _node_subiter(c_node, nmps):
-            return [OrderInvertedFailure(producer=p_node, consumer=c_node)]
-        return []  # cross-subiter pipelined dependency — legitimate
+    # Phase 1 — same-body order check is no longer needed here: Sub-B's
+    # per-byte latest-writer resolver only emits edges where producer is
+    # before consumer in stream order. Within-graph OrderInverted detection
+    # is therefore impossible by construction; the cross-graph classifier
+    # in diagnose_missing_edge owns OrderInverted detection (with default
+    # positions for diagnostics).
 
     # MFMA-as-producer: gated by quad-cycle issue timing rather than
     # SWaitCnt (see diagnose_missing_edge). Sub-C (wx9.4.3) replaces the
