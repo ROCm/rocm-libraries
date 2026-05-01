@@ -26,6 +26,7 @@ from typing import Any, Optional
 from rocisa.instruction import SWaitCnt
 
 from Tensile.Components.CMSValidator import verify_scc_overlap
+from Tensile.Components.ScheduleCapture import SCCConflictFailure
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateSCCOverlap(CMSValidationTestBase):
@@ -38,6 +39,23 @@ class TestValidateSCCOverlap(CMSValidationTestBase):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates.update({"MIWaveTileA": 4, "MIWaveTileB": 4, "DirectToLds": 1})
         super().setup_method(method, kernel_updates=kernel_updates)
+
+    def _expect_scc_conflict(self, optSchedule, syncCode, *,
+                             conflicting_name, grinc_name,
+                             conflicting_index, interval_start, interval_end):
+        """Validate that the schedule fails with the expected SCC-conflict shape."""
+        failure = self.validate(
+            optSchedule, syncCode, 1, None, None, 0,
+            expected_failure=SCCConflictFailure,
+        )
+        self.assert_scc_conflict(
+            failure,
+            conflicting_name=conflicting_name,
+            grinc_name=grinc_name,
+            conflicting_index=conflicting_index,
+            interval_start=interval_start,
+            interval_end=interval_end,
+        )
 
     
     def test_gr_simple(self):
@@ -60,14 +78,20 @@ class TestValidateSCCOverlap(CMSValidationTestBase):
 
         # GRA in GRIncA
         optSchedule["GRA"] = [[2, 11]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRA at index 2 can't be between GRIncA 2-3 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRA", grinc_name="GRIncA",
+            conflicting_index=2, interval_start=2, interval_end=3,
+        )
 
         # GRB in GRIncB
         optSchedule["GRA"] = [[10, 11]]
         optSchedule["GRB"] = [[6, 11]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRB at index 6 can't be between GRIncB 6-7 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRB", grinc_name="GRIncB",
+            conflicting_index=6, interval_start=6, interval_end=7,
+        )
 
     def test_gr_declaration_order(self):
         self.kernel["Use64bShadowLimit"] = 1
@@ -99,14 +123,20 @@ class TestValidateSCCOverlap(CMSValidationTestBase):
 
         # GRB just before GRIncB
         optSchedule["GRB"] = [[8, 11]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRB at index 8 can't be between GRIncB 8-9 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRB", grinc_name="GRIncB",
+            conflicting_index=8, interval_start=8, interval_end=9,
+        )
 
         # GRA just after GRIncA
         optSchedule["GRB"] = [[12, 13]]
         optSchedule["GRA"] = [[1, 11]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRA at index 1 can't be between GRIncA 0-1 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRA", grinc_name="GRIncA",
+            conflicting_index=1, interval_start=0, interval_end=1,
+        )
 
         # GRB just after GRIncA
         optSchedule["GRA"] = [[10, 11]]
@@ -139,19 +169,28 @@ class TestValidateSCCOverlap(CMSValidationTestBase):
         self.validate(optSchedule, syncCode, 1, None, None, 0)
 
         optSchedule["GRA"] = [[0, 11]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRA at index 0 can't be between GRIncA 0-1 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRA", grinc_name="GRIncA",
+            conflicting_index=0, interval_start=0, interval_end=1,
+        )
 
         optSchedule["GRA"] = [[2, 11]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRA at index 2 can't be between GRIncA 2-3 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRA", grinc_name="GRIncA",
+            conflicting_index=2, interval_start=2, interval_end=3,
+        )
 
         optSchedule["GRA"] = [[3, 11]]
         self.validate(optSchedule, syncCode, 1, None, None, 0)
 
         optSchedule["GRB"] = [[6, 11]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRB at index 6 can't be between GRIncA 6-7 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRB", grinc_name="GRIncA",
+            conflicting_index=6, interval_start=6, interval_end=7,
+        )
 
 
     def test_gr_noshadow(self):
@@ -178,21 +217,27 @@ class TestValidateSCCOverlap(CMSValidationTestBase):
 
         # GRA inside GRInc interval
         optSchedule["GRA"] = [[0, 11]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRA at index 0 can't be between GRIncA 0-1 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRA", grinc_name="GRIncA",
+            conflicting_index=0, interval_start=0, interval_end=1,
+        )
 
         # GRA just after GRInc interval
         optSchedule["GRA"] = [[1, 11]]
         self.validate(optSchedule, syncCode, 1, None, None, 0)
 
-        # GRB after GRIncB-10 
+        # GRB after GRIncB-10
         optSchedule["GRB"] = [[10, 11]]
         self.validate(optSchedule, syncCode, 1, None, None, 0)
 
         # GRA before GRIncB-10 -> middle of interval
         optSchedule["GRA"] = [[10, 11]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRA at index 10 can't be between GRIncB 9-10 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRA", grinc_name="GRIncB",
+            conflicting_index=10, interval_start=9, interval_end=10,
+        )
 
     def test_lws(self):
         self.kernel["Use64bShadowLimit"] = 0
@@ -220,15 +265,21 @@ class TestValidateSCCOverlap(CMSValidationTestBase):
         self.validate(optSchedule, syncCode, 1, None, None, 0)
 
         optSchedule["LWSA"] = [[1]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="LWSA at index 1 can't be between GRIncA 0-1 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="LWSA", grinc_name="GRIncA",
+            conflicting_index=1, interval_start=0, interval_end=1,
+        )
 
         optSchedule["LWSA"] = [[2]]
         self.validate(optSchedule, syncCode, 1, None, None, 0)
 
         optSchedule["LWSB"] = [[9]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="LWSB at index 9 can't be between GRIncB 9-10 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="LWSB", grinc_name="GRIncB",
+            conflicting_index=9, interval_start=9, interval_end=10,
+        )
 
         
     def test_gr_inc_together(self):
@@ -256,8 +307,11 @@ class TestValidateSCCOverlap(CMSValidationTestBase):
         optSchedule["GRIncB"] = [[0, 0, 1,
                                   9, 10,
                                   10]]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_message="GRIncB at index 0 can't be between GRIncA 0-1 due to SCC usage.")
+        self._expect_scc_conflict(
+            optSchedule, syncCode,
+            conflicting_name="GRIncB", grinc_name="GRIncA",
+            conflicting_index=0, interval_start=0, interval_end=1,
+        )
 
         optSchedule["GRIncB"] = [[1, 1, 2,
                             9, 10,

@@ -3094,6 +3094,9 @@ def verify_scc_overlap(scheduleInfo, context: 'ValidationContext', code_path: in
                         interval_start=interval[0],
                         interval_end=interval[1],
                     )
+                    # Stash typed Failure for test-side introspection. Return
+                    # shape stays (False, str) — see ValidationContext._last_failure.
+                    context._last_failure = failure
                     return failure.format(capture=None)
         return None
 
@@ -3147,6 +3150,12 @@ class ValidationContext:
     # the comparison rule is skipped (existing behavior preserved).
     default_capture: object = None
     cms_capture: object = None
+    # Side-channel for typed Failure objects emitted by structural rules
+    # (verify_scc_overlap, verify_ascending_order). These rules return
+    # (False, str) for backward compatibility but stash the Failure here so
+    # test infrastructure can introspect typed fields. Reset to None at the
+    # top of each rule iteration in isValid to prevent cross-rule leakage.
+    _last_failure: Optional[object] = None
 
     @property
     def swap_global_read_order(self) -> bool:
@@ -3355,6 +3364,11 @@ def verify_ascending_order(scheduleInfo, context: 'ValidationContext', code_path
                     bad_index=i,
                     prev_value=seq[i - 1],
                 )
+                # Stash typed Failure for test-side introspection. Return
+                # shape stays (False, str) — see ValidationContext._last_failure.
+                # Guard against test callers that pass context=None.
+                if context is not None:
+                    context._last_failure = failure
                 return (False, failure.format(capture=None))
     return True, ""
 
@@ -3480,6 +3494,9 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
         for rule in STRUCTURAL_RULES:
             if not (rule.concerns() & required):
                 continue
+            # Reset typed-Failure side-channel before each rule so a previous
+            # rule's stale Failure can't leak into this iteration's diagnostics.
+            context._last_failure = None
             status, message = rule.run(scheduleInfo, context, code_path)
             if not status:
                 scheduleInfo.pretty_print()

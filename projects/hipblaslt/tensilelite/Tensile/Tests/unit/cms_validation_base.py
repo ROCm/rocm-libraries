@@ -150,7 +150,6 @@ class CMSValidationTestBase:
         snopCode: list[Any] = None,
         expected_failure: Optional[type] = None,
         expected_fields: Optional[dict] = None,
-        expected_message: Optional[str] = None,
     ):
         """
         Creates a ScheduleInfo and validates it using the validation function from the subclass.
@@ -173,19 +172,12 @@ class CMSValidationTestBase:
             expected_fields: dict of {attr_name: expected_value} to assert on
                 the typed Failure. Use this with expected_failure to bind the
                 test to semantic state rather than message text.
-            expected_message: Exact-string assertion path for rules that still
-                return raw strings (not typed Failures) — e.g.
-                `verify_scc_overlap`. Mutually exclusive with expected_failure.
-                Prefer expected_failure for any rule that emits typed Failures.
 
         For tests where the rule raises a Python AssertionError before
         validate_timeline is reached (e.g. preprocessing precondition
         violations), call this without expected_failure inside a
         pytest.raises(AssertionError, match=...) block.
         """
-        assert not (expected_failure is not None and expected_message is not None), (
-            "pass either expected_failure OR expected_message, not both"
-        )
         if mfmaReorder is None:
             mfmaReorder = []
         if snopCode is None:
@@ -222,10 +214,16 @@ class CMSValidationTestBase:
 
         if expected_failure is not None:
             assert not status, "Schedule should have failed but passed."
+            # Timeline rules stash their typed Failure on the Timeline;
+            # structural rules (verify_scc_overlap, verify_ascending_order)
+            # have no Timeline and instead stash on ValidationContext.
             failure = getattr(timeline, "_last_failure", None) if timeline else None
+            if failure is None:
+                failure = getattr(ctx, "_last_failure", None)
             assert failure is not None, (
-                f"Expected typed Failure but timeline._last_failure is None. "
-                f"The rule may still emit a raw string. Got message: {message!r}"
+                f"Expected typed Failure but neither timeline._last_failure "
+                f"nor ctx._last_failure is set. The rule may still emit a raw "
+                f"string. Got message: {message!r}"
             )
             assert isinstance(failure, expected_failure), (
                 f"Expected {expected_failure.__name__}, got {type(failure).__name__}: {message}"
@@ -236,13 +234,6 @@ class CMSValidationTestBase:
                     f"{type(failure).__name__}.{attr_name}: expected {expected_value!r}, got {actual_value!r}"
                 )
             return failure
-
-        if expected_message is not None:
-            assert not status, "Schedule should have failed but passed."
-            assert message == expected_message, (
-                f"Expected: {expected_message!r}, Got: {message!r}"
-            )
-            return None
 
         assert status, f"Schedule should have passed validation but did not. {message}"
 
@@ -286,6 +277,51 @@ class CMSValidationTestBase:
         assert failure.actual_quad_cycles == actual_quad_cycles, (
             f"actual_quad_cycles: expected {actual_quad_cycles}, "
             f"got {failure.actual_quad_cycles}"
+        )
+
+    @staticmethod
+    def assert_scc_conflict(failure, *, conflicting_name, grinc_name,
+                            conflicting_index, interval_start, interval_end):
+        """Assert SCCConflictFailure carries the expected conflicting/GRInc
+        identities AND the SCC-protected interval bounds."""
+        assert failure.conflicting_name == conflicting_name, (
+            f"conflicting_name: expected {conflicting_name!r}, got {failure.conflicting_name!r}"
+        )
+        assert failure.grinc_name == grinc_name, (
+            f"grinc_name: expected {grinc_name!r}, got {failure.grinc_name!r}"
+        )
+        assert failure.conflicting_index == conflicting_index, (
+            f"conflicting_index: expected {conflicting_index}, got {failure.conflicting_index}"
+        )
+        assert failure.interval_start == interval_start, (
+            f"interval_start: expected {interval_start}, got {failure.interval_start}"
+        )
+        assert failure.interval_end == interval_end, (
+            f"interval_end: expected {interval_end}, got {failure.interval_end}"
+        )
+
+    @staticmethod
+    def assert_out_of_order_sequence(failure, *, schedule_key, sequence,
+                                     bad_value, bad_index, prev_value):
+        """Assert OutOfOrderSequenceFailure (kind='sequence') carries the
+        expected schedule-key, full sequence, and bad-position triple."""
+        assert failure.kind == "sequence", (
+            f"kind: expected 'sequence', got {failure.kind!r}"
+        )
+        assert failure.schedule_key == schedule_key, (
+            f"schedule_key: expected {schedule_key!r}, got {failure.schedule_key!r}"
+        )
+        assert failure.sequence == sequence, (
+            f"sequence: expected {sequence!r}, got {failure.sequence!r}"
+        )
+        assert failure.bad_value == bad_value, (
+            f"bad_value: expected {bad_value}, got {failure.bad_value}"
+        )
+        assert failure.bad_index == bad_index, (
+            f"bad_index: expected {bad_index}, got {failure.bad_index}"
+        )
+        assert failure.prev_value == prev_value, (
+            f"prev_value: expected {prev_value}, got {failure.prev_value}"
         )
 
     @staticmethod

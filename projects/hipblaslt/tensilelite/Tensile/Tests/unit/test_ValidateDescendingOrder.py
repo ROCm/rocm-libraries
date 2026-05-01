@@ -22,6 +22,7 @@
 
 
 from Tensile.Components.CMSValidator import verify_ascending_order
+from Tensile.Components.ScheduleCapture import OutOfOrderSequenceFailure
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateDescendingOrder(CMSValidationTestBase):
@@ -35,8 +36,18 @@ class TestValidateDescendingOrder(CMSValidationTestBase):
         Test that validation fails when instructions appear in descending order.
         """
         optSchedule = {"P": [[3, 2, 1]]}
-        expected = "Non-descending-order rule failed, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
-        self.validate(optSchedule, [], 1, None, None, 0, expected_message=expected)
+        failure = self.validate(
+            optSchedule, [], 1, None, None, 0,
+            expected_failure=OutOfOrderSequenceFailure,
+        )
+        self.assert_out_of_order_sequence(
+            failure,
+            schedule_key="P",
+            sequence=[3, 2, 1],
+            bad_value=2,
+            bad_index=1,
+            prev_value=3,
+        )
 
     def test_non_descending_order_success(self):
         """
