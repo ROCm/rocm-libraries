@@ -64,7 +64,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@d66f1529a2a69cd8ffde5e1239d411a7b5e56277 # rocm-libraries-ci-support
     with:
       build_variant: "release"
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || '' }}
@@ -84,13 +84,14 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@d66f1529a2a69cd8ffde5e1239d411a7b5e56277 # rocm-libraries-ci-support
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
+      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
     permissions:
       contents: read
       id-token: write
@@ -103,7 +104,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@d66f1529a2a69cd8ffde5e1239d411a7b5e56277 # rocm-libraries-ci-support
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -114,8 +115,8 @@ jobs:
       contents: read
       id-token: write
 
-  ci_summary:
-    name: CI Summary
+  multi_arch_ci_summary:
+    name: Multi-Arch CI Summary
     if: always()
     needs:
       - setup
@@ -127,7 +128,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
+          ref: d66f1529a2a69cd8ffde5e1239d411a7b5e56277 # rocm-libraries-ci-support
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
