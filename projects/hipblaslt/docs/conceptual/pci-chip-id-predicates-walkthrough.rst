@@ -12,6 +12,10 @@ Predicates are one of the essential integration points between the TensileLite b
 Predicates are built into the master solution libraries. They are files that contain information about which kernels are available 
 and their location. These files are loaded at runtime and used in the kernel selection process.
 
+.. note::
+
+   This guide covers advanced technical concepts and is intended for highly experienced users and developers only.
+
 Chip ID registry
 -----------------------
 
