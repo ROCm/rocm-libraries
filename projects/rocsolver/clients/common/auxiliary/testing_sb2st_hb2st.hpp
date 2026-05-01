@@ -35,8 +35,11 @@
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 #include "print_matrix.hpp"
+#include "common/misc/generate.hpp"
 
 //------------------------------------------------------------------------------
+// todo: why not put CPU, GPU as regular arguments, rather than template
+// arguments? Reduces object size and compile time.
 template <bool CPU, bool GPU, typename T, typename Ud, typename Uh>
 void sb2st_hb2st_initData(const rocblas_handle handle,
                           const rocblas_fill uplo,
@@ -46,97 +49,13 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
                           const rocblas_int ldab,
                           Uh& hAband)
 {
+//printf( "%s:%d\n", __func__, __LINE__ );
+
     // TODO: how to handle uplo? Easiest would be to convert upper to lower.
-
-    // For bandwidth kd, need ku = kd-1 superdiagonals to cover the diagonal
-    // blocks. (ku superdiagonals needed if we update diag blocks using
-    // gemv/ger, but none needed if we used hemv/her2.)
-    // Need kl = 2*kd-1 subdiagonals to cover the off-diagonal blocks and bulges.
-    rocblas_int ku = kd - 1;
-    rocblas_int kl = 2*kd - 1;
-    rocblas_int m  = ku + kl + 1;
-    assert( ldab >= m );
-
-    // Index of main diagonal.
-    rocblas_int idiag = ku;
 
     if (CPU)
     {
-        for (rocblas_int j = 0; j < n; ++j)
-        {
-            #if 0
-                printf( "skipping init\n" );
-                for (rocblas_int i = 0; i < ldab; ++i)
-                {
-                    hAband[0][i + j*ldab] = i + j/100.;
-                }
-            #else
-                // Diagonal is real.
-                // Random on [-1, 1].
-                // todo: better random number generator.
-                hAband[0][idiag + j*ldab] = 2*(rand() / S( RAND_MAX )) - 1;
-                // j/100.;
-
-                // Fill in lower band and copy conjugate to upper band.
-                for (rocblas_int i = 1; i < kd + 1 && i + j < n; ++i)
-                {
-                    // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
-                    if constexpr (rocblas_is_complex<T>)
-                    {
-                        hAband[0][idiag + i + j*ldab]
-                            = T( 2*(rand() / S( RAND_MAX )) - 1,
-                                 2*(rand() / S( RAND_MAX )) - 1 );
-                    }
-                    else
-                    {
-                        hAband[0][idiag + i + j*ldab]
-                            //= i + j/100.;
-                            = 2*(rand() / S( RAND_MAX )) - 1;
-                    }
-
-                    #if 1
-                        // Copy conj of lower band to upper band. The kd-th diagonal is
-                        // not needed, as it is outside the kd x kd diagonal blocks.
-                        if (i < kd)
-                        {
-                            hAband[0][idiag - i + (j + i)*ldab]
-                                = conjugate( hAband[0][idiag + i + j*ldab] );
-                        }
-                    #endif
-                }
-                // Zero out entries outside band where bulges will fill in.
-                for (rocblas_int i = kd+1; i < 2*kd; ++i)
-                {
-                    hAband[0][idiag + i + j*ldab] = 0;
-                }
-            #endif
-        }
-
-        #if 1
-            // Mark entries outside the band structure as nan,
-            // to ensure we don't use them.
-            // Example with n = 6, ku = 2, kl = 2, set x = nan:
-            // [ x x . . . . ] }
-            // [ x . . . . . ] } ku = 2
-            // [ . . . . . . ] <= main diag
-            // [ . . . . . x ] } kl = 2
-            // [ . . . . x x ] }
-            for (rocblas_int j = 0; j < ku; ++j)
-            {
-                for (rocblas_int i = 0; i < ku - j; ++i)
-                {
-                    hAband[0][i + j*ldab] = nan( "" );
-                }
-            }
-            // For lower band, work from right-most column (n-1) to left.
-            for (rocblas_int j = 0; j < kl; ++j)
-            {
-                for (rocblas_int i = j; i < kl; ++i)
-                {
-                    hAband[0][idiag + 1 + i + (n - 1 - j)*ldab] = nan( "" );
-                }
-            }
-        #endif
+        hbrand( n, kd, hAband[0], ldab );
     }
 
     if (GPU)
@@ -390,7 +309,7 @@ void testing_sb2st_hb2st( Arguments& argus )
     // V is ldv x nv
     // todo: if eigval only, don't need T, and only need V vectors and tau
     // for 2 rounds, so maybe 2(n+1) or so is enough.
-    rocblas_int nt = ceildiv( n, kd );
+    rocblas_int nt = ceildiv( n-1, kd );
     rocblas_int nv_blocks = nt*(nt + 1)/2;
     rocblas_int nv = nv_blocks*kd;
 
