@@ -299,6 +299,8 @@ if(HIPDNN_ENABLE_COVERAGE)
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
         -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_flatbuffers_sdk_tests
+        -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_plugin_sdk_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_test_sdk_tests
