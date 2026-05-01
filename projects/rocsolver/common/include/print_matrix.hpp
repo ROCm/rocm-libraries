@@ -60,8 +60,11 @@
 template <typename T, typename I>
 void copy_matrix( I m, I n, T* src, I ld_src, T* dst, I ld_dst, hipStream_t stream )
 {
-    printf( "# %s( m=%d, n=%d, src=%p, ld=%d, dst=%p, ld=%d, stream=%p )\n",
-            __func__, m, n, src, ld_src, dst, ld_dst, stream );
+    using llong = long long;
+
+    printf( "# %s( m=%lld, n=%lld, src=%p, ld=%lld, dst=%p, ld=%lld, stream=%p )\n",
+            __func__, llong(m), llong(n), src, llong(ld_src),
+            dst, llong(ld_dst), stream );
     hip_call(
         hipMemcpy2DAsync(
             dst, ld_dst*sizeof(T),
@@ -163,6 +166,8 @@ void print_matrix(
     std::string const& label, I m, I n, T* A, I lda, int p=3,
     hipStream_t stream=nullptr )
 {
+    using llong = long long;
+
     PrintOptions opts( p+6, p );
 
     T* hA;
@@ -181,9 +186,10 @@ void print_matrix(
         hA = A;
     }
 
-    printf( "# %s %d x %d, ld %d, %s\n"
+    printf( "# %s %lld x %lld, ld %lld, %s\n"
             "%s = numpy.array([\n",
-            label.c_str(), m, n, lda, get_type_name<T>().c_str(), label.c_str() );
+            label.c_str(), llong(m), llong(n), llong(lda),
+            get_type_name<T>().c_str(), label.c_str() );
     for (int i = 0; i < m; ++i) {
         printf( "  [  " );
         for (int j = 0; j < n; ++j) {
