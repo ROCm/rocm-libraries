@@ -91,10 +91,6 @@ bool isBufferMemoryOp(const StinkyInstruction& inst) {
     return isGlobalMemLoad(inst) || isGlobalMemStore(inst);
 }
 
-bool isTensorMemoryOp(const StinkyInstruction& inst) {
-    return isTensorLoad(inst);
-}
-
 bool isBarrierOp(const StinkyInstruction& inst) {
     return isBarrier(inst);
 }
