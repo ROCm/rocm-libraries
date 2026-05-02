@@ -34,11 +34,8 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
-<<<<<<< HEAD
-        "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
-=======
         "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
->>>>>>> 4e89c910f1bcf18f4ad80209c9674213367c5243
+        "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
 )
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
