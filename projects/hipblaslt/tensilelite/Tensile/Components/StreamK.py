@@ -2388,9 +2388,9 @@ class StreamKTwoTileOriginal(StreamK):
 
         return module
 
-    def computeLoadSrd(self, writer, kernel, tc, sTmp):
+    def computeLoadSrd(self, writer, kernel, tP, sTmp):
         module = Module("StreamK TwoTileOriginal computeLoadSrd")
-        module.add(self.computeLoadSrdCommon(writer, kernel, tc, sTmp))
+        module.add(self.computeLoadSrdCommon(writer, kernel, tP, sTmp))
         return module
 
     def computeStoreSrdStart(self, writer, kernel):

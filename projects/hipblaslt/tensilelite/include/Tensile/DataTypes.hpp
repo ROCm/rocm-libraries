@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -237,7 +237,7 @@ namespace TensileLite
     };
 
     template <>
-    struct TypeInfo<Int8> : public BaseTypeInfo<int8_t, rocisa::DataType::Int8, 1, false, true>
+    struct TypeInfo<Int8> : public BaseTypeInfo<Int8, rocisa::DataType::Int8, 1, false, true>
     {
     };
 
@@ -300,28 +300,45 @@ namespace TensileLite
     {
     };
 
+#ifdef _WIN32
 #ifdef TENSILE_USE_FP6
     template <>
-    struct TypeInfo<Float6x16>
-        : public BaseTypeInfo<Float6x16, rocisa::DataType::Float6, 16, false, false>
+    struct TypeInfo<Float6> : public BaseTypeInfo<Float6, rocisa::DataType::Float6, 1, false, false>
     {
     };
-#endif // #ifdef TENSILE_USE_FP6
+#endif // TENSILE_USE_FP6
 #ifdef TENSILE_USE_BF6
     template <>
-    struct TypeInfo<BFloat6x16>
-        : public BaseTypeInfo<BFloat6x16, rocisa::DataType::BFloat6, 16, false, false>
+    struct TypeInfo<BFloat6> : public BaseTypeInfo<BFloat6, rocisa::DataType::BFloat6, 1, false, false>
     {
     };
-#endif // #ifdef TENSILE_USE_BF6
+#endif // TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
     template <>
-    struct TypeInfo<Float4x2>
-        : public BaseTypeInfo<Float4x2, rocisa::DataType::Float4, 2, false, false>
+    struct TypeInfo<Float4> : public BaseTypeInfo<Float4, rocisa::DataType::Float4, 1, false, false>
     {
     };
-#endif // #ifdef TENSILE_USE_FP4
-
+#endif // TENSILE_USE_FP4
+#else // _WIN32
+#ifdef TENSILE_USE_FP6
+    template <>
+    struct TypeInfo<Float6x32> : public BaseTypeInfo<Float6x32, rocisa::DataType::Float6, 32, false, false>
+    {
+    };
+#endif // TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+    template <>
+    struct TypeInfo<BFloat6x32> : public BaseTypeInfo<BFloat6x32, rocisa::DataType::BFloat6, 32, false, false>
+    {
+    };
+#endif // TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+    template <>
+    struct TypeInfo<Float4x2> : public BaseTypeInfo<Float4x2, rocisa::DataType::Float4, 2, false, false>
+    {
+    };
+#endif // TENSILE_USE_FP4
+#endif // _WIN32
     template <>
     struct TypeInfo<E8>
         : public BaseTypeInfo<E8, rocisa::DataType::E8, 1, false, false>
@@ -348,7 +365,18 @@ namespace TensileLite
                                          BFloat8,
                                          Float8_fnuz,
                                          BFloat8_fnuz,
-                                         int8_t>;
+                                         int8_t,
+#if !defined(_WIN32) && defined(TENSILE_USE_FP6)
+                                         Float6x32,
+#endif // !_WIN32 && TENSILE_USE_FP6
+#if !defined(_WIN32) && defined(TENSILE_USE_BF6)
+                                         BFloat6x32,
+#endif // !_WIN32 && TENSILE_USE_BF6
+#if !defined(_WIN32) && defined(TENSILE_USE_FP4)
+                                         Float4x2,
+#endif // !_WIN32 && TENSILE_USE_FP4
+                                         E8
+                                        >;
 
     // Convert variants to type T
     template <typename T>
@@ -415,6 +443,54 @@ namespace TensileLite
     {
         return static_cast<T>(*std::get_if<Int8x4>(&val));
     }
+
+#if !defined(_WIN32) && defined(TENSILE_USE_FP6)
+    // Convert variants to type T
+    template <typename T>
+    typename std::enable_if<std::is_same<Float6x32, T>::value, T>::type
+        constVariantCast(const ConstantVariant& val)
+    {
+        switch(val.index())
+        {
+        case static_cast<int>(rocisa::DataType::Float6):
+            return static_cast<T>(*std::get_if<Float6x32>(&val));
+        default:
+            throw std::runtime_error("Unsupported variant cast type.");
+        }
+    }
+#endif // !_WIN32 && TENSILE_USE_FP6
+
+#if !defined(_WIN32) && defined(TENSILE_USE_BF6)
+    // Convert variants to type T
+    template <typename T>
+    typename std::enable_if<std::is_same<BFloat6x32, T>::value, T>::type
+        constVariantCast(const ConstantVariant& val)
+    {
+        switch(val.index())
+        {
+        case static_cast<int>(rocisa::DataType::BFloat6):
+            return static_cast<T>(*std::get_if<BFloat6x32>(&val));
+        default:
+            throw std::runtime_error("Unsupported variant cast type.");
+        }
+    }
+#endif // !_WIN32 && TENSILE_USE_BF6
+
+#if !defined(_WIN32) && defined(TENSILE_USE_FP4)
+    // Convert variants to type T
+    template <typename T>
+    typename std::enable_if<std::is_same<Float4x2, T>::value, T>::type
+        constVariantCast(const ConstantVariant& val)
+    {
+        switch(val.index())
+        {
+        case static_cast<int>(rocisa::DataType::Float4):
+            return static_cast<T>(*std::get_if<Float4x2>(&val));
+        default:
+            throw std::runtime_error("Unsupported variant cast type.");
+        }
+    }
+#endif // !_WIN32 && TENSILE_USE_FP4
 
     std::string ToString(ConstantVariant d);
     bool        CompareValue(const ConstantVariant& d, double value);

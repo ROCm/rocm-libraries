@@ -2681,4 +2681,23 @@ Tests:
   beta: [ 0.0, 1.0 ]
   gpu_arch: '90a'
 
+# This is for testing MX FP4 kernel using Tensile
+- name: matmul_tensile_fp4
+  category: quick
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  M: [2048]
+  N: [2048]
+  K: [4096]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
 ...
