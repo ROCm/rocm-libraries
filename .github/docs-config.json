@@ -1,0 +1,109 @@
+{
+    "projects": [
+    {
+        "folder":  "composablekernel",
+        "rtd_slug": "advanced-micro-devices-composable-kernel",
+        "rtd_alias": "composable_kernel"
+    },
+    {
+        "folder":  "hipblas",
+        "rtd_slug": "advanced-micro-devices-hipblas",
+        "rtd_alias": "hipBLAS"
+    },
+    {
+        "folder":  "hipblaslt",
+        "rtd_slug": "advanced-micro-devices-hipblaslt",
+        "rtd_alias": "hipBLASLt"
+    },
+    {
+        "folder":  "hipcub",
+        "rtd_slug": "advanced-micro-devices-hipcub",
+        "rtd_alias": "hipCUB"
+    },
+    {
+        "folder":  "hipdnn",
+        "rtd_slug": "advanced-micro-devices-hipdnn",
+        "rtd_alias": "hipdnn"
+    },
+    {
+        "folder":  "hipfft",
+        "rtd_slug": "advanced-micro-devices-hipfft",
+        "rtd_alias": "hipFFT"
+    },
+    {
+        "folder":  "hiprand",
+        "rtd_slug": "advanced-micro-devices-hiprand",
+        "rtd_alias": "hipRAND"
+    },
+    {
+        "folder":  "hipsolver",
+        "rtd_slug": "advanced-micro-devices-hipsolver",
+        "rtd_alias": "hipSOLVER"
+    },
+    {
+        "folder":  "hipsparse",
+        "rtd_slug": "advanced-micro-devices-hipsparse",
+        "rtd_alias": "hipSPARSE"
+    },
+    {
+        "folder":  "hipsparselt",
+        "rtd_slug": "advanced-micro-devices-hipsparselt",
+        "rtd_alias": "hipSPARSELt"
+    },
+    {
+        "folder":  "hiptensor",
+        "rtd_slug": "advanced-micro-devices-hiptensor",
+        "rtd_alias": "hipTensor"
+    },
+    {
+        "folder":  "miopen",
+        "rtd_slug": "advanced-micro-devices-miopen",
+        "rtd_alias": "MIOpen"
+    },
+    {
+        "folder":  "rocblas",
+        "rtd_slug": "advanced-micro-devices-rocblas",
+        "rtd_alias": "rocBLAS"
+    },
+    {
+        "folder":  "rocfft",
+        "rtd_slug": "advanced-micro-devices-rocfft",
+        "rtd_alias": "rocFFT"
+    },
+    {
+        "folder":  "rocprim",
+        "rtd_slug": "advanced-micro-devices-rocprim",
+        "rtd_alias": "rocPRIM"
+    },
+    {
+        "folder":  "rocrand",
+        "rtd_slug": "advanced-micro-devices-rocrand",
+        "rtd_alias": "rocRAND"
+    },
+    {
+        "folder":  "rocsolver",
+        "rtd_slug": "advanced-micro-devices-rocsolver",
+        "rtd_alias": "rocSOLVER"
+    },
+    {
+        "folder":  "rocsparse",
+        "rtd_slug": "advanced-micro-devices-rocsparse",
+        "rtd_alias": "rocSPARSE"
+    },
+    {
+        "folder":  "rocthrust",
+        "rtd_slug": "advanced-micro-devices-rocthrust",
+        "rtd_alias": "rocThrust"
+    },
+    {
+        "folder":  "rocwmma",
+        "rtd_slug": "advanced-micro-devices-rocwmma",
+        "rtd_alias": "rocWMMA"
+    },
+    {
+        "folder":  "tensile",
+        "rtd_slug": "advanced-micro-devices-tensile",
+        "rtd_alias": "Tensile"
+    }
+    ]
+}
