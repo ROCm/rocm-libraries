@@ -163,8 +163,8 @@ void testing_gemvi(Arguments argus)
     int                  m        = argus.M;
     int                  n        = argus.N;
     int                  nnz      = argus.nnz;
-    T                    alpha    = make_DataType<T>(argus.alpha);
-    T                    beta     = make_DataType<T>(argus.beta);
+    T                    alpha    = argus.get_alpha<T>();
+    T                    beta     = argus.get_beta<T>();
     hipsparseOperation_t trans    = argus.transA;
     hipsparseIndexBase_t idxBase  = argus.baseA;
     std::string          filename = argus.filename;

@@ -429,7 +429,7 @@ void testing_bsrsv2(Arguments argus)
     hipsparseDiagType_t    diag_type = argus.diag_type;
     hipsparseFillMode_t    fill_mode = argus.fill_mode;
     hipsparseSolvePolicy_t policy    = argus.solve_policy;
-    T                      h_alpha   = make_DataType<T>(argus.alpha);
+    T                      h_alpha   = argus.get_alpha<T>();
     std::string            filename  = argus.filename;
 
     hipsparseLocalHandle_t handle(argus);

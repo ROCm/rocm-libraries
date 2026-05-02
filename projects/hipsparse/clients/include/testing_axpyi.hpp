@@ -83,7 +83,7 @@ void testing_axpyi(const Arguments& argus)
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
     int                  nnz      = argus.nnz;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
+    T                    h_alpha  = argus.get_alpha<T>();
     hipsparseIndexBase_t idx_base = argus.baseA;
 
     hipsparseLocalHandle_t handle(argus);

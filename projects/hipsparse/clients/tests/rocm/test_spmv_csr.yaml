@@ -40,9 +40,9 @@ Tests:
   M: [50]
   N: [84]
   alpha: [2.0]
-  alphai: [0.0]
+  alphai: [0.5]
   beta: [1.0]
-  betai: [0.0]
+  betai: [0.5]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
@@ -58,9 +58,9 @@ Tests:
   M: [50]
   N: [84]
   alpha: [2.0]
-  alphai: [0.0]
+  alphai: [1.0]
   beta: [1.0]
-  betai: [0.0]
+  betai: [1.0]
   transA: [HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT]
@@ -73,9 +73,9 @@ Tests:
   M: 1
   N: 1
   alpha: [2.0]
-  alphai: [0.0]
+  alphai: [-0.5]
   beta: [1.0]
-  betai: [0.0]
+  betai: [-0.5]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
@@ -88,6 +88,7 @@ Tests:
              nos5,
              nos6,
              nos7]
+             
 - name: spmv_csr
   category: pre_checkin
   function: spmv_csr

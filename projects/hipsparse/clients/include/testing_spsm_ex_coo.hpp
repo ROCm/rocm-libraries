@@ -182,7 +182,7 @@ void testing_spsm_ex_coo(Arguments argus)
     I                    m        = argus.M;
     I                    n        = argus.N;
     I                    k        = argus.K;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
+    T                    h_alpha  = argus.get_alpha<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseOperation_t transB   = argus.transB;
     hipsparseOrder_t     orderB   = argus.orderB;

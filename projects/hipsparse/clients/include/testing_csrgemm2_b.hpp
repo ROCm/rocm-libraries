@@ -821,7 +821,7 @@ void testing_csrgemm2_b(Arguments argus)
     hipsparseIndexBase_t idx_base_C = argus.baseC;
     hipsparseIndexBase_t idx_base_D = argus.baseD;
     std::string          filename   = argus.filename;
-    T                    beta       = make_DataType<T>(argus.beta);
+    T                    beta       = argus.get_beta<T>();
 
     T* h_beta = &beta;
 

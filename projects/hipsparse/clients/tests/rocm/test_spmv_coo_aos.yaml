@@ -40,7 +40,7 @@ Tests:
   M: [50]
   N: [84]
   alpha: [2.0]
-  alphai: [0.0]
+  alphai: [-0.5]
   beta: [1.0]
   betai: [0.0]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
@@ -59,7 +59,7 @@ Tests:
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
-  betai: [0.0]
+  betai: [1.0]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 

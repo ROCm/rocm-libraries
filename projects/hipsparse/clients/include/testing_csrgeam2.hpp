@@ -737,8 +737,8 @@ void testing_csrgeam2(Arguments argus)
     hipsparseIndexBase_t idx_base_B = argus.baseB;
     hipsparseIndexBase_t idx_base_C = argus.baseC;
     std::string          filename   = argus.filename;
-    T                    h_alpha    = make_DataType<T>(argus.alpha);
-    T                    h_beta     = make_DataType<T>(argus.beta);
+    T                    h_alpha    = argus.get_alpha<T>();
+    T                    h_beta     = argus.get_beta<T>();
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;

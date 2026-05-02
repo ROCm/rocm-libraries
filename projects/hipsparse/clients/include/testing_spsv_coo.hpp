@@ -165,7 +165,7 @@ void testing_spsv_coo(Arguments argus)
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
     I                    m        = argus.M;
     I                    n        = argus.N;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
+    T                    h_alpha  = argus.get_alpha<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseIndexBase_t idx_base = argus.baseA;
     hipsparseDiagType_t  diag     = argus.diag_type;
