@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,6 @@ from Tensile.Common import fastdeepcopy as deepcopy
 from Tensile.Common.Constants import INDEX_CHARS
 from Tensile.Common.DataType import DataType
 from Tensile.Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
-
 
 
 
@@ -775,7 +774,7 @@ class ProblemType(Mapping):
     else:
       self["DataTypeB"] = self["MacDataTypeB"]
     self["DataTypeB"] = getRealDataTypeB(self["DataTypeB"])
-    
+
     if "DestDataType" in config:
       self["DestDataType"] = DataType(config["DestDataType"])
     else:
@@ -963,9 +962,6 @@ class ProblemType(Mapping):
     computeType = self["ComputeDataType"]
 
     gemmType = ( inType.toChar(), outType.toChar(), computeType.toChar() )
-    if gemmType not in _validGEMMTypes:
-      raise Exception("This typed-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet."%(gemmType[0], gemmType[1], gemmType[2]))
-
     if self["MXBlockA"] or self["MXBlockB"]:
       if gemmType not in _validMXGEMMTypes:
         raise Exception("This typed-MX-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet." % (gemmType[0], gemmType[1], gemmType[2]))
@@ -979,6 +975,8 @@ class ProblemType(Mapping):
         raise Exception("MXShape is not supported")
       elif (self["MXBlockA"] not in _validMXGEMMBlock):
         raise Exception("MXShape is not supported")
+    elif gemmType not in _validGEMMTypes:
+      raise Exception("This typed-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet."%(gemmType[0], gemmType[1], gemmType[2]))
 
   ########################################
   def initGEMM(self):
@@ -1148,9 +1146,9 @@ class ProblemType(Mapping):
 
     if printIndexAssignmentInfo:
       print("TLUA:  %s (stridePosA(%d) <? unrollIdxA(%d)" % \
-			(state["TLUA"], strideIdxA, unrollIdxA))
+           (state["TLUA"], strideIdxA, unrollIdxA))
       print("TLUB:  %s (stridePosB(%d) <? unrollIdxB(%d)" % \
-	  		(state["TLUB"], strideIdxB, unrollIdxB))
+           (state["TLUB"], strideIdxB, unrollIdxB))
       print("Index01A:  %s" % state["Index01A"])
       print("Index01B:  %s" % state["Index01B"])
     #unrollDimStrideGreaterThanTileDimStrideA = TLUA = !transA = fast

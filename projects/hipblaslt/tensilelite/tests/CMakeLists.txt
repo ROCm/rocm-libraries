@@ -49,6 +49,14 @@ target_link_libraries(tensilelite-tests
         ${hipblaslt_msgpack_target}
 )
 
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_sources(tensilelite-tests
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/MXDataGen_test.cpp"
+    )
+    target_link_libraries(tensilelite-tests PRIVATE hipblaslt::mxdatagen)
+endif()
+
 gtest_discover_tests(tensilelite-tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)

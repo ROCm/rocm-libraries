@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,9 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
+#endif
 #include "near.hpp"
 #include "norm.hpp"
 #include "unit.hpp"
@@ -84,7 +86,7 @@ bool isSwizzleSupported(hipDataType datatype)
     case HIP_R_16BF:
     case HIP_R_16F:
     case HIP_R_8F_E4M3_FNUZ:
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         return true;
     default:
         return false;
@@ -100,7 +102,7 @@ hipblasLtOrder_t orderForDatatype(hipDataType datatype)
         return HIPBLASLT_ORDER_COL16_4R8;
     case HIP_R_8F_E4M3_FNUZ:
         return HIPBLASLT_ORDER_COL16_4R16;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         return HIPBLASLT_ORDER_COL16_4R32;
     default:
         throw std::runtime_error("unsupported datatype in orderForDatatype");
@@ -141,7 +143,7 @@ void calculateKforSwizzling(
         MiK  = 32;
         MiKv = 8;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         // For fp4 viewed as uint8: matches shuffle_weight with layout=(16,16)
         // BK=32 bytes, K=16 bytes, BK/K=2
         MiK  = 16; // K inner block = 16 bytes
@@ -243,7 +245,7 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
             throw std::runtime_error("Error type in mx_type_to_f32()");
         }
 #if defined(HIPBLASLT_USE_FP6)
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
@@ -255,7 +257,7 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         }
 #endif
 #if defined(HIPBLASLT_USE_BF6)
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
@@ -267,7 +269,7 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         }
 #endif
 #if defined(HIPBLASLT_USE_FP4)
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
@@ -396,7 +398,7 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
         swizzle_tensor<hipblaslt_bf8>(
             dst.as<hipblaslt_bf8>(), src.as<hipblaslt_bf8>(), datatype, arg, b, m_n, k, ld, colMaj);
         return;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         // fp4: 2 elements per byte, so k_bytes = k/2, ld_bytes = ld/2
         swizzle_tensor<uint8_t>(
             dst.as<uint8_t>(), src.as<uint8_t>(), datatype, arg, b, m_n, k / 2, ld / 2, colMaj);
@@ -466,13 +468,13 @@ Tout cast_from_type(void* in, hipDataType type, size_t index)
         return static_cast<Tout>((static_cast<int32_t*>(in))[index]);
     case HIP_R_8I:
         return static_cast<Tout>((static_cast<hipblasLtInt8*>(in))[index]);
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "cast_from_type() does not support FP6" << std::endl;
         return 0;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "cast_from_type() does not support BF6" << std::endl;
         return 0;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "cast_from_type() does not support FP4" << std::endl;
         return 0;
     default:
@@ -516,13 +518,13 @@ void saturate_cast_to_type(void* dst, Tin src, hipDataType typeD, size_t indexD)
     case HIP_R_8I:
         static_cast<hipblasLtInt8*>(dst)[indexD] = saturate_cast<hipblasLtInt8>(src);
         return;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "cast_from_type() does not support FP6!" << std::endl;
         return;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "cast_from_type() does not support BF6!" << std::endl;
         return;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "cast_from_type() does not support FP4!" << std::endl;
         return;
     default:
@@ -1369,9 +1371,9 @@ hipDataType derive_unset_bias_type(const Arguments& arg)
             else //more default cases once support C != D
                 real_bias_type = HIP_R_16F;
         }
-        else if((arg.a_type == HIP_R_6F_E2M3_EXT && arg.b_type == HIP_R_6F_E2M3_EXT)
-                || (arg.a_type == HIP_R_6F_E3M2_EXT && arg.b_type == HIP_R_6F_E3M2_EXT)
-                || (arg.a_type == HIP_R_4F_E2M1_EXT && arg.b_type == HIP_R_4F_E2M1_EXT))
+        else if((arg.a_type == HIP_R_6F_E2M3 && arg.b_type == HIP_R_6F_E2M3)
+                || (arg.a_type == HIP_R_6F_E3M2 && arg.b_type == HIP_R_6F_E3M2)
+                || (arg.a_type == HIP_R_4F_E2M1 && arg.b_type == HIP_R_4F_E2M1))
         {
             if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
                 real_bias_type = HIP_R_16BF;
@@ -1429,9 +1431,9 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
         HIP_R_8F_E5M2,
         HIP_R_8F_E4M3_FNUZ,
         HIP_R_8F_E5M2_FNUZ,
-        static_cast<hipDataType>(HIP_R_6F_E2M3_EXT),
-        static_cast<hipDataType>(HIP_R_6F_E3M2_EXT),
-        static_cast<hipDataType>(HIP_R_4F_E2M1_EXT),
+        static_cast<hipDataType>(HIP_R_6F_E2M3),
+        static_cast<hipDataType>(HIP_R_6F_E3M2),
+        static_cast<hipDataType>(HIP_R_4F_E2M1),
     };
 
     hipDataType real_compute_input_typeA = arg.compute_input_typeA;
@@ -2481,6 +2483,9 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
+        // TODO: mxDataGenerator can only generate data on CPU. Using
+        //       GPU to generate data might be more efficient and avoid
+        //       unnecessary hipMemCpy when CPU verification is not needed.
         if(isBlockScaling(arg.scaleA))
         {
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -2500,10 +2505,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             // For MX format, use mxDataGenerator to generate input data
             // (consists of data part and scale part)
-            // TODO: mxDataGenerator can only generate data on CPU. Using
-            //       GPU to generate data might be more efficient and avoid
-            //       unnecessary hipMemCpy when CPU verification is not needed.
-
             // preTile for A: {tileK, tileM} - swap from preTileSizeForScaleA which returns {tileM, tileK}
             auto preTileATmp = preTileSizeForScaleA(arg.scaleA);
             auto preTileA    = (preTileATmp.size() == 2)
@@ -2606,9 +2607,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             // For MX format, use mxDataGenerator to generate
             // input data (consists of data part and scale part)
-            // TODO: mxDataGenerator can only generate data on CPU. Using
-            //       GPU to generate data might be more efficient and avoid
-            //       unnecessary hipMemCpy when CPU verification is not needed.
             // preTile for B: {tileK, tileN}
             auto preTileB = preTileSizeForScaleB(arg.scaleB);
             refB.emplace_back(generateMXInput(TiB,
@@ -2728,34 +2726,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                             do_swizzle_b,
                                             stream));
                 CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
-#ifndef HIPBLASLT_USE_ROCROLLER
-                if(isBlockScaling(arg.scaleA))
-                {
-                    CHECK_HIP_ERROR(
-                        synchronize(hScaleA[i], dScaleA[i], 0, 0, 0, 0, 1, false, stream));
-                    refA.emplace_back(mx_type_to_f32(TiA,
-                                                     scaleDataType(arg.scaleA),
-                                                     hA[i],
-                                                     hScaleA[i],
-                                                     A_row[i],
-                                                     A_col[i],
-                                                     scaleA_row,
-                                                     scaleA_col));
-                }
-                if(isBlockScaling(arg.scaleB))
-                {
-                    CHECK_HIP_ERROR(
-                        synchronize(hScaleB[i], dScaleB[i], 0, 0, 0, 0, 1, false, stream));
-                    refB.emplace_back(mx_type_to_f32(TiB,
-                                                     scaleDataType(arg.scaleB),
-                                                     hB[i],
-                                                     hScaleB[i],
-                                                     B_row[i],
-                                                     B_col[i],
-                                                     scaleB_row,
-                                                     scaleB_col));
-                }
-#endif
+
 
                 if(arg.dump_matrix)
                 {

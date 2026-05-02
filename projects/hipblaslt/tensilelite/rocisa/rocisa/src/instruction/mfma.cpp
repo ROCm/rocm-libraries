@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -161,9 +161,13 @@ void mfma_inst(nb::module_ m_mfma)
         });
 
     nb::class_<rocisa::MXMFMAInstruction, rocisa::Instruction>(m_mfma, "MXMFMAInstruction")
+        // The C++ constructor parameter order was reshuffled (mxScaleA/BType moved
+        // from positions 3-4 to after mxsb). nb::kw_only() forces every Python
+        // caller to spell out argument names, which prevents a silent positional
+        // mis-binding if the C++ signature changes again. The lone in-tree caller
+        // (KernelWriterAssembly.MXMFMAInstruction(...)) already uses keyword args,
+        // so this is non-breaking.
         .def(nb::init<rocisa::InstType,
-                      rocisa::InstType,
-                      rocisa::InstType,
                       rocisa::InstType,
                       const std::vector<int>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -172,21 +176,24 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
+                      rocisa::InstType,
+                      rocisa::InstType,
                       int,
                       const std::string&>(),
+             nb::kw_only(),
              nb::arg("instType"),
              nb::arg("accType"),
-             nb::arg("mxScaleAType"),
-             nb::arg("mxScaleBType"),
              nb::arg("variant"),
              nb::arg("acc"),
              nb::arg("a"),
              nb::arg("b"),
-             nb::arg("acc2"),
-             nb::arg("mxsa"),
-             nb::arg("mxsb"),
-             nb::arg("block"),
-             nb::arg("comment") = "")
+             nb::arg("acc2")         = nullptr,
+             nb::arg("mxsa")         = nullptr,
+             nb::arg("mxsb")         = nullptr,
+             nb::arg("mxScaleAType") = rocisa::InstType::INST_F32,
+             nb::arg("mxScaleBType") = rocisa::InstType::INST_F32,
+             nb::arg("block")        = 0,
+             nb::arg("comment")      = "")
         .def_rw("a", &rocisa::MXMFMAInstruction::a)
         .def_rw("b", &rocisa::MXMFMAInstruction::b)
         .def_rw("mxsa", &rocisa::MXMFMAInstruction::mxsa)
@@ -194,6 +201,7 @@ void mfma_inst(nb::module_ m_mfma)
         .def_rw("acc", &rocisa::MXMFMAInstruction::acc)
         .def_rw("acc2", &rocisa::MXMFMAInstruction::acc2)
         .def("getParams", &rocisa::MXMFMAInstruction::getParams)
+        .def("getIssueLatency", &rocisa::MXMFMAInstruction::getIssueLatency)
         .def("__str__", &rocisa::MXMFMAInstruction::toString)
         .def("__deepcopy__", [](const rocisa::MXMFMAInstruction& self, const nb::dict&) {
             return new rocisa::MXMFMAInstruction(self);
