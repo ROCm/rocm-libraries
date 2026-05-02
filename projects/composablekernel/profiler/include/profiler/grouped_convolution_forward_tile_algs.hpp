@@ -117,7 +117,7 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                                          name,
                                                          desc,
                                                          outputs.*ptr,
-                                                         reference->*ptr,
+                                                         (*reference).*ptr,
                                                          ck::profiler::get_rtol<DataType>(),
                                                          ck::profiler::get_atol<DataType>());
                                                  });
