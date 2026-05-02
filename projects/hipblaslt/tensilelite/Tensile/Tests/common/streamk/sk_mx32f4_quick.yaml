@@ -24,6 +24,7 @@ GlobalParameters:
   MaxFileName: 128
   DeviceLDS: 163840
   MaxLDS: 163840
+  MXScaleFormat: 1
 
 BenchmarkProblems:
   ########################################
@@ -68,11 +69,11 @@ BenchmarkProblems:
         # - UseSgprForGRO: [0,1]
         - UseSgprForGRO: [0]
         # - DepthU: [64, 128]
-        - DepthU: [128]
+        - DepthU: [256]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         - AssertSummationElementMultiple: [64]
-        - LocalReadVectorWidth: [16]
+        - LocalReadVectorWidth: [32]
         # - PrefetchGlobalRead: [0,1,2]
         - PrefetchGlobalRead: [2]
         # - PrefetchLocalRead: [0,1]
@@ -96,6 +97,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - SourceSwap: [1]
         - StreamK: [3]
+        - UseSubtileImpl: [1] # TODO: enable subtile
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

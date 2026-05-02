@@ -215,7 +215,7 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
 
   # Add MX scale format if set
   if globalParameters["MXScaleFormat"]:
-    args.append("--mx-scale-format={}".format(globalParameters["MXScaleFormat"]))
+    args.extend(["--mx-scale-format", str(globalParameters["MXScaleFormat"])])
 
   try:
     subprocess.run(args, check=True)
@@ -332,7 +332,7 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
 
     clientExe = getClientExecutablePath()
     timingFlag = " --timing-instrumentation" if globalParameters["TimingInstrumentation"] else ""
-    mxScaleFormatFlag = " --mx-scale-format={}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
+    mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
       runScriptFile.write("{} --config-file {}{}{}\n".format(clientExe, configFile, timingFlag, mxScaleFormatFlag))
     runScriptFile.write("ERR2=$?\n\n")
@@ -356,7 +356,7 @@ fi
         runScriptFile.write("%s -d 0 --resetclocks\n" % globalParameters["ROCmSMIPath"])
         runScriptFile.write("%s -d 0 --setfan 50\n" % globalParameters["ROCmSMIPath"])
   else:
-    mxScaleFormatFlag = " --mx-scale-format={}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
+    mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
       runScriptFile.write("{} --config-file {} --best-solution 1{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
 
