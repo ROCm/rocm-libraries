@@ -29,10 +29,12 @@ from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, SBa
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
     SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
-    VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32
+    VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, \
+    SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
+from .SubtileBasedKernel import localReadResetOffsetsSubtile
 
 from ..Common import print2, ceilDivide, log2
 from ..Component import Component
@@ -257,10 +259,18 @@ class StreamK(Component):
 
         For MX scale tensors, DepthU is divided by the MX block size because
         there is one scale element per MXBlock data elements.
+        For MXSA/MXSB (MX swizzled/pre-shuffle case), the swizzled block size
+        is 32 * 256 so an additional *32 multiplier is needed.
         """
         key = "_DepthU%s" % tc
         if key in kernel:
-            return kernel[key]
+            _DepthU = kernel[key]
+            if tc in ("MXSA", "MXSB") and kernel.get("UseSubtileImpl"):
+                # UseSubtileImpl MX swizzled(pre shuffle) case: swizzled block size is 32 * 256,
+                # so the effective K stride for the scale tensor is DepthU * 32.
+                # Non-subtile MX kernels use the raw _DepthU (scale elements per tile in K).
+                _DepthU = (_DepthU * 32)
+            return _DepthU
         return kernel["DepthU"]
 
     def shiftSrd(self, writer, srdIdx) -> Module:
@@ -314,12 +324,15 @@ class StreamK(Component):
 
         # Always reset pointers to handle odd-exit case which moves LRO to the upper bank
         if kernel["PrefetchGlobalRead"]: # not self.prefetchAcrossPersistent
-            module.add(writer.localReadResetOffsets(kernel, tPA))
-            if kernel["ProblemType"]["MXBlockA"] and "MX" in tPA:
-                module.add(writer.localReadResetOffsets(kernel, tPA["MX"]))
-            if kernel["ProblemType"]["MXBlockB"] and "MX" in tPB:
-                module.add(writer.localReadResetOffsets(kernel, tPB["MX"]))
-            module.add(writer.localReadResetOffsets(kernel, tPB))
+            if not kernel["UseSubtileImpl"]:
+                module.add(writer.localReadResetOffsets(kernel, tPA))
+                if kernel["ProblemType"]["MXBlockA"] and "MX" in tPA:
+                    module.add(writer.localReadResetOffsets(kernel, tPA["MX"]))
+                if kernel["ProblemType"]["MXBlockB"] and "MX" in tPB:
+                    module.add(writer.localReadResetOffsets(kernel, tPB["MX"]))
+                module.add(writer.localReadResetOffsets(kernel, tPB))
+            else:
+                module.add(localReadResetOffsetsSubtile(writer, kernel))
 
         module.addComment0("StreamK calculate tile idx and map to WG")
 
@@ -841,7 +854,34 @@ class StreamK(Component):
                 writer.sgprPool.checkIn(tmpSgpr)
 
                 fixupEdge = [False] # Test no edge variant
-                module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
+                # Fixup writes to workspace (no bias LDS barriers), safe to defer.
+                deferFixup = (
+                    kernel.get("UseSubtileImpl")
+                )
+                if deferFixup:
+                    fixupDeferredLabel = Label(label=writer.labels.getNameInc("Fixup_E0_Deferred"), comment="")
+                    fixupReturnLabel = Label(label=writer.labels.getNameInc("Fixup_E0_Deferred_Return"), comment="")
+                    # Keep original Fixup_E0 label inline as a stub
+                    fixupInlineLabel = Label(label=writer.labels.getNameInc("Fixup_E%u" % 0), comment="")
+                    module.add(fixupInlineLabel)
+                    with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                        module.add(SLongBranchPositive(fixupDeferredLabel, tmpSgprInfo, comment="jump to deferred fixup block"))
+                    module.addComment0("=" * 60)
+                    module.addComment0(" Fixup block deferred to after persistent loop")
+                    module.addComment0(" (would have been inline here in non-deferred version)")
+                    module.addComment0("=" * 60)
+                    module.add(fixupReturnLabel)
+                    # Collect fixup code in deferred module
+                    fixupModule = Module("Fixup_DeferredBlock")
+                    fixupModule.add(fixupDeferredLabel)
+                    fixupModule.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
+                    with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                        posLabel = writer.labels.getNameInc("FixupDeferredReturnDir")
+                        fixupModule.add(SLongBranch(fixupReturnLabel, tmpSgprInfo, posLabel, comment="return from deferred fixup block"))
+                    writer.states.deferredFixupModule = fixupModule
+                else:
+                    fixupModule = None
+                    module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
 
                 if kernel["StreamK"] >= 2:
                     sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
@@ -904,14 +944,44 @@ class StreamK(Component):
             with self.allocTmpSgpr(4) as tmpSgprInfo:
                 module.add(writer.checkIsEdge(kernel, tmpSgprInfo, partialsLabels[True], partialsLabels[True]))
 
-        for edge in edges:
-            module.add(partialsLabels[edge])
-            sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-            if writer.isStreamKConstantsToVgprEnabled(kernel):
-                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
-            module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
-            writer.releaseStreamKConstSgpr(sIdx)
-            module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, endLabel))
+        # WritePartials writes to workspace (no bias LDS barriers), safe to defer.
+        deferPartials = (
+            kernel.get("UseSubtileImpl")
+        )
+        if deferPartials:
+            partialsDeferredLabel = Label(label=writer.labels.getNameInc("GW_Partials_E0_Deferred"), comment="")
+            partialsReturnLabel = Label(label=writer.labels.getNameInc("GW_Partials_E0_Deferred_Return"), comment="")
+            # Inline stub
+            for edge in edges:
+                module.add(partialsLabels[edge])
+            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                module.add(SLongBranchPositive(partialsDeferredLabel, tmpSgprInfo, comment="writePartials (deferred)"))
+            module.addComment0("=" * 60)
+            module.addComment0(" WritePartials block deferred to after persistent loop")
+            module.addComment0(" (would have been inline here in non-deferred version)")
+            module.addComment0("=" * 60)
+            module.add(partialsReturnLabel)
+            module.add(SBranch(labelName=endLabel.getLabelName(), comment="jump to end"))
+            # Deferred block
+            partialsModule = Module("Partials_DeferredBlock")
+            partialsModule.add(partialsDeferredLabel)
+            for edge in edges:
+                sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
+                if writer.isStreamKConstantsToVgprEnabled(kernel):
+                    partialsModule.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+                partialsModule.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
+                writer.releaseStreamKConstSgpr(sIdx)
+                partialsModule.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, partialsReturnLabel))
+            writer.states.deferredPartialsModule = partialsModule
+        else:
+            for edge in edges:
+                module.add(partialsLabels[edge])
+                sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
+                if writer.isStreamKConstantsToVgprEnabled(kernel):
+                    module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+                module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
+                writer.releaseStreamKConstSgpr(sIdx)
+                module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, endLabel))
 
         return module
 
@@ -1064,6 +1134,15 @@ class StreamK(Component):
         else:
             numElementsPerBatch = len(elements[edgeI]) # max, do 'em all
 
+        # Cap batch size to align on MIWaveTile[0] boundaries (see refineOccupancy).
+        if kernel.get("UseSubtileImpl") and kernel.get("EnableMatrixInstruction"):
+            miwt0 = kernel["MIWaveTile"][0]
+            totalElems = kernel["MIWaveTile"][0] * kernel["MIWaveTile"][1]
+            if numElementsPerBatch >= totalElems:
+                numElementsPerBatch = totalElems
+            elif miwt0 > 1 and numElementsPerBatch >= miwt0:
+                numElementsPerBatch = (numElementsPerBatch // miwt0) * miwt0
+
         # assert(writer.states.numVgprValuC % gwvw == 0) # sanity check
 
         numElementsPerBatch = numElementsPerBatch if not kernel["NumElementsPerBatchStore"] else min(kernel["NumElementsPerBatchStore"],numElementsPerBatch)
@@ -1170,7 +1249,12 @@ class StreamK(Component):
                 module.add(skipFlagSet)
             module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
 
-        module.add(SBranch(labelName=endLabel.getLabelName(), comment="jump to end"))
+        if "Deferred" in endLabel.getLabelName():
+            posLabel = writer.labels.getNameInc("PartialsDeferredReturnDir")
+            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                module.add(SLongBranch(endLabel, tmpSgprInfo, posLabel, comment="jump to end"))
+        else:
+            module.add(SBranch(labelName=endLabel.getLabelName(), comment="jump to end"))
 
         # Finish one write path, reset currPreLoopVmcntCase to Undefined
         # self.currPreLoopVmcntCase = PreLoopVmcntCase.Undefined
@@ -1286,7 +1370,8 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
+                        startVgprValuOffset = 0 if kernel.get("UseSubtileImpl") else writer.states.c.startVgprValu
+                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
                         #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
@@ -1354,8 +1439,14 @@ class StreamK(Component):
             element = batchElements[elementIdx]
             addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
             addr = addrCalc.addrDVgpr
-            sumIdx = ss.elementSumIdx[elementIdx]
-
+            # For UseSubtileImpl, vgprValuC is remapped; add the base offset so the
+            # WS store reads from the correct accumulator VGPRs.  For the regular path
+            # (non-subtile), startVgprValu is already accounted for by the vgprValuC
+            # assembler macro, so no offset is needed (matches rebase behaviour).
+            if kernel.get("UseSubtileImpl"):
+                sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
+            else:
+                sumIdx = ss.elementSumIdx[elementIdx]
             storeWidth = kernel["StoreVectorWidth"]
             # storeWidth = 2
             if batchIdx == 0 and elementIdx == 0:

@@ -28,6 +28,7 @@ GlobalParameters:
 #  PrintTensorC: True
 #  PrintTensorD: True
 #  PrintTensorRef: True
+  MXScaleFormat: 1
 
 BenchmarkProblems:
   ########################################
@@ -103,6 +104,8 @@ BenchmarkProblems:
 #        - NumElementsPerBatchStore: [0]
 #        - StorePriorityOpt: [0]
 #        - StaggerU: [0]
+        - StreamK: [0,3]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -165,6 +168,7 @@ BenchmarkProblems:
         - DirectToLds: [0,1,2,3]
         - Use64bShadowLimitMX: [0,1]
         - StreamK: [0,3]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

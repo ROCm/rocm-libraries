@@ -136,7 +136,7 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
-                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::optional<InstructionInput>&,
                       bool,
                       const std::string&>(),
              nb::arg("instType"),
@@ -146,7 +146,7 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("acc"),
              nb::arg("a"),
              nb::arg("b"),
-             nb::arg("acc2")    = nullptr,
+             nb::arg("acc2")    = nb::none(),
              nb::arg("neg")     = false,
              nb::arg("comment") = "")
         .def_rw("a", &rocisa::MFMAInstruction::a)
@@ -176,6 +176,7 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::optional<rocisa::VOP3PModifiers>&,
                       rocisa::InstType,
                       rocisa::InstType,
                       int,
@@ -190,6 +191,7 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("acc2")         = nullptr,
              nb::arg("mxsa")         = nullptr,
              nb::arg("mxsb")         = nullptr,
+             nb::arg("vop3")         = std::nullopt,
              nb::arg("mxScaleAType") = rocisa::InstType::INST_F32,
              nb::arg("mxScaleBType") = rocisa::InstType::INST_F32,
              nb::arg("block")        = 0,
@@ -200,6 +202,7 @@ void mfma_inst(nb::module_ m_mfma)
         .def_rw("mxsb", &rocisa::MXMFMAInstruction::mxsb)
         .def_rw("acc", &rocisa::MXMFMAInstruction::acc)
         .def_rw("acc2", &rocisa::MXMFMAInstruction::acc2)
+        .def_rw("vop3", &rocisa::MXMFMAInstruction::vop3)
         .def("getParams", &rocisa::MXMFMAInstruction::getParams)
         .def("getIssueLatency", &rocisa::MXMFMAInstruction::getIssueLatency)
         .def("__str__", &rocisa::MXMFMAInstruction::toString)
