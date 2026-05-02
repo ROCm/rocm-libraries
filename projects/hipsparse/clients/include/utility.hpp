@@ -478,7 +478,7 @@ template <>
 inline hipComplex testing_fma(hipComplex p, hipComplex q, hipComplex r)
 {
     float re = std::fmaf(-p.y, q.y, std::fmaf(p.x, q.x, r.x));
-    float im = std::fmaf( p.x, q.y, std::fmaf(p.y, q.x, r.y));
+    float im = std::fmaf(p.x, q.y, std::fmaf(p.y, q.x, r.y));
     return make_hipComplex(re, im);
 }
 
@@ -486,7 +486,7 @@ template <>
 inline hipDoubleComplex testing_fma(hipDoubleComplex p, hipDoubleComplex q, hipDoubleComplex r)
 {
     double re = std::fma(-p.y, q.y, std::fma(p.x, q.x, r.x));
-    double im = std::fma( p.x, q.y, std::fma(p.y, q.x, r.y));
+    double im = std::fma(p.x, q.y, std::fma(p.y, q.x, r.y));
     return make_hipDoubleComplex(re, im);
 }
 
