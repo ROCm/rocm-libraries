@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -584,9 +584,9 @@ bool norm_check(double norm_error, hipDataType type)
     case HIP_R_8I:
         return norm_error < 0.01;
     // TODO: find a suitable rnom value for f6 and f4
-    case HIP_R_6F_E2M3_EXT:
-    case HIP_R_6F_E3M2_EXT:
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_6F_E2M3:
+    case HIP_R_6F_E3M2:
+    case HIP_R_4F_E2M1:
         return norm_error < 0.5;
     default:
         return false;
