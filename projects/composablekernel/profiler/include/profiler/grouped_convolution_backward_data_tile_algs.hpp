@@ -84,8 +84,8 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                                               ck_tile::bfloat16_t>>;
 
     std::unique_ptr<ckt::Outputs<SIGNATURE>> reference;
-    const auto conv_param = args.to_ck_tile_conv_param();
-    float max_accumulated_value       = 0.f;
+    const auto conv_param       = args.to_ck_tile_conv_param();
+    float max_accumulated_value = 0.f;
     if(do_verification)
     {
         reference = ckt::alloc_outputs(args);
@@ -97,8 +97,8 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
         // Get max possible value in the output
         const std::size_t input_bytes_num = conv_param.template GetInputByte<DataType>();
         std::vector<DataType> ref(input_bytes_num / sizeof(DataType));
-        HIP_CHECK_ERROR(hipMemcpy(
-            &ref.data()[0], reference->input, input_bytes_num, hipMemcpyDeviceToHost));
+        HIP_CHECK_ERROR(
+            hipMemcpy(&ref.data()[0], reference->input, input_bytes_num, hipMemcpyDeviceToHost));
         max_accumulated_value = *std::max_element(ref.begin(), ref.end());
     }
 

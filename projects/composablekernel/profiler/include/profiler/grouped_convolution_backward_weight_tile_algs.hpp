@@ -82,8 +82,8 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
                                               ck_tile::bfloat16_t>>;
 
     std::unique_ptr<ckt::Outputs<SIGNATURE>> reference;
-    const auto conv_param             = args.to_ck_tile_conv_param();
-    float max_accumulated_value       = 0.f;
+    const auto conv_param       = args.to_ck_tile_conv_param();
+    float max_accumulated_value = 0.f;
     if(do_verification)
     {
         reference = ckt::alloc_outputs(args);
@@ -95,8 +95,8 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
         // Get max possible value in the output
         const std::size_t weight_bytes_num = conv_param.template GetWeightByte<DataType>();
         std::vector<DataType> ref(weight_bytes_num / sizeof(DataType));
-        HIP_CHECK_ERROR(hipMemcpy(
-            &ref.data()[0], reference->weight, weight_bytes_num, hipMemcpyDeviceToHost));
+        HIP_CHECK_ERROR(
+            hipMemcpy(&ref.data()[0], reference->weight, weight_bytes_num, hipMemcpyDeviceToHost));
         max_accumulated_value = *std::max_element(ref.begin(), ref.end());
     }
     const index_t num_accums = std::accumulate(std::begin(conv_param.output_spatial_lengths_),

@@ -90,7 +90,7 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
         auto ref_conv = ReferenceInstance{};
         ckt::run(ref_conv, args, inputs, reference.get());
     }
-    auto run_alg    = [&](auto&& run_alg_func) {
+    auto run_alg = [&](auto&& run_alg_func) {
         std::tie(is_supported, avg_time, op_name) = run_alg_func(args, inputs, outputs, s_conf);
         if(is_supported)
         {
@@ -109,18 +109,18 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
             if(do_verification)
             {
                 ckt::ValidationReport report;
-                ckt::Outputs<SIGNATURE>::reflect(
-                    args,
-                    [&](std::string_view name,
-                        const auto& desc,
-                        void* ckt::Outputs<SIGNATURE>::*ptr) {
-                        report.check(name,
-                                     desc,
-                                     outputs.*ptr,
-                                     reference->*ptr,
-                                     ck::profiler::get_rtol<DataType>(),
-                                     ck::profiler::get_atol<DataType>());
-                    });
+                ckt::Outputs<SIGNATURE>::reflect(args,
+                                                 [&](std::string_view name,
+                                                     const auto& desc,
+                                                     void* ckt::Outputs<SIGNATURE>::*ptr) {
+                                                     report.check(
+                                                         name,
+                                                         desc,
+                                                         outputs.*ptr,
+                                                         reference->*ptr,
+                                                         ck::profiler::get_rtol<DataType>(),
+                                                         ck::profiler::get_atol<DataType>());
+                                                 });
 
                 for(const auto& error : report.get_errors())
                 {
