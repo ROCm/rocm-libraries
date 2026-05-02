@@ -67,7 +67,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 
     // addPeepholeOptPasses(pm, optLevel);
 
-    // ========== Phase 3: Instruction Scheduling ==========
+    // Instruction scheduling
     pm.addPass(createStinkyBuildImplicitDependencyPass());
     // pm.addPass(createScheduleFirstLRsPass());
     pm.addPass(createStinkyDAGSchedulerPass());
