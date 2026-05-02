@@ -196,6 +196,26 @@ def build(
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
     ]
 
+    # Locate ROCmCMakeBuildTools for version TWEAK (git hash) support.
+    _rocm_sdk = shutil.which("rocm-sdk")
+    if _rocm_sdk:
+        try:
+            _sdk_root = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--root"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_root:
+                _rocm_cmake_dir = Path(_sdk_root) / "share/rocmcmakebuildtools/cmake"
+                if _rocm_cmake_dir.is_dir():
+                    cmake_opts.append(
+                        f"-DROCmCMakeBuildTools_DIR={_rocm_cmake_dir.as_posix()}"
+                    )
+        except subprocess.CalledProcessError:
+            pass
+
     compiler_opts = []
 
     if sys.platform == "win32":
