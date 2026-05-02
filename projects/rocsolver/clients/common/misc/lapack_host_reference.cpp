@@ -2086,7 +2086,7 @@ void ssbev_(const char* evect,
             const int* kd,
             float* Aband,
             const int* ldab,
-            float* W,
+            float* Lambda,
             float* Z,
             const int* ldz,
             float* work,
@@ -2097,7 +2097,7 @@ void dsbev_(const char* evect,
             const int* kd,
             double* Aband,
             const int* ldab,
-            double* W,
+            double* Lambda,
             double* Z,
             const int* ldz,
             double* work,
@@ -2108,7 +2108,7 @@ void chbev_(const char* evect,
             const int* kd,
             rocblas_float_complex* Aband,
             const int* ldab,
-            float* W,
+            float* Lambda,
             rocblas_float_complex* Z,
             const int* ldz,
             rocblas_float_complex* work,
@@ -2120,7 +2120,7 @@ void zhbev_(const char* evect,
             const int* kd,
             rocblas_double_complex* Aband,
             const int* ldab,
-            double* W,
+            double* Lambda,
             rocblas_double_complex* Z,
             const int* ldz,
             rocblas_double_complex* work,
@@ -6921,7 +6921,7 @@ void cpu_sbev_hbev<float, float>(rocblas_evect evect,
                                  rocblas_int kd,
                                  float* Aband,
                                  rocblas_int ldab,
-                                 float* W,
+                                 float* Lambda,
                                  float* Z,
                                  rocblas_int ldz,
                                  float* work,
@@ -6930,7 +6930,7 @@ void cpu_sbev_hbev<float, float>(rocblas_evect evect,
 {
     char evectC = rocblas2char_evect(evect);
     char uploC = rocblas2char_fill(uplo);
-    ssbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, info);
+    ssbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, Lambda, Z, &ldz, work, info);
 }
 
 template <>
@@ -6940,7 +6940,7 @@ void cpu_sbev_hbev<double, double>(rocblas_evect evect,
                                    rocblas_int kd,
                                    double* Aband,
                                    rocblas_int ldab,
-                                   double* W,
+                                   double* Lambda,
                                    double* Z,
                                    rocblas_int ldz,
                                    double* work,
@@ -6949,7 +6949,7 @@ void cpu_sbev_hbev<double, double>(rocblas_evect evect,
 {
     char evectC = rocblas2char_evect(evect);
     char uploC = rocblas2char_fill(uplo);
-    dsbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, info);
+    dsbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, Lambda, Z, &ldz, work, info);
 }
 
 template <>
@@ -6959,7 +6959,7 @@ void cpu_sbev_hbev<rocblas_float_complex, float>(rocblas_evect evect,
                                                  rocblas_int kd,
                                                  rocblas_float_complex* Aband,
                                                  rocblas_int ldab,
-                                                 float* W,
+                                                 float* Lambda,
                                                  rocblas_float_complex* Z,
                                                  rocblas_int ldz,
                                                  rocblas_float_complex* work,
@@ -6968,7 +6968,7 @@ void cpu_sbev_hbev<rocblas_float_complex, float>(rocblas_evect evect,
 {
     char evectC = rocblas2char_evect(evect);
     char uploC = rocblas2char_fill(uplo);
-    chbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, rwork, info);
+    chbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, Lambda, Z, &ldz, work, rwork, info);
 }
 
 template <>
@@ -6978,7 +6978,7 @@ void cpu_sbev_hbev<rocblas_double_complex, double>(rocblas_evect evect,
                                                    rocblas_int kd,
                                                    rocblas_double_complex* Aband,
                                                    rocblas_int ldab,
-                                                   double* W,
+                                                   double* Lambda,
                                                    rocblas_double_complex* Z,
                                                    rocblas_int ldz,
                                                    rocblas_double_complex* work,
@@ -6987,7 +6987,7 @@ void cpu_sbev_hbev<rocblas_double_complex, double>(rocblas_evect evect,
 {
     char evectC = rocblas2char_evect(evect);
     char uploC = rocblas2char_fill(uplo);
-    zhbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, rwork, info);
+    zhbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, Lambda, Z, &ldz, work, rwork, info);
 }
 
 // sytrd & hetrd
