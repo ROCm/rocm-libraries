@@ -349,7 +349,7 @@ void ormtr_unmtr_hb2st_getError(
 
     // Residual R = I - Q^H Q.
     CHECK_ROCBLAS_ERROR(
-        rocblas_gemm(
+        rocsolver_gemm(
             false, handle,
             rocblas_operation_conjugate_transpose, rocblas_operation_none,
             nq, nq, nq,
@@ -417,7 +417,7 @@ void ormtr_unmtr_hb2st_getError(
         // R -= op(Q) C
         assert( nq == m );
         CHECK_ROCBLAS_ERROR(
-            rocblas_gemm(
+            rocsolver_gemm(
                 false, handle, trans, rocblas_operation_none, m, n, nq,
                 &negone, dQ.data(), ldq, stride,
                          dC.data(), ldc, stride,
@@ -428,7 +428,7 @@ void ormtr_unmtr_hb2st_getError(
         // R -= C op(Q)
         assert( nq == n );
         CHECK_ROCBLAS_ERROR(
-            rocblas_gemm(
+            rocsolver_gemm(
                 false, handle, rocblas_operation_none, trans, m, n, nq,
                 &negone, dC.data(), ldc, stride,
                          dQ.data(), ldq, stride,
