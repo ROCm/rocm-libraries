@@ -20,6 +20,8 @@
   DataTypeAmaxD: 0
   DataTypeB: 21
   DataTypeE: 0
+  DataTypeMXSA: 22
+  DataTypeMXSB: 22
   DestDataType: 0
   F32XdlMathOp: 0
   Gradient: false
