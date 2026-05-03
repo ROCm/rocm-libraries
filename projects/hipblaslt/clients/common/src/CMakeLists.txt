@@ -14,10 +14,6 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_init_device.cpp"
 )
 
-if(HIPBLASLT_ENABLE_ROCROLLER)
-    target_sources(hipblaslt-clients-common PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGen.cpp")
-endif()
-
 if(HIPBLASLT_ENABLE_BLIS)
     target_sources(hipblaslt-clients-common
         PRIVATE
