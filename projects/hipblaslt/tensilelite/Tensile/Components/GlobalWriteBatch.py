@@ -880,12 +880,15 @@ class GlobalWriteBatchWriter:
     # Must match is16bitSubtilePaired (per-element store dispatch) exactly.
     # Excluded for "MultipleBufferSingleKernel" and "MultipleBuffer" (StreamK partial-tile
     # workspace path) — both write float32 to workspace, not 16bit to D output.
-    is16bitSubtile = (
+    isSubtileNonEdge = (
       self.kernel.get("UseSubtileImpl") and not self.edge
+      and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
+    )
+    is16bitSubtile = (
+      isSubtileNonEdge
       and (self.kernel["ProblemType"]["DestDataType"].isBFloat16() or
            self.kernel["ProblemType"]["DestDataType"].isHalf())
       and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
-      and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
     )
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
@@ -1242,20 +1245,13 @@ class GlobalWriteBatchWriter:
           destIdx = self.activationSetPCStruct.vgprActCopy
         else:
           destIdx = self.ss.elementSumIdx[elementIdx]
-        is16bitSubtilePairedPack = (
-          self.kernel.get("UseSubtileImpl") and not self.edge
-          and (self.kernel["ProblemType"]["DestDataType"].isBFloat16() or
-               self.kernel["ProblemType"]["DestDataType"].isHalf())
-          and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
-          and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
-        )
         if self.kernel["ProblemType"]["DestDataType"].isHalf():
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
-          if not is16bitSubtilePairedPack:
+          if not is16bitSubtile:
             packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isBFloat16():
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
-          if not is16bitSubtilePairedPack:
+          if not is16bitSubtile:
             packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
                                        tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
@@ -1320,19 +1316,8 @@ class GlobalWriteBatchWriter:
         #   element 2: tt0=2 (sba=0)   (if MIWaveTile[0]>2)
         #   ...
         # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
-        is16bitSubtilePaired = (
-          self.kernel.get("UseSubtileImpl") and not self.edge
-          and (self.kernel["ProblemType"]["DestDataType"].isBFloat16() or
-               self.kernel["ProblemType"]["DestDataType"].isHalf())
-          and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
-          and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
-        )
-        isSubtileNonEdge = (
-          self.kernel.get("UseSubtileImpl") and not self.edge
-          and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
-        )
         storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
-        if is16bitSubtilePaired:
+        if is16bitSubtile:
           tt0 = element[1]  # d0: thread-tile index along M
           # Epilogue (bias/activation) is applied per-element in iteration order.
           # The paired store must be emitted AFTER both sba=0 and sba=1 elements have

@@ -130,8 +130,6 @@ class ABMatrixInfo(MatrixInfo):
   gRDtlSwizzlePerpBlockSize: int    = -1
   gRDtlSwizzleParaBlockSize: int    = -1
 
-
-
 # States
 @dataclass
 class StateValues:
@@ -2849,7 +2847,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # prefetch: unrolled loop prefix
       ####################################
       if kernel["PrefetchGlobalRead"]:
-        self.states.setMemTokenInsts = {"TensorLoadToLds": [self.states.ldsWriteTokenIdx]}
         # if DirectToVgpr is enabled and swapGlobalRead is true, swap the order of global read (B->A)
         tensorParameters1st = tensorParametersA
         tensorParameters2nd = tensorParametersB
@@ -2884,9 +2881,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["DirectToVgprB"]:
             tPB = None
         module.add(self.globalReadIncrementAB(kernel, tPA, tPB, self.states.unrollIdx, pfi))
-        self.states.setMemTokenInsts = {}
-        self.states.ldsWriteTokenIdx = \
-          self.states.memTokenLdsBuffer1 if self.states.ldsWriteTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+        # swap Tensor memToken
+        self.states.ldsTensorTokenIdx = \
+            self.states.memTokenLdsBuffer1 if self.states.ldsTensorTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
 
     module.addComment2("End setupNewTile")
 
@@ -4581,7 +4578,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Kernel Body
   ##############################################################################
   def kernelBody( self, kernel, tensorParametersA, tensorParametersB ):
-
     expand = kernel["ExpandPointerSwap"]
     self.dontAppendCode = False
 
@@ -7701,8 +7697,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # for cgemm or zgemm + MIAV case, allocate 2 or 4 vgpr for alpha calculation (cannot use tmp vgpr in write batch)
       if kernel["ProblemType"]["DataType"].isComplex() \
-        and kernel["MIArchVgpr"] \
-        and (kernel["_GlobalAccumulation"] == 'SingleBuffer' or kernel["_GlobalAccumulation"] == None):
+        and kernel["MIArchVgpr"]:
 
         # need proper alignment
         vgprIdx = ((vgprIdx+2 - 1)//2)*2

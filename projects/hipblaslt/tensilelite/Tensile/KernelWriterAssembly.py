@@ -12532,9 +12532,6 @@ class KernelWriterAssembly(KernelWriter):
     component = Component.ComputeStoreVgprs.find(self)
     if component:
       if kernel["EnableMatrixInstruction"]:
-        #ret = component(self, kernel)
-        #print(ret)
-        #exit(1)
         module.add(component(self, kernel))
       else:
         module.add(component(self, kernel, divisor, tid0Scale, tid1Scale))
@@ -15076,8 +15073,6 @@ class KernelWriterAssembly(KernelWriter):
 
     maxVgprs, occupancy = self.setOccupancy(kernel)
 
-    #print(gwvw, edge, beta, atomic, element, vectorDataTypes, factorDim)
-    #exit(1)
     ss = StoreState(self, kernel, gwvw, edge, beta, atomic, element, vectorDataTypes, dim=factorDim)
 
     
