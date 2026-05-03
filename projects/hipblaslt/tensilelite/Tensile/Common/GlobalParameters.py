@@ -137,6 +137,7 @@ globalParameters["CMakeBuildType"] = (
 )
 globalParameters["LogicFormat"] = "yaml"  # set library backend (yaml, or json)
 globalParameters["LibraryFormat"] = "yaml"  # set library backend (yaml, or msgpack)
+globalParameters["MXScaleFormat"] = 0  # MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)
 
 # True/False: CSV will/won't export WinnerGFlops, WinnerTimeUS, WinnerIdx, WinnerName.
 # TODO - if no side-effect, we can set default to True. This can make analyzing "LibraryLogic" (AddFromCSV) faster
@@ -177,9 +178,9 @@ globalParameters["DataInitTypeScaleB"] = 2
 globalParameters["DataInitTypeScaleC"] = 2
 globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
-globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
+globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -453,6 +454,7 @@ defaultBenchmarkCommonParameters = [
     {"GlobalSplitUCoalesced": [False]},
     {"GlobalSplitUWorkGroupMappingRoundRobin": [False]},
     {"Use64bShadowLimit": [True]},
+    {"Use64bShadowLimitMX": [False]}, # Disable Use64bShadowLimit for MXSA/B by default
     {"NumLoadsCoalescedA": [1]},
     {"NumLoadsCoalescedB": [1]},
     {"WorkGroup": [[16, 16, 1]]},
@@ -460,7 +462,7 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupMappingXCC": [1]},
     {"WorkGroupMappingXCCGroup": [-1]},
     {"ThreadTile": [[4, 4]]},
-    {"WavefrontSize": [64]},
+    {"WavefrontSize": [-1]},
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
     {"DepthU": [-1]},

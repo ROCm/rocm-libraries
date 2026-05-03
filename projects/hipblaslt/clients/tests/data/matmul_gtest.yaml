@@ -84,6 +84,8 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
   c_equal_d: [false, true]
+  batch_mode: [0, 1]
+  batch_count: [1, 3]
 
 # FP16 I/O + FP32 compute: full-matrix probe for internal FP32 accumulation (rocBLAS-style near-max A, ±2 pairs in B).
 # Mirrors matmul_integer_exact_* matrix_size / category / batch / gpu_arch; NN only (probe does not support transposes).
@@ -2678,5 +2680,24 @@ Tests:
   alpha: [ 0.0, 1.0 ]
   beta: [ 0.0, 1.0 ]
   gpu_arch: '90a'
+
+# This is for testing MX FP4 kernel using Tensile
+- name: matmul_tensile_fp4
+  category: quick
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  M: [2048]
+  N: [2048]
+  K: [4096]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
 
 ...

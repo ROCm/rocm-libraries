@@ -53,9 +53,12 @@ TIMING_HIERARCHY = {
             "python_kernel_build_co": {},
             "python_kernel_build_src_co": {
                 "python_kernel_build_src_co.setup": {},
+                "python_kernel_build_src_co.cache_check": {},
+                "python_kernel_build_src_co.cache_hit": {},
                 "python_kernel_build_src_co.compile": {},
                 "python_kernel_build_src_co.unbundle": {},
                 "python_kernel_build_src_co.move": {},
+                "python_kernel_build_src_co.cache_populate": {},
             },
             "python_kernel_bench_postprocess": {
                 "python_benchpost_naming": {},
@@ -71,6 +74,8 @@ TIMING_HIERARCHY = {
                 "python_wsol_prepare_cache": {},
                 "python_wsol_prepare_nocache": {},
             },
+            "python_wsol_header": {},
+            "python_wsol_dump": {},
         },
         "python_client_execution": {
             "hip_initialization": {},
@@ -369,15 +374,7 @@ def print_visual_breakdown(nodes: List[PhaseNode], wall_clock_ms: float):
     print("TIME BREAKDOWN (visual, % of wall clock)")
     print("-" * TABLE_WIDTH)
 
-    def _max_label_width(node_list, depth=0):
-        widest = 0
-        for n in node_list:
-            w = 2 + 2 * depth + len(n.name)
-            widest = max(widest, w)
-            widest = max(widest, _max_label_width(_get_display_children(n), depth + 1))
-        return widest
-
-    label_width = max(42, _max_label_width(nodes) + 2)
+    label_width = 42
 
     def bar_line(indent: int, name: str, ms: float):
         pct = ms / wall_clock_ms * 100
@@ -465,18 +462,7 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
 
     # -- Hierarchical table --------------------------------------------------
 
-    nodes = build_hierarchy(timings)
-
-    def _max_cat_width(node_list, depth=0):
-        """Walk the node tree to find the widest category label."""
-        widest = 0
-        for n in node_list:
-            w = 2 + 2 * depth + len(n.name)  # "  " prefix + "  "*depth + name
-            widest = max(widest, w)
-            widest = max(widest, _max_cat_width(_get_display_children(n), depth + 1))
-        return widest
-
-    COL_CAT = max(44, _max_cat_width(nodes) + 2)  # +2 for padding
+    COL_CAT = 44
     COL_CNT = 8
     COL_TOT = 14
     COL_MEAN = 14
@@ -538,6 +524,8 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
 
         for i, child in enumerate(_get_display_children(node)):
             render_node(child, depth + 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
+
+    nodes = build_hierarchy(timings)
 
     for top_idx, node in enumerate(nodes):
         if top_idx > 0:
@@ -629,24 +617,21 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
             reverse=True,
         )[:10]
 
-        # Compute column widths from data
-        headers = ["M", "N", "K", "Batch", "TypeA", "TypeD", "CPU Ref (ms)", "GPU (ms)"]
-        rows = []
+        print(
+            f"  {'M':>8} {'N':>8} {'K':>8} {'Batch':>8}"
+            f" {'TypeA':>10} {'TypeD':>10}"
+            f" {'CPU Ref (ms)':>12} {'GPU (ms)':>10}"
+        )
+        print(f"  {'-' * (TABLE_WIDTH - 2)}")
         for p in sorted_problems:
             ctx = p.context
-            rows.append([
-                ctx.get('M', '?'), ctx.get('N', '?'),
-                ctx.get('K', '?'), ctx.get('batch', '?'),
-                ctx.get('typeA', '?'), ctx.get('typeD', '?'),
-                f"{p.cpu_reference_gemm_ms:.2f}", f"{p.gpu_kernel_execution_ms:.2f}",
-            ])
-        col_widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
-
-        hdr = "  " + " ".join(f"{h:>{w}}" for h, w in zip(headers, col_widths))
-        print(hdr)
-        print(f"  {'-' * (TABLE_WIDTH - 2)}")
-        for row in rows:
-            print("  " + " ".join(f"{v:>{w}}" for v, w in zip(row, col_widths)))
+            print(
+                f"  {ctx.get('M', '?'):>8} {ctx.get('N', '?'):>8}"
+                f" {ctx.get('K', '?'):>8} {ctx.get('batch', '?'):>8}"
+                f" {ctx.get('typeA', '?'):>10} {ctx.get('typeD', '?'):>10}"
+                f" {p.cpu_reference_gemm_ms:>12.2f}"
+                f" {p.gpu_kernel_execution_ms:>10.2f}"
+            )
         print()
 
 

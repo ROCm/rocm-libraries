@@ -43,7 +43,8 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
 {
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }

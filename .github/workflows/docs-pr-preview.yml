@@ -117,10 +117,62 @@ jobs:
 
           if echo "$project_list" | grep -Fxq "$project_slug"; then
             echo "exists=true" >> $GITHUB_OUTPUT
+
+            # Fetch documentation URL
+            doc_url=$(curl \
+              --connect-timeout 180 \
+              --silent \
+              --header "Authorization: Token $RTD_TOKEN" \
+              "https://app.readthedocs.com/api/v3/projects/$project_slug/" \
+              | jq --raw-output '.urls.documentation')
+
+            # Strip trailing version segment (e.g. "latest/") to get the base url
+            doc_base=$(echo "$doc_url" | sed 's|/[^/]\+/\?$||')
+            echo "doc_base=$doc_base" >> $GITHUB_OUTPUT
           else
             echo "${{ steps.extract.outputs.project_name }} does not exist on Read the Docs, skipping."
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Sync RTD versions to discover PR branch
+        # Without a GitHub webhook configured on the repo, RTD is unaware of new branches.
+        # Triggering a sync forces RTD to re-scan the repository and register the PR branch
+        # as a version before we attempt to activate it in the next step.
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          curl \
+            --connect-timeout 180 \
+            --fail \
+            --request POST \
+            --header "Authorization: Token $RTD_TOKEN" \
+            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/sync-versions/"
+
+      - name: Wait for RTD to register PR branch version
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          declare version_url="https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
+
+          declare -i MAXIMUM_NUMBER_OF_POLLS=20
+          declare -i SLEEP_BETWEEN_POLLS_SECONDS=15
+
+          echo "Polling for version to appear: $version_url"
+          for i in $(seq 1 ${MAXIMUM_NUMBER_OF_POLLS}); do
+            status=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+              --header "Authorization: Token $RTD_TOKEN" \
+              "$version_url")
+            if [ "$status" = "200" ]; then
+              echo "Version found after $i attempt(s)."
+              exit 0
+            fi
+            echo "Attempt $i: version not yet registered (HTTP $status), waiting 15s..."
+            sleep ${SLEEP_BETWEEN_POLLS_SECONDS}
+          done
+          echo "Timed out waiting for RTD to register version."
+          exit 1
 
       - name: Activate PR branch as a new RTD version
         if: steps.rtd.outputs.exists == 'true'
@@ -153,7 +205,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          preview_url="https://rocm.docs.amd.com/projects/${{ steps.extract.outputs.project_name }}/en/${{ steps.rtd.outputs.version_slug }}/"
+          preview_url="${{ steps.rtd.outputs.doc_base }}/${{ steps.rtd.outputs.version_slug }}/"
           gh pr comment ${{ github.event.issue.number }} \
             --repo ${{ github.repository }} \
             --body "Docs preview for **${{ steps.extract.outputs.project_name }}** is building on Read the Docs: $preview_url \

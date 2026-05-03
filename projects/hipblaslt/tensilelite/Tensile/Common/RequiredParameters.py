@@ -102,6 +102,7 @@ def getRequiredParametersMin() -> set:
         'TDMInst',
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',
+        'Use64bShadowLimitMX',
         'UseInstOffsetForGRO',
         'UseSgprForGRO',
         'VectorStore',

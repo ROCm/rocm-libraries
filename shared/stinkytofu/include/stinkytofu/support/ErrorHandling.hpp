@@ -73,10 +73,28 @@ namespace stinkytofu {
     std::cerr << file << ":" << line << ": UNREACHABLE executed";
     if (msg) std::cerr << ": " << msg;
     std::cerr << "!\n";
+    std::cerr.flush();
     std::abort();
 }
 
 #define STINKY_UNREACHABLE(msg) ::stinkytofu::stinky_unreachable_internal(msg, __FILE__, __LINE__)
+
+/// @brief Report a fatal error and abort. Unlike assert(), this remains in
+/// release builds and flushes stderr so the message is captured by callers
+/// (e.g. stinkytofu-check via popen).
+///
+/// Use for input validation errors that cannot be recovered from:
+/// @code
+///   if (inconsistent_state) {
+///       std::cerr << "details...\n";
+///       report_fatal_error("inconsistent memory tokens in basic block");
+///   }
+/// @endcode
+[[noreturn]] inline void report_fatal_error(const std::string& msg) {
+    std::cerr << "FATAL ERROR: " << msg << "\n";
+    std::cerr.flush();
+    std::abort();
+}
 
 // ============================================================================
 // Expected<T> - Type-safe error handling for recoverable errors

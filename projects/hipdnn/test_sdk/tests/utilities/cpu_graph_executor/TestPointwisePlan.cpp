@@ -44,10 +44,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
                                    TensorLayout::NCHW);
 
     // Execute using CpuReferenceGraphExecutor
-    CpuReferenceGraphExecutor graphExecutor;
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     // Verify output is correct (non-negative since it's RELU)
     // For this test we just verify execution succeeded without throwing
@@ -75,10 +75,10 @@ TEST_F(TestPointwisePlan, ExecutePlanBinaryAdd)
                                     TensorLayout::NCHW);
 
     // Execute using CpuReferenceGraphExecutor
-    CpuReferenceGraphExecutor graphExecutor;
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     // Verify execution succeeded
     SUCCEED();
@@ -105,10 +105,10 @@ TEST_F(TestPointwisePlan, ExecutePlanBackwardReluBwd)
                                     TensorLayout::NCHW);
 
     // Execute using CpuReferenceGraphExecutor
-    CpuReferenceGraphExecutor graphExecutor;
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     // Verify execution succeeded
     SUCCEED();
@@ -130,10 +130,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryGeluFwd)
                                    seed,
                                    TensorLayout::NCHW);
 
-    CpuReferenceGraphExecutor graphExecutor;
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     SUCCEED();
 }
@@ -154,10 +154,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryGeluApproxTanhFwd)
                                    seed,
                                    TensorLayout::NCHW);
 
-    CpuReferenceGraphExecutor graphExecutor;
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     SUCCEED();
 }
@@ -178,10 +178,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnarySwishFwd)
                                    seed,
                                    TensorLayout::NCHW);
 
-    CpuReferenceGraphExecutor graphExecutor;
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     SUCCEED();
 }
@@ -206,10 +206,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnarySwishFwdWithBeta)
                                    std::nullopt,
                                    0.5f);
 
-    CpuReferenceGraphExecutor graphExecutor;
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     SUCCEED();
 }

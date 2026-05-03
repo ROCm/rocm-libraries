@@ -255,9 +255,10 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
-            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
-            auto        hasNTModifier    = rocIsa::getInstance().getAsmCaps()["HasNTModifier"];
+            auto        asmCaps          = rocIsa::getInstance().getAsmCaps();
+            auto        hasDLCModifier   = asmCaps["HasDLCModifier"];
+            auto        hasSCOPEModifier = asmCaps["HasSCOPEModifier"];
+            auto        hasNTModifier    = asmCaps["HasNTModifier"];
             std::string kStr;
             if(offen)
             {
