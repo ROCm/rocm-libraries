@@ -18,10 +18,10 @@ std::vector<PoolingTestCase> GetNDHWCPooling3dTestCases()
     }
 
     std::vector<PoolingTestCase> test_cases;
-    // Keep parity with legacy ctest pooling3d_ndhwc:
-    // Legacy test_drive coverage:
-    //   forward path:  test_pooling3d --all --in_layout NDHWC --out_layout NDHWC
-    //   backward path: test_pooling3d --forw 0 --in_layout NDHWC --out_layout NDHWC
+    // NOTE: This NDHWC migration path is intentionally constrained to a single stable case.
+    // In this gtest harness, one PoolingTestCase executes both forward and backward checks,
+    // so there is no separate "--forw 0" test vector as in legacy test_drive wrappers.
+    // Current subset:
     // input=[16,64,3,4,4], lens=[2,2,2], strides=[2,2,2], pads=[1,1,1],
     // wsidx=1, mode=max, index_type=uint32, in_layout=NDHWC.
     const std::vector<int> in_shape = {16, 64, 3, 4, 4};
