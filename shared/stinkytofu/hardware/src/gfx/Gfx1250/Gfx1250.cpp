@@ -112,6 +112,9 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"VCvtPkF32toBF8", "v_cvt_pk_bf8_f32"},
         {"VCvtSRF32toFP8", "v_cvt_sr_fp8_f32"},
         {"VCvtSRF32toBF8", "v_cvt_sr_bf8_f32"},
+        {"VCvtScalePk8F32toFP8", "v_cvt_scalef32_pk8_fp8_f32"},
+        {"VCvtScalePk8F32toBF8", "v_cvt_scalef32_pk8_bf8_f32"},
+        {"VCvtScaleSRPkF32toFP8", "v_cvt_scalef32_sr_pk8_fp8_f32"},
         {"VCvtPkF32toBF16", "v_cvt_pk_bf16_f32"},
         {"VCvtPkF32toF16", "v_cvt_pk_f16_f32"},
         /* mem.hpp */
