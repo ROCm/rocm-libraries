@@ -32,14 +32,26 @@ class IntegrationGpuBenchmarkingKnob
 {
 };
 
+/// CBA-only fixture: overrides the engine-config hook to skip when the device
+/// has no applicable CBA fusion solution (gfx90a + RDNA archs without CK
+/// fusion kernels).
+class IntegrationGpuBenchmarkingKnobCba : public IntegrationGpuBenchmarkingKnob
+{
+protected:
+    std::optional<std::string>
+        shouldSkipOnEngineConfigResult(const hipdnn_frontend::Error& result) override
+    {
+        if(IS_WORKAROUND_ISSUE_6979(result))
+        {
+            return WORKAROUND_ISSUE_6979_SKIP_MSG;
+        }
+        return std::nullopt;
+    }
+};
+
 /// Single parameterized test that runs for all operations
 TEST_P(IntegrationGpuBenchmarkingKnob, ExecutesSuccessfully)
 {
-    if(GetParam() == OperationType::CONV_FWD_BIAS_ACTIV)
-    {
-        SKIP_IF_WORKAROUND_ISSUE_5409();
-    }
-
     auto graph = FrontendGraphFactory::create(GetParam());
 
     std::vector<KnobSetting> knobSettings;
@@ -48,16 +60,31 @@ TEST_P(IntegrationGpuBenchmarkingKnob, ExecutesSuccessfully)
     executeGraphWithKnobs(graph, knobSettings);
 }
 
-/// Instantiate test suite for all operation types
+TEST_P(IntegrationGpuBenchmarkingKnobCba, ExecutesSuccessfully)
+{
+    auto graph = FrontendGraphFactory::create(GetParam());
+
+    std::vector<KnobSetting> knobSettings;
+    knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1LL);
+
+    executeGraphWithKnobs(graph, knobSettings);
+}
+
+/// Instantiate test suite for all non-CBA operation types
 INSTANTIATE_TEST_SUITE_P(BenchmarkingSmoke,
                          IntegrationGpuBenchmarkingKnob,
                          ::testing::Values(OperationType::CONV_FORWARD,
                                            OperationType::CONV_BACKWARD_DATA,
                                            OperationType::CONV_BACKWARD_WEIGHTS,
-                                           OperationType::CONV_FWD_BIAS_ACTIV,
                                            OperationType::BATCHNORM_TRAINING,
                                            OperationType::BATCHNORM_INFERENCE,
                                            OperationType::BATCHNORM_BACKWARD),
+                         OperationTypeNameGenerator());
+
+/// CBA gets its own instantiation so the fixture override applies.
+INSTANTIATE_TEST_SUITE_P(BenchmarkingSmoke,
+                         IntegrationGpuBenchmarkingKnobCba,
+                         ::testing::Values(OperationType::CONV_FWD_BIAS_ACTIV),
                          OperationTypeNameGenerator());
 
 } // namespace

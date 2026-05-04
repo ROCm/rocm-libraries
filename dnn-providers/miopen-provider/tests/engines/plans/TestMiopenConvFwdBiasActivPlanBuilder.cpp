@@ -34,12 +34,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        // No issue-5409 SKIP here: the TEST_F cases in this fixture either call
-        // getMaxWorkspaceSize/buildPlan (which the workaround REJECT does not
-        // gate) or assert isApplicable() == false for non-CBA graphs (still true
-        // when the workaround forces false). Skipping would silently drop
-        // regression coverage on gfx90a. The GPU-execution fixture below keeps
-        // its SKIP because that one drives buildPlan on supported graphs.
+        // No #6979 SKIP here: every TEST_F in this fixture exercises non-CBA
+        // graphs or mocks, so isApplicable returns false regardless of whether
+        // the device has a CBA solver. The skip belongs in the GPU fixture
+        // below where buildPlan is actually invoked on a CBA graph.
         _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
     }
 
@@ -133,7 +131,6 @@ protected:
         SKIP_IF_WINDOWS();
 
         SKIP_IF_NO_DEVICES();
-        SKIP_IF_WORKAROUND_ISSUE_5409();
         _handle = std::make_unique<HipdnnMiopenHandle>();
 
         auto param = GetParam();
@@ -593,6 +590,15 @@ TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAnd
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     auto graph = GraphWrapper(graphBuffer.data(), graphBuffer.size());
     MockEngineConfig mockEngineConfig;
+
+    // Per ROCm/rocm-libraries#6979: when this case expects an applicable engine
+    // but the device's MIOpen has no CBA solver, skip rather than fail.
+    // Negative cases (`_isApplicable == false`) intentionally proceed: their
+    // rejection assertion passes either way.
+    if(_isApplicable)
+    {
+        SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
+    }
 
     EXPECT_EQ(_planBuilder.isApplicable(*_handle, graph), _isApplicable);
 

@@ -73,7 +73,7 @@ class SumUnrollMfma(SumUnroll):
         m = (u) % (writer.states.numVgprBuffer) # local to use for MACs
 
         # calculate constant
-        numRegistersIn   = kernel["ProblemType"]["DataType"].numRegisters()
+        numRegistersIn   = kernel["ProblemType"]["MacDataType%s"%tc].numRegisters()
         numMIInput       = kernel["MIInputPerThread%s"%tc]
         vgprPerInput     = int(numMIInput * numRegistersIn)
 
@@ -96,7 +96,7 @@ class SumUnrollMfma(SumUnroll):
         vgprBuffer_new = (m//numIterPerCoalescedRead)*numIterPerCoalescedRead
         vgprBuffer_new_offset = m%numIterPerCoalescedRead*kernel["InnerUnroll"]*vgprPerInput
 
-        if kernel["ProblemType"]["DataType"].isBFloat16():
+        if kernel["ProblemType"]["MacDataType%s"%tc].isBFloat16():
             hiBitsMaskVgpr = writer.vgprPool.checkOut(1)
             imod.add(VMovB32(dst=vgpr(hiBitsMaskVgpr), src=hex(0xffff0000), comment="mask 0xffff0000 for pack two bfloat16 element to 32bit"))
 
@@ -130,7 +130,7 @@ class SumUnrollMfma(SumUnroll):
                     while inputIdx < vgprPerInput:
                         imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), src1=vgpr(valuSumStr), comment="sum K"))
                         inputIdx += 1
-                elif kernel["ProblemType"]["DataType"].isBFloat16():
+                elif kernel["ProblemType"]["MacDataType%s"%tc].isBFloat16():
                     # BF16 BiasSrcA,B
                     tmpVgpr = writer.vgprPool.checkOutAligned(2,2)
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
@@ -145,8 +145,7 @@ class SumUnrollMfma(SumUnroll):
                     else:
                         printExit("Currently unsupported vgprPerInput %u"%vgprPerInput)
                     writer.vgprPool.checkIn(tmpVgpr)
-                elif (kernel["ProblemType"]["DataType"].isAnyFloat8A() and tc == "A") or \
-                     (kernel["ProblemType"]["DataType"].isAnyFloat8B() and tc == "B"):
+                elif kernel["ProblemType"]["MacDataType%s"%tc].isAnyFloat8():
                     #FP8
                     tmpVgpr = writer.vgprPool.checkOutAligned(4,2)
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
@@ -161,8 +160,7 @@ class SumUnrollMfma(SumUnroll):
                     else:
                         printExit("Currently unsupported vgprPerInput %u"%vgprPerInput)
                     writer.vgprPool.checkIn(tmpVgpr)
-                elif (kernel["ProblemType"]["DataType"].isAnyBFloat8A() and tc == "A") or \
-                     (kernel["ProblemType"]["DataType"].isAnyBFloat8B() and tc == "B"):
+                elif kernel["ProblemType"]["MacDataType%s"%tc].isAnyBFloat8():
                     #BF8
                     tmpVgpr = writer.vgprPool.checkOutAligned(4,2)
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
@@ -180,7 +178,7 @@ class SumUnrollMfma(SumUnroll):
                 else:
                     printExit("Currently unsupported data type")
 
-        if kernel["ProblemType"]["DataType"].isBFloat16():
+        if kernel["ProblemType"]["MacDataType%s"%tc].isBFloat16():
             writer.vgprPool.checkIn(hiBitsMaskVgpr)
 
         return imod

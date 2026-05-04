@@ -19,10 +19,18 @@
 //
 // REJECT_IF_WORKAROUND_ISSUE_5409(handle) must only be invoked from a function
 // whose return type is `bool` (or convertible from `false`) since it contains
-// a `return`. Pair with SKIP_IF_WORKAROUND_ISSUE_5409() in test TUs.
+// a `return`. CBA-specific test TUs observe the resulting "no engine applicable"
+// outcome via the test-side issue 6979 helpers (see TestWorkarounds.hpp).
 //
-// To remove after the fix: delete this file (and tests/common/TestWorkarounds.
-// hpp), drop includes, and remove all macro call sites.
+// Issue 5409 (this file) is gfx90a-specific. Issue 6979 (test-side) tracks the
+// broader CBA capability gap across architectures — gfx90a (covered by 5409)
+// plus gfx1151 / RDNA archs that lack CK fusion kernels. The two are decoupled:
+// fixing 5409 only removes the gfx90a REJECT here; the 6979 test-side skip
+// stays in place until CK fusion kernels exist for the remaining archs.
+//
+// To remove after the 5409 fix: delete this file, drop its includes, and
+// remove the REJECT_IF_WORKAROUND_ISSUE_5409 call sites. The test-side
+// 6979 helpers stay until that issue is independently resolved.
 // `git grep WORKAROUND_ISSUE_5409` finds them all.
 // ----------------------------------------------------------------------------
 
