@@ -221,7 +221,9 @@ def main():
                 mask_type=first_mask_int,
             )
 
-        prob_str = f"B={prob.batch} H={prob.nhead_q} S={prob.seqlen_q} D={prob.hdim_q}"
+        h_str = f"H={prob.nhead_q}" if prob.nhead_q == prob.nhead_k else f"Hq={prob.nhead_q} Hk={prob.nhead_k}"
+        s_str = f"S={prob.seqlen_q}" if prob.seqlen_q == prob.seqlen_k else f"Sq={prob.seqlen_q} Sk={prob.seqlen_k}"
+        prob_str = f"B={prob.batch} {h_str} {s_str} D={prob.hdim_q}"
         print(f"\n  Problem [{prob_idx}]: {prob_str}")
         print(
             f"  {'Kernel':<105} {'Time(ms)':>10} {'TFLOPS':>10}"
@@ -307,7 +309,9 @@ def main():
                         "problem": {
                             "batch": prob.batch,
                             "nhead_q": prob.nhead_q,
+                            "nhead_k": prob.nhead_k,
                             "seqlen_q": prob.seqlen_q,
+                            "seqlen_k": prob.seqlen_k,
                             "hdim_q": prob.hdim_q,
                         },
                         "latency_ms": result.time_ms,
@@ -345,9 +349,11 @@ def main():
             best = max(results, key=lambda x: x["tflops"])
             prob = json.loads(key)
             ns_tag = f"  [ns={best['num_splits']}]" if best.get("num_splits") else ""
+            h_str = f"H={prob['nhead_q']}" if prob['nhead_q'] == prob['nhead_k'] else f"Hq={prob['nhead_q']} Hk={prob['nhead_k']}"
+            s_str = f"S={prob['seqlen_q']}" if prob['seqlen_q'] == prob['seqlen_k'] else f"Sq={prob['seqlen_q']} Sk={prob['seqlen_k']}"
             print(
-                f"    B={prob['batch']} H={prob['nhead_q']}"
-                f" S={prob['seqlen_q']} D={prob['hdim_q']}"
+                f"    B={prob['batch']} {h_str}"
+                f" {s_str} D={prob['hdim_q']}"
                 f" -> {best['kernel']}{ns_tag}"
                 f" ({best['tflops']:.2f} TFLOPS, {best['latency_ms']:.3f} ms)"
             )
