@@ -88,25 +88,15 @@ def checkoutRepo()
     def scmVars = checkout scm
     // Jenkins merges develop into the PR branch locally before running CI.
     // The merge commit does not exist on GitHub, so status must be reported
-    // against the original PR branch tip. Fallback priority:
-    //   1. CHANGE_SHA      - GitHub Branch Source plugin (Multibranch Pipelines)
-    //   2. git ORIG_HEAD   - set by `git merge` to the pre-merge HEAD (PR branch tip);
-    //                        validated against HEAD^1 to confirm it is fresh from
-    //                        this build's merge, not a stale value from a prior run
-    //   3. scmVars.GIT_COMMIT - branch builds where no merge occurs
-    def sha = env.CHANGE_SHA
-    if (!sha) {
-        sha = sh(returnStdout: true, script: '''
-            orig=$(git rev-parse ORIG_HEAD 2>/dev/null)
-            p1=$(git rev-parse HEAD^1 2>/dev/null)
-            if [ -n "$orig" ] && [ -n "$p1" ] && [ "$orig" = "$p1" ]; then
-                echo "$orig"
-            else
-                git rev-parse HEAD
-            fi
-        ''').trim()
-    }
-    env.GIT_COMMIT = sha
+    // against the original PR branch tip.
+    // CHANGE_SHA is set by the GitHub Branch Source plugin for PR builds.
+    // Otherwise, use ORIG_HEAD which git sets to the pre-merge HEAD when Jenkins
+    // merges develop into the PR branch — giving the PR branch tip that exists on
+    // GitHub. Falls back to HEAD when no merge occurred (branch already in sync
+    // with develop, or a plain branch build). 
+    env.GIT_COMMIT = env.CHANGE_SHA ?: sh(returnStdout: true, script: '''
+        git rev-parse ORIG_HEAD 2>/dev/null || git rev-parse HEAD
+    ''').trim()
 }
 
 def withWorkingDir(Closure body) {
