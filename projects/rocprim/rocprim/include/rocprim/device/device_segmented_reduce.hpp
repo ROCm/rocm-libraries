@@ -57,7 +57,7 @@ struct segmented_reduce_impl
                                     size_t&        storage_size,
                                     InputIterator  input,
                                     OutputIterator output,
-                                    unsigned int   segments,
+                                    size_t         segments,
                                     OffsetIterator begin_offsets,
                                     OffsetIterator end_offsets,
                                     BinaryFunction reduce_op,
@@ -75,6 +75,11 @@ struct segmented_reduce_impl
         const auto params = get_config<Selector>(Config{}, current_target);
 
         const unsigned int block_size = params.kernel_config.block_size;
+        // HIP supports (2^32 - 1) max threads.  We have to ensure block_size * segments
+        // doesn't exceed that.  Compute the maximum number of segments:
+        const size_t segments_limit = static_cast<size_t>(params.kernel_config.size_limit)
+                                      / static_cast<size_t>(block_size);
+        const size_t num_launch = ceiling_div(segments, segments_limit);
 
         if(temporary_storage == nullptr)
         {
@@ -84,43 +89,55 @@ struct segmented_reduce_impl
             return hipSuccess;
         }
 
-        if(segments == 0u)
+        if(segments == size_t{0})
+        {
             return hipSuccess;
-
-        // HIP supports (2^32 - 1) max threads.  We have to ensure block_size * segments
-        // doesn't exceed that.  Compute the maximum number of segments:
-        const size_t max_segments = 0xffffffff / static_cast<size_t>(block_size);
-
-        std::chrono::steady_clock::time_point start;
+        }
 
         if(debug_synchronous)
         {
-            start = std::chrono::steady_clock::now();
+            std::cout << "----------------------------------\n";
+            std::cout << "segments:       " << segments << '\n';
+            std::cout << "segments_limit: " << segments_limit << '\n';
+            std::cout << "num_launch:     " << num_launch << '\n';
+            std::cout << "block_size:     " << block_size << '\n';
+            std::cout << "----------------------------------\n";
         }
-        // If the number of segments is greater than max_segments, split the
-        // work into multiple kernel calls.
-        for(size_t offset = 0; offset < segments; offset += max_segments)
-        {
-            size_t remaining_segments = segments - offset;
-            size_t batch_size         = std::min(max_segments, remaining_segments);
 
+        for(size_t launch = 0, segments_offset = 0; launch < num_launch;
+            ++launch, segments_offset += segments_limit)
+        {
+            const unsigned int current_segments = static_cast<unsigned int>(
+                std::min<size_t>(segments - segments_offset, segments_limit));
+
+            std::chrono::steady_clock::time_point start;
+            if(debug_synchronous)
+            {
+                std::cout << "launch:           " << launch << '\n';
+                std::cout << "current_segments: " << current_segments << '\n';
+                std::cout << "segments_offset:  " << segments_offset << '\n';
+
+                start = std::chrono::steady_clock::now();
+            }
             auto segmented_reduce_kernel = [=](auto target_config)
             {
                 segmented_reduce<decltype(target_config)>(input,
-                                                          output + offset,
-                                                          begin_offsets + offset,
-                                                          end_offsets + offset,
+                                                          output + segments_offset,
+                                                          begin_offsets + segments_offset,
+                                                          end_offsets + segments_offset,
                                                           reduce_op,
                                                           static_cast<result_type>(initial_value));
             };
 
             ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                           segmented_reduce_kernel,
-                                                                          dim3(batch_size),
+                                                                          dim3(current_segments),
                                                                           dim3(block_size),
                                                                           0,
                                                                           stream));
-            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", batch_size, start);
+            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce",
+                                                        current_segments,
+                                                        start);
         }
         return hipSuccess;
     }
@@ -129,11 +146,11 @@ struct segmented_reduce_impl
 template<typename OffsetT>
 struct transform_idx_to_offset_op
 {
-    unsigned int segments;
+    size_t       segments;
     unsigned int segment_length;
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    OffsetT      operator()(unsigned int i) const
+    OffsetT      operator()(size_t i) const
     {
         if(i < segments)
         {
@@ -180,7 +197,7 @@ private:
     {
         ArgsPre&       args_pre;
         ArgsPost&      args_post;
-        unsigned int   segments;
+        size_t         segments;
         OffsetIterator begin_offsets;
         OffsetIterator end_offsets;
 
@@ -197,7 +214,7 @@ private:
 
 public:
     template<class ArgsPre, class ArgsPost>
-    static inline hipError_t invoke(const unsigned int& segments,
+    static inline hipError_t invoke(const size_t&       segments,
                                     const unsigned int& segment_length,
                                     ArgsPre&&           args_pre,
                                     ArgsPost&&          args_post)
@@ -206,9 +223,9 @@ public:
 
         auto run_segmented_reduce = [&](auto transform_op) -> hipError_t
         {
-            auto offsets = ::rocprim::make_transform_iterator(
-                ::rocprim::make_counting_iterator<unsigned int>(0),
-                transform_op);
+            auto offsets
+                = ::rocprim::make_transform_iterator(::rocprim::make_counting_iterator<size_t>(0),
+                                                     transform_op);
             using OffsetIterator            = decltype(offsets);
             constexpr unsigned int PreSize  = std::tuple_size<std::decay_t<ArgsPre>>::value;
             constexpr unsigned int PostSize = std::tuple_size<std::decay_t<ArgsPost>>::value;
@@ -348,7 +365,7 @@ inline hipError_t segmented_reduce(void*          temporary_storage,
                                    size_t&        storage_size,
                                    InputIterator  input,
                                    OutputIterator output,
-                                   unsigned int   segments,
+                                   size_t         segments,
                                    OffsetIterator begin_offsets,
                                    OffsetIterator end_offsets,
                                    BinaryFunction reduce_op         = BinaryFunction(),
@@ -470,7 +487,7 @@ inline hipError_t segmented_reduce(void*          temporary_storage,
                                    size_t&        storage_size,
                                    InputIterator  input,
                                    OutputIterator output,
-                                   unsigned int   segments,
+                                   size_t         segments,
                                    unsigned int   segment_length,
                                    BinaryFunction reduce_op         = BinaryFunction(),
                                    InitValueType  initial_value     = InitValueType(),
