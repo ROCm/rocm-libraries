@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -133,8 +133,8 @@ class ProblemType:
 
         rv.transA = bool(d['TransposeA'])
         rv.transB = bool(d['TransposeB'])
-        # it will either be set as d['MacDataType'] or a specified input
-        if 'MacDataTypeA' in d: 
+
+        if 'MacDataTypeA' in d: #it will either be set as d['MacDataType'] or a specified input
             rv.computeInputTypeA = DataType(d['MacDataTypeA'])
         else:
             rv.computeInputTypeA = srcType
@@ -414,7 +414,6 @@ class ProblemType:
             predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
             if self.mxBlockB:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
-
         return predicates
 
 def extractDimPredicate(cls, key, value, predicateName):
