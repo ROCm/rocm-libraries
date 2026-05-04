@@ -999,8 +999,10 @@ public:
      *
      * @param rankedEngineIds Output vector of engine IDs, ranked by expected performance
      * @param modes Heuristic modes to use for ranking
-     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
-     *         on failure. Call get_message() for the specific failure reason.
+     * @return ErrorCode::OK on success; ErrorCode::GRAPH_NOT_SUPPORTED if no
+     *         engine has an applicable solution for this graph on the current
+     *         device; ErrorCode::HIPDNN_BACKEND_ERROR on other backend failure.
+     *         Call get_message() for the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
@@ -1031,9 +1033,11 @@ public:
      * specified heuristic modes.
      *
      * @param modes Heuristic modes to use for engine selection
-     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
-     *         if the graph has not been built. Call get_message() for the
-     *         specific failure reason.
+     * @return ErrorCode::OK on success; ErrorCode::GRAPH_NOT_SUPPORTED if no
+     *         engine has an applicable solution for this graph on the current
+     *         device; ErrorCode::HIPDNN_BACKEND_ERROR if the graph has not
+     *         been built or on other backend failure. Call get_message() for
+     *         the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plans(const std::vector<HeuristicMode>& modes
@@ -1129,7 +1133,9 @@ public:
      * @brief Check if the graph is supported by any available engine plugin
      * @param handle The hipDNN handle
      * @param modes Heuristic modes for engine ranking
-     * @return Error with OK if supported, HIPDNN_BACKEND_ERROR if not
+     * @return Error with OK if supported; GRAPH_NOT_SUPPORTED if no engine
+     *         has an applicable solution for this graph on the current device;
+     *         HIPDNN_BACKEND_ERROR on other backend failure
      *
      * Performs a lightweight check to determine if any engine plugin can
      * handle this graph. If the graph has not yet been validated and built,
@@ -1575,8 +1581,10 @@ public:
      * @param policy Build plan policy (currently only HEURISTICS_CHOICE is used)
      * @param do_multithreaded_builds Reserved for future use
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
-     *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR
-     *         on failure. Call get_message() for the specific failure reason.
+     *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR /
+     *         ErrorCode::GRAPH_NOT_SUPPORTED (when no engine has an applicable
+     *         solution on the current device) on failure. Call get_message() for
+     *         the specific failure reason.
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,

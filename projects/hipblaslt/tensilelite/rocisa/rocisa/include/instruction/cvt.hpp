@@ -787,4 +787,28 @@ namespace rocisa
             return std::make_shared<VCvtPkF32toBF16>(*this);
         }
     };
+
+    struct VCvtPkF32toFP16 : public VCvtInstruction
+    {
+        VCvtPkF32toFP16(const std::shared_ptr<RegisterContainer>& dst,
+                        const std::shared_ptr<Container>&         src0,
+                        const std::shared_ptr<Container>&         src1,
+                        std::optional<SDWAModifiers>              sdwa    = std::nullopt,
+                        std::optional<VOP3PModifiers>             vop3    = std::nullopt,
+                        const std::string&                        comment = "")
+            : VCvtInstruction(CvtType::CVT_PK_F32_to_F16, dst, {src0, src1}, sdwa, vop3, std::vector<int>({}), comment)
+        {
+            setInst("v_cvt_pk_f16_f32");
+        }
+
+        VCvtPkF32toFP16(const VCvtPkF32toFP16& other)
+            : VCvtInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCvtPkF32toFP16>(*this);
+        }
+    };
 } // namespace rocisa

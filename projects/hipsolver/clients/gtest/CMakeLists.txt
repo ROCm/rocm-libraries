@@ -67,6 +67,7 @@ set(hipsolverDn_test_source
   sytrd_hetrd_gtest.cpp
   syev_heev_gtest.cpp
   sytrf_gtest.cpp
+  sytrs_gtest.cpp
   geev_gtest.cpp
   orgbr_ungbr_gtest.cpp
   orgqr_ungqr_gtest.cpp

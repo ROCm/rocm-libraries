@@ -200,6 +200,95 @@ namespace rocisa
         return module;
     }
 
+    // Split-register overloads: accept a 2-aligned pair and a separate offset SGPR
+    // so the caller does not need 3 contiguous SGPRs.
+
+    inline std::shared_ptr<Module>
+        SGetPositivePCOffset(int sgprIdx, const Label& label, int tmpSgprOff)
+    {
+        auto cr = ContinuousRegister(tmpSgprOff, 1);
+        return SGetPositivePCOffset(sgprIdx, label, cr);
+    }
+
+    inline std::shared_ptr<Module> SLongBranchPositive(const Label&       label,
+                                                       ContinuousRegister& pcPair,
+                                                       ContinuousRegister& offSgpr,
+                                                       const std::string&  comment = "")
+    {
+        std::string labelName = label.getLabelName();
+        auto        module    = std::make_shared<Module>("SLongBranchPositive " + labelName);
+        if(!comment.empty())
+            module->addComment(comment);
+        if(pcPair.size < 2 || pcPair.idx % 2 != 0)
+            throw std::runtime_error("pcPair must be a 2-aligned pair.");
+        if(offSgpr.size < 1)
+            throw std::runtime_error("offSgpr must have at least 1 register.");
+        module->add(SGetPositivePCOffset(pcPair.idx, label, offSgpr.idx));
+        module->addT<SSetPCB64>(sgpr(pcPair.idx, 2), "branch to " + labelName);
+        return module;
+    }
+
+    inline std::shared_ptr<Module> SLongBranchNegative(const Label&       label,
+                                                       ContinuousRegister& pcPair,
+                                                       ContinuousRegister& offSgpr,
+                                                       const std::string&  comment = "")
+    {
+        std::string labelName = label.getLabelName();
+        auto        module    = std::make_shared<Module>("SLongBranchNegative " + labelName);
+        if(!comment.empty())
+            module->addComment(comment);
+        if(pcPair.size < 2 || pcPair.idx % 2 != 0)
+            throw std::runtime_error("pcPair must be a 2-aligned pair.");
+        if(offSgpr.size < 1)
+            throw std::runtime_error("offSgpr must have at least 1 register.");
+        int tmpSgprX2 = pcPair.idx;
+        int tmpSgprX1 = offSgpr.idx;
+        module->addT<SGetPCB64>(sgpr(tmpSgprX2, 2), "addr of next instr");
+        module->addT<SAddI32>(sgpr(tmpSgprX1), labelName, 4, "target branch offset");
+        module->addT<SAbsI32>(sgpr(tmpSgprX1), sgpr(tmpSgprX1), "abs offset");
+        module->addT<SSubU32>(
+            sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "sub target branch offset");
+        module->addT<SSubBU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "sub high and carry");
+        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
+        return module;
+    }
+
+    inline std::shared_ptr<Module> SLongBranch(const Label&        label,
+                                               ContinuousRegister& pcPair,
+                                               ContinuousRegister& offSgpr,
+                                               const std::string&  positiveLabelStr,
+                                               const std::string&  comment = "")
+    {
+        std::string labelName = label.getLabelName();
+        auto        module    = std::make_shared<Module>("SLongBranch " + labelName);
+        if(!comment.empty())
+            module->addComment(comment);
+        if(pcPair.size < 2 || pcPair.idx % 2 != 0)
+            throw std::runtime_error("pcPair must be a 2-aligned pair.");
+        if(offSgpr.size < 1)
+            throw std::runtime_error("offSgpr must have at least 1 register.");
+        int tmpSgprX2 = pcPair.idx;
+        int tmpSgprX1 = offSgpr.idx;
+        Label positiveLabel(positiveLabelStr, "");
+        module->addT<SGetPCB64>(sgpr(tmpSgprX2, 2), "addr of next instr");
+        module->addT<SAddI32>(sgpr(tmpSgprX1), labelName, 4, "target branch offset");
+        module->addT<SCmpGeI32>(sgpr(tmpSgprX1), 0, "check positive or negative");
+        module->addT<SCBranchSCC1>(positiveLabel.getLabelName(), "jump when positive");
+        // negative offset
+        module->addT<SAbsI32>(sgpr(tmpSgprX1), sgpr(tmpSgprX1), "abs offset");
+        module->addT<SSubU32>(
+            sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "sub target branch offset");
+        module->addT<SSubBU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "sub high and carry");
+        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
+        // positive offset
+        module->addT<Label>(positiveLabel);
+        module->addT<SAddU32>(
+            sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "add target branch offset");
+        module->addT<SAddCU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "add high and carry");
+        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
+        return module;
+    }
+
     //////////////////////////////////////////////////////////////////////////////
     // longBranchScc0 - 32 bit offset
     // Conditional branch to label when SCC == 0

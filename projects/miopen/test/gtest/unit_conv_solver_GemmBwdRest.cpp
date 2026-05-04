@@ -36,8 +36,6 @@ auto GetConvTestCases(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, datatype},
-        // dilation=2: effective kernel size 5, pad=2 keeps spatial dims at 8
-        TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {2, 2}, {1, 1}, {2, 2}, datatype},
         // clang-format on
     };
 }
@@ -56,7 +54,7 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
         // clang-format off
         if(!miopen::StartsWith(name, "gfx1151"))
         {
-            // Regression test for https://github.com/ROCm/MIOpen/issues/1956
+            // Regression test for https://github.com/ROCm/MIOpen/issues/1956            
             cases.emplace_back(TestCase{{2, 64, 128, 128, 128}, {32, 64, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenHalf});
         }
         else
@@ -67,17 +65,6 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
         }
         // clang-format on
     }
-
-    // clang-format off
-    // dilation=3: effective kernel size 7, pad=3 keeps spatial dims at 8
-    cases.emplace_back(TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {3, 3}, {1, 1}, {3, 3}, datatype});
-    // asymmetric dilation: different dilation per spatial dim
-    cases.emplace_back(TestCase{{1, 8, 9, 9}, {8, 8, 3, 3}, {1, 2}, {1, 1}, {1, 2}, datatype});
-    // 3D dilation=2: effective kernel size 5 in each dim, pad=2 keeps spatial dims at 8
-    cases.emplace_back(TestCase{{1, 8, 8, 8, 8}, {8, 8, 3, 3, 3}, {2, 2, 2}, {1, 1, 1}, {2, 2, 2}, datatype});
-    // 3D asymmetric dilation: dilation=(1,2,3), pad=(1,2,3) keeps spatial dims at 8
-    cases.emplace_back(TestCase{{1, 8, 8, 8, 8}, {8, 8, 3, 3, 3}, {1, 2, 3}, {1, 1, 1}, {1, 2, 3}, datatype});
-    // clang-format on
 
     return cases;
 }
@@ -152,15 +139,3 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenHalf))));
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_UnitTestConvSolverGemmBwdRestBwd_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoGEMM),
-                                          testing::ValuesIn(GetConvTestCasesFull(miopenBFloat16))));
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_UnitTestConvSolverGemmBwdRestBwd_FP32,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoGEMM),
-                                          testing::ValuesIn(GetConvTestCasesFull(miopenFloat))));

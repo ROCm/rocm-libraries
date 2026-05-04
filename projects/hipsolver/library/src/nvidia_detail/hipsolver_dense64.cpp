@@ -668,4 +668,85 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
+/******************** SYTRS ********************/
+hipsolverStatus_t hipsolverDnXsytrs_bufferSize(hipsolverDnHandle_t handle,
+                                               hipsolverFillMode_t uplo,
+                                               int64_t             n,
+                                               int64_t             nrhs,
+                                               hipDataType         dataTypeA,
+                                               const void*         A,
+                                               int64_t             lda,
+                                               const int64_t*      devIpiv,
+                                               hipDataType         dataTypeB,
+                                               void*               B,
+                                               int64_t             ldb,
+                                               size_t*             lworkOnDevice,
+                                               size_t*             lworkOnHost)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return hipsolver::cuda2hip_status(cusolverDnXsytrs_bufferSize((cusolverDnHandle_t)handle,
+                                                                  hipsolver::hip2cuda_fill(uplo),
+                                                                  n,
+                                                                  nrhs,
+                                                                  dataTypeA,
+                                                                  A,
+                                                                  lda,
+                                                                  devIpiv,
+                                                                  dataTypeB,
+                                                                  B,
+                                                                  ldb,
+                                                                  lworkOnDevice,
+                                                                  lworkOnHost));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDnXsytrs(hipsolverDnHandle_t handle,
+                                    hipsolverFillMode_t uplo,
+                                    int64_t             n,
+                                    int64_t             nrhs,
+                                    hipDataType         dataTypeA,
+                                    const void*         A,
+                                    int64_t             lda,
+                                    const int64_t*      devIpiv,
+                                    hipDataType         dataTypeB,
+                                    void*               B,
+                                    int64_t             ldb,
+                                    void*               workOnDevice,
+                                    size_t              lworkOnDevice,
+                                    void*               workOnHost,
+                                    size_t              lworkOnHost,
+                                    int*                devInfo)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    return hipsolver::cuda2hip_status(cusolverDnXsytrs((cusolverDnHandle_t)handle,
+                                                       hipsolver::hip2cuda_fill(uplo),
+                                                       n,
+                                                       nrhs,
+                                                       dataTypeA,
+                                                       A,
+                                                       lda,
+                                                       devIpiv,
+                                                       dataTypeB,
+                                                       B,
+                                                       ldb,
+                                                       workOnDevice,
+                                                       lworkOnDevice,
+                                                       workOnHost,
+                                                       lworkOnHost,
+                                                       devInfo));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
 } //extern C
