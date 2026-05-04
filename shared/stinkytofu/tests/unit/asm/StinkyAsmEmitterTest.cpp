@@ -634,3 +634,101 @@ TEST_F(AsmEmitterTest, VOP3ModifierMultipleSources) {
     std::string expected = "    v_fma_f32 v30, -v31, abs(v32), -abs(v33)\n";
     EXPECT_EQ(assembly, expected);
 }
+
+// ============================================================================
+// MUBUF "off" vaddr Tests
+//
+// When a BufferStore/Load is created with isOff=true (rocisa vgpr("off",
+// isOff=True)), the conversion layer produces StinkyRegister("off") — a
+// literal-string register — instead of a normal VGPR.  The emitter must
+// write the keyword "off", not "v[vgproff]".
+// ============================================================================
+
+// buffer_store_b32 vdata=v12, vaddr=off, srsrc=s[60:63], soffset=s46
+TEST_F(AsmEmitterTest, MUBUFStoreB32_OffVAddr) {
+    StinkyInstruction* inst = createInstruction("buffer_store_b32");
+    ASSERT_NE(inst, nullptr);
+
+    // buffer_store_b32 has no dest — only sources: vdata, vaddr, rsrc, soffset
+    inst->addSrcReg(StinkyRegister("v", 12, 1));  // vdata
+    inst->addSrcReg(StinkyRegister("off"));       // vaddr = off keyword
+    inst->addSrcReg(StinkyRegister("s", 60, 4));  // rsrc  s[60:63]
+    inst->addSrcReg(StinkyRegister("s", 46, 1));  // soffset s46
+
+    // glc+slc on an arch that uses sc0/sc1 naming (gfx1250, hasMUBUFConst=false)
+    MUBUFModifiers mubufMod(/*offen=*/false, /*offset12=*/0, /*glc=*/true, /*slc=*/true,
+                            /*nt=*/false, /*lds=*/false, /*isStore=*/true,
+                            /*hasMUBUFConst=*/false, /*hasGLCModifier=*/false,
+                            /*hasSC0Modifier=*/true);
+    inst->addModifier(mubufMod);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    std::string expected = "buffer_store_b32 v12, off, s[60:63], s46 sc0 sc1\n";
+    EXPECT_EQ(assembly, expected);
+}
+
+// buffer_load_b32 vdst=v0, vaddr=off, srsrc=s[4:7], soffset=s3
+TEST_F(AsmEmitterTest, MUBUFLoadB32_OffVAddr) {
+    StinkyInstruction* inst = createInstruction("buffer_load_b32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->addDestReg(StinkyRegister("v", 0, 1));  // vdst
+    inst->addSrcReg(StinkyRegister("off"));       // vaddr = off keyword
+    inst->addSrcReg(StinkyRegister("s", 4, 4));   // rsrc  s[4:7]
+    inst->addSrcReg(StinkyRegister("s", 3, 1));   // soffset s3
+
+    MUBUFModifiers mubufMod(/*offen=*/false, /*offset12=*/0, /*glc=*/false, /*slc=*/false,
+                            /*nt=*/false, /*lds=*/false, /*isStore=*/false,
+                            /*hasMUBUFConst=*/false, /*hasGLCModifier=*/false,
+                            /*hasSC0Modifier=*/false);
+    inst->addModifier(mubufMod);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    std::string expected = "buffer_load_b32 v0, off, s[4:7], s3\n";
+    EXPECT_EQ(assembly, expected);
+}
+
+TEST_F(AsmEmitterTest, MUBUFScopeModifier) {
+    StinkyInstruction* inst = createInstruction("buffer_store_b32");
+    ASSERT_NE(inst, nullptr);
+
+    inst->addSrcReg(StinkyRegister("v", 12, 1));
+    inst->addSrcReg(StinkyRegister("v", 32, 1));
+    inst->addSrcReg(StinkyRegister("s", 60, 4));
+    inst->addSrcReg(StinkyRegister("s", 46, 1));
+
+    MUBUFModifiers mubufMod(/*offen=*/true, /*offset12=*/0, /*glc=*/false, /*slc=*/false,
+                            /*nt=*/false, /*lds=*/false, /*isStore=*/true,
+                            /*hasMUBUFConst=*/false, /*hasGLCModifier=*/false,
+                            /*hasSC0Modifier=*/false, /*scope=*/MUBUFScope::SCOPE_DEV);
+    inst->addModifier(mubufMod);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    std::string expected =
+        "buffer_store_b32 v12, v32, s[60:63], s46 offen offset:0 scope:SCOPE_DEV\n";
+    EXPECT_EQ(assembly, expected);
+}

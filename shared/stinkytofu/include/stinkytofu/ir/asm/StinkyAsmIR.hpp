@@ -29,6 +29,7 @@
 #include <optional>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
@@ -44,7 +45,7 @@ namespace stinkytofu {
 #include "hardware/gfxIsa.inc"
 
 // Represents a single assembly instruction.
-struct StinkyInstruction : public IRBase {
+struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     friend class IRBase;
     friend class AsmIRBuilder;
     friend class DefUseChainUpdater;
@@ -258,7 +259,7 @@ struct StinkyInstruction : public IRBase {
 
 /// Builder for assembly-level IR.
 /// In passes, create StinkyInstruction only through this builder.
-class AsmIRBuilder : public IRBuilder {
+class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
    public:
     const GfxArchID arch;
 
@@ -287,6 +288,15 @@ class AsmIRBuilder : public IRBuilder {
     /// PHI instruction format:
     /// def = PHI(pred0_def, pred1_def, ..., predN_def)
 
+    /// Creates a scheduling fence pseudo-instruction (emits no assembly).
+    /// Acts as a hard region boundary in the DAG scheduler — nothing can be
+    /// reordered across it.
+    StinkyInstruction* createFence() {
+        static const HwInstDesc fenceMCID{
+            GFX::FENCE, GFX::FENCE, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        return create(&fenceMCID);
+    }
+
     /// Creates and inserts a PHI instruction at the beginning of the block.
     /// The PHI defines one DWORD register and has one placeholder srcReg per
     /// predecessor. sources and users are NOT initialized — the caller
@@ -300,9 +310,9 @@ class AsmIRBuilder : public IRBuilder {
     AsmIRBuilder(BasicBlock& bb, GfxArchID arch) : IRBuilder(bb), arch(arch) {}
 };
 
-const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
-const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
-uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
 
 // Processing StinkyTofu IR.
 class StinkyInstPass : public Pass {};
@@ -352,10 +362,17 @@ inline bool isSMemStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SMemStore);
 }
 
-/// Check if instruction is a pseudo instruction (LABEL or PHI) that should be
+/// Check if instruction is a scheduling fence pseudo-instruction.
+/// Fences emit no assembly but carry MemTokenData ordering constraints.
+inline bool isFence(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::FENCE;
+}
+
+/// Check if instruction is a pseudo instruction (LABEL, PHI, or FENCE) that should be
 /// skipped for def-use chain processing of "real" instructions.
 inline bool isPseudoInst(const StinkyInstruction* inst) {
-    return inst->getUnifiedOpcode() == GFX::LABEL || inst->getUnifiedOpcode() == GFX::PHI;
+    return inst->getUnifiedOpcode() == GFX::LABEL || inst->getUnifiedOpcode() == GFX::PHI ||
+           inst->getUnifiedOpcode() == GFX::FENCE;
 }
 
 inline bool isGlobalMemLoad(const StinkyInstruction& inst) {

@@ -543,6 +543,256 @@ TEST(TestUtilities, ValidateChannelOnlyTensorShapeInvalidLessThan2D)
 }
 
 // ============================================================================
+// validateScaleNormalizedShape Tests
+// ============================================================================
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeFullRank4)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 3, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeTrailingHW)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 3, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeTrailingW)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 1, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRank3Full)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 4, 8});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 4, 8});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRank3TrailingW)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 4, 8});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 8});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRank5TrailingHW)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 1, 3, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsPerChannelCanonical)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 1, 1});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("no trailing dims matching input") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsTrailingOneAfterNonOne)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 3, 1});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("no trailing dims matching input") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsOneGapInMiddle)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 1, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("leading region before normalized shape")
+                != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsNonTrailingMiddleDim)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 3, 1});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("no trailing dims matching input") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsAllOnes)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 1, 1});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("no trailing dims matching input") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeAcceptsAllOnesRank4)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 1, 1, 1});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 1, 1});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeAcceptsAllOnesInputRank4WithBatch)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({2, 1, 1, 1});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 1, 1});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeAcceptsAllOnesInputRank3)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({3, 1, 1});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 1});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsAllOnesScaleWithTrailingNonOneInput)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({2, 1, 1, 4});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 1, 1});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("no trailing dims matching input") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsScaleRankGreaterThanInput)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 1, 2, 3, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("must match input rank") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsRank3Rows)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 6, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 6, 1});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("no trailing dims matching input") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsRank5Gap)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 1, 3, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("leading region before normalized shape")
+                != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsBatchNotOne)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({2, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({2, 2, 3, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("batch dimension (index 0) must be 1")
+                != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsMismatchedNonOneDim)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 5, 3, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("leading region before normalized shape")
+                != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsRankMismatch)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 3});
+    auto error = validateScaleNormalizedShape(scale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("must match input rank") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsNullScale)
+{
+    auto input = std::make_shared<TensorAttributes>();
+    input->set_dim({1, 2, 3, 3});
+    const std::shared_ptr<TensorAttributes> nullScale = nullptr;
+    auto error = validateScaleNormalizedShape(nullScale, input, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(error.get_message().find("is not set") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateScaleNormalizedShapeRejectsNullInput)
+{
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 2, 3, 3});
+    const std::shared_ptr<TensorAttributes> nullInput = nullptr;
+    auto error = validateScaleNormalizedShape(scale, nullInput, "TestTensor");
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(error.get_message().find("is not set") != std::string::npos);
+}
+
+// ============================================================================
 // validateScalarParameter Tests
 // ============================================================================
 

@@ -82,29 +82,41 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
     if(segments == 0u)
         return hipSuccess;
 
+    // HIP supports (2^32 - 1) max threads.  We have to ensure block_size * segments
+    // doesn't exceed that.  Compute the maximum number of segments:
+    const size_t max_segments = 0xffffffff / static_cast<size_t>(block_size);
+
     std::chrono::steady_clock::time_point start;
 
     if(debug_synchronous)
     {
         start = std::chrono::steady_clock::now();
     }
-    auto segmented_reduce_kernel = [=](auto target_config)
-    {
-        segmented_reduce<decltype(target_config)>(input,
-                                                  output,
-                                                  begin_offsets,
-                                                  end_offsets,
-                                                  reduce_op,
-                                                  static_cast<result_type>(initial_value));
-    };
 
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
-                                                                  segmented_reduce_kernel,
-                                                                  dim3(segments),
-                                                                  dim3(block_size),
-                                                                  0,
-                                                                  stream));
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", segments, start);
+    // If the number of segments is greater than max_segments, split the
+    // work into multiple kernel calls.
+    for (size_t offset = 0; offset < segments; offset += max_segments) {
+        size_t remaining_segments = segments - offset;
+        size_t batch_size = std::min(max_segments, remaining_segments);
+
+        auto segmented_reduce_kernel = [=](auto target_config)
+        {
+            segmented_reduce<decltype(target_config)>(input,
+                                                      output + offset,
+                                                      begin_offsets + offset,
+                                                      end_offsets + offset,
+                                                      reduce_op,
+                                                      static_cast<result_type>(initial_value));
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      segmented_reduce_kernel,
+                                                                      dim3(batch_size),
+                                                                      dim3(block_size),
+                                                                      0,
+                                                                      stream));
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", batch_size, start);
+    }
 
     return hipSuccess;
 }

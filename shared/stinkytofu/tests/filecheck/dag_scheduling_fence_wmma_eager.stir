@@ -1,0 +1,31 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyDAGSchedulerPass --print-output
+#
+# Scheduling fence: demonstrates that a fence acts as a hard region boundary,
+# constraining the WMMA to be issued only after the fence, even though the
+# WMMA has no register deps on any instruction before the fence.
+#
+# Input order:
+#   v_add_f32  v1 → v0       (independent, no deps)
+#   v_add_f32  v2 → v3       (independent, no deps)
+#   FENCE                    (hard ordering boundary — no tokens)
+#   v_add_f32  v4 → v5       (independent, no deps)
+#   v_wmma     v6,v6 → acc0  (no register deps on anything before fence)
+#
+# Without the fence, WMMA would be issued eagerly to the top (no register deps
+# blocking it).  With the fence, the scheduler treats it as a non-movable
+# side-effect that splits the region — WMMA stays in the post-fence region.
+#
+# Expected: the WMMA must appear after the FENCE in the scheduled output.
+# The independent v_add_f32 instructions may appear anywhere within their region.
+#
+# CHECK: "st.FENCE"
+# CHECK: v_wmma_f32_16x16x16_bf16
+
+st.func @test() {
+^entry:
+  v0 = "st.v_add_f32"(v1, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.FENCE"() { issueCycles = 0, latencyCycles = 0 }
+  v5 = "st.v_add_f32"(v4, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[6:13], v[6:13], acc[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+}
