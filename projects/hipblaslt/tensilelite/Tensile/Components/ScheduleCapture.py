@@ -492,6 +492,22 @@ def _node_label(node, capture=None) -> str:
     return f"{cat}[{idx}]"
 
 
+def _iter_note(producer, consumer) -> str:
+    """Return ' (of next iteration)' when consumer is exactly one loop_index
+    past producer (i -> i+1). SchedulePosition.loop_index is the canonical
+    cross-body iteration counter, so the numeric +1 test captures every
+    next-iteration crossing without hardcoding body labels. Empty string
+    otherwise.
+
+    Accepts GraphNode (`position`) or ValidatorInstruction (`issued_at`).
+    """
+    p_pos = getattr(producer, 'position', None) or producer.issued_at
+    c_pos = getattr(consumer, 'position', None) or consumer.issued_at
+    if c_pos.loop_index == p_pos.loop_index + 1:
+        return " (of next iteration)"
+    return ""
+
+
 def format_position(node, capture=None) -> str:
     """Render a node's schedule position with optional list-position suffix.
 
@@ -597,13 +613,7 @@ class MissingWaitFailure(Failure):
         c_pos = (getattr(self.consumer, 'position', None) or self.consumer.issued_at)
         producer_pos = f"@ idx={p_pos.vmfma_index}"
         consumer_pos = f"@ idx={c_pos.vmfma_index}"
-        # Cross-iteration note: only true "next iteration" in the captured
-        # 4-body model is ML-1 -> ML (loop_index 0 -> 1). ML -> NGL / NGL ->
-        # NLL are post-loop drains within the SAME logical iteration.
-        iter_note = ""
-        if (p_pos.loop_index == BODY_LABEL_TO_LOOP_INDEX[BODY_LABEL_ML_PREV]
-                and c_pos.loop_index == BODY_LABEL_TO_LOOP_INDEX[BODY_LABEL_ML]):
-            iter_note = " (of next iteration)"
+        iter_note = _iter_note(self.producer, self.consumer)
         # Optional hint when other-counter SWaitCnts exist in the window:
         # the user could extend one of them rather than insert a new SWaitCnt.
         hint = ""
@@ -632,7 +642,8 @@ class WaitTooLateFailure(Failure):
     def _format_canonical(self, capture=None) -> str:
         return (
             f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
-            f"{format_position(self.consumer, capture)} is guaranteed by an "
+            f"{format_position(self.consumer, capture)}"
+            f"{_iter_note(self.producer, self.consumer)} is guaranteed by an "
             f"SWaitCnt @ idx={self.wait_position.vmfma_index} which fires at "
             f"or after the consumer position. Move the wait earlier in the schedule."
         )
@@ -652,7 +663,8 @@ class WaitInsufficientFailure(Failure):
     def _format_canonical(self, capture=None) -> str:
         return (
             f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
-            f"{format_position(self.consumer, capture)}'s producer "
+            f"{format_position(self.consumer, capture)}"
+            f"{_iter_note(self.producer, self.consumer)}'s producer "
             f"{self.producer.category} {format_position(self.producer, capture)} "
             f"is guaranteed by SWaitCnt {format_position(self.wait, capture)}, "
             f"but the counter value ({self.counter_value}) leaves "
@@ -695,7 +707,8 @@ class MissingBarrierFailure(Failure):
         return (
             f"{why} Required ordering is {order}. SWaitCnt is present but no "
             f"SBarrier appears between the SWaitCnt and "
-            f"{self.consumer.category} {format_position(self.consumer, capture)}."
+            f"{self.consumer.category} {format_position(self.consumer, capture)}"
+            f"{_iter_note(self.producer, self.consumer)}."
         )
 
 

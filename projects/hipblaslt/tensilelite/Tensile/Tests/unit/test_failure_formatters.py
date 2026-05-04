@@ -313,6 +313,19 @@ def test_wait_too_late_failure_format():
     assert "fires at or after the consumer" in msg
     assert "@ idx=12" in msg
     assert "Move the wait earlier" in msg
+    assert "(of next iteration)" not in msg
+
+
+def test_wait_too_late_failure_format_cross_iteration():
+    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix."""
+    producer = _make_node("LRA0", "LRA0[0]", 5, body_label="ML-1")
+    consumer = _make_node("MFMA", "MFMA", 10, body_label="ML")
+    failure = WaitTooLateFailure(
+        producer=producer, consumer=consumer,
+        wait_position=SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0),
+    )
+    msg = failure.format(capture=None)
+    assert "@ idx=10 (of next iteration) is guaranteed" in msg
 
 
 def test_wait_insufficient_failure_format():
@@ -330,6 +343,20 @@ def test_wait_insufficient_failure_format():
     assert "queue depth at wait = 5" in msg
     assert "counter value (2)" in msg
     assert "Tighten the wait" in msg
+    assert "(of next iteration)" not in msg
+
+
+def test_wait_insufficient_failure_format_cross_iteration():
+    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix."""
+    producer = _make_node("LRA0", "LRA0[0]", 5, body_label="ML-1")
+    consumer = _make_node("MFMA", "MFMA", 10, body_label="ML")
+    wait = _make_node("SYNC", "SWaitCnt", 7, body_label="ML")
+    failure = WaitInsufficientFailure(
+        producer=producer, consumer=consumer, wait=wait,
+        queue_depth_at_wait=5, counter_value=2,
+    )
+    msg = failure.format(capture=None)
+    assert "@ idx=10 (of next iteration)'s producer" in msg
 
 
 def test_missing_barrier_failure_must_start_after_format():
@@ -341,6 +368,7 @@ def test_missing_barrier_failure_must_start_after_format():
     msg = failure.format(capture=None)
     assert "LRA0 -> SWaitCnt(dscnt=0) -> SBarrier -> GRA" in msg
     assert "GRA overwrites the LDS slot read by LRA0" in msg
+    assert "(of next iteration)" not in msg
 
 
 def test_missing_barrier_failure_needed_by_format():
@@ -352,6 +380,20 @@ def test_missing_barrier_failure_needed_by_format():
     msg = failure.format(capture=None)
     assert "GRA -> SWaitCnt(vlcnt=0) -> SBarrier -> LRA1" in msg
     assert "LRA1 reads the LDS slot written by GRA" in msg
+    assert "(of next iteration)" not in msg
+
+
+def test_missing_barrier_failure_format_cross_iteration():
+    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix
+    on the trailing consumer reference. Mirrors the canonical lr_to_gr_lds_reuse
+    cross-body case (LR0 in ML-1, GR in ML)."""
+    producer = _make_node("LRA0", "LRA0[0]", 8, body_label="ML-1")
+    consumer = _make_node("GRA", "GRA[0]", 2, body_label="ML")
+    failure = MissingBarrierFailure(
+        producer=producer, consumer=consumer, role="must_start_after"
+    )
+    msg = failure.format(capture=None)
+    assert msg.endswith("GRA @ idx=2 (of next iteration)."), msg
 
 
 def test_wrong_interleaving_failure_format():
