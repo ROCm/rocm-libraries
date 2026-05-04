@@ -94,7 +94,7 @@ protected:
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
-        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
+        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, refBundle;
         std::vector<int64_t> outputTensorIds;
 
         // Check engine support and set preferred engine before building execution plans.
@@ -145,13 +145,13 @@ protected:
         result = graph.build_plans();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
+        generateBundles(graph, refBundle, gpuBundle, outputTensorIds);
 
         initializeBundle(graph, gpuBundle, seed);
-        initializeBundle(graph, cpuBundle, seed);
+        initializeBundle(graph, refBundle, seed);
 
         ASSERT_NO_FATAL_FAILURE(executeGpuGraph(getSharedHandle(), graph, gpuBundle));
-        ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, cpuBundle));
+        ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
 
         ASSERT_GE(outputTensorIds.size(), 1)
             << "At least one output tensor id must be specified for "
@@ -170,7 +170,7 @@ protected:
 
         for(const auto& tensorId : outputTensorIds)
         {
-            auto& cpuTensor = cpuBundle.tensors.at(tensorId);
+            auto& refTensor = refBundle.tensors.at(tensorId);
             auto& gpuTensor = gpuBundle.tensors.at(tensorId);
 
             // This tells the tensor that its data has been modified on the device side
@@ -183,7 +183,7 @@ protected:
             // tensors so host access triggers device-to-host sync
             if(referenceUsesDevice)
             {
-                cpuTensor->markDeviceModified();
+                refTensor->markDeviceModified();
             }
 
             if(_tensorIdToValidatorMap.find(tensorId) == _tensorIdToValidatorMap.end())
@@ -192,7 +192,7 @@ protected:
                        << ", name: " << getOutputTensorName(tensorId);
             }
 
-            bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(*cpuTensor, *gpuTensor);
+            bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(*refTensor, *gpuTensor);
             ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
                                << ", name: " << _tensorIdToNameMap.at(tensorId);
         }
@@ -267,21 +267,21 @@ protected:
     }
 
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
-                                 hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle,
+                                 hipdnn_test_sdk::utilities::GraphTensorBundle& refBundle,
                                  hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle,
                                  std::vector<int64_t>& outputTensorIds)
     {
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
-                if(tryAddTensorToBundles(tensorAttr, cpuBundle, gpuBundle))
+                if(tryAddTensorToBundles(tensorAttr, refBundle, gpuBundle))
                 {
                     outputTensorIds.push_back(tensorAttr->get_uid());
                 }
             }
             for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
             {
-                tryAddTensorToBundles(tensorAttr, cpuBundle, gpuBundle);
+                tryAddTensorToBundles(tensorAttr, refBundle, gpuBundle);
             }
         });
     }
@@ -390,18 +390,18 @@ protected:
 
     bool tryAddTensorToBundles(
         const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensorAttr,
-        hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle,
+        hipdnn_test_sdk::utilities::GraphTensorBundle& refBundle,
         hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle)
     {
         int64_t tensorId = tensorAttr->get_uid();
 
         if(tensorAttr->get_is_virtual()
-           || cpuBundle.tensors.find(tensorId) != cpuBundle.tensors.end())
+           || refBundle.tensors.find(tensorId) != refBundle.tensors.end())
         {
             return false;
         }
 
-        cpuBundle.tensors.insert(
+        refBundle.tensors.insert(
             {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
         gpuBundle.tensors.insert(
             {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
