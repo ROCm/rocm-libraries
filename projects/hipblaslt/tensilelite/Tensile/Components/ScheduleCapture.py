@@ -834,12 +834,15 @@ class OutOfOrderSequenceFailure(Failure):
 # ----------------------------------------------------------------------------
 # 13. ConstraintViolationFailure — declared producer/consumer dependency
 #     constraint violated within a single schedule. Emitted by single-schedule
-#     constraint validators (Pack.validate, GlobalRead._validate_must_start_after)
-#     where there is no default schedule reference: the producer/consumer pair
-#     and the violation are derived entirely from the schedule under test plus
-#     its declared constraints (must_start_after, needed_by).
+#     constraint validators (Pack.validate) where there is no default schedule
+#     reference: the producer/consumer pair and the violation are derived
+#     entirely from the schedule under test plus its declared constraints
+#     (must_start_after, needed_by).
 #     Distinct from OrderInvertedFailure (#1), which is reserved for cross-graph
 #     reorder detection against the canonical default schedule.
+#     Note: GlobalRead._validate_must_start_after was deleted in bead `ola.2`
+#     phase 2 — that path's coverage is now graph-native (lr_to_gr_lds_reuse
+#     edges + SRD sgpr RAW edges).
 # ----------------------------------------------------------------------------
 @dataclass
 class ConstraintViolationFailure(Failure):
@@ -2873,8 +2876,10 @@ def build_dataflow_graph(four_part_capture):
     # =========================================================================
     # SBarrier-edge collectors (cross-wave LDS-reuse)
     # =========================================================================
-    # Two patterns mirror CMSValidator.apply_must_start_after_barriers (line 1216)
-    # and apply_barriers (line 1195):
+    # Two patterns mirror the legacy CMSValidator structural rules
+    # `apply_must_start_after_barriers` and `apply_barriers` (the former was
+    # deleted in bead `ola.2` phase 2; this collector is now the sole source
+    # of LR0 -> GR LDS-reuse coverage):
     #
     #   lr_to_gr_lds_reuse  (must_start_after):
     #     Producer LR0/LR1 -> SWaitCnt(dscnt drain) -> SBarrier -> Consumer GR
@@ -4029,8 +4034,8 @@ def _last_drain(waits, producer, subj_graph):
 #
 # This is the lint that replaces:
 #   - LRDataReadyRule              (CMSValidator.py:3461)
-#   - GRAfterLRRule                (CMSValidator.py:3470)  [LDS-reuse barrier-edges]
-#   - GRBeforeLRRule               (deleted in bead ola.1) [LDS-reuse barrier-edges]
+#   - GRAfterLRRule                (deleted in bead ola.2 phase 2)  [LDS-reuse barrier-edges]
+#   - GRBeforeLRRule               (deleted in bead ola.1)          [LDS-reuse barrier-edges]
 #   - PackDataReadyRule (ordering) (CMSValidator.py:3464)
 #
 # Same Failure types the cross-graph diagnose_missing_edge classifier

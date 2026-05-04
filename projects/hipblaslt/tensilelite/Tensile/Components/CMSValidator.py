@@ -477,8 +477,16 @@ class GlobalRead(ValidatorInstruction):
     needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(name="MFMA", issued_at=POSITION_INF))
     guaranteed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
     barriered_at: list[SchedulePosition] = field(default_factory=list)
-    must_start_after: list[ValidatorInstruction] = field(default_factory=list)
-    must_start_after_barriered_at: list[SchedulePosition] = field(default_factory=list)
+    # Bead `ola.2` phase 2: deleted `must_start_after` and
+    # `must_start_after_barriered_at` fields. The LR0 -> SWait -> SBarrier ->
+    # GR (LDS-reuse) ordering invariant is now enforced graph-side via
+    # `lr_to_gr_lds_reuse` edges in ScheduleCapture.py
+    # (`_collect_barrier_edges` + `validate_edge_wait_coverage`); the GRInc
+    # -> GR (SRD ordering) invariant is enforced graph-side via the SRD
+    # sgpr RAW edge formed by `_GenericALURule` and surfaced as
+    # `OrderInvertedFailure` by `compare_graphs`. See migrated tests at
+    # Tensile/Tests/unit/test_validate_gr_not_too_early_graph.py and
+    # Tensile/Tests/unit/test_GRMustStartAfterGRInc.py.
 
     def done_idx(self) -> SchedulePosition:
         return self.guaranteed_by
@@ -486,42 +494,10 @@ class GlobalRead(ValidatorInstruction):
     def validate(self):
         """Stack 1.3: returns typed Failure or None (legacy str also accepted
         for the residual defensive-fallback branches)."""
-        # Check must_start_after constraint (GR must start after LR0s are done)
-        must_start_after_error = self._validate_must_start_after()
-        if must_start_after_error:
-            return must_start_after_error
-
         # Check needed_by constraint (GR must finish before LR1/3)
         needed_by_error = self._validate_needed_by()
         if needed_by_error:
             return needed_by_error
-
-        return None
-
-    def _validate_must_start_after(self):
-        """Validate all must_start_after constraints. Returns Failure or None."""
-        from Tensile.Components.ScheduleCapture import (
-            ConstraintViolationFailure, MissingBarrierFailure,
-        )
-        for constraint in self.must_start_after:
-            if constraint.done_idx() == POSITION_NEG_INF:
-                continue
-
-            constraint_done = constraint.done_idx()
-
-            # 1. Check ordering: GR must be issued after constraint is done
-            if self.issued_at <= constraint_done:
-                return ConstraintViolationFailure(
-                    producer=constraint, consumer=self,
-                )
-
-            # 2. LocalRead constraints require an SBarrier (cross-wave LDS sync)
-            if isinstance(constraint, LocalRead):
-                if not any(constraint_done < b < self.issued_at
-                           for b in self.must_start_after_barriered_at):
-                    return MissingBarrierFailure(
-                        producer=constraint, consumer=self, role="must_start_after",
-                    )
 
         return None
 
@@ -1234,41 +1210,12 @@ def apply_barriers(timeline: Timeline) -> None:
             instruction.barriered_at.append(barrier.issued_at)
 
 
-@applies_only_once
-def apply_must_start_after_barriers(timeline: Timeline) -> None:
-    """
-    Apply the effect of SBarriers to the must_start_after_barriered_at field of GlobalReads.
-    For each GlobalRead, finds SBarrier instructions that occur between must_start_after.done_idx()
-    and the GlobalRead's issued_at. These barriers ensure all waves have completed the LR0s.
-    Timeline is modified in place.
-
-    Args:
-        timeline: The Timeline object containing the instructions.
-    """
-    for i_gr, gr in timeline.get_instructions_combined("GRA"):
-        _apply_must_start_after_barriers_single(timeline, gr, i_gr)
-    for i_gr, gr in timeline.get_instructions_combined("GRB"):
-        _apply_must_start_after_barriers_single(timeline, gr, i_gr)
-
-
-def _apply_must_start_after_barriers_single(timeline: Timeline, gr: GlobalRead, i_gr: int) -> None:
-    """Apply must_start_after barriers for a single GlobalRead instruction."""
-    lr_constraints = [c for c in gr.must_start_after
-                      if isinstance(c, LocalRead)
-                      and c.done_idx() != POSITION_NEG_INF]
-    if not lr_constraints:
-        return
-
-    # Use min to search the widest window for barrier candidates;
-    # _validate_must_start_after does per-constraint filtering afterwards.
-    earliest_done = min(c.done_idx() for c in lr_constraints)
-
-    for i_inst in range(i_gr - 1, -1, -1):
-        instruction = timeline.combined_timeline[i_inst]
-        if not isinstance(instruction, Barrier):
-            continue
-        if earliest_done < instruction.issued_at < gr.issued_at:
-            gr.must_start_after_barriered_at.append(instruction.issued_at)
+# `apply_must_start_after_barriers` and its `_apply_must_start_after_barriers_single`
+# helper were deleted in bead `ola.2` phase 2. Their only consumer was
+# `add_gr_not_too_early_constraints` (also deleted), which encoded the
+# LR0 -> SWait(dscnt=0) -> SBarrier -> GR LDS-reuse invariant. That
+# invariant is now enforced graph-side via `lr_to_gr_lds_reuse` edges in
+# ScheduleCapture.py (`_collect_barrier_edges` + `validate_edge_wait_coverage`).
 
 
 @applies_only_once
@@ -1358,91 +1305,14 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
 # `_collect_barrier_edges` and `validate_edge_wait_coverage` in
 # ScheduleCapture.py.
 
-@applies_only_once
-def set_gr_must_start_after_from_lr0s(timeline: Timeline, swap_global_read_order: bool, dtl_plus_lds_buf: bool = False) -> None:
-    """
-    Set the must_start_after field of GlobalReads based on the last LR0 that shares their LDS block.
-
-    Standard case (dtl_plus_lds_buf=False):
-        GRs in iteration N write (DDR->LDS) to the same LDS block that LR0s of iteration N read from.
-        Each GR must start after the last same-iteration LR0 is guaranteed done.
-
-    DtlPlusLdsBuf case (dtl_plus_lds_buf=True):
-        GRs in iteration N write to a different LDS block than same-iteration LR0s read from,
-        so there is no same-iteration dependency. However, GRs in iteration N write to the LDS
-        block that LR0s from iteration N-1 were reading from, creating a cross-iteration dependency.
-        Each GR must start after the last previous-iteration LR0 is guaranteed done.
-
-    If SwapGlobalReadOrder is True, GRA loads B so the first GRA must start after the last LRB0,
-    and the first GRB must start after the last LRA0.
-
-    The LR0's done_idx() is its guaranteed_by (set by apply_swaits), which is the SWaitCnt index.
-
-    Args:
-        timeline: The Timeline object containing the instructions.
-        swap_global_read_order: Whether global read order is swapped.
-        dtl_plus_lds_buf: Whether DtlPlusLdsBuf is enabled (cross-iteration dependency).
-    """
-    target_names = {"GRA": "LRA0", "GRB": "LRB0"}
-
-    if swap_global_read_order:
-        target_names["GRA"], target_names["GRB"] = target_names["GRB"], target_names["GRA"]
-
-    for i_loop, loop in enumerate(timeline.loops):
-        for gr_name, lr0_name in target_names.items():
-            grs = timeline.get_instructions(gr_name, loop)
-            if not grs:
-                continue
-
-            if dtl_plus_lds_buf:
-                # GRs write to a different LDS block than same-iteration LR0s.
-                # The dependency is against the previous iteration's LR0s instead.
-                if i_loop == 0:
-                    continue  # No previous iteration available (ML-1)
-                lr0s = timeline.get_instructions(lr0_name, timeline.loops[i_loop - 1])
-            else:
-                lr0s = timeline.get_instructions(lr0_name, loop)
-
-            if not lr0s:
-                continue
-
-            # Pick the LR0 that finishes last (highest guaranteed_by)
-            last_lr0 = max((lr0 for _, lr0 in lr0s), key=lambda lr0: lr0.guaranteed_by)
-            for _, gr in grs:
-                gr.must_start_after.append(last_lr0)
-
-@applies_only_once
-def set_gr_must_start_after_from_grinc(timeline: Timeline, swap_global_read_order: bool) -> None:
-    """
-    Set the must_start_after constraint of GlobalReads based on the last GRInc
-    that increments their address pointer.
-
-    GRIncA always increments A's pointer, GRIncB always increments B's pointer.
-    With SwapGlobalReadOrder: GRA loads B (uses GRIncB), GRB loads A (uses GRIncA).
-
-    This is an ordering-only constraint (no SBarrier needed) since GRInc and GR
-    are scalar/VMEM instructions within the same wave.
-    """
-    target_names = {"GRA": "GRIncA", "GRB": "GRIncB"}
-
-    if swap_global_read_order:
-        target_names["GRA"], target_names["GRB"] = target_names["GRB"], target_names["GRA"]
-
-    for loop in timeline.loops:
-        for gr_name, grinc_name in target_names.items():
-            grs = timeline.get_instructions(gr_name, loop)
-            if not grs:
-                continue
-
-            grincs = timeline.get_instructions(grinc_name, loop)
-            if not grincs:
-                continue
-
-            # Pick the GRInc that finishes last (highest issued_at)
-            last_grinc = max((grinc for _, grinc in grincs), key=lambda g: g.done_idx())
-
-            for _, gr in grs:
-                gr.must_start_after.append(last_grinc)
+# `set_gr_must_start_after_from_lr0s` and `set_gr_must_start_after_from_grinc`
+# were deleted in bead `ola.2` phase 2. Their only consumer was
+# `add_gr_not_too_early_constraints` (also deleted). The LR0 -> GR LDS-reuse
+# invariant is now graph-side via `lr_to_gr_lds_reuse` edges
+# (validate_edge_wait_coverage). The GRInc -> GR SRD ordering invariant is
+# graph-side via the SRD sgpr RAW edge from the GRInc's SAddU32 to the GR's
+# BufferLoad — `compare_graphs` flips a reversed-order subject into
+# OrderInvertedFailure (proven by test_GRMustStartAfterGRInc.py).
 
 
 def find_earliest_mfma_execution(
@@ -2950,33 +2820,16 @@ def add_pack_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
     hook_up_packs(timeline, ctx.kernel, ctx.mfma_reorder)
 
 
-def add_gr_not_too_early_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
-    """
-    Ensure that GlobalReads are not issued before the corresponding LR0s are guaranteed complete.
-
-    Standard case (DtlPlusLdsBuf=False):
-        Same-iteration dependency. GRs write to the same LDS block that LR0s read from.
-        Required ordering per operand:
-            last LR0 -> SWaitCnt -> SBarrier -> first GR (within same iteration)
-
-    DtlPlusLdsBuf case (DtlPlusLdsBuf=True):
-        Cross-iteration dependency. GRs write to a different LDS block than same-iteration LR0s,
-        but to the same block that previous-iteration LR0s were reading from.
-        Required ordering per operand:
-            last LR0 (iter N-1) -> SWaitCnt -> SBarrier -> first GR (iter N)
-
-    GRA writes (DDR->LDS) to the LDS that LRA0 reads from (LDS->VGPR).
-    We conservatively assume GRA always writes everywhere that a thread in the workgroup is reading from in LRA0.
-    Thus we must ensure that every thread in every wave in the workgroup has finished all of its LRA0 instructions
-    before GRA is issued. Same logic applies for B. No cross-operand constraints (LRA0 vs GRB are independent).
-    """
-    dtl_plus_lds_buf = ctx.kernel.get("DtlPlusLdsBuf", False)
-
-    # apply_swaits must run first so that LR0.guaranteed_by (done_idx) is set before must_start_after hookup.
-    apply_swaits(timeline)
-    set_gr_must_start_after_from_lr0s(timeline, ctx.swap_global_read_order, dtl_plus_lds_buf)
-    set_gr_must_start_after_from_grinc(timeline, ctx.swap_global_read_order)
-    apply_must_start_after_barriers(timeline)
+# `add_gr_not_too_early_constraints` was deleted in bead `ola.2` phase 2.
+# It encoded two invariants:
+#   * LR0 -> SWait(dscnt=0) -> SBarrier -> GR (LDS-reuse) — now graph-side
+#     via `lr_to_gr_lds_reuse` edges (validate_edge_wait_coverage). Phase 1
+#     of ola.2 migrated parallel coverage in test_validate_gr_not_too_early_graph.py.
+#   * last GRInc<X> -> first GR<X> (intra-wave SRD ordering) — now graph-side
+#     via the SRD sgpr RAW edge published by `_GenericALURule`; reversed
+#     subjects surface as `OrderInvertedFailure` in `compare_graphs`. See
+#     Tensile/Tests/unit/test_GRMustStartAfterGRInc.py for the migrated
+#     coverage.
 
 
 # `add_gr_finish_before_lr_constraints` was removed in bead `ola.1`.
@@ -3077,13 +2930,14 @@ class PackDataReadyRule(ValidationRule):
         return validate_timeline(timeline)
 
 
-class GRAfterLRRule(ValidationRule):
-    def concerns(self) -> set[ValidationConcern]:
-        return {ValidationConcern.LDS_WRITE_AFTER_READ}
-
-    def run(self, timeline, ctx):
-        add_gr_not_too_early_constraints(timeline, ctx)
-        return validate_timeline(timeline)
+# `GRAfterLRRule` and its underlying `add_gr_not_too_early_constraints`
+# were deleted in bead `ola.2` phase 2. The rule's two invariants
+# (LR0 -> SWait -> SBarrier -> GR LDS-reuse coverage AND last GRInc<X>
+# before first GR<X> SRD ordering) are now both enforced graph-side; see
+# the comment block above `add_gr_not_too_early_constraints`'s former
+# location and the migrated tests at
+# Tensile/Tests/unit/test_validate_gr_not_too_early_graph.py and
+# Tensile/Tests/unit/test_GRMustStartAfterGRInc.py.
 
 
 # `GRBeforeLRRule` and its underlying `add_gr_finish_before_lr_constraints` /
@@ -3099,7 +2953,7 @@ class GRAfterLRRule(ValidationRule):
 TIMELINE_RULES: list[ValidationRule] = [
     LRDataReadyRule(),
     PackDataReadyRule(),
-    GRAfterLRRule(),
+    # `GRAfterLRRule()` deleted in bead `ola.2` phase 2 — see comment block above.
 ]
 
 STRUCTURAL_RULES: list[StructuralRule] = [

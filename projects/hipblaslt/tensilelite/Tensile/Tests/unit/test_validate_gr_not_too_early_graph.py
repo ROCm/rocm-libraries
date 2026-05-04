@@ -52,20 +52,19 @@ satisfies this — it asserts a `MissingBarrierFailure` driven through the
 `validate_edge_wait_coverage` path (subject graph has a covering wait but
 no barrier between drain and consumer).
 
-Production-side deletions deferred:
-  * `add_gr_not_too_early_constraints` is still used by
-    `test_GRMustStartAfterGRInc.py` for the GRInc -> GR ordering arc; that
-    arc should migrate via the SCC sentinel resource (mrj epic, complete)
-    in a follow-up bead. Until then we KEEP the legacy rule and the legacy
-    `test_ValidateGlobalReadsNotTooEarly.py` to preserve coverage.
-  * `set_gr_must_start_after_from_lr0s`, `apply_must_start_after_barriers`,
-    `GRAfterLRRule`, and the `must_start_after` / `must_start_after_barriered_at`
-    fields on `GlobalRead` will be deleted in the same follow-up bead, once
-    `test_GRMustStartAfterGRInc.py` is migrated and the legacy test file
-    can be removed.
-
-This mirrors the pattern set by ola.4 (graph-native pack tests live in
-`test_validate_pack_graph.py`; legacy `test_ValidatePack.py` retained).
+Production-side deletions (bead `ola.2` phase 2, landed):
+  * `add_gr_not_too_early_constraints`, `set_gr_must_start_after_from_lr0s`,
+    `set_gr_must_start_after_from_grinc`, `apply_must_start_after_barriers`,
+    `_apply_must_start_after_barriers_single`, `GRAfterLRRule`, the
+    `GR.must_start_after` / `GR.must_start_after_barriered_at` fields, and
+    `GlobalRead._validate_must_start_after` are ALL deleted from
+    CMSValidator.py.
+  * The legacy `test_ValidateGlobalReadsNotTooEarly.py` is also deleted —
+    its coverage now lives in this file.
+  * The GRInc -> GR ordering arc previously consumed by
+    `test_GRMustStartAfterGRInc.py` is now graph-native via the SRD sgpr
+    RAW edge (GRInc's SAddU32 writes the SRD sgpr that GR's BufferLoad
+    reads); see the rewritten `test_GRMustStartAfterGRInc.py`.
 """
 
 from Tensile.Components.ScheduleCapture import (
