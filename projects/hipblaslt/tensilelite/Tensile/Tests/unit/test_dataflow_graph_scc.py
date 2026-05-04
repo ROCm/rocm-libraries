@@ -42,7 +42,7 @@ before it hits integration.
 from rocisa.container import sgpr
 from rocisa.instruction import (
     SAddU32, SAddCU32, SSubU32, SSubBU32,
-    SCmpEQU32, SCmpLgU32, SCSelectB32,
+    SBitcmp1B32, SCmpEQU32, SCmpLgU32, SCSelectB32,
 )
 
 from Tensile.Components.ScheduleCapture import (
@@ -233,6 +233,33 @@ class TestSCCRuleExtract:
             assert cls in _SCC_OPCODE_FLAGS, (
                 f"{cls} missing from _SCC_OPCODE_FLAGS"
             )
+
+    def test_sbitcmp1b32_writes_scc_does_not_read(self):
+        """Bead ckj defense-in-depth: SBitcmp1B32 has the same dst=nullptr
+        shape as SCmp* (`getParams() == [src0, src1]`), so without the
+        _SCC_OPCODE_FLAGS entry the generic rule would misclassify
+        params[0]=src0 as a write at sgpr 50. _SCCRule must claim it with
+        shape="no_dst" so both srcs land as reads only and SCC is the
+        sole write."""
+        inst = SBitcmp1B32(src0=sgpr(50, 1), src1=sgpr(51, 1),
+                           comment="ckj sentinel")
+        w = self._wrap_and_populate(inst)
+        # SCC write present, no SCC read.
+        assert self._has_scc(w.writes), "SBitcmp1B32 must publish SCC write"
+        assert not self._has_scc(w.reads), "SBitcmp1B32 must NOT read SCC"
+        # No sgpr write — proves the false-write footgun is sealed.
+        sgpr_writes = [r for r in w.writes
+                       if getattr(r, "regType", None) == "s"]
+        assert sgpr_writes == [], (
+            f"SBitcmp1B32 has dst=nullptr — must yield zero sgpr writes, "
+            f"got {sgpr_writes}. If this fires, the _GenericALURule fallback "
+            f"is misclassifying params[0] as a write again — re-add the "
+            f"SBitcmp1B32 entry to _SCC_OPCODE_FLAGS or extend _SCCRule."
+        )
+        # Both srcs land as reads.
+        sgpr_reads = sorted(r.regIdx for r in w.reads
+                            if getattr(r, "regType", None) == "s")
+        assert sgpr_reads == [50, 51]
 
 
 # =============================================================================

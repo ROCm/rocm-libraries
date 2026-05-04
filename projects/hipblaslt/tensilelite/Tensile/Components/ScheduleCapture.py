@@ -2199,6 +2199,15 @@ _SCC_OPCODE_FLAGS = {
     "SCmpKGeU32":  ("no_dst",        False, True),
     "SCmpKGtU32":  ("no_dst",        False, True),
     "SCmpKLGU32":  ("no_dst",        False, True),
+    # SOPC bit test (no sgpr dst, writes SCC = ((ssrc0 >> ssrc1) & 1)).
+    # Same shape footgun as SCmp*: rocisa constructs it with `dst=nullptr`,
+    # so `getParams()` returns just `[src0, src1]` and the generic rule
+    # would misclassify src0 as a write. Currently emitted only OUTSIDE the
+    # captured CMS body (KernelWriterAssembly.py:8813 in openSumAtLeastUnroll;
+    # 16979/17009/17061 in TDM setup), but claimed here for defense-in-depth
+    # so a future move into the captured region cannot silently corrupt the
+    # graph. Audit trail: bead rocm-libraries-ckj.
+    "SBitcmp1B32": ("no_dst",        False, True),
     # SOP2 with sgpr dst, implicit write SCC.
     "SAddU32":             ("dst_then_srcs", False, True),
     "SAddI32":             ("dst_then_srcs", False, True),
@@ -2351,6 +2360,27 @@ class _GenericALURule:
         `[src0, src1]`, so the generic rule would misclassify `src0` as a
         write at params[0]. `_SCCRule` claims SCmp* opcodes BEFORE the
         generic rule and treats every register-shaped param as a read.
+      - SBitcmp1B32 (bead ckj): same `dst=nullptr` shape; claimed by
+        `_SCCRule` with shape="no_dst" so `params[0]=ssrc0` is correctly
+        treated as a read. Currently dormant in CMS captures (emitted in
+        TDM setup + openSumAtLeastUnroll, both outside the captured body)
+        but claimed for defense-in-depth.
+
+    DANGER ZONE for new rocisa classes (audit checklist for future PRs):
+      Any new CommonInstruction subclass whose constructor passes
+      `nullptr` as the `dst` argument (look for the second positional arg
+      in the `CommonInstruction(InstType::..., <dst>, ...)` super-call)
+      will hit this rule with the SAME footgun: `getParams()` skips the
+      absent dst and returns `[src0, ...]`, so `params[0]` is a SOURCE
+      that this rule will misclassify as a write. If the new class also
+      lands in a captured CMS body region (per `LoopBodyCaptureBuilder`),
+      that false write will form phantom RAW edges in the dataflow graph.
+      Mitigation: add the class to `_SCC_OPCODE_FLAGS` with shape="no_dst"
+      and the appropriate `(reads_scc, writes_scc)` flags. The SCmp*,
+      SCmpK*, SCBranchSCC*, and SBitcmp1B32 entries are the existing
+      precedents. Audit was bead rocm-libraries-ckj — see commit msg for
+      the full grep methodology and the `dst=nullptr` survey of
+      `rocisa/rocisa/include/instruction/`.
     """
     def applies(self, inst, category=None):
         # Only real rocisa CommonInstruction-shaped objects expose
