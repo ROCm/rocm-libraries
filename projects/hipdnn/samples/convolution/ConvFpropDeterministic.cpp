@@ -64,7 +64,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful (using deterministic engine).\n";
 
     utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);

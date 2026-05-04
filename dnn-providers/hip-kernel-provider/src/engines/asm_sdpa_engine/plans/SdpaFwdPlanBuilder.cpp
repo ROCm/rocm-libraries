@@ -457,30 +457,13 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with path: " << coPath);
 
-    hipModule_t module;
-    hipError_t err = hipModuleLoad(&module, coPath.c_str());
-    if(err != hipSuccess)
+    auto kernel = loadKernelModule(coPath, config.knl_name.c_str());
+    if(!kernel)
     {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "Failed to load kernel module: " << coPath << " error: " << hipGetErrorString(err));
         return;
     }
 
-    hipFunction_t function;
-    err = hipModuleGetFunction(&function, module, config.knl_name.c_str());
-    if(err != hipSuccess)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to get kernel function, error: " << hipGetErrorString(err));
-        err = hipModuleUnload(module);
-        if(err != hipSuccess)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR(
-                "Failed to unload kernel module on error, error: " << hipGetErrorString(err));
-        }
-        return;
-    }
-
-    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(module, function, params));
+    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(*kernel), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(

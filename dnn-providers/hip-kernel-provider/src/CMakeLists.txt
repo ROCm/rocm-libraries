@@ -16,7 +16,9 @@ add_library(
     engines/plans/batchnorm/BatchnormFwdInferencePlan.cpp
     engines/plans/batchnorm/BatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/batchnorm/BatchnormFwdTrainingPlan.cpp
+    engines/plans/batchnorm/BatchnormBwdPlan.cpp
     engines/plans/batchnorm/BatchnormApplicabilityChecks.cpp
+    engines/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.cpp
     engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
     engines/plans/RMSnorm/RMSnormFwdPlan.cpp
     engines/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
@@ -41,6 +43,7 @@ dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_imp
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
 target_compile_options(hip_kernel_provider_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_source_files_properties(${KERNEL_GENERATED_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
 set_target_properties(hip_kernel_provider_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE ON
