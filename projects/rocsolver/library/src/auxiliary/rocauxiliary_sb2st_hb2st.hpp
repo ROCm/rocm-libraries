@@ -311,6 +311,7 @@ __device__ void sb2st_hb2st_task(
     S* E,
     T* V,
     rocblas_int ldv,
+    T* tau,
     T* s_housev,
     T* s_work,
     rocblas_int round)
@@ -361,7 +362,7 @@ __device__ void sb2st_hb2st_task(
                 assert( std::imag( s_housev[0] ) == 0 );
                 E[sweep] = std::real( s_housev[0] );
                 s_housev[0] = T( 1 );
-                V[ldv - 1 + vj*ldv] = s_tau;
+                tau[vj] = s_tau;
             }
             // was: starting from 1, for (i = 1 + xid; ...
             // if V is initialized to Identity, don't need to store i=0.
@@ -413,7 +414,7 @@ __device__ void sb2st_hb2st_task(
             }
             if (xid == 0)
             {
-                s_tau = V[ldv - 1 + vpj*ldv];
+                s_tau = tau[ vpj ];
             }
         }
         __syncthreads();
@@ -447,7 +448,7 @@ __device__ void sb2st_hb2st_task(
                     Aband[idiag + kd + jp*ldab] = s_housev[0];
                     s_housev[0] = T( 1 );
                     V[vi + vj*ldv] = s_housev[0];
-                    V[ldv - 1 + vj*ldv] = s_tau;
+                    tau[vj] = s_tau;
                 }
                 // hmm... if I did i = xid; then it copies the whole s_housev,
                 // but 0's whole column of A; need to preserve the top element
@@ -525,7 +526,9 @@ ROCSOLVER_KERNEL void sb2st_hb2st_kernel(
     rocblas_stride strideE,
     T* VV,
     rocblas_int ldv,
-    rocblas_stride strideV )
+    rocblas_stride strideV,
+    T* TTau,
+    rocblas_stride strideTau )
 {
     const rocblas_int xid = threadIdx.x;
     const rocblas_int yid = threadIdx.y;
@@ -536,6 +539,7 @@ ROCSOLVER_KERNEL void sb2st_hb2st_kernel(
     T* Aband = load_ptr_batch<T>( AAband, bid, shiftA, strideA );
     T* V = load_ptr_batch<T>( VV, bid, 0, strideV );
     S* E = load_ptr_batch<S>( EE, bid, 0, strideE );
+    T* tau = load_ptr_batch<T>( TTau, bid, 0, strideTau );
 
     // shared memory setup
     // todo: should s_mem be double, float, byte, T?
@@ -550,7 +554,7 @@ ROCSOLVER_KERNEL void sb2st_hb2st_kernel(
 
     // execute sweep task
     sb2st_hb2st_task<T, S>(
-        xid, yid, n, kd, sweep, task, Aband, ldab, E, V, ldv,
+        xid, yid, n, kd, sweep, task, Aband, ldab, E, V, ldv, tau,
         s_housev, s_work, round );
 }
 
@@ -605,6 +609,7 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(
     S D,
     S E,
     T V,
+    T tau,
     const rocblas_int batch_count = 1)
 {
     // order is important for unit tests:
@@ -614,7 +619,7 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(
         return rocblas_status_not_implemented;
 
     // 2. invalid size
-    if (n < 0 || kd < 0 || ldab < 3*kd - 1 || ldv < 3*kd)
+    if (n < 0 || kd < 0 || ldab < 3*kd - 1 || ldv < 2*kd)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size
@@ -626,7 +631,7 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(
         return rocblas_status_continue;
 
     // 3. invalid pointers
-    if (! Aband || ! D || ! E || ! V)
+    if (! Aband || ! D || ! E || ! V || ! tau)
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;
@@ -651,6 +656,8 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     U V,
     const rocblas_int ldv,
     const rocblas_stride strideV,
+    T* tau,
+    const rocblas_stride strideTau,
     const rocblas_int batch_count)
 {
     ROCSOLVER_ENTER( "sb2st_hb2st", "n:", n, "kd:", kd, "shiftA:", shiftA,
@@ -722,7 +729,8 @@ rocblas_status rocsolver_sb2st_hb2st_template(
                 n, kd, round,
                 Aband, shiftA, ldab, strideA,
                 E, strideE,
-                V, ldv, strideV );
+                V, ldv, strideV,
+                tau, strideTau );
         }
         if (round == sweep_begin_finishes)
         {

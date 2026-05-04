@@ -66,6 +66,116 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
 }
 
 //------------------------------------------------------------------------------
+template <typename T>
+void sb2st_hb2st_checkBadArgs(const rocblas_handle handle,
+                               const rocblas_int n,
+                               const rocblas_int kd,
+                               T* dAband,
+                               const rocblas_int ldab,
+                               decltype(std::real(T{}))* dD,
+                               decltype(std::real(T{}))* dE,
+                               T* dV,
+                               const rocblas_int ldv,
+                               T* dTau)
+{
+    using S = decltype(std::real(T{}));
+
+    // handle
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(nullptr, rocblas_fill_lower, n, kd,
+                              dAband, ldab, dD, dE, dV, ldv, dTau),
+        rocblas_status_invalid_handle);
+
+    // values
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_upper, n, kd,
+                              dAband, ldab, dD, dE, dV, ldv, dTau),
+        rocblas_status_not_implemented);
+
+    // sizes
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, -1, kd,
+                              dAband, ldab, dD, dE, dV, ldv, dTau),
+        rocblas_status_invalid_size);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, -1,
+                              dAband, ldab, dD, dE, dV, ldv, dTau),
+        rocblas_status_invalid_size);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd,
+                              dAband, 3*kd - 2, dD, dE, dV, ldv, dTau),
+        rocblas_status_invalid_size);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd,
+                              dAband, ldab, dD, dE, dV, 3*kd - 1, dTau),
+        rocblas_status_invalid_size);
+
+    // pointers
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd,
+                              (T*)nullptr, ldab, dD, dE, dV, ldv, dTau),
+        rocblas_status_invalid_pointer);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd,
+                              dAband, ldab, (S*)nullptr, dE, dV, ldv, dTau),
+        rocblas_status_invalid_pointer);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd,
+                              dAband, ldab, dD, (S*)nullptr, dV, ldv, dTau),
+        rocblas_status_invalid_pointer);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd,
+                              dAband, ldab, dD, dE, (T*)nullptr, ldv, dTau),
+        rocblas_status_invalid_pointer);
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd,
+                              dAband, ldab, dD, dE, dV, ldv, (T*)nullptr),
+        rocblas_status_invalid_pointer);
+
+    // quick return with invalid pointers
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, 0, kd,
+                              (T*)nullptr, ldab, (S*)nullptr, (S*)nullptr,
+                              (T*)nullptr, ldv, (T*)nullptr),
+        rocblas_status_success);
+}
+
+template <typename T>
+void testing_sb2st_hb2st_bad_arg()
+{
+    using S = decltype(std::real(T{}));
+
+    // safe arguments
+    rocblas_local_handle handle;
+    rocblas_int n   = 2;
+    rocblas_int kd  = 1;
+    rocblas_int ldab = 3*kd - 1;  // == 2
+    rocblas_int ldv  = 2*kd;      // == 2
+
+    // nv = nv_blocks * kd = 1 * 1 = 1
+    rocblas_int nv = 1;
+
+    // memory allocations
+    device_strided_batch_vector<T> dAband(ldab * n, 1, ldab * n, 1);
+    device_strided_batch_vector<S> dD(n, 1, n, 1);
+    device_strided_batch_vector<S> dE(n - 1, 1, n - 1, 1);
+    device_strided_batch_vector<T> dV(ldv * nv, 1, ldv * nv, 1);
+    device_strided_batch_vector<T> dTau(nv, 1, nv, 1);
+    CHECK_HIP_ERROR(dAband.memcheck());
+    CHECK_HIP_ERROR(dD.memcheck());
+    CHECK_HIP_ERROR(dE.memcheck());
+    CHECK_HIP_ERROR(dV.memcheck());
+    CHECK_HIP_ERROR(dTau.memcheck());
+
+    // check bad arguments
+    sb2st_hb2st_checkBadArgs(handle, n, kd,
+                             dAband.data(), ldab,
+                             dD.data(), dE.data(),
+                             dV.data(), ldv,
+                             dTau.data());
+}
+
+//------------------------------------------------------------------------------
 template <typename T, typename Ud, typename Td, typename Uh, typename Th>
 void sb2st_hb2st_getError(const rocblas_handle handle,
                           const rocblas_fill uplo,
@@ -77,6 +187,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
                           Td& dE,
                           Ud& dV,
                           const rocblas_int ldv,
+                          Ud& dTau,
                           Uh& hAband,
                           Uh& hAbandRes,
                           Th& hDRes,
@@ -106,7 +217,8 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
             handle, uplo, n, kd,
             dAband.data(), ldab,
             dD.data(), dE.data(),
-            dV.data(), ldv ) );
+            dV.data(), ldv,
+            dTau.data() ) );
     time = get_time_us_sync(stream) - start;
         CHECK_HIP_ERROR( hAbandRes.transfer_from( dAband ) );
     CHECK_HIP_ERROR( hDRes.transfer_from( dD ) );
@@ -224,6 +336,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                              Td& dE,
                              Ud& dV,
                              const rocblas_int ldv,
+                             Ud& dTau,
                              Uh& hAband,
                              double* gpu_time_used,
                              double* cpu_time_used,
@@ -258,7 +371,8 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                 handle, uplo, n, kd,
                 dAband.data(), ldab,
                 dD.data(), dE.data(),
-                dV.data(), ldv ) );
+                dV.data(), ldv,
+                dTau.data() ) );
         time = get_time_us_sync(stream) - start;
         printf( "n %d, kd %d, cold iter %d, time %.4f\n", n, kd, iter, time );
     }
@@ -285,7 +399,8 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                 handle, uplo, n, kd,
                 dAband.data(), ldab,
                 dD.data(), dE.data(),
-                dV.data(), ldv ) );
+                dV.data(), ldv,
+                dTau.data() ) );
         time = get_time_us_sync(stream) - start;
         *gpu_time_used += time;
         printf( "n %d, kd %d, hot  iter %d, time %.4f\n", n, kd, iter, time );
@@ -304,11 +419,9 @@ void testing_sb2st_hb2st( Arguments& argus )
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int kd = argus.get<rocblas_int>("kd");
     rocblas_int ldab = argus.get<rocblas_int>("ldab", 3*kd - 1);
-    rocblas_int ldv = argus.get<rocblas_int>("ldv", 3*kd);
+    rocblas_int ldv = argus.get<rocblas_int>("ldv", 2*kd);
 
     // V is ldv x nv
-    // todo: if eigval only, don't need T, and only need V vectors and tau
-    // for 2 rounds, so maybe 2(n+1) or so is enough.
     rocblas_int nt = ceildiv( n-1, kd );
     rocblas_int nv_blocks = nt*(nt + 1)/2;
     rocblas_int nv = nv_blocks*kd;
@@ -319,6 +432,7 @@ void testing_sb2st_hb2st( Arguments& argus )
     // determine sizes
     size_t size_Aband = ldab * n;
     size_t size_V = ldv * nv;
+    size_t size_Tau = nv;
     size_t size_D = n;
     size_t size_E = n - 1;
     size_t size_W = size_D;
@@ -330,7 +444,7 @@ void testing_sb2st_hb2st( Arguments& argus )
     size_t size_Vres = 0;  // todo: not yet checked
 
     // check invalid sizes
-    bool invalid_size = (n < 0 || kd < 0 || ldab < 3*kd - 1 || ldv < 3*kd);
+    bool invalid_size = (n < 0 || kd < 0 || ldab < 3*kd - 1 || ldv < 2*kd);
     if (invalid_size)
     {
         EXPECT_ROCBLAS_STATUS(
@@ -338,7 +452,8 @@ void testing_sb2st_hb2st( Arguments& argus )
                 handle, uplo, n, kd,
                 (T*)nullptr, ldab,
                 (S*)nullptr, (S*)nullptr,
-                (T*)nullptr, ldv ),
+                (T*)nullptr, ldv,
+                (T*)nullptr ),
             rocblas_status_invalid_size );
 
         if (argus.timing)
@@ -358,7 +473,8 @@ void testing_sb2st_hb2st( Arguments& argus )
                 handle, uplo, n, kd,
                 (T*)nullptr, ldab,
                 (S*)nullptr, (S*)nullptr,
-                (T*)nullptr, ldv ) );
+                (T*)nullptr, ldv,
+                (T*)nullptr ) );
 
         size_t size;
         CHECK_ROCBLAS_ERROR(
@@ -377,6 +493,7 @@ void testing_sb2st_hb2st( Arguments& argus )
 
     device_strided_batch_vector<T> dAband( size_Aband, 1, size_Aband, 1 );
     device_strided_batch_vector<T> dV( size_V, 1, size_V, 1 );
+    device_strided_batch_vector<T> dTau( size_Tau, 1, size_Tau, 1 );
     device_strided_batch_vector<S> dD( size_D, 1, size_D, 1 );
     device_strided_batch_vector<S> dE( size_E, 1, size_E, 1 );
 
@@ -384,6 +501,8 @@ void testing_sb2st_hb2st( Arguments& argus )
         CHECK_HIP_ERROR( dAband.memcheck() );
     if (size_V)
         CHECK_HIP_ERROR( dV.memcheck() );
+    if (size_Tau)
+        CHECK_HIP_ERROR( dTau.memcheck() );
     if (size_D)
         CHECK_HIP_ERROR( dD.memcheck() );
     if (size_E)
@@ -397,7 +516,8 @@ void testing_sb2st_hb2st( Arguments& argus )
                 handle, uplo, n, kd,
                 dAband.data(), ldab,
                 dD.data(), dE.data(),
-                dV.data(), ldv ),
+                dV.data(), ldv,
+                dTau.data() ),
             rocblas_status_success );
         if (argus.timing)
             rocsolver_bench_inform( inform_quick_return );
@@ -412,6 +532,7 @@ void testing_sb2st_hb2st( Arguments& argus )
             dAband, ldab,
             dD, dE,
             dV, ldv,
+            dTau,
             hAband, hAbandRes, hDRes, hERes, hW,
             &max_error );
     }
@@ -424,6 +545,7 @@ void testing_sb2st_hb2st( Arguments& argus )
             dAband, ldab,
             dD, dE,
             dV, ldv,
+            dTau,
             hAband,
             &gpu_time_used, &cpu_time_used,
             hot_calls, argus.profile, argus.profile_kernels, argus.perf );
