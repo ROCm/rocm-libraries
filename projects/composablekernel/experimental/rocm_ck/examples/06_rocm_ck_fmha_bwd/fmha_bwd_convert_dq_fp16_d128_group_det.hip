@@ -11,8 +11,9 @@
 static constexpr rocm_ck::FmhaBwdConvertDQSpec spec =
     rocm_ck::fmha_bwd_convert_dq_variant_spec("fmha_bwd_convert_dq_fp16_d128_group_det");
 
-extern "C" __global__ __launch_bounds__(spec.block_size, spec.block_per_cu)
-void fmha_bwd_convert_dq_fp16_d128_group_det(rocm_ck::Args args)
+extern "C" __global__ __launch_bounds__(
+    spec.block_size,
+    spec.block_per_cu) void fmha_bwd_convert_dq_fp16_d128_group_det(rocm_ck::Args args)
 {
     rocm_ck::runFmhaBwdConvertDQ<spec>(args);
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Variant registry for programmatic kernel selection.
-// Host-only header — no CK Tile dependency, no HIP dependency.
+// Host-only header -- no CK Tile dependency, no HIP dependency.
 //
 // Three kernel families, three variant arrays, three findVariant overloads.
 //

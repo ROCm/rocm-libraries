@@ -75,7 +75,7 @@ TEST(FmhaBwdDqDkDv, MakeSpecBF16)
 TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsQ)
 {
     // Test all supported hdim_q values. Each must be a separate constexpr
-    // variable because makeSpec is consteval — cannot use a runtime loop.
+    // variable because makeSpec is consteval -- cannot use a runtime loop.
     constexpr auto k32 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
                                                    .hdim_q = 32,
@@ -117,7 +117,7 @@ TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsQ)
 TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsV)
 {
     // Test all supported hdim_v values. Each must be a separate constexpr
-    // variable because makeSpec is consteval — cannot use a runtime loop.
+    // variable because makeSpec is consteval -- cannot use a runtime loop.
     constexpr auto k32 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
                                                    .hdim_q = 128,
