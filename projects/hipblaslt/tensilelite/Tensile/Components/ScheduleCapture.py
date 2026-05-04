@@ -375,9 +375,12 @@ class GraphNode:
     mirrors `ValidatorInstruction.min_issue_quad_cycles()` (CMSValidator.py:327
     + 645). Default 1; SNop-shaped instructions return `1 + wait_state`.
     Populated by `_make_node` from a class-dispatch table so the graph-side
-    `cumulative_issue_cycles` helper can reproduce `precompute_issue_times`
+    `cumulative_issue_cycles` helper can simulate per-instruction issue costs
     cycle-exactly without re-importing CMSValidator (which would create an
-    import cycle — CMSValidator imports from this module).
+    import cycle — CMSValidator imports from this module). After bead `8nz`
+    the structural-side simulators (`precompute_issue_times`,
+    `estimate_quad_cycles_precomputed`, `estimate_quad_cycles`) are deleted
+    and `cumulative_issue_cycles` is the single source of truth.
     """
     identity: tuple                     # (rocisa_class_name, loop_index, signature_tuple)
     position: SchedulePosition
@@ -1387,7 +1390,7 @@ _SNOP_CLASS_NAMES = {
 # CVT-pack rocisa classes (TF32 emulation: v_cvt_pk_bf16_f32 and friends).
 # Used by `_is_cvt_pack` (Sub-B of bead `35z`) to identify CVTPack producers
 # whose results feed downstream MFMAs and need the 2-quad-cycle settle window
-# (`QUAD_CYCLES_CVT_BEFORE_MFMA`, CMSValidator.py:275). Mirrors the
+# (`_QUAD_CYCLES_CVT_BEFORE_MFMA` in this file). Mirrors the
 # class-name-set lookup pattern used for MFMA / LR / LW / GR; the production
 # rocisa class is `VCvtPkF32toBF16` (CMSValidator.py:676 PACK_TYPE_MAP entry
 # binds it to the `CVTPack` validator dataclass). Test fixtures use plain
@@ -1421,7 +1424,7 @@ def _is_cvt_pack(inst):
     `CVTPack` dataclass via PACK_TYPE_MAP (CMSValidator.py:676). When such
     an instruction writes a vgpr that a downstream MFMA reads, the CDNA 4
     ISA (section 7.6) requires 2 quad-cycles between them
-    (`QUAD_CYCLES_CVT_BEFORE_MFMA`, CMSValidator.py:275). The graph-side
+    (`_QUAD_CYCLES_CVT_BEFORE_MFMA` in this file). The graph-side
     enforcement of this rule (Sub-B of bead `35z`) routes CVTPack producers
     through `_cvt_to_mfma_gap_ok` instead of the ALU-immediate exemption.
     """
@@ -2658,9 +2661,8 @@ def _min_issue_quad_cycles_for(rocisa_inst) -> int:
     Why duplicated here. CMSValidator imports from ScheduleCapture for typed
     Failure formatters (search 'from Tensile.Components.ScheduleCapture' in
     CMSValidator.py); importing CMSValidator from here would close the cycle.
-    The bead's mandate is to leave only the graph-side timing code, so this
-    helper is the new home and `precompute_issue_times` becomes deletable
-    once all callers migrate.
+    Post-`8nz` this helper is the canonical per-instruction cost table — the
+    structural-side simulators are deleted.
     """
     if rocisa_inst is None:
         return 1
@@ -3235,17 +3237,17 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
         # return so we don't double-emit on a non-clobber miss.
 
     # 4x4 PackMFMA-as-producer feeding CVTPack-as-consumer: 5-quad-cycle
-    # settle window (CDNA 4 ISA 7.6, `QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`,
-    # CMSValidator.py:276). Sub-C of bead `or9` migrates this to the graph
-    # side. Must run BEFORE the generic `_is_mfma_producer` branch below:
-    # `_is_mfma_producer` claims PackMFMA producers (post-`e7w`) and would
-    # otherwise route this pair through `_quad_cycle_gap_ok`, which uses
+    # settle window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`).
+    # Sub-C of bead `or9` migrated this to the graph side. Must run BEFORE
+    # the generic `_is_mfma_producer` branch below: `_is_mfma_producer`
+    # claims PackMFMA producers (post-`e7w`) and would otherwise route
+    # this pair through `_quad_cycle_gap_ok`, which uses
     # `_mfma_finish_cycles_for(producer) == 1` for 4x4 PackMFMAs — too
     # weak by 4 quad-cycles versus the 5-cycle CVT1 visibility window.
-    # The validator-side mirror is `isinstance(pack, MFMAPack)` at
-    # CMSValidator.py:1748-1751 inside `_handle_min_pack_quad_cycles`,
-    # which sets `min_quad_cycles_before_result_used =
-    # QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1` (= 5).
+    # Bead `8nz` deleted the structural-side mirror
+    # (`_handle_min_pack_quad_cycles` /
+    # `MFMAPack.min_quad_cycles_before_result_used`); this dispatch is
+    # now the only enforcement path.
     if (_is_mfma_pack_producer(p_node)
             and _is_cvt_pack_producer(c_node)):
         ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
@@ -3280,9 +3282,10 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
         return []
 
     # CVTPack-as-producer feeding MFMA-as-consumer: 2-quad-cycle settle
-    # window (CDNA 4 ISA 7.6, `QUAD_CYCLES_CVT_BEFORE_MFMA`,
-    # CMSValidator.py:275). Sub-B of bead `35z` migrates this to the graph
-    # side. Must precede the ALU-immediate exemption below (same
+    # window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_CVT_BEFORE_MFMA`). Sub-B of
+    # bead `35z` migrated this to the graph side; bead `8nz` deleted the
+    # structural-side mirror so this dispatch is now the only enforcement
+    # path. Must precede the ALU-immediate exemption below (same
     # dispatch-order constraint as the MFMA branch above) so CVTPacks
     # don't get silently waved through. Non-MFMA consumers fall through
     # to the ALU exemption — only the CVT->MFMA edge carries the
@@ -3498,23 +3501,24 @@ def _any_drains(waits, producer, subj_graph) -> bool:
     return any(_wait_drains_producer(w, producer, subj_graph) for w in waits)
 
 
-# --- Quad-cycle constants (mirrored from CMSValidator.py:275-282) -------------
-# These are duplicated locally rather than imported because ScheduleCapture
-# must stay import-free of CMSValidator (CMSValidator imports from this
-# module — bringing CMSValidator's symbols in here would create a cycle).
-# CDNA 4 ISA section 7.6.
+# --- Quad-cycle constants (single source of truth, post-`8nz`) ---------------
+# CDNA 4 ISA section 7.6. These constants used to be mirrored from
+# CMSValidator.py; bead `8nz` deleted the structural-side `QUAD_CYCLES_*` /
+# `MFMA_TYPE_SWITCH_THRESHOLD_*` constants together with the simulator that
+# consumed them (`estimate_quad_cycles`). The values below are now the only
+# place these magic numbers live in the code base.
 _QUAD_CYCLES_STANDARD_MFMA_FINISH = 3   # Standard MFMA: 3 quad-cycles to finish.
 _QUAD_CYCLES_MFMA_4X4_FINISH = 1        # 4x4 (Pack-flavored) MFMA: 1 quad-cycle.
 _QUAD_CYCLES_CVT_BEFORE_MFMA = 2        # CVT pack -> MFMA settle window.
 _QUAD_CYCLES_CVT_FINISH = 0             # CVT issues + finishes in 1 cycle (finish=0).
 _QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = 5   # 4x4 PackMFMA -> CVT1 settle window.
 
-# --- MFMA Type-Switch Thresholds (mirrored from CMSValidator.py:280-282) ------
-# When the simulator (`precompute_issue_times`, CMSValidator.py:2664-2670)
-# observes consecutive MFMAs of DIFFERENT classes whose issue gap is below the
-# producer's threshold, it injects a +1 quad-cycle stall — the consumer is
-# forced to issue one cycle later. The thresholds depend on the PRODUCER
-# class: 5 quad-cycles required after a standard MFMA, 3 after a 4x4 PackMFMA.
+# --- MFMA Type-Switch Thresholds (single source of truth, post-`8nz`) --------
+# When `cumulative_issue_cycles` observes consecutive MFMAs of DIFFERENT
+# classes whose issue gap is below the producer's threshold, it injects a +1
+# quad-cycle stall — the consumer is forced to issue one cycle later. The
+# thresholds depend on the PRODUCER class: 5 quad-cycles required after a
+# standard MFMA, 3 after a 4x4 PackMFMA.
 _MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5
 _MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3
 
@@ -3523,9 +3527,7 @@ def _mfma_finish_cycles_for(rocisa_inst) -> int:
     """Classify an MFMA-shaped rocisa instruction as standard (3 quad-cycles)
     or 4x4 PackMFMA (1 quad-cycle).
 
-    The CMSValidator dataclasses (`MFMA`, `MFMAPack`) carry the canonical
-    `mfma_finish_cycles` ClassVar (3 vs 1) — but those live on the validator
-    side. The rocisa `MFMAInstruction` C++ class accepts a `variant` list at
+    The rocisa `MFMAInstruction` C++ class accepts a `variant` list at
     construction (`[M, N, K, blk]`, e.g. `[4, 4, 4, 16]` for the 4x4 PackMFMA
     family) but does NOT expose that field as a readable Python attribute via
     the nanobind binding. The rendered assembly string IS canonical and
@@ -3537,9 +3539,11 @@ def _mfma_finish_cycles_for(rocisa_inst) -> int:
     model PackMFMAs). The attribute path is checked first so fixtures don't
     have to roundtrip through `str()`.
 
-    Mirrors the validator-side ClassVar split (CMSValidator.py:367, 482) and
-    keeps ScheduleCapture import-free of CMSValidator. Returns the standard
-    value when the instance lacks both signals (defensive fallback).
+    Single source of truth for per-MFMA finish cycles (post-`8nz`): the
+    structural-side `MFMA.mfma_finish_cycles` / `MFMAPack.mfma_finish_cycles`
+    ClassVars were deleted along with the simulator that consumed them.
+    Returns the standard value when the instance lacks both signals
+    (defensive fallback).
     """
     if rocisa_inst is None:
         return _QUAD_CYCLES_STANDARD_MFMA_FINISH
@@ -3614,12 +3618,10 @@ def _is_cvt_pack_producer(producer) -> bool:
     exemption claims them — same shape as the e7w PackMFMA carve-out, but
     with the CVT class set in place of the MFMA class set.
 
-    The validator-side mirror is `isinstance(pack, CVTPack)` at
-    CMSValidator.py:1786 inside `_handle_min_pack_quad_cycles`, which sets
-    `min_quad_cycles_before_result_used = QUAD_CYCLES_CVT_BEFORE_MFMA`
-    (= 2). The structural side then compares against
-    `estimated_quad_cycles_before_result_used` populated by
-    `estimate_quad_cycles` (walks the timeline including SWaitCnt stalls).
+    Bead `8nz` deleted the structural-side mirror (`_handle_min_pack_quad_cycles`,
+    `Pack.min_quad_cycles_before_result_used`, `Pack.estimated_quad_cycles_before_result_used`,
+    `estimate_quad_cycles`); the graph-side dispatch in `_classify_edge_coverage`
+    is now the only enforcement path for the CVT -> MFMA settle window.
     """
     if not getattr(producer, "category", "").startswith("Pack"):
         return False
@@ -3632,11 +3634,13 @@ def cumulative_issue_cycles(graph, producer, consumer) -> int:
     completion and consumer's issue start (bead `nk0`).
 
     Replaces the slot-delta + subiter approximation with cycle-exact
-    arithmetic equivalent to `CMSValidator.precompute_issue_times` (CMSValidator
-    .py:2612-2646) followed by `estimate_quad_cycles_precomputed` (CMSValidator
-    .py:2648-2665). Walks the captured body's instruction stream from the
-    producer up to (and excluding) the consumer, simulating the same per-
-    instruction issue accumulator the structural simulator uses, including:
+    arithmetic. Originally derived from the (since-deleted, beads `arv` /
+    `8nz`) structural-side `precompute_issue_times` /
+    `estimate_quad_cycles_precomputed` / `estimate_quad_cycles` simulators
+    in CMSValidator.py; this helper is now the canonical implementation.
+    Walks the captured body's instruction stream from the producer up to
+    (and excluding) the consumer, simulating per-instruction issue
+    accumulation including:
 
     1. Per-instruction issue cost (`node.issue_cycles`, populated by
        `_make_node` from `_min_issue_quad_cycles_for`). Default 1; SNop adds
@@ -3649,7 +3653,8 @@ def cumulative_issue_cycles(graph, producer, consumer) -> int:
        is delayed by one quad-cycle.
 
     Returns the gap as `consumer_issue_start - producer_issue_start - 1`
-    (the same convention as `estimate_quad_cycles_precomputed`).
+    (the convention previously used by the deleted
+    `estimate_quad_cycles_precomputed`).
 
     Falls back to `0` if the body or the producer/consumer cannot be
     located in the captured stream (defensive — should not happen in
@@ -3701,9 +3706,11 @@ def cumulative_issue_cycles(graph, producer, consumer) -> int:
     if p_idx is None or c_idx is None or p_idx >= c_idx:
         return 0
 
-    # Walk producer..consumer, mirroring `precompute_issue_times` exactly.
-    # We start the simulator at the producer (current_issue = 0 baseline),
-    # then accumulate; the returned gap is `c_issue - p_issue - 1`.
+    # Walk producer..consumer with the canonical issue-time simulator
+    # (post-`8nz` this is the single source of truth — the structural-side
+    # `precompute_issue_times` is deleted). We start the simulator at the
+    # producer (current_issue = 0 baseline), then accumulate; the returned
+    # gap is `c_issue - p_issue - 1`.
     mfma_free_at = 0
     current_issue = 0
     last_mfma_class = None
@@ -3757,8 +3764,9 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter=0, graph=None):
 
     Bead `nk0` rewrite: the same-body branch now delegates to
     `cumulative_issue_cycles`, which simulates the captured body's
-    instruction stream cycle-exactly (mirrors
-    `CMSValidator.precompute_issue_times`). The previous slot-delta
+    instruction stream cycle-exactly (the canonical implementation
+    post-`8nz`; the structural-side `precompute_issue_times` it
+    originally mirrored has been deleted). The previous slot-delta
     approximation, the subiter +1 correction (cmw), and the unconditional
     type-switch +1 (vf4) are all subsumed by the helper — the helper sees
     every intermediate instruction's issue cost and applies the type-switch
@@ -3799,54 +3807,30 @@ def _cvt_to_mfma_gap_ok(producer, consumer, subj_graph):
     downstream MFMA consumer for the CVT result to be visible.
 
     Sub-B of bead `35z`. The threshold is fixed at
-    `_QUAD_CYCLES_CVT_BEFORE_MFMA == 2`, mirroring the validator-side
-    `QUAD_CYCLES_CVT_BEFORE_MFMA` constant (CMSValidator.py:275, set on
-    `CVTPack.min_quad_cycles_before_result_used` by
-    `_handle_min_pack_quad_cycles` at CMSValidator.py:1786-1788).
+    `_QUAD_CYCLES_CVT_BEFORE_MFMA == 2` (CDNA 4 ISA 7.6). Bead `8nz`
+    deleted the structural-side mirror (`QUAD_CYCLES_CVT_BEFORE_MFMA`,
+    `Pack.min_quad_cycles_before_result_used`, `_handle_min_pack_quad_cycles`,
+    `estimate_quad_cycles`); this helper is now the only enforcement path.
 
     Returns `(ok, expected, actual)` — same triple shape as
     `_quad_cycle_gap_ok` so callers can wrap a single
     `TimingTooCloseFailure(expected, actual)` regardless of the gap kind.
 
-    Approach: SOUND UNDER-ESTIMATE of the actual quad-cycle gap. CVT
-    (`v_cvt_pk_bf16_f32`) issues and completes in 1 cycle on the vector
-    ALU (finish=0). The basic slot-delta back-to-back formula
-    (`slot_delta * (1 + 0) - 1`) under-counts in real schedules because
-    the CMS pipeline interleaves Pack/SWait/SBarrier work between the
-    CVT and the MFMA — `precompute_issue_times` (CMSValidator.py:2646)
-    accumulates those intervening instructions' `min_issue_quad_cycles()`
-    contributions into the structural gap, but the bare slot-delta formula
-    has no signal for them.
-
-    Concretely the bare formula gave actual=0 for slot_delta==1 and
-    actual=1 for slot_delta==2 — both well below the 2-cycle threshold —
-    even though the real TF32 4x4 schedule interleaves multiple CVTs and
-    SWaitCnts between every CVT and its target MFMA so the structural
-    gap is comfortably above 2. To stay sound we count the instructions
-    sitting between producer.position and consumer.position in the
-    captured body and add a +1 quad-cycle credit per intervening
-    instruction (each instruction contributes at least
-    `min_issue_quad_cycles_base == 1` per CMSValidator.py:298,
-    irrespective of class). This is still a lower bound on the real gap
-    (some classes — SNop, SWaitCnt under counter pressure — contribute
-    more than 1 cycle each), but it is enough to keep the graph-side
-    check from false-flagging real CMS schedules whose structural-side
-    `Pack.validate` is satisfied.
+    Approach: CYCLE-EXACT via `cumulative_issue_cycles` (bead `nk0`).
+    CVT (`v_cvt_pk_bf16_f32`) issues and completes in 1 cycle on the
+    vector ALU (finish=0); the helper walks the captured body's
+    instruction stream from CVT producer to MFMA consumer and accumulates
+    every intervening instruction's `min_issue_quad_cycles()` contribution
+    plus MFMA contention and type-switch stalls. Bead `8nz` deleted the
+    structural-side `precompute_issue_times` / `estimate_quad_cycles`
+    simulator that this helper originally mirrored; the graph-side path
+    is now the single source of truth.
 
     Cross-body CVT->MFMA edges follow the same conservative under-estimate
     as the MFMA->MFMA cross-body branch: report `body_delta * 1000`
     quad-cycles so (a) the gap is always judged OK and (b) telemetry sees a
     numerically meaningful value rather than the misleading
     `actual == expected` placeholder (s7k pattern).
-
-    Soundness contract matches `_quad_cycle_gap_ok`: this is a LOWER BOUND
-    on the real gap. The structural-side
-    `CMSValidator.precompute_issue_times` walks the full instruction stream
-    (including SWaitCnt stalls and non-CVT fillers) and remains the
-    cycle-accurate ground truth. The graph-side check is a fast
-    pre-filter — when it returns ok=False we know the structural side will
-    also fail; when it returns ok=True the structural side may still flag
-    a tighter gap that the graph couldn't see.
     """
     expected = _QUAD_CYCLES_CVT_BEFORE_MFMA
     finish = _QUAD_CYCLES_CVT_FINISH
@@ -3885,15 +3869,11 @@ def _mfma_pack_to_cvt_gap_ok(producer, consumer, subj_graph):
     its downstream CVTPack (CVT1) consumer for the accumulator to settle.
 
     Sub-C of bead `or9` (parent epic `w7f`). The threshold is fixed at
-    `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 == 5`, mirroring the validator-side
-    `QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1` constant (CMSValidator.py:276, set
-    on `MFMAPack.min_quad_cycles_before_result_used` by
-    `_handle_min_pack_quad_cycles` at CMSValidator.py:1748-1751). This is
-    the LARGEST gap among the four CDNA 4 ISA section 7.6 quad-cycle
-    constants; the 4x4 MFMA finish-cycle (1) is shorter than the 5-cycle
-    visibility window the CVT1 needs, so the structural side enforces a
-    larger min-gap on PackMFMA->CVTPack edges than the bare finish would
-    suggest.
+    `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 == 5` (CDNA 4 ISA 7.6). This is
+    the LARGEST gap among the four section-7.6 quad-cycle constants; the
+    4x4 MFMA finish-cycle (1) is shorter than the 5-cycle visibility
+    window the CVT1 needs, so this helper enforces a larger min-gap on
+    PackMFMA->CVTPack edges than the bare finish would suggest.
 
     Returns `(ok, expected, actual)` — same triple shape as
     `_quad_cycle_gap_ok` and `_cvt_to_mfma_gap_ok` so callers can wrap a
@@ -3901,12 +3881,13 @@ def _mfma_pack_to_cvt_gap_ok(producer, consumer, subj_graph):
     gap kind.
 
     Approach: CYCLE-EXACT via `cumulative_issue_cycles` (bead `nk0`), the
-    same simulator the cmw rewrite of `_quad_cycle_gap_ok` uses. The
-    helper walks the captured body's instruction stream from the
-    producer to the consumer, accumulating per-instruction issue costs
-    plus MFMA-specific finish-time and type-switch stalls — equivalent
-    to `CMSValidator.precompute_issue_times`. Same body as
-    `_quad_cycle_gap_ok`'s post-nk0 implementation.
+    same simulator `_quad_cycle_gap_ok` uses. The helper walks the
+    captured body's instruction stream from the producer to the
+    consumer, accumulating per-instruction issue costs plus
+    MFMA-specific finish-time and type-switch stalls. Bead `8nz` deleted
+    the structural-side `precompute_issue_times` simulator that this
+    helper originally mirrored; the graph-side path is now the single
+    source of truth for the PackMFMA -> CVT settle window.
 
     Cross-body edges follow the conservative `body_delta * 1000`
     placeholder (s7k pattern, mirrors the cross-body branches in the
@@ -3914,14 +3895,6 @@ def _mfma_pack_to_cvt_gap_ok(producer, consumer, subj_graph):
     the gap is always judged OK and telemetry sees a numerically
     meaningful value rather than the misleading `actual == expected`
     placeholder.
-
-    Soundness contract matches `_quad_cycle_gap_ok` and
-    `_cvt_to_mfma_gap_ok`: the structural-side
-    `CMSValidator.precompute_issue_times` walks the full instruction
-    stream (including SWaitCnt stalls and intervening fillers) and
-    remains the cycle-accurate ground truth. The graph-side check is a
-    fast pre-filter — when it returns ok=False we know the structural
-    side will also fail.
     """
     expected = _QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1
 
@@ -4118,14 +4091,15 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
     # positions for diagnostics).
 
     # 4x4 PackMFMA-as-producer feeding CVTPack-as-consumer: 5-quad-cycle
-    # settle window (CDNA 4 ISA 7.6, `QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`,
-    # CMSValidator.py:276). Sub-C of bead `or9` migrates this rule to the
-    # graph side. Must run BEFORE the generic `_is_mfma_producer` branch
-    # below: PackMFMA producers are claimed by `_is_mfma_producer`
+    # settle window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`).
+    # Sub-C of bead `or9` migrated this rule to the graph side; bead `8nz`
+    # deleted the structural-side mirror so this dispatch is now the only
+    # enforcement path. Must run BEFORE the generic `_is_mfma_producer`
+    # branch below: PackMFMA producers are claimed by `_is_mfma_producer`
     # (post-`e7w`) and would otherwise route through `_quad_cycle_gap_ok`,
     # whose threshold for 4x4 PackMFMAs (`_mfma_finish_cycles_for == 1`)
     # is too weak by 4 quad-cycles versus the 5-cycle CVT1 visibility
-    # window. Validator-side mirror: CMSValidator.py:1748-1751.
+    # window.
     if (_is_mfma_pack_producer(p_node)
             and _is_cvt_pack_producer(c_node)):
         ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
@@ -4159,9 +4133,11 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
         return []
 
     # CVTPack-as-producer feeding MFMA-as-consumer: governed by the
-    # `QUAD_CYCLES_CVT_BEFORE_MFMA` (= 2) settle window from CDNA 4 ISA
-    # section 7.6 (CMSValidator.py:275). Sub-B of bead `35z` migrates this
-    # rule to the graph side. Must run BEFORE the ALU-immediate exemption
+    # `_QUAD_CYCLES_CVT_BEFORE_MFMA` (= 2) settle window from CDNA 4 ISA
+    # section 7.6. Sub-B of bead `35z` migrated this rule to the graph
+    # side; bead `8nz` deleted the structural-side mirror so this dispatch
+    # is now the only enforcement path. Must run BEFORE the ALU-immediate
+    # exemption
     # below — CVTPacks are categorized `Pack*` and `_is_alu_producer`
     # would otherwise silently absorb them and skip the gap check entirely
     # (this is the same dispatch-order bug Sub-A fixed for PackMFMAs).

@@ -48,10 +48,11 @@ discussion and the parent epic's "Sequencing" section):
     graph-side classifier today. Recommendation: add a sibling sub-bead
     `ola.4.MiddlePack` for the new graph-side rule.
   * CVT-pair quad-cycle timing (`TimingTooCloseFailure` for ALU-producer
-    Pack -> MFMA gaps): graph's `_quad_cycle_gap_ok` only dispatches on
-    MFMA producers. Pack-as-producer quad-cycle gaps are owned by the
-    in-flight `35z` quad-cycle work (see CMSValidator.estimate_quad_cycles
-    + Pack.min_quad_cycles_before_result_used).
+    Pack -> MFMA gaps): now graph-side via `_cvt_to_mfma_gap_ok` (bead
+    `35z`) and `_mfma_pack_to_cvt_gap_ok` (bead `or9`). Bead `8nz` deleted
+    the structural-side mirror (`estimate_quad_cycles`,
+    `Pack.min_quad_cycles_before_result_used`); coverage lives in
+    `test_dataflow_graph_register_gaps.py`.
   * MFMA reorder + multi-tile + swap-pack tests: depend on Pack -> Pack
     pair ordering and CVT-pair timing, both blocked above.
 

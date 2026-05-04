@@ -32,7 +32,7 @@ from Tensile.Components.CMSValidator import (
 )
 from Tensile.Components.CustomSchedule import ScheduleInfo
 from Tensile.Components.ScheduleCapture import (
-    ConstraintViolationFailure, TimingTooCloseFailure, WrongInterleavingFailure,
+    ConstraintViolationFailure, WrongInterleavingFailure,
 )
 from cms_validation_base import CMSValidationTestBase
 from cms_test_utils import make_mock_id_map, make_mock_mfma_code
@@ -542,45 +542,13 @@ class TestValidatePackTF32(CMSValidationTestBase):
             f, producer_name="PackB0", producer_idx=8,
             consumer_name="MFMA", consumer_idx=6)
 
-    def test_failing_not_enough_time_CVT1_MFMA(self):
-        """
-        Failing case where there is not enough time between the last cvt pack command the first "real" mfma using the result.
-        """
-        assert self.num_vmfma == 12
-
-        optSchedule = {
-            "SYNC": [[self.q1s+2, self.q2s+2]],
-            "SNOP": [[self.q2s]],  # 
-
-            # Must finish before 2nd quarter (i < 3)
-            "LRA0": [[self.q1s+1] * 2],
-            "PackA0": [
-                [self.q1e] * 22 +
-                [self.q2s] *2 
-            ],
-
-            # Must finish before 3rd quarter (i < 6)
-            "LRB0": [[self.q2s+1] * 2],
-            "PackB0": [[self.q2e] * 24],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
-        ]
-
-        snopCode = [
-            SNop(waitState=1, comment="Needed to force the last 2 PackA0s to be too close to the MFMA."),
-        ]
-
-        # PackA0 @ idx=3 too close to MFMA @ idx=4 — quad-cycle timing violation.
-        f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=TimingTooCloseFailure,
-                          snopCode=snopCode)
-        self.assert_timing_too_close(
-            f, producer_name="PackA0", producer_idx=3,
-            consumer_name="MFMA", consumer_idx=4,
-            expected_quad_cycles=2, actual_quad_cycles=1)
+    # Bead `8nz`: `test_failing_not_enough_time_CVT1_MFMA` was deleted.
+    # It pinned `TimingTooCloseFailure` produced by the structural-side
+    # `estimate_quad_cycles` simulator, which `8nz` removed. Equivalent
+    # graph-native coverage lives in
+    # `test_dataflow_graph_register_gaps.py::TestMFMAQuadCycleGap` and
+    # neighboring CVT-pack-to-MFMA / Pack-MFMA-to-CVT1 cases routed through
+    # `_classify_edge_coverage`.
 
 class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
     """
@@ -1141,126 +1109,19 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
 
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, snopCode=snopCode)
 
-    def test_failing_not_enough_time_CVTO_MFMA(self):
-        """
-        Failing case where there is not enough time between the first pair of CVT0 and the first 4x4 MFMA.
-        """
-        assert self.num_vmfma == 48
-
-        optSchedule = {
-            "SYNC": [[self.q1s+1, self.q2s+1]],
-            
-            "LRA0": [[self.q1s] * 2],
-            "PackA0": [
-                [self.q1s+1] * 2 +
-                [self.q1s+2] * 2 +
-                [self.q1s+1] +
-                [self.q1s+3] +
-                [self.q1s+4] * 4
-            ],
-
-            "LRB0": [[self.q2s] * 2],
-            "PackB0": [
-                [self.q2s+1] * 2 +
-                [self.q2s+2] * 2 +
-                [self.q2s+1] +
-                [self.q2s+3] +
-                [self.q2s+4] * 4
-            ],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
-        ]
-
-        # PackA0 @ idx=1 too close to PackA0 @ idx=1 — quad-cycle timing violation.
-        f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=TimingTooCloseFailure)
-        self.assert_timing_too_close(
-            f, producer_name="PackA0", producer_idx=1,
-            consumer_name="PackA0", consumer_idx=1,
-            expected_quad_cycles=2, actual_quad_cycles=1)
-
-    def test_failing_not_enough_time_MFMA_CVT1(self):
-        """
-        Failing case where there is not enough time between the 4x4 MFMA (Pack 5) and the first CVT1 pack (Pack 6).
-        Pack 5 (second 4x4 MFMA) needs 5 quad-cycles before Pack 6 (first CVT1) can use its result.
-        With only 1 standard MFMA between them, there's only 3 quad-cycles, which is not enough.
-        """
-        assert self.num_vmfma == 48
-
-        optSchedule = {
-            "SYNC": [[self.q1s+1, self.q2s+1]],
-
-            "LRA0": [[self.q1s] * 2],
-            "PackA0": [
-                [self.q1s+2] * 4 +
-                [self.q1s+2] * 2 +
-                [self.q1s+3] * 4     # CVT1: indices 6-9 at vmfma 3 (only 1 MFMA between, not enough time!)
-            ],
-
-            "LRB0": [[self.q2s] * 2],
-            "PackB0": [
-                [self.q2s+2] * 4 +
-                [self.q2s+2] * 2 +
-                [self.q2s+4] * 4  # CVT1 at vmfma q2s+4, enough time for B
-            ],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
-        ]
-
-        # PackA0 @ idx=2 too close to PackA0 @ idx=3 — quad-cycle timing violation.
-        f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=TimingTooCloseFailure)
-        self.assert_timing_too_close(
-            f, producer_name="PackA0", producer_idx=2,
-            consumer_name="PackA0", consumer_idx=3,
-            expected_quad_cycles=5, actual_quad_cycles=3)
-
-    def test_failing_not_enough_time_CVT1_MFMA(self):
-        """
-        Failing case where there is not enough time between the last CVT1 pack and the first "real" MFMA using the result.
-        CVT1 packs (indices 6-9) need 2 quad-cycles before the MFMAs can use their results.
-        """
-        assert self.num_vmfma == 48
-
-        optSchedule = {
-            "SYNC": [[self.q1s+2, self.q2s+2]],
-            "SNOP": [[self.q2s]],
-
-            "LRA0": [[self.q1s+1] * 2],
-            "PackA0": [
-                [self.q1s+2] * 4 +
-                [self.q1s+2] * 2 +
-                [self.q1e] * 2 +
-                [self.q2s] * 2       # CVT1 (8-9) at vmfma 12 (too close to MFMA at q2s+1)
-            ],
-
-            "LRB0": [[self.q2s+1] * 2],
-            "PackB0": [[self.q2e] * 10],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
-        ]
-
-        snopCode = [
-            SNop(waitState=1, comment="Needed to force the last 2 PackA0s to be too close to the MFMA."),
-        ]
-
-        # PackA0 @ idx=12 too close to MFMA @ idx=13 — quad-cycle timing violation.
-        f = self.validate(optSchedule, syncCode, 1, 2, 2, 0,
-                          expected_failure=TimingTooCloseFailure,
-                          snopCode=snopCode)
-        self.assert_timing_too_close(
-            f, producer_name="PackA0", producer_idx=12,
-            consumer_name="MFMA", consumer_idx=13,
-            expected_quad_cycles=2, actual_quad_cycles=1)
+    # Bead `8nz`: deleted three structural-side TF32 4x4 timing tests
+    # (`test_failing_not_enough_time_CVTO_MFMA`,
+    # `test_failing_not_enough_time_MFMA_CVT1`,
+    # `test_failing_not_enough_time_CVT1_MFMA`). Each pinned
+    # `TimingTooCloseFailure` from the deleted `estimate_quad_cycles`
+    # simulator. Graph-native coverage:
+    #   * CVT0 -> 4x4 PackMFMA settle window
+    #     (`_cvt_to_mfma_gap_ok`): see
+    #     `test_dataflow_graph_register_gaps.py::test_cvt_pack_to_mfma_*`.
+    #   * 4x4 PackMFMA -> CVT1 settle window
+    #     (`_mfma_pack_to_cvt_gap_ok`): see
+    #     `test_dataflow_graph_register_gaps.py::test_mfma_pack_acc_chain_*`.
+    #   * CVT1 -> MFMA settle window: same dispatch as CVT0 -> MFMA.
 
 class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
     """
@@ -1549,13 +1410,15 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
             41, 41, 41, 41]]
         valid, message = isValid(schedule_info, ValidationContext(kernel=kernel, id_map=make_mock_id_map(schedule_info, kernel), mfma_code=make_mock_mfma_code(schedule_info.numMfma)))
         assert not valid
-        # The validator now uses register-traced needed_by which detects the
-        # broken schedule via the MFMAPack→CVT1 timing constraint (gap of 1
-        # vmfma between vmfma=40 and vmfma=41 is below the required minimum).
-        # The old positional path detected a different symptom of the same
-        # broken schedule (CVT0 at vmfma=37 issued after its consuming external
-        # MFMA at vmfma=36). Either error is a correct rejection.
-        assert message == "Code path 0: PackA0 @ idx=40 has too little gap between it and PackA0 @ idx=41. Expected at least 5 quad-cycles but only 3 passed."
+        # Broken schedule rejection. Bead `8nz` deleted the structural-side
+        # `estimate_quad_cycles` simulator that previously caught this schedule
+        # via the MFMAPack -> CVT1 timing constraint (gap of 1 vmfma between
+        # vmfma=40 and vmfma=41 is below the required minimum); the same
+        # broken-schedule symptom is now caught earlier by the positional
+        # ordering check (CVT0 at vmfma=37 issued after its consuming external
+        # MFMA at vmfma=36). Quad-cycle visibility for this case is also covered
+        # graph-side via `_mfma_pack_to_cvt_gap_ok` in ScheduleCapture.py.
+        assert message == "Code path 0: Loop NLL: PackA0[PackA0] @ idx=37 is issued after its consumer MFMA[MFMA] @ idx=36. The producer must complete before the consumer can use it."
 
 
 class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):

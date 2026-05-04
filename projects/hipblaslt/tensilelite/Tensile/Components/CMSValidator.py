@@ -272,14 +272,13 @@ PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
     # TF32 Pack Index Range constants removed — type resolution via idMap replaces positional arithmetic
 
 # --- Quad-Cycle Timing (CDNA 4 ISA section 7.6) ---
-QUAD_CYCLES_CVT_BEFORE_MFMA = 2          # CVT packs need 2 quad-cycles before MFMA can use result
-QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = 5     # 4x4 MFMA needs 5 quad-cycles before CVT1 can use result
-QUAD_CYCLES_STANDARD_MFMA_FINISH = 3      # Standard MFMA takes 3 quad-cycles to finish after issue
-QUAD_CYCLES_MFMA_4X4_FINISH = 1           # 4x4 MFMA takes 1 quad-cycle to finish after issue
-
-# --- MFMA Type-Switch Thresholds ---
-MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5  # Min gap before type switch from standard MFMA
-MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3       # Min gap before type switch from 4x4 MFMA
+# The structural-side `estimate_quad_cycles` orchestrator and its
+# accompanying constants were deleted by bead `8nz`. The graph-side
+# `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` / `_mfma_pack_to_cvt_gap_ok`
+# helpers in `Tensile/Components/ScheduleCapture.py` are now the single
+# source of truth for MFMA quad-cycle visibility verdicts; their constants
+# (`_QUAD_CYCLES_*`, `_MFMA_TYPE_SWITCH_THRESHOLD_*`) live alongside them
+# in ScheduleCapture.py.
 
 # --- TF32 Emulation ---
 MFMAS_PER_TILE_TF32 = 3   # 3 MFMAs per tile pair in TF32 emulation
@@ -364,7 +363,10 @@ class LocalRead(ValidatorInstruction):
 
 @dataclass
 class MFMA(ValidatorInstruction):
-    mfma_finish_cycles: ClassVar[int] = QUAD_CYCLES_STANDARD_MFMA_FINISH
+    # Bead `8nz`: `mfma_finish_cycles` was the only field consumed by
+    # the deleted `estimate_quad_cycles` simulator. The graph-side
+    # `_mfma_finish_cycles_for(rocisa_inst)` (ScheduleCapture.py:3543)
+    # is now the single source of truth for per-MFMA finish-cycle costs.
 
     def validate(self) -> Optional[str]:
         return None
@@ -381,20 +383,17 @@ class Pack(ValidatorInstruction):
     needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(name="MFMA", issued_at=POSITION_INF))
     must_start_after: list[ValidatorInstruction] = field(default_factory=list)
 
-    # The minimum number of quad-cycles that must pass before the result of this pack is used.
-    # Measure from the point that this Pack is finished being issued.
-    # See section 7.6 of the CDNA 4 ISA.
-    # Default 0 = no timing constraint. Set by _handle_min_pack_quad_cycles for CVTPack and MFMAPack.
-    min_quad_cycles_before_result_used: int = 0
-    # The estimated number of quad-cycles that passed between the pack being issued and the result being used.
-    # This is a lower bound estimate (does not account for most stalls and such).
-    estimated_quad_cycles_before_result_used: int = 0
+    # Bead `8nz`: `min_quad_cycles_before_result_used` /
+    # `estimated_quad_cycles_before_result_used` (and the timing-check
+    # block below) were deleted. Quad-cycle visibility is now enforced
+    # exclusively by the graph-side `_quad_cycle_gap_ok` /
+    # `_cvt_to_mfma_gap_ok` / `_mfma_pack_to_cvt_gap_ok` helpers in
+    # ScheduleCapture.py, which emit the same `TimingTooCloseFailure`
+    # type via `_classify_edge_coverage`.
 
     def validate(self):
         """Stack 1.3: returns typed Failure or None."""
-        from Tensile.Components.ScheduleCapture import (
-            ConstraintViolationFailure, TimingTooCloseFailure,
-        )
+        from Tensile.Components.ScheduleCapture import ConstraintViolationFailure
         issued_at = self.issued_at.vmfma_index
 
         # Collapse must_start_after list to the single latest constraint
@@ -403,32 +402,20 @@ class Pack(ValidatorInstruction):
         ) if self.must_start_after else MFMA(name="MFMA", issued_at=POSITION_NEG_INF)
 
         if effective_must_start_after.done_idx() < self.issued_at < self.needed_by.done_idx():
-            pass  # Ordering checks passed, fall through to timing check
-        elif self.issued_at < effective_must_start_after.done_idx():
+            return None  # Ordering checks passed; quad-cycle timing now graph-side.
+        if self.issued_at < effective_must_start_after.done_idx():
             # Issued too early
             return ConstraintViolationFailure(
                 producer=effective_must_start_after, consumer=self,
             )
-        elif self.issued_at >= self.needed_by.issued_at:
+        if self.issued_at >= self.needed_by.issued_at:
             # Issued too late
             return ConstraintViolationFailure(
                 producer=self, consumer=self.needed_by,
             )
-        else:
-            # Generic fallback — defensive guard, should not fire on valid
-            # rule logic. Stays as a string return (no semantic Failure type).
-            return f"{self.name} at index {issued_at} is not valid."
-
-        # Timing check (only fires when min > 0, i.e. when _handle_min_pack_quad_cycles has set a constraint)
-        if self.min_quad_cycles_before_result_used > 0:
-            if self.estimated_quad_cycles_before_result_used < self.min_quad_cycles_before_result_used:
-                return TimingTooCloseFailure(
-                    producer=self, consumer=self.needed_by,
-                    expected_quad_cycles=self.min_quad_cycles_before_result_used,
-                    actual_quad_cycles=self.estimated_quad_cycles_before_result_used,
-                )
-
-        return None
+        # Generic fallback — defensive guard, should not fire on valid
+        # rule logic. Stays as a string return (no semantic Failure type).
+        return f"{self.name} at index {issued_at} is not valid."
 
 @dataclass
 class CVTPack(Pack):
@@ -478,12 +465,10 @@ class MFMAPack(Pack, MFMA):
     - isinstance(x, Pack) is True — works with pack gathering, filtering, type hints
     - isinstance(x, MFMA) is True — captures "this IS an MFMA" semantics
     """
-    # Override MFMA's finish cycles for 4x4 timing
-    mfma_finish_cycles: ClassVar[int] = QUAD_CYCLES_MFMA_4X4_FINISH
-
-    # NOTE: min_quad_cycles_before_result_used is NOT overridden here.
-    # It keeps Pack's default (0) and is set by _handle_min_pack_quad_cycles
-    # only when the constraint is active (when local reads exist).
+    # Bead `8nz`: deleted the `mfma_finish_cycles` ClassVar override
+    # (consumed only by the deleted `estimate_quad_cycles` simulator).
+    # Graph-side `_mfma_finish_cycles_for(rocisa_inst)` distinguishes
+    # 4x4 PackMFMAs from standard MFMAs by rocisa class name.
 
 
 @dataclass
@@ -1735,24 +1720,11 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 pack.needed_by = cvt1_needed_by
        
 
-def _handle_min_pack_quad_cycles(packs: list[Pack]) -> None:
-    """
-    Set the min_quad_cycles_before_result_used field for Pack instructions that need timing constraints.
-    This is used to enforce timing constraints for TF32 emulation modes.
-    Only CVTPack and MFMAPack get non-zero values;
-    MiddlePack, SwapPack, and plain Pack keep the default of 0.
-
-    Args:
-        packs: List of Pack instructions to set minimum quad-cycles for.
-    """
-    for pack in packs:
-        if isinstance(pack, MFMAPack):
-            # 4x4 MFMAs need 5 quad-cycles before CVT1 can use result
-            pack.min_quad_cycles_before_result_used = QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1
-        elif isinstance(pack, CVTPack):
-            # CVT packs need 2 quad-cycles before MFMAs can use their results
-            pack.min_quad_cycles_before_result_used = QUAD_CYCLES_CVT_BEFORE_MFMA
-        # All other packs have no timing constraints
+# Bead `8nz`: `_handle_min_pack_quad_cycles` was deleted. It only set
+# `Pack.min_quad_cycles_before_result_used`, which itself was only read
+# by the deleted `estimate_quad_cycles` simulator and the deleted
+# timing-check block in `Pack.validate`. Quad-cycle visibility is now
+# enforced by the graph-side helpers in ScheduleCapture.py.
 
 def _compute_swap_register_pairs(vw: int, total_regs: int) -> list[tuple[int, int]]:
     """Compute the (src_reg, dst_reg) pairs for each VSwapB32 instruction, in issue order.
@@ -2222,8 +2194,9 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
                     pack.must_start_after = reg_deps[pack.issue_index]
 
             # TF32-specific constraints
+            # Bead `8nz`: removed `_handle_min_pack_quad_cycles(packs)` —
+            # quad-cycle visibility is now graph-side.
             if is_tf32_emulation:
-                _handle_min_pack_quad_cycles(packs)
                 if not is_4x4mfma_tf32:
                     _hook_up_middle_16_pairs(packs, all_middle_16_packs)
 
@@ -2609,99 +2582,18 @@ def verify_swaitcnt_counters(timeline: 'Timeline') -> Optional[str]:
     return None
 
 
-@applies_only_once
-def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
-    """
-    Perform a rough estimate on the number of quad-cycles that pass between when an instruction is issued and when its result is used.
-    Needed to ensure the restrictions laid out in section 7.6 of the CDNA 4 ISA are met. Failing to meet these restrictions will result in deterministic errors.
-    
-    E.g. for the 4x4 MFMA TF32 route the 6th and 7th pack instructions map to:
-    v_mfma_f32_4x4x4_16b_bf16 v[0:3], ..., ..., ...
-    v_cvt_pk_bf16_f32 v[3], v[2], v[3]
-
-    As listed above, the sequence of instructions is incorrect since (they reference the same VGPRs and) there must be a minimum of 5 quad-cycles between when v_mfma_f32_4x4x4_16b_bf16 has been issued and when v_cvt_pk_bf16_f32 starts issuing. As written there is a 0 quad-cycle gap (the v_cvt issues and completes in parallel with the v_mfma completing.) One way to write a correct sequency would be:
-    v_mfma_f32_4x4x4_16b_bf16 v[0:3], ..., ..., ...
-    s_nop 4
-    v_cvt_pk_bf16_f32 v[3], v[2], v[3]
-
-    Only operates on instructions which have a set needed_by field and a set min_quad_cycles_before_result_used field.
-
-    All instructions take 1 quad-cycle to issue minimum.
-    Swaits will stall everything else for 1 + wait_state number of quad-cycles.
-    SWait is assumed to be only 1 quad-cycle, have no easy way to determine stalls.
-    SBarrier is assumed to be only 1 quad-cycle, have no easy way to determine stalls.
-    MFMAs take a different number of quad-cycles to finish. Currently assumed that it's 4 quad-cycles (1 issue + 3 finish).
-    Packs take a different number of quad-cycles to finish (since some are actually MFMAs).
-        - Specifically the 5th and 6th pack for 4x4MFMA TF32 approximation, which will take 2 quad-cycles (1 issue + 1 finish).
-
-    During the finish cycles of an MFMA we can issue other instructions.
-    E.g.: MFMA, SNop(2)
-    There will have an execution time of 4 quad-cycles.
-    The SNop(2) which takes 3 quad-cycles (1 issue + 2 finish) will be executed in parallel with the MFMA finishing and fit entirely behind the 3 cycles the mfma takes to finish.
-    """
-    if not kernel.get("UseF32XEmulation", False):
-        # Only F32 emulation issues instructions (Packs) which need estimation of quad-cycles for correctness.
-        return
-
-    if not kernel.get("UseDirect32XEmulation", False):
-        raise ValueError("UseDirect32XEmulation is False, case not supported.")
-
-    # Build helper lookup
-    index_for_inst_id = {id(inst): i for i, inst in enumerate(timeline.combined_timeline)}
-
-    # Inline issue-time simulator. (Bead `arv` deleted the standalone
-    # `precompute_issue_times` / `estimate_quad_cycles_precomputed`
-    # helpers — graph-side `cumulative_issue_cycles` is now the source
-    # of truth for MFMA quad-cycle gap verdicts. The body below is the
-    # only surviving consumer of the simulator and is preserved here
-    # verbatim so this orchestrator stays self-contained until bead
-    # `8nz` migrates `add_pack_constraints` off `estimate_quad_cycles`.)
-    mfma_free_at = 0
-    current_issue = 0
-    last_mfma_class: Optional[type] = None
-    last_mfma_issue = -1
-
-    issue_times: list[int] = []
-    for instruction in timeline.combined_timeline:
-        if isinstance(instruction, MFMA):
-            # MFMAs must wait for previous MFMA to finish
-            current_issue = max(current_issue, mfma_free_at)
-
-            # MFMA type switch penalty
-            current_mfma_class = type(instruction)
-            if last_mfma_class and current_mfma_class != last_mfma_class:
-                gap = current_issue - last_mfma_issue
-                threshold = MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 if last_mfma_class is MFMAPack else MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD
-                if gap < threshold:
-                    current_issue += 1
-
-            mfma_free_at = current_issue + 1 + instruction.mfma_finish_cycles  # 1 to issue + finish_cycles to complete
-
-            last_mfma_issue = current_issue
-            last_mfma_class = current_mfma_class
-
-        issue_times.append(current_issue)
-        current_issue = current_issue + instruction.min_issue_quad_cycles()
-
-    # Estimate number of quad-cycles between being issued and result being used
-    for i_instruction, instruction in enumerate(timeline.combined_timeline):
-        if not isinstance(instruction, Pack) or instruction.min_quad_cycles_before_result_used == 0:
-            continue
-
-        needed_by = instruction.needed_by
-        if needed_by is None:
-            continue
-        if not isinstance(needed_by, ValidatorInstruction):
-            continue
-        if needed_by.issued_at == POSITION_INF:
-            continue
-
-        i_needed_by = index_for_inst_id.get(id(needed_by))
-        # Inlined `estimate_quad_cycles_precomputed`: gap between when
-        # i_instruction has finished issuing (issue_times[i] + 1) and
-        # when i_needed_by starts issuing.
-        estimate = issue_times[i_needed_by] - issue_times[i_instruction] - 1
-        instruction.estimated_quad_cycles_before_result_used = estimate
+# Bead `8nz`: `estimate_quad_cycles` (the structural-side issue-time
+# simulator) was deleted. Quad-cycle visibility (CDNA 4 ISA section 7.6)
+# is now enforced exclusively by the graph-side helpers in
+# Tensile/Components/ScheduleCapture.py:
+#   * `cumulative_issue_cycles(graph, producer, consumer)` — cycle-exact
+#     equivalent of the deleted simulator (bead `nk0`).
+#   * `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` /
+#     `_mfma_pack_to_cvt_gap_ok` — pair-specific dispatch, all routed
+#     through `_classify_edge_coverage`, all emitting `TimingTooCloseFailure`.
+# See `Tensile/Tests/unit/test_dataflow_graph_register_gaps.py` for the
+# graph-native coverage of the rules previously pinned by the (now
+# removed) `TimingTooClose*` tests in `test_ValidatePack.py`.
 
 def _failure_to_string(result) -> Optional[str]:
     """Boundary helper: a rule's validate() may return either a legacy
@@ -3043,16 +2935,19 @@ def add_pack_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
 
     There are several restrictions placed on Pack instructions:
     1. For all gemm types (tf32, bf16, etc.) the Pack instructions must be issued after the data is guaranteed to be loaded into the registers (guaranteed by SWaitCnt instructions). And they must finish before the first VMFMA that uses their results.
-    2. For fp32 GEMMs, there are additional restrictions on:
-        1. The ordering of the Pack instructions.
-        2. The minimum number of quad-cycles that must pass between issuing certain pack instructions and when their results get used. These restrictions are defined in section 7.6 of the CDNA 4 ISA.
+    2. For fp32 GEMMs, there are additional ordering restrictions on the Pack instructions.
+    The CDNA 4 ISA section 7.6 quad-cycle visibility restrictions for fp32
+    Pack instructions used to be enforced here via `estimate_quad_cycles`
+    plus a per-Pack timing check; bead `8nz` migrated those to the graph
+    side (`_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` /
+    `_mfma_pack_to_cvt_gap_ok` in ScheduleCapture.py, all routed through
+    `_classify_edge_coverage`).
     """
     if ctx.kernel.get("UseF32XEmulation", False) and not ctx.kernel.get("UseDirect32XEmulation", False):
         printWarning("UseF32XEmulation is set to True but UseDirect32XEmulation is not set to True. Skipping CMS validation for packs.")
         return
     apply_swaits(timeline)
     hook_up_packs(timeline, ctx.kernel, ctx.mfma_reorder)
-    estimate_quad_cycles(timeline, ctx.kernel)
 
 
 def add_gr_not_too_early_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:

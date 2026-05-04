@@ -24,7 +24,7 @@
 ## Validation Gaps
 
 ### False Negatives (schedule appears valid but may fail)
-1. **Quad-cycle estimation is conservative**: `estimate_quad_cycles` does not model all pipeline stalls (only MFMA execution latency and type-switch penalties). Real cycle counts may be higher, making some schedules pass validation that would violate timing in practice.
+1. **Quad-cycle estimation is conservative**: graph-side `cumulative_issue_cycles` (in `Tensile/Components/ScheduleCapture.py`) models MFMA execution latency and type-switch penalties cycle-exactly but does not account for SWaitCnt counter pressure or other dynamic stalls. Real cycle counts may be higher, making some schedules pass validation that would violate timing in practice. (Bead `8nz` deleted the structural-side mirror `estimate_quad_cycles`; the graph helper is the single source of truth.)
 2. **SBarrier timing assumes instant synchronization**: The validator checks that an `s_barrier` exists between the required instructions but does not model barrier latency.
 3. **SWaitCnt counter values are not verified**: The validator trusts that `dscnt`/`vlcnt`/`vscnt` values in `SWaitCnt` instructions are correct — it does not count actual outstanding memory operations to verify.
 
