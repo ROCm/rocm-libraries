@@ -588,9 +588,9 @@ void thread_scan_kernel(Type* const device_input, Type* device_output)
     size_t input_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
     size_t output_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
 
-    hipcub::internal::ThreadScanInclusive<Length>(&device_input[input_index],
-                                                  &device_output[output_index],
-                                                  sum_op());
+    hipcub::detail::ThreadScanInclusive<Length>(&device_input[input_index],
+                                                &device_output[output_index],
+                                                sum_op());
 }
 
 TYPED_TEST(HipcubThreadOperationTests, Scan)
