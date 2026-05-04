@@ -611,12 +611,15 @@ def setGithubStatus(String context, String state, String description) {
     def targetUrl = env.RUN_DISPLAY_URL ?: env.BUILD_URL
     def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
     withCredentials([usernamePassword(credentialsId: 'github-app-miopen', usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
-        sh(script: """
-            curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
+        def code = sh(returnStdout: true, script: """
+            curl -s -w "%{http_code}" -o /dev/null -X POST '${statusUrl}' \\
                 -H "Authorization: token \$GITHUB_TOKEN" \\
                 -H 'Content-Type: application/json' \\
                 -d '{"state":"${state}","context":"${context}","description":"${description}","target_url":"${targetUrl}"}'
-        """)
+        """).trim()
+        if (!code.startsWith('2')) {
+            echo "WARNING: GitHub status POST returned ${code} (context=${context}, state=${state})"
+        }
     }
 }
 
