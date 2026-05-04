@@ -33,6 +33,7 @@
 #include "utility.hpp"
 #include <cstdio>
 #include <hipblaslt/hipblaslt.h>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -557,45 +558,60 @@ bool norm_check(double norm_error)
     return false;
 }
 
-// TODO: norm_check determines the required norm solely based on
-//       To (type). This might cause tests to fail when the input
-//       matrices are MX types (F4/F8/F6). A better way is
-//       needed to determine the required norm for MX types.
-bool norm_check(double norm_error, hipDataType type)
+// TODO: tune norm tolerance for MX FP6 and FP8 types
+double norm_tolerance(hipDataType type)
 {
     switch(type)
     {
     case HIP_R_32F:
-        return norm_error < 0.00001;
+        return 0.00001;
     case HIP_R_64F:
-        return norm_error < 0.000000000001;
+        return 0.000000000001;
     case HIP_R_16F:
-        return norm_error < 0.01;
+        return 0.01;
     case HIP_R_16BF:
-        return norm_error < 0.1;
+        return 0.1;
     case HIP_R_8F_E4M3_FNUZ:
     case HIP_R_8F_E4M3:
-        return norm_error < 0.125;
+        return 0.125;
     case HIP_R_8F_E5M2_FNUZ:
     case HIP_R_8F_E5M2:
-        return norm_error < 0.25;
+        return 0.25;
     case HIP_R_32I:
-        return norm_error < 0.0001;
+        return 0.0001;
     case HIP_R_8I:
-        return norm_error < 0.01;
-    // TODO: find a suitable rnom value for f6 and f4
+        return 0.01;
+    case HIP_R_4F_E2M1:
+        return 0.3;
     case HIP_R_6F_E2M3:
     case HIP_R_6F_E3M2:
-    case HIP_R_4F_E2M1:
-        return norm_error < 0.5;
+        return 0.5;
     default:
-        return false;
+        return 0.0;
     }
 }
 
-bool norm_check(double norm_error, hipDataType type, hipblasComputeType_t compute_type)
+bool norm_check(double norm_error, hipDataType type)
 {
-    if(compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF && type == HIP_R_32F)
-        return norm_error < 0.5;
-    return norm_check(norm_error, type);
+    double tol = norm_tolerance(type);
+    return tol > 0.0 && norm_error < tol;
+}
+
+bool norm_check(double                 norm_error,
+                hipDataType            outputType,
+                hipblasComputeType_t   compute_type,
+                hipDataType            inputTypeA = static_cast<hipDataType>(-1),
+                hipDataType            inputTypeB = static_cast<hipDataType>(-1))
+{
+    double tol = norm_tolerance(outputType);
+
+    if(compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF && outputType == HIP_R_32F)
+        tol = std::max(tol, 0.5);
+
+    if(static_cast<int>(inputTypeA) >= 0)
+        tol = std::max(tol, norm_tolerance(inputTypeA));
+    if(static_cast<int>(inputTypeB) >= 0)
+        tol = std::max(tol, norm_tolerance(inputTypeB));
+
+    return tol > 0.0 && norm_error < tol;
 }

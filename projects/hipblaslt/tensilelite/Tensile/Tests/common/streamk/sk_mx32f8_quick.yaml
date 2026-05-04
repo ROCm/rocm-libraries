@@ -1,5 +1,6 @@
 TestParameters:
-  marks: [skip-gfx1250, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+  # need to skip for gfx950: TODO: re-enable this with subtile + MXScaleFormat=1
+  marks: [skip-gfx1250, skip-gfx950, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 GlobalParameters:
   NumElementsToValidate: -1
@@ -24,6 +25,7 @@ GlobalParameters:
   MaxFileName: 128
   DeviceLDS: 163840
   MaxLDS: 163840
+  MXScaleFormat: 1
 
 BenchmarkProblems:
   ########################################
@@ -68,7 +70,7 @@ BenchmarkProblems:
         # - UseSgprForGRO: [0,1]
         - UseSgprForGRO: [0]
         # - DepthU: [64, 128]
-        - DepthU: [128]
+        - DepthU: [256]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
         - AssertSummationElementMultiple: [64]

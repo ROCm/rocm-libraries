@@ -114,5 +114,6 @@ def getRequiredParametersMin() -> set:
         'WorkGroup',
         'DtlPlusLdsBuf',
         'MinGRIncPerMfma',
-        'UsePLRPack'
+        'UsePLRPack',
+        'UseSubtileImpl'
     })

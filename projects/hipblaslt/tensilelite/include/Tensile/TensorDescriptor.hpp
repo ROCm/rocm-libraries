@@ -469,11 +469,13 @@ namespace TensileLite
         if(decorated)
             stream << "[";
 
+        constexpr size_t packing = TypeInfo<std::remove_cv_t<T>>::Packing;
+
         if(desc.sizes()[0] > 0)
             stream << data[0];
 
-        for(size_t i = 1; i < desc.sizes()[0]; i++)
-            stream << " " << data[i];
+        for(size_t i = packing; i < desc.sizes()[0]; i += packing)
+            stream << " " << data[i / packing];
 
         if(decorated)
             stream << "]" << std::endl;

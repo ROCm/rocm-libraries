@@ -2483,6 +2483,16 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4_S_S>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
+            case TypedGemm_F4_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
 #endif //TENSILE_USE_FP4
 #if defined(TENSILE_USE_FP6) && defined(TENSILE_USE_BF6)
             case TypedGemm_F6B6_S_S::TypeId():
