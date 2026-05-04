@@ -14,6 +14,24 @@
 # CHECK: .amdhsa_group_segment_fixed_size 262144
 # CHECK: .amdhsa_wavefront_size32 1
 # CHECK: .end_amdhsa_kernel
+#
+# Regression: the kernel-level YAML entry "  - .name: <kernelName>" sits
+# under "amdhsa.kernels:" and must NOT be parsed as the first argument.
+# Before the fix, the regenerated .args: block was prefixed with a synthetic
+# "- .name: Cijk_Alik_Bljk_..." entry copied from the kernel name. The first
+# real arg in this kernel is "Gemm info"; assert that immediately after
+# .args: the first argument is Gemm info, not the kernel name.
+# CHECK:      .args:
+# CHECK-NEXT: - .name:{{.*}}Gemm info
+#
+# Regression: SignatureCodeMeta::toString() ends its emission with
+# "<kernelName>:\n", so the signature header itself provides the kernel
+# body label. The parser must NOT also push the kernel body label as a
+# ParsedInstruction (otherwise it appears twice in the round-tripped
+# output: once from the signature emit, once from the function emit).
+# CHECK:      .end_amdgpu_metadata
+# CHECK-NEXT: Cijk_Alik_Bljk_BBS_BH_UserArgs_MT256x256x128_{{.*}}:
+# CHECK-NOT:  Cijk_Alik_Bljk_BBS_BH_UserArgs_MT256x256x128_{{.*}}:
 # CHECK: label_LoopBeginL
 # CHECK: ds_load_b128
 # CHECK: v_wmma_f32_16x16x32_bf16
