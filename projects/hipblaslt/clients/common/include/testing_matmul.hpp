@@ -2864,6 +2864,30 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   num_batches[i]);
 
 #ifndef HIPBLASLT_USE_ROCROLLER
+        // Sync A/B data from GPU to host so mx_type_to_f32 can read them.
+        // In the non-ROCROLLER MX path, A/B data is initialized on GPU
+        // (hipblaslt_init_device) so hA/hB are not yet populated.
+        if(isBlockScaling(arg.scaleA))
+            CHECK_HIP_ERROR(synchronize(hA[i],
+                                        dA[i],
+                                        num_batches[i],
+                                        A_row[i],
+                                        A_col[i],
+                                        lda[i],
+                                        realDataTypeSize(TiA),
+                                        false,
+                                        stream));
+        if(isBlockScaling(arg.scaleB))
+            CHECK_HIP_ERROR(synchronize(hB[i],
+                                        dB[i],
+                                        num_batches[i],
+                                        K[i],
+                                        N[i],
+                                        ldb[i],
+                                        realDataTypeSize(TiB),
+                                        false,
+                                        stream));
+
         // Build CPU reference from unswizzled scale before mutating the buffer
         if(isBlockScaling(arg.scaleA))
             refA.emplace_back(mx_type_to_f32(TiA,
