@@ -60,6 +60,8 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
     matrixInstK = 128 if fp4 else 32
     if depthU is None:
         depthU = 256 if fp4 else 64
+    if miWaveGroup is None:
+        miWaveGroup = [2, 2]
     dtype = _mock_dtype(bpe)
     problemType = {
         "DataTypeA": dtype,
@@ -82,7 +84,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
         "MatrixInstK": matrixInstK,
         "MIWaveGroup": list(waveGroup),
         "WavefrontSize": 64,
-        "SourceSwap": False,
+        "SourceSwap": sourceSwap,
         "MIArchVgpr": False,
         "NonTemporalA": 0,
         "NonTemporalB": 0,

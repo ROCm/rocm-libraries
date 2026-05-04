@@ -939,27 +939,23 @@ class LogicalScheduler:
         atoms = []
         for tensor, mt_val, t_start, t_end, k_start, k_end, gr_gran in gr_list:
             mn = gr_gran.mn
+            last = max(0, min(upper.get((tensor, mt_val), numSlots) - 1,
+                            numSlots - 1))
             for pos in range(t_start, t_end, mn):
-                atoms.append((tensor, mt_val, pos, pos + mn, k_start, k_end))
+                atoms.append((tensor, mt_val, pos, pos + mn, k_start, k_end, last))
 
-        loads_per_slot = max(1, -(-len(atoms) // numSlots))
-
-        # 2b. Distribute atoms into flat buckets [0..numSlots),
-        #     each bucket maps to (partition=flat//numK, subIterK=flat%numK)
+        # 2b. Place atoms evenly across [0..numSlots) using a stride.
+        #     Each atom's ideal slot is i * numSlots // nAtoms, clamped to
+        #     its upper bound.  On LR conflict, scan forward.
+        nAtoms = len(atoms)
         buckets = [[] for _ in range(numSlots)]
-        for atom in atoms:
-            tensor, mt_val, _, _, ks, ke = atom
-            cur = 0
-            last = min(upper.get((tensor, mt_val), numSlots) - 1, numSlots - 1)
-            while cur < last:
-                pi = cur // numK
-                subK = cur % numK
-                if (not self._has_lr_conflict(lower, tensor, mt_val,
-                                              pi, subK, ks, ke) and
-                        len(buckets[cur]) < loads_per_slot):
-                    break
-                cur += 1
-            buckets[cur].append(atom)
+        for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
+            slot = min(i * numSlots // nAtoms, last) if nAtoms else 0
+            while (slot < last and
+                   self._has_lr_conflict(lower, tensor, mt_val,
+                                         slot // numK, slot % numK, ks, ke)):
+                slot += 1
+            buckets[slot].append((tensor, mt_val, ts, te, ks, ke))
 
         # 2c. Remerge consecutive atoms and place into partitions
         for flat, bucket in enumerate(buckets):
