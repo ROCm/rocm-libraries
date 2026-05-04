@@ -112,12 +112,11 @@ _CONV_IO_TYPE: Dict[str, str] = {
     "conv": "float",
     "convfp16": "half",
     "convbfp16": "bfloat16",
-    "convfp32": "float",
 }
 
 
 def conv_io_type(operation: str) -> str:
-    return _CONV_IO_TYPE.get(operation, "bfloat16")
+    return _CONV_IO_TYPE[operation]
 
 
 def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:

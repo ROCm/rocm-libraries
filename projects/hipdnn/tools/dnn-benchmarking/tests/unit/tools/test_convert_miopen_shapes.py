@@ -583,7 +583,6 @@ class TestConvDataTypes:
             ("conv", "float"),
             ("convfp16", "half"),
             ("convbfp16", "bfloat16"),
-            ("convfp32", "float"),
         ],
     )
     def testconv_io_type_mapping(self, operation: str, expected_io_type: str) -> None:
@@ -646,19 +645,4 @@ class TestBnormDataTypes:
         mean_tensor = next(t for t in graph["tensors"] if t["name"] == "mean")
         assert mean_tensor["data_type"] == expected_stat_type
 
-    @pytest.mark.parametrize(
-        "operation,expected_scale_type",
-        [
-            ("bnorm", "float"),
-            ("bnormfp16", "float"),
-            ("bnormbfp16", "float"),
-            ("bnormfp16fp32", "half"),
-            ("bnormbfp16fp32", "bfloat16"),
-        ],
-    )
-    def test_bnorm_scale_bias_types(
-        self, operation: str, expected_scale_type: str
-    ) -> None:
-        graph = build_bnorm_json(operation, dict(self._BASIC_ARGS))
-        scale_tensor = next(t for t in graph["tensors"] if t["name"] == "scale")
-        assert scale_tensor["data_type"] == expected_scale_type
+

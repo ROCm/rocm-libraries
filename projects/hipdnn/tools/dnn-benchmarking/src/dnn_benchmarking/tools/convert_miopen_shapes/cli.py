@@ -22,14 +22,9 @@ _BNORM_OPERATIONS = {
     "bnorm",
     "bnormfp16",
     "bnormbfp16",
-    "bnormfp16fp32",
-    "bnormbfp16fp32",
-    "bn",
-    "bnfp16",
-    "bnbfp16",
 }
 
-_CONV_OPERATIONS = {"convbfp16", "conv", "convfp16", "convfp32"}
+_CONV_OPERATIONS = {"conv", "convfp16", "convbfp16"}
 
 _ALL_OPERATIONS = _CONV_OPERATIONS | _BNORM_OPERATIONS
 

@@ -13,48 +13,15 @@ from .tensors import _join_prefix, _make_scalar_tensor, _make_tensor
 # Batchnorm type resolution
 # ---------------------------------------------------------------------------
 
-# MIOpen BN driver template: BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>
-# The operation name encodes the IO type; stat/affine tensors follow MIOpen internals:
-#
-#   bnorm          → TInput=float,    TAcc=float,  TScaleBias=float
-#   bnormfp16      → TInput=float16,  TAcc=float,  TScaleBias=float
-#   bnormbfp16     → TInput=bfloat16, TAcc=float,  TScaleBias=float
-#   bnormfp16fp32  → TInput=float16,  TAcc=float,  TScaleBias=float16  (TOut=float, rare)
-#   bnormbfp16fp32 → TInput=bfloat16, TAcc=float,  TScaleBias=bfloat16 (TOut=float, rare)
-#
-# For hipDNN graphs, TAcc drives the stat-tensor dtype and TScaleBias drives scale/bias.
-# dscale/dbias are always TAcc (float) regardless of TScaleBias.
-
 _BNORM_IO_TYPE: Dict[str, str] = {
     "bnorm": "float",
     "bnormfp16": "half",
     "bnormbfp16": "bfloat16",
-    "bnormfp16fp32": "half",
-    "bnormbfp16fp32": "bfloat16",
-    # short aliases without data-type suffix default to float
-    "bn": "float",
-    "bnfp16": "half",
-    "bnbfp16": "bfloat16",
-}
-
-_BNORM_SCALE_BIAS_TYPE: Dict[str, str] = {
-    "bnorm": "float",
-    "bnormfp16": "float",
-    "bnormbfp16": "float",
-    "bnormfp16fp32": "half",
-    "bnormbfp16fp32": "bfloat16",
-    "bn": "float",
-    "bnfp16": "float",
-    "bnbfp16": "float",
 }
 
 
 def _bnorm_io_type(operation: str) -> str:
-    return _BNORM_IO_TYPE.get(operation, "bfloat16")
-
-
-def _bnorm_scale_bias_type(operation: str) -> str:
-    return _BNORM_SCALE_BIAS_TYPE.get(operation, "float")
+    return _BNORM_IO_TYPE[operation]
 
 
 # ---------------------------------------------------------------------------
@@ -80,10 +47,6 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
     back = _int(args, "--back", 0)
 
     io_type = _bnorm_io_type(operation)
-    # TAcc is always float for all supported driver variants
-    stat_type = "float"
-    # TScaleBias depends on the driver variant
-    scale_bias_type = _bnorm_scale_bias_type(operation)
 
     is_3d = "-D" in args
     D: Optional[int] = _int(args, "-D", 1) if is_3d else None
@@ -114,15 +77,15 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
         node_type = "BatchnormInferenceAttributes"
         tensors = [
             _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
-            _make_tensor(2, "mean", scale_dims, scale_strides, data_type=stat_type),
+            _make_tensor(2, "mean", scale_dims, scale_strides, data_type="float"),
             _make_tensor(
-                3, "inv_variance", scale_dims, scale_strides, data_type=stat_type
+                3, "inv_variance", scale_dims, scale_strides, data_type="float"
             ),
             _make_tensor(
-                4, "scale", scale_dims, scale_strides, data_type=scale_bias_type
+                4, "scale", scale_dims, scale_strides, data_type="float"
             ),
             _make_tensor(
-                5, "bias", scale_dims, scale_strides, data_type=scale_bias_type
+                5, "bias", scale_dims, scale_strides, data_type="float"
             ),
             _make_tensor(6, "output_y", x_dims, x_strides, data_type=io_type),
         ]
@@ -149,18 +112,18 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
         tensors = [
             _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
             _make_tensor(
-                2, "scale", scale_dims, scale_strides, data_type=scale_bias_type
+                2, "scale", scale_dims, scale_strides, data_type="float"
             ),
             _make_tensor(
-                3, "bias", scale_dims, scale_strides, data_type=scale_bias_type
+                3, "bias", scale_dims, scale_strides, data_type="float"
             ),
             _make_scalar_tensor(4, "epsilon", 1e-5, data_type="float"),
             _make_tensor(5, "output_y", x_dims, x_strides, data_type=io_type),
             _make_tensor(
-                6, "saved_mean", scale_dims, scale_strides, data_type=stat_type
+                6, "saved_mean", scale_dims, scale_strides, data_type="float"
             ),
             _make_tensor(
-                7, "saved_inv_variance", scale_dims, scale_strides, data_type=stat_type
+                7, "saved_inv_variance", scale_dims, scale_strides, data_type="float"
             ),
         ]
         nodes = [
@@ -196,20 +159,20 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
         tensors = [
             _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
             _make_tensor(2, "input_dy", x_dims, x_strides, data_type=io_type),
-            _make_tensor(3, "mean", scale_dims, scale_strides, data_type=stat_type),
+            _make_tensor(3, "mean", scale_dims, scale_strides, data_type="float"),
             _make_tensor(
-                4, "inv_variance", scale_dims, scale_strides, data_type=stat_type
+                4, "inv_variance", scale_dims, scale_strides, data_type="float"
             ),
             _make_tensor(
-                5, "scale", scale_dims, scale_strides, data_type=scale_bias_type
+                5, "scale", scale_dims, scale_strides, data_type="float"
             ),
             _make_tensor(6, "output_dx", x_dims, x_strides, data_type=io_type),
             # dscale and dbias accumulate in TAcc (float) regardless of TScaleBias
             _make_tensor(
-                7, "output_dscale", scale_dims, scale_strides, data_type=stat_type
+                7, "output_dscale", scale_dims, scale_strides, data_type="float"
             ),
             _make_tensor(
-                8, "output_dbias", scale_dims, scale_strides, data_type=stat_type
+                8, "output_dbias", scale_dims, scale_strides, data_type="float"
             ),
         ]
         nodes = [
