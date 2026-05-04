@@ -22,6 +22,7 @@
 
 import os
 import pytest
+import re
 import subprocess
 from pathlib import Path
 
@@ -132,8 +133,10 @@ def _find_caches_dirs(output_dir: str) -> list[Path]:
 
 
 def _write_config_with_depth_u(path: str, depth_u: int) -> None:
-    """Write config with a specific DepthU value."""
-    config = _CONFIG.replace("DepthU: [32]", f"DepthU: [{depth_u}]")
+    """Write config with a specific DepthU value, regardless of what the base value is."""
+    config, n = re.subn(r"DepthU:\s*\[\s*\d+\s*\]", f"DepthU: [{depth_u}]", _CONFIG)
+    assert n == 1, f"Expected exactly one DepthU entry in _CONFIG, found {n}"
+    assert config != _CONFIG, f"DepthU substitution to {depth_u} produced no change in _CONFIG"
     with open(path, "w") as f:
         f.write(config)
 

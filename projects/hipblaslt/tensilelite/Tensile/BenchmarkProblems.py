@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import shutil
+import yaml
 import sys
 import time
 import itertools
@@ -69,52 +70,72 @@ _CACHE_FIELDS = {
     "CustomKernelWildcard": "customKernelWildcard",
 }
 
-_LEGACY_CACHE = "__legacy__"
+# 12 hex chars = 48 bits. Birthday-collision likely around 2^24 (~16M) entries
+# in one caches/ dir; tuning sweeps produce <<1k entries, so collision risk is
+# negligible. Lookup re-validates by content so a collision becomes a recompile,
+# never a wrong-cache hit.
+_CACHE_KEY_LEN = 12
+
 
 def _cacheDataMatches(cacheData, benchmarkStep):
     """Check if cached data matches the current benchmark step parameters."""
     return all(cacheData[f] == getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items())
 
+
 def _computeCacheKey(benchmarkStep):
     """Compute a deterministic hash from the cache-relevant parameter fields."""
     cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
     canonical = json.dumps(cacheFields, sort_keys=True, default=str)
-    return hashlib.sha256(canonical.encode()).hexdigest()[:12]
+    return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
 
-def _findMatchingCache(stepBaseDir, benchmarkStep, useCache):
-    """Search all cache entries for one matching the current parameters.
 
-    Returns (cacheDir, codeObjectFiles) if found, (None, None) otherwise.
-    """
-    if not useCache:
-        return None, None
+def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage):
+    """Return CodeObjectFiles from cachePath iff its params match benchmarkStep, else None."""
+    if not os.path.isfile(cachePath):
+        return None
+    try:
+        c = LibraryIO.read(cachePath)
+    except (OSError, yaml.YAMLError) as e:
+        printWarning(f"Ignoring unreadable cache entry {cachePath}: {e}")
+        return None
+    try:
+        if _cacheDataMatches(c, benchmarkStep):
+            return c["CodeObjectFiles"]
+    except KeyError as e:
+        printWarning(f"Ignoring incompatible cache entry {cachePath} (missing field {e})")
+        return None
+    printWarning(mismatchMessage.format(path=cachePath))
+    return None
 
-    # Check new multi-cache layout
-    cachesDir = os.path.join(stepBaseDir, "caches")
-    if os.path.isdir(cachesDir):
-        for entry in os.listdir(cachesDir):
-            cachePath = os.path.join(cachesDir, entry, "cache.yaml")
-            if not os.path.isfile(cachePath):
-                continue
-            try:
-                c = LibraryIO.read(cachePath)
-                if _cacheDataMatches(c, benchmarkStep):
-                    return os.path.join(cachesDir, entry), c["CodeObjectFiles"]
-            except Exception:
-                printWarning(f"Ignoring corrupt cache entry: {cachePath}")
-                continue
 
-    # Fall back to legacy single cache.yaml
-    legacyCachePath = os.path.join(stepBaseDir, "cache.yaml")
-    if os.path.isfile(legacyCachePath):
-        try:
-            c = LibraryIO.read(legacyCachePath)
-            if _cacheDataMatches(c, benchmarkStep):
-                return _LEGACY_CACHE, c["CodeObjectFiles"]
-        except Exception:
-            printWarning(f"Ignoring corrupt cache entry: {legacyCachePath}")
+def _loadCacheIfMatches(cacheDir, benchmarkStep):
+    """Return CodeObjectFiles from the hash-keyed cacheDir/cache.yaml iff matching, else None."""
+    cachePath = os.path.join(cacheDir, "cache.yaml")
+    # Hash matched but content didn't: collision. Loser will be overwritten on the next write.
+    return _readCacheIfValid(
+        cachePath, benchmarkStep,
+        "Cache hash collision at {path}; will overwrite on recompile",
+    )
 
-    return None, None
+
+# TODO(2026-05-04): Remove the legacy single cache.yaml fallback after a transition
+# period of ~3 months (i.e. on/after 2026-08-04). It exists only so users with
+# pre-multi-cache output dirs from develop don't pay one extra recompile after
+# upgrading. See PR #6583.
+def _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep):
+    """Return CodeObjectFiles from the pre-multi-cache stepBaseDir/cache.yaml iff matching."""
+    cachePath = os.path.join(stepBaseDir, "cache.yaml")
+    return _readCacheIfValid(
+        cachePath, benchmarkStep,
+        "Legacy cache at {path} does not match config; will recompile",
+    )
+
+
+def _resetCacheDir(cacheDir):
+    """Wipe and recreate cacheDir so a write fully replaces any prior content."""
+    if os.path.exists(cacheDir):
+        shutil.rmtree(cacheDir)
+    os.makedirs(cacheDir)
 
 
 def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
@@ -474,30 +495,28 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         # check if a solution cache exists and if it matches our solution parameters
         cacheKey = _computeCacheKey(benchmarkStep)
         cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
+        sourcePath = Path(cacheDir) / "source"
 
         with timing_context("python_cache_check"):
             cacheValid = False
-            matchDir, matchCO = _findMatchingCache(stepBaseDir, benchmarkStep, useCache)
-            if matchDir is not None:
-                cacheValid = True
-                codeObjectFiles = matchCO
-                if matchDir == _LEGACY_CACHE:
-                    cacheDir = stepBaseDir
-                else:
-                    cacheDir = matchDir
-            elif useCache:
-                has_legacy = os.path.isfile(os.path.join(stepBaseDir, "cache.yaml"))
-                has_new = os.path.isdir(os.path.join(stepBaseDir, "caches"))
-                if has_legacy or has_new:
+            if useCache:
+                matchCO = _loadCacheIfMatches(cacheDir, benchmarkStep)
+                if matchCO is None:
+                    # TODO(2026-05-04): Drop legacy fallback after ~2026-08-04 (see _loadLegacyCacheIfMatches).
+                    matchCO = _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep)
+                    if matchCO is not None:
+                        cacheDir = stepBaseDir
+                        sourcePath = shortNamePath / "source"
+                if matchCO is not None:
+                    cacheValid = True
+                    codeObjectFiles = matchCO
+                elif os.path.isdir(os.path.join(stepBaseDir, "caches")) \
+                        or os.path.isfile(os.path.join(stepBaseDir, "cache.yaml")):
                     printWarning("Cache data does not match config: redoing solution generation")
 
-        if cacheDir == stepBaseDir:
-            # Legacy cache layout
-            sourcePath = shortNamePath / "source"
-        else:
-            sourcePath = Path(cacheDir) / "source"
-
         if not cacheValid:
+            # New compiles always go to the hash-keyed dir, never overwrite legacy in place.
+            _resetCacheDir(cacheDir)
             ensurePath(sourcePath)
             # enumerate benchmark permutations and create resulting solution objects
             with timing_context("python_solution_generation"):
@@ -550,7 +569,6 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
             # write cache data
             with timing_context("python_write_cache"):
-                ensurePath(cacheDir)
                 cachePath = os.path.join(cacheDir, "cache.yaml")
                 cacheData = {
                     "CodeObjectFiles": codeObjectFiles,
