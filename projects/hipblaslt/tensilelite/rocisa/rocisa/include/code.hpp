@@ -1461,6 +1461,7 @@ namespace rocisa
                         + std::to_string(numSgprPreload) + "\n";
                 kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_offset 0\n";
             }
+
             kStr += ".end_amdhsa_kernel\n";
             kStr += ".text\n";
             kStr += block("Num VGPR   =" + std::to_string(originalTotalVgprs));

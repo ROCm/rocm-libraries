@@ -14554,6 +14554,7 @@ class KernelWriterAssembly(KernelWriter):
     vgprFp8Temp: int   = -1
     vgprFp8Min: int    = -1
     vgprFp8Max: int    = -1
+    autoTruncate: bool = False
 
   class BF8CVTVgprStruct(NamedTuple):
     vgprBF8NanInf: int = -1
@@ -14583,6 +14584,9 @@ class KernelWriterAssembly(KernelWriter):
     deferredGSU0 = Module("DeferredGSU0")
 
     module.addComment2("Global Write Elements")
+    if self.states.archCaps["HasFp8HwSaturation"]:
+      module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="1", value=[23, 1]), src=1,
+                                 comment="set MODE.FP16_OVFL=1 (HW_REG_MODE, bit 23, saturate fp32->fp16 cvt)"))
     if kernel["ProblemType"]["OutputAmaxD"]:
         module.add(VMovB32(dst=vgpr("AmaxOut"), src="0"))
     if self.states.numStoreSgprToLoad or self.states.numStoreSgprToLoad2: # Wait for kernel args
@@ -15175,7 +15179,8 @@ class KernelWriterAssembly(KernelWriter):
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         cvtVgpr = self.vgprPool.checkOut(4)
         cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
-                                              vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3))
+                                              vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3), \
+                                              autoTruncate=self.states.archCaps["HasFp8HwSaturation"])
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
         cvtVgpr = self.vgprPool.checkOut(4)
         cvtVgprStruct = self.BF8CVTVgprStruct(vgprBF8Temp=cvtVgpr, vgprBF8NanInf=(cvtVgpr+1), \
