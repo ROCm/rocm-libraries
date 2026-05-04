@@ -61,11 +61,21 @@ struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::ijt>
 };
 
 template <>
-struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::spmv>
+struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::ijabct_spmv>
 {
     template <template <typename...> class TEST>
     static auto dispatch(const Arguments& arg)
     {
-        return hipsparse_spmv_dispatch<TEST>(arg);
+        return hipsparse_ijabct_spmv_dispatch<TEST>(arg);
+    }
+};
+
+template <>
+struct hipsparse_test_dispatch<hipsparse_test_dispatch_enum::iabct_spmv>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return hipsparse_iabct_spmv_dispatch<TEST>(arg);
     }
 };

@@ -39,7 +39,7 @@
 
 using namespace hipsparse_test;
 
-template <typename I, typename J, typename A, typename X, typename Y, typename T>
+template <typename I, typename A, typename X, typename Y, typename T>
 void testing_spmv_coo_aos_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION > 10010 && CUDART_VERSION < 12000) \
@@ -153,7 +153,7 @@ void testing_spmv_coo_aos_bad_arg(const Arguments& argus)
 #endif
 }
 
-template <typename I, typename J, typename A, typename X, typename Y, typename T>
+template <typename I, typename A, typename X, typename Y, typename T>
 void testing_spmv_coo_aos(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000))

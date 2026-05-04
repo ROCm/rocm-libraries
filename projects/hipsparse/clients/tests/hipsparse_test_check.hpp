@@ -70,6 +70,13 @@ public:
         return std::is_integral<I>::value && std::is_integral<J>::value && is_valid_type<T>();
     };
 
+    template <typename I, typename A, typename X, typename Y, typename T>
+    static constexpr bool is_valid_type()
+    {
+        return std::is_integral<I>::value && is_valid_type<A>() && is_valid_type<X>()
+               && is_valid_type<Y>() && is_valid_type<T>();
+    };
+
     template <typename I, typename J, typename A, typename X, typename Y, typename T>
     static constexpr bool is_valid_type()
     {
