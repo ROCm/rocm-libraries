@@ -75,7 +75,11 @@ struct Config
     // Swizzle pattern - by default no explicit swizzle.
     SwizzleType swizzle_type = SwizzleType::None;
 
+    // Epilogue type - by default skip LDS staging and write directly from registers to global memory.
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
+
+    // Size of the vector loads/stores
+    int vector_size = 8;
 
     // Total number of waves.
     constexpr int num_waves() const { return waves_c64 * waves_q4; }
@@ -226,6 +230,19 @@ constexpr Config configs[] = {
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift,
      .epilogue = EpilogueType::RegistersToGlobalMemory},
+     // Small vector load/store configs
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 4},
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 2},
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 1},
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Fprop,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 4},
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Fprop,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 2},
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Fprop,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 1},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
@@ -241,6 +258,11 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
         return false;
     if(cfg.swizzle_type == SwizzleType::XOR && !xor_config_valid(cfg, par))
         return false;
+
+    const bool padding_needed = par.channels_per_group() != 4 || par.filters_per_group() != 4;
+    if (padding_needed && par.channels_per_group() % cfg.vector_size != 0)
+        return false;
+    
     return true;
 }
 

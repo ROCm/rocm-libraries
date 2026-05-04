@@ -107,6 +107,9 @@ struct Config
 
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 
+    // Size of the vector loads/stores
+    int vector_size = 8;
+
     constexpr int group_size() const { return channels_per_group; }
 
     constexpr int block_c() const { return channels_per_group * waves_per_wg; }

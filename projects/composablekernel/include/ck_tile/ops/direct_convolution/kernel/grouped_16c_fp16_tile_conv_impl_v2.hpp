@@ -64,6 +64,9 @@ struct Config
 
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 
+    // Size of the vector loads/stores
+    int vector_size = 8;
+
     // Total number of waves per workgroup.
     constexpr int num_waves() const { return waves_per_wg; }
 

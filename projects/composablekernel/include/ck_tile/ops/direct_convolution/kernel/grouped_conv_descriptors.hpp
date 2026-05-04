@@ -234,6 +234,7 @@ struct SharedDescriptors
         //
         // The buffer base pointer must be set to the start of bc.block_group in the
         // global weight tensor (see weight_load_to_lds).
+        template <int GuaranteedVectorLoadSize = 1>
         static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int k_per_group, int c_per_group)
         {
             constexpr int filter_size   = TC::KH_KW;
@@ -253,7 +254,7 @@ struct SharedDescriptors
                 ck_tile::make_tuple(ck_tile::number<BLOCK_GROUPS>{}, k_per_group,
                                     ck_tile::number<filter_size>{}, c_per_group),
                 ck_tile::make_tuple(GStride, KStride, XYStride, CStride),
-                ck_tile::number<1>{}, 
+                ck_tile::number<GuaranteedVectorLoadSize>{}, 
                 ck_tile::number<1>{});
 
             // Step 2+3: pad K → GROUP_SIZE, pad C → GROUP_SIZE.

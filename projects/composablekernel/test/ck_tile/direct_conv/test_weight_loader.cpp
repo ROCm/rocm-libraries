@@ -8,8 +8,8 @@
 //   1. Loads real weight data into the correct LDS positions.
 //   2. Zero-pads the extra C and K channels.
 //
-// The test launches a minimal GPU kernel that calls weight_load_to_lds,
-// then reads back LDS via a device-to-host copy of the LDS buffer.
+// Also verifies that is_valid_config correctly gates configs by vector_size
+// versus c_per_group divisibility.
 
 #include "gtest/gtest.h"
 
@@ -26,65 +26,69 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <vector>
-#include <cstdio>
 
 using namespace ck_tile::direct_conv;
+using namespace grouped_4c_tile::v3;
 
 // ============================================================================
-// Test kernel: calls weight_load_to_lds and copies LDS content to global memory
+// Config indices used by the tests
+//
+// configs[9]  — Fprop, vector_size=8 (default, full GROUP_SIZE)  → unpadded
+// configs[47] — Fprop, CyclicShift, vector_size=4               → c%4==0
+// configs[48] — Fprop, CyclicShift, vector_size=2               → c%2==0
+// configs[49] — Fprop, CyclicShift, vector_size=1               → any c
 // ============================================================================
+static constexpr int CFG_UNPADDED = 9;
+static constexpr int CFG_VEC4    = 47;
+static constexpr int CFG_VEC2    = 48;
+static constexpr int CFG_VEC1    = 49;
 
-// Use configs[9] from the 4c kernel as the test configuration.
-// configs[9] is Fprop with waves_c64=1, waves_q4=1 (smallest block size = 64 threads).
-static constexpr auto test_cfg = grouped_4c_tile::v3::configs[9];
-using TestTC = grouped_4c_tile::v3::TileConstants<test_cfg>;
-
-static constexpr int WEIGHT_LDS_SIZE_UINT4 = TestTC::Weight::WEIGHT_LDS_SIZE_UINT4;
-static constexpr int GROUP_SIZE = TestTC::GROUP_SIZE; // = 4
-static constexpr int BLOCK_GROUPS = test_cfg.block_groups();
-static constexpr int KH = test_cfg.kh;
-static constexpr int KW = test_cfg.kw;
-static constexpr int BLOCK_SIZE = test_cfg.block_size();
-static constexpr int LDS_FP16_ELEMS = WEIGHT_LDS_SIZE_UINT4 * 8;
-
-// Kernel: load weights to LDS, then copy LDS to global for host verification.
+// ============================================================================
+// Test kernel: templated on config index.
+// Calls weight_load_to_lds and copies LDS content to global memory.
+// ============================================================================
+template <int CfgIdx>
 __global__ void test_weight_load_kernel(const _Float16* __restrict__ wei,
                                         _Float16* __restrict__ lds_out,
                                         int groups,
                                         int c_per_group,
                                         int k_per_group)
 {
-    grouped_4c_tile::v3::BlockCoords<test_cfg> bc(groups);
+    using TC = TileConstants<configs[CfgIdx]>;
+    constexpr auto cfg = configs[CfgIdx];
 
-    __shared__ uint4 lds_buf[WEIGHT_LDS_SIZE_UINT4];
+    ck_tile::direct_conv::BlockCoords<cfg> bc(groups);
 
-    // Initialize LDS with sentinel values to detect unwritten positions.
-    for(int i = threadIdx.x; i < WEIGHT_LDS_SIZE_UINT4; i += BLOCK_SIZE)
-    {
+    constexpr int LDS_UINT4 = TC::Weight::WEIGHT_LDS_SIZE_UINT4;
+    constexpr int BLOCK_SIZE = cfg.block_size();
+
+    __shared__ uint4 lds_buf[LDS_UINT4];
+
+    for(int i = threadIdx.x; i < LDS_UINT4; i += BLOCK_SIZE)
         lds_buf[i] = uint4{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
-    }
     __syncthreads();
 
-    weight_load_to_lds<TestTC, test_cfg>(bc, lds_buf, wei, c_per_group, k_per_group);
-
+    weight_load_to_lds<TC, cfg>(bc, lds_buf, wei, c_per_group, k_per_group);
     __syncthreads();
 
-    // Copy LDS to global for host verification.
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);
-    for(int i = threadIdx.x; i < LDS_FP16_ELEMS; i += BLOCK_SIZE)
-    {
+    for(int i = threadIdx.x; i < LDS_UINT4 * 8; i += BLOCK_SIZE)
         lds_out[i] = lds_fp16[i];
-    }
 }
 
 // ============================================================================
 // Test fixture
 // ============================================================================
-
 class WeightLoaderTest : public ::testing::Test
 {
 protected:
-    // Build a GKYXC weight tensor with distinct non-zero values.
+    static constexpr int KH = configs[CFG_VEC1].kh;
+    static constexpr int KW = configs[CFG_VEC1].kw;
+    static constexpr int GROUP_SIZE = 4; // fixed for 4c kernel
+
+    // All padded configs share the same block_groups (waves_c64=2 → 32 groups).
+    static constexpr int BLOCK_GROUPS = configs[CFG_VEC1].block_groups();
+
     static std::vector<_Float16> make_weight_tensor(int groups,
                                                     int k_per_group,
                                                     int c_per_group)
@@ -92,87 +96,71 @@ protected:
         const int total = groups * k_per_group * KH * KW * c_per_group;
         std::vector<_Float16> wei(total);
         for(int i = 0; i < total; i++)
-        {
-            // Values 1-7, never 0, so we can distinguish data from zero-padding.
             wei[i] = static_cast<_Float16>(static_cast<float>((i % 7) + 1));
-        }
         return wei;
     }
 
-    // Read element at [g, k, y, x, c] from the host weight tensor.
     static float read_weight(const std::vector<_Float16>& wei,
                              int k_per_group, int c_per_group,
                              int g, int k, int y, int x, int c)
     {
-        const int filter_size = KH * KW;
-        int idx = g * (k_per_group * filter_size * c_per_group)
-                + k * (filter_size * c_per_group)
+        int idx = g * (k_per_group * KH * KW * c_per_group)
+                + k * (KH * KW * c_per_group)
                 + (y * KW + x) * c_per_group
                 + c;
         return static_cast<float>(wei[idx]);
     }
 
-    // Launch kernel, read back LDS, and verify the padded layout.
+    // Launch the kernel for the given config index and verify LDS contents.
+    template <int CfgIdx>
     void run_and_verify(int c_per_group, int k_per_group)
     {
-        const int groups = BLOCK_GROUPS;
+        using TC = TileConstants<configs[CfgIdx]>;
+        constexpr int LDS_FP16 = TC::Weight::WEIGHT_LDS_SIZE_UINT4 * 8;
+        constexpr int BLOCK_SIZE = configs[CfgIdx].block_size();
+
+        // Use the config-specific block_groups, not the fixture constant.
+        // Config 9 (unpadded) has waves_c64=1 → block_groups()=16,
+        // while configs 47-49 have waves_c64=2 → block_groups()=32.
+        constexpr int groups = configs[CfgIdx].block_groups();
         auto wei_host = make_weight_tensor(groups, k_per_group, c_per_group);
 
-        _Float16* d_wei = nullptr;
+        _Float16* d_wei     = nullptr;
         _Float16* d_lds_out = nullptr;
-        const size_t wei_bytes = wei_host.size() * sizeof(_Float16);
-        const size_t lds_out_bytes = LDS_FP16_ELEMS * sizeof(_Float16);
+        ck_tile::hip_check_error(hipMalloc(&d_wei,     wei_host.size() * sizeof(_Float16)));
+        ck_tile::hip_check_error(hipMalloc(&d_lds_out, LDS_FP16        * sizeof(_Float16)));
+        ck_tile::hip_check_error(hipMemcpy(
+            d_wei, wei_host.data(), wei_host.size() * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        ck_tile::hip_check_error(hipMalloc(&d_wei, wei_bytes));
-        ck_tile::hip_check_error(hipMalloc(&d_lds_out, lds_out_bytes));
-        ck_tile::hip_check_error(
-            hipMemcpy(d_wei, wei_host.data(), wei_bytes, hipMemcpyHostToDevice));
-
-        test_weight_load_kernel<<<dim3(1, 1, 1), BLOCK_SIZE>>>(
+        test_weight_load_kernel<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
             d_wei, d_lds_out, groups, c_per_group, k_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
-        std::vector<_Float16> lds_host(LDS_FP16_ELEMS);
-        ck_tile::hip_check_error(
-            hipMemcpy(lds_host.data(), d_lds_out, lds_out_bytes, hipMemcpyDeviceToHost));
+        std::vector<_Float16> lds_host(LDS_FP16);
+        ck_tile::hip_check_error(hipMemcpy(
+            lds_host.data(), d_lds_out, LDS_FP16 * sizeof(_Float16), hipMemcpyDeviceToHost));
 
         // Verify LDS layout: [g, k, yx, c] with GROUP_SIZE-padded K and C.
-        // Real positions: LDS[g,k,yx,c] = DRAM weight[g,k,y,x,c]
-        // Padded positions: LDS[g,k,yx,c] = 0.0
         const int kh_kw = KH * KW;
-        for(int g = 0; g < BLOCK_GROUPS; g++)
+        for(int g = 0; g < groups; g++)
+        for(int k = 0; k < GROUP_SIZE; k++)
+        for(int yx = 0; yx < kh_kw; yx++)
+        for(int c = 0; c < GROUP_SIZE; c++)
         {
-            for(int k = 0; k < GROUP_SIZE; k++)
-            {
-                for(int yx = 0; yx < kh_kw; yx++)
-                {
-                    for(int c = 0; c < GROUP_SIZE; c++)
-                    {
-                        int lds_idx = g * GROUP_SIZE * kh_kw * GROUP_SIZE
-                                    + k * kh_kw * GROUP_SIZE
-                                    + yx * GROUP_SIZE
-                                    + c;
+            int lds_idx = g * GROUP_SIZE * kh_kw * GROUP_SIZE
+                        + k * kh_kw * GROUP_SIZE
+                        + yx * GROUP_SIZE
+                        + c;
 
-                        float actual = static_cast<float>(lds_host[lds_idx]);
-                        float expected;
+            float actual   = static_cast<float>(lds_host[lds_idx]);
+            float expected = (k < k_per_group && c < c_per_group)
+                ? read_weight(wei_host, k_per_group, c_per_group,
+                              g, k, yx / KW, yx % KW, c)
+                : 0.0f;
 
-                        if(k < k_per_group && c < c_per_group)
-                        {
-                            expected = read_weight(wei_host, k_per_group, c_per_group,
-                                                   g, k, yx / KW, yx % KW, c);
-                        }
-                        else
-                        {
-                            expected = 0.0f;
-                        }
-
-                        EXPECT_EQ(actual, expected)
-                            << "Mismatch at g=" << g << " k=" << k
-                            << " yx=" << yx << " c=" << c
-                            << " lds_idx=" << lds_idx;
-                    }
-                }
-            }
+            EXPECT_EQ(actual, expected)
+                << "cfg=" << CfgIdx
+                << " g=" << g << " k=" << k << " yx=" << yx << " c=" << c;
         }
 
         ck_tile::hip_check_error(hipFree(d_wei));
@@ -181,60 +169,117 @@ protected:
 };
 
 // ============================================================================
-// Tests
+// Correctness tests — weight loading
 // ============================================================================
 
-// Baseline: c_per_group == GROUP_SIZE, k_per_group == GROUP_SIZE (no padding).
-TEST_F(WeightLoaderTest, NoPadding_C4_K4)
+// Unpadded path (config 9, vector_size=8): c==GROUP_SIZE, k==GROUP_SIZE.
+TEST_F(WeightLoaderTest, Unpadded_C4_K4)
 {
-    const int c_per_group = GROUP_SIZE; // 4
-    const int k_per_group = GROUP_SIZE; // 4
-    const int groups = BLOCK_GROUPS;
-
-    auto wei_host = make_weight_tensor(groups, k_per_group, c_per_group);
-
-    _Float16* d_wei = nullptr;
-    _Float16* d_lds_out = nullptr;
-    const size_t wei_bytes = wei_host.size() * sizeof(_Float16);
-    const size_t lds_out_bytes = LDS_FP16_ELEMS * sizeof(_Float16);
-
-    ck_tile::hip_check_error(hipMalloc(&d_wei, wei_bytes));
-    ck_tile::hip_check_error(hipMalloc(&d_lds_out, lds_out_bytes));
-    ck_tile::hip_check_error(
-        hipMemcpy(d_wei, wei_host.data(), wei_bytes, hipMemcpyHostToDevice));
-
-    test_weight_load_kernel<<<dim3(1, 1, 1), BLOCK_SIZE>>>(
-        d_wei, d_lds_out, groups, c_per_group, k_per_group);
-    ck_tile::hip_check_error(hipDeviceSynchronize());
-
-    std::vector<_Float16> lds_host(LDS_FP16_ELEMS);
-    ck_tile::hip_check_error(
-        hipMemcpy(lds_host.data(), d_lds_out, lds_out_bytes, hipMemcpyDeviceToHost));
-
-    // Unpadded path: flat contiguous copy from DRAM to LDS.
-    const int total_weight_elems = BLOCK_GROUPS * GROUP_SIZE * KH * KW * GROUP_SIZE;
-    ASSERT_EQ(total_weight_elems, LDS_FP16_ELEMS)
-        << "Weight element count must match LDS capacity for the no-padding case";
-
-    for(int i = 0; i < total_weight_elems; i++)
-    {
-        float expected = static_cast<float>(wei_host[i]);
-        float actual = static_cast<float>(lds_host[i]);
-        EXPECT_EQ(actual, expected) << "Mismatch at LDS element " << i;
-    }
-
-    ck_tile::hip_check_error(hipFree(d_wei));
-    ck_tile::hip_check_error(hipFree(d_lds_out));
+    run_and_verify<CFG_UNPADDED>(GROUP_SIZE, GROUP_SIZE);
 }
 
-// Padded: c_per_group=3, k_per_group=4 (C padding only).
-TEST_F(WeightLoaderTest, PaddedC3_K4) { run_and_verify(3, GROUP_SIZE); }
+// C padding only (k == GROUP_SIZE).
+TEST_F(WeightLoaderTest, Vec4_C4_K4) { run_and_verify<CFG_VEC4>(4, GROUP_SIZE); }
+TEST_F(WeightLoaderTest, Vec2_C2_K4) { run_and_verify<CFG_VEC2>(2, GROUP_SIZE); }
+TEST_F(WeightLoaderTest, Vec1_C1_K4) { run_and_verify<CFG_VEC1>(1, GROUP_SIZE); }
+TEST_F(WeightLoaderTest, Vec1_C3_K4) { run_and_verify<CFG_VEC1>(3, GROUP_SIZE); }
 
-// Padded: c_per_group=2, k_per_group=3 (both C and K padding).
-TEST_F(WeightLoaderTest, PaddedC2_K3) { run_and_verify(2, 3); }
+// K padding only (c == GROUP_SIZE).
+TEST_F(WeightLoaderTest, Vec4_C4_K3) { run_and_verify<CFG_VEC4>(GROUP_SIZE, 3); }
+TEST_F(WeightLoaderTest, Vec4_C4_K2) { run_and_verify<CFG_VEC4>(GROUP_SIZE, 2); }
+TEST_F(WeightLoaderTest, Vec4_C4_K1) { run_and_verify<CFG_VEC4>(GROUP_SIZE, 1); }
 
-// Padded: c_per_group=2, k_per_group=2 (both C and K padding).
-TEST_F(WeightLoaderTest, PaddedC2_K2) { run_and_verify(2, 2); }
+// Both C and K padded.
+TEST_F(WeightLoaderTest, Vec4_C4_K3_both) { run_and_verify<CFG_VEC4>(4, 3); }
+TEST_F(WeightLoaderTest, Vec2_C2_K3)      { run_and_verify<CFG_VEC2>(2, 3); }
+TEST_F(WeightLoaderTest, Vec2_C2_K2)      { run_and_verify<CFG_VEC2>(2, 2); }
+TEST_F(WeightLoaderTest, Vec1_C3_K3)      { run_and_verify<CFG_VEC1>(3, 3); }
+TEST_F(WeightLoaderTest, Vec1_C1_K1)      { run_and_verify<CFG_VEC1>(1, 1); }
 
-// Padded: c_per_group=1, k_per_group=1 (depthwise conv - maximum padding).
-TEST_F(WeightLoaderTest, PaddedC1_K1) { run_and_verify(1, 1); }
+// ============================================================================
+// Validity tests — is_valid_config gates configs by vector_size vs c_per_group
+// ============================================================================
+
+class ValidConfigTest : public ::testing::Test
+{
+protected:
+    // Minimal Fprop params with the given c_per_group.
+    static Conv2dParams make_params(int c_per_group, int k_per_group = 4)
+    {
+        // groups must be a multiple of block_groups() for any of the padded configs.
+        const int groups = configs[CFG_VEC1].block_groups();
+        // Spatial dims must be >= block_q() for the largest waves_q4 config.
+        // configs 47-49 have waves_q4=8 → block_q()=32, so use q=w=32.
+        Conv2dParams p;
+        p.direction = Direction::Fprop;
+        p.n         = 1;
+        p.c_tot     = groups * c_per_group;
+        p.k_tot     = groups * k_per_group;
+        p.h         = 32;
+        p.w         = 32;
+        p.q         = 32;
+        p.groups    = groups;
+        p.kh        = configs[CFG_VEC1].kh;
+        p.kw        = configs[CFG_VEC1].kw;
+        return p;
+    }
+};
+
+// c%4==0: vec4 valid, vec2 valid, vec1 valid; unpadded valid only if c==4.
+TEST_F(ValidConfigTest, C4_valid_all)
+{
+    auto p = make_params(4);
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_UNPADDED]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC4]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+}
+
+// c==3: not divisible by 2 or 4 → only vec1 valid.
+TEST_F(ValidConfigTest, C3_only_vec1)
+{
+    auto p = make_params(3);
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+}
+
+// c==2: divisible by 2 → vec2 and vec1 valid, vec4 invalid.
+TEST_F(ValidConfigTest, C2_vec2_and_vec1)
+{
+    auto p = make_params(2);
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+}
+
+// c==1: only vec1 valid.
+TEST_F(ValidConfigTest, C1_only_vec1)
+{
+    auto p = make_params(1);
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+}
+
+// Wrong direction: all Fprop configs reject Dgrad params.
+TEST_F(ValidConfigTest, WrongDirection_rejected)
+{
+    auto p = make_params(4);
+    p.direction = Direction::Dgrad;
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
+}
+
+// groups not a multiple of block_groups(): all configs reject.
+TEST_F(ValidConfigTest, NonAlignedGroups_rejected)
+{
+    auto p = make_params(4);
+    p.groups = configs[CFG_VEC1].block_groups() + 1; // not a multiple
+    p.c_tot  = p.groups * 4;
+    p.k_tot  = p.groups * 4;
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC1]));
+}

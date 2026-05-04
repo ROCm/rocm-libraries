@@ -89,7 +89,7 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
         // The buffer base is offset to bc.block_group so the BLOCK_GROUPS
         // dimension covers exactly this block's groups.
         const auto weight_padded_dram_desc =
-            TC::Weight::MakeDramReadDescriptorPadded(k_per_group, c_per_group);
+            TC::Weight::template MakeDramReadDescriptorPadded<cfg.vector_size>(k_per_group, c_per_group);
 
         // Offset wei to bc.block_group * k_per_group * KH_KW * c_per_group.
         const _Float16* wei_block =
