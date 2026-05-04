@@ -522,13 +522,11 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
         _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                serializeExecutionContext(ENGINE_ID, getExecutionContext(), _, _))
+                serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
         .Times(2)
         .WillRepeatedly([&pluginPayload](int64_t,
                                          hipdnnEnginePluginExecutionContext_t,
-                                         const hipdnnPluginConstData_t* engineConfig,
                                          std::vector<uint8_t>& serializedContext) {
-            EXPECT_EQ(engineConfig->size, 3);
             serializedContext = pluginPayload;
         });
 
@@ -572,10 +570,9 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
         _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                serializeExecutionContext(ENGINE_ID, getExecutionContext(), _, _))
+                serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
         .WillOnce([&pluginPayload](int64_t,
                                    hipdnnEnginePluginExecutionContext_t,
-                                   const hipdnnPluginConstData_t*,
                                    std::vector<uint8_t>& serializedContext) {
             serializedContext = pluginPayload;
         });

@@ -53,7 +53,6 @@ public:
                 serializeExecutionContext,
                 (int64_t engineId,
                  hipdnnEnginePluginExecutionContext_t executionContext,
-                 const hipdnnPluginConstData_t* engineConfig,
                  std::vector<uint8_t>& serializedContext),
                 (const, override));
     MOCK_METHOD(void,

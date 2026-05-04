@@ -363,11 +363,9 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
                   "ExecutionPlanDescriptor::serializeBackendPlan() failed: engine config is "
                   "empty.");
 
-    const hipdnnPluginConstData_t engineConfigData{_serializedEngineConfig.data(),
-                                                   _serializedEngineConfig.size()};
     std::vector<uint8_t> pluginPayload;
     _pluginResourceManager->serializeExecutionContext(
-        _engineId, _executionContext->get(), &engineConfigData, pluginPayload);
+        _engineId, _executionContext->get(), pluginPayload);
 
     flatbuffers::FlatBufferBuilder builder;
     auto serializedEngineConfig = builder.CreateVector(_serializedEngineConfig);

@@ -110,7 +110,6 @@ public:
                                     hipdnnEnginePluginExecutionContext_t executionContext) const;
     virtual void serializeExecutionContext(int64_t engineId,
                                            hipdnnEnginePluginExecutionContext_t executionContext,
-                                           const hipdnnPluginConstData_t* engineConfig,
                                            std::vector<uint8_t>& serializedContext) const;
 
     virtual void executeOpGraph(hipdnnBackendDescriptor_t executionPlan,

@@ -273,7 +273,6 @@ bool EnginePlugin::supportsExecutionContextSerialization() const
 
 void EnginePlugin::serializeExecutionContext(hipdnnEnginePluginHandle_t handle,
                                              hipdnnEnginePluginExecutionContext_t executionContext,
-                                             const hipdnnPluginConstData_t* engineConfig,
                                              hipdnnPluginConstData_t* serializedContext) const
 {
     assert(_initialized);
@@ -287,7 +286,6 @@ void EnginePlugin::serializeExecutionContext(hipdnnEnginePluginHandle_t handle,
                          _funcSerializeExecutionContext,
                          handle,
                          executionContext,
-                         engineConfig,
                          serializedContext);
 }
 

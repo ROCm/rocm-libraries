@@ -763,7 +763,7 @@ TEST(TestFusilliPluginApi, SerializeExecutionContextAddsPayloadHeader) {
 
   hipdnnPluginConstData_t serializedContext{nullptr, 0};
   ASSERT_EQ(hipdnnEnginePluginSerializeExecutionContext(
-                handle, executionContext, &engineConfig, &serializedContext),
+                handle, executionContext, &serializedContext),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_NE(serializedContext.ptr, nullptr);
   ASSERT_GT(serializedContext.size,
@@ -818,7 +818,7 @@ TEST(TestFusilliPluginApi,
 
   hipdnnPluginConstData_t serializedContext{nullptr, 0};
   ASSERT_EQ(hipdnnEnginePluginSerializeExecutionContext(
-                handle, executionContext, &engineConfig, &serializedContext),
+                handle, executionContext, &serializedContext),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   ASSERT_NE(serializedContext.ptr, nullptr);
 

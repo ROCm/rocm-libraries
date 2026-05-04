@@ -53,7 +53,6 @@ public:
     virtual bool supportsExecutionContextSerialization() const;
     virtual void serializeExecutionContext(hipdnnEnginePluginHandle_t handle,
                                            hipdnnEnginePluginExecutionContext_t executionContext,
-                                           const hipdnnPluginConstData_t* engineConfig,
                                            hipdnnPluginConstData_t* serializedContext) const;
     virtual void
         destroySerializedExecutionContext(hipdnnEnginePluginHandle_t handle,
@@ -114,7 +113,6 @@ private:
                                                          hipdnnEnginePluginExecutionContext_t);
     hipdnnPluginStatus_t (*_funcSerializeExecutionContext)(hipdnnEnginePluginHandle_t,
                                                            hipdnnEnginePluginExecutionContext_t,
-                                                           const hipdnnPluginConstData_t*,
                                                            hipdnnPluginConstData_t*);
     hipdnnPluginStatus_t (*_funcDestroySerializedExecutionContext)(hipdnnEnginePluginHandle_t,
                                                                    hipdnnPluginConstData_t*);

@@ -494,10 +494,8 @@ size_t EnginePluginResourceManager::getWorkspaceSize(
 void EnginePluginResourceManager::serializeExecutionContext(
     int64_t engineId,
     hipdnnEnginePluginExecutionContext_t executionContext,
-    const hipdnnPluginConstData_t* engineConfig,
     std::vector<uint8_t>& serializedContext) const
 {
-    THROW_IF_NULL(engineConfig, HIPDNN_STATUS_BAD_PARAM, "Engine config cannot be null");
     THROW_IF_NULL(executionContext, HIPDNN_STATUS_BAD_PARAM, "Execution context cannot be null");
 
     auto it = _engineIdToHandle.find(engineId);
@@ -511,7 +509,7 @@ void EnginePluginResourceManager::serializeExecutionContext(
     auto plugin = _handleToPlugin.at(handle);
 
     hipdnnPluginConstData_t pluginData{nullptr, 0};
-    plugin->serializeExecutionContext(handle, executionContext, engineConfig, &pluginData);
+    plugin->serializeExecutionContext(handle, executionContext, &pluginData);
 
     try
     {

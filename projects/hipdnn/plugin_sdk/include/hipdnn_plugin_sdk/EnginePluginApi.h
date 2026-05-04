@@ -212,8 +212,6 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * @param[in] handle The engine plugin handle.
  * @param[in] execution_context The execution context to serialize.
- * @param[in] engine_config A pointer to a structure where the serialized `EngineConfig` from
- *                          `engine_config.fbs` is stored.
  * @param[in,out] serialized_context A pointer to a structure where the plugin-specific serialized execution
  *                                  context bytes will be stored.
  *
@@ -229,7 +227,6 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginSerializeExecutionContext(
         hipdnnEnginePluginHandle_t handle,
         hipdnnEnginePluginExecutionContext_t execution_context,
-        const hipdnnPluginConstData_t* engine_config,
         hipdnnPluginConstData_t* serialized_context);
 
 /**
