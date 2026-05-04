@@ -243,16 +243,58 @@ def test_order_inverted_failure_format_mfma_consumer_omits_bracket():
 
 
 def test_missing_wait_failure_format():
-    producer = _make_node("LRA0", "LRA0[0]", 23)
-    consumer = _make_node("MFMA", "MFMA", 34)
+    """Plain same-iteration scenario: producer LRA0 in ML, consumer MFMA in
+    ML, no SWaitCnt(dscnt) between. With a capture provided, producer renders
+    as LRA0[0] (first LRA0 in stream); consumer is plain MFMA so no [N]."""
+    @dataclass(eq=False)
+    class _TaggedStub:
+        category: str
+    producer_tagged = _TaggedStub(category="LRA0")
+    consumer_tagged = _TaggedStub(category="MFMA")
+    producer = _make_node("LRA0", "LRA0", 0, tagged_inst=producer_tagged)
+    consumer = _make_node("MFMA", "MFMA", 2, tagged_inst=consumer_tagged)
+    capture = _capture_with(producer_tagged, consumer_tagged)
     failure = MissingWaitFailure(
         producer=producer, consumer=consumer, counter_kind="dscnt"
     )
+    msg = failure.format(capture=capture)
+    assert msg == "SWaitCnt(dscnt) missing between LRA0[0] @ idx=0 and MFMA @ idx=2."
+
+
+def test_missing_wait_failure_format_cross_iteration():
+    """Cross-iteration LDS-reuse: producer LRA0 in ML-1, consumer GRB in ML.
+    Real-data fixture from test_validate_gr_not_too_early_graph.py::
+    test_negative_prev_iter_lr0_not_drained — producer LRA0 @ idx=5 in ML-1,
+    consumer GRB @ idx=6 in ML. The "(of next iteration)" suffix appends to
+    the consumer's position because ML-1 -> ML IS the cross-loop-iteration
+    transition in the captured 4-body model."""
+    @dataclass(eq=False)
+    class _TaggedStub:
+        category: str
+    producer_tagged = _TaggedStub(category="LRA0")
+    consumer_tagged = _TaggedStub(category="GRB")
+    producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged, body_label="ML-1")
+    consumer = _make_node("GRB", "GRB", 6, tagged_inst=consumer_tagged, body_label="ML")
+    # The capture passed in is the body the consumer lives in; fixture uses
+    # the consumer's body to keep the per-category index meaningful for it.
+    capture = _capture_with(consumer_tagged)
+    failure = MissingWaitFailure(
+        producer=producer, consumer=consumer, counter_kind="dscnt"
+    )
+    msg = failure.format(capture=capture)
+    assert msg == "SWaitCnt(dscnt) missing between LRA0 @ idx=5 and GRB[0] @ idx=6 (of next iteration)."
+
+
+def test_missing_wait_failure_format_no_capture():
+    """capture=None: per-category [N] omitted; iteration note still works
+    when body_labels are populated on the nodes."""
+    producer = _make_node("LRA0", "LRA0", 0)
+    consumer = _make_node("MFMA", "MFMA", 2)
+    failure = MissingWaitFailure(
+        producer=producer, consumer=consumer, counter_kind="vlcnt"
+    )
     msg = failure.format(capture=None)
-    assert "not guaranteed by any SWaitCnt" in msg
-    assert "dscnt" in msg
-    assert "MFMA" in msg
-    assert "LRA0" in msg
+    assert msg == "SWaitCnt(vlcnt) missing between LRA0 @ idx=0 and MFMA @ idx=2."
 
 
 def test_wait_on_wrong_counter_failure_format():

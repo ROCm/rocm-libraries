@@ -582,12 +582,22 @@ class MissingWaitFailure(Failure):
     counter_kind: str  # 'dscnt' / 'vlcnt' / 'vscnt'
 
     def _format_canonical(self, capture=None) -> str:
+        producer_label = _node_label(self.producer, capture)
+        consumer_label = _node_label(self.consumer, capture)
+        producer_pos = f"@ idx={(getattr(self.producer, 'position', None) or self.producer.issued_at).vmfma_index}"
+        consumer_pos = f"@ idx={(getattr(self.consumer, 'position', None) or self.consumer.issued_at).vmfma_index}"
+        # Cross-iteration note: only true "next iteration" in the captured
+        # 4-body model is ML-1 -> ML. ML -> NGL / NGL -> NLL are post-loop
+        # drains within the SAME logical iteration, not the next one.
+        iter_note = ""
+        p_body = getattr(self.producer, "body_label", None)
+        c_body = getattr(self.consumer, "body_label", None)
+        if p_body == "ML-1" and c_body == "ML":
+            iter_note = " (of next iteration)"
         return (
-            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
-            f"{format_position(self.consumer, capture)} is not guaranteed by any "
-            f"SWaitCnt before its producer {self.producer.category} "
-            f"{format_position(self.producer, capture)}. No SWaitCnt with "
-            f"{self.counter_kind} drain appears between them in the schedule."
+            f"SWaitCnt({self.counter_kind}) missing between "
+            f"{producer_label} {producer_pos} and "
+            f"{consumer_label} {consumer_pos}{iter_note}."
         )
 
 
