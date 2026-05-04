@@ -58,7 +58,6 @@ from Tensile.Components.ScheduleCapture import (
     build_dataflow_graph,
     validate_edge_wait_coverage,
     MissingWaitFailure,
-    WaitOnWrongCounterFailure,
     WaitInsufficientFailure,
     OrderInvertedFailure,
     CaptureUnknownInstructionError,
@@ -321,9 +320,13 @@ class TestWaitCoverage:
                    and f.consumer.position.vmfma_index == 4
                    for f in failures)
 
-    def test_swait_on_wrong_counter_emits_wait_on_wrong_counter_failure(self):
+    def test_swait_on_wrong_counter_emits_missing_wait_with_nearby_hint(self):
         """SWait drains vlcnt; LR needs dscnt. Edge forms by register
-        resolution. Validator reports WaitOnWrongCounterFailure."""
+        resolution. Validator reports MissingWaitFailure with
+        nearby_other_counter_waits populated (the wrong-counter SWait at
+        slot=1 is surfaced so the user can extend it). The former
+        WaitOnWrongCounterFailure was collapsed into MissingWaitFailure
+        in bead `hof`."""
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, vlcnt=0, dscnt=-1),
@@ -333,7 +336,10 @@ class TestWaitCoverage:
         g = build_dataflow_graph(_wrap(cap))
         assert _has_edge(g, "LRA0", "MFMA", reg_start=8)
         failures = validate_edge_wait_coverage(g)
-        assert any(isinstance(f, WaitOnWrongCounterFailure) for f in failures)
+        miss = [f for f in failures if isinstance(f, MissingWaitFailure)]
+        assert miss, f"Expected MissingWaitFailure, got: {[type(f).__name__ for f in failures]}"
+        assert miss[0].counter_kind == "dscnt"
+        assert len(miss[0].nearby_other_counter_waits) >= 1
 
     def test_consumer_without_producer_no_edge(self):
         """SWait + MFMA with no producer in the body: register resolution

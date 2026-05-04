@@ -43,7 +43,6 @@ from Tensile.Components.ScheduleCapture import (
     validate_edge_wait_coverage,
     OrderInvertedFailure,
     MissingWaitFailure,
-    WaitOnWrongCounterFailure,
     WaitInsufficientFailure,
     MissingBarrierFailure,
     CaptureConsistencyError,
@@ -232,7 +231,10 @@ class TestPerFailureDiagnosis:
     def test_wait_on_wrong_counter_diagnosis(self):
         """Schedule has SWait(vlcnt=0) where SWait(dscnt=0) is needed for
         an LR -> MFMA edge. validate_edge_wait_coverage emits
-        WaitOnWrongCounterFailure."""
+        MissingWaitFailure with nearby_other_counter_waits surfaced (the
+        wrong-counter SWait at slot=1). The former
+        WaitOnWrongCounterFailure was collapsed into MissingWaitFailure
+        in bead `hof`."""
         subj_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, vlcnt=0),
@@ -240,10 +242,11 @@ class TestPerFailureDiagnosis:
         ])
         subj = build_dataflow_graph(_wrap(subj_cap))
         failures = validate_edge_wait_coverage(subj)
-        assert any(isinstance(f, WaitOnWrongCounterFailure) for f in failures)
-        wf = next(f for f in failures if isinstance(f, WaitOnWrongCounterFailure))
-        assert wf.expected_counter == "dscnt"
-        assert len(wf.wrong_counter_waits) >= 1
+        miss = [f for f in failures if isinstance(f, MissingWaitFailure)]
+        assert miss, f"Expected MissingWaitFailure, got: {[type(f).__name__ for f in failures]}"
+        wf = miss[0]
+        assert wf.counter_kind == "dscnt"
+        assert len(wf.nearby_other_counter_waits) >= 1
 
     def test_wait_insufficient_diagnosis(self):
         """Schedule has 5 LRs in flight + SWait(dscnt=2) which only drains

@@ -37,7 +37,6 @@ from Tensile.Components.ScheduleCapture import (
     Failure,
     OrderInvertedFailure,
     MissingWaitFailure,
-    WaitOnWrongCounterFailure,
     WaitTooLateFailure,
     WaitInsufficientFailure,
     MissingBarrierFailure,
@@ -297,20 +296,24 @@ def test_missing_wait_failure_format_no_capture():
     assert msg == "SWaitCnt(vlcnt) missing between LRA0 @ idx=0 and MFMA @ idx=2."
 
 
-def test_wait_on_wrong_counter_failure_format():
-    producer = _make_node("LRA0", "LRA0[0]", 5)
+def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
+    """When the window contains a wrong-counter SWaitCnt (former
+    WaitOnWrongCounterFailure case), MissingWaitFailure surfaces it via
+    nearby_other_counter_waits + appends a hint to the message."""
+    producer = _make_node("LRA0", "LRA0", 5)
     consumer = _make_node("MFMA", "MFMA", 10)
     wrong_wait = _make_node("SYNC", "SWaitCnt", 7)
-    failure = WaitOnWrongCounterFailure(
+    failure = MissingWaitFailure(
         producer=producer,
         consumer=consumer,
-        expected_counter="dscnt",
-        wrong_counter_waits=[wrong_wait],
+        counter_kind="dscnt",
+        nearby_other_counter_waits=[wrong_wait],
     )
     msg = failure.format(capture=None)
-    assert "dscnt" in msg
-    assert "Did you mean dscnt?" in msg
-    assert "@ idx=7" in msg
+    assert msg == (
+        "SWaitCnt(dscnt) missing between LRA0 @ idx=5 and MFMA @ idx=10 "
+        "(existing SWaitCnts at idx=7 drain other counters)."
+    )
 
 
 def test_wait_too_late_failure_format():

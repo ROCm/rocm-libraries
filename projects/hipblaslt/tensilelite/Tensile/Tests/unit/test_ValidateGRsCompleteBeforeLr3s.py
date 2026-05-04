@@ -44,7 +44,6 @@ from Tensile.Components.ScheduleCapture import (
     MissingBarrierFailure,
     MissingWaitFailure,
     OrderInvertedFailure,
-    WaitOnWrongCounterFailure,
 )
 
 from dataflow_fixtures import (
@@ -143,11 +142,12 @@ class TestGRBeforeLR3_Negatives(GraphNativeValidationTest):
             self.wrap_single_body(subj_cap),
         )
         f = self.assert_failures_contain(
-            failures, cls=WaitOnWrongCounterFailure,
-            expected_counter="vlcnt",
+            failures, cls=MissingWaitFailure,
+            counter_kind="vlcnt",
         )
         assert f.producer.category == "GRA"
         assert f.consumer.category == "LRA3"
+        assert len(f.nearby_other_counter_waits) >= 1
 
     def test_LR3_grs_no_swait_at_all(self):
         """No SWait of any kind in the window -> MissingWait(vlcnt)."""

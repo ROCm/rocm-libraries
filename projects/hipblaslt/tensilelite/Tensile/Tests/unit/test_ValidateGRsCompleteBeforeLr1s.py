@@ -63,7 +63,6 @@ from Tensile.Components.ScheduleCapture import (
     MissingBarrierFailure,
     MissingWaitFailure,
     OrderInvertedFailure,
-    WaitOnWrongCounterFailure,
 )
 
 from dataflow_fixtures import (
@@ -208,13 +207,16 @@ class TestGRBeforeLR1_MissingWait(GraphNativeValidationTest):
     def test_grs_swait_on_wrong_counter(self):
         """SWait fires with dscnt=0 (LR-counter) instead of vlcnt=0
         (GR-counter). Pattern collector requires vlcnt-draining wait, so
-        the edge doesn't form. diagnose_missing_edge finds the wrong-counter
-        wait in the [GR, LR1) window and emits WaitOnWrongCounterFailure
-        with expected_counter='vlcnt'.
+        the edge doesn't form. diagnose_missing_edge finds no vlcnt-draining
+        wait in the [GR, LR1) window and emits MissingWaitFailure with
+        counter_kind='vlcnt' AND nearby_other_counter_waits populated with
+        the wrong-counter SWait (so the user knows they could extend it).
 
         Equivalent to legacy ``test_grs_not_swait``: same defect (no
-        vlcnt drain on the GR), more precise diagnosis (the existing
-        wait was on the wrong counter, not absent)."""
+        vlcnt drain on the GR). The presence of the wrong-counter
+        SWaitCnt is surfaced via nearby_other_counter_waits — the user
+        can extend that SWaitCnt to add a vlcnt drain rather than
+        inserting a new one."""
         subj_cap = make_capture(BODY_LABEL_ML, [
             _gr(slot=0, category="GRA"),
             make_swait(slot=2, dscnt=0),    # wrong counter
@@ -226,11 +228,14 @@ class TestGRBeforeLR1_MissingWait(GraphNativeValidationTest):
             self.wrap_single_body(subj_cap),
         )
         f = self.assert_failures_contain(
-            failures, cls=WaitOnWrongCounterFailure,
-            expected_counter="vlcnt",
+            failures, cls=MissingWaitFailure,
+            counter_kind="vlcnt",
         )
         assert f.producer.category == "GRA"
         assert f.consumer.category == "LRA1"
+        # The wrong-counter SWait (dscnt drain at slot=2) is surfaced
+        # as a nearby SWait the user could extend.
+        assert len(f.nearby_other_counter_waits) >= 1
 
     def test_grs_no_swait_at_all(self):
         """No SWait of ANY kind in the window — diagnose_missing_edge

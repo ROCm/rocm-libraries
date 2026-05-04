@@ -573,13 +573,22 @@ class OrderInvertedFailure(Failure):
 
 
 # ----------------------------------------------------------------------------
-# 2. MissingWaitFailure — no SWaitCnt covers the producer at all.
+# 2. MissingWaitFailure — no SWaitCnt drains the expected counter in the
+#    window between producer and consumer. If other-counter SWaitCnts ARE
+#    in the window, they're surfaced via `nearby_other_counter_waits` so
+#    the user knows they could extend an existing SWaitCnt rather than
+#    insert a new one. (Bead `hof` collapsed the former
+#    WaitOnWrongCounterFailure into this single type — the user-facing
+#    fix is the same in both cases.)
 # ----------------------------------------------------------------------------
 @dataclass
 class MissingWaitFailure(Failure):
     producer: object
     consumer: object
     counter_kind: str  # 'dscnt' / 'vlcnt' / 'vscnt'
+    nearby_other_counter_waits: list = field(default_factory=list)
+    # ^ list[GraphNode] — SWaitCnts present in the window but draining other
+    # counters. Empty when no SWaitCnts are in the window at all.
 
     def _format_canonical(self, capture=None) -> str:
         producer_label = _node_label(self.producer, capture)
@@ -594,35 +603,19 @@ class MissingWaitFailure(Failure):
         c_body = getattr(self.consumer, "body_label", None)
         if p_body == "ML-1" and c_body == "ML":
             iter_note = " (of next iteration)"
+        # Optional hint when other-counter SWaitCnts exist in the window:
+        # the user could extend one of them rather than insert a new SWaitCnt.
+        hint = ""
+        if self.nearby_other_counter_waits:
+            indices = ", ".join(
+                f"idx={(getattr(w, 'position', None) or w.issued_at).vmfma_index}"
+                for w in self.nearby_other_counter_waits
+            )
+            hint = f" (existing SWaitCnts at {indices} drain other counters)"
         return (
             f"SWaitCnt({self.counter_kind}) missing between "
             f"{producer_label} {producer_pos} and "
-            f"{consumer_label} {consumer_pos}{iter_note}."
-        )
-
-
-# ----------------------------------------------------------------------------
-# 3. WaitOnWrongCounterFailure — SWait exists but on wrong counter.
-# ----------------------------------------------------------------------------
-@dataclass
-class WaitOnWrongCounterFailure(Failure):
-    producer: object
-    consumer: object
-    expected_counter: str
-    wrong_counter_waits: list  # list[GraphNode], in stream order
-
-    def _format_canonical(self, capture=None) -> str:
-        wait_descriptions = ", ".join(
-            f"SWaitCnt {format_position(w, capture)}"
-            for w in self.wrong_counter_waits
-        )
-        return (
-            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
-            f"{format_position(self.consumer, capture)}'s producer "
-            f"{self.producer.category} {format_position(self.producer, capture)} "
-            f"requires an SWaitCnt with {self.expected_counter} drain. "
-            f"Existing SWaitCnts in the window drain other counters: {wait_descriptions}. "
-            f"Did you mean {self.expected_counter}?"
+            f"{consumer_label} {consumer_pos}{iter_note}{hint}."
         )
 
 
@@ -3131,7 +3124,10 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
 #   OrderInvertedFailure       — subject reverses producer/consumer order
 #                                 from default schedule (default is canonical)
 #   MissingWaitFailure         — no SWait on the right counter in the window
-#   WaitOnWrongCounterFailure  — SWait exists but drains the wrong counter
+#                                 (carries `nearby_other_counter_waits` when
+#                                 wrong-counter SWaits sit in the window;
+#                                 the former WaitOnWrongCounterFailure was
+#                                 collapsed into this type by bead `hof`)
 #   WaitInsufficientFailure    — SWait counter value too lax
 #   MissingBarrierFailure      — wait covers but no barrier in window (LDS-reuse only)
 #
@@ -3224,10 +3220,13 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
     See plan §"Comparison and diagnosis" for the phased classifier:
       Phase 0: identity lookup (gating — missing nodes raise).
       Phase 1: OrderInvertedFailure (same-body only — gating for Phase 2).
-      Phase 2: MissingWaitFailure / WaitOnWrongCounterFailure /
-               WaitInsufficientFailure (mutually exclusive); plus
-               MissingBarrierFailure when a wait covers but no barrier
-               sits in the post-wait window (LDS-reuse edges only).
+      Phase 2: MissingWaitFailure / WaitInsufficientFailure (mutually
+               exclusive); plus MissingBarrierFailure when a wait covers
+               but no barrier sits in the post-wait window (LDS-reuse
+               edges only). MissingWaitFailure carries
+               `nearby_other_counter_waits` populated when SWaitCnts on
+               other counters sit in the window — replaces the former
+               WaitOnWrongCounterFailure.
 
     `raise_on_unexplained=True` (default) raises UnexplainedMissingEdgeError
     when the classifier reaches a fall-through — used in unit tests to
@@ -3423,20 +3422,16 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
     wait_failure_emitted = False
 
     if not waits:
-        # No SWait on the expected counter at all in the window.
-        if waits_other:
-            failures.append(WaitOnWrongCounterFailure(
-                producer=p_node,
-                consumer=c_node,
-                expected_counter=expected_counter,
-                wrong_counter_waits=waits_other,
-            ))
-        else:
-            failures.append(MissingWaitFailure(
-                producer=p_node,
-                consumer=c_node,
-                counter_kind=expected_counter,
-            ))
+        # No SWait on the expected counter at all in the window. If other-
+        # counter SWaits exist, surface them as nearby_other_counter_waits
+        # so the user can extend one of them rather than insert a new
+        # SWaitCnt; the underlying fix is the same either way.
+        failures.append(MissingWaitFailure(
+            producer=p_node,
+            consumer=c_node,
+            counter_kind=expected_counter,
+            nearby_other_counter_waits=waits_other,
+        ))
         wait_failure_emitted = True
     else:
         # At least one wait on the right counter. Check if any drains the producer.
@@ -4142,7 +4137,9 @@ def validate_edge_wait_coverage(graph, *, raise_on_unexplained=False):
     producer.position and consumer.position; require an SWaitCnt on the
     producer's counter (`dscnt` for LR/LW, `vlcnt` for GR) that drains
     the producer's queue slot. Emits MissingWaitFailure /
-    WaitOnWrongCounterFailure / WaitInsufficientFailure as appropriate.
+    WaitInsufficientFailure as appropriate. (When other-counter SWaits
+    sit in the window, MissingWaitFailure carries them in
+    `nearby_other_counter_waits`.)
 
     For each `lr_to_gr_lds_reuse` / `gr_to_lr_lds_reuse` edge: the wait
     check above plus a barrier-coverage check (mirrors the LDS-reuse
@@ -4273,17 +4270,12 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
     wait_failure_emitted = False
 
     if not waits:
-        if waits_other:
-            failures.append(WaitOnWrongCounterFailure(
-                producer=p_node, consumer=c_node,
-                expected_counter=expected_counter,
-                wrong_counter_waits=waits_other,
-            ))
-        else:
-            failures.append(MissingWaitFailure(
-                producer=p_node, consumer=c_node,
-                counter_kind=expected_counter,
-            ))
+        # See note in _classify_edge_coverage's MissingWaitFailure emit.
+        failures.append(MissingWaitFailure(
+            producer=p_node, consumer=c_node,
+            counter_kind=expected_counter,
+            nearby_other_counter_waits=waits_other,
+        ))
         wait_failure_emitted = True
     else:
         if not _any_drains(waits, p_node, subj_graph):
