@@ -61,8 +61,7 @@ def _iter_arch_dirs():
 
 
 def _all_arch_names():
-    if not _LOGIC_ROOT.is_dir():
-        return []
+    assert _LOGIC_ROOT.is_dir(), f"Logic file root is required but not found: {_LOGIC_ROOT}"
     return sorted({arch_dir.name for _, arch_dir in _iter_arch_dirs()})
 
 
