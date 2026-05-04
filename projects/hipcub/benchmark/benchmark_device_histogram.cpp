@@ -37,8 +37,6 @@
 const size_t DEFAULT_N = 32 * primbench::MiB;
 #endif
 
-const unsigned int batch_size = 10;
-
 template<class T>
 std::vector<T>
     generate(size_t size, int entropy_reduction, long long lower_level, long long upper_level)
@@ -99,7 +97,8 @@ private:
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("algo", "device_histogram_even")
+            .add("algo", "device_histogram")
+            .add("subalgo", "even")
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("bin_count", Bins)
@@ -133,24 +132,21 @@ private:
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.set_items(batch_size * size);
-        state.add_writes<T>(batch_size * size);
+        state.set_items(size);
+        state.add_writes<T>(size);
 
         state.run(
             [&]
             {
-                for(size_t i = 0; i < batch_size; i++)
-                {
-                    HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
-                                                                     temporary_storage_bytes,
-                                                                     d_input,
-                                                                     d_histogram,
-                                                                     Bins + 1,
-                                                                     lower_level,
-                                                                     upper_level,
-                                                                     int(size),
-                                                                     stream));
-                }
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
+                                                                 temporary_storage_bytes,
+                                                                 d_input,
+                                                                 d_histogram,
+                                                                 Bins + 1,
+                                                                 lower_level,
+                                                                 upper_level,
+                                                                 int(size),
+                                                                 stream));
             });
 
         HIP_CHECK(hipFree(d_temporary_storage));
@@ -171,7 +167,8 @@ private:
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "device_histogram_multi_even")
+            .add("algo", "device_histogram")
+            .add("subalgo", "multi_even")
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("bin_count", Bins)
@@ -217,26 +214,22 @@ private:
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.add_writes<T>(batch_size * size * Channels);
-        state.set_items(batch_size * size * Channels);
+        state.set_items(size * Channels);
+        state.add_writes<T>(size * Channels);
 
         state.run(
             [&]
             {
-                for(size_t i = 0; i < batch_size; i++)
-                {
-                    HIP_CHECK(
-                        (hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
-                            d_temporary_storage,
-                            temporary_storage_bytes,
-                            d_input,
-                            d_histogram,
-                            num_levels,
-                            lower_level,
-                            upper_level,
-                            int(size),
-                            stream)));
-                }
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
+                    d_temporary_storage,
+                    temporary_storage_bytes,
+                    d_input,
+                    d_histogram,
+                    num_levels,
+                    lower_level,
+                    upper_level,
+                    int(size),
+                    stream)));
             });
 
         HIP_CHECK(hipFree(d_temporary_storage));
@@ -256,7 +249,8 @@ class range_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "device_histogram_range")
+            .add("algo", "device_histogram")
+            .add("subalgo", "range")
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("bin_count", Bins);
@@ -291,23 +285,20 @@ class range_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.set_items(batch_size * size);
-        state.add_writes<T>(batch_size * size);
+        state.set_items(size);
+        state.add_writes<T>(size);
 
         state.run(
             [&]
             {
-                for(size_t i = 0; i < batch_size; i++)
-                {
-                    HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
-                                                                      temporary_storage_bytes,
-                                                                      d_input,
-                                                                      d_histogram,
-                                                                      Bins + 1,
-                                                                      d_levels,
-                                                                      int(size),
-                                                                      stream));
-                }
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
+                                                                  temporary_storage_bytes,
+                                                                  d_input,
+                                                                  d_histogram,
+                                                                  Bins + 1,
+                                                                  d_levels,
+                                                                  int(size),
+                                                                  stream));
             });
 
         HIP_CHECK(hipFree(d_temporary_storage));
@@ -323,7 +314,8 @@ class multi_range_benchmark : public primbench::benchmark_interface
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("algo", "device_histogram_multi_range")
+            .add("algo", "device_histogram")
+            .add("subalgo", "multi_range")
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("channels", Channels)
@@ -378,25 +370,21 @@ class multi_range_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.set_items(batch_size * size * Channels);
-        state.add_writes<T>(batch_size * size * Channels);
+        state.set_items(size * Channels);
+        state.add_writes<T>(size * Channels);
 
         state.run(
             [&]
             {
-                for(size_t i = 0; i < batch_size; i++)
-                {
-                    HIP_CHECK(
-                        (hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
-                            d_temporary_storage,
-                            temporary_storage_bytes,
-                            d_input,
-                            d_histogram,
-                            num_levels,
-                            d_levels,
-                            int(size),
-                            stream)));
-                }
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
+                    d_temporary_storage,
+                    temporary_storage_bytes,
+                    d_input,
+                    d_histogram,
+                    num_levels,
+                    d_levels,
+                    int(size),
+                    stream)));
             });
 
         HIP_CHECK(hipFree(d_temporary_storage));
