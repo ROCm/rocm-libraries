@@ -1039,7 +1039,8 @@ namespace TensileLite
         else
         {
             // Default WGM
-            if(sizeMapping.workGroupMapping == 0)
+            if(sizeMapping.workGroupMapping == 0
+               && hipAMDGPU != nullptr && hipAMDGPU->analyticalHardware != nullptr)
             {
                 auto numCU  = hipAMDGPU->analyticalHardware->N_CU;
                 auto numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
@@ -1050,7 +1051,8 @@ namespace TensileLite
                 defaultWGM = sizeMapping.workGroupMapping;
 
             // Default WGMXCC
-            if(sizeMapping.workGroupMappingXCC == -1)
+            if(sizeMapping.workGroupMappingXCC == -1
+               && hipAMDGPU != nullptr && hipAMDGPU->analyticalHardware != nullptr)
                 defaultWGMXCC = hipAMDGPU->analyticalHardware->NUM_XCD;
             else
                 defaultWGMXCC = sizeMapping.workGroupMappingXCC;
