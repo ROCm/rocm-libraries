@@ -125,9 +125,9 @@ jobs:
           python3 TheRock/build_tools/install_rocm_from_artifacts.py \
             --latest-release \
             --amdgpu-family gfx1151 \
-            --output-dir C:/ROCm \
+            --output-dir B:/ROCm \
             --base-only
-          echo "ROCM_PATH=C:/ROCm" >> $GITHUB_ENV
+          echo "ROCM_PATH=B:/ROCm" >> $GITHUB_ENV
 
       - name: Build
         working-directory: shared/stinkytofu
