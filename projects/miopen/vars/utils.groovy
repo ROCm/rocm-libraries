@@ -606,23 +606,39 @@ def getDockerImage(Map conf=[:])
     return [dockerImage, image]
 }
 
-// New wrapper function to add gitStatusWrapper around getDockerImage
+// New wrapper function to add GitHub commit status around getDockerImage
 def getDockerImageWithStatus(Map conf=[:]) {
-    def stageName = env.STAGE_NAME ?: "Docker Image"  
+    def stageName = env.STAGE_NAME ?: "Docker Image"
     def credentialsID = env.monorepo_status_wrapper_creds
-    
-    gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${stageName}", account: 'ROCm', repo: 'rocm-libraries') {
-        try {
-            return getDockerImage(conf) 
+    def sha = env.GIT_COMMIT
+    def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
+
+    Closure setStatus = { String state, String description ->
+        withCredentials([string(credentialsId: credentialsID, variable: 'GITHUB_TOKEN')]) {
+            sh(script: """
+                curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
+                    -H 'Authorization: token \$GITHUB_TOKEN' \\
+                    -H 'Content-Type: application/json' \\
+                    -d '{"state":"${state}","context":"${stageName}","description":"${description}"}'
+            """)
         }
-        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-                echo "The job was cancelled or aborted"
-                throw e
-        }
-        catch (Exception ex) {
-            echo "Error in getDockerImageWithStatus: ${ex.message}"
-            throw ex
-        }
+    }
+
+    setStatus('pending', 'In progress')
+    try {
+        def result = getDockerImage(conf)
+        setStatus('success', 'Completed successfully')
+        return result
+    }
+    catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        echo "The job was cancelled or aborted"
+        setStatus('error', 'Job cancelled or aborted')
+        throw e
+    }
+    catch (Exception ex) {
+        echo "Error in getDockerImageWithStatus: ${ex.message}"
+        setStatus('failure', 'Stage failed')
+        throw ex
     }
 }
 
@@ -660,7 +676,22 @@ def buildHipClangJob(Map conf=[:]){
         def retimage
         def credentialsID = env.monorepo_status_wrapper_creds
 
-        gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${variant}", account: 'ROCm', repo: 'rocm-libraries') {
+        def sha = env.GIT_COMMIT
+        def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
+
+        Closure setStatus = { String state, String description ->
+            withCredentials([string(credentialsId: credentialsID, variable: 'GITHUB_TOKEN')]) {
+                sh(script: """
+                    curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
+                        -H 'Authorization: token \$GITHUB_TOKEN' \\
+                        -H 'Content-Type: application/json' \\
+                        -d '{"state":"${state}","context":"${variant}","description":"${description}"}'
+                """)
+            }
+        }
+
+        setStatus('pending', 'In progress')
+        try {
             try {
                 (retimage, image) = getDockerImage(conf)
                 if (needs_gpu) {
@@ -679,6 +710,7 @@ def buildHipClangJob(Map conf=[:]){
             }
             catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
                 echo "The job was cancelled or aborted"
+                setStatus('error', 'Job cancelled or aborted')
                 throw e
             }
             catch(Exception ex) {
@@ -703,10 +735,10 @@ def buildHipClangJob(Map conf=[:]){
             withDockerContainer(image: image, args: dockerOpts + " -v=${remote_root}:${remote_root}") {
                 timeout(time: build_timeout, unit:'MINUTES')
                 {
-                    // We set LOGNAME here because under the hood dvc calls Python's getpass.getuser() object to 
+                    // We set LOGNAME here because under the hood dvc calls Python's getpass.getuser() object to
                     // create a unique hash to store its local cache in. When Jenkins runs this Docker container, it
                     // runs as a UID that doesn't have an entry in /etc/passwd within the container. getuser() throws
-                    // an exception if it can't get the user name for the current user's UID, but it will check the 
+                    // an exception if it can't get the user name for the current user's UID, but it will check the
                     // LOGNAME environment variable and use that value if it's available.
                     // https://github.com/iterative/dvc/blob/3915fa26aa7d95d5cbe345e62846bfd82dccbfc7/dvc/repo/__init__.py#L646
                     // https://docs.python.org/3/library/getpass.html#getpass.getuser
@@ -719,6 +751,14 @@ def buildHipClangJob(Map conf=[:]){
                     cmake_build(conf)
                 }
             }
+            setStatus('success', 'Completed successfully')
+        }
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+            throw e  // already set status above
+        }
+        catch (Exception ex) {
+            setStatus('failure', 'Stage failed')
+            throw ex
         }
         return retimage
 }
