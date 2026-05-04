@@ -99,15 +99,15 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
 
-    # Optional inclusion of external shared/stinkytofu CMake project
-    set(STINKYTOFU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-    if(EXISTS "${STINKYTOFU_DIR}/CMakeLists.txt")
-        set(BUILD_SHARED_LIBS ON)
-        set(STINKYTOFU_ENABLE_WERROR ON)
-        # Add the external directory; build output goes into a local binary dir 'stinkytofu'
-        add_subdirectory("${STINKYTOFU_DIR}" stinkytofu EXCLUDE_FROM_ALL)
-    else()
-        message(FATAL_ERROR "External directory not found: ${STINKYTOFU_DIR} (skipping)")
+    # Locate stinkytofu: prefer the monorepo sibling, fall back to installed package.
+    if(NOT TARGET stinkytofu)
+        set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+        if(IS_DIRECTORY "${_stinkytofu_sibling}")
+            set(STINKYTOFU_ENABLE_WERROR ON)
+            add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
+        else()
+            find_package(stinkytofu REQUIRED)
+        endif()
     endif()
 
     target_link_libraries(_rocisa PUBLIC roc::origami)

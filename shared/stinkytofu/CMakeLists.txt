@@ -149,8 +149,9 @@ if(NOT BUILD_SHARED_LIBS)
 endif()
 target_include_directories(stinkytofu
     PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include> # For generated files
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+        $<INSTALL_INTERFACE:include/stinkytofu>
     PRIVATE
         # Make the generated files' directories available to the library
         # This allows source files to #include the generated .inc files
@@ -207,12 +208,37 @@ add_subdirectory(tools)
 # Install targets
 ##===----------------------------------------------------------------------===##
 
-# Install the stinkytofu library
+# Install the stinkytofu library and export targets for find_package().
 install(TARGETS stinkytofu
+    EXPORT stinkytofu-targets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
 )
+install(EXPORT stinkytofu-targets
+    FILE stinkytofu-targets.cmake
+    NAMESPACE stinkytofu::
+    DESTINATION lib/cmake/stinkytofu
+)
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    cmake/stinkytofuConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfig.cmake
+    INSTALL_DESTINATION lib/cmake/stinkytofu
+)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
+    VERSION "${STINKYTOFU_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
+    DESTINATION lib/cmake/stinkytofu
+)
+# Build-tree export so find_package() works without installing.
+export(TARGETS stinkytofu NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
 
 # Install public header files with stinkytofu/ namespace
 # Exclude ir/python/ (Python-specific, internal headers)
