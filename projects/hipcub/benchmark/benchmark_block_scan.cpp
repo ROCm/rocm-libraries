@@ -40,27 +40,12 @@ void kernel(const T* input, T* output, const T init)
     Runner::template run<T, BlockSize, ItemsPerThread>(input, output, init);
 }
 
-template<hipcub::BlockScanAlgorithm Algorithm>
+template<hipcub::BlockScanAlgorithm Algorithm, class Name>
 struct inclusive_scan
 {
     static const char* get_algorithm_name()
     {
-        if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING)
-        {
-            return "inclusive_scan(block_scan_raking)";
-        }
-        else if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE)
-        {
-            return "inclusive_scan(block_scan_raking_memoize)";
-        }
-        else if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS)
-        {
-            return "inclusive_scan(block_scan_warp_scans)";
-        }
-        else
-        {
-            static_assert(false, "unknown algorithm");
-        }
+        return Name::name;
     }
 
     template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
@@ -92,27 +77,12 @@ struct inclusive_scan
     }
 };
 
-template<hipcub::BlockScanAlgorithm Algorithm>
+template<hipcub::BlockScanAlgorithm Algorithm, class Name>
 struct exclusive_scan
 {
     static const char* get_algorithm_name()
     {
-        if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING)
-        {
-            return "exclusive_scan(block_scan_raking)";
-        }
-        else if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE)
-        {
-            return "exclusive_scan(block_scan_raking_memoize)";
-        }
-        else if constexpr(Algorithm == hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS)
-        {
-            return "exclusive_scan(block_scan_warp_scans)";
-        }
-        else
-        {
-            static_assert(false, "unknown algorithm");
-        }
+        return Name::name;
     }
 
     template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
@@ -228,6 +198,38 @@ void add_benchmarks(primbench::executor& executor)
     CREATE_BENCHMARK(custom_double2, 256, 8);
 }
 
+// At the time of writing, BLOCK_SCAN_RAKING and BLOCK_SCAN_RAKING_MEMOIZE have the same values, so we can't switch on them like a normal enum.
+// So we have to pass the algorithm names here
+struct inclusive_raking_tag
+{
+    static constexpr const char* name = "inclusive_scan(block_scan_raking)";
+};
+
+struct inclusive_raking_memoize_tag
+{
+    static constexpr const char* name = "inclusive_scan(block_scan_raking_memoize)";
+};
+
+struct inclusive_warp_scans_tag
+{
+    static constexpr const char* name = "inclusive_scan(block_scan_warp_scans)";
+};
+
+struct exclusive_raking_tag
+{
+    static constexpr const char* name = "exclusive_scan(block_scan_raking)";
+};
+
+struct exclusive_raking_memoize_tag
+{
+    static constexpr const char* name = "exclusive_scan(block_scan_raking_memoize)";
+};
+
+struct exclusive_warp_scans_tag
+{
+    static constexpr const char* name = "exclusive_scan(block_scan_warp_scans)";
+};
+
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
@@ -236,12 +238,21 @@ int main(int argc, char* argv[])
 
     primbench::executor executor(argc, argv, settings);
 
-    add_benchmarks<inclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING>>(executor);
-    add_benchmarks<inclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE>>(executor);
-    add_benchmarks<inclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS>>(executor);
-    add_benchmarks<exclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING>>(executor);
-    add_benchmarks<exclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE>>(executor);
-    add_benchmarks<exclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS>>(executor);
+    add_benchmarks<
+        inclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING, inclusive_raking_tag>>(
+        executor);
+    add_benchmarks<inclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE,
+                                  inclusive_raking_memoize_tag>>(executor);
+    add_benchmarks<inclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS,
+                                  inclusive_warp_scans_tag>>(executor);
+
+    add_benchmarks<
+        exclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING, exclusive_raking_tag>>(
+        executor);
+    add_benchmarks<exclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_RAKING_MEMOIZE,
+                                  exclusive_raking_memoize_tag>>(executor);
+    add_benchmarks<exclusive_scan<hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS,
+                                  exclusive_warp_scans_tag>>(executor);
 
     executor.run();
 }
