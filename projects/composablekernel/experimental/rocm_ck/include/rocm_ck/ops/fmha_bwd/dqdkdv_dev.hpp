@@ -11,9 +11,9 @@
 // Uses C++20 struct NTTPs: template <FmhaBwdDQDKDVSpec K>.
 //
 // Compilation boundary:
-//   _spec.hpp — consteval factory + slot constants (both passes)
-//   _api.hpp  — host-only helpers: grid_size (host pass only, #error on device)
-//   _dev.hpp (this) — CK Tile bridge + __device__ code (device pass only, #error on host)
+//   _spec.hpp -- consteval factory + slot constants (both passes)
+//   _api.hpp  -- host-only helpers: grid_size (host pass only, #error on device)
+//   _dev.hpp (this) -- CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
@@ -50,7 +50,7 @@ consteval ck_tile::BlockAttentionBiasEnum biasTypeToCkEnum(FmhaBiasType bt)
 }
 
 // =========================================================================
-// FmhaBwdDQDKDVTypes — maps kernel descriptor to CK Tile type chain
+// FmhaBwdDQDKDVTypes -- maps kernel descriptor to CK Tile type chain
 // =========================================================================
 
 /// Maps a FmhaBwdDQDKDVSpec descriptor to the full CK Tile type chain.
@@ -106,7 +106,15 @@ struct FmhaBwdDQDKDVTypes
                   "Tile geometry is hardcoded for d128. Other hdim values "
                   "require different tile configs.");
 
-    // --- Tile shape (hardcoded for d128 gfx9 — Config 4 from fmha_bwd.py) ---
+    // Guard: BlockSize=256 with NumWarps=4 assumes wave64 (gfx9). On wave32
+    // targets (gfx10/11/12) the same NumWarps would yield BlockSize=128,
+    // breaking the BlockTile arithmetic and warp-level intrinsics encoded
+    // into the pipeline. Refuse to compile this bridge on non-gfx9 targets.
+    static_assert(__AMDGCN_WAVEFRONT_SIZE == 64,
+                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). The hardcoded "
+                  "BlockSize=256 / NumWarps=4 tile config assumes warp_size=64.");
+
+    // --- Tile shape (hardcoded for d128 gfx9 -- Config 4 from fmha_bwd.py) ---
     //
     // From the gfx9 tile table for fp16/bf16 d128:
     //   bm0=16, bn0=128, bk0=128, bk1=16, bk2=128, bk3=16, bk4=32
@@ -226,7 +234,7 @@ struct FmhaBwdDQDKDVTypes
 };
 
 // =========================================================================
-// runFmhaBwdDQDKDV — device function
+// runFmhaBwdDQDKDV -- device function
 // =========================================================================
 
 /// Device function that invokes the CK Tile FMHA BWD dQ/dK/dV kernel.
@@ -274,7 +282,7 @@ struct FmhaBwdDQDKDVTypes
 ///   scalars[S::DROP_OFFSET].u64 = dropout RNG offset
 ///
 /// CK Tile stores row strides as index_t (int32). Large strides that
-/// exceed INT32_MAX will be silently truncated — a known CK Tile limitation.
+/// exceed INT32_MAX will be silently truncated -- a known CK Tile limitation.
 /// The nhead_stride_dq_acc is long_index_t (int64).
 ///
 /// Call this from an extern "C" __global__ wrapper.
@@ -346,253 +354,181 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     //
     // The Kargs struct uses multiple inheritance with conditional base classes.
     // Aggregate initialization must match the exact inheritance order:
-    //   1. FmhaBwdCommonKargs
-    //   2. Bias kargs (conditional)
-    //   3. BiasGrad kargs (conditional)
-    //   4. Mask kargs (conditional)
-    //   5. Dropout kargs (conditional)
-    //   6. Deterministic kargs (conditional)
-    //   7. Batch/Group-specific members
+    //   1. FmhaBwdCommonKargs                (32 fields, common to both modes)
+    //   2..6. Bias / BiasGrad / Mask / Dropout / Deterministic kargs
+    //         (each is either FmhaBwdEmptyKargs<N> or its full counterpart,
+    //          chosen at compile time by the pipeline problem traits)
+    //   7. Batch- or Group-mode tail members (fixed-length vs variable-length
+    //      sequence metadata)
     //
-    // Because the conditional bases make aggregate init fragile, we use
-    // aggregate init for the common + empty-placeholder bases, then
-    // assign optional fields via if constexpr — following the same pattern
-    // as CK Tile's MakeKargsImpl().
+    // Strategy: aggregate-init the COMMON base positionally (its layout is
+    // stable inside CK Tile), pass `{}` for the 5 optional bases (zero-init
+    // matches FmhaBwdEmptyKargs<N> and is a sane default for the populated
+    // variants -- we fill them by name below), and leave the mode-specific
+    // tail value-initialized so we can assign each tail field by name. This
+    // mirrors CK Tile's own MakeKargsImpl while removing the positional
+    // fragility flagged by the W7 finding.
+
+    typename T::Kargs kargs{
+        // FmhaBwdCommonKargs (32 positional fields)
+        {t_q.ptr,                         // q_ptr
+         t_k.ptr,                         // k_ptr
+         t_v.ptr,                         // v_ptr
+         t_lse.ptr,                       // lse_ptr
+         t_do.ptr,                        // do_ptr
+         t_d.ptr,                         // d_ptr (input: const void*)
+         const_cast<void*>(t_dq_acc.ptr), // dq_acc_ptr (output)
+         const_cast<void*>(t_dk.ptr),     // dk_ptr (output)
+         const_cast<void*>(t_dv.ptr),     // dv_ptr (output)
+         // Group mode passes -1 for both seqlens; CK Tile reads per-batch
+         // lengths from seqstart/seqlen pointers below. Batch mode passes
+         // the fixed sequence dimensions.
+         (K.mode == FmhaMode::GROUP) ? index_t{-1} : seqlen_q, // seqlen_q
+         (K.mode == FmhaMode::GROUP) ? index_t{-1} : seqlen_k, // seqlen_k
+         hdim_q,                                               // hdim_q
+         hdim_v,                                               // hdim_v
+         num_head_q,                                           // num_head_q
+         nhead_ratio_qk,                                       // nhead_ratio_qk
+         raw_scale,                                            // raw_scale
+         scale,                                                // scale
+         stride_q,                                             // stride_q
+         stride_k,                                             // stride_k
+         stride_v,                                             // stride_v
+         stride_do,                                            // stride_do
+         stride_dq_acc,                                        // stride_dq_acc
+         stride_dk,                                            // stride_dk
+         stride_dv,                                            // stride_dv
+         nhead_stride_q,                                       // nhead_stride_q
+         nhead_stride_k,                                       // nhead_stride_k
+         nhead_stride_v,                                       // nhead_stride_v
+         nhead_stride_do,                                      // nhead_stride_do
+         nhead_stride_lsed,                                    // nhead_stride_lsed
+         nhead_stride_dq_acc,                                  // nhead_stride_dq_acc
+         nhead_stride_dk,                                      // nhead_stride_dk
+         nhead_stride_dv},                                     // nhead_stride_dv
+        {}, // bias placeholder    (EmptyKargs<0> or BiasKargs)
+        {}, // dbias placeholder   (EmptyKargs<1> or BiasGradKargs)
+        {}, // mask placeholder    (EmptyKargs<2> or MaskKargs)
+        {}, // dropout placeholder (EmptyKargs<3> or DropoutKargs)
+        {}, // determ placeholder  (EmptyKargs<4> or DetermKargs)
+        // Mode-specific tail fields are value-initialized (zero) here and
+        // assigned by name in the per-mode block below.
+    };
+
+    // --- Mode-specific tail (named-field assignment, no positional drift) ---
 
     if constexpr(K.mode == FmhaMode::GROUP)
     {
-        // Group mode: variable-length sequences
-
-        typename T::Kargs kargs{
-            // FmhaBwdCommonKargs
-            {t_q.ptr,                         // q_ptr
-             t_k.ptr,                         // k_ptr
-             t_v.ptr,                         // v_ptr
-             t_lse.ptr,                       // lse_ptr
-             t_do.ptr,                        // do_ptr
-             t_d.ptr,                         // d_ptr (input: const void*)
-             const_cast<void*>(t_dq_acc.ptr), // dq_acc_ptr (output)
-             const_cast<void*>(t_dk.ptr),     // dk_ptr (output)
-             const_cast<void*>(t_dv.ptr),     // dv_ptr (output)
-             -1,                              // seqlen_q (updated per-batch)
-             -1,                              // seqlen_k (updated per-batch)
-             hdim_q,                          // hdim_q
-             hdim_v,                          // hdim_v
-             num_head_q,                      // num_head_q
-             nhead_ratio_qk,                  // nhead_ratio_qk
-             raw_scale,                       // raw_scale
-             scale,                           // scale
-             stride_q,                        // stride_q
-             stride_k,                        // stride_k
-             stride_v,                        // stride_v
-             stride_do,                       // stride_do
-             stride_dq_acc,                   // stride_dq_acc
-             stride_dk,                       // stride_dk
-             stride_dv,                       // stride_dv
-             nhead_stride_q,                  // nhead_stride_q
-             nhead_stride_k,                  // nhead_stride_k
-             nhead_stride_v,                  // nhead_stride_v
-             nhead_stride_do,                 // nhead_stride_do
-             nhead_stride_lsed,               // nhead_stride_lsed
-             nhead_stride_dq_acc,             // nhead_stride_dq_acc
-             nhead_stride_dk,                 // nhead_stride_dk
-             nhead_stride_dv},                // nhead_stride_dv
-            {},                               // placeholder for bias
-            {},                               // placeholder for dbias
-            {},                               // placeholder for mask
-            {},                               // placeholder for dropout
-            {},                               // placeholder for deterministic
-            // FmhaBwdGroupModeKargs members
-            reinterpret_cast<const int32_t*>(args.tensors[S::SEQSTART_Q].ptr),
-            reinterpret_cast<const int32_t*>(args.tensors[S::SEQSTART_K].ptr),
-            reinterpret_cast<const int32_t*>(args.tensors[S::SEQLEN_Q].ptr),
-            reinterpret_cast<const int32_t*>(args.tensors[S::SEQLEN_K].ptr),
-            nullptr, // cu_seqlen_q_ptr (unused — seqstart/seqlen are authoritative)
-            nullptr  // cu_seqlen_k_ptr (unused)
-        };
-
-        // --- Populate optional fields via if constexpr ---
-
-        if constexpr(K.bias_type == FmhaBiasType::ELEMENTWISE)
-        {
-            const TensorArg& t_bias = args.tensors[S::BIAS];
-            kargs.bias_ptr          = t_bias.ptr;
-            kargs.stride_bias       = static_cast<index_t>(t_bias.strides[0]);
-            kargs.nhead_stride_bias = static_cast<index_t>(t_bias.strides[1]);
-        }
-        else if constexpr(K.bias_type == FmhaBiasType::ALIBI)
-        {
-            const TensorArg& t_bias  = args.tensors[S::BIAS];
-            kargs.alibi_slope_ptr    = t_bias.ptr;
-            kargs.alibi_slope_stride = static_cast<index_t>(t_bias.strides[0]);
-        }
-
-        if constexpr(K.has_bias_grad)
-        {
-            const TensorArg& t_dbias = args.tensors[S::DBIAS];
-            kargs.dbias_ptr          = const_cast<void*>(t_dbias.ptr);
-            kargs.stride_dbias       = static_cast<index_t>(t_dbias.strides[0]);
-            kargs.nhead_stride_dbias = static_cast<index_t>(t_dbias.strides[1]);
-        }
-
-        if constexpr(K.has_mask)
-        {
-            kargs.window_size_left  = args.scalars[S::WINDOW_SIZE_LEFT].i32;
-            kargs.window_size_right = args.scalars[S::WINDOW_SIZE_RIGHT].i32;
-            kargs.mask_type =
-                static_cast<ck_tile::GenericAttentionMaskEnum>(args.scalars[S::MASK_TYPE].i32);
-        }
-
-        if constexpr(K.has_dropout)
-        {
-            const float p_undrop      = args.scalars[S::P_UNDROP].f32;
-            const float rp_undrop     = args.scalars[S::RP_UNDROP].f32;
-            kargs.rp_undrop           = rp_undrop;
-            kargs.scale_rp_undrop     = rp_undrop * raw_scale;
-            kargs.p_undrop_in_uint8_t = static_cast<uint8_t>(__builtin_floorf(p_undrop * 255.0f));
-
-            kargs.drop_seed.val                 = args.scalars[S::DROP_SEED].u64;
-            kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
-            kargs.is_drop_seed_offset_from_host = true;
-
-            kargs.rand_val_ptr         = nullptr;
-            kargs.stride_randval       = 0;
-            kargs.nhead_stride_randval = 0;
-        }
-
-        if constexpr(K.is_deterministic)
-        {
-            const index_t split_stride_dq_acc = static_cast<index_t>(t_dq_acc.strides[3]);
-            kargs.split_stride_dq_acc         = split_stride_dq_acc;
-        }
-
-        typename T::Kernel{}(kargs);
+        // Variable-length sequences: seqstart pointers give per-batch offsets
+        // into the packed Q/K/V buffers; seqlen pointers carry actual lengths.
+        // cu_seqlen_*_ptr are deprecated CK Tile fields (seqstart/seqlen are
+        // authoritative); leave them null.
+        kargs.seqstart_q_ptr  = reinterpret_cast<const int32_t*>(args.tensors[S::SEQSTART_Q].ptr);
+        kargs.seqstart_k_ptr  = reinterpret_cast<const int32_t*>(args.tensors[S::SEQSTART_K].ptr);
+        kargs.seqlen_q_ptr    = reinterpret_cast<const int32_t*>(args.tensors[S::SEQLEN_Q].ptr);
+        kargs.seqlen_k_ptr    = reinterpret_cast<const int32_t*>(args.tensors[S::SEQLEN_K].ptr);
+        kargs.cu_seqlen_q_ptr = nullptr;
+        kargs.cu_seqlen_k_ptr = nullptr;
     }
     else
     {
-        // Batch mode: fixed-length sequences
-
-        // Batch strides
-        const index_t batch_stride_q           = static_cast<index_t>(t_q.strides[2]);
-        const index_t batch_stride_k           = static_cast<index_t>(t_k.strides[2]);
-        const index_t batch_stride_v           = static_cast<index_t>(t_v.strides[2]);
-        const index_t batch_stride_do          = static_cast<index_t>(t_do.strides[2]);
-        const index_t batch_stride_lsed        = static_cast<index_t>(t_lse.strides[1]);
-        const long_index_t batch_stride_dq_acc = t_dq_acc.strides[2];
-        const index_t batch_stride_dk          = static_cast<index_t>(t_dk.strides[2]);
-        const index_t batch_stride_dv          = static_cast<index_t>(t_dv.strides[2]);
-
-        typename T::Kargs kargs{
-            // FmhaBwdCommonKargs
-            {t_q.ptr,                         // q_ptr
-             t_k.ptr,                         // k_ptr
-             t_v.ptr,                         // v_ptr
-             t_lse.ptr,                       // lse_ptr
-             t_do.ptr,                        // do_ptr
-             t_d.ptr,                         // d_ptr (input: const void*)
-             const_cast<void*>(t_dq_acc.ptr), // dq_acc_ptr (output)
-             const_cast<void*>(t_dk.ptr),     // dk_ptr (output)
-             const_cast<void*>(t_dv.ptr),     // dv_ptr (output)
-             seqlen_q,                        // seqlen_q
-             seqlen_k,                        // seqlen_k
-             hdim_q,                          // hdim_q
-             hdim_v,                          // hdim_v
-             num_head_q,                      // num_head_q
-             nhead_ratio_qk,                  // nhead_ratio_qk
-             raw_scale,                       // raw_scale
-             scale,                           // scale
-             stride_q,                        // stride_q
-             stride_k,                        // stride_k
-             stride_v,                        // stride_v
-             stride_do,                       // stride_do
-             stride_dq_acc,                   // stride_dq_acc
-             stride_dk,                       // stride_dk
-             stride_dv,                       // stride_dv
-             nhead_stride_q,                  // nhead_stride_q
-             nhead_stride_k,                  // nhead_stride_k
-             nhead_stride_v,                  // nhead_stride_v
-             nhead_stride_do,                 // nhead_stride_do
-             nhead_stride_lsed,               // nhead_stride_lsed
-             nhead_stride_dq_acc,             // nhead_stride_dq_acc
-             nhead_stride_dk,                 // nhead_stride_dk
-             nhead_stride_dv},                // nhead_stride_dv
-            {}, // placeholder for bias    (EmptyKargs<0> or BiasKargs)
-            {}, // placeholder for dbias   (EmptyKargs<1> or BiasGradKargs)
-            {}, // placeholder for mask    (EmptyKargs<2> or MaskKargs)
-            {}, // placeholder for dropout (EmptyKargs<3> or DropoutKargs)
-            {}, // placeholder for determ  (EmptyKargs<4> or DetermKargs)
-            // FmhaBwdBatchModeKargs own members
-            batch_stride_q,      // batch_stride_q
-            batch_stride_k,      // batch_stride_k
-            batch_stride_v,      // batch_stride_v
-            batch_stride_do,     // batch_stride_do
-            batch_stride_lsed,   // batch_stride_lsed
-            batch_stride_dq_acc, // batch_stride_dq_acc
-            batch_stride_dk,     // batch_stride_dk
-            batch_stride_dv      // batch_stride_dv
-        };
-
-        // --- Populate optional fields via if constexpr ---
-
-        if constexpr(K.bias_type == FmhaBiasType::ELEMENTWISE)
-        {
-            const TensorArg& t_bias = args.tensors[S::BIAS];
-            kargs.bias_ptr          = t_bias.ptr;
-            kargs.stride_bias       = static_cast<index_t>(t_bias.strides[0]);
-            kargs.nhead_stride_bias = static_cast<index_t>(t_bias.strides[1]);
-            kargs.batch_stride_bias = static_cast<index_t>(t_bias.strides[2]);
-        }
-        else if constexpr(K.bias_type == FmhaBiasType::ALIBI)
-        {
-            const TensorArg& t_bias  = args.tensors[S::BIAS];
-            kargs.alibi_slope_ptr    = t_bias.ptr;
-            kargs.alibi_slope_stride = static_cast<index_t>(t_bias.strides[0]);
-        }
-
-        if constexpr(K.has_bias_grad)
-        {
-            const TensorArg& t_dbias = args.tensors[S::DBIAS];
-            kargs.dbias_ptr          = const_cast<void*>(t_dbias.ptr);
-            kargs.stride_dbias       = static_cast<index_t>(t_dbias.strides[0]);
-            kargs.nhead_stride_dbias = static_cast<index_t>(t_dbias.strides[1]);
-            kargs.batch_stride_dbias = static_cast<index_t>(t_dbias.strides[2]);
-        }
-
-        if constexpr(K.has_mask)
-        {
-            kargs.window_size_left  = args.scalars[S::WINDOW_SIZE_LEFT].i32;
-            kargs.window_size_right = args.scalars[S::WINDOW_SIZE_RIGHT].i32;
-            kargs.mask_type =
-                static_cast<ck_tile::GenericAttentionMaskEnum>(args.scalars[S::MASK_TYPE].i32);
-        }
-
-        if constexpr(K.has_dropout)
-        {
-            const float p_undrop      = args.scalars[S::P_UNDROP].f32;
-            const float rp_undrop     = args.scalars[S::RP_UNDROP].f32;
-            kargs.rp_undrop           = rp_undrop;
-            kargs.scale_rp_undrop     = rp_undrop * raw_scale;
-            kargs.p_undrop_in_uint8_t = static_cast<uint8_t>(__builtin_floorf(p_undrop * 255.0f));
-
-            kargs.drop_seed.val                 = args.scalars[S::DROP_SEED].u64;
-            kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
-            kargs.is_drop_seed_offset_from_host = true;
-
-            // randval not stored in backward pass
-            kargs.rand_val_ptr         = nullptr;
-            kargs.stride_randval       = 0;
-            kargs.nhead_stride_randval = 0;
-            kargs.batch_stride_randval = 0;
-        }
-
-        if constexpr(K.is_deterministic)
-        {
-            const index_t split_stride_dq_acc = static_cast<index_t>(t_dq_acc.strides[3]);
-            kargs.split_stride_dq_acc         = split_stride_dq_acc;
-        }
-
-        typename T::Kernel{}(kargs);
+        // Fixed-length sequences: per-batch strides for every tensor.
+        kargs.batch_stride_q      = static_cast<index_t>(t_q.strides[2]);
+        kargs.batch_stride_k      = static_cast<index_t>(t_k.strides[2]);
+        kargs.batch_stride_v      = static_cast<index_t>(t_v.strides[2]);
+        kargs.batch_stride_do     = static_cast<index_t>(t_do.strides[2]);
+        kargs.batch_stride_lsed   = static_cast<index_t>(t_lse.strides[1]);
+        kargs.batch_stride_dq_acc = t_dq_acc.strides[2]; // long_index_t
+        kargs.batch_stride_dk     = static_cast<index_t>(t_dk.strides[2]);
+        kargs.batch_stride_dv     = static_cast<index_t>(t_dv.strides[2]);
     }
+
+    // --- Optional feature fields (single set of if-constexpr branches) ---
+    //
+    // Bias / dbias batch_stride_* and dropout batch_stride_randval fields
+    // exist only on the BATCH-mode arms of the optional kargs. Guarding by
+    // K.mode prevents referencing absent members in GROUP mode. CK Tile's
+    // GROUP-mode bias/dbias kargs derive batch offsets from seqstart_q_ptr,
+    // so the host-supplied batch_stride is unused there.
+    //
+    // The GROUP path here is exercised only by the plain-feature variant
+    // shipped today (fmha_bwd_dqdkdv_fp16_d128_group). The compile-time
+    // branches below are correct for any future GROUP variant that enables
+    // an optional feature, but those combinations are not numerically
+    // verified by the current example -- they remain compilation-only.
+
+    if constexpr(K.bias_type == FmhaBiasType::ELEMENTWISE)
+    {
+        const TensorArg& t_bias = args.tensors[S::BIAS];
+        kargs.bias_ptr          = t_bias.ptr;
+        kargs.stride_bias       = static_cast<index_t>(t_bias.strides[0]);
+        kargs.nhead_stride_bias = static_cast<index_t>(t_bias.strides[1]);
+        if constexpr(K.mode == FmhaMode::BATCH)
+            kargs.batch_stride_bias = static_cast<index_t>(t_bias.strides[2]);
+    }
+    else if constexpr(K.bias_type == FmhaBiasType::ALIBI)
+    {
+        const TensorArg& t_bias  = args.tensors[S::BIAS];
+        kargs.alibi_slope_ptr    = t_bias.ptr;
+        kargs.alibi_slope_stride = static_cast<index_t>(t_bias.strides[0]);
+    }
+
+    if constexpr(K.has_bias_grad)
+    {
+        const TensorArg& t_dbias = args.tensors[S::DBIAS];
+        kargs.dbias_ptr          = const_cast<void*>(t_dbias.ptr);
+        kargs.stride_dbias       = static_cast<index_t>(t_dbias.strides[0]);
+        kargs.nhead_stride_dbias = static_cast<index_t>(t_dbias.strides[1]);
+        if constexpr(K.mode == FmhaMode::BATCH)
+            kargs.batch_stride_dbias = static_cast<index_t>(t_dbias.strides[2]);
+    }
+
+    if constexpr(K.has_mask)
+    {
+        kargs.window_size_left  = args.scalars[S::WINDOW_SIZE_LEFT].i32;
+        kargs.window_size_right = args.scalars[S::WINDOW_SIZE_RIGHT].i32;
+        kargs.mask_type =
+            static_cast<ck_tile::GenericAttentionMaskEnum>(args.scalars[S::MASK_TYPE].i32);
+    }
+
+    if constexpr(K.has_dropout)
+    {
+        const float p_undrop  = args.scalars[S::P_UNDROP].f32;
+        const float rp_undrop = args.scalars[S::RP_UNDROP].f32;
+        kargs.rp_undrop       = rp_undrop;
+        kargs.scale_rp_undrop = rp_undrop * raw_scale;
+        // Clamp before the uint8_t cast: out-of-range float-to-int
+        // conversion is UB. Host setup may pass p_undrop > 1.0 for
+        // dropout-disabled "no-drop" launches.
+        const float p_undrop_byte =
+            __builtin_fmaxf(0.0f, __builtin_fminf(255.0f, __builtin_floorf(p_undrop * 255.0f)));
+        kargs.p_undrop_in_uint8_t = static_cast<uint8_t>(p_undrop_byte);
+
+        kargs.drop_seed.val                 = args.scalars[S::DROP_SEED].u64;
+        kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
+        kargs.is_drop_seed_offset_from_host = true;
+
+        // randval is never stored in the backward pass.
+        kargs.rand_val_ptr         = nullptr;
+        kargs.stride_randval       = 0;
+        kargs.nhead_stride_randval = 0;
+        if constexpr(K.mode == FmhaMode::BATCH)
+            kargs.batch_stride_randval = 0;
+    }
+
+    if constexpr(K.is_deterministic)
+    {
+        kargs.split_stride_dq_acc = static_cast<index_t>(t_dq_acc.strides[3]);
+        // Newer CK Tile upstream gained a persistent kernel for the
+        // deterministic+BATCH path that requires kargs.batch to be set. The
+        // CK Tile shipped with this build (rocm7.1.1) does not have that
+        // FmhaBwdDeterministicKargs::batch field yet, so we cannot assign
+        // it here. usesBatchSizeSlot()/BATCH_SIZE remain wired through the
+        // host API in anticipation of the upstream bump, and the validator
+        // will exercise that path via the host-only tests.
+    }
+
+    typename T::Kernel{}(kargs);
 }
 
 } // namespace rocm_ck
