@@ -1153,25 +1153,11 @@ def applies_only_once(func):
     return wrapper
 
 
-@applies_only_once
-def apply_barriers(timeline: Timeline) -> None:
-    """
-    Apply the effect of SBarriers to the GlobalReads in the timeline by updating the barriered_at field of GlobalReads.
-    Timeline is modified in place.
-    
-    Args:
-        timeline: The Timeline object containing the instructions.
-    """
-    for i_barrier, barrier in timeline.get_instructions_combined("SBarrier"):
-        for i_inst in range(i_barrier-1, -1, -1):
-            instruction = timeline.combined_timeline[i_inst]
-            if not isinstance(instruction, GlobalRead):
-                continue
-            if instruction.barriered_at and barrier.issued_at >= instruction.needed_by.issued_at:
-                # Note: Cannot break since we can't say anything about the relationship 
-                #       of `GR.needed_by` between GRs based on the order they're encountered.
-                continue
-            instruction.barriered_at.append(barrier.issued_at)
+# `apply_barriers` was deleted as a follow-up cleanup after ola.4 phase 2.
+# Its only consumers were `add_gr_finish_before_lr_constraints` and
+# `add_pack_constraints` (both deleted in ola.1 / ola.4). The barriered_at
+# bookkeeping it produced is now derived graph-side via `_collect_barrier_edges`
+# in ScheduleCapture.py (`gr_to_lr_lds_reuse` edge_kind).
 
 
 # `apply_must_start_after_barriers` and its `_apply_must_start_after_barriers_single`
@@ -1495,7 +1481,7 @@ ValidatorPassContext = ValidationContext
 # `add_local_read_constraints` was deleted in bead `ola.3` phase-2.
 # It was the structural rule that wired LR.needed_by from a positional
 # tile-index heuristic (`set_lr_needed_by_for_VMFMA`) and then drove
-# `LocalRead.validate` through `apply_swaits` + `apply_barriers`.
+# `LocalRead.validate` through the now-deleted `apply_swaits` + `apply_barriers`.
 # The graph-side replacement is `validate_edge_wait_coverage` over
 # LR -> MFMA RAW edges (`_DSLoadRule` writes vgpr; `_MFMARule` reads
 # vgpr). Migrated coverage lives in
