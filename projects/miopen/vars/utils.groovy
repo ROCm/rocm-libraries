@@ -606,38 +606,35 @@ def getDockerImage(Map conf=[:])
     return [dockerImage, image]
 }
 
-// New wrapper function to add GitHub commit status around getDockerImage
-def getDockerImageWithStatus(Map conf=[:]) {
-    def stageName = env.STAGE_NAME ?: "Docker Image"
-    def credentialsID = "github-app-miopen"
+def setGithubStatus(String context, String state, String description) {
     def sha = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
     def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
-
-    Closure setStatus = { String state, String description ->
-        withCredentials([usernamePassword(credentialsId: credentialsID, usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
-            sh(script: """
-                curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
-                    -H "Authorization: token \$GITHUB_TOKEN" \\
-                    -H 'Content-Type: application/json' \\
-                    -d '{"state":"${state}","context":"${stageName}","description":"${description}"}'
-            """)
-        }
+    withCredentials([usernamePassword(credentialsId: 'github-app-miopen', usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
+        sh(script: """
+            curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
+                -H "Authorization: token \$GITHUB_TOKEN" \\
+                -H 'Content-Type: application/json' \\
+                -d '{"state":"${state}","context":"${context}","description":"${description}"}'
+        """)
     }
+}
 
-    setStatus('pending', 'In progress')
+def getDockerImageWithStatus(Map conf=[:]) {
+    def stageName = env.STAGE_NAME ?: "Docker Image"
+    setGithubStatus(stageName, 'pending', 'In progress')
     try {
         def result = getDockerImage(conf)
-        setStatus('success', 'Completed successfully')
+        setGithubStatus(stageName, 'success', 'Completed successfully')
         return result
     }
     catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
         echo "The job was cancelled or aborted"
-        setStatus('error', 'Job cancelled or aborted')
+        setGithubStatus(stageName, 'error', 'Job cancelled or aborted')
         throw e
     }
     catch (Exception ex) {
         echo "Error in getDockerImageWithStatus: ${ex.message}"
-        setStatus('failure', 'Stage failed')
+        setGithubStatus(stageName, 'failure', 'Stage failed')
         throw ex
     }
 }
@@ -674,23 +671,7 @@ def buildHipClangJob(Map conf=[:]){
         def build_timeout = conf.get("build_timeout", 420)
 
         def retimage
-        def credentialsID = "github-app-miopen"
-
-        def sha = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
-        def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
-
-        Closure setStatus = { String state, String description ->
-            withCredentials([usernamePassword(credentialsId: credentialsID, usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
-                sh(script: """
-                    curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
-                        -H "Authorization: token \$GITHUB_TOKEN" \\
-                        -H 'Content-Type: application/json' \\
-                        -d '{"state":"${state}","context":"${variant}","description":"${description}"}'
-                """)
-            }
-        }
-
-        setStatus('pending', 'In progress')
+        setGithubStatus(variant, 'pending', 'In progress')
         try {
             try {
                 (retimage, image) = getDockerImage(conf)
@@ -710,7 +691,7 @@ def buildHipClangJob(Map conf=[:]){
             }
             catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
                 echo "The job was cancelled or aborted"
-                setStatus('error', 'Job cancelled or aborted')
+                setGithubStatus(variant, 'error', 'Job cancelled or aborted')
                 throw e
             }
             catch(Exception ex) {
@@ -751,13 +732,13 @@ def buildHipClangJob(Map conf=[:]){
                     cmake_build(conf)
                 }
             }
-            setStatus('success', 'Completed successfully')
+            setGithubStatus(variant, 'success', 'Completed successfully')
         }
         catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
             throw e  // already set status above
         }
         catch (Exception ex) {
-            setStatus('failure', 'Stage failed')
+            setGithubStatus(variant, 'failure', 'Stage failed')
             throw ex
         }
         return retimage
