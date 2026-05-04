@@ -63,7 +63,12 @@ KEPT for now to preserve coverage during the incremental migration.
 """
 
 from rocisa.container import vgpr
-from rocisa.instruction import VCvtPkF32toBF16, VPermB32
+from rocisa.instruction import (
+    PVCvtBF16toFP32,
+    VCvtPkF32toBF16,
+    VPermB32,
+    VSubF32,
+)
 
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
@@ -72,6 +77,7 @@ from Tensile.Components.ScheduleCapture import (
     TaggedInstruction,
     OrderInvertedFailure,
     MissingWaitFailure,
+    WrongInterleavingFailure,
 )
 
 from dataflow_fixtures import (
@@ -387,3 +393,213 @@ class TestLRAfterPack_LR1Graph(GraphNativeValidationTest):
 # In the graph-native model, kernel config (UsePLRPack, ForceUnrollSubIter,
 # UseDirect32XEmulation) does not change graph edge formation, so a
 # parallel LR1/LR3 graph variant would assert the same thing as LR0.
+
+
+# =============================================================================
+# MiddlePack pair-interleaving tests (bead `dpi`)
+# =============================================================================
+# Graph-native ports of the legacy
+# `TestValidatePackTF32CrossPackInterleaving::test_failing_interleaved` and
+# `TestValidatePackTF32MultipleGroups::test_failing_two_groups_fully_interleaved`
+# in test_ValidatePack.py — both depend on the structural rule
+# `_hook_up_packs_f32` + `MiddlePack.validate` in CMSValidator.py, which
+# pairs middle-16 packs by adjacency in their category-local list (e.g.
+# pair (0,1), (2,3), ... within PackA0) and asserts that the next
+# MiddlePack in the GLOBAL stream after a pair-leader is its
+# pair_consumer (the partner sharing its temp VGPR). The graph-side
+# classifier `validate_middle_pack_pair_interleaving` (ScheduleCapture.py)
+# walks the unified node stream once and emits WrongInterleavingFailure
+# with the same shape the structural rule produces.
+#
+# The legacy tests stay on (parallel coverage) until ola.4 phase-2 deletes
+# the structural rule; this file covers the graph-side classifier.
+
+
+def _pack_middle_pvcvt(out_vgpr: int, src_vgpr: int, *, slot: int,
+                       sequence: int = 0,
+                       category: str = "PackA0") -> TaggedInstruction:
+    """A MiddlePack-shaped instruction (PVCvtBF16toFP32 / `p_v_cvt_f32_bf16`).
+
+    PVCvtBF16toFP32 is one of the four rocisa classes the production
+    PACK_TYPE_MAP binds to the `MiddlePack` validator dataclass
+    (CMSValidator.py:627). It carries the `dpi` classifier's pair-leader
+    semantics if its category-local list places it at an even index. Here
+    we use it as the leader of each pair; pair the `_pack_middle_vsubf32`
+    helper below with it as the consumer for parity with the production
+    `(v_cvt_f32_bf16, v_sub_f32)` pair shape — but the graph-side classifier
+    only cares that BOTH halves are in `_MIDDLE_PACK_CLASS_NAMES`, not that
+    they're a specific class pair.
+    """
+    inst = PVCvtBF16toFP32(dst=vgpr(out_vgpr, 1), src=vgpr(src_vgpr, 1))
+    return TaggedInstruction(
+        inst=inst,
+        category=category,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                     mfma_index=slot, sequence=sequence),
+    )
+
+
+def _pack_middle_vsub(out_vgpr: int, src0_vgpr: int, src1_vgpr: int, *,
+                     slot: int, sequence: int = 0,
+                     category: str = "PackA0") -> TaggedInstruction:
+    """A MiddlePack-shaped instruction (VSubF32 / `v_sub_f32`).
+
+    The other half of a real production middle-16 pair (the
+    error-term-subtraction step). Used here as the pair-CONSUMER while the
+    PVCvtBF16toFP32 above acts as the LEADER. Either ordering would also
+    fire the `dpi` classifier; the convention mirrors production stream
+    order.
+    """
+    inst = VSubF32(dst=vgpr(out_vgpr, 1),
+                   src0=vgpr(src0_vgpr, 1),
+                   src1=vgpr(src1_vgpr, 1))
+    return TaggedInstruction(
+        inst=inst,
+        category=category,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                     mfma_index=slot, sequence=sequence),
+    )
+
+
+class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
+    """Bead `dpi`: graph-native MiddlePack pair-interleaving classifier.
+
+    Mirrors the legacy `MiddlePack.validate` semantics on the dataflow
+    graph side: for each MiddlePack pair-leader (even-indexed within its
+    category's middle-16 sub-stream), the next MiddlePack in the GLOBAL
+    stream order must be the leader's pair-consumer (the next index in the
+    same category). Otherwise emit `WrongInterleavingFailure(pack,
+    expected_next, actual_next)`.
+
+    Negative tests use unique category labels (PackA0 / PackB0) so the
+    classifier's per-category pairing matches the production rule's
+    per-group pairing in `_hook_up_middle_16_pairs`.
+    """
+
+    def test_middlepack_pair_contiguous_passing(self):
+        """One PackA0 middle-16 pair (leader at slot 4, consumer at slot 5),
+        feeding an MFMA at slot 8. No intervening MiddlePack. The classifier
+        emits no failure.
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
+            make_swait(slot=2, dscnt=0),
+            # Pair leader: PVCvtBF16toFP32 reading the LR's v8.
+            _pack_middle_pvcvt(out_vgpr=40, src_vgpr=8, slot=4,
+                               category="PackA0"),
+            # Pair consumer: VSubF32 immediately after — back-to-back.
+            _pack_middle_vsub(out_vgpr=41, src0_vgpr=40, src1_vgpr=9,
+                              slot=5, category="PackA0"),
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=8, a_src_count=1),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(cap)))
+        # No WrongInterleavingFailure — pair is contiguous.
+        for f in failures:
+            assert not isinstance(f, WrongInterleavingFailure), (
+                f"unexpected WrongInterleavingFailure: {f.format()}"
+            )
+
+    def test_middlepack_pair_interleaved_with_mfma_emits_wrong_interleaving(self):
+        """PackA0 pair interleaved with a PackB0 MiddlePack: leader at slot 4,
+        an OTHER middle-16 (PackB0) at slot 5, consumer at slot 6. The
+        classifier fires WrongInterleavingFailure with pack=PackA0[leader],
+        expected_next=PackA0[consumer], actual_next=PackB0[interloper].
+
+        Note: the legacy test name says "interleaved with MFMA" but the
+        actual structural-rule trigger is "another MiddlePack between the
+        pair", because the pair-VGPR-share invariant is about pack-pack
+        ordering, not pack-MFMA ordering. An intervening pure-MFMA does
+        NOT violate the invariant (MFMAs do not contend for the temp VGPR).
+        Mirrors `test_failing_interleaved` (PackB0[1] -> PackA0[2,2] ->
+        PackB0[3]) — the issue is PackA0's middle-16 sitting between
+        PackB0's pair leader and consumer.
+        """
+        # PackA0 pair: leader @ slot 4, would-be consumer @ slot 6.
+        # PackB0 pair: leader @ slot 5 (between them), consumer @ slot 7.
+        # Stream order of MiddlePacks: PackA0[L]@4, PackB0[L]@5, PackA0[C]@6, PackB0[C]@7.
+        # PackA0[L]'s next MiddlePack in stream is PackB0[L], NOT PackA0[C] -> FAIL.
+        # PackB0[L]'s next MiddlePack in stream is PackA0[C], NOT PackB0[C] -> FAIL.
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, lds_offset=64, slot=0, category="LRA0"),
+            make_lr(20, 4, lds_offset=128, slot=1, category="LRB0"),
+            make_swait(slot=2, dscnt=0),
+            _pack_middle_pvcvt(out_vgpr=40, src_vgpr=8, slot=4,
+                               category="PackA0"),  # PackA0 leader
+            _pack_middle_pvcvt(out_vgpr=50, src_vgpr=20, slot=5,
+                               category="PackB0"),  # interloper (PackB0 leader)
+            _pack_middle_vsub(out_vgpr=41, src0_vgpr=40, src1_vgpr=9,
+                              slot=6, category="PackA0"),  # PackA0 consumer
+            _pack_middle_vsub(out_vgpr=51, src0_vgpr=50, src1_vgpr=21,
+                              slot=7, category="PackB0"),  # PackB0 consumer
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(cap)))
+        wrong_interleavings = [f for f in failures
+                               if isinstance(f, WrongInterleavingFailure)]
+        # Two violations: PackA0[L] and PackB0[L] both have a stranger as next.
+        assert len(wrong_interleavings) == 2, (
+            f"expected 2 WrongInterleavingFailures, got {len(wrong_interleavings)}: "
+            + ", ".join(f.format() for f in wrong_interleavings)
+        )
+        # Verify the PackA0 leader's failure: leader@4, expected consumer@6,
+        # actual next is PackB0 leader @ 5.
+        f_a = next(f for f in wrong_interleavings if f.pack.category == "PackA0")
+        assert f_a.pack.position.vmfma_index == 4
+        assert f_a.expected_next.category == "PackA0"
+        assert f_a.expected_next.position.vmfma_index == 6
+        assert f_a.actual_next.category == "PackB0"
+        assert f_a.actual_next.position.vmfma_index == 5
+
+    def test_middlepack_two_groups_fully_interleaved(self):
+        """Two pairs interleaved across categories — mirror of
+        `test_failing_two_groups_fully_interleaved` in the legacy file.
+
+        Stream: A0_L, B0_L, A0_C, B0_C. Both leaders see the wrong next.
+        Two `WrongInterleavingFailure` (one per violating pair) expected.
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_swait(slot=2, dscnt=0),
+            _pack_middle_pvcvt(out_vgpr=40, src_vgpr=8, slot=4,
+                               category="PackA0"),
+            _pack_middle_pvcvt(out_vgpr=50, src_vgpr=20, slot=5,
+                               category="PackB0"),
+            _pack_middle_vsub(out_vgpr=41, src0_vgpr=40, src1_vgpr=9,
+                              slot=6, category="PackA0"),
+            _pack_middle_vsub(out_vgpr=51, src0_vgpr=50, src1_vgpr=21,
+                              slot=7, category="PackB0"),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(cap)))
+        wrong_interleavings = [f for f in failures
+                               if isinstance(f, WrongInterleavingFailure)]
+        assert len(wrong_interleavings) == 2, (
+            f"expected 2 WrongInterleavingFailures, got {len(wrong_interleavings)}"
+        )
+        # Both leaders should have been flagged.
+        flagged_categories = sorted(f.pack.category for f in wrong_interleavings)
+        assert flagged_categories == ["PackA0", "PackB0"]
+
+    def test_middlepack_non_pair_writes_no_false_positive(self):
+        """A single MiddlePack in PackA0 (no sibling — odd-length category list)
+        followed by an unrelated PackB0 MiddlePack. With only ONE PackA0 the
+        category-local list has length 1 so no pair forms; the classifier
+        must not fire. Same for PackB0.
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_swait(slot=2, dscnt=0),
+            # Single PackA0 MiddlePack (no pair).
+            _pack_middle_pvcvt(out_vgpr=40, src_vgpr=8, slot=4,
+                               category="PackA0"),
+            # Single PackB0 MiddlePack (no pair).
+            _pack_middle_pvcvt(out_vgpr=50, src_vgpr=20, slot=5,
+                               category="PackB0"),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(cap)))
+        for f in failures:
+            assert not isinstance(f, WrongInterleavingFailure), (
+                f"unexpected WrongInterleavingFailure on unpaired MiddlePacks: "
+                f"{f.format()}"
+            )

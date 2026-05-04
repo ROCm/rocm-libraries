@@ -669,17 +669,30 @@ class MissingBarrierFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class WrongInterleavingFailure(Failure):
-    pack: object  # MiddlePack
-    expected_next: object  # MiddlePack (pair_consumer)
-    actual_next: object  # MiddlePack (next_scheduled_middle_16)
+    pack: object  # MiddlePack — validator-side ValidatorInstruction OR graph-side GraphNode
+    expected_next: object  # MiddlePack (pair_consumer) — same shape choice
+    actual_next: object  # MiddlePack (next_scheduled_middle_16) — same shape choice
 
     def _format_canonical(self, capture=None) -> str:
+        # The structural-side `MiddlePack.validate` (CMSValidator.py:420)
+        # emits with ValidatorInstructions (carry `issued_at:
+        # SchedulePosition`); the graph-side
+        # `validate_middle_pack_pair_interleaving` (bead `dpi`) emits with
+        # GraphNodes (carry `position: SchedulePosition`). Both shapes
+        # expose vmfma_index via a SchedulePosition attribute under
+        # different names — pick whichever exists. Same convention as
+        # `TimingTooCloseFailure._format_canonical` (post-bead `35z`).
+        def _idx(node):
+            pos = getattr(node, "issued_at", None)
+            if pos is None:
+                pos = getattr(node, "position", None)
+            return getattr(pos, "vmfma_index", "?") if pos is not None else "?"
         return (
-            f"{self.pack.name} @ idx={self.pack.issued_at.vmfma_index} has wrong "
+            f"{self.pack.name} @ idx={_idx(self.pack)} has wrong "
             f"interleaving. Should have been followed by "
-            f"{self.expected_next.name} @ idx={self.expected_next.issued_at.vmfma_index} "
+            f"{self.expected_next.name} @ idx={_idx(self.expected_next)} "
             f"but was followed by "
-            f"{self.actual_next.name} @ idx={self.actual_next.issued_at.vmfma_index}."
+            f"{self.actual_next.name} @ idx={_idx(self.actual_next)}."
         )
 
 
@@ -1403,6 +1416,24 @@ _CVT_PACK_CLASS_NAMES = {
     "VCvtPkF32toBF16",
 }
 
+# MiddlePack rocisa classes (TF32 emulation: the 16 instructions in the middle
+# of each 24-pack group that compute the bf16 error terms via paired
+# v_cvt_f32_bf16 + v_sub_f32 instructions). Used by `_is_middle_pack` and
+# `validate_middle_pack_pair_interleaving` (bead `dpi`) to identify the
+# pair-leader / pair-consumer relationships independently of the structural
+# `MiddlePack` validator-dataclass binding (CMSValidator.py:627-630
+# PACK_TYPE_MAP entries). The pairing semantics: middle-16 packs in each
+# category (e.g. PackA0) are paired adjacently in stream order — pair (0,1),
+# pair (2,3), etc. — and each pair's two halves share a temporary VGPR, so no
+# OTHER middle-16 pack (from any category, even another one in this category)
+# may appear between them in the global stream.
+_MIDDLE_PACK_CLASS_NAMES = {
+    "PVCvtBF16toFP32",
+    "VCvtBF16toFP32",
+    "VSubF32",
+    "VDot2CF32BF16",
+}
+
 
 def _is_lr(inst):
     return type(inst).__name__ in _LR_CLASS_NAMES
@@ -1418,6 +1449,24 @@ def _is_gr(inst):
 
 def _is_mfma(inst):
     return type(inst).__name__ in _MFMA_CLASS_NAMES
+
+
+def _is_middle_pack(inst):
+    """True for MiddlePack rocisa instances (TF32 middle-16 v_cvt_f32_bf16
+    + v_sub_f32 / PVCvtBF16toFP32 / VDot2CF32BF16 family).
+
+    These are the 16 instructions in each 24-pack group that compute the
+    bf16 error terms. Per CMSValidator.py PACK_TYPE_MAP, all of them bind
+    to the `MiddlePack` validator dataclass which carries the pair-consumer
+    interleaving invariant. The graph-side classifier in
+    `validate_middle_pack_pair_interleaving` (bead `dpi`) uses this
+    discriminator to identify pair leaders / consumers from the GraphNode
+    stream without re-importing the validator dataclass (which would create
+    an import cycle). Test fixtures may use any of the four production
+    rocisa classes, or a stub class whose `type(...).__name__` matches one
+    of the names in `_MIDDLE_PACK_CLASS_NAMES`.
+    """
+    return type(inst).__name__ in _MIDDLE_PACK_CLASS_NAMES
 
 
 def _is_cvt_pack(inst):
@@ -4077,6 +4126,12 @@ def validate_edge_wait_coverage(graph, *, raise_on_unexplained=False):
         edge_failures = _classify_edge_coverage(edge, graph,
                                                 raise_on_unexplained=raise_on_unexplained)
         failures.extend(edge_failures)
+    # Bead `dpi`: MiddlePack pair-interleaving is a stream-shape invariant,
+    # not an edge-shape invariant, so it's a sibling pass driven from the
+    # same entry point (rather than per-edge inside _classify_edge_coverage).
+    # Returns the same WrongInterleavingFailure shape the structural-side
+    # MiddlePack.validate emits in CMSValidator.py:420-433.
+    failures.extend(validate_middle_pack_pair_interleaving(graph))
     return failures
 
 
@@ -4230,6 +4285,122 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
             f"{c_node.identity} (kind={edge.edge_kind}) wasn't classified "
             f"by any branch. Classifier bug."
         )
+    return failures
+
+
+# =============================================================================
+# MiddlePack pair-interleaving classifier (bead `dpi`)
+# =============================================================================
+#
+# TF32 emulation packs come in groups of 24, the middle 16 of which compute
+# bf16 error terms via paired (v_cvt_f32_bf16, v_sub_f32) instructions
+# bound to the `MiddlePack` validator dataclass (CMSValidator.py:415,
+# PACK_TYPE_MAP entries lines 627-630). Each pair shares a temporary VGPR,
+# which the validator-side rule `MiddlePack.validate` enforces by requiring
+# the two halves of every pair appear back-to-back in stream order: no
+# OTHER MiddlePack (from any category, including the same one) may sit
+# between a pair's leader (even index in its category's middle-16 list) and
+# its consumer (the next, odd index).
+#
+# The structural rule (`_hook_up_middle_16_pairs` / `_hook_up_packs_f32`
+# in CMSValidator.py) wires `pack.pair_consumer` and `pack.next_scheduled_
+# middle_16` then asserts identity at `MiddlePack.validate` time. The
+# graph-side equivalent here works directly off the GraphNode stream,
+# without any cross-reference to validator-side dataclasses (avoids an
+# import cycle: CMSValidator imports ScheduleCapture, not the other way).
+#
+# Pair-detection algorithm:
+#   1. Walk every node in stream order.
+#   2. Filter to MiddlePack-class nodes (rocisa class in
+#      `_MIDDLE_PACK_CLASS_NAMES`). Group by `category` (PackA0, PackB0,
+#      etc.) — categories partition the pack stream.
+#   3. Within each category, pair MiddlePacks by adjacency in the
+#      category-local stream order: pair (0, 1), (2, 3), (4, 5), ...
+#      Each pair's first element is the LEADER; the second is the
+#      CONSUMER. (Mirrors `_hook_up_middle_16_pairs` line 1944.)
+#   4. For each LEADER, scan the GLOBAL MiddlePack stream and find the
+#      first MiddlePack node positioned strictly after the leader. If it
+#      isn't the leader's CONSUMER, emit `WrongInterleavingFailure`.
+#      (Mirrors `MiddlePack.validate` line 426-433.)
+
+
+def validate_middle_pack_pair_interleaving(graph):
+    """Bead `dpi`: graph-side MiddlePack pair-interleaving check.
+
+    Walks the unified node stream once and enforces the
+    pair-leader/pair-consumer adjacency invariant for TF32 middle-16 packs.
+    Emits zero-or-more `WrongInterleavingFailure` for each violating pair
+    (one failure per pair, never per intervening node).
+
+    Returns a list of `WrongInterleavingFailure` instances. Empty list
+    means every middle-16 pair was emitted contiguously in the global
+    stream order.
+
+    Coverage parity with the structural rule
+    (CMSValidator.py:`MiddlePack.validate` + `_hook_up_middle_16_pairs`):
+    same pair-detection (adjacency within category-local middle-16 list),
+    same successor scan (next MiddlePack in global stream), same failure
+    shape (`pack` / `expected_next` / `actual_next`).
+    """
+    # 1. Collect MiddlePacks in global stream order.
+    middle_packs_global = []
+    for node in _all_nodes_in_order(graph):
+        inst = getattr(node, "rocisa_inst", None)
+        if inst is None:
+            continue
+        if not _is_middle_pack(inst):
+            continue
+        # Defensive: only honor nodes whose category looks like a Pack* tag
+        # (production resolves PackA0/PackB0/... via PACK_TYPE_MAP). A
+        # MiddlePack rocisa class with a non-Pack category would mean the
+        # category resolver mis-tagged the instruction; ignore rather than
+        # blow up — the resolver is exercised by test_ScheduleCapture.py.
+        if not getattr(node, "category", "").startswith("Pack"):
+            continue
+        middle_packs_global.append(node)
+
+    if not middle_packs_global:
+        return []
+
+    # 2. Bucket by category and determine pair-leader/consumer relationships
+    #    using category-local adjacency.
+    by_category: dict = {}
+    for node in middle_packs_global:
+        by_category.setdefault(node.category, []).append(node)
+
+    # leader_to_consumer[leader_node] = consumer_node
+    leader_to_consumer: dict = {}
+    for cat_nodes in by_category.values():
+        # Pair (0,1), (2,3), ... — same convention as
+        # `_hook_up_middle_16_pairs`. A trailing unpaired leader (odd-length
+        # category list) is ignored: the structural rule never sets
+        # `pair_consumer` for it (and the production middle-16 always comes
+        # in even multiples of 8 per group), so no invariant applies.
+        for i in range(0, len(cat_nodes) - 1, 2):
+            leader_to_consumer[id(cat_nodes[i])] = cat_nodes[i + 1]
+
+    # 3. For each leader, find the next MiddlePack in global stream order
+    #    and compare to expected consumer.
+    failures = []
+    for global_idx, node in enumerate(middle_packs_global):
+        consumer = leader_to_consumer.get(id(node))
+        if consumer is None:
+            continue
+        # Find the next MiddlePack (any category) strictly after this leader
+        # in the global stream.
+        if global_idx + 1 >= len(middle_packs_global):
+            # Leader at end of stream with no follower — the structural
+            # rule's `next_scheduled_middle_16` indexing would IndexError
+            # here too; treat as missing data, not a failure.
+            continue
+        actual_next = middle_packs_global[global_idx + 1]
+        if actual_next is consumer:
+            continue
+        failures.append(WrongInterleavingFailure(
+            pack=node,
+            expected_next=consumer,
+            actual_next=actual_next,
+        ))
     return failures
 
 
