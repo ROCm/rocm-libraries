@@ -144,7 +144,7 @@ namespace
         {
             const std::string archName = trimArchName(props.gcnArchName);
             auto perArchPath = rocblaslt_find_library_relative_path(
-                std::filesystem::path(archName) / "hipblasltExtOpLibrary.dat");
+                std::filesystem::path("hipblasltExtOpLibrary_" + archName + ".dat"));
             if(perArchPath)
                 return perArchPath->string();
         }

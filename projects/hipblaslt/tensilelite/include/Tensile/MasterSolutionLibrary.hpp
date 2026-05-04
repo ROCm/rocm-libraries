@@ -37,6 +37,10 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorOps.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace fs = std::filesystem;
 
 namespace TensileLite
@@ -113,13 +117,27 @@ namespace TensileLite
             fs::path path(tensileLibPath);
             libraryDirectory = path.parent_path().string();
             suffix           = path.extension().string();
-            path             = fs::path(libraryDirectory) / "TensileLiteLibrary_lazy_Mapping.dat";
 
-            // libraryMapping
+            // Derive the arch from the master library filename, e.g.
+            // "TensileLibrary_lazy_gfx1100.dat" -> "gfx1100", and load the
+            // matching per-arch mapping file. Per-arch mapping files are
+            // required so single-arch shard installs don't collide on a
+            // shared "TensileLiteLibrary_lazy_Mapping.dat".
+            std::string       stem   = path.stem().string();
+            const std::string prefix = "TensileLibrary_lazy_";
+            if(stem.compare(0, prefix.size(), prefix) != 0)
+            {
+                std::cout << "Cannot derive arch from " << tensileLibPath << std::endl;
+                return false;
+            }
+            const std::string arch = stem.substr(prefix.size());
+            path                   = fs::path(libraryDirectory)
+                   / ("TensileLiteLibrary_lazy_" + arch + "_Mapping.dat");
+
             libraryMapping = LoadLibraryMapping(path.string());
             if(libraryMapping.empty())
             {
-                std::cout << "No library mapping found in " << libraryDirectory << std::endl;
+                std::cout << "No library mapping found at " << path.string() << std::endl;
                 return false;
             }
             return true;
@@ -353,3 +371,5 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

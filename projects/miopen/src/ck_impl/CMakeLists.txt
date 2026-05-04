@@ -11,6 +11,46 @@ if(NOT MIOPEN_USE_COMPOSABLEKERNEL)
     return()
 endif()
 
+# Strip target features (e.g. ":sramecc+:xnack-") to get the base arch name.
+# The loader uses the same stripping logic when looking up the .so.
+function(ck_impl_base_arch ARCH OUT_VAR)
+    string(FIND "${ARCH}" ":" _colon_pos)
+    if(_colon_pos GREATER -1)
+        string(SUBSTRING "${ARCH}" 0 ${_colon_pos} _base)
+    else()
+        set(_base "${ARCH}")
+    endif()
+    set(${OUT_VAR} "${_base}" PARENT_SCOPE)
+endfunction()
+
+# GPU base archs for which MIOpen has CK grouped conv kernels.
+# Note: this is narrower than CK's own supported arch list — e.g. gfx103x and
+# gfx11x are CK-capable but MIOpen does not yet provide CK grouped conv kernels
+# for them. Add arches here when MIOpen adds grouped conv support for them.
+set(_CK_SUPPORTED_ARCHS
+    gfx908 gfx90a gfx942 gfx950
+    gfx1100 gfx1101 gfx1102
+    gfx1150 gfx1151 gfx1152 gfx1153
+    gfx1200 gfx1201
+)
+
+# Filter GPU_TARGETS to only those with MIOpen CK grouped conv support.
+set(_CK_FILTERED_TARGETS)
+foreach(_gpu_target IN LISTS GPU_TARGETS)
+    ck_impl_base_arch("${_gpu_target}" _base)
+    if(_base IN_LIST _CK_SUPPORTED_ARCHS)
+        list(APPEND _CK_FILTERED_TARGETS "${_gpu_target}")
+    else()
+        message(STATUS "MIOpen CK: skipping ${_gpu_target} (no MIOpen CK grouped conv support for this arch)")
+    endif()
+endforeach()
+
+if(NOT _CK_FILTERED_TARGETS)
+    message(STATUS "MIOpen CK: no supported GPU targets found in GPU_TARGETS; "
+                   "skipping CK grouped conv library build.")
+    return()
+endif()
+
 set(CK_IMPL_SOURCES
     ck_grouped_conv_common.cpp
     ck_grouped_conv_fwd_impl.cpp
@@ -26,21 +66,9 @@ set(CK_IMPL_SOURCES
     ck_depthwise_fwd_impl.cpp
 )
 
-# Strip target features (e.g. ":sramecc+:xnack-") to get the base arch name.
-# The loader uses the same stripping logic when looking up the .so.
-function(ck_impl_base_arch ARCH OUT_VAR)
-    string(FIND "${ARCH}" ":" _colon_pos)
-    if(_colon_pos GREATER -1)
-        string(SUBSTRING "${ARCH}" 0 ${_colon_pos} _base)
-    else()
-        set(_base "${ARCH}")
-    endif()
-    set(${OUT_VAR} "${_base}" PARENT_SCOPE)
-endfunction()
-
 # Collect plugin target names for the MIOpen_with_plugins proxy (see src/CMakeLists.txt).
 set(CK_PLUGIN_TARGETS)
-foreach(gpu_target IN LISTS GPU_TARGETS)
+foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     ck_impl_base_arch("${gpu_target}" arch_base)
     if(MIOPEN_CK_UNBUNDLE_PER_ARCH)
         miopen_sanitize_arch("${gpu_target}" arch_safe)
@@ -64,7 +92,6 @@ foreach(gpu_target IN LISTS GPU_TARGETS)
     )
 
     set_target_properties(${lib_name} PROPERTIES
-        SOVERSION ${MIOpen_SOVERSION}
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN 1
     )
