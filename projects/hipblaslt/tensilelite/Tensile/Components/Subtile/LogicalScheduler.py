@@ -942,7 +942,7 @@ class LogicalScheduler:
             for pos in range(t_start, t_end, mn):
                 atoms.append((tensor, mt_val, pos, pos + mn, k_start, k_end))
 
-        loads_per_slot = len(atoms) // numSlots
+        loads_per_slot = max(1, -(-len(atoms) // numSlots))
 
         # 2b. Distribute atoms into flat buckets [0..numSlots),
         #     each bucket maps to (partition=flat//numK, subIterK=flat%numK)
