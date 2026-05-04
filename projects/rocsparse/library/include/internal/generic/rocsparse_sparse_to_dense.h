@@ -84,7 +84,7 @@ extern "C" {
 *
 *  \note
 *  This function writes the required allocation size (in bytes) to \p buffer_size and
-*  returns without performing the sparse to dense operation when a nullptr is passed for
+*  returns without performing the sparse to dense operation when NULL is passed for
 *  \p temp_buffer.
 *
 *  \note

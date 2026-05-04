@@ -506,7 +506,7 @@ rocsparse_status rocsparse_csrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *  some \f$j\f$.
 *
 *  The sparse CSR matrix passed to \p rocsparse_csrsm_solve does not actually have to be a triangular matrix. Instead, the
-*  triangular upper or lower part of the sparse matrix is solved based on the \ref rocsparse_fill_mode setthing on the descriptor
+*  triangular upper or lower part of the sparse matrix is solved based on the \ref rocsparse_fill_mode setting on the descriptor
 *  \p descr. If the fill mode is set to \ref rocsparse_fill_mode_lower, then the lower triangular matrix is solved. If the
 *  fill mode is set to \ref rocsparse_fill_mode_upper, then the upper triangular matrix is solved.
 *
