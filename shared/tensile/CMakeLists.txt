@@ -51,14 +51,14 @@ if(INSTALL_TENSILE_PYTEST_TESTS)
   # Install top-level test configuration files
   install(
     FILES pytest.ini tox.ini
-    DESTINATION .
+    DESTINATION Tensile
     COMPONENT tests
   )
 
   # Install test_categories.yaml for TheRock CI
   install(
     FILES test_categories.yaml
-    DESTINATION .
+    DESTINATION Tensile
     COMPONENT tests
   )
 endif()
@@ -75,7 +75,7 @@ if(BUILD_TENSILE_HOST_LIBRARY_TESTS)
   if(TARGET TensileTests)
     install(
       TARGETS TensileTests
-      RUNTIME DESTINATION bin
+      RUNTIME DESTINATION Tensile
       COMPONENT tests
     )
   endif()
