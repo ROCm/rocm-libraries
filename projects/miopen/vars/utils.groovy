@@ -614,7 +614,7 @@ def setGithubStatus(String context, String state, String description) {
             curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
                 -H "Authorization: token \$GITHUB_TOKEN" \\
                 -H 'Content-Type: application/json' \\
-                -d '{"state":"${state}","context":"${context}","description":"${description}"}'
+                -d '{"state":"${state}","context":"${context}","description":"${description}","target_url":"${env.BUILD_URL}"}'
         """)
     }
 }
