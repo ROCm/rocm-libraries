@@ -212,4 +212,3 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuConvBwdDataLargeValues2dFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW),
                      testing::ValuesIn(test_conv_common::getConvTestCases4D())));
-

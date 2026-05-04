@@ -86,9 +86,14 @@ public:
                 {
                     instance._referenceExecutorType = ReferenceExecutorType::GPU;
                 }
-                else
+                else if(val == "cpu")
                 {
                     instance._referenceExecutorType = ReferenceExecutorType::CPU;
+                }
+                else
+                {
+                    throw std::runtime_error("Invalid HIPDNN_TEST_REFERENCE_EXECUTOR value '" + val
+                                             + "'; expected 'cpu' or 'gpu'");
                 }
             }
         }

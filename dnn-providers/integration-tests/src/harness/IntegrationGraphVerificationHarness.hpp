@@ -248,9 +248,8 @@ protected:
                      finalRtol)});
             if(!inserted)
             {
-                HIPDNN_PLUGIN_LOG_WARN("Duplicate validator for tensor "
-                                       << attr->get_uid() << " (" << attr->get_name()
-                                       << "); keeping first registration");
+                ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
+                              << attr->get_name() << "); keeping first registration";
             }
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
@@ -269,9 +268,8 @@ protected:
                      rmsThreshold)});
             if(!inserted)
             {
-                HIPDNN_PLUGIN_LOG_WARN("Duplicate validator for tensor "
-                                       << attr->get_uid() << " (" << attr->get_name()
-                                       << "); keeping first registration");
+                ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
+                              << attr->get_name() << "); keeping first registration";
             }
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
@@ -339,18 +337,23 @@ protected:
         if(const auto* fpropNode = dynamic_cast<const fe::ConvolutionFpropNode*>(&node))
         {
             auto wAttr = fpropNode->attributes.get_w();
+            EXPECT_NE(wAttr, nullptr) << "ConvolutionFpropNode missing weight tensor";
+            // Both input and weight use the same fill range since initializeBundle
+            // applies _fillMin/_fillMax uniformly to all tensors.
             return conv::calculateConvFpropTolerance<T, T, float>(
                 fillMin, fillMax, fillMin, fillMax, wAttr->get_dim());
         }
         if(const auto* dgradNode = dynamic_cast<const fe::ConvolutionDgradNode*>(&node))
         {
             auto wAttr = dgradNode->attributes.get_w();
+            EXPECT_NE(wAttr, nullptr) << "ConvolutionDgradNode missing weight tensor";
             return conv::calculateConvDgradTolerance<T, T, float>(
                 fillMin, fillMax, fillMin, fillMax, wAttr->get_dim());
         }
         if(const auto* wgradNode = dynamic_cast<const fe::ConvolutionWgradNode*>(&node))
         {
             auto dyAttr = wgradNode->attributes.get_dy();
+            EXPECT_NE(dyAttr, nullptr) << "ConvolutionWgradNode missing dy tensor";
             return conv::calculateConvWrwTolerance<T, T, float>(
                 fillMin, fillMax, fillMin, fillMax, dyAttr->get_dim());
         }

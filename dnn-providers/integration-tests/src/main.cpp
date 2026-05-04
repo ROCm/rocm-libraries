@@ -106,7 +106,6 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--tc", "--test-config")
             .help("Path to a TOML configuration file for per-test tolerance overrides.");
         parser.add_argument("--reference-executor")
-            .default_value(std::string("cpu"))
             .help("Reference executor for validation: 'cpu' (default) or 'gpu'. "
                   "Can also be set via HIPDNN_TEST_REFERENCE_EXECUTOR env var.");
 
