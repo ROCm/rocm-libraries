@@ -752,59 +752,91 @@ class TestPlaceGRs:
         _assert_gr(slots[1], 'SB', 0, 2, 0, 8)
 
     def test_1x1_k1_DU512(self):
-        """256x256, DU512, FP4. GR k=2 → two k-chunks. grSA/SB k=4 → full MT."""
+        """256x256, DU512, FP4. GR k=2 → two k-chunks. grSA/SB k=4 → full MT.
+        Spaced-out distribution: B splits across s0/s1, SA migrates to s1, A k=2-4 sits whole at s2.
+        """
         cfg = make_cfg_256x256_fp4(depthU=512)
         sched = LogicalScheduler(cfg)
         slots = sched.place_GRs()
 
-        _assert_slot_grs(slots[0], ['A'])
+        _assert_slot_grs(slots[0], ['A', 'B'])
         _assert_gr(slots[0], 'A', 0, 2, 0, 8)
-        _assert_slot_grs(slots[1], ['B'])
-        _assert_gr(slots[1], 'B', 0, 2, 0, 8)
-        _assert_slot_grs(slots[2], ['SA', 'SB', 'A'])
-        _assert_gr(slots[2], 'A', 2, 4, 0, 6)
-        _assert_slot_grs(slots[3], ['A', 'B'])
-        _assert_gr(slots[3], 'A', 2, 4, 6, 8)
+        _assert_gr(slots[0], 'B', 0, 2, 0, 1)
+        _assert_slot_grs(slots[1], ['B', 'SA'])
+        _assert_gr(slots[1], 'B', 0, 2, 1, 8)
+        _assert_gr(slots[1], 'SA', 0, 4, 0, 8)
+        _assert_slot_grs(slots[2], ['SB', 'A'])
+        _assert_gr(slots[2], 'SB', 0, 4, 0, 8)
+        _assert_gr(slots[2], 'A', 2, 4, 0, 8)
+        _assert_slot_grs(slots[3], ['B'])
         _assert_gr(slots[3], 'B', 2, 4, 0, 8)
 
     def test_2x2_k1_DU256(self):
-        """256x256, DU256, FP4, 2x2 partition. Cross-MT dedup removes n+1 duplicates."""
+        """256x256, DU256, FP4, 2x2 partition. Cross-MT dedup removes n+1 duplicates.
+        Spaced-out distribution: tensors split into smaller atoms across more slots;
+        scale GRs migrate to the last slot of the last partition.
+        """
         cfg = make_cfg_256x256_fp4(numPartM=2, numPartN=2)
         sched = LogicalScheduler(cfg)
         slots = sched.place_GRs()
         parts = sched._partitions
 
-        # P0: A n+1
+        # P0: A n+1 split, B n+1 starts at s1
         _assert_slot_grs(parts[0][0], ['A'], "P0 s0")
-        _assert_gr(parts[0][0], 'A', 0, 2, 4, 6, mt=1)
-        _assert_slot_grs(parts[0][1], ['A'], "P0 s1")
-        _assert_gr(parts[0][1], 'A', 0, 2, 6, 8, mt=1)
+        _assert_gr(parts[0][0], 'A', 0, 2, 4, 7, mt=1)
+        _assert_slot_grs(parts[0][1], ['A', 'B'], "P0 s1")
+        _assert_gr(parts[0][1], 'A', 0, 2, 7, 8, mt=1)
+        _assert_gr(parts[0][1], 'B', 0, 2, 4, 5, mt=1)
 
-        # P1: B n+1
+        # P1: B n+1 finishes, A n+2 starts at s1
         _assert_slot_grs(parts[1][0], ['B'], "P1 s0")
-        _assert_gr(parts[1][0], 'B', 0, 2, 4, 6, mt=1)
+        _assert_gr(parts[1][0], 'B', 0, 2, 5, 7, mt=1)
+        _assert_slot_grs(parts[1][1], ['B', 'A'], "P1 s1")
+        _assert_gr(parts[1][1], 'B', 0, 2, 7, 8, mt=1)
+        _assert_gr(parts[1][1], 'A', 0, 2, 0, 1, mt=2)
 
-        # P3: B n+2, SA n+2, SB n+2
-        _assert_slot_grs(parts[3][1], ['B', 'SA', 'SB'], "P3 s1")
+        # P2: A n+2 finishes, B n+2 starts
+        _assert_slot_grs(parts[2][0], ['A'], "P2 s0")
+        _assert_gr(parts[2][0], 'A', 0, 2, 1, 4, mt=2)
+        _assert_slot_grs(parts[2][1], ['B'], "P2 s1")
+        _assert_gr(parts[2][1], 'B', 0, 2, 0, 2, mt=2)
+
+        # P3: B n+2 finishes at s0; SA/SB n+2 at s1 (last slot)
+        _assert_slot_grs(parts[3][0], ['B'], "P3 s0")
+        _assert_gr(parts[3][0], 'B', 0, 2, 2, 4, mt=2)
+        _assert_slot_grs(parts[3][1], ['SA', 'SB'], "P3 s1")
         _assert_gr(parts[3][1], 'SA', 0, 2, 0, 8, mt=2)
         _assert_gr(parts[3][1], 'SB', 0, 2, 0, 8, mt=2)
 
     def test_2x2_k1_DU512(self):
-        """256x256, DU512, FP4, 2x2 partition. GR k=2 × 2 chunks + scale."""
+        """256x256, DU512, FP4, 2x2 partition. GR k=2 × 2 chunks + scale.
+        Spaced-out distribution: A k=0-2 and k=2-4 chunks split across slots within P0;
+        B n+1 starts in P0 s3; SA/SB migrate to P3 s3 (last slot of last partition).
+        """
         cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
         sched = LogicalScheduler(cfg)
         sched.place_GRs()
         parts = sched._partitions
 
-        # P0: A n+1 across 4 slots
-        for i, (k_s, k_e) in enumerate([(0,2),(0,2),(2,4),(2,4)]):
-            _assert_slot_grs(parts[0][i], ['A'], f"P0 s{i}")
-        _assert_gr(parts[0][0], 'A', 0, 2, 4, 6, mt=1)
-        _assert_gr(parts[0][2], 'A', 2, 4, 4, 6, mt=1)
+        # P0 s0: A n+1 k=0-2 [4-7]
+        _assert_slot_grs(parts[0][0], ['A'], "P0 s0")
+        _assert_gr(parts[0][0], 'A', 0, 2, 4, 7, mt=1)
+        # P0 s1: A n+1 k=0-2 tail [7-8] + A n+1 k=2-4 head [4-5]
+        _assert_slot_grs(parts[0][1], ['A', 'A'], "P0 s1")
+        _assert_gr(parts[0][1], 'A', 0, 2, 7, 8, mt=1, idx=0)
+        _assert_gr(parts[0][1], 'A', 2, 4, 4, 5, mt=1, idx=1)
+        # P0 s2: A n+1 k=2-4 [5-7]
+        _assert_slot_grs(parts[0][2], ['A'], "P0 s2")
+        _assert_gr(parts[0][2], 'A', 2, 4, 5, 7, mt=1)
+        # P0 s3: A n+1 k=2-4 tail [7-8] + B n+1 k=0-2 head [4-5]
+        _assert_slot_grs(parts[0][3], ['A', 'B'], "P0 s3")
+        _assert_gr(parts[0][3], 'A', 2, 4, 7, 8, mt=1)
+        _assert_gr(parts[0][3], 'B', 0, 2, 4, 5, mt=1)
 
-        # P3 s0: SA+SB n+2
-        _assert_slot_grs(parts[3][0], ['SA', 'SB'], "P3 s0")
-        _assert_gr(parts[3][0], 'SA', 0, 4, 0, 8, mt=2)
+        # P2 s3: SA+SB n+2 (migrated from P3 s0 to P2 s3)
+        _assert_slot_grs(parts[2][3], ['SA', 'SB'], "P2 s3")
+        _assert_gr(parts[2][3], 'SA', 0, 4, 0, 8, mt=2)
+        _assert_gr(parts[2][3], 'SB', 0, 4, 0, 8, mt=2)
 
     def test_10x1_bf16(self):
         """320x320, BF16, 10x1 partition. No scales."""

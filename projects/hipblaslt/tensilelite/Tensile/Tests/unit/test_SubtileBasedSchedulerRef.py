@@ -653,34 +653,38 @@ EXPECTED_EMIT_DEP_ORDER_128x128_FP4_1x1 = """\
 MAINLOOP (dependency paths):
   Partition 0:
     subIterK=0:
-      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-3] , B : [0-3] <- [5]
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-3] , B : [0-3] <- [6]
       preMFMA path 0:
-        [ 5] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [1]) [0-3]
         [ 2] lr         LR B  (MT n, subIterK [1]) [0-3]
         [ 3] lr         LR SA (MT n, subIterK [2,3]) [0-3]
-        [ 6] wait_lr    wait_lr
-        [ 7] sync       sync
-        [ 8] gr_inc     gr_inc(A)
+        [ 7] wait_lr    wait_lr
+        [ 8] sync       sync
+        [ 9] gr_inc     gr_inc(A)
         [ 4] gr         GR A (MT n+2, subIterK [0,1]) ids [0-3]
+        [10] gr_inc     gr_inc(B)
+        [ 5] gr         GR B (MT n+2, subIterK [0,1]) ids [0-0]
     subIterK=1:
-      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-3] , B : [0-3] <- [5]
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-3] , B : [0-3] <- [6]
       preMFMA path 0:
-        [ 5] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
-        [ 6] wait_gr    wait_gr(A=12,B=8,SA=1,SB=1)
-        [ 7] sync       sync
+        [ 7] wait_gr    wait_gr(A=12,B=9,SA=1,SB=1)
+        [ 8] sync       sync
         [ 1] lr         LR A  (MT n, subIterK [2]) [0-3]
         [ 2] lr         LR B  (MT n, subIterK [2]) [0-3]
         [ 3] lr         LR SB (MT n, subIterK [2,3]) [0-3]
       path 1:
-        [ 8] gr_inc     gr_inc(B)
-        [ 4] gr         GR B (MT n+2, subIterK [0,1]) ids [0-3]
+        [ 4] gr         GR B (MT n+2, subIterK [0,1]) ids [1-3]
+        [ 9] sync       sync
+        [10] gr_inc     gr_inc(SA)
+        [ 5] gr         GR SA (MT n+2, subIterK [0,3]) ids [0-3]
     subIterK=2:
-      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-3] , B : [0-3] <- [6]
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-3] , B : [0-3] <- [5]
       preMFMA path 0:
-        [ 6] wait_lr    wait_lr
+        [ 5] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [3]) [0-3]
         [ 2] lr         LR B  (MT n, subIterK [3]) [0-3]
@@ -692,9 +696,9 @@ MAINLOOP (dependency paths):
         [ 4] gr         GR SB (MT n+2, subIterK [0,3]) ids [0-3]
         [ 5] gr         GR A (MT n+2, subIterK [2,3]) ids [0-1]
     subIterK=3:
-      MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-3] , B : [0-3] <- [7]
+      MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-3] , B : [0-3] <- [6]
       preMFMA path 0:
-        [ 7] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
         [ 8] wait_gr    wait_gr(A=10,B=8,SA=1,SB=1)
         [ 9] sync       sync
@@ -707,9 +711,8 @@ MAINLOOP (dependency paths):
         [ 3] lr         LR SA (MT n+1, subIterK [0,1]) [0-3]
         [ 4] lr         LR SB (MT n+1, subIterK [0,1]) [0-3]
       path 1:
-        [ 5] gr         GR A (MT n+2, subIterK [2,3]) ids [2-3]
-        [14] sync       sync
-        [ 6] gr         GR B (MT n+2, subIterK [2,3]) ids [0-3]
+        [13] sync       sync
+        [ 5] gr         GR B (MT n+2, subIterK [2,3]) ids [0-3]
 """
 
 
@@ -719,7 +722,7 @@ def test_128x128_fp4_partition_1x1():
     sched = LogicalScheduler(cfg)
     sched.emit()
     actual = sched.print_emit_dep_order()
-    # Note: [14] sync       sync is not needed because of the grouping of LRs. We could add an extra pass to detect those. TDB.
+    # Note: [13] sync       sync is not needed because of the grouping of LRs. We could add an extra pass to detect those. TDB.
     assert actual == EXPECTED_EMIT_DEP_ORDER_128x128_FP4_1x1, (
         f"Emit dependency order mismatch.\n"
         f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_128x128_FP4_1x1}\n"
