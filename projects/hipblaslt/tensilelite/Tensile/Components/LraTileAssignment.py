@@ -127,6 +127,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("b")
               }}
@@ -271,6 +272,7 @@ class LraTileAssignmentTransposedMFMAFP32(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("s")
               }}
@@ -279,6 +281,7 @@ class LraTileAssignmentTransposedMFMAFP16(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("h")
               }}
@@ -290,6 +293,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("I8")
               }}
@@ -465,6 +469,7 @@ class LraTileAssignmentTransposedMFMA_FP8(LraTileAssignmentTransposedMFMAB8):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("F8"),
                   "isMixMode": False,
@@ -477,6 +482,7 @@ class LraTileAssignmentTransposedMFMA_BF8(LraTileAssignmentTransposedMFMA_FP8):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("B8"),
                   "isMixMode": False,
@@ -489,6 +495,7 @@ class LraTileAssignmentTransposedMFMA_FP8BF8(LraTileAssignmentTransposedMFMA_FP8
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("F8B8"),
                   "isMixMode": False,
@@ -501,6 +508,7 @@ class LraTileAssignmentTransposedMFMA_BF8FP8(LraTileAssignmentTransposedMFMA_FP8
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("B8F8"),
                   "isMixMode": False,
@@ -513,6 +521,7 @@ class LraTileAssignmentTransposedMFMAMixMode(LraTileAssignmentTransposedMFMAB8):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "isMixMode": True,
               }}
@@ -543,6 +552,7 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("F4"),
                   "isMixMode": False,
@@ -653,6 +663,7 @@ class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("F6"),
                   "isMixMode": False,
@@ -760,6 +771,7 @@ class LraTileAssignmentTransposedMFMAB6(LraTileAssignmentTransposedMFMAF6):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
+              "LDSTrInst": True,
               "ProblemType": {
                   "DataType": DataType("B6"),
                   "isMixMode": False,
@@ -769,11 +781,9 @@ class LraTileAssignmentTransposedMFMAB6(LraTileAssignmentTransposedMFMAF6):
     }
 
 class LraTileAssignmentMFMA(LraTileAssignment):
-    kernel = {"EnableMatrixInstruction": True, }
-    # TODO: fix this condition
-    asmCaps = {
-        "HasLDSTrB128B16": False
-    }
+    kernel = {"EnableMatrixInstruction": True, 
+              "LDSTrInst": False,
+              }
 
     """
     Local Read Addresses: Tile Assignment A/B
