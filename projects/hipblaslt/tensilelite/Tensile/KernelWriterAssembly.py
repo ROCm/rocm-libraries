@@ -13717,11 +13717,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if not isSize1:
       divisor   = kernel["MacroTile0"]
-      # The M-alignment granularity must be waveGroupM so that every wave in the tile
-      # has either 0 or a full waveGroupM valid rows.  Using only mBlockSize (32 for bf16)
-      # is insufficient when waveGroupM is not a multiple of mBlockSize (e.g., MIWT3 → 48).
-      waveGroupM = kernel["MIWaveTile"][0] * kernel["MatrixInstM"]
-      alignSize  = waveGroupM
+      alignSize  = kernel["MatrixInstM"]
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
