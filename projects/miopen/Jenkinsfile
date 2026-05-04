@@ -2,24 +2,6 @@ def projDir = "projects"
 def miopenDir = "${projDir}/miopen"
 def ckDir = "${projDir}/composablekernel"
 
-// Resolves the original PR branch tip or branch HEAD SHA from the Jenkins build
-// object, unaffected by any local merge Jenkins performs before running CI.
-// PullRequestSCMRevision.pullHash is recorded at job scheduling time (before merge).
-// SCMRevisionImpl.hash covers plain branch builds. Returns null for manual/non-SCM
-// triggers so the caller can fall back gracefully.
-@NonCPS
-String getGitHubCommitHash(def build) {
-    def scmAction = build?.actions.find { action ->
-        action instanceof jenkins.scm.api.SCMRevisionAction
-    }
-    if (scmAction?.revision instanceof org.jenkinsci.plugins.github_branch_source.PullRequestSCMRevision) {
-        return scmAction.revision.pullHash
-    } else if (scmAction?.revision instanceof jenkins.plugins.git.AbstractGitSCMSource$SCMRevisionImpl) {
-        return scmAction.revision.hash
-    }
-    return null
-}
-
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
 }
@@ -104,10 +86,11 @@ def checkoutRepo()
     //update ref repo
     cloneUpdateRefRepo()
     def scmVars = checkout scm
-    // getGitHubCommitHash reads the SCMRevisionAction recorded before any local
-    // merge, giving the true PR branch tip (pullHash) or branch HEAD (hash).
-    // Falls back to scmVars.GIT_COMMIT for manual/non-SCM triggers.
-    env.GIT_COMMIT = getGitHubCommitHash(currentBuild.rawBuild) ?: scmVars.GIT_COMMIT
+    // CHANGE_SHA is set by the GitHub Branch Source plugin to the PR head SHA
+    // before Jenkins performs any local merge, so it always points to the commit
+    // that exists on GitHub. For branch builds CHANGE_SHA is not set and no merge
+    // occurs, so scmVars.GIT_COMMIT is the correct branch tip directly.
+    env.GIT_COMMIT = env.CHANGE_SHA ?: scmVars.GIT_COMMIT
 }
 
 def withWorkingDir(Closure body) {
