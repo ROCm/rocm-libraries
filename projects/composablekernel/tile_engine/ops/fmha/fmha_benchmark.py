@@ -110,9 +110,15 @@ def main():
     parser.add_argument(
         "--filter-file", default="", help="Path to .py with filter_config(c) -> bool"
     )
+    parser.add_argument(
+        "--num-splits",
+        default="1,2,4,8",
+        help="Comma-separated num_splits values to sweep for splitkv (default: 1,2,4,8)",
+    )
     args = parser.parse_args()
 
     problems = parse_problems(args.problems)
+    num_splits_list = [int(x) for x in args.num_splits.split(",")]
     build_dir = Path(args.build_dir).resolve()
 
     if args.clean and build_dir.exists():
@@ -218,10 +224,10 @@ def main():
         prob_str = f"B={prob.batch} H={prob.nhead_q} S={prob.seqlen_q} D={prob.hdim_q}"
         print(f"\n  Problem [{prob_idx}]: {prob_str}")
         print(
-            f"  {'Kernel':<50} {'Time(ms)':>10} {'TFLOPS':>10}"
+            f"  {'Kernel':<105} {'Time(ms)':>10} {'TFLOPS':>10}"
             f" {'MaxErr':>10} {'Status':>6}"
         )
-        print(f"  {'-' * 90}")
+        print(f"  {'-' * 145}")
 
         _BIAS_INT = {"no": 0, "bias": 1, "alibi": 2}
 
@@ -246,59 +252,69 @@ def main():
             }
             api_family = _FAMILY_TO_API.get(config.family, config.family)
 
-            result = setup.runner.run(
-                Q, K, V, prob,
-                mask_type=mask_int,
-                bias_type=_BIAS_INT.get(config.bias, 0),
-                has_lse=int(config.lse),
-                has_dropout=int(config.dropout),
-                has_logits=int(config.logits),
-                has_sink=int(config.sink),
-                data_type=config.data_type,
-                is_group_mode=int(is_group),
-                is_v_rowmajor=int(config.vlayout == "r"),
-                api_family=api_family,
-                window_left=-1,
-                window_right=0 if is_causal else -1,
-            )
-            if not result.success:
-                continue
+            # Sweep num_splits for splitkv; non-splitkv runs once
+            splits_to_try = num_splits_list if api_family == "splitkv" else [0]
 
-            # Adjust TFLOPS for causal mask (~half the ops)
-            tflops = result.tflops
-            if is_causal and result.time_ms > 0:
-                sq, sk = prob.seqlen_q, prob.seqlen_k
-                causal_ratio = (min(sq, sk) + 1) / (2.0 * sk)
-                tflops = prob.num_ops * causal_ratio / (result.time_ms * 1e-3) / 1e12
+            for ns in splits_to_try:
+                run_kwargs = dict(
+                    mask_type=mask_int,
+                    bias_type=_BIAS_INT.get(config.bias, 0),
+                    has_lse=int(config.lse),
+                    has_dropout=int(config.dropout),
+                    has_logits=int(config.logits),
+                    has_sink=int(config.sink),
+                    data_type=config.data_type,
+                    is_group_mode=int(is_group),
+                    is_v_rowmajor=int(config.vlayout == "r"),
+                    api_family=api_family,
+                    window_left=-1,
+                    window_right=0 if is_causal else -1,
+                )
+                if api_family == "splitkv":
+                    run_kwargs["num_splits"] = ns
 
-            max_err = 0.0
-            status = "OK"
-            if ref is not None and result.output is not None:
-                max_err = float(np.abs(result.output.astype(np.float32) - ref).max())
-                status = "PASS" if max_err < 0.01 else "FAIL"
+                result = setup.runner.run(Q, K, V, prob, **run_kwargs)
+                if not result.success:
+                    continue
 
-            print(
-                f"  {config.name:<50} {result.time_ms:>10.3f}"
-                f" {tflops:>10.2f} {max_err:>10.2e} {status:>6}"
-            )
+                # Adjust TFLOPS for causal mask (~half the ops)
+                tflops = result.tflops
+                if is_causal and result.time_ms > 0:
+                    sq, sk = prob.seqlen_q, prob.seqlen_k
+                    causal_ratio = (min(sq, sk) + 1) / (2.0 * sk)
+                    tflops = prob.num_ops * causal_ratio / (result.time_ms * 1e-3) / 1e12
 
-            all_results.append(
-                {
-                    "kernel": config.name,
-                    "dtype": config.data_type,
-                    "hdim": config.hdim_q,
-                    "pipeline": config.pipeline,
-                    "problem": {
-                        "batch": prob.batch,
-                        "nhead_q": prob.nhead_q,
-                        "seqlen_q": prob.seqlen_q,
-                        "hdim_q": prob.hdim_q,
-                    },
-                    "latency_ms": result.time_ms,
-                    "tflops": tflops,
-                    "max_err": max_err,
-                }
-            )
+                max_err = 0.0
+                status = "OK"
+                if ref is not None and result.output is not None:
+                    max_err = float(np.abs(result.output.astype(np.float32) - ref).max())
+                    status = "PASS" if max_err < 0.01 else "FAIL"
+
+                splits_tag = f"  [ns={ns}]" if api_family == "splitkv" else ""
+                display_name = f"{config.name}{splits_tag}"
+                print(
+                    f"  {display_name:<105} {result.time_ms:>10.3f}"
+                    f" {tflops:>10.2f} {max_err:>10.2e} {status:>6}"
+                )
+
+                all_results.append(
+                    {
+                        "kernel": config.name,
+                        "dtype": config.data_type,
+                        "hdim": config.hdim_q,
+                        "pipeline": config.pipeline,
+                        "num_splits": ns if api_family == "splitkv" else None,
+                        "problem": {
+                            "batch": prob.batch,
+                            "nhead_q": prob.nhead_q,
+                            "seqlen_q": prob.seqlen_q,
+                            "hdim_q": prob.hdim_q,
+                        },
+                        "latency_ms": result.time_ms,
+                        "tflops": tflops,
+                        "max_err": max_err,
+                    }
+                )
 
     bench_time = time.perf_counter() - bench_t0
 
@@ -328,10 +344,12 @@ def main():
         for key, results in by_problem.items():
             best = max(results, key=lambda x: x["tflops"])
             prob = json.loads(key)
+            ns_tag = f"  [ns={best['num_splits']}]" if best.get("num_splits") else ""
             print(
                 f"    B={prob['batch']} H={prob['nhead_q']}"
                 f" S={prob['seqlen_q']} D={prob['hdim_q']}"
-                f" -> {best['kernel']} ({best['tflops']:.2f} TFLOPS)"
+                f" -> {best['kernel']}{ns_tag}"
+                f" ({best['tflops']:.2f} TFLOPS, {best['latency_ms']:.3f} ms)"
             )
 
     if args.csv:
