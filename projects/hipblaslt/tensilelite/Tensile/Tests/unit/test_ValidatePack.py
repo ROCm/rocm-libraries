@@ -28,7 +28,7 @@ import pytest
 from rocisa.instruction import SWaitCnt, SNop, SBarrier
 
 from Tensile.Components.CMSValidator import (
-    add_local_read_constraints, add_pack_constraints, isValid, ValidationContext,
+    add_pack_constraints, isValid, ValidationContext,
 )
 from Tensile.Components.CustomSchedule import ScheduleInfo
 from Tensile.Components.ScheduleCapture import (
@@ -42,7 +42,7 @@ class TestValidatePackBF16(CMSValidationTestBase):
     Validate the Pack instructions present in BF16 kernels.
     Here, the pack commands map to v_perm.
     """
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def test_passing(self):
         """
@@ -148,7 +148,7 @@ class TestValidatePackBF16MFMAReorder(CMSValidationTestBase):
         super().setup_method(method, kernel_updates=kernel_updates)
         self.mfma_reorder = [0, 2, 1, 3, 4, 6, 5, 7]
     
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def test_passing(self):
         """
@@ -241,7 +241,7 @@ class TestValidatePackBF16PLRPack(CMSValidationTestBase):
         kernel_updates.update({"UsePLRPack": True})
         super().setup_method(method, kernel_updates=kernel_updates)
     
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def test_passing_plr_pack(self):
         """
@@ -413,7 +413,7 @@ class TestValidatePackTF32(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
     
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
     
     def test_passing(self):
         """
@@ -588,7 +588,7 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         # MFMA reorder: swap Q2 (indices 12-23) and Q3 (indices 24-35)
         self.mfma_reorder = list(range(12)) + list(range(24, 36)) + list(range(12, 24)) + list(range(36, 48))
     
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
     
     def test_passing(self):
         """
@@ -655,7 +655,7 @@ class TestValidatePackTF32CrossPackInterleaving(CMSValidationTestBase):
         kernel_updates.update({"UsePLRPack": True, "UseF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, "MIWaveTileA": 4, "MIWaveTileB": 4})
         super().setup_method(method, kernel_updates=kernel_updates)
     
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
     
     def test_passing_interleaved(self):
         """
@@ -795,7 +795,7 @@ class TestValidatePackTF32MultipleGroups(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
     
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
     
     def test_passing_two_groups_consecutive(self):
         """
@@ -938,7 +938,7 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
     
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
     
     def test_passing(self):
         """
@@ -1158,7 +1158,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
         self.q4s = self.q3e + 1  # 18
         self.q4e = self.num_vmfma - 1  # 23
     
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
     
     def _make_valid_pack_group(self, base_idx: int) -> list[int]:
         """
@@ -1511,7 +1511,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
 
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def _make_valid_pack_group(self, base_idx: int) -> list[int]:
         """Creates a valid group of 10 packs with proper spacing for 4x4 MFMA TF32."""
@@ -1792,7 +1792,7 @@ class TestLRAfterPack(CMSValidationTestBase):
 
     LR1 covered here in default-kernel class; LR3 in TestLRAfterPack_LR3.
     """
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def test_LR0_A_LR_after_Pack(self):
         """LRA0 placed at idx=1, after PackA0[0] @ idx=0. SWaitCnt @ idx=2 covers LRs.
@@ -1875,7 +1875,7 @@ class TestLRAfterPack_LR1(CMSValidationTestBase):
         kernel_updates.update({"UsePLRPack": True})
         super().setup_method(method, kernel_updates=kernel_updates)
 
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def test_LR1_A_LR_after_Pack(self):
         """LRA1 at idx=5, PackA1[0] @ idx=4. SWaitCnt for LR1 at idx=6 covers LRA1.
@@ -1953,7 +1953,7 @@ class TestLRAfterPack_LR3(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
 
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def _base_schedule(self):
         """Quarter-aligned valid skeleton; tests mutate one PackA3 / LRA3 entry."""
@@ -2017,7 +2017,7 @@ class TestPackAfterMFMA(CMSValidationTestBase):
     Single variant per LR type — Pack has no `guaranteed_by`, so the only way to
     push it past its consumer is to move its `issued_at`.
     """
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def test_LR0_Pack_after_MFMA(self):
         """PackA0[0] @ idx=5, AFTER consumer MFMA @ idx=4."""
@@ -2071,7 +2071,7 @@ class TestPackAfterMFMA_LR1(CMSValidationTestBase):
         kernel_updates.update({"UsePLRPack": True})
         super().setup_method(method, kernel_updates=kernel_updates)
 
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def test_LR1_Pack_after_MFMA(self):
         """PackA1[0] @ idx=1 of next iter (loop semantics), but cleanly: place
@@ -2126,7 +2126,7 @@ class TestPackAfterMFMA_LR3(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
 
-    validator_passes = [add_local_read_constraints, add_pack_constraints]
+    validator_passes = [add_pack_constraints]
 
     def test_LR3_Pack0_after_MFMA(self):
         """In LR3 (TF32 + ForceUnrollSubIter + PLR) mode, push PackA0[0] past its

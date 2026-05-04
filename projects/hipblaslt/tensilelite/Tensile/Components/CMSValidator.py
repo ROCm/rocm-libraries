@@ -331,35 +331,24 @@ class LocalRead(ValidatorInstruction):
     # The index in the list of Local Read instructions provided by a CMS schedule.
     # Needed to properly calculate must_start_after for Packs.
     issue_index: int
-    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(name="MFMA", issued_at=POSITION_INF))
+    # `guaranteed_by` is set by ``apply_swaits`` to the SWaitCnt position
+    # that drains this LR; consumed by Pack-side dependency derivation
+    # (``derive_pack_must_start_after``) via ``done_idx()``.
     guaranteed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
 
     def done_idx(self) -> SchedulePosition:
         return self.guaranteed_by
 
     def validate(self):
-        """Stack 1.3 of jaunty-reddy plan: returns typed Failure or None."""
-        from Tensile.Components.ScheduleCapture import (
-            MissingWaitFailure, WaitTooLateFailure,
-        )
-
-        # For when local reads are not being guaranteed by a particular pass.
-        if self.needed_by.issued_at == POSITION_INF:
-            return None
-
-        # Needs to be guaranteed BEFORE the index at which it's needed since the
-        # SWaitCnt is issued AFTER the vmfma.
-        if self.guaranteed_by < self.needed_by.issued_at:
-            return None
-
-        if self.guaranteed_by == POSITION_INF:
-            return MissingWaitFailure(
-                producer=self, consumer=self.needed_by, counter_kind="dscnt",
-            )
-
-        return WaitTooLateFailure(
-            producer=self, consumer=self.needed_by, wait_position=self.guaranteed_by,
-        )
+        """Bead ``ola.3`` phase-2: the LR-data-ready rule
+        (``add_local_read_constraints`` + ``set_lr_needed_by_for_VMFMA``)
+        was deleted. LR -> MFMA wait-coverage now lives graph-side via
+        ``validate_edge_wait_coverage`` (LR -> MFMA RAW edges). The
+        ``ValidatorInstruction.validate`` abstract method still requires
+        an override on every subclass; this no-op preserves the contract
+        without re-introducing the structural rule.
+        """
+        return None
 
 @dataclass
 class MFMA(ValidatorInstruction):
@@ -1250,53 +1239,16 @@ def apply_swaits(timeline: Timeline) -> None:
             apply(timeline.combined_timeline[i_swait-1::-1], swait, GlobalRead, swait.vlcnt)
 
 
-@applies_only_once
-def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
-    """
-    Set the needed_by field of LocalReads based on the VMFMA index they are required for.
-    Timeline is modified in place.
-    
-    For LRA0/LRB0, the data is needed at a VMFMA index offset by num_vmfma // 2 (halfway point).
-    For LRA1/LRB1, the data is needed at a VMFMA index offset by num_vmfma (next iteration).
-    
-    Args:
-        timeline:       The Timeline object containing the instructions.
-        kernel:         Solution object containing the kernel metadata.
-        mfma_reorder:   Mapping between the index of a default-scheduled MFMA and its new custom assigned index.
-    """
-
-    if mfma_reorder and len(mfma_reorder) != timeline.num_vmfma:
-        raise ValueError(f"Incorrect number of VMFMA indices in mfmaReorder. Expected {timeline.num_vmfma}, given {len(mfma_reorder)}.")
-
-    n_tiles_a = kernel["MIWaveTileA"]
-    n_tiles_b = kernel["MIWaveTileB"]
-
-    n_local_reads_a = len(timeline.get_instructions("LRA0", MAIN_LOOP))
-    n_local_reads_b = len(timeline.get_instructions("LRB0", MAIN_LOOP))
-
-    mfma_for_linear_index: dict[int, MFMA] = {
-        mfma.issued_at.loop_index * timeline.num_vmfma + mfma.issued_at.vmfma_index: mfma
-        for _, mfma in timeline.get_instructions_combined("MFMA")
-    }
-
-    for i_loop, loop in enumerate(timeline.loops):
-        loop_offset = timeline.num_vmfma * i_loop
-        for instruction_name in timeline.get_instruction_names():
-            if not instruction_name.startswith("LRA") and not instruction_name.startswith("LRB"):
-                continue
-            local_reads = timeline.get_instructions(instruction_name, loop)
-            for lr_idx, (_, lr) in enumerate(local_reads):
-                needed_by = lr_needed_by_mfma(
-                    local_read_name=lr.name,
-                    lr_idx=lr_idx,
-                    num_vmfma=timeline.num_vmfma,
-                    mfma_reorder=mfma_reorder,
-                    n_tiles_a=n_tiles_a, n_tiles_b=n_tiles_b,
-                    n_local_reads_a=n_local_reads_a,
-                    n_local_reads_b=n_local_reads_b,
-                    force_unroll_sub_iter=kernel.get("ForceUnrollSubIter", False),
-                    use_f32x_emulation=kernel.get("UseF32XEmulation", False))
-                lr.needed_by = mfma_for_linear_index[needed_by + loop_offset]
+# `set_lr_needed_by_for_VMFMA` was deleted in bead `ola.3` phase-2.
+# It was the consumer-MFMA wiring helper for the now-deleted
+# `add_local_read_constraints` rule. LR -> MFMA wait-coverage is
+# enforced graph-side: `_DSLoadRule` (writes vgpr) + `_MFMARule`
+# (reads vgpr) + per-byte latest-writer resolver build LR -> MFMA
+# RAW edges; `validate_edge_wait_coverage` then emits
+# `MissingWaitFailure(counter_kind='dscnt')` /
+# `WaitInsufficientFailure(counter_kind='dscnt')` for any uncovered
+# edge. See `Tensile/Tests/unit/test_validate_lr_before_mfma_graph.py`
+# for the migrated coverage.
 
 
 # `set_gr_needed_by_from_lrs` was removed in bead `ola.1`. Its only
@@ -2532,194 +2484,14 @@ def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> li
     return schedules[0] if len(schedules) == 1 else schedules[code_path]
 
 
-def _transform_index_with_force_unroll_sub_iter(
-    linear_index: int,
-    is_lr0: bool,
-    is_lra: bool,
-    n_tiles_a: int,
-    n_tiles_b: int,
-    use_f32x_emulation: bool,
-    mfma_reorder: list[int],
-    num_vmfma: int,
-) -> int:
-    """
-    Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is enabled.
-    
-    LR data is consumed by multiple MFMAs (one for each tile in the opposite dimension).
-    With MFMA reordering, we find the earliest consumer.
-    """
-    mfmas_per_tile = MFMAS_PER_TILE_TF32 if use_f32x_emulation else MFMAS_PER_TILE_BF16
-    
-    # Determine the tile coordinate for this LR
-    # For LRA: linear_index is the A tile index
-    # For LRB: linear_index is n_tiles_a * B tile index, so extract B tile
-    if is_lra:
-        a_tile = linear_index
-        if is_lr0:
-            a_tile += n_tiles_a // 2  # Second half of A tiles
-    else:
-        b_tile = linear_index // n_tiles_a
-        if is_lr0:
-            b_tile += n_tiles_b // 2  # Second half of B tiles
-    
-    def compute_consumer_mfma_index(a: int, b: int) -> int:
-        """Compute MFMA index for tile (a, b) after ForceUnrollSubIter permutation."""
-        # Column-major tile index
-        col_major_idx = a + b * n_tiles_a
-        # Apply ForceUnrollSubIter permutation
-        permuted = index_for_force_unroll_sub_iter(col_major_idx, n_tiles_a, n_tiles_b)
-        # Convert to MFMA index (multiply by 3 for TF32)
-        return permuted * mfmas_per_tile
-    
-    if mfma_reorder:
-        # Find earliest consumer across all tiles in the opposite dimension.
-        # mfma_reorder[new_pos] = original_pos, so we need the inverse to find execution position.
-        inverse = invert_mfma_reorder(mfma_reorder)
-        if is_lra:
-            # LRA's A tile is consumed by MFMAs at (a_tile, b) for all b tiles
-            needed_by = min(
-                inverse[compute_consumer_mfma_index(a_tile, b)]
-                for b in range(n_tiles_b)
-            )
-        else:
-            # LRB's B tile is consumed by MFMAs at (a, b_tile) for all a tiles
-            needed_by = min(
-                inverse[compute_consumer_mfma_index(a, b_tile)]
-                for a in range(n_tiles_a)
-            )
-    else:
-        # Without reorder, the first consumer (in permuted order) is always earliest
-        if is_lra:
-            needed_by = compute_consumer_mfma_index(a_tile, 0)
-        else:
-            needed_by = compute_consumer_mfma_index(0, b_tile)
-    
-    if not is_lr0:  # LR1/LR3 reads data for next iteration.
-        needed_by += num_vmfma
-    
-    return needed_by
-
-
-def _transform_index_standard(
-    linear_index: int,
-    is_lr0: bool,
-    is_lra: bool,
-    n_tiles_a: int,
-    n_tiles_b: int,
-    use_f32x_emulation: bool,
-    mfma_reorder: list[int],
-    num_vmfma: int
-) -> int:
-    """
-    Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is disabled.
-    
-    LR data is consumed by multiple MFMAs (one for each tile in the opposite dimension).
-    With MFMA reordering, we find the earliest consumer.
-    """
-    mfmas_per_tile = MFMAS_PER_TILE_TF32 if use_f32x_emulation else MFMAS_PER_TILE_BF16
-    
-    # Convert linear index to MFMA base index
-    needed_by = linear_index * mfmas_per_tile
-    
-    if is_lr0:  # LR0 reads data for 2nd half of this iteration (when present)
-        needed_by += num_vmfma // 2
-    
-    if mfma_reorder:
-        # With reordering, we need to find the earliest consumer across all tiles in the opposite dimension.
-        # LR data is used by multiple MFMAs - one for each tile in the opposite dimension.
-        # mfma_reorder[new_pos] = original_pos, so we need the inverse to find execution position.
-        inverse = invert_mfma_reorder(mfma_reorder)
-        if is_lra:
-            # LRA's A tile is consumed by MFMAs at (a, b) for all b tiles
-            # In column-major layout: index = base + b * n_tiles_a * mfmas_per_tile
-            needed_by = min(
-                inverse[needed_by + b * n_tiles_a * mfmas_per_tile]
-                for b in range(n_tiles_b)
-            )
-        else:
-            # LRB's B tile is consumed by MFMAs at (a, b) for all a tiles
-            # In column-major layout: index = base + a * mfmas_per_tile
-            needed_by = min(
-                inverse[needed_by + a * mfmas_per_tile]
-                for a in range(n_tiles_a)
-            )
-    
-    if not is_lr0:  # LR1/LR3 reads data for first half of next iteration
-        needed_by += num_vmfma
-    
-    return needed_by
-
-
-def lr_needed_by_mfma(
-    local_read_name: str,
-    lr_idx: int,
-    num_vmfma: int,
-    mfma_reorder: list[int],
-    n_tiles_a: int,
-    n_tiles_b: int,
-    n_local_reads_a: int,
-    n_local_reads_b: int,
-    force_unroll_sub_iter: bool,
-    use_f32x_emulation: bool,
-    ) -> int:
-    """
-    Helper function to calculate the index of the MFMA at which the given LRA/LRB will be needed by.
-
-    Args:
-        local_read_name: The name of the local read to calculate the needed_by index for.
-        lr_idx: The index of the LRA/LRB in the list of LRAs/LRBs for the given code path.
-        num_vmfma: The number of MFMA indices.
-        mfma_reorder: The reordering mapping for MFMA indices.
-        n_tiles_a: The number of tiles in the A dimension.
-        n_tiles_b: The number of tiles in the B dimension.
-        n_local_reads_a: The number of local reads in the A dimension.
-        n_local_reads_b: The number of local reads in the B dimension.
-        force_unroll_sub_iter: Whether to force unroll the sub-iter.
-        use_f32x_emulation: Whether TF32 emulation is enabled (3 MFMAs per tile).
-
-    Returns:
-        The index of the MFMA at which the given LRA/LRB will be needed by.
-    """
-    # How many MFMA worth of data is loaded by each LRA/LRB
-    n_tiles_per_lra = n_tiles_a / n_local_reads_a
-    n_tiles_per_lrb = n_tiles_b / n_local_reads_b
-
-    mfma_per_tile = 3 if use_f32x_emulation else 1
-    single_sub_iter = num_vmfma == n_tiles_a * n_tiles_b * mfma_per_tile
-    if force_unroll_sub_iter or single_sub_iter:
-        # Without the unroll, the LRs are for half of the vmfmas.
-        # But the number of vmfmas == 2 * n_tiles_a * n_tiles_b.
-        # So each LR loads n_tiles tiles.
-        # For force_unroll_sub_iter (and single-sub-iter schedules), there are only
-        # n_tiles_a * n_tiles_b vmfmas. So each LR only loads half as many tiles.
-        n_tiles_per_lra /= 2
-        n_tiles_per_lrb /= 2
-
-    # NOTE: This is based on the current bahaviour where we iterate through MFMAs in column-major order (A faster than B).
-    def index_lra_needed_by_mfma(lra_idx: int) -> int:
-        return int(lra_idx * n_tiles_per_lra)
-    def index_lrb_needed_by_mfma(lrb_idx: int) -> int:
-        return n_tiles_a * int(lrb_idx * n_tiles_per_lrb)
-
-    # Calculate base tile index in column-major order
-    is_lra = local_read_name.startswith("LRA")
-    if is_lra:
-        linear_index = index_lra_needed_by_mfma(lr_idx)
-    else:
-        linear_index = index_lrb_needed_by_mfma(lr_idx)
-    
-    # Apply transformations based on scheduling mode
-    is_lr0 = local_read_name == "LRA0" or local_read_name == "LRB0"
-    
-    transform_function = _transform_index_standard
-    if force_unroll_sub_iter:
-        transform_function = _transform_index_with_force_unroll_sub_iter        
-    needed_by = transform_function(
-        linear_index, is_lr0, is_lra, n_tiles_a, n_tiles_b,
-        use_f32x_emulation, mfma_reorder, num_vmfma
-    )
-    
-    return needed_by
+# `_transform_index_with_force_unroll_sub_iter`,
+# `_transform_index_standard`, and `lr_needed_by_mfma` were deleted in
+# bead `ola.3` phase-2 alongside `set_lr_needed_by_for_VMFMA` /
+# `add_local_read_constraints` / `index_for_force_unroll_sub_iter`.
+# These were the positional tile-index -> MFMA-index helpers used by
+# the old structural rule. Graph-side LR -> MFMA edges are derived
+# from real register dataflow (`_DSLoadRule` writes vgpr; `_MFMARule`
+# reads vgpr), so no positional heuristic is needed.
 
 
 @dataclass
@@ -2791,11 +2563,14 @@ class ValidationContext:
 ValidatorPassContext = ValidationContext
 
 
-def add_local_read_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
-    """Add LR.needed_by and LR.guaranteed_by constraints to the provided timeline."""
-    set_lr_needed_by_for_VMFMA(timeline, ctx.kernel, ctx.mfma_reorder)
-    apply_swaits(timeline)
-    apply_barriers(timeline)
+# `add_local_read_constraints` was deleted in bead `ola.3` phase-2.
+# It was the structural rule that wired LR.needed_by from a positional
+# tile-index heuristic (`set_lr_needed_by_for_VMFMA`) and then drove
+# `LocalRead.validate` through `apply_swaits` + `apply_barriers`.
+# The graph-side replacement is `validate_edge_wait_coverage` over
+# LR -> MFMA RAW edges (`_DSLoadRule` writes vgpr; `_MFMARule` reads
+# vgpr). Migrated coverage lives in
+# `Tensile/Tests/unit/test_validate_lr_before_mfma_graph.py`.
 
 
 def add_pack_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
@@ -2840,50 +2615,13 @@ def add_pack_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
 # Tensile/Tests/unit/test_ValidateGRsCompleteBeforeLr{1,3}s.py.
 
 
-def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
-    """
-    Map original column-major index to index scheme used by force unroll sub-iter:
-    Split the tile for each wave into 4 blocks, each indexed in column-major order.
-        -------
-        | 0| 2|
-        |--|--|
-        | 1| 3|
-        -------
-    Then, within each block, index within column-major order.
-    For a 4x4 tile, the index changes as follows:
-        |  0  4  8 12 |  ->  |  0  2  8 10 |
-        |  1  5  9 13 |  ->  |  1  3  9 11 |
-        |  2  6 10 14 |  ->  |  4  6 12 14 |
-        |  3  7 11 15 |  ->  |  5  7 13 15 |
-    
-    Args:
-        original_idx: The original column-major index
-        M: Number of rows in the matrix
-        N: Number of columns in the matrix
-    
-    Returns:
-        The permuted index
-    """
-    # Block dimensions
-    block_rows = M // 2
-    block_cols = N // 2
-    block_size = block_rows * block_cols
-    
-    # Convert linear index to 2D coordinates (column-major)
-    row = original_idx % M
-    col = original_idx // M
-    
-    # Determine which block (0-3) in column-major order
-    block_row = row // block_rows  # 0 or 1
-    block_col = col // block_cols  # 0 or 1
-    block_idx = block_col * 2 + block_row  # Column-major block indexing
-    
-    # Position within the block
-    local_row = row % block_rows
-    local_col = col % block_cols
-    local_idx = local_col * block_rows + local_row
-    
-    return block_idx * block_size + local_idx
+# `index_for_force_unroll_sub_iter` was deleted in bead `ola.3` phase-2.
+# It mapped column-major tile indices into the ForceUnrollSubIter
+# block-permuted scheme used by the deleted `lr_needed_by_mfma`
+# helper. Graph-side LR -> MFMA edges read from real register dataflow
+# and are invariant under MFMA-slot permutations (whether by
+# ForceUnrollSubIter or mfma_reorder), so no positional remapping is
+# needed.
 
 
 def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: 'ValidationContext', code_path: int) -> tuple[bool, str]:
@@ -2912,13 +2650,11 @@ class InstructionCountRule(StructuralRule):
         return verify_correct_number_of_instructions(schedule_info, context, code_path)
 
 
-class LRDataReadyRule(ValidationRule):
-    def concerns(self) -> set[ValidationConcern]:
-        return {ValidationConcern.LR_DATA_READY}
-
-    def run(self, timeline, ctx):
-        add_local_read_constraints(timeline, ctx)
-        return validate_timeline(timeline)
+# `LRDataReadyRule` was deleted in bead `ola.3` phase-2. The
+# LR-data-ready concern (LR -> MFMA dscnt drain) is enforced graph-side
+# by `validate_edge_wait_coverage` over LR -> MFMA RAW edges. The
+# `ValidationConcern.LR_DATA_READY` enum value is preserved for
+# downstream compatibility but no rule currently dispatches on it.
 
 
 class PackDataReadyRule(ValidationRule):
@@ -2951,7 +2687,7 @@ class PackDataReadyRule(ValidationRule):
 
 
 TIMELINE_RULES: list[ValidationRule] = [
-    LRDataReadyRule(),
+    # `LRDataReadyRule()` removed in bead `ola.3` phase-2 — see comment above.
     PackDataReadyRule(),
     # `GRAfterLRRule()` deleted in bead `ola.2` phase 2 — see comment block above.
 ]

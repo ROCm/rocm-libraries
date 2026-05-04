@@ -19,8 +19,8 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
-"""TestValidateNgl: graph-native NGL-body GR -> ML-body LR1 cross-body
-edge coverage (bead ola.1).
+"""TestValidateNgl + TestValidateNll: graph-native cross-body
+GR -> LR1 / LR0 wait coverage (beads ola.1 + ola.3).
 
 The legacy ``TestValidateNgl`` exercised the structural-rule shift-value
 reasoning: GRs scheduled in the NGL (no-global-load) tail body still need
@@ -34,17 +34,15 @@ producer in body=NGL, consumer in body=ML. Body order is
 consumer in ML, we get the same cross-body shape with the standard
 filler-body machinery from ``GraphNativeValidationTest.wrap_single_body``.
 
-For TestValidateNll: kept using the legacy CMSValidationTestBase since
-``add_local_read_constraints`` (the rule it tests) is still in place — it
-is being migrated separately under bead ``ola.3``. Once ola.3 lands, those
-tests will move to the graph-native base too.
+The legacy ``TestValidateNll`` exercised
+``add_local_read_constraints``: SWaitCnts whose dscnt cap accidentally
+includes a later LR1 leave earlier LR0s in flight when a consumer MFMA
+fires. Bead ola.3 phase-2 deleted that rule; the equivalent coverage
+graph-side is the LR0 -> MFMA RAW edge classified by
+``validate_edge_wait_coverage`` (``MissingWaitFailure(dscnt)`` /
+``WaitInsufficientFailure(dscnt)``).
 """
 
-from rocisa.instruction import SWaitCnt, SBarrier
-
-from Tensile.Components.CMSValidator import (
-    add_local_read_constraints,
-)
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     BODY_LABEL_ML_PREV,
@@ -54,9 +52,8 @@ from Tensile.Components.ScheduleCapture import (
     WaitTooLateFailure,
 )
 
-from cms_validation_base import CMSValidationTestBase
 from dataflow_fixtures import (
-    make_capture, make_gr, make_lr, make_sbarrier, make_swait,
+    make_capture, make_gr, make_lr, make_mfma, make_sbarrier, make_swait,
 )
 from graph_native_validation_base import GraphNativeValidationTest
 
@@ -186,91 +183,134 @@ class TestValidateNgl(GraphNativeValidationTest):
 
 
 # =============================================================================
-# TestValidateNll — kept legacy until ola.3 (add_local_read_constraints)
+# TestValidateNll — graph-native LR-data-ready coverage (bead ola.3 phase-2)
 # =============================================================================
-# These tests exercise ``add_local_read_constraints`` (LR-data-ready
-# rule), not ``add_gr_finish_before_lr_constraints``. The LR rule is
-# being migrated under bead ``ola.3``; until then the legacy
-# CMSValidationTestBase wiring is preserved here so the LR-side coverage
-# isn't lost during ola.1's GR-side migration.
+# Legacy ``TestValidateNll`` exercised ``add_local_read_constraints``:
+# the NLL-tail SWaitCnt's dscnt cap was set assuming an LRA1 had been
+# issued, but in NLL no LRA1 actually exists (hence the "depends on
+# LRA1" failure mode). With the cap miscounted, the LRB0 fed to the
+# consumer MFMA never gets fully drained.
+#
+# Graph-native equivalent: model LRA0 + LRB0 (the producers the legacy
+# rule complained about), then put the consumer MFMA in the ML body
+# reading from the LRA0/LRB0 vgprs. Failure modes:
+#
+#   * No SWait between LR and consumer MFMA -> MissingWaitFailure(dscnt)
+#   * SWait with insufficient dscnt cap (e.g. dscnt=1 leaves 1 LR in
+#     flight) -> WaitInsufficientFailure(dscnt) on the older LR's edge
 
 
-class TestValidateNll(CMSValidationTestBase):
-    validator_passes = [add_local_read_constraints]
+class TestValidateNll(GraphNativeValidationTest):
+    """LR0 -> MFMA wait-coverage with mis-capped or absent SWaitCnts.
+
+    Mirrors the legacy three failure shapes:
+
+      1. Single LRA0 + single LRB0 sharing one consumer MFMA, no SWait
+         in window -> MissingWait on the older LR's edge.
+      2. Multi-LR shape: 4 LRB0s in flight, SWait(dscnt=1) drains 3 ->
+         the oldest LRB0 -> MFMA edge is uncovered.
+      3. Pass case: SWait(dscnt=0) covers everything.
+    """
 
     def test_lr0_swait_depends_on_lr1(self):
-        """
-        Simple failure case where the SWaitCnt for LRB0 depends on the LRA1.
-        """
-        assert self.num_vmfma == 8
+        """Two LRs (LRA0 @ slot 0, LRB0 @ slot 0) feed one MFMA @ slot 4
+        reading both vgprs. SWait(dscnt=1) at slot 3 leaves 1 LR in
+        flight -> the OLDER LR's edge is uncovered.
 
-        optSchedule = {
-            "SYNC": [[3, 7]],
-            "LRA0": [[0, 0]],
-            "LRB0": [[0, 0]],
-            "LRA1": [[2]],
-        }
-        syncCode = [
-            SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment=""),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+        Mirrors legacy ``test_lr0_swait_depends_on_lr1`` where the
+        NLL SWait's dscnt was set assuming LRA1 had been issued, but
+        without LRA1 in the window, the cap was off-by-one and the
+        consumer MFMA fired before the older LR was drained.
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(dst_vgpr_start=8, dst_vgpr_count=2, lds_offset=64,
+                    slot=0, category="LRA0"),
+            make_lr(dst_vgpr_start=10, dst_vgpr_count=2, lds_offset=128,
+                    slot=0, category="LRB0", sequence=1),
+            make_swait(slot=3, dscnt=1),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=10,
+                      slot=4, a_src_count=1, b_src_count=1),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(cap)))
+        # The dscnt=1 cap leaves 1 LR pending. Either the older LR's
+        # edge is reported as MissingWait (no qualifying drain) or
+        # WaitInsufficient (drain present but cap leaves it in flight).
+        # Both are equivalent coverage signals here.
+        dscnt_failures = [
+            f for f in failures
+            if isinstance(f, (MissingWaitFailure, WaitInsufficientFailure))
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0,
-                                         expected_failure=WaitTooLateFailure)
+        assert dscnt_failures, (
+            f"Expected dscnt-related failure on the older LR's edge. "
+            f"Got: {[type(f).__name__ for f in failures]}"
+        )
 
-    def test_lr0_swait_depends_on_lr1_realistic(self, useZeroDscnt: bool=False):
+    def test_lr0_swait_depends_on_lr1_realistic(self):
+        """4 LRB0s in flight, SWait(dscnt=1) leaves 1 LR pending. The
+        consumer MFMA reads from the YOUNGEST (sequence=3) LR's vgpr —
+        which is the one dscnt=1 leaves un-drained -> WaitInsufficient
+        on the youngest LR's edge.
+
+        Mirrors the legacy ``test_lr0_swait_depends_on_lr1_realistic``
+        shape: the NLL's SWait(dscnt=1) was meant to cover LRB0s but
+        accidentally counted LRA1 as already-issued; without the LRA1
+        in the queue the cap is wrong and the MFMA's data is unreliable.
         """
-        A more realistic version of `test_lr0_swait_depends_on_lr1`. GRs are now present. Optionally checks zero dscnt option for NLL
-        """
-        self.kernel["MIWaveTileA"] = 4
-        self.kernel["MIWaveTileB"] = 4
-        self.num_vmfma = 2 * self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
-        assert self.num_vmfma == 32
-
-        syncTable = [
-            1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Finish LRA0s"),
-            1, SBarrier(comment=""),
-
-            3, SWaitCnt(dscnt=-1, vlcnt=1, vscnt=-1, comment="Finish GRAs"),
-            3, SBarrier(comment=""),
-
-            15, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Finish 2/4 LRB0s"),
-
-            # NOTE: This SWaitCnt is wrong for the NLL. It depends on the LRA1 being issued in order to guarantee that the LRB0s are finished.
-            23, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Finish LRB0s"),
-
-            28, SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Finish GRBs"),
-            28, SBarrier(comment=""),
-
-            31, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA1s (but in NLL this leaves 2 LRB0s in-flight)"),
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(dst_vgpr_start=8, dst_vgpr_count=2, lds_offset=64,
+                    slot=0, category="LRB0", sequence=0),
+            make_lr(dst_vgpr_start=10, dst_vgpr_count=2, lds_offset=128,
+                    slot=0, category="LRB0", sequence=1),
+            make_lr(dst_vgpr_start=12, dst_vgpr_count=2, lds_offset=192,
+                    slot=0, category="LRB0", sequence=2),
+            make_lr(dst_vgpr_start=14, dst_vgpr_count=2, lds_offset=256,
+                    slot=0, category="LRB0", sequence=3),
+            # dscnt=1 leaves 1 LR pending — the YOUNGEST (sequence=3)
+            # in dscnt's LIFO interpretation. MFMA reads v14 (that LR's
+            # dst), so the LR -> MFMA edge fails coverage.
+            make_swait(slot=3, dscnt=1),
+            make_mfma(c_dst_start=0, a_src_start=14, b_src_start=32,
+                      slot=4, a_src_count=1),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(cap)))
+        dscnt_failures = [
+            f for f in failures
+            if isinstance(f, (MissingWaitFailure, WaitInsufficientFailure))
         ]
-        optSchedule = {
-            "SYNC": [syncTable[::2]],
-
-            "LRA0": [[0]],
-            "GRA":  [[2, 2]],
-
-            "LRB0": [[3, 3, 3, 3]],
-
-            "LRA1": [[22]],
-
-            # Irrelevant, but need to schedule for correctness
-            "GRB":  [[28, 28]],
-            "LRB1": [[30, 30, 30, 30]],
-        }
-        # We need to set nglshift and nllshift for the vlcnt adjustments
-        num_gr = 2  # 2 GRs total (1 GRA + 1 GRB, but we only count the actual reads not the increments)
-        expected_failure = None if useZeroDscnt else WaitTooLateFailure
-        self.validate(optSchedule, syncTable[1::2], 1, num_gr, num_gr, 0,
-                      nllZeroDscnt=useZeroDscnt, expected_failure=expected_failure)
+        assert dscnt_failures, (
+            f"Expected dscnt-related failure. Got: "
+            f"{[type(f).__name__ for f in failures]}"
+        )
 
     def test_lr0_swait_depends_on_lr1_realistic_zero_dscnt(self):
+        """Pass case: same shape but SWait(dscnt=0) drains everything
+        before the consumer MFMA fires. No failure.
+
+        Mirrors the legacy ``test_lr0_swait_depends_on_lr1_realistic_zero_dscnt``
+        which used the ``nllZeroDscnt`` option to force the NLL SWait
+        to dscnt=0 and verified the validator passed.
         """
-        Same as above, but uses the zero dscnt option for NLL, so the test should now pass.
-        """
-        self.test_lr0_swait_depends_on_lr1_realistic(useZeroDscnt=True)
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(dst_vgpr_start=8, dst_vgpr_count=2, lds_offset=64,
+                    slot=0, category="LRB0", sequence=0),
+            make_lr(dst_vgpr_start=10, dst_vgpr_count=2, lds_offset=128,
+                    slot=0, category="LRB0", sequence=1),
+            make_lr(dst_vgpr_start=12, dst_vgpr_count=2, lds_offset=192,
+                    slot=0, category="LRB0", sequence=2),
+            make_lr(dst_vgpr_start=14, dst_vgpr_count=2, lds_offset=256,
+                    slot=0, category="LRB0", sequence=3),
+            make_swait(slot=3, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=14, b_src_start=32,
+                      slot=4, a_src_count=1),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(cap)))
+        self.assert_no_failures(failures)
 
 
 # Keep imports referenced so linters don't flag them as unused. These
 # Failure subclasses are exposed so the graph-native tests above can be
 # extended with finer-grained assertions if/when needed.
-_ = (MissingWaitFailure, WaitOnWrongCounterFailure)
+_ = (WaitOnWrongCounterFailure, WaitTooLateFailure)

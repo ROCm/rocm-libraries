@@ -43,7 +43,6 @@ from Tensile.Components.CMSValidator import (
     derive_pack_must_start_after,
     set_pack_needed_by_from_mfma_operands,
     set_lr_needed_by_from_mfma_operands,
-    set_lr_needed_by_for_VMFMA,
     resolve_pack_type, PACK_TYPE_MAP,
     _compute_swap_register_pairs, _build_reg_to_lr_map,
     _hook_up_packs_f32_mfma,
@@ -51,7 +50,7 @@ from Tensile.Components.CMSValidator import (
     get_dst_range, get_src_ranges, get_reg_range,
     SchedulePosition,
     create_unified_timeline,
-    add_pack_constraints, add_local_read_constraints,
+    add_pack_constraints,
     validate_timeline, ValidationContext, isValid,
     _get_lrs_for_pack,
 )
@@ -984,97 +983,16 @@ class TestSetLrNeededByFromMFMAOperands:
 
 
 # =============================================================================
-# Parity test: register-based vs positional set_lr_needed_by_for_VMFMA
+# Parity test removed by bead ola.3 phase-2.
 # =============================================================================
-
-
-class TestSetLrNeededByParity:
-    """Parity test against the positional baseline on a real-idMap timeline.
-
-    Coverage limits:
-      - _REAL_TWIN_CONFIG_VW4 has PrefetchLocalRead=1, so this test
-        exercises LR0 (and possibly LR1) only — not LR3.
-      - The config has LocalReadVectorWidth=4, so SwapPacks are inserted
-        between LR and CVT0 (per transposeLRVregs). The current LR-side
-        algorithm filters SwapPacks from candidates, so the chain dies
-        at the SwapPack and most LRs are omitted from the register-path
-        result. The parity assertion is therefore weakened to "register
-        path produces no FALSE answers" (intersection-only check) rather
-        than "register path covers everything positional covers."
-      Both limits are tracked in CMSValidator_TODO.md as follow-ups
-      for the wiring stage.
-    """
-
-    _REAL_TWIN_CONFIG_VW4 = {
-        'ProblemType': {
-            'OperationType': 'GEMM', 'DataType': 'S', 'DestDataType': 'S',
-            'F32XdlMathOp': 'X', 'TransposeA': False, 'TransposeB': False,
-            'UseBeta': True, 'Batched': True,
-        },
-        'MatrixInstruction': [16, 16, 32, 1, 1, 4, 4, 2, 2],
-        'DepthU': 64, 'PrefetchGlobalRead': 2, 'PrefetchLocalRead': 1,
-        'DirectToLds': 1, 'TransposeLDS': 1, 'LocalReadVectorWidth': 4,
-        'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
-        'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
-        'SourceSwap': 1, 'StreamK': 0,
-        'VectorWidthA': 4,
-    }
-
-    def test_lr_needed_by_parity_against_positional_lr0(self, isa_infrastructure):
-        """For LR0 in MAIN_LOOP, the register-traced consumer matches the
-        positional baseline by issued_at."""
-        from Tensile.Components.CMSValidator import MAIN_LOOP
-
-        isa, isaInfoMap, asm = isa_infrastructure
-        id_map, mfma_code, solution = generate_real_idmap(
-            self._REAL_TWIN_CONFIG_VW4, asm, isaInfoMap
-        )
-        has_schedule, schedule_info = hasCustomSchedule(solution)
-        assert has_schedule
-
-        timeline = create_unified_timeline(schedule_info, solution, code_path=0,
-                                           id_map=id_map, mfma_code=mfma_code)
-
-        # Run the positional baseline; populates lr.needed_by on every LR.
-        set_lr_needed_by_for_VMFMA(timeline, solution, mfma_reorder=[])
-
-        # Gather MAIN_LOOP-scoped LRs/Packs/MFMAs and run the new function.
-        lr_names = [n for n in timeline.get_instruction_names()
-                    if n.startswith("LR") and not n.startswith("LRS")]
-        lr0_in_loop = []
-        for name in lr_names:
-            if name not in ("LRA0", "LRB0"):
-                continue  # LR0 only — LR1/LR3 deferred (see class docstring)
-            for _, lr in timeline.get_instructions(name, MAIN_LOOP):
-                lr0_in_loop.append(lr)
-
-        pack_names = [n for n in timeline.get_instruction_names() if n.startswith("Pack")]
-        packs_in_loop = []
-        for name in pack_names:
-            for _, p in timeline.get_instructions(name, MAIN_LOOP):
-                packs_in_loop.append(p)
-
-        mfmas_in_loop = [m for _, m in timeline.get_instructions("MFMA", MAIN_LOOP)]
-
-        result = set_lr_needed_by_from_mfma_operands(lr0_in_loop, packs_in_loop, mfmas_in_loop)
-
-        # Weakened parity: for every LR the register path DID produce a
-        # result for, that result must match the positional baseline by
-        # issued_at. The register path is allowed to silently miss LRs
-        # whose chain dies (e.g. SwapPack-only consumer); caller-side
-        # wholesale-fallback handles those cases at wiring time.
-        mismatches = []
-        for lr in lr0_in_loop:
-            reg_target = result.get(lr.name, {}).get(lr.issue_index)
-            if reg_target is None:
-                continue
-            pos_target = lr.needed_by
-            if pos_target.rocisa_inst is None:
-                # Positional placeholder; can't compare meaningfully.
-                continue
-            if reg_target.issued_at != pos_target.issued_at:
-                mismatches.append(
-                    f"{lr.name}[{lr.issue_index}]: positional={pos_target.issued_at}, "
-                    f"register={reg_target.issued_at}"
-                )
-        assert not mismatches, "Parity mismatches:\n  " + "\n  ".join(mismatches)
+# The deleted ``TestSetLrNeededByParity`` compared
+# ``set_lr_needed_by_from_mfma_operands`` (register-based) against
+# ``set_lr_needed_by_for_VMFMA`` (positional baseline). The positional
+# baseline was the implementation of the deleted
+# ``add_local_read_constraints`` rule; with the rule and helper gone,
+# there is no longer a baseline to compare against.
+#
+# The register-based ``set_lr_needed_by_from_mfma_operands`` continues
+# to ship — it is consumed by ``hook_up_packs`` (still alive under
+# ola.4 phase-1). Direct coverage of that helper lives in
+# ``TestSetLrNeededByFromMFMAOperands`` above.
