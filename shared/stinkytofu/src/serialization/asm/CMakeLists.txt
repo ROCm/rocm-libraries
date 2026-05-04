@@ -8,4 +8,5 @@ target_sources(stinkytofu PRIVATE
     IRParser.cpp
     IRConverter.cpp
     ModifierSerializer.cpp
-    PatternParser.cpp)
+    PatternParser.cpp
+    RawAsmParser.cpp)
