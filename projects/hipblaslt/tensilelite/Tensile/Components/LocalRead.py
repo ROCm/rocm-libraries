@@ -238,7 +238,7 @@ class LocalReadMFMA(LocalRead):
 
     def getTransposeXorTIndex(self, writer, kernel, idx, tc, lrvwTile, dst, isNext, localRead=False):
         mipt = kernel["MIInputPerThread"]
-        assert(lrvwTile <= 4, "lrvwTile is %d"%lrvwTile)
+        assert lrvwTile <= 4, "lrvwTile is %d"%lrvwTile
         abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
         if isNext:
             useTransposeCode = abmatrixinfo.useTransposeCodeNext
@@ -336,7 +336,7 @@ class LocalReadMFMA(LocalRead):
         if lrvwTile == 1:
             return idx
         mipt = kernel["MIInputPerThread"]
-        assert(lrvwTile <= 4, "lrvwTile is %d"%lrvwTile)
+        assert lrvwTile <= 4, "lrvwTile is %d"%lrvwTile
         blockSize = mipt * lrvwTile
         blockIdx = idx // blockSize
         idxInBlk = idx % blockSize
