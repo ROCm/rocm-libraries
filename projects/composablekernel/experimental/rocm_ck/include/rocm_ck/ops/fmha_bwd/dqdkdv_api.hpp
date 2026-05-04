@@ -7,9 +7,9 @@
 // Device code should include <rocm_ck/ops/fmha_bwd/dqdkdv_dev.hpp>.
 //
 // Compilation boundary:
-//   _spec.hpp — consteval factory + slot constants (both passes)
-//   _api.hpp (this) — host-only helpers: grid_size (host pass only, #error on device)
-//   _dev.hpp — CK Tile bridge + __device__ code (device pass only, #error on host)
+//   _spec.hpp -- consteval factory + slot constants (both passes)
+//   _api.hpp (this) -- host-only helpers: grid_size (host pass only, #error on device)
+//   _dev.hpp -- CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
@@ -89,7 +89,14 @@ inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] Fmh
             continue;
         if(i == S::DBIAS && !k.has_bias_grad)
             continue;
-        if(i == S::RANDVAL && !k.has_dropout)
+        // RANDVAL is never populated by the host: the device bridge always
+        // assigns rand_val_ptr=nullptr (backward pass never stores randval).
+        // Skip unconditionally.
+        if(i == S::RANDVAL)
+            continue;
+        // SEQLEN_Q/SEQLEN_K may be left null in group mode -- CK Tile derives
+        // per-batch lengths from SEQSTART_Q/SEQSTART_K when these are absent.
+        if(i == S::SEQLEN_Q || i == S::SEQLEN_K)
             continue;
 
         if(args.tensors[i].ptr == nullptr)
@@ -120,6 +127,24 @@ inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] Fmh
                      S::NHEAD_RATIO_QK,
                      nhead_ratio);
         std::abort();
+    }
+
+    // BATCH_SIZE is required only by the deterministic+BATCH persistent kernel
+    // path (CK Tile reads kargs.batch for total_jobs); other configs ignore it.
+    // Predicate is centralized in usesBatchSizeSlot() so the spec, validator,
+    // and device bridge cannot drift apart.
+    if(usesBatchSizeSlot(k))
+    {
+        const int32_t batch_size = args.scalars[S::BATCH_SIZE].i32;
+        if(batch_size <= 0)
+        {
+            std::fprintf(stderr,
+                         "rocm_ck::validateArgs(DqDkDv): BATCH_SIZE (slot %d)"
+                         " must be positive for deterministic batch mode, got %d\n",
+                         S::BATCH_SIZE,
+                         batch_size);
+            std::abort();
+        }
     }
 #endif
 }
