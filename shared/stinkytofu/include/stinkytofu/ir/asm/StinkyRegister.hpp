@@ -28,6 +28,8 @@
 #include <optional>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 // Register type enumeration for different register classes
 enum class RegType {
@@ -99,7 +101,7 @@ inline std::string regTypeToString(RegType type) {
 }
 
 // Represents a register or a literal value in the StinkyTofu IR.
-struct StinkyRegister {
+struct STINKYTOFU_EXPORT StinkyRegister {
     // Bit 31 of reg.idx marks a virtual register. Virtual registers are
     // placeholders used in instruction templates; they must be resolved to
     // physical registers via resolveVirtualToPhysical() before the IR

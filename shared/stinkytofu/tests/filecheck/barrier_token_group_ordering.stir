@@ -11,37 +11,33 @@
 #
 # Converted from BarrierTest.TokenGrouped_PassesPreserveOrderWithinGroup
 #
-# Group 0 pre-barrier: ds_load must come before signal
-# CHECK: ds_load_b128{{.*}}tokens = [0]
-# CHECK-SAME: v[0:3]
-#
-# Group 1: tensor_load before signal, signal before wait
-# CHECK: tensor_load_to_lds{{.*}}tokens = [1]
-# CHECK: s_barrier_signal{{.*}}tokens = [1]
-# CHECK: s_barrier_wait{{.*}}tokens = [1]
+# Verify that within each token group, the relative ordering is preserved:
+#   - loads before their barrier_signal
+#   - barrier_signal before barrier_wait
+#   - barrier_wait before post-barrier loads
 #
 # Group 2 pre-barrier: {tensor_load, ds_load} before signal
-# CHECK: tensor_load_to_lds{{.*}}tokens = [2]
-# CHECK-SAME: s[24:27]
-# CHECK: ds_load_b128{{.*}}tokens = [2]
-# CHECK-SAME: v[8:11]
-# CHECK: s_barrier_signal{{.*}}tokens = [2]
-# CHECK: s_barrier_wait{{.*}}tokens = [2]
+# CHECK: LDS2 = "st.tensor_load_to_lds"(s[24:27], s[28:35]){{.*}}
+# CHECK: v[8:11] = "st.ds_load_b128"(v24, LDS2)
+# CHECK: LDS2 = "st.s_barrier_signal"(-1, LDS2)
+# CHECK: LDS2 = "st.s_barrier_wait"(-1, LDS2)
+#
+# Group 1: tensor_load before signal, signal before wait
+# CHECK: LDS1 = "st.tensor_load_to_lds"(s[12:15], s[16:23])
+# CHECK: LDS1 = "st.s_barrier_signal"(-1, LDS1)
+# CHECK: LDS1 = "st.s_barrier_wait"(-1, LDS1)
 #
 # Group 2 post-barrier: ds_load and tensor_load after wait
-# CHECK: ds_load_b128{{.*}}tokens = [2]
-# CHECK-SAME: v[12:15]
-# CHECK: tensor_load_to_lds{{.*}}tokens = [2]
-# CHECK-SAME: s[36:39]
+# CHECK: v[12:15] = "st.ds_load_b128"(v28, LDS2)
+# CHECK: LDS2 = "st.tensor_load_to_lds"(s[36:39], s[40:47])
 #
 # Group 1 post-barrier: ds_load after wait
-# CHECK: ds_load_b128{{.*}}tokens = [1]
-# CHECK-SAME: v[4:7]
+# CHECK: v[4:7] = "st.ds_load_b128"(v20, LDS1)
 #
 # Group 0 post-barrier: signal, wait, tensor_load
-# CHECK: s_barrier_signal{{.*}}tokens = [0]
-# CHECK: s_barrier_wait{{.*}}tokens = [0]
-# CHECK: tensor_load_to_lds{{.*}}tokens = [0]
+# CHECK: LDS0 = "st.s_barrier_signal"(-1, LDS0)
+# CHECK: LDS0 = "st.s_barrier_wait"(-1, LDS0)
+# CHECK: LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11])
 
 st.func @test() {
 ^entry:

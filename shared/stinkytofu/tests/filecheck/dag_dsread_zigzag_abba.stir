@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --ds-read-order=AscendingCache --StinkyDAGSchedulerPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --ds-read-order=AscendingCache --StinkyDAGSchedulerPass --print-output
 #
 # AscendingCache zigzag: AABB → ABBA across WMMA groups.
 # Original: A0A0 A1A1 B0B0 B1B1. A0+B0 feed WMMA0, A1+B1 feed WMMA1.

@@ -109,7 +109,7 @@ rocsparse_status rocsparse::check_matrix_gebsr_core(rocsparse_handle       handl
     {
         // offsets buffer
         tmp_offsets = reinterpret_cast<I*>(ptr);
-        ptr += ((sizeof(I) * mb) / 256 + 1) * 256;
+        ptr += ((sizeof(I) * (mb + 1)) / 256 + 1) * 256;
 
         // columns 1 buffer
         tmp_cols1 = reinterpret_cast<J*>(ptr);

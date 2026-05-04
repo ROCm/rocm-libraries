@@ -9,27 +9,12 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-include(${CMAKE_CURRENT_LIST_DIR}/cmake/VersionUtils.cmake)
-hip_kernel_provider_setup_version(hip_kernel_provider)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
 
-# Get ROCM_PATH from configuration options as it is required to set include paths for hiprtc
-if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
-    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "Path to ROCm installation" FORCE)
-    message(STATUS "ROCM_PATH detected from environment.")
-else()
-    if(NOT ROCM_PATH)
-        message(FATAL_ERROR "ROCM_PATH must be set. Please set the ROCM_PATH environment variable or provide -DROCM_PATH=/path/to/rocm to cmake.")
-    endif()
-    message(STATUS "ROCM_PATH detected from build option.")
-endif()
-file(TO_CMAKE_PATH "${ROCM_PATH}" ROCM_PATH)
-set(ROCM_PATH "${ROCM_PATH}" CACHE PATH "Path to ROCm installation" FORCE)
-message(STATUS "Using ROCM_PATH: ${ROCM_PATH}")
-add_compile_definitions(ROCM_PATH="${ROCM_PATH}")
-
-if(NOT WIN32)
+if(NOT WIN32 AND DEFINED ROCM_PATH)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
         set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
@@ -100,9 +85,18 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
 find_package(hiprtc REQUIRED)
-find_package(hipdnn_data_sdk CONFIG REQUIRED)
-find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+# hipdnn SDK dependencies - use targets directly if available (superbuild),
+# otherwise find installed packages (true standalone)
+if(NOT TARGET hipdnn_data_sdk)
+    find_package(hipdnn_data_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 include(CheckToolVersion)
 include(ClangCheck)

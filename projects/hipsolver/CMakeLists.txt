@@ -83,6 +83,7 @@ option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
+option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
 
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
@@ -141,6 +142,132 @@ endif()
 
 if(HIP_PLATFORM STREQUAL nvidia)
   find_package(CUDA REQUIRED)
+endif()
+
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+    # TODO: This LAPACK dependency is only required to support geev
+    # It should be removed once geev is implemented in rocSOLVER
+    option(HIPSOLVER_INTERNAL_LAPACK_BUILD "Link to a locally built, static, OpenBLAS library -- required to support geev, will be removed once geev is implemented in rocSOLVER" ON)
+    if(HIPSOLVER_INTERNAL_LAPACK_BUILD)
+        set(LAPACK_SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-src)
+        set(LAPACK_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-bin)
+
+        # Detect if we're using a multi-config generator (focus on Ninja Multi-Config and Visual Studio)
+        get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+
+        # Set BYPRODUCTS based on generator type
+        if(IS_MULTI_CONFIG)
+            # NOTE: OpenBLAS converts the usual config-specific subdirectories
+            # to upper-case (e.g., lib/DEBUG/ instead of lib/Debug) in its
+            # CMakeLists.txt file.
+            if(NOT CMAKE_CONFIGURATION_TYPES)
+                set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;MinSizeRel")
+            endif()
+
+            set(LAPACK_BUILD_BYPRODUCTS)
+            foreach(config ${CMAKE_CONFIGURATION_TYPES})
+                string(TOUPPER ${config} config_upper)
+                list(APPEND LAPACK_BUILD_BYPRODUCTS
+                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
+            endforeach()
+        else()
+            set(LAPACK_BUILD_BYPRODUCTS
+                ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
+        endif()
+
+        set(LAPACK_CMAKE_ARGS
+            -DC_LAPACK=ON
+            -DNOFORTRAN=ON
+            -DBUILD_STATIC_LIBS=ON
+            -DBUILD_LAPACK_DEPRECATED=OFF
+            -DBUILD_TESTING=OFF
+            -DBUILD_BENCHMARKS=OFF
+            -DUSE_OPENMP=OFF
+            -DUSE_THREAD=OFF
+        )
+
+        # Only pass CMAKE_BUILD_TYPE for single-config generators (it is
+        # ignored in multi-config generators)
+        if(NOT IS_MULTI_CONFIG)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})
+        endif()
+
+        # Build OpenBLAS with PIC if hipSOLVER is a shared library
+        if(BUILD_SHARED_LIBS)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_POSITION_INDEPENDENT_CODE=ON)
+        endif()
+
+        # Force OpenBLAS to use the same compiler as hipSOLVER to avoid
+        # runtime library mismatches (e.g., MinGW vs MSVCRT on Windows)
+        if(CMAKE_C_COMPILER)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+        endif()
+        if(CMAKE_CXX_COMPILER)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
+        endif()
+
+        # Force GENERIC target to ensure binaries work on all CPUs
+        list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+
+        # Downgrade incompatible-pointer-types errors to warnings when using Clang
+        if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_C_FLAGS=-Wno-error=incompatible-pointer-types)
+        endif()
+
+        include(ExternalProject)
+        # Use OpenBLAS v0.3.33 (commit 62bcfb0)
+        ExternalProject_Add(hipsolver-static-lapack
+            BUILD_BYPRODUCTS    ${LAPACK_BUILD_BYPRODUCTS}
+            GIT_REPOSITORY      https://github.com/OpenMathLib/OpenBLAS
+            GIT_TAG             62bcfb0dc9f1cfa685fc04135c50e2780c303137
+            SOURCE_DIR          ${LAPACK_SOURCE_DIR}
+            BINARY_DIR          ${LAPACK_BINARY_DIR}
+            CMAKE_ARGS          ${LAPACK_CMAKE_ARGS}
+            INSTALL_COMMAND     ""
+        )
+        add_library(lapack_libraries STATIC IMPORTED)
+
+        if(IS_MULTI_CONFIG)
+            foreach(config ${CMAKE_CONFIGURATION_TYPES})
+                string(TOUPPER ${config} config_upper)
+                set_property(TARGET lapack_libraries PROPERTY
+                    IMPORTED_LOCATION_${config_upper}
+                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}
+                )
+            endforeach()
+        else()
+            set_target_properties(lapack_libraries PROPERTIES
+                IMPORTED_LOCATION ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}
+            )
+        endif()
+
+        add_dependencies(lapack_libraries hipsolver-static-lapack)
+    else() # NOT HIPSOLVER_INTERNAL_LAPACK_BUILD
+        # Some CPU side functionality is provided by external lapack
+        # Linking lapack library requires fortran flags
+        set(THREADS_PREFER_PTHREAD_FLAG ON)
+        find_package(Threads REQUIRED)
+        if(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
+            find_package(LAPACK 3.7 REQUIRED CONFIG)
+        else()
+            find_package(LAPACK 3.7 REQUIRED)
+        endif()
+
+        if(NOT LAPACK_LIBRARIES)
+            set(LAPACK_LIBRARIES
+                ${LAPACK_blas_LIBRARIES}
+                ${LAPACK_lapack_LIBRARIES}
+            )
+        endif()
+
+        if(NOT TARGET lapack_libraries)
+            add_library(lapack_libraries INTERFACE)
+            message(STATUS "Using manually specified LAPACK")
+            target_link_libraries(lapack_libraries INTERFACE
+                ${LAPACK_LIBRARIES}
+            )
+        endif()
+    endif()
 endif()
 
 

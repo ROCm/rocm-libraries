@@ -12,6 +12,20 @@
 
 namespace ck_tile {
 
+// `always_false_v<T...>` — a value-template that is always `false` but whose
+// evaluation is deferred until template instantiation. The canonical use is
+// inside the `else` arm of an `if constexpr` chain or under an arch-gated
+// `#if` to fire a `static_assert` ONLY when the offending instantiation is
+// actually requested, e.g.:
+//
+//     if constexpr (...) { ... }
+//     else { static_assert(always_false_v<T>, "unsupported T"); }
+//
+// A bare `static_assert(false, ...)` would fire at template-definition
+// parse time on conforming compilers, breaking the whole TU.
+template <typename...>
+inline constexpr bool always_false_v = false;
+
 // remove_cvref_t
 template <typename T>
 using remove_reference_t = typename std::remove_reference<T>::type;
@@ -103,7 +117,7 @@ template <
     typename PY,
     typename PX,
     typename std::enable_if<std::is_pointer_v<PY> && std::is_pointer_v<PX>, bool>::type = false>
-CK_TILE_HOST_DEVICE PY c_style_pointer_cast(PX p_x)
+CK_TILE_HOST_DEVICE PY c_style_pointer_cast([[clang::lifetimebound]] PX p_x)
 {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"

@@ -10,6 +10,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenContext.hpp"
 #include "HipdnnMiopenHandle.hpp"
@@ -23,6 +24,8 @@ using ::testing::Return;
 
 TEST(TestMiopenEngineManager, ReturnsApplicableEngineIds)
 {
+    SKIP_IF_NO_DEVICES();
+
     std::set<std::unique_ptr<
         hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>>>
         engines;
@@ -52,6 +55,8 @@ TEST(TestMiopenEngineManager, ReturnsApplicableEngineIds)
 
 TEST(TestMiopenEngineManager, ReturnsMultipleApplicableEngineIds)
 {
+    SKIP_IF_NO_DEVICES();
+
     std::set<std::unique_ptr<
         hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>>>
         engines;
@@ -82,6 +87,8 @@ TEST(TestMiopenEngineManager, ReturnsMultipleApplicableEngineIds)
 
 TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)
 {
+    SKIP_IF_NO_DEVICES();
+
     std::set<std::unique_ptr<
         hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>>>
         engines;
@@ -110,6 +117,8 @@ TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)
 
 TEST(TestMiopenEngineManager, ReturnsEngineDetails)
 {
+    SKIP_IF_NO_DEVICES();
+
     hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
         manager;
 
@@ -142,6 +151,8 @@ TEST(TestMiopenEngineManager, ReturnsEngineDetails)
 
 TEST(TestMiopenEngineManager, ThrowsOnInvalidEngineId)
 {
+    SKIP_IF_NO_DEVICES();
+
     hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
         manager;
 
@@ -155,6 +166,8 @@ TEST(TestMiopenEngineManager, ThrowsOnInvalidEngineId)
 
 TEST(TestMiopenEngineManager, GetWorkspaceSizeReturnsCorrectValue)
 {
+    SKIP_IF_NO_DEVICES();
+
     hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
         manager;
 
@@ -175,6 +188,8 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeReturnsCorrectValue)
 
 TEST(TestMiopenEngineManager, GetWorkspaceSizeThrowsOnInvalidEngineId)
 {
+    SKIP_IF_NO_DEVICES();
+
     hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
         manager;
     HipdnnMiopenHandle dummyHandle = {};
@@ -188,6 +203,8 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeThrowsOnInvalidEngineId)
 
 TEST(TestMiopenEngineManager, InitializeExecutionContextCallsEngine)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(7));
     EXPECT_CALL(*mockEngine,
@@ -209,6 +226,8 @@ TEST(TestMiopenEngineManager, InitializeExecutionContextCallsEngine)
 
 TEST(TestMiopenEngineManager, InitializeExecutionContextThrowsOnInvalidEngineId)
 {
+    SKIP_IF_NO_DEVICES();
+
     MockHipdnnMiopenContext execCtx;
     hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
         manager;

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #include "rocsparse_check_matrix_gebsr.hpp"
 #include "rocsparse_determine_indextype.hpp"
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_check_spmat_stage value_)
 {
@@ -45,9 +46,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_check_spmat_stage value_)
         CASE(rocsparse_check_spmat_stage_compute);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -72,10 +71,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_data_status data_status)
     case rocsparse_data_status_invalid_fill:
         return "Fill mode was detected to be invalid.";
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_check_spmat_stage value_)

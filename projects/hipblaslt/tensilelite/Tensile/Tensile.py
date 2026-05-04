@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -218,10 +218,11 @@ def addCommonArguments(argParser):
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack"], \
         action="store", default="yaml", help="select which library format to use")
     argParser.add_argument("--client-lock", default=None)
-    argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH),
+    argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH), \
         type=os.path.abspath, help="Specify the full path to a pre-built tensilelite-client executable")
+    argParser.add_argument("--mx-scale-format", dest="MXScaleFormat", type=int, default=0, \
+        help="MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
     argParser.add_argument("--rocm-agent-enumerator", default=None, action="store", dest="rocm_agent_enumerator")
-
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
 
 
@@ -247,6 +248,9 @@ def argUpdatedGlobalParameters(args):
         rv["ClientExecutionLockPath"] = args.client_lock
     if args.prebuilt_client:
         rv["PrebuiltClient"] = args.prebuilt_client
+    if args.MXScaleFormat:
+        print1("# Command-line override: MXScaleFormat")
+        rv["MXScaleFormat"] = args.MXScaleFormat
 
     for key, value in args.global_parameters:
         rv[key] = value
@@ -500,6 +504,9 @@ def Tensile(userArgs):
                  "First run using this flag, then rerun with --use-cache.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
             help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
+    argParser.add_argument("--gpu-targets", dest="gpuTargets", default=None,
+            help="Semicolon-separated GPU targets (e.g. gfx942). "
+                 "Overrides ISA auto-detection and YAML config ISA.")
 
     addCommonArguments(argParser)
     args = argParser.parse_args(userArgs)
@@ -602,11 +609,15 @@ def Tensile(userArgs):
 
     cxxCompiler, \
     cCompiler, \
-    offloadBundler, \
-    enumerator = validateToolchain(args.CxxCompiler,
-                                   args.CCompiler,
-                                   args.OffloadBundler,
-                                   ToolchainDefaults.DEVICE_ENUMERATOR if args.rocm_agent_enumerator is None else args.rocm_agent_enumerator)
+    offloadBundler = validateToolchain(args.CxxCompiler,
+                                       args.CCompiler,
+                                       args.OffloadBundler)
+
+    if args.gpuTargets:
+        enumerator = None  # not needed — ISA comes from --gpu-targets
+    else:
+        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR if args.rocm_agent_enumerator is None else args.rocm_agent_enumerator)
+
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
         offloadBundler,
@@ -618,7 +629,18 @@ def Tensile(userArgs):
         offloadBundler,
     )
 
-    if "ISA" in config["GlobalParameters"]:
+    if args.gpuTargets:
+        from Tensile.Common.Architectures import gfxToIsa
+        isaList = []
+        for arch in args.gpuTargets.split(";"):
+            arch = arch.strip()
+            if not arch:
+                raise ValueError(f"Invalid GPU target: '{arch}'")
+            isa = gfxToIsa(arch)
+            if isa is None:
+                raise ValueError(f"Unrecognized GPU target: '{arch}'")
+            isaList.append(isa)
+    elif "ISA" in config["GlobalParameters"]:
         isaList = [IsaVersion(isa[0], isa[1], isa[2]) for isa in config["GlobalParameters"]["ISA"]]
 
     else:

@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
 
 namespace stinkytofu {
@@ -52,7 +53,7 @@ namespace stinkytofu {
  *   4. Install directory: <install-prefix>/lib/stinkytofu/intrinsics.st.bc
  *   5. Relative to library: ../lib/stinkytofu/intrinsics.st.bc
  */
-class IntrinsicRegistry {
+class STINKYTOFU_EXPORT IntrinsicRegistry {
    public:
     /**
      * @brief Get the global intrinsic registry (singleton)

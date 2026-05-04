@@ -4,10 +4,12 @@
 #pragma once
 
 #include <optional>
+#include <string>
 #include <unordered_map>
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
@@ -178,6 +180,12 @@ MiopenTensor createBatchnormTensor(
     int64_t uid);
 
 size_t getSpatialDimCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attr);
+
+/// @brief Returns the GPU architecture string (e.g., "gfx942") for the
+/// device backing the given HIP stream. Strips any feature suffix such
+/// as ":xnack+".
+/// @throws hipdnn_plugin_sdk::HipdnnPluginException on HIP failure.
+std::string getDeviceArch(hipStream_t stream);
 
 using hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue;
 using hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue;

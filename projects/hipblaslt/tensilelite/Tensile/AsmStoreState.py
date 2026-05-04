@@ -434,7 +434,9 @@ class StoreState:
 
                 coordOffset1  = eIdx1 * (self.kernel["WavefrontSize"] // matrixInstN) * MFMAContinuousOutputs
                 coordOffset1 += bIdx1 * matrixInstN
-                coordOffset1 += wtIdex * matrixInstN *  matrixInstBN * kernel["MIWaveGroup"][1]
+                # Subtile kernels: successive wave tiles step by MIBShape1 (not MIBShape1 * MIWaveGroup[1]).
+                wtStep1 = matrixInstN * matrixInstBN if kernel.get("UseSubtileImpl") else matrixInstN * matrixInstBN * kernel["MIWaveGroup"][1]
+                coordOffset1 += wtIdex * wtStep1
                 coordOffset1  = coordOffset1 * vectorWidth + vc1
             else: # mac instruction
                 if kernel["LocalSplitU"] > 1:
@@ -462,7 +464,10 @@ class StoreState:
 
                 coordOffset0  = eIdx0 * (self.kernel["WavefrontSize"] // matrixInstM) * MFMAContinuousOutputs
                 coordOffset0 += bIdx0 * matrixInstM
-                coordOffset0 += wtIdex * matrixInstM * matrixInstBM * kernel["MIWaveGroup"][0]
+                # Subtile kernels: each wave owns a contiguous block of rows, so successive
+                # wave tiles step by MIBShape0 (not MIBShape0 * MIWaveGroup[0]).
+                wtStep = matrixInstM * matrixInstBM if kernel.get("UseSubtileImpl") else matrixInstM * matrixInstBM * kernel["MIWaveGroup"][0]
+                coordOffset0 += wtIdex * wtStep
                 coordOffset0  = coordOffset0 * vectorWidth + vc0
             else: # mac instruction
                 coordOffset0 = d0 * kernel["SubGroup0"]*kernel["VectorWidthA"] + vc0
@@ -828,6 +833,8 @@ class StoreState:
 
                 if kernel["EnableMatrixInstruction"]:
                     alignment = self.cfg.numVgprPerValuC * self.cfg.gwvw
+                    #print(self.cfg.numVgprPerValuC, self.cfg.gwvw)
+                    #exit(1)
                     sumIdx    = kw.vgprPool.checkOutAligned(self.cfg.numVgprPerValuC*self.cfg.gwvw, alignment, "vgprValuC") // self.cfg.numVgprPerValuC
                 else:
                     sumIdx = kw.states.c.startVgprValu + vc0 + d0*kernel["VectorWidthA"] + vc1*kernel["ThreadTile0"] + d1*kernel["VectorWidthA"]*kernel["ThreadTile0"]

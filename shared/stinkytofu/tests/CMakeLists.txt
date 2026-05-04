@@ -2,18 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 find_package(Threads REQUIRED)
-find_package(GTest QUIET)
-if(NOT GTest_FOUND)
-    include(FetchContent)
-    FetchContent_Declare(
-        googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG        v1.15.2
-    )
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(googletest)
-endif()
+find_package(GTest REQUIRED)
 include(GoogleTest)
 
 # Common test main entry point
@@ -81,6 +70,12 @@ set(UNIT_LOGICAL_TEST_FILES
     unit/logical/LogicalIntrinsicFlowTest.cpp
 )
 
+# Core Infrastructure Tests
+set(UNIT_CORE_TEST_FILES
+    unit/core/AnalysisManagerTest.cpp
+    unit/core/BackendRegistryTest.cpp
+)
+
 # Common/Shared Tests
 set(UNIT_COMMON_TEST_FILES
     unit/ErrorHandlingTest.cpp
@@ -92,6 +87,7 @@ set(UNIT_COMMON_TEST_FILES
 
 # Combine all unit tests
 set(UNIT_TEST_FILES
+    ${UNIT_CORE_TEST_FILES}
     ${UNIT_ASM_TEST_FILES}
     ${UNIT_LOGICAL_TEST_FILES}
     ${UNIT_COMMON_TEST_FILES}
@@ -210,7 +206,10 @@ endif()
 ##===----------------------------------------------------------------------===##
 # FileCheck tests (LLVM-style .stir pattern tests)
 ##===----------------------------------------------------------------------===##
-file(GLOB FILECHECK_TESTS "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.stir")
+file(GLOB FILECHECK_TESTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.stir"
+    "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.s"
+)
 foreach(test_file ${FILECHECK_TESTS})
     get_filename_component(test_name ${test_file} NAME_WE)
     add_test(

@@ -79,6 +79,7 @@ enum class Processor : int
     // only including supported types
     gfx803  = 803,
     gfx900  = 900,
+    gfx90c  = 912,
     gfx906  = 906,
     gfx908  = 908,
     gfx90a  = 910,
@@ -293,7 +294,7 @@ public:
     bool isDefaultHipBLASLtArch()
     {
         int gfx_arch = getArch();
-        if(gfx_arch == 1200 || gfx_arch == 1201 || gfx_arch == 950)
+        if(gfx_arch == 1200 || gfx_arch == 1201 || gfx_arch == 1250 || gfx_arch == 950)
         {
             return true;
         }

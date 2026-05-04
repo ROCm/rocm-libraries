@@ -433,7 +433,7 @@ public:
             .set_io_data_type(DataType::FLOAT);
 
         const std::vector<int64_t> xDims = {2, 8, 16};
-        const std::vector<int64_t> scaleDims = {1, 8, 1};
+        const std::vector<int64_t> scaleDims = {1, 8, 16};
         auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
         auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
 

@@ -60,6 +60,7 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipsparselt/**/*'
   - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "ci:hipsparselt-fast":
 - changed-files:
@@ -113,6 +114,10 @@
 "shared: origami":
 - changed-files:
   - any-glob-to-any-file: 'shared/origami/**/*'
+
+"shared: stinkytofu":
+- changed-files:
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "shared: primbench":
 - changed-files:

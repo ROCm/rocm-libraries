@@ -24,10 +24,13 @@
 
 #include <memory>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class BasicBlock;
 class Function;
 class Pass;
+struct DominanceInfo;
 
 /// Builds def-use chains for all instructions in the given Function.
 ///
@@ -60,13 +63,18 @@ class Pass;
 ///                        on a fresh function that has no PHIs/chains yet.
 ///
 /// Note: Assumes non-SSA form (physical registers). Requires CFG to be built.
-void buildUseDefChain(Function& func, bool clearExisting);
+STINKYTOFU_EXPORT void buildUseDefChain(Function& func, bool clearExisting);
+
+/// Overload that accepts pre-computed dominance info to avoid
+/// redundant computeDominanceInfo() calls.
+STINKYTOFU_EXPORT void buildUseDefChain(Function& func, const DominanceInfo& domInfo,
+                                        bool clearExisting);
 
 /// Creates a Pass that builds the def-use chain for a Function.
 /// Use this to run buildUseDefChain as part of a pass pipeline.
 ///
 /// @param clearExisting  Forwarded to buildUseDefChain(). When true,
 ///                        existing PHIs and chains are removed first.
-std::unique_ptr<Pass> createBuildUseDefChainPass(bool clearExisting = true);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createBuildUseDefChainPass(bool clearExisting = true);
 
 }  // namespace stinkytofu

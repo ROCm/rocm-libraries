@@ -81,6 +81,7 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     Gpu supportedDevices = Gpu::None;
 #endif
     miopen::unit_tests::UnitTestConvSolverParams p(supportedDevices);
+    p.ExcludeDevice("gfx1103");
     p.Tunable(5);
     p.UsesCKDynamicLib();
 

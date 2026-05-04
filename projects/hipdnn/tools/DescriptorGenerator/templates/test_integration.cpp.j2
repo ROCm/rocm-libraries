@@ -7,8 +7,8 @@
 #include <memory>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/{{ op.fbs_generated_header }}>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
@@ -25,8 +25,8 @@ using hipdnn_tests::lowerAndDeserialize;
 using hipdnn_tests::buildTensorMap;
 using hipdnn_tests::TestableGraphLowering;
 using hipdnn_tests::IntegrationTestFixture;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 {% for ef in op.enum_fields %}
 using {{ ef.enum_short_type }}Sdk = {{ ef.cpp_enum }};
 {% endfor %}
@@ -48,7 +48,7 @@ protected:
     /// Builds and lowers a graph, returning the deserialized GraphT.
     /// Callers set up attrs before calling; this creates tensors, calls the
     /// graph method, validates, lowers, serializes, and deserializes.
-    hipdnn_data_sdk::data_objects::GraphT buildAndDeserialize(
+    hipdnn_flatbuffers_sdk::data_objects::GraphT buildAndDeserialize(
         {{ op.frontend.attributes_class }}& attrs)
     {
         auto graph = std::make_shared<TestableGraphLowering>();
