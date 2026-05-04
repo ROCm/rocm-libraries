@@ -146,73 +146,53 @@ namespace TensileLite
         void loadLibrary(const int index) const
         {
             auto it = libraryMapping.upper_bound(index);
-            if(it != libraryMapping.begin())
+            if(it == libraryMapping.begin())
             {
-                --it;
-                std::string filePrefix = it->second;
-                // load the file here directly and push the library for later use.
-                {
-                    std::lock_guard<std::mutex> lock(solutionsGuard);
-                    if(loadedFiles.find(filePrefix) != loadedFiles.end())
-                        return;
-                }
                 if(Debug::Instance().printDataInit())
-                    std::cout << "Loading library for index " << index
-                              << " from file: " << filePrefix << std::endl;
-
-                fs::path path(libraryDirectory);
-                path = path / (filePrefix + suffix);
-
-                auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
-                auto mLibrary
-                    = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
-
-                using std::begin;
-                using std::end;
-
+                    std::cout << "Index " << index << " not in this arch's mapping range"
+                              << std::endl;
+                return;
+            }
+            --it;
+            std::string filePrefix = it->second;
+            // load the file here directly and push the library for later use.
+            {
                 std::lock_guard<std::mutex> lock(solutionsGuard);
                 if(loadedFiles.find(filePrefix) != loadedFiles.end())
                     return;
-                // Push to cache
-                indexLoadedLibraries[filePrefix] = mLibrary->library;
-
-                std::transform(begin(mLibrary->solutions),
-                               end(mLibrary->solutions),
-                               std::inserter(solutions, end(solutions)),
-                               [this, filePrefix](auto& i) {
-                                   i.second->codeObjectFilename = filePrefix + ".co";
-                                   return i;
-                               });
-                loadedFiles.insert(filePrefix);
-
-                if(Debug::Instance().printCodeObjectInfo())
-                    std::cout << "load placeholder library " << path << std::endl
-                              << mLibrary->solutions.size() << " solutions loaded" << std::endl;
             }
-            else
-            {
-                // Index is below the smallest key in this arch's mapping.
-                // This branch can't tell two cases apart:
-                //   (a) routine cross-arch miss — a consumer scanning an
-                //       index range lands below the local arch's smallest
-                //       mapping key. Common on per-arch shard installs
-                //       where indices are globally numbered but each arch
-                //       only owns a subrange.
-                //   (b) genuinely bad index — caller passed an index that
-                //       belongs to no arch at all.
-                //
-                // Pre-#6840 (single global mapping) this was always (b),
-                // so an unconditional std::cerr was load-bearing. With
-                // per-arch mapping, (a) is now routine and dominates the
-                // signal: leaving it on stderr produced thousands of lines
-                // of noise per consumer scan. Trade-off: gate behind
-                // Debug::printDataInit() (the same flag used by the
-                // success-path "Loading library for index" print above),
-                // accepting that genuine bad-index diagnosis now requires
-                // opting in via the Tensile debug knob.
-                if(Debug::Instance().printDataInit())
-                    std::cout << "No library found for index " << index << std::endl;
-            }
+            if(Debug::Instance().printDataInit())
+                std::cout << "Loading library for index " << index
+                          << " from file: " << filePrefix << std::endl;
+
+            fs::path path(libraryDirectory);
+            path = path / (filePrefix + suffix);
+
+            auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
+            auto mLibrary
+                = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+
+            using std::begin;
+            using std::end;
+
+            std::lock_guard<std::mutex> lock(solutionsGuard);
+            if(loadedFiles.find(filePrefix) != loadedFiles.end())
+                return;
+            // Push to cache
+            indexLoadedLibraries[filePrefix] = mLibrary->library;
+
+            std::transform(begin(mLibrary->solutions),
+                           end(mLibrary->solutions),
+                           std::inserter(solutions, end(solutions)),
+                           [this, filePrefix](auto& i) {
+                               i.second->codeObjectFilename = filePrefix + ".co";
+                               return i;
+                           });
+            loadedFiles.insert(filePrefix);
+
+            if(Debug::Instance().printCodeObjectInfo())
+                std::cout << "load placeholder library " << path << std::endl
+                          << mLibrary->solutions.size() << " solutions loaded" << std::endl;
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
