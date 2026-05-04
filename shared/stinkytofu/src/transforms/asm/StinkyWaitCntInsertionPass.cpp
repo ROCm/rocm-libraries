@@ -506,7 +506,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                     if (auto* memTokenData = inst->getModifier<MemTokenData>()) {
                         auto& barrierMemTokens = memTokenData->tokens;
                         int lastDependentIndex = -1;
-                        for (int i = 0; i < static_cast<int>(tensorLoads.size()); ++i) {
+                        for (int i = static_cast<int>(tensorLoads.size()) - 1; i >= 0; --i) {
                             auto* tensorLoad = tensorLoads[i];
                             auto* tensorMemTokenData = tensorLoad->getModifier<MemTokenData>();
                             if (tensorMemTokenData == nullptr) {
@@ -518,20 +518,20 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                                             [barrierMemTokens](int token) {
                                                 return std::find(barrierMemTokens.begin(),
                                                                  barrierMemTokens.end(),
-                                                                 token)
-                                                       != barrierMemTokens.end();
+                                                                 token) != barrierMemTokens.end();
                                             })) {
                                 lastDependentIndex = i;
+                                break;
                             }
                         }
 
                         if (lastDependentIndex >= 0) {
                             int remainingTensorLoads =
                                 static_cast<int>(tensorLoads.size()) - 1 - lastDependentIndex;
-                            tensorWaits.emplace_back(inst, WaitCntInstruction(
-                                                               WaitCntInstruction::kUnused,
-                                                               WaitCntInstruction::kUnused,
-                                                               remainingTensorLoads));
+                            tensorWaits.emplace_back(inst,
+                                                     WaitCntInstruction(WaitCntInstruction::kUnused,
+                                                                        WaitCntInstruction::kUnused,
+                                                                        remainingTensorLoads));
 
                             // Loads up to lastDependentIndex are guaranteed complete after wait.
                             tensorLoads.erase(tensorLoads.begin(),
