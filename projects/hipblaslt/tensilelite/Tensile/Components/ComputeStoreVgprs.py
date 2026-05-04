@@ -188,7 +188,9 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             module.add(vectorStaticDivide(tmpVgpr0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res))
             if kernel["LocalSplitU"] > 1:
                 module.add(vectorStaticRemainder(dummy, tmpVgpr0, tmpVgpr0, kernel["MIWaveGroup"][1], tmpVgpr1Res, tmpSgprInfo))
-            module.add(VMulLOU32(dst=vgpr(tid1), src0=hex(MIBShape1), src1=vgpr(tmpVgpr0), comment="wave coordination offset 1"))
+            # Subtile kernels: each wave owns a contiguous block of MIWaveTile[1]*MIBShape1 cols.
+            waveBlockCols = MIBShape1 * kernel["MIWaveTile"][1] if kernel.get("UseSubtileImpl") else MIBShape1
+            module.add(vectorStaticMultiply(vgpr(tid1), vgpr(tmpVgpr0), waveBlockCols, tmpSgprInfo, "wave coordination offset 1"))
 
             # coord 1 : thread part
             module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", matrixInstN, tmpVgpr1Res, tmpSgprInfo))
@@ -209,7 +211,10 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
 
             # coord 0 : wave part
             module.add(vectorStaticRemainder(dummy, tmpVgpr0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res, tmpSgprInfo))
-            module.add(VMulLOU32(dst=vgpr(tmpVgpr0), src0=hex(MIBShape0), src1=vgpr(tmpVgpr0), comment="wave coordination offset 0"))
+            # Subtile kernels: each wave owns a contiguous block of MIWaveTile[0]*MIBShape0 rows.
+            # wave_id0 * MIWaveTile[0] * MIBShape0 gives the start row of wave's block.
+            waveBlockRows = MIBShape0 * kernel["MIWaveTile"][0] if kernel.get("UseSubtileImpl") else MIBShape0
+            module.add(vectorStaticMultiply(vgpr(tmpVgpr0), vgpr(tmpVgpr0), waveBlockRows, tmpSgprInfo, "wave coordination offset 0"))
 
             # coord 0 : thread part
             module.add(vectorStaticRemainder(dummy, tid0, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))

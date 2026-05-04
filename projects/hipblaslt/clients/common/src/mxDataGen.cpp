@@ -342,6 +342,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
     opt.min          = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
     opt.max          = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
+    opt.forceDenorm  = false;
 
     // Map string initMethod to DataInitMode
     if(initMethod == "Sequential")

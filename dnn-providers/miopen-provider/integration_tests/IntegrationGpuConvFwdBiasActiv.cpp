@@ -25,11 +25,22 @@ class ConvFwdBiasActiv
           std::tuple<test_conv_common::ConvTestCase, bool, test_activation_common::ActivTestCase>>
 {
 protected:
+    /// CBA fusion has limited engine coverage (gfx90a + RDNA archs without CK
+    /// fusion kernels). Skip when no engine has an applicable solution.
+    std::optional<std::string>
+        shouldSkipOnEngineConfigResult(const hipdnn_frontend::Error& result) override
+    {
+        if(IS_WORKAROUND_ISSUE_6979(result))
+        {
+            return WORKAROUND_ISSUE_6979_SKIP_MSG;
+        }
+        return std::nullopt;
+    }
+
     void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
-        SKIP_IF_WORKAROUND_ISSUE_5409();
 
         const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
 
