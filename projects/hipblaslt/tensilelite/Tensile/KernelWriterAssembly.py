@@ -14561,6 +14561,7 @@ class KernelWriterAssembly(KernelWriter):
     vgprBF8Temp: int   = -1
     vgprBF8Min: int    = -1
     vgprBF8Max: int    = -1
+    autoTruncate: bool = False
 
   class I8CVTVgprStruct(NamedTuple):
     vgprI8Temp0: int   = -1
@@ -15177,14 +15178,25 @@ class KernelWriterAssembly(KernelWriter):
                                                vgprLaneGroupDelta=(cvtVgpr+5) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1)
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
-        cvtVgpr = self.vgprPool.checkOut(4)
-        cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
-                                              vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3), \
-                                              autoTruncate=self.states.archCaps["HasFp8HwSaturation"])
+        # gfx12 conversion instructions handle NaN/Inf saturation in hardware; skip software clamp
+        fp8AutoTruncate = self.states.archCaps["HasFp8HwSaturation"]
+        cvtVgprCount = 1 if fp8AutoTruncate else 4
+        cvtVgpr = self.vgprPool.checkOut(cvtVgprCount)
+        cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, \
+                                              vgprFp8NanInf=(cvtVgpr+1) if not fp8AutoTruncate else -1, \
+                                              vgprFp8Min=(cvtVgpr+2) if not fp8AutoTruncate else -1, \
+                                              vgprFp8Max=(cvtVgpr+3) if not fp8AutoTruncate else -1, \
+                                              autoTruncate=fp8AutoTruncate)
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
-        cvtVgpr = self.vgprPool.checkOut(4)
-        cvtVgprStruct = self.BF8CVTVgprStruct(vgprBF8Temp=cvtVgpr, vgprBF8NanInf=(cvtVgpr+1), \
-                                              vgprBF8Min=(cvtVgpr+2), vgprBF8Max=(cvtVgpr+3))
+        # gfx12 conversion instructions handle NaN/Inf saturation in hardware; skip software clamp
+        bf8AutoTruncate = self.states.archCaps["HasFp8HwSaturation"]
+        cvtVgprCount = 1 if bf8AutoTruncate else 4
+        cvtVgpr = self.vgprPool.checkOut(cvtVgprCount)
+        cvtVgprStruct = self.BF8CVTVgprStruct(vgprBF8Temp=cvtVgpr, \
+                                              vgprBF8NanInf=(cvtVgpr+1) if not bf8AutoTruncate else -1, \
+                                              vgprBF8Min=(cvtVgpr+2) if not bf8AutoTruncate else -1, \
+                                              vgprBF8Max=(cvtVgpr+3) if not bf8AutoTruncate else -1, \
+                                              autoTruncate=bf8AutoTruncate)
       elif kernel["ProblemType"]["DestDataType"].isInt8():
         cvtVgpr = self.vgprPool.checkOut(4)
         cvtVgprStruct = self.I8CVTVgprStruct(vgprI8Temp0=cvtVgpr, vgprI8Temp1=(cvtVgpr+1), \
