@@ -87,6 +87,8 @@ jobs:
 
   Windows:
     runs-on: azure-windows-scale-rocm
+    env:
+      BUILD_DIR: B:\build
     defaults:
       run:
         shell: bash
@@ -110,9 +112,6 @@ jobs:
       - name: Install GTest
         run: vcpkg install gtest
 
-      - name: Install GTest
-        run: vcpkg install gtest
-
       - name: Checkout TheRock
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -132,18 +131,18 @@ jobs:
 
       - name: Build
         working-directory: shared/stinkytofu
-        run: invoke build
+        run: invoke build --build-dir "${{ env.BUILD_DIR }}/stinkytofu"
 
       - name: Test
-        working-directory: shared/stinkytofu/build
+        working-directory: ${{ env.BUILD_DIR }}/stinkytofu
         run: ctest --output-on-failure
 
       - name: Build (static)
         working-directory: shared/stinkytofu
-        run: invoke build --static --build-dir build-static --clean
+        run: invoke build --static --build-dir "${{ env.BUILD_DIR }}/stinkytofu-static" --clean
 
       - name: Test (static)
-        working-directory: shared/stinkytofu/build-static
+        working-directory: ${{ env.BUILD_DIR }}/stinkytofu-static
         run: ctest --output-on-failure
 
       - name: Build rocisa
@@ -155,9 +154,8 @@ jobs:
           for /f "delims=" %%i in ('python3 -c "import nanobind; print(nanobind.cmake_dir())"') do set NANOBIND_DIR=%%i
           for /f "delims=" %%i in ('where amdclang++') do set CXX_COMPILER=%%i
           for /f "delims=" %%i in ('where amdclang') do set C_COMPILER=%%i
-          cmake -B build -G "NMake Makefiles" -DCMAKE_CXX_COMPILER="%CXX_COMPILER%" -DCMAKE_C_COMPILER="%C_COMPILER%" -DCMAKE_BUILD_TYPE=Release -DROCISA_STANDALONE=ON -DCMAKE_PREFIX_PATH="%ROCM_PATH%" -Dnanobind_DIR="%NANOBIND_DIR%"
-          cmake --build build
+          cmake -B %BUILD_DIR%/rocisa -G "NMake Makefiles" -DCMAKE_CXX_COMPILER="%CXX_COMPILER%" -DCMAKE_C_COMPILER="%C_COMPILER%" -DCMAKE_BUILD_TYPE=Release -DROCISA_STANDALONE=ON -DCMAKE_PREFIX_PATH="%ROCM_PATH%" -Dnanobind_DIR="%NANOBIND_DIR%"
+          cmake --build %BUILD_DIR%/rocisa
 
       - name: Test rocisa import
-        working-directory: projects/hipblaslt/tensilelite/rocisa
-        run: python3 -c "import os; os.add_dll_directory(os.path.abspath('build/rocisa')); import sys; sys.path.insert(0, 'build'); import rocisa; print('rocisa import OK')"
+        run: python3 -c "import os; os.add_dll_directory(os.path.abspath('${{ env.BUILD_DIR }}/rocisa/rocisa')); import sys; sys.path.insert(0, '${{ env.BUILD_DIR }}/rocisa'); import rocisa; print('rocisa import OK')"
