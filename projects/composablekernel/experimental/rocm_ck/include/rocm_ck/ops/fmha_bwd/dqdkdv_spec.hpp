@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Compile-time configuration and argument slot definitions for the FMHA BWD
-// dQ/dK/dV kernel family — the main backward kernel that computes query, key,
+// dQ/dK/dV kernel family -- the main backward kernel that computes query, key,
 // and value gradients via 5 GEMMs.
 //
 // SHARED header: compiled in both host and device (--cuda-device-only) passes.
@@ -10,9 +10,9 @@
 // constants. No runtime code, no HIP dependency.
 //
 // Compilation boundary:
-//   _spec.hpp (this) — consteval factory + slot constants (both passes)
-//   _api.hpp         — host-only helpers: grid_size (host pass only, #error on device)
-//   _dev.hpp         — CK Tile bridge + __device__ code (device pass only, #error on host)
+//   _spec.hpp (this) -- consteval factory + slot constants (both passes)
+//   _api.hpp         -- host-only helpers: grid_size (host pass only, #error on device)
+//   _dev.hpp         -- CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
@@ -41,14 +41,14 @@ struct FmhaBwdDQDKDVSignature
 /// Algorithm: describes HOW the kernel executes (feature flags + tuning).
 struct FmhaBwdDQDKDVAlgorithm
 {
-    // Feature flags — which variation of the computation
+    // Feature flags -- which variation of the computation
     FmhaBiasType bias_type = FmhaBiasType::NONE;
     bool has_bias_grad     = false;
     bool has_mask          = false;
     bool has_dropout       = false;
     bool is_deterministic  = false;
 
-    // Tuning — padding and occupancy
+    // Tuning -- padding and occupancy
     int pad_hdim_q   = 0;  // 0 (no pad), 1 (small pad), or 8 (full vec pad)
     int pad_hdim_v   = 0;  // 0, 1, or 8
     int block_per_cu = -1; // occupancy hint (-1 = auto, resolved in makeSpec)
@@ -61,7 +61,7 @@ struct FmhaBwdDQDKDVConfig
     FmhaBwdDQDKDVAlgorithm algorithm;
 };
 
-/// Validated kernel descriptor — structural type, safe for use as NTTP.
+/// Validated kernel descriptor -- structural type, safe for use as NTTP.
 /// All optional/default values are resolved; no std::optional.
 struct FmhaBwdDQDKDVSpec
 {
@@ -71,14 +71,14 @@ struct FmhaBwdDQDKDVSpec
     int hdim_v;
     FmhaMode mode;
 
-    // From Algorithm — feature flags
+    // From Algorithm -- feature flags
     FmhaBiasType bias_type;
     bool has_bias_grad;
     bool has_mask;
     bool has_dropout;
     bool is_deterministic;
 
-    // From Algorithm — tuning
+    // From Algorithm -- tuning
     int pad_hdim_q;
     int pad_hdim_v;
     int block_per_cu;
@@ -95,7 +95,7 @@ struct FmhaBwdDQDKDVSpec
 /// Named tensor and scalar slot indices for the dQ/dK/dV kernel.
 /// These map directly to indices in rocm_ck::Args::tensors[] and
 /// rocm_ck::Args::scalars[]. The device bridge reads from these slots;
-/// host code populates the same slots — named constants prevent
+/// host code populates the same slots -- named constants prevent
 /// off-by-one errors.
 namespace fmha_bwd_dqdkdv_slots {
 
@@ -110,7 +110,7 @@ constexpr int DQ_ACC = 6;
 constexpr int DK     = 7;
 constexpr int DV     = 8;
 // Optional slots have fixed indices regardless of which features are enabled.
-// Unused slots are simply not populated by host code — no slot remapping.
+// Unused slots are simply not populated by host code -- no slot remapping.
 constexpr int BIAS    = 9;  // optional: present if bias_type != NONE
 constexpr int DBIAS   = 10; // optional: present if has_bias_grad
 constexpr int RANDVAL = 11; // optional: present if has_dropout
@@ -125,7 +125,7 @@ constexpr int SEQLEN_K   = 15; // const int32_t*: per-batch actual K-lengths [ba
 
 /// Minimum tensor slot count (max_used_index + 1) for a given config.
 /// Slot indices are fixed (BIAS=9, DBIAS=10, RANDVAL=11) regardless of
-/// which features are enabled — unused slots are simply not populated.
+/// which features are enabled -- unused slots are simply not populated.
 constexpr int requiredTensors(FmhaBwdDQDKDVSpec k)
 {
     // Start with the highest optional feature slot used
@@ -153,15 +153,37 @@ constexpr int P_UNDROP       = 4; // f32: 1/(1-dropout_rate)
 constexpr int RP_UNDROP      = 5; // f32: 1/p_undrop
 constexpr int DROP_SEED      = 6; // u64: dropout RNG seed
 constexpr int DROP_OFFSET    = 7; // u64: dropout RNG offset
-// Mask scalar slots — present only when has_mask=true.
+// Mask scalar slots -- present only when has_mask=true.
 // Indices are fixed regardless of dropout; unused slots are not populated.
 constexpr int WINDOW_SIZE_LEFT  = 8;  // i32: left context window (-1 = unlimited)
 constexpr int WINDOW_SIZE_RIGHT = 9;  // i32: right context window (0 = causal)
 constexpr int MASK_TYPE         = 10; // i32: GenericAttentionMaskEnum cast to int
+// Batch count -- present only when is_deterministic=true AND mode==BATCH.
+// CK Tile's persistent kernel reads kargs.batch for total_jobs computation
+// (fmha_bwd_kernel.hpp:752: total_heads = kargs.batch * kargs.num_head_q).
+// In group mode the kernel derives per-batch counts from seqstart pointers,
+// so this slot is unused there.
+constexpr int BATCH_SIZE = 11; // i32: batch count (deterministic batch mode only)
+
+} // namespace fmha_bwd_dqdkdv_slots
+
+/// Single source of truth for "does this spec use the BATCH_SIZE scalar slot".
+/// Used by requiredScalars(), validateArgs(), and the device bridge so the
+/// predicate cannot drift between sites. CK Tile's persistent kernel
+/// (kUsePersistent = is_deterministic && !is_group_mode) is the only path
+/// that reads kargs.batch; group mode derives batch implicitly from seqstart.
+constexpr bool usesBatchSizeSlot(FmhaBwdDQDKDVSpec k)
+{
+    return k.is_deterministic && k.mode == FmhaMode::BATCH;
+}
+
+namespace fmha_bwd_dqdkdv_slots {
 
 /// Minimum scalar slot count (max_used_index + 1) for a given config.
 constexpr int requiredScalars(FmhaBwdDQDKDVSpec k)
 {
+    if(usesBatchSizeSlot(k))
+        return BATCH_SIZE + 1; // 12 (dominates mask/dropout slots)
     if(k.has_mask)
         return MASK_TYPE + 1; // 11 (covers dropout slots [4..7] since 11 > 8)
     if(k.has_dropout)
@@ -172,7 +194,7 @@ constexpr int requiredScalars(FmhaBwdDQDKDVSpec k)
 } // namespace fmha_bwd_dqdkdv_slots
 
 // ---------------------------------------------------------------------------
-// makeSpec — consteval validation
+// makeSpec -- consteval validation
 // ---------------------------------------------------------------------------
 
 /// Validate config and produce a structural kernel descriptor.
@@ -202,7 +224,7 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     // --- mode validation ---
     // Group mode uses variable-length sequences, which requires padding.
     // Note: unlike OGradDotO/ConvertDQ, DqDkDv does not have a separate
-    // pad_seqlen_q flag — sequence padding is implied by pad_hdim_q/v.
+    // pad_seqlen_q flag -- sequence padding is implied by pad_hdim_q/v.
     // pad_hdim_q/v must be nonzero for group mode to handle unaligned heads.
     if(sig.mode == FmhaMode::GROUP && algo.pad_hdim_q == 0 && algo.pad_hdim_v == 0)
         throw "group mode requires padding"
@@ -254,8 +276,63 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     return k;
 }
 
-// Compile canary: dropout variant exercises bias/dropout/slot count paths.
+// Compile canaries: each variant exercises a distinct slot-count path so
+// requiredTensors() / requiredScalars() drift is caught at build time.
 // clang-format off
+
+// Plain BATCH: Q..DV only -> 9 tensors, base scalars only -> 4 scalars.
+static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})) == 9);
+static_assert(fmha_bwd_dqdkdv_slots::requiredScalars(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})) == 4);
+
+// ALiBi BATCH: bias slot active -> 10 tensors.
+static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.bias_type = FmhaBiasType::ALIBI,
+                      .pad_hdim_q = 8, .pad_hdim_v = 8}})) == 10);
+
+// Elementwise bias + bias gradient: BIAS+DBIAS slots active -> 11 tensors.
+static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.bias_type = FmhaBiasType::ELEMENTWISE,
+                      .has_bias_grad = true,
+                      .pad_hdim_q = 8, .pad_hdim_v = 8}})) == 11);
+
+// Causal mask + deterministic BATCH: BATCH_SIZE dominates -> 12 scalars.
+static_assert(fmha_bwd_dqdkdv_slots::requiredScalars(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.has_mask = true,
+                      .is_deterministic = true,
+                      .pad_hdim_q = 8, .pad_hdim_v = 8}})) == 12);
+
+// Plain deterministic BATCH (no mask): BATCH_SIZE still required -> 12 scalars.
+static_assert(fmha_bwd_dqdkdv_slots::requiredScalars(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.is_deterministic = true,
+                      .pad_hdim_q = 8, .pad_hdim_v = 8}})) == 12);
+
+// Dropout BATCH: RANDVAL slot active -> 12 tensors, dropout scalars -> 8.
 static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(makeSpec(
     FmhaBwdDQDKDVConfig{
         .signature = {.dtype = DataType::FP16,
@@ -263,6 +340,22 @@ static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(makeSpec(
                       .mode = FmhaMode::BATCH},
         .algorithm = {.has_dropout = true,
                       .pad_hdim_q = 8, .pad_hdim_v = 8}})) == 12);
+static_assert(fmha_bwd_dqdkdv_slots::requiredScalars(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.has_dropout = true,
+                      .pad_hdim_q = 8, .pad_hdim_v = 8}})) == 8);
+
+// GROUP mode always extends to SEQLEN_K slot -> 16 tensors regardless of
+// optional features (the seqstart/seqlen tail dominates).
+static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::GROUP},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})) == 16);
 // clang-format on
 
 } // namespace rocm_ck
