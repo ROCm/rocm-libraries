@@ -22,13 +22,14 @@
  * ************************************************************************ */
 #pragma once
 
-#include <any>
+#include <cstddef>
 #include <functional>
 #include <iosfwd>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -43,6 +44,72 @@
 
 namespace stinkytofu {
 class PassContext;
+
+class PassResultStorage {
+    struct Base {
+        virtual ~Base() = default;
+        virtual std::unique_ptr<Base> clone() const = 0;
+    };
+
+    template <typename T>
+    struct Model final : Base {
+        explicit Model(T value) : value(std::move(value)) {}
+
+        std::unique_ptr<Base> clone() const override {
+            return std::make_unique<Model<T>>(value);
+        }
+
+        T value;
+    };
+
+    template <typename T>
+    static const void* typeTag() {
+        static const std::byte tag{};
+        return &tag;
+    }
+
+   public:
+    PassResultStorage() = default;
+
+    PassResultStorage(const PassResultStorage& other)
+        : holder(other.holder ? other.holder->clone() : nullptr), tag(other.tag) {}
+
+    PassResultStorage& operator=(const PassResultStorage& other) {
+        if (this == &other) return *this;
+        holder = other.holder ? other.holder->clone() : nullptr;
+        tag = other.tag;
+        return *this;
+    }
+
+    PassResultStorage(PassResultStorage&&) noexcept = default;
+    PassResultStorage& operator=(PassResultStorage&&) noexcept = default;
+
+    template <typename T>
+    static PassResultStorage create(T value) {
+        using Decayed = std::decay_t<T>;
+        PassResultStorage storage;
+        storage.holder = std::make_unique<Model<Decayed>>(std::move(value));
+        storage.tag = typeTag<Decayed>();
+        return storage;
+    }
+
+    template <typename T>
+    const T* getIf() const {
+        using Decayed = std::decay_t<T>;
+        if (tag != typeTag<Decayed>()) return nullptr;
+        return &static_cast<const Model<Decayed>*>(holder.get())->value;
+    }
+
+   private:
+    std::unique_ptr<Base> holder;
+    const void* tag = nullptr;
+};
+
+template <typename T>
+const T* passResultCast(const PassResultStorage* value) {
+    if (!value) return nullptr;
+    return value->template getIf<T>();
+}
 
 //----------------------------------------------------------------------
 // BasicBlock Filter Support
@@ -116,7 +183,7 @@ class STINKYTOFU_EXPORT PassContext {
     PassFeatureConfig passConfig;
     AsmCapsConfig asmCapsConfig;
     uint32_t wavefrontSize = 0;  ///< Computed from gemmConfig.arch
-    std::unordered_map<std::string, std::any> passResults;
+    std::unordered_map<std::string, PassResultStorage> passResults;
 
     // Global BasicBlock filter applied to all StinkyInstPass instances.
     // By default, all BasicBlocks are processed.
@@ -166,7 +233,7 @@ class STINKYTOFU_EXPORT PassContext {
     /// Store an arbitrary pass result by key.
     template <typename T>
     void setResult(std::string key, T value) {
-        passResults[std::move(key)] = std::make_any<T>(std::move(value));
+        passResults[std::move(key)] = PassResultStorage::create(std::move(value));
     }
 
     /// Retrieve a typed pass result by key.
@@ -175,7 +242,7 @@ class STINKYTOFU_EXPORT PassContext {
     std::optional<T> getResult(const std::string& key) const {
         auto it = passResults.find(key);
         if (it == passResults.end()) return std::nullopt;
-        if (const T* value = std::any_cast<T>(&it->second)) return *value;
+        if (const T* value = passResultCast<T>(&it->second)) return *value;
         return std::nullopt;
     }
 
@@ -187,7 +254,7 @@ class STINKYTOFU_EXPORT PassContext {
         passResults.clear();
     }
 
-    const std::unordered_map<std::string, std::any>& getAllResults() const {
+    const std::unordered_map<std::string, PassResultStorage>& getAllResults() const {
         return passResults;
     }
 };

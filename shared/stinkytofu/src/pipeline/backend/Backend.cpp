@@ -22,7 +22,6 @@
  * ************************************************************************ */
 #include "stinkytofu/pipeline/Backend.hpp"
 
-#include <any>
 #include <optional>
 
 #include "stinkytofu/bindings/python/Module.hpp"
@@ -31,29 +30,29 @@
 
 namespace stinkytofu {
 namespace {
-std::optional<StinkyAsmModule::PassResultValue> toPassResultValue(const std::any& value) {
-    if (const auto* v = std::any_cast<uint32_t>(&value)) {
+std::optional<StinkyAsmModule::PassResultValue> toPassResultValue(const PassResultStorage& value) {
+    if (const auto* v = passResultCast<uint32_t>(&value)) {
         return static_cast<uint64_t>(*v);
     }
-    if (const auto* v = std::any_cast<uint64_t>(&value)) {
+    if (const auto* v = passResultCast<uint64_t>(&value)) {
         return *v;
     }
-    if (const auto* v = std::any_cast<int32_t>(&value)) {
+    if (const auto* v = passResultCast<int32_t>(&value)) {
         return static_cast<int64_t>(*v);
     }
-    if (const auto* v = std::any_cast<int64_t>(&value)) {
+    if (const auto* v = passResultCast<int64_t>(&value)) {
         return *v;
     }
-    if (const auto* v = std::any_cast<double>(&value)) {
+    if (const auto* v = passResultCast<double>(&value)) {
         return *v;
     }
-    if (const auto* v = std::any_cast<float>(&value)) {
+    if (const auto* v = passResultCast<float>(&value)) {
         return static_cast<double>(*v);
     }
-    if (const auto* v = std::any_cast<bool>(&value)) {
+    if (const auto* v = passResultCast<bool>(&value)) {
         return *v;
     }
-    if (const auto* v = std::any_cast<std::string>(&value)) {
+    if (const auto* v = passResultCast<std::string>(&value)) {
         return *v;
     }
     return std::nullopt;
