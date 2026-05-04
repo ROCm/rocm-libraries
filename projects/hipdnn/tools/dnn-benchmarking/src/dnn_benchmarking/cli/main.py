@@ -13,10 +13,10 @@ import sys
 # ~/.cache/ or ~/.miopen/, which is a network filesystem on AMD dev machines.
 # Only set each variable if the user has not already overridden it.
 _LOCAL_CACHE_DEFAULTS = {
-    "XDG_CACHE_HOME": "/tmp/cache",              # pip, torch, black, all XDG-aware tools
-    "MIOPEN_USER_DB_PATH": "/tmp/miopen_cache",  # MIOpen user kernel DB
-    "MIOPEN_CUSTOM_CACHE_DIR": "/tmp/miopen_cache",  # MIOpen find-db / system DB
-    "AMD_COMGR_CACHE_DIR": "/tmp/comgr_cache",   # ROCm compiler cache
+    "XDG_CACHE_HOME": "/workspace/cache",              # pip, torch, black, all XDG-aware tools
+    "MIOPEN_USER_DB_PATH": "/workspace/miopen_cache",  # MIOpen user kernel DB
+    "MIOPEN_CUSTOM_CACHE_DIR": "/workspace/miopen_cache",  # MIOpen find-db / system DB
+    "AMD_COMGR_CACHE_DIR": "/workspace/comgr_cache",   # ROCm compiler cache
 }
 for _var, _default in _LOCAL_CACHE_DEFAULTS.items():
     os.environ.setdefault(_var, _default)
