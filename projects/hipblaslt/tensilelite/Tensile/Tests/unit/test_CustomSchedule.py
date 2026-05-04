@@ -127,16 +127,6 @@ class TestCustomScheduleValidation:
         assert not has_schedule
         assert schedule_info is None
 
-    def test_ascending_order_catches_invalid_schedule(self):
-        """A non-ascending schedule is caught by the ordering concern."""
-        kernel = create_base_kernel()
-        invalid_schedule = {"P": [[3, 2, 1]]}
-
-        si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
-        status, message = isValid(si, _make_context(kernel, si))
-        assert status == False
-        assert "Non-descending-order" in message
-
     def test_active_concerns_gfx950_with_packs(self):
         """gfx950 kernel with packs includes PACK_DATA_READY."""
         kernel = create_base_kernel()

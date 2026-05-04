@@ -222,9 +222,9 @@ class StructuralRule(ABC):
     """A composable validation rule that operates on raw schedule data (no Timeline).
 
     The run() method returns a (bool, str) tuple. Migrated structural rules
-    (e.g. AscendingOrderRule) construct typed Failures
-    internally and call .format(capture=None) to produce the str — keeping
-    the tuple shape stable for the existing isValid contract.
+    construct typed Failures internally and call .format(capture=None) to
+    produce the str — keeping the tuple shape stable for the existing
+    isValid contract.
     """
 
     @abstractmethod
@@ -3029,7 +3029,7 @@ class ValidationContext:
     default_capture: object = None
     cms_capture: object = None
     # Side-channel for typed Failure objects emitted by structural rules
-    # (verify_ascending_order). These rules return (False, str) for backward
+    # (e.g. verify_scc_overlap). These rules return (False, str) for backward
     # compatibility but stash the Failure here so test infrastructure can
     # introspect typed fields. Reset to None at the top of each rule iteration
     # in isValid to prevent cross-rule leakage.
@@ -3206,62 +3206,9 @@ def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context
     return True, ""
 
 
-def verify_ascending_order(scheduleInfo, context: 'ValidationContext', code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that all sequences of scheduleInfo.optSchedule are non-decreasing for a single code path.
-
-    Context and example: There will be a sequence of N 'GRIncA' instructions
-    for incrementing the memory address that the A macro tile is read from.
-    The CMS developer has the freedom to insert these N instructions into
-    'vmfmaIndices' of their choice. A vmfma_index is a sequence of instructions between
-    2 consecutive mfma instructions. Example: 'GRIncA' : [[0,1,1,3]] would
-    mean that the N=4 instructions to increment the pointer appear as follows:
-
-    instruction 1    : between mfma 0 and mfma 1.
-    instructions 2,3 : between mfma 1 and mfma 2.
-    instruction 4    : between mfma 3 and mfma 4.
-
-    However, there is a correctness requirement that the N vmfmaIndices for these
-    instructions are non-decreasing. This rule is true for all groups of instructions,
-    not just the 'GRIncA' instructions.
-    """
-    # TODO: Move this validation into each instructions's validation to allow for custom ordering.
-    from Tensile.Components.ScheduleCapture import OutOfOrderSequenceFailure
-    for k in scheduleInfo.optSchedule.keys():
-        if k.startswith("Pack"):
-            # Packs have their own validation for ordering.
-            continue
-        seq = schedule_get(k, code_path, scheduleInfo)
-        for i in range(1, len(seq)):
-            if seq[i] < seq[i - 1]:
-                failure = OutOfOrderSequenceFailure(
-                    kind="sequence",
-                    schedule_key=k,
-                    sequence=seq,
-                    bad_value=seq[i],
-                    bad_index=i,
-                    prev_value=seq[i - 1],
-                )
-                # Stash typed Failure for test-side introspection. Return
-                # shape stays (False, str) — see ValidationContext._last_failure.
-                # Guard against test callers that pass context=None.
-                if context is not None:
-                    context._last_failure = failure
-                return (False, failure.format(capture=None))
-    return True, ""
-
-
 # ---------------------------------------------------------------------------
 # Concern-based rule wrappers (stage 11 → isValid wiring)
 # ---------------------------------------------------------------------------
-
-class AscendingOrderRule(StructuralRule):
-    def concerns(self) -> set[ValidationConcern]:
-        return {ValidationConcern.INSTRUCTION_ORDERING}
-
-    def run(self, schedule_info, context, code_path):
-        return verify_ascending_order(schedule_info, context, code_path)
-
 
 class InstructionCountRule(StructuralRule):
     def concerns(self) -> set[ValidationConcern]:
@@ -3315,7 +3262,6 @@ TIMELINE_RULES: list[ValidationRule] = [
 ]
 
 STRUCTURAL_RULES: list[StructuralRule] = [
-    AscendingOrderRule(),
     InstructionCountRule(),
 ]
 

@@ -789,8 +789,9 @@ class SWaitCountExceedsOutstandingFailure(Failure):
 
 # ----------------------------------------------------------------------------
 # 12. OutOfOrderSequenceFailure — instruction A came after B that should follow it.
-#     Two detection sites with the same shape: schedule-sequence ordering
-#     (verify_ascending_order) and CVT0/CVT1 pair ordering (CMSValidator.py:1642).
+#     Used by CVT0/CVT1 pair ordering (CMSValidator.py:1642). The historical
+#     `verify_ascending_order` emitter was retired in bead wx9.11; that
+#     coverage now comes from the dataflow graph (compare_graphs).
 # ----------------------------------------------------------------------------
 @dataclass
 class OutOfOrderSequenceFailure(Failure):
@@ -2330,7 +2331,7 @@ class _GenericALURule:
     SSubU32, SSubBU32, SCmpEQU32 and similar SOP1/SOP2 instructions land
     here. Their sgpr dst (params[0]) and sgpr srcs are tracked, so a
     reversed GRInc-style chain forms RAW edges that `compare_graphs`
-    flips into `OrderInvertedFailure`. This is what allows
+    flips into `OrderInvertedFailure`. This is what allowed
     `verify_ascending_order` (CMSValidator.py) to be retired in bead
     wx9.11. Coverage proven by
     `test_dataflow_graph_comparison.py::TestGRIncReorderDetection` and

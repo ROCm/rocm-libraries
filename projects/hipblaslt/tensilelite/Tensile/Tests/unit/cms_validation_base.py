@@ -47,8 +47,8 @@ class CMSValidationTestBase:
     Structural-only tests (no Timeline needed) override ``validation_function``
     directly and set ``needs_timeline = False``.
     """
-    # Structural-only tests (e.g. verify_ascending_order) should set this to False
-    # if their schedule format is incompatible with Timeline construction.
+    # Structural-only tests should set this to False if their schedule format
+    # is incompatible with Timeline construction.
     needs_timeline = True
 
     # Subclasses set this to the list of add_*_constraints functions to run.
@@ -215,8 +215,8 @@ class CMSValidationTestBase:
         if expected_failure is not None:
             assert not status, "Schedule should have failed but passed."
             # Timeline rules stash their typed Failure on the Timeline;
-            # structural rules (verify_ascending_order) have no Timeline and
-            # instead stash on ValidationContext.
+            # structural rules have no Timeline and instead stash on
+            # ValidationContext.
             failure = getattr(timeline, "_last_failure", None) if timeline else None
             if failure is None:
                 failure = getattr(ctx, "_last_failure", None)

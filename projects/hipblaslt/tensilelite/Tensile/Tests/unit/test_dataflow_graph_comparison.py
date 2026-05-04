@@ -587,29 +587,25 @@ class TestDiagnoseMissingEdgeDefenses:
 
 
 # =============================================================================
-# Coverage gap — reversed GRIncA scalar chain is invisible to compare_graphs
+# Reversed GRIncA scalar chain — detected via dataflow graph (post wx9.10)
 # =============================================================================
 #
-# `verify_ascending_order` (CMSValidator.py:3345) catches CMS schedules that
-# emit category instructions out of order — e.g. GRIncA at vmfma_indices
-# [3,2,1,0] instead of [0,1,2,3]. The scheduler walks the optSchedule list
-# left-to-right with no sort (CustomSchedule.py:400-423), so reversal silently
-# emits the chain in reverse order.
+# Historical context: a structural rule `verify_ascending_order` previously
+# caught CMS schedules that emitted category instructions out of order — e.g.
+# GRIncA at vmfma_indices [3,2,1,0] instead of [0,1,2,3]. The scheduler walks
+# the optSchedule list left-to-right with no sort (CustomSchedule.py:400-423),
+# so reversal silently emits the chain in reverse order.
 #
 # A reversed GRIncA chain has real dataflow violations:
 #   #2 SCSelectB32 writes incLower; #4 SAddU32 reads incLower (RAW)
 #   #6 SSubU32 writes ShadowLimit+0; #9 SCSelectB32 reads ShadowLimit+0 (RAW)
 # Reversal puts the consumers before the producers — wrong code.
 #
-# Today the dataflow graph cannot see this. `_writes()` and `_reads()` in
-# ScheduleCapture.py only handle LR/GR/LW/MFMA — scalar ALU instructions
-# return [] from both, so they form no edges. compare_graphs therefore
-# treats reversed and normal GRIncA as identical graphs.
-#
-# This test asserts the *desired* behavior (compare_graphs detects the
-# reversal) so the failure documents the gap. If/when `_writes` and `_reads`
-# are extended to recognize scalar ALU registers, this test starts passing
-# and `verify_ascending_order` becomes a redundant defense.
+# As of bead wx9.10, `_writes()` / `_reads()` model scalar ALU registers, so
+# these reversals form RAW edges that compare_graphs flips into typed
+# OrderInvertedFailures. Bead wx9.11 retired the now-redundant
+# `verify_ascending_order` structural rule; the test below is the
+# replacement coverage.
 
 
 class TestGRIncReorderDetection:
@@ -709,25 +705,6 @@ class TestGRIncReorderDetection:
             "Expected at least one OrderInvertedFailure for the reversed "
             f"GRIncA chain; got {[type(f).__name__ for f in failures]}."
         )
-
-    def test_ascending_order_rule_does_catch_reversed_grinc(self):
-        """Companion: prove that the structural rule `verify_ascending_order`
-        DOES catch the same kind of error at the optSchedule level. This is
-        why the rule remains necessary even after the dataflow-graph
-        comparison is in place."""
-        from Tensile.Components.CMSValidator import verify_ascending_order
-        from Tensile.Components.ScheduleCapture import OutOfOrderSequenceFailure
-
-        class _FakeSchedInfo:
-            optSchedule = {"GRIncA": [[5, 4, 3, 2, 1, 0]]}
-
-        ok, msg = verify_ascending_order(_FakeSchedInfo(), context=None, code_path=0)
-        assert not ok, "verify_ascending_order should have rejected reversed GRIncA"
-        # The rule constructs an OutOfOrderSequenceFailure internally; here
-        # we just confirm the message identifies the offending key.
-        assert "GRIncA" in msg
-        assert "0" in msg  # the bad value
-
 
 class TestVgprChainReorderDetection:
     """Coverage proof for non-GRIncA categories — bead wx9.10 task #4.
