@@ -627,7 +627,7 @@ class LiveDisplay:
                     _BOLD, True,
                 )
             )
-            for jid, rec in running_jobs[:8]:
+            for jid, rec in running_jobs[:self._state.max_parallel]:
                 elapsed_job = (
                     f"[{_fmt_elapsed(now_wall - rec.start_time)}]"
                     if rec.start_time else ""
