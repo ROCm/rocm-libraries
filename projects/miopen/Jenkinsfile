@@ -8,7 +8,7 @@ def rocmnode(name) {
 
 // Returns the original PR branch tip SHA (pullHash) or branch HEAD SHA (hash)
 // from the Jenkins SCMRevisionAction, which is recorded before any local merge.
-// Returns null for non-SCM triggers; caller should fall back to scmVars.GIT_COMMIT.
+// Returns null for non-SCM triggers; caller should handle fall back.
 @NonCPS
 String getGitHubCommitHash(def build)
 {
@@ -108,8 +108,11 @@ def checkoutRepo()
     def scmVars = checkout scm
     // getGitHubCommitHash reads SCMRevisionAction recorded before any local merge,
     // giving the true PR branch tip (pullHash) or branch HEAD (hash).
-    // Falls back to scmVars.GIT_COMMIT for manual/non-SCM triggers.
-    env.GIT_COMMIT = getGitHubCommitHash(currentBuild.rawBuild) ?: scmVars.GIT_COMMIT
+    // Falls back to ORIG_HEAD (pre-merge HEAD set by git merge) when SCMRevisionAction
+    // is unavailable, then to HEAD for branch builds where no merge occurred.
+    env.GIT_COMMIT = getGitHubCommitHash(currentBuild.rawBuild) ?: sh(returnStdout: true, script: '''
+        git rev-parse ORIG_HEAD 2>/dev/null || git rev-parse HEAD
+    ''').trim()
 }
 
 def withWorkingDir(Closure body) {
