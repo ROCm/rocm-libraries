@@ -72,11 +72,16 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML_PREV,
     MissingBarrierFailure,
     MissingWaitFailure,
+    OrderInvertedFailure,
+    SLOT_KIND_MFMA,
+    SlotKey,
+    TaggedInstruction,
     WaitInsufficientFailure,
 )
 
 from dataflow_fixtures import (
-    make_capture, make_gr, make_lr, make_sbarrier, make_swait,
+    make_capture, make_dtl_buffer_load, make_gr, make_lr, make_lw,
+    make_sbarrier, make_swait,
 )
 from graph_native_validation_base import GraphNativeValidationTest
 
@@ -561,3 +566,434 @@ class TestGRNotTooEarlyDtlPlusLdsBufGraph(GraphNativeValidationTest):
         self.assert_failures_contain(
             failures, cls=MissingWaitFailure, counter_kind="dscnt",
         )
+
+
+# =============================================================================
+# DTL vs non-DTL path coverage — bead wa6
+# =============================================================================
+# Pin the two distinct production code paths feeding the LR0 -> GR LDS-reuse
+# invariant:
+#
+#   - DTL path (DirectToLds=1): BufferLoad has dst=None, writes directly to
+#     LDS via the m0 register. _DTLBufferLoadRule publishes m0 as a read for
+#     such loads. The LR0 -> GR cross-iter chain is collected by the
+#     `lr_to_gr_lds_reuse` barrier-pattern collector regardless of DTL vs not.
+#
+#   - Non-DTL path: BufferLoad has a vgpr dst; the chain is GR -> LW (vgpr
+#     RAW edge, vlcnt counter) -> next-iter LR. The GR -> LW edge is a
+#     `raw_intrawave` edge from the per-byte resolver; the LR0 -> GR cross-
+#     iter LDS-reuse handoff is the SAME barrier-pattern edge as the DTL path
+#     (collector is category-based, not instance-based).
+#
+# `TestDTLPathCoverage` and `TestNonDTLPathCoverage` exercise each path
+# independently with discriminating mutation-smell-tests. `TestCrossModeParity`
+# proves the LR0 -> GR LDS-reuse Failure shape is identical across modes for
+# the analogous violation, so a future regression that breaks the lr_to_gr
+# branch in one mode but not the other is impossible without breaking both
+# tests in lockstep.
+#
+# Helpers below mirror the wx9.7 DTL m0 tests' shape (test_dataflow_graph_
+# register_gaps.TestDTLm0Tracking): the m0 setter is a real rocisa
+# SMovB32 to mgpr(0), tagged with category="GRA" so the per-byte resolver
+# routes it via `_GenericALURule` and the m0 RAW edge to the DTL BufferLoad
+# forms via the m0 register identity.
+
+
+# Distinct LDS slot/vgpr ranges for the DTL/non-DTL chains. The non-DTL LW
+# reads the same vgpr the GR wrote (that is the `raw_intrawave` edge under
+# test); cross-iter tests share the same LDS slot between prev-iter LRA0
+# and curr-iter GR.
+_NDLDS = 64           # LDS offset shared across the chain
+_NDVGPR = 60          # vgpr range carrying GR.dst -> LW.src (non-DTL)
+_NDVGPR_COUNT = 4
+_DTL_VADDR = 40       # vaddr vgpr for the DTL BufferLoad
+_DTL_SRD = 12         # SRD sgpr base for both DTL and non-DTL
+
+
+def _smov_m0_set(slot, *, sequence=0, category="GRA"):
+    """Build a real rocisa SMovB32 to mgpr(0) wrapped in a TaggedInstruction.
+
+    Mirrors the m0-setter shape emitted by KWA at lines 10049-10072 (DTL
+    default path: SMovB32(dst=mgpr(0), src=sgpr("LocalWriteAddrA"))). Used
+    by the DTL path tests to publish a producer for the m0 read that
+    `_DTLBufferLoadRule` exposes on the following BufferLoad.
+
+    Tagged with category="GRA" because in production the m0 setter is
+    emitted within the GRA emission group; the per-byte resolver doesn't
+    care about category for register tracking, only for the
+    `_collect_pattern` LR/GR pattern matching (which pairs by category).
+    """
+    # Lazy imports — keep the rocisa cost out of fake-only test runs.
+    from rocisa.container import sgpr, mgpr
+    from rocisa.instruction import SMovB32
+    inst = SMovB32(dst=mgpr(0), src=sgpr("LocalWriteAddrA", 1))
+    return TaggedInstruction(
+        inst=inst,
+        category=category,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                     mfma_index=slot, sequence=sequence),
+    )
+
+
+def _nd_gr(slot, *, sequence=0, category="GRA"):
+    """Non-DTL BufferLoad: writes vgpr (_NDVGPR..+_NDVGPR_COUNT)."""
+    return make_gr(
+        _NDVGPR, _NDVGPR_COUNT, srd_sgpr_start=_DTL_SRD,
+        immediate_offset=_NDLDS, slot=slot, category=category,
+        sequence=sequence,
+    )
+
+
+def _nd_lw(slot, *, sequence=0):
+    """Non-DTL LW: reads the same vgpr the non-DTL GR wrote."""
+    return make_lw(
+        _NDVGPR, _NDVGPR_COUNT, lds_offset=_NDLDS, slot=slot,
+        category="LWA", sequence=sequence,
+    )
+
+
+def _dtl_gr(slot, *, sequence=0, category="GRA"):
+    """DTL BufferLoad (dst=None) — implicitly reads m0 via _DTLBufferLoadRule."""
+    return make_dtl_buffer_load(
+        vaddr_vgpr_start=_DTL_VADDR, srd_sgpr_start=_DTL_SRD,
+        slot=slot, category=category, immediate_offset=_NDLDS,
+        sequence=sequence,
+    )
+
+
+def _prev_lra0_drained(*, lra0_dst_start=8):
+    """ML-1 body: LRA0 then full dscnt drain + barrier. Used as the
+    canonical reference for DTL/non-DTL cross-iter tests."""
+    return make_capture(BODY_LABEL_ML_PREV, [
+        make_lr(lra0_dst_start, 4, lds_offset=_NDLDS, slot=0, category="LRA0"),
+        make_swait(slot=2, dscnt=0),
+        make_sbarrier(slot=3),
+    ])
+
+
+def _prev_lra0_misplaced(*, lra0_dst_start=8):
+    """ML-1 body: dscnt drain + barrier emitted FIRST, then LRA0 issued
+    AFTER — the LRA0 has no covering wait/barrier before the next-iter GR."""
+    return make_capture(BODY_LABEL_ML_PREV, [
+        make_swait(slot=2, dscnt=0),
+        make_sbarrier(slot=3),
+        make_lr(lra0_dst_start, 4, lds_offset=_NDLDS, slot=5, category="LRA0"),
+    ])
+
+
+# -----------------------------------------------------------------------------
+# DTL path coverage
+# -----------------------------------------------------------------------------
+
+
+class TestDTLPathCoverage(GraphNativeValidationTest):
+    """Pin the DTL BufferLoad code path: dst=None + implicit m0 read.
+
+    These tests use `make_dtl_buffer_load` so the BufferLoad goes through
+    `_DTLBufferLoadRule` (publishes `reads=(m0, srd)`) rather than the
+    non-DTL `_BufferLoadRule` (publishes `writes=(vgpr_dst,)`).
+
+    Mutation-smell-tests pinned by this class:
+      * Comment out `_DTLBufferLoadRule.extract`'s m0 publish (or the
+        `applies` predicate so DTL BufferLoads route to `_BufferLoadRule`):
+        `test_dtl_m0_edge_present_when_setter_present` no longer finds the
+        m0 RAW edge and fails.
+      * Comment out the `lr_to_gr_lds_reuse` branch in
+        `_classify_edge_coverage`: `test_dtl_gr_before_prev_lr0_dscnt_drain`
+        no longer emits MissingWaitFailure(counter_kind='dscnt') on the
+        cross-iter LRA0 -> GRA edge.
+    """
+
+    def test_dtl_gr_before_prev_lr0_dscnt_drain(self):
+        """DTL BufferLoad (dst=None, reads m0) in current iter consumes the
+        LDS slot the previous iter's LRA0 read. The cross-iter
+        `lr_to_gr_lds_reuse` edge requires a dscnt drain + barrier between
+        the prev LRA0 and the curr DTL load.
+
+        REF: prev LRA0 properly drained in ML-1, current DTL BufferLoad in ML.
+        SUBJ: the dscnt drain + barrier is emitted in ML-1 BEFORE the LRA0,
+        so the LRA0 is not covered before the next-iter GR.
+
+        Asserts MissingWaitFailure(counter_kind='dscnt') on the cross-iter
+        LRA0 -> GRA edge.
+        """
+        ref_cap = self.wrap_single_body(
+            make_capture(BODY_LABEL_ML, [_dtl_gr(slot=0)]),
+            ml_prev=_prev_lra0_drained(),
+        )
+        subj_cap = self.wrap_single_body(
+            make_capture(BODY_LABEL_ML, [_dtl_gr(slot=0)]),
+            ml_prev=_prev_lra0_misplaced(),
+        )
+        failures = self.compare(ref_cap, subj_cap)
+        f = self.assert_failures_contain(
+            failures, cls=MissingWaitFailure, counter_kind="dscnt",
+        )
+        assert f.producer.category == "LRA0"
+        assert f.consumer.category == "GRA"
+
+    def test_dtl_m0_edge_present_when_setter_present(self):
+        """Positive structural pin: when an SMovB32 to mgpr(0) precedes
+        the DTL BufferLoad, `_DTLBufferLoadRule` publishes `reads=(m0,...)`
+        and the per-byte resolver forms a `raw_intrawave` edge from the
+        SMov to the BufferLoad with `resource.regType == 'm'`.
+
+        Mutation pin: commenting out the `mgpr(0)` publish in
+        `_DTLBufferLoadRule.extract` removes the m0 from the wrapper's
+        reads, and this assertion fails (no edge with `regType == 'm'`).
+        """
+        cap = self.wrap_single_body(make_capture(BODY_LABEL_ML, [
+            _smov_m0_set(slot=0),
+            _dtl_gr(slot=1),
+        ]))
+        graph = self.build_graph(cap)
+        # Find the m0 RAW edge from the SMov to the DTL BufferLoad.
+        m0_edges = [
+            e for e in graph.edges
+            if e.edge_kind == "raw_intrawave"
+            and getattr(e.resource, "regType", None) == "m"
+        ]
+        assert len(m0_edges) >= 1, (
+            f"Expected at least one m0 raw_intrawave edge from the SMov "
+            f"to the DTL BufferLoad. Edges in graph: "
+            f"{[(e.producer.category, e.consumer.category, e.edge_kind, getattr(e.resource, 'regType', None)) for e in graph.edges]}"
+        )
+
+    def test_dtl_m0_setter_missing_before_buffer_load(self):
+        """Negative structural pin: with NO m0 setter in the stream, the
+        DTL BufferLoad's m0 read has no producer — the per-byte resolver
+        emits no `raw_intrawave` edge with `regType == 'm'` into the load.
+
+        This test asserts the edge ABSENCE explicitly. Complementary to
+        `test_dtl_m0_edge_present_when_setter_present`: the m0 read is
+        published by `_DTLBufferLoadRule` regardless, but with no producer
+        in the latest_writer map for the m0 byte-key, no edge forms —
+        modelling the production hazard where a missing m0 update lets
+        the BufferLoad write to the wrong LDS slot.
+        """
+        cap = self.wrap_single_body(make_capture(BODY_LABEL_ML, [
+            _dtl_gr(slot=0),  # No SMov m0 setter precedes this
+        ]))
+        graph = self.build_graph(cap)
+        m0_edges = [
+            e for e in graph.edges
+            if e.edge_kind == "raw_intrawave"
+            and getattr(e.resource, "regType", None) == "m"
+        ]
+        assert m0_edges == [], (
+            f"Expected NO m0 RAW edge into the DTL BufferLoad when no m0 "
+            f"setter precedes it; got: {m0_edges!r}"
+        )
+
+    def test_dtl_cross_iter_full_chain_passing(self):
+        """Full positive: DTL chain across `main_loop_prev -> main_loop`.
+
+        ML-1: LRA0 -> SWaitCnt(dscnt=0) -> SBarrier
+        ML  : SMov m0 -> DTL BufferLoad (reads m0)
+
+        Both the cross-iter `lr_to_gr_lds_reuse` edge (LRA0 -> GRA) and the
+        m0 `raw_intrawave` edge (SMov -> DTL BufferLoad) form. Wait
+        coverage emits no failures.
+        """
+        prev = _prev_lra0_drained()
+        ml = make_capture(BODY_LABEL_ML, [
+            _smov_m0_set(slot=0),
+            _dtl_gr(slot=1),
+        ])
+        cap = self.wrap_single_body(ml, ml_prev=prev)
+        graph = self.build_graph(cap)
+        # Pin both edge surfaces.
+        self.assert_edge_exists(graph, edge_kind="lr_to_gr_lds_reuse",
+                                producer_category="LRA0",
+                                consumer_category="GRA")
+        m0_edges = [
+            e for e in graph.edges
+            if e.edge_kind == "raw_intrawave"
+            and getattr(e.resource, "regType", None) == "m"
+        ]
+        assert m0_edges, "Expected at least one m0 RAW edge in the DTL chain"
+        # Wait coverage clean.
+        failures = self.validate_waits(graph)
+        self.assert_no_failures(failures)
+
+
+# -----------------------------------------------------------------------------
+# Non-DTL path coverage
+# -----------------------------------------------------------------------------
+
+
+class TestNonDTLPathCoverage(GraphNativeValidationTest):
+    """Pin the non-DTL BufferLoad code path: GR (vgpr dst) -> LW chain.
+
+    The non-DTL BufferLoad has a vgpr dst, so the per-byte resolver forms a
+    `raw_intrawave` edge from GR.dst to the LW that reads the vgpr. The
+    counter for a GR producer is `vlcnt`, so a missing vlcnt drain in the
+    GR -> LW window emits MissingWaitFailure(counter_kind='vlcnt').
+
+    The next-iter LR0 reusing the LDS slot is captured by the SAME
+    `lr_to_gr_lds_reuse` cross-iter pattern as the DTL path — the
+    barrier-pattern collector is category-based, so the dscnt drain
+    requirement applies to both modes uniformly. The DSCNT-drain test
+    here therefore exercises the non-DTL BufferLoad as the GR consumer
+    of the LR0->GR pattern.
+
+    Mutation-smell-tests pinned by this class:
+      * Comment out the GR vlcnt-counter mapping (the GR* branch in
+        `counter_for`): `test_nondtl_gr_to_lw_vlcnt_drain_missing` would
+        either crash with CaptureUnknownInstructionError or, if the branch
+        defaults to dscnt, the explicit `counter_kind='vlcnt'` assertion
+        fails.
+      * Comment out the `lr_to_gr_lds_reuse` branch in
+        `_classify_edge_coverage` / `diagnose_missing_edge`:
+        `test_nondtl_lr0_to_gr_dscnt_drain_missing` no longer emits
+        MissingWait on the LR0 -> GR cross-iter edge.
+      * Comment out OrderInverted's Phase-1 check in `diagnose_missing
+        _edge`: `test_nondtl_lw_after_gr_order_inverted` no longer surfaces
+        the GR -> LW reorder.
+    """
+
+    def test_nondtl_gr_to_lw_vlcnt_drain_missing(self):
+        """Non-DTL GR (writes vgpr v60..v63) -> LW (reads v60..v63). With no
+        SWaitCnt(vlcnt=0) in the [GR, LW) window, the GR's vector-memory
+        load hasn't necessarily completed when the LW issues — the LW
+        sources potentially stale data.
+
+        validate_edge_wait_coverage on a single graph emits MissingWait
+        Failure(counter_kind='vlcnt') on the `raw_intrawave` GRA -> LWA
+        edge.
+        """
+        cap = self.wrap_single_body(make_capture(BODY_LABEL_ML, [
+            _nd_gr(slot=0),
+            # No SWaitCnt(vlcnt=0) here — the LW reads the vgpr while the
+            # buffer load may still be in flight.
+            _nd_lw(slot=2),
+        ]))
+        graph = self.build_graph(cap)
+        failures = self.validate_waits(graph)
+        f = self.assert_failures_contain(
+            failures, cls=MissingWaitFailure, counter_kind="vlcnt",
+        )
+        assert f.producer.category == "GRA"
+        assert f.consumer.category == "LWA"
+
+    def test_nondtl_lr0_to_gr_dscnt_drain_missing(self):
+        """Non-DTL cross-iter chain analogue of
+        `TestDTLPathCoverage.test_dtl_gr_before_prev_lr0_dscnt_drain`.
+
+        The LR0 -> GR cross-iter `lr_to_gr_lds_reuse` edge is the SAME
+        pattern-collector edge for both modes (collector is category-based,
+        not instance-based). For the non-DTL path the GR is a plain
+        BufferLoad with a vgpr dst (uses `make_gr` / `_BufferLoadRule`)
+        instead of `_DTLBufferLoadRule`. The dscnt-drain requirement is
+        identical — pinned here for the non-DTL leaf so a future regression
+        that special-cases DTL vs non-DTL in the lr_to_gr branch fails
+        BOTH tests in lockstep.
+        """
+        ref_cap = self.wrap_single_body(
+            make_capture(BODY_LABEL_ML, [_nd_gr(slot=0)]),
+            ml_prev=_prev_lra0_drained(),
+        )
+        subj_cap = self.wrap_single_body(
+            make_capture(BODY_LABEL_ML, [_nd_gr(slot=0)]),
+            ml_prev=_prev_lra0_misplaced(),
+        )
+        failures = self.compare(ref_cap, subj_cap)
+        f = self.assert_failures_contain(
+            failures, cls=MissingWaitFailure, counter_kind="dscnt",
+        )
+        assert f.producer.category == "LRA0"
+        assert f.consumer.category == "GRA"
+
+    def test_nondtl_lw_after_gr_order_inverted(self):
+        """Non-DTL: LW reordered to issue BEFORE the GR that produces the
+        vgpr it reads. Reference order is GR (writes v60..v63) -> LW
+        (reads v60..v63); subject inverts this to LW -> GR.
+
+        diagnose_missing_edge's Phase-1 OrderInvertedFailure detection
+        flags the inversion (default schedule has producer<consumer in
+        stream order, subject has producer>consumer).
+
+        Note: the bead text says "LW emitted AFTER the next-iter LR that
+        consumes it"; the more direct OrderInverted surface for the
+        non-DTL chain is the GR->LW vgpr RAW edge in the SAME body, since
+        the LW->LR LDS handoff isn't tracked register-side (LDS is not in
+        the per-byte resolver's address space). Same Failure type, same
+        Phase-1 detection branch — the inversion of the GR->LW edge
+        captures the equivalent "data flowing backward through the chain"
+        defect.
+        """
+        ref_cap = self.wrap_single_body(make_capture(BODY_LABEL_ML, [
+            _nd_gr(slot=0),
+            make_swait(slot=1, vlcnt=0),
+            _nd_lw(slot=2),
+        ]))
+        subj_cap = self.wrap_single_body(make_capture(BODY_LABEL_ML, [
+            _nd_lw(slot=0),  # LW issues BEFORE the GR — reads stale vgpr
+            _nd_gr(slot=1),
+            make_swait(slot=2, vlcnt=0),
+        ]))
+        failures = self.compare(ref_cap, subj_cap, raise_on_unexplained=False)
+        f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
+        assert f.producer.category == "GRA"
+        assert f.consumer.category == "LWA"
+
+
+# -----------------------------------------------------------------------------
+# Cross-mode parity
+# -----------------------------------------------------------------------------
+
+
+class TestCrossModeParity(GraphNativeValidationTest):
+    """Lockstep parity between DTL and non-DTL modes.
+
+    For the analogous logical violation — "previous-iter LR0 has no covering
+    dscnt drain before the current-iter GR consumes the LDS slot" — both
+    DTL and non-DTL fixtures must emit a Failure of identical SHAPE
+    (same class, same counter_kind, same producer/consumer category strings).
+
+    This guards against a future divergence where one path's edge-formation
+    logic changes and silently drops a failure on its branch — the lockstep
+    assertion fails immediately with both fixtures' failure lists side-by-
+    side.
+    """
+
+    def _build_pair(self, gr_factory):
+        """Build (REF, SUBJ) FourPartCaptures for the LRA0(prev) misplacement
+        violation, parameterised by the GR factory (DTL vs non-DTL).
+        """
+        ref = self.wrap_single_body(
+            make_capture(BODY_LABEL_ML, [gr_factory(slot=0)]),
+            ml_prev=_prev_lra0_drained(),
+        )
+        subj = self.wrap_single_body(
+            make_capture(BODY_LABEL_ML, [gr_factory(slot=0)]),
+            ml_prev=_prev_lra0_misplaced(),
+        )
+        return ref, subj
+
+    def test_dtl_and_nondtl_same_violation_same_failure_shape(self):
+        # DTL fixture
+        dtl_ref, dtl_subj = self._build_pair(_dtl_gr)
+        dtl_failures = self.compare(dtl_ref, dtl_subj)
+        dtl_f = self.assert_failures_contain(
+            dtl_failures, cls=MissingWaitFailure, counter_kind="dscnt",
+        )
+
+        # Non-DTL fixture
+        nd_ref, nd_subj = self._build_pair(_nd_gr)
+        nd_failures = self.compare(nd_ref, nd_subj)
+        nd_f = self.assert_failures_contain(
+            nd_failures, cls=MissingWaitFailure, counter_kind="dscnt",
+        )
+
+        # Lockstep parity: same Failure class, same counter, same producer
+        # category, same consumer category. The producer/consumer NODE
+        # identities differ (different rocisa instances) — that's expected;
+        # what we pin is the diagnostic SHAPE, not the per-instance fields.
+        assert type(dtl_f) is type(nd_f), (
+            f"Failure class divergence: DTL emits {type(dtl_f).__name__}, "
+            f"non-DTL emits {type(nd_f).__name__}"
+        )
+        assert dtl_f.counter_kind == nd_f.counter_kind == "dscnt"
+        assert dtl_f.producer.category == nd_f.producer.category == "LRA0"
+        assert dtl_f.consumer.category == nd_f.consumer.category == "GRA"
