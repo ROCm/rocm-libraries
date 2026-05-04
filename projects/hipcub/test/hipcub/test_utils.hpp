@@ -732,6 +732,32 @@ inline auto make_discard_iterator() -> ::thrust::discard_iterator<T>
 
 #endif
 
+template<typename offset_type, typename segment_index_type>
+struct segments_index_to_offset_op
+{
+    segment_index_type             empty_segments_count;
+    segment_index_type             segments_count;
+    offset_type                    segment_length;
+    offset_type                    size;
+
+    HIPCUB_HOST_DEVICE
+    HIPCUB_FORCEINLINE offset_type operator()(segment_index_type i) const
+    {
+        if(i < empty_segments_count)
+        {
+            return 0;
+        }
+        else if(i < segments_count)
+        {
+            return segment_length * static_cast<offset_type>(i - empty_segments_count);
+        }
+        else
+        {
+            return size;
+        }
+    }
+};
+
 } // namespace test_utils
 
 // Need for hipcub::DeviceReduce::Min/Max etc.
