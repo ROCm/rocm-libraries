@@ -432,6 +432,15 @@ std::string SignatureKernelDescriptor::toString() const {
         kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_offset 0\n";
     }
 
+    // Emit pass-through directives captured by RawAsmParser (.amdhsa_* lines
+    // not modelled by the structured fields above). Each entry is already
+    // formatted verbatim (with its source indentation) and includes no
+    // trailing newline.
+    for (const auto& d : extraKernelDirectives) {
+        kStr += d;
+        if (d.empty() || d.back() != '\n') kStr += "\n";
+    }
+
     kStr += ".end_amdhsa_kernel\n";
     kStr += ".text\n";
     kStr += "/* Num VGPR   =" + std::to_string(originalTotalVgprs) + " */\n";

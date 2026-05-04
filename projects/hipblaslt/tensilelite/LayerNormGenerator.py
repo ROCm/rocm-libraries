@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -121,7 +121,7 @@ class LayerNormKernelGenerator:
                  arch: str,
                  isa: IsaVersion):
         self.io_type = io_type
-        self.bpe = io_type.numBytes()
+        self.bpe = int(io_type.numBytes())
         self.num_workitems = num_workitems
         self.num_load_count = num_load_count
         self.num_load_size = num_load_size

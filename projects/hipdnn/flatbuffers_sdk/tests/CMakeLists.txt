@@ -44,6 +44,7 @@ target_include_directories(
 
 target_link_libraries(
     hipdnn_flatbuffers_sdk_tests
+    PRIVATE
     GTest::gtest
     GTest::gmock
     Threads::Threads

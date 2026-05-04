@@ -43,7 +43,7 @@ Graph makeGraph(const UnsupportedBnDtypeCase& tc, const TensorLayout& layout = T
     const auto cDims = getDerivedShape(dims);
 
     auto xAttr = makeTensorAttributes("X", tc.io, dims, generateStrides(dims, layout.strideOrder));
-    auto X = std::make_shared<TensorAttributes>(std::move(xAttr));
+    auto x = std::make_shared<TensorAttributes>(std::move(xAttr));
 
     auto meanAttr = makeTensorAttributes("mean", tc.stats, cDims, generateStrides(cDims));
     auto invVarAttr = makeTensorAttributes("inv_variance", tc.stats, cDims, generateStrides(cDims));
@@ -56,8 +56,8 @@ Graph makeGraph(const UnsupportedBnDtypeCase& tc, const TensorLayout& layout = T
     auto bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
     BatchnormInferenceAttributes bn;
-    auto Y = g.batchnorm_inference(X, mean, invVar, scale, bias, bn);
-    Y->set_output(true);
+    auto y = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
+    y->set_output(true);
 
     return g;
 }
@@ -112,7 +112,7 @@ TEST_P(IntegrationGpuBatchnormUnsupportedDataTypes, RejectsUnsupportedDataTypes)
 
     auto result = g.build(_handle);
 
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << "err_msg: " << result.err_msg;
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED) << "err_msg: " << result.err_msg;
 
     EXPECT_FALSE(result.err_msg.empty()) << "err_msg is empty";
 }

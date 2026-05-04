@@ -25,12 +25,14 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
+#include <nanobind/stl/vector.h>
 
 #include <algorithm>
 #include <cassert>
 #include <cctype>
 #include <iostream>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -79,14 +81,61 @@ stinkytofu::FLATModifiers convertFLATModifiers(const rocisa::FLATModifiers& rocM
                                      rocMod.isStore, hasGLCModifier, hasSC0Modifier);
 }
 
+stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope) {
+    switch (scope) {
+        case rocisa::CacheScope::SCOPE_CU:
+            return stinkytofu::MUBUFScope::SCOPE_CU;
+        case rocisa::CacheScope::SCOPE_SE:
+            return stinkytofu::MUBUFScope::SCOPE_SE;
+        case rocisa::CacheScope::SCOPE_DEV:
+            return stinkytofu::MUBUFScope::SCOPE_DEV;
+        case rocisa::CacheScope::SCOPE_SYS:
+            return stinkytofu::MUBUFScope::SCOPE_SYS;
+        default:
+            return stinkytofu::MUBUFScope::SCOPE_NONE;
+    }
+}
+
 stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& rocMod,
                                                  const std::map<std::string, int>& asmCaps) {
     bool hasMUBUFConst = asmCaps.count("HasMUBUFConst") && asmCaps.at("HasMUBUFConst");
     bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
+    stinkytofu::MUBUFScope scope = convertMUBUFScope(rocMod.scope);
     return stinkytofu::MUBUFModifiers(rocMod.offen, rocMod.offset12, rocMod.glc, rocMod.slc,
                                       rocMod.nt, rocMod.lds, rocMod.isStore, hasMUBUFConst,
-                                      hasGLCModifier, hasSC0Modifier);
+                                      hasGLCModifier, hasSC0Modifier, scope);
+}
+
+/// Returns true when vaddr is the MUBUF "off" keyword.
+bool isOffVaddrContainer(const rocisa::Container* vaddr) {
+    if (auto* regCont = dynamic_cast<const rocisa::RegisterContainer*>(vaddr)) {
+        return regCont->isOff;
+    }
+    return false;
+}
+
+/// Build modifiers matching rocisa's MUBUF address form: real vaddr operands
+/// use `offen`, while `off` keeps the no-vaddr form.
+stinkytofu::MUBUFModifiers buildMUBUFModifiersForBufferOp(
+    const std::optional<rocisa::MUBUFModifiers>& rocMubuf, const rocisa::Container* vaddr,
+    const std::map<std::string, int>& asmCaps) {
+    bool hasMUBUFConst = asmCaps.count("HasMUBUFConst") && asmCaps.at("HasMUBUFConst");
+    bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
+    bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
+
+    stinkytofu::MUBUFModifiers mod = rocMubuf.has_value()
+                                         ? convertMUBUFModifiers(rocMubuf.value(), asmCaps)
+                                         : stinkytofu::MUBUFModifiers(
+                                               /*offen=*/false, /*offset12=*/0, /*glc=*/false,
+                                               /*slc=*/false, /*nt=*/false, /*lds=*/false,
+                                               /*isStore=*/false, hasMUBUFConst, hasGLCModifier,
+                                               hasSC0Modifier, stinkytofu::MUBUFScope::SCOPE_NONE);
+
+    if (!mod.offen && !isOffVaddrContainer(vaddr)) {
+        mod.offen = 1;
+    }
+    return mod;
 }
 
 stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocMod,
@@ -430,8 +479,8 @@ void handleMFMAModifiers(StinkyInstruction* stinkyInst, const rocisa::MFMAInstru
     // Extract neg_lo/neg_hi modifiers
     auto [negStr, hasNegLo, hasNegHi] = extractNegModifiers(instString);
 
+    // TODO: deprecated, remove this after all callers are updated to provide scaleStr
     std::string scaleStr;
-    if (mfmaInst->forceScaledWMMA()) scaleStr = ", 0, 0";
 
     MFMAModifiers mfmaModifiers(inputPermuteStr, scaleStr, negStr, false, false, hasNegLo,
                                 hasNegHi);
@@ -553,10 +602,14 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
-        else TRY_ADD_MOD(MUBUFReadInstruction, mubuf, stinkytofu::MUBUFModifiers,
-            [&](const auto& mod) { return convertMUBUFModifiers(mod, asmCaps); })
-        else TRY_ADD_MOD(MUBUFStoreInstruction, mubuf, stinkytofu::MUBUFModifiers,
-            [&](const auto& mod) { return convertMUBUFModifiers(mod, asmCaps); })
+        else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
+            stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
+                buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
+        }
+        else if (auto typed = dynamic_cast<const MUBUFStoreInstruction*>(inst)) {
+            stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
+                buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
+        }
         else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers,
             [&](const auto& mod) { return convertSMEMModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(SMemStoreInstruction, smem, stinkytofu::SMEMModifiers,
@@ -617,6 +670,13 @@ int getMsbOffsetFromStinkyVgpr(const StinkyRegister& reg) {
 StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgprMsb) {
     if (const rocisa::RegisterContainer* regCont =
             dynamic_cast<const rocisa::RegisterContainer*>(container)) {
+        // isOff=true signals the MUBUF "off" keyword (no address register).
+        // rocisa emits "off" for this case; produce a literal string so the
+        // emitter writes "off" instead of treating it as a named VGPR.
+        if (regCont->isOff) {
+            return StinkyRegister("off");
+        }
+
         RegType regType = stringToRegType(regCont->regType);
 
         int physicalIdx = regCont->regIdx;
@@ -953,7 +1013,63 @@ std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
     };
 
-    traverseModule(module, {}, processItem);
+    // Check whether a rocisa Instruction is a global/buffer/flat load or tensor load.
+    // Excludes SMemLoadInstruction (s_load) which also inherits from GlobalReadInstruction.
+    auto isPrefetchLoadInst = [](const rocisa::Instruction* inst) -> bool {
+        return dynamic_cast<const rocisa::MUBUFReadInstruction*>(inst) ||
+               dynamic_cast<const rocisa::GLOBALLoadInstruction*>(inst) ||
+               dynamic_cast<const rocisa::FLATReadInstruction*>(inst) ||
+               dynamic_cast<const rocisa::TensorLoadToLds*>(inst);
+    };
+
+    // Recursively check whether an item contains a prefetch load instruction.
+    std::function<bool(const rocisa::Item*)> containsPrefetchLoad =
+        [&](const rocisa::Item* item) -> bool {
+        if (const auto* inst = dynamic_cast<const rocisa::Instruction*>(item))
+            return isPrefetchLoadInst(inst);
+        if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
+            for (const auto& child : mod->itemList)
+                if (containsPrefetchLoad(child.get())) return true;
+        }
+        return false;
+    };
+
+    // Auto-detect the loopWithPrefetch region: from the first global read or
+    // tensor load item up to and including Module("loopBody").
+    int pgrStartIdx = -1;
+    int loopBodyIdx = -1;
+    for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+        const auto& item = module.itemList[i];
+        if (pgrStartIdx == -1 && containsPrefetchLoad(item.get())) {
+            pgrStartIdx = i;
+        }
+        if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
+            if (subMod->name == "loopBody") {
+                loopBodyIdx = i;
+                break;
+            }
+        }
+    }
+
+    const bool hasPGR = (pgrStartIdx != -1 && loopBodyIdx != -1 && pgrStartIdx <= loopBodyIdx);
+    static const std::string kPGR = "loopWithPrefetch";
+
+    // Traverse top-level items, injecting the loopWithPrefetch group name
+    // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx].
+    for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+        const auto& item = module.itemList[i];
+        const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);
+
+        std::vector<const std::string*> base;
+        if (inPGR) base.push_back(&kPGR);
+        base.push_back(&module.name);
+
+        if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
+            traverseModule(*subMod, base, processItem);
+        } else {
+            processItem(item.get(), base);
+        }
+    }
 
     return std::make_shared<StinkyAsmModule>(std::move(stinkyAsmModule));
 }
@@ -998,6 +1114,9 @@ void init_stinkytofu(nb::module_ m) {
             return BackendRegistry::getArchPipeline(archArray) != nullptr;
         },
         nb::arg("arch"), "Check if the architecture is supported by StinkyTofu");
+    m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
+          "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
+          "[\"gfx1250\"]).");
     // Wrapper class to add signature support to StinkyAsmModule
     class StinkyAsmModuleWithSignature {
        private:

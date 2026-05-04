@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 
@@ -91,14 +92,14 @@ namespace stinkytofu {
  *   std::string asm = module->emitAssembly();
  * @endcode
  */
-class StinkyAsmModule {
+class STINKYTOFU_EXPORT StinkyAsmModule {
    public:
     /**
      * @brief Options for the StinkyAsmModule
      * @note This struct is used to store the information for the StinkyAsmModule
      */
     struct ModuleOptions {
-#define GEN_MEMBER_OPTION(name, type) type name;
+#define GEN_MEMBER_OPTION(name, type) type name{};
         MODULE_OPTIONS_LIST(GEN_MEMBER_OPTION)
 #undef GEN_MEMBER_OPTION
     };
