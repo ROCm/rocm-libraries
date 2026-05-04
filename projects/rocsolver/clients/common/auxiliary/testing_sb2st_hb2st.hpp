@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 #include "print_matrix.hpp"
 #include "common/misc/generate.hpp"
 
@@ -378,6 +379,8 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
     }
 
     // gpu-lapack performance
+    rocsolver_timer timer;
+
     if (profile > 0)
     {
         if (profile_kernels)
@@ -393,7 +396,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
         sb2st_hb2st_initData<false, true, T>(
             handle, uplo, n, kd, dAband, ldab, hAband);
 
-        start = get_time_us_sync( stream );
+        timer.start(stream);
         CHECK_ROCBLAS_ERROR(
             rocsolver_sb2st_hb2st(
                 handle, uplo, n, kd,
@@ -401,11 +404,10 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                 dD.data(), dE.data(),
                 dV.data(), ldv,
                 dTau.data() ) );
-        time = get_time_us_sync(stream) - start;
-        *gpu_time_used += time;
+        time = timer.end(stream);
         printf( "n %d, kd %d, hot  iter %d, time %.4f\n", n, kd, iter, time );
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <typename T>
