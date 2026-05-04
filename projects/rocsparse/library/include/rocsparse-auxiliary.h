@@ -975,9 +975,9 @@ rocsparse_status rocsparse_create_coo_aos_descr(rocsparse_spmat_descr* descr,
  *               \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr or \p bsr_row_ptr or \p bsr_col_ind or \p bsr_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p brows or \p bcols or \p bnnz \p block_dim is invalid.
- *  \retval rocsparse_status_invalid_value if \p row_ptr_type or \p col_ind_type or \p idx_base or \p data_type or \p block_dir is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr, \p bsr_row_ptr, \p bsr_col_ind, or \p bsr_val is invalid.
+ *  \retval rocsparse_status_invalid_size if \p brows, \p bcols, \p bnnz, or \p block_dim is invalid.
+ *  \retval rocsparse_status_invalid_value if \p row_ptr_type, \p col_ind_type, \p idx_base, \p data_type, or \p block_dir is invalid.
  */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -2475,9 +2475,9 @@ rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
  *               \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr or \p brows or \p bcols or \p bnnz or
- *          \p block_dir or \p block_dim or \p bsr_row_ptr or \p bsr_col_ind or \p bsr_val or
- *          \p row_ptr_type or \p col_ind_type or \p idx_base or \p data_type is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr, \p brows, \p bcols, \p bnnz,
+ *          \p block_dir, \p block_dim, \p bsr_row_ptr, \p bsr_col_ind, \p bsr_val,
+ *          \p row_ptr_type, \p col_ind_type, \p idx_base, or \p data_type is invalid.
  *  \retval rocsparse_status_not_initialized if \p descr has not been initialized.
  */
 /**@{*/
