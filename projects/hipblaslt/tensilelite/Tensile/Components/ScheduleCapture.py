@@ -3407,6 +3407,15 @@ _QUAD_CYCLES_MFMA_4X4_FINISH = 1        # 4x4 (Pack-flavored) MFMA: 1 quad-cycle
 _QUAD_CYCLES_CVT_BEFORE_MFMA = 2        # CVT pack -> MFMA settle window.
 _QUAD_CYCLES_CVT_FINISH = 0             # CVT issues + finishes in 1 cycle (finish=0).
 
+# --- MFMA Type-Switch Thresholds (mirrored from CMSValidator.py:280-282) ------
+# When the simulator (`precompute_issue_times`, CMSValidator.py:2664-2670)
+# observes consecutive MFMAs of DIFFERENT classes whose issue gap is below the
+# producer's threshold, it injects a +1 quad-cycle stall — the consumer is
+# forced to issue one cycle later. The thresholds depend on the PRODUCER
+# class: 5 quad-cycles required after a standard MFMA, 3 after a 4x4 PackMFMA.
+_MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5
+_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3
+
 
 def _mfma_finish_cycles_for(rocisa_inst) -> int:
     """Classify an MFMA-shaped rocisa instruction as standard (3 quad-cycles)
@@ -3573,6 +3582,24 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
     without the import cycle (likely by extracting the small core of
     `precompute_issue_times` into a shared module that both
     `ScheduleCapture` and `CMSValidator` import).
+
+    Type-switch +1 stall (bead `vf4`). When the producer and consumer
+    belong to DIFFERENT MFMA classes (standard vs 4x4 PackMFMA), the
+    structural simulator (`precompute_issue_times`,
+    CMSValidator.py:2664-2670) injects a +1 quad-cycle stall whenever the
+    inter-MFMA issue gap is below the producer's threshold
+    (`_MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5` or
+    `_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3`). This delays the
+    consumer's issue and therefore ENLARGES the real producer→consumer
+    gap by one quad-cycle. Without this layer the graph-side `actual` was
+    a strictly looser under-estimate than the simulator's report; with
+    it, graph-side `actual` matches the simulator for the direct
+    producer→consumer edge in the no-intermediate case (and remains a
+    sound lower bound when intermediates introduce additional stalls
+    that the graph cannot see). Sound under-estimate property is
+    preserved: real_actual >= formula_actual_with_penalty in every
+    direct type-switch case (the penalty is a lower bound on the true
+    enlargement, never an over-count).
     """
     # Classify the producer's MFMA family from its rocisa shape (variant
     # field). The pre-e7w implementation read `mfma_finish_cycles` off the
@@ -3583,6 +3610,12 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
     # 4x4 PackMFMAs whose true finish is 1.
     finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None))
     expected = finish
+    # Consumer-side classification for vf4 type-switch detection. Pulled
+    # outside the same-body branch because the cross-body early-return does
+    # not need it (cross-body gaps already dwarf any +1 stall).
+    consumer_finish = _mfma_finish_cycles_for(
+        getattr(consumer, "rocisa_inst", None)
+    )
 
     if producer.body_label != consumer.body_label:
         # Cross-body: a body boundary always represents many issue cycles.
@@ -3638,6 +3671,31 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
         subiter_delta = c_subiter - p_subiter
         if subiter_delta > 0:
             actual += subiter_delta
+    # Type-switch +1 stall (vf4). When the producer and consumer differ in
+    # MFMA class (standard vs 4x4 PackMFMA), the structural simulator
+    # (`precompute_issue_times`) injects a +1 quad-cycle stall when the
+    # inter-MFMA issue gap is below the producer's threshold. The threshold
+    # is `_MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5` for a standard
+    # producer (matched against the basic `1 + finish == 4` adjacency gap
+    # → fires) or `_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3` for a 4x4
+    # producer (matched against `1 + finish == 2` → fires). For the direct
+    # adjacency case (slot_delta == 1, no MFMAs in between) both
+    # directions trigger the penalty unconditionally; for slot_delta > 1
+    # the conservative choice is to add the same +1 — the real hardware
+    # gap is at least that large in the no-intermediate case, and chains
+    # with intermediate MFMAs of varying classes accumulate AT LEAST one
+    # boundary-stall when the producer/consumer pair differs in class
+    # (any path between them must cross at least one class boundary). So
+    # adding +1 stays a sound under-estimate of the simulator's output.
+    #
+    # Why not subtract from `expected` instead? `expected` is the
+    # producer-finish-cycle visibility threshold (3 for standard, 1 for
+    # 4x4) — an architectural minimum, not a tunable scratch field.
+    # Adjusting `actual` keeps the threshold semantically clean; the
+    # `actual >= expected` verdict reads as "delivered gap meets minimum
+    # visibility" regardless of which sources contribute to delivered.
+    if finish != consumer_finish:
+        actual += 1
     return actual >= expected, expected, actual
 
 

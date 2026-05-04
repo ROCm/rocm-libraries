@@ -1390,6 +1390,183 @@ class TestMFMAQuadCycleGap:
         assert timing[0].expected_quad_cycles == 2
         assert timing[0].actual_quad_cycles == 0
 
+    # -------------------------------------------------------------------------
+    # Bead `vf4` — MFMA type-switch +1 stall penalty in the graph-side
+    # `_quad_cycle_gap_ok` actual computation. The structural simulator
+    # (`precompute_issue_times`, CMSValidator.py:2664-2670) injects a +1
+    # quad-cycle stall whenever consecutive MFMAs differ in class
+    # (standard MFMA <-> 4x4 PackMFMA) and the inter-MFMA gap is below the
+    # producer's threshold (FROM_STANDARD = 5, FROM_4X4 = 3). For the
+    # direct producer→consumer adjacency case (slot_delta == 1) both
+    # directions trigger the stall: standard producer's gap is 1+3=4 < 5;
+    # 4x4 producer's gap is 1+1=2 < 3. The graph-side fix mirrors this by
+    # adding +1 to `actual` when producer.finish != consumer.finish — so
+    # the reported `actual` matches the simulator's enlarged gap and the
+    # graph stays a sound under-estimate (real_actual ≥ formula+1 in the
+    # direct case, ≥ formula+1 in the chain case since any path between
+    # the producer and a different-class consumer crosses ≥ 1 boundary).
+    # -------------------------------------------------------------------------
+
+    def test_mfma_type_switch_standard_to_4x4_adds_one_to_actual(self):
+        """Standard MFMA producer (finish=3) at slot=2 with a 4x4 PackMFMA
+        consumer (finish=1) at slot=3 reading the producer's accumulator.
+        Without the vf4 +1 stall the basic formula gives
+        `actual = 1 * (1 + 3) - 1 = 3`. With the type-switch +1 the
+        reported `actual` becomes 4 — matching what the structural
+        `precompute_issue_times` simulator computes for this direct edge:
+        producer issues at 0, mfma_free=4, consumer's `current_issue=4`,
+        gap=4 < FROM_STANDARD=5 → +1 stall → consumer issues at 5,
+        delivered gap = 5-0-1 = 4."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # Producer: standard MFMA (default variant=[32,32]) at slot=2.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # Consumer: 4x4 PackMFMA at slot=3 reads v0..v1 (RAW on
+            # producer's accumulator). Different MFMA class — type switch.
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=3, sequence=0, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        # Find the MFMA→MFMA acc-chain edge.
+        acc_edge = None
+        for e in g.edges:
+            if (getattr(e.producer, "category", None) == "MFMA"
+                    and getattr(e.consumer, "category", None) == "MFMA"):
+                acc_edge = e
+                break
+        assert acc_edge is not None, (
+            "Expected a standard-MFMA → 4x4-PackMFMA acc-chain edge."
+        )
+        ok, expected, actual = _quad_cycle_gap_ok(
+            acc_edge.producer, acc_edge.consumer, 0)
+        assert ok, (
+            f"Type-switch case should still pass the gap check (expected={expected}, "
+            f"actual={actual}); the type-switch +1 only enlarges actual."
+        )
+        # expected == producer's finish == 3 (standard MFMA).
+        assert expected == 3, (
+            f"expected should be the standard producer's finish (3), got {expected}."
+        )
+        # actual = base 3 + type-switch penalty 1 = 4.
+        assert actual == 4, (
+            f"vf4: type-switch penalty should add +1 to actual. "
+            f"Basic formula gives 3; with +1 stall actual must be 4. Got {actual}."
+        )
+
+    def test_mfma_type_switch_4x4_to_standard_adds_one_to_actual(self):
+        """Symmetric to the standard→4x4 case: 4x4 PackMFMA producer
+        (finish=1) at slot=2, standard MFMA consumer (finish=3) at slot=3
+        reading the producer's accumulator. Basic formula:
+        `actual = 1 * (1 + 1) - 1 = 1`. With vf4 +1: actual = 2.
+        Structural simulator: producer issues at 0, mfma_free=2,
+        consumer's `current_issue=2`, gap=2 < FROM_4X4=3 → +1 stall →
+        consumer issues at 3, delivered gap = 3-0-1 = 2. Match."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # Producer: 4x4 PackMFMA at slot=2.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+            # Consumer: standard MFMA at slot=3 reads v0..v1 (RAW).
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=3, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        acc_edge = None
+        for e in g.edges:
+            if (getattr(e.producer, "category", None) == "MFMA"
+                    and getattr(e.consumer, "category", None) == "MFMA"):
+                acc_edge = e
+                break
+        assert acc_edge is not None, (
+            "Expected a 4x4-PackMFMA → standard-MFMA acc-chain edge."
+        )
+        ok, expected, actual = _quad_cycle_gap_ok(
+            acc_edge.producer, acc_edge.consumer, 0)
+        assert ok, (
+            f"Type-switch case should still pass the gap check (expected={expected}, "
+            f"actual={actual})."
+        )
+        # expected == producer's finish == 1 (4x4 PackMFMA).
+        assert expected == 1, (
+            f"expected should be the 4x4 producer's finish (1), got {expected}."
+        )
+        # actual = base 1 + type-switch penalty 1 = 2.
+        assert actual == 2, (
+            f"vf4: type-switch penalty should add +1 to actual. "
+            f"Basic formula gives 1; with +1 stall actual must be 2. Got {actual}."
+        )
+
+    def test_mfma_same_class_chain_no_type_switch_penalty(self):
+        """Regression guard: same-class chain (standard producer → standard
+        consumer) does NOT trigger the vf4 type-switch +1 penalty.
+
+        Without this guard, a buggy implementation that always added +1
+        (failing to check class equality) would inflate `actual` even
+        when producer and consumer share the same MFMA class — breaking
+        the existing `test_mfma_acc_chain_consecutive_slots_no_failure`
+        invariant that consecutive standard MFMAs at slot_delta=1 yield
+        actual == expected == 3 exactly."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # Producer: standard MFMA at slot=2 (default variant).
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # Consumer: standard MFMA at slot=3 — SAME class. No type
+            # switch, no +1 penalty.
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=3, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        acc_edge = None
+        for e in g.edges:
+            if (getattr(e.producer, "category", None) == "MFMA"
+                    and getattr(e.consumer, "category", None) == "MFMA"):
+                acc_edge = e
+                break
+        assert acc_edge is not None
+        ok, expected, actual = _quad_cycle_gap_ok(
+            acc_edge.producer, acc_edge.consumer, 0)
+        # Basic formula: 1*(1+3)-1 = 3. No type-switch, so no +1. actual=3.
+        assert ok and expected == 3 and actual == 3, (
+            f"Same-class standard→standard at slot_delta=1 must yield "
+            f"actual==expected==3 (no type-switch penalty). Got "
+            f"ok={ok}, expected={expected}, actual={actual}."
+        )
+
+        # Sanity sibling: same-class 4x4→4x4 chain — no +1 either.
+        cap_pack = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=3, sequence=0, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+        ])
+        g_pack = build_dataflow_graph(_wrap(cap_pack))
+        acc_edge_pack = None
+        for e in g_pack.edges:
+            if (getattr(e.producer, "category", None) == "MFMA"
+                    and getattr(e.consumer, "category", None) == "MFMA"):
+                acc_edge_pack = e
+                break
+        assert acc_edge_pack is not None
+        ok_p, expected_p, actual_p = _quad_cycle_gap_ok(
+            acc_edge_pack.producer, acc_edge_pack.consumer, 0)
+        # Basic formula: 1*(1+1)-1 = 1. No type-switch, no +1. actual=1.
+        assert ok_p and expected_p == 1 and actual_p == 1, (
+            f"Same-class 4x4→4x4 at slot_delta=1 must yield "
+            f"actual==expected==1 (no type-switch penalty). Got "
+            f"ok={ok_p}, expected={expected_p}, actual={actual_p}."
+        )
+
 
 # =============================================================================
 # P0 — GRInc SRD WAW invisible to subsequent GR (BufferLoad)
