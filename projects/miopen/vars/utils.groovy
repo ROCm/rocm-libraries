@@ -614,7 +614,7 @@ def getDockerImageWithStatus(Map conf=[:]) {
     def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
 
     Closure setStatus = { String state, String description ->
-        withCredentials([string(credentialsId: credentialsID, variable: 'GITHUB_TOKEN')]) {
+        withCredentials([usernamePassword(credentialsId: credentialsID, usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
             sh(script: """
                 curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
                     -H 'Authorization: token \$GITHUB_TOKEN' \\
@@ -680,7 +680,7 @@ def buildHipClangJob(Map conf=[:]){
         def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
 
         Closure setStatus = { String state, String description ->
-            withCredentials([string(credentialsId: credentialsID, variable: 'GITHUB_TOKEN')]) {
+            withCredentials([usernamePassword(credentialsId: credentialsID, usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
                 sh(script: """
                     curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
                         -H 'Authorization: token \$GITHUB_TOKEN' \\
