@@ -593,15 +593,16 @@ class MissingWaitFailure(Failure):
     def _format_canonical(self, capture=None) -> str:
         producer_label = _node_label(self.producer, capture)
         consumer_label = _node_label(self.consumer, capture)
-        producer_pos = f"@ idx={(getattr(self.producer, 'position', None) or self.producer.issued_at).vmfma_index}"
-        consumer_pos = f"@ idx={(getattr(self.consumer, 'position', None) or self.consumer.issued_at).vmfma_index}"
+        p_pos = (getattr(self.producer, 'position', None) or self.producer.issued_at)
+        c_pos = (getattr(self.consumer, 'position', None) or self.consumer.issued_at)
+        producer_pos = f"@ idx={p_pos.vmfma_index}"
+        consumer_pos = f"@ idx={c_pos.vmfma_index}"
         # Cross-iteration note: only true "next iteration" in the captured
-        # 4-body model is ML-1 -> ML. ML -> NGL / NGL -> NLL are post-loop
-        # drains within the SAME logical iteration, not the next one.
+        # 4-body model is ML-1 -> ML (loop_index 0 -> 1). ML -> NGL / NGL ->
+        # NLL are post-loop drains within the SAME logical iteration.
         iter_note = ""
-        p_body = getattr(self.producer, "body_label", None)
-        c_body = getattr(self.consumer, "body_label", None)
-        if p_body == "ML-1" and c_body == "ML":
+        if (p_pos.loop_index == BODY_LABEL_TO_LOOP_INDEX[BODY_LABEL_ML_PREV]
+                and c_pos.loop_index == BODY_LABEL_TO_LOOP_INDEX[BODY_LABEL_ML]):
             iter_note = " (of next iteration)"
         # Optional hint when other-counter SWaitCnts exist in the window:
         # the user could extend one of them rather than insert a new SWaitCnt.

@@ -34,6 +34,7 @@ from dataclasses import dataclass
 import pytest
 
 from Tensile.Components.ScheduleCapture import (
+    BODY_LABEL_TO_LOOP_INDEX,
     Failure,
     OrderInvertedFailure,
     MissingWaitFailure,
@@ -63,6 +64,7 @@ from Tensile.Components.ScheduleCapture import (
 @dataclass
 class _Pos:
     vmfma_index: int
+    loop_index: int = 1  # default = ML; overridden by _make_node from body_label
 
 
 @dataclass
@@ -78,7 +80,10 @@ def _make_node(category, name, vmfma_index, tagged_inst=None, body_label="ML"):
     return _Node(
         category=category,
         name=name,
-        position=_Pos(vmfma_index=vmfma_index),
+        position=_Pos(
+            vmfma_index=vmfma_index,
+            loop_index=BODY_LABEL_TO_LOOP_INDEX[body_label],
+        ),
         tagged_inst=tagged_inst,
         body_label=body_label,
     )
