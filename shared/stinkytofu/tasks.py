@@ -157,6 +157,7 @@ def _rmtree(path: Path):
         "build_type": "CMake build type: Release, Debug, RelWithDebInfo (default: Release).",
         "tests": "Build unit tests (default: ON when building standalone).",
         "python": "Build Python bindings.",
+        "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
@@ -168,6 +169,7 @@ def build(
     build_type="Release",
     tests=True,
     python=False,
+    static=False,
     jobs=None,
     clean=False,
     rocm_path=None,
@@ -186,6 +188,7 @@ def build(
 
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
+        f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
     ]
