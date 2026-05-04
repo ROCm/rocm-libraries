@@ -370,6 +370,14 @@ class GraphNode:
 
     position lives in graph-builder space (loop_index spans bodies); the
     underlying TaggedInstruction.slot is preserved on tagged_inst.
+
+    issue_cycles is the per-instruction quad-cycle issue cost (bead `nk0`):
+    mirrors `ValidatorInstruction.min_issue_quad_cycles()` (CMSValidator.py:327
+    + 645). Default 1; SNop-shaped instructions return `1 + wait_state`.
+    Populated by `_make_node` from a class-dispatch table so the graph-side
+    `cumulative_issue_cycles` helper can reproduce `precompute_issue_times`
+    cycle-exactly without re-importing CMSValidator (which would create an
+    import cycle — CMSValidator imports from this module).
     """
     identity: tuple                     # (rocisa_class_name, loop_index, signature_tuple)
     position: SchedulePosition
@@ -378,6 +386,7 @@ class GraphNode:
     tagged_inst: TaggedInstruction      # back-reference for stream-position lookup
     body_label: str                     # 'ML-1' | 'ML' | 'NGL' | 'NLL'
     name: str = ""                      # human-readable label (e.g. 'LRA0[2]')
+    issue_cycles: int = 1               # bead `nk0`: per-instruction quad-cycle cost
 
 
 @dataclass
@@ -2638,6 +2647,42 @@ def _intersection(a, b):
     return _reg_intersection(a, b)
 
 
+def _min_issue_quad_cycles_for(rocisa_inst) -> int:
+    """Return the per-instruction quad-cycle issue cost (bead `nk0`).
+
+    Mirrors `ValidatorInstruction.min_issue_quad_cycles()` from CMSValidator.py:
+        - Default `min_issue_quad_cycles_base = 1` (CMSValidator.py:298, 327-328).
+        - `SNop.min_issue_quad_cycles` adds `wait_state` (CMSValidator.py:645-647).
+    Every other validator dataclass keeps the base cost of 1.
+
+    Why duplicated here. CMSValidator imports from ScheduleCapture for typed
+    Failure formatters (search 'from Tensile.Components.ScheduleCapture' in
+    CMSValidator.py); importing CMSValidator from here would close the cycle.
+    The bead's mandate is to leave only the graph-side timing code, so this
+    helper is the new home and `precompute_issue_times` becomes deletable
+    once all callers migrate.
+    """
+    if rocisa_inst is None:
+        return 1
+    if _is_snop(rocisa_inst):
+        # Test-fixture path: _FakeSNop exposes `wait_state` directly.
+        wait_state = getattr(rocisa_inst, "wait_state", None)
+        if wait_state is not None:
+            return 1 + int(wait_state)
+        # Production rocisa path: SNop stores wait_state as the first param
+        # (matches CMSValidator.py:1058-1060: `snop.getParams()[0]`).
+        get_params = getattr(rocisa_inst, "getParams", None)
+        if callable(get_params):
+            try:
+                params = get_params()
+                if params:
+                    return 1 + int(params[0])
+            except Exception:
+                pass
+        return 1
+    return 1
+
+
 def _make_node(tagged_inst, body_label: str) -> GraphNode:
     inst = tagged_inst.inst
     identity = _identity_for(inst, body_label, category=tagged_inst.category)
@@ -2651,6 +2696,7 @@ def _make_node(tagged_inst, body_label: str) -> GraphNode:
         tagged_inst=tagged_inst,
         body_label=body_label,
         name=name,
+        issue_cycles=_min_issue_quad_cycles_for(inst),
     )
 
 
@@ -3198,7 +3244,7 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
     # exemption claims them.
     if _is_mfma_producer(p_node):
         nmps = subj_graph.num_mfma_per_subiter
-        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps)
+        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
         if not ok:
             return [TimingTooCloseFailure(
                 producer=p_node,
@@ -3555,177 +3601,170 @@ def _is_cvt_pack_producer(producer) -> bool:
     if inst is None:
         return False
     return _is_cvt_pack(inst)
-# Each MFMA slot in the schedule consumes (1 issue + finish_cycles) quad-cycles
-# of timeline; the next MFMA can start issuing at the producer's mfma_free_at
-# (see CMSValidator.precompute_issue_times). So the quad-cycle gap between the
-# producer's issue completion and the consumer's issue start, expressed in the
-# vmfma_index domain, is approximately:
-#     gap_qc = (consumer.vmfma_index - producer.vmfma_index) * (1 + finish) - 1
-# For consecutive standard MFMAs (slot delta == 1) this gives 3 quad-cycles —
-# exactly matching QUAD_CYCLES_STANDARD_MFMA_FINISH, the threshold below.
+def cumulative_issue_cycles(graph, producer, consumer) -> int:
+    """Return the exact number of quad-cycles between producer's issue
+    completion and consumer's issue start (bead `nk0`).
+
+    Replaces the slot-delta + subiter approximation with cycle-exact
+    arithmetic equivalent to `CMSValidator.precompute_issue_times` (CMSValidator
+    .py:2612-2646) followed by `estimate_quad_cycles_precomputed` (CMSValidator
+    .py:2648-2665). Walks the captured body's instruction stream from the
+    producer up to (and excluding) the consumer, simulating the same per-
+    instruction issue accumulator the structural simulator uses, including:
+
+    1. Per-instruction issue cost (`node.issue_cycles`, populated by
+       `_make_node` from `_min_issue_quad_cycles_for`). Default 1; SNop adds
+       wait_state.
+    2. MFMA-only contention: each MFMA's `mfma_free_at = current_issue + 1
+       + finish_cycles` blocks the next MFMA's issue start.
+    3. MFMA type-switch +1 stall: when consecutive MFMAs differ in class
+       (standard vs 4x4 Pack-MFMA) AND the gap-since-last-MFMA is below the
+       producer-class threshold (FROM_STANDARD=5 / FROM_4X4=3), the consumer
+       is delayed by one quad-cycle.
+
+    Returns the gap as `consumer_issue_start - producer_issue_start - 1`
+    (the same convention as `estimate_quad_cycles_precomputed`).
+
+    Falls back to `0` if the body or the producer/consumer cannot be
+    located in the captured stream (defensive — should not happen in
+    well-formed graphs but keeps unit-test scaffolding resilient).
+    """
+    captures = getattr(graph, "captures", None)
+    if not captures:
+        return 0
+    body = captures.get(producer.body_label)
+    if body is None:
+        return 0
+    instructions = getattr(body, "instructions", None)
+    if not instructions:
+        return 0
+
+    # Locate producer and consumer within the body's instruction stream by
+    # (mfma_index, sequence). The TaggedInstruction.slot tuple lex-orders
+    # the same way SchedulePosition does (vmfma_index, sub_index).
+    p_key = (producer.position.vmfma_index, producer.position.sub_index)
+    c_key = (consumer.position.vmfma_index, consumer.position.sub_index)
+    if p_key >= c_key:
+        # Producer at-or-after consumer: no forward issue gap to compute.
+        return 0
+
+    # Locate by tagged_inst identity first (exact match — robust against
+    # fixtures where multiple instructions share the same slot key, e.g.
+    # an LR and an MFMA both at mfma_index=0,sequence=0). Fall back to
+    # slot-key match if the back-reference isn't pinned (defensive — every
+    # GraphNode build path sets `tagged_inst`, so the fallback only fires
+    # in degenerate test paths).
+    p_ti = getattr(producer, "tagged_inst", None)
+    c_ti = getattr(consumer, "tagged_inst", None)
+    p_idx = None
+    c_idx = None
+    for i, ti in enumerate(instructions):
+        if p_idx is None and (ti is p_ti or (
+                p_ti is None
+                and getattr(ti, "slot", None) is not None
+                and (getattr(ti.slot, "mfma_index", None),
+                     getattr(ti.slot, "sequence", None)) == p_key)):
+            p_idx = i
+        if ti is c_ti or (
+                c_ti is None
+                and getattr(ti, "slot", None) is not None
+                and (getattr(ti.slot, "mfma_index", None),
+                     getattr(ti.slot, "sequence", None)) == c_key):
+            c_idx = i
+            break
+    if p_idx is None or c_idx is None or p_idx >= c_idx:
+        return 0
+
+    # Walk producer..consumer, mirroring `precompute_issue_times` exactly.
+    # We start the simulator at the producer (current_issue = 0 baseline),
+    # then accumulate; the returned gap is `c_issue - p_issue - 1`.
+    mfma_free_at = 0
+    current_issue = 0
+    last_mfma_class = None
+    last_mfma_issue = -1
+    p_issue_start = None
+    c_issue_start = None
+
+    for i in range(p_idx, c_idx + 1):
+        ti = instructions[i]
+        inst = getattr(ti, "inst", None)
+        is_mfma = inst is not None and _is_mfma(inst)
+        if is_mfma:
+            current_issue = max(current_issue, mfma_free_at)
+            current_mfma_class = _mfma_finish_cycles_for(inst)
+            if last_mfma_class is not None and current_mfma_class != last_mfma_class:
+                gap = current_issue - last_mfma_issue
+                # Threshold is producer-class-keyed: from a 4x4 producer use
+                # FROM_4X4=3, otherwise FROM_STANDARD=5. We discriminate by
+                # the previous MFMA's finish cycles (1 → 4x4 family).
+                threshold = (_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4
+                             if last_mfma_class == _QUAD_CYCLES_MFMA_4X4_FINISH
+                             else _MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD)
+                if gap < threshold:
+                    current_issue += 1
+            mfma_free_at = current_issue + 1 + current_mfma_class
+            last_mfma_issue = current_issue
+            last_mfma_class = current_mfma_class
+
+        if i == p_idx:
+            p_issue_start = current_issue
+        if i == c_idx:
+            c_issue_start = current_issue
+            break
+        # Per-instruction issue cost. Skip lookup for SWait/SBarrier/SNop
+        # whose rocisa instances are not graph nodes — read their cost
+        # directly from `_min_issue_quad_cycles_for`. For graph-tracked
+        # nodes the cost is identical (default base 1) so either path is
+        # cycle-exact.
+        current_issue += _min_issue_quad_cycles_for(inst)
+
+    if p_issue_start is None or c_issue_start is None:
+        return 0
+    return c_issue_start - p_issue_start - 1
 
 
-def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter):
+def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter=0, graph=None):
     """Verify that enough quad-cycles separate an MFMA producer from its
     consumer for the producer's result to be visible.
 
     Returns (ok, expected_quad_cycles, actual_quad_cycles).
 
-    Cross-body edges are treated as 'plenty of gap' — a body boundary in
-    the captured schedule represents at least a full pipelined iteration's
-    worth of issue slots, which dwarfs any single-MFMA finish window.
+    Bead `nk0` rewrite: the same-body branch now delegates to
+    `cumulative_issue_cycles`, which simulates the captured body's
+    instruction stream cycle-exactly (mirrors
+    `CMSValidator.precompute_issue_times`). The previous slot-delta
+    approximation, the subiter +1 correction (cmw), and the unconditional
+    type-switch +1 (vf4) are all subsumed by the helper — the helper sees
+    every intermediate instruction's issue cost and applies the type-switch
+    stall only when the actual gap-since-last-MFMA is below the threshold.
 
-    For same-body MFMA-to-MFMA edges, the gap is derived from the
-    vmfma_index delta and the subiteration structure (`num_mfma_per_subiter`).
-    The producer's `mfma_finish_cycles` (3 for the standard MFMA family,
-    1 for the 4x4 Pack-MFMA) is the minimum required gap N.
+    `num_mfma_per_subiter` is retained as a positional parameter for
+    backward compatibility with existing call sites and tests but is no
+    longer consulted (the helper has the body context). `graph` is the
+    DataflowGraph the producer/consumer belong to; when omitted (or when
+    the body can't be located) we degrade gracefully by reporting an
+    `actual` of 0 — strictly conservative, will fail the gap check.
 
-    Approach: SOUND UNDER-ESTIMATE (approach (b) per bead `cmw`). The
-    structural-side authority for the actual gap arithmetic when slot_delta
-    > 1 is `CMSValidator.precompute_issue_times`, which walks the full
-    instruction stream including non-MFMA fillers. This function operates
-    only on (producer, consumer, num_mfma_per_subiter) — it does NOT have
-    access to the instructions between producer and consumer, so it cannot
-    replicate `precompute_issue_times` exactly. A direct re-implementation
-    here would require carrying the body's instruction stream through the
-    dataflow-graph node API, which the graph deliberately does not expose
-    (and ScheduleCapture must not import CMSValidator — that would create a
-    cycle since CMSValidator imports from this module).
-
-    The formula here is therefore a sound under-estimate: the returned
-    `actual` is a LOWER BOUND on the real quad-cycle gap. Same-subiter
-    consecutive MFMAs (slot_delta == 1, subiter_delta == 0) are tight —
-    the formula reports exactly `finish`, matching the threshold and
-    `precompute_issue_times`. For slot_delta > 1 we add `subiter_delta`
-    extra quad-cycles to acknowledge that each subiter boundary crossed
-    represents at least one non-MFMA issue cycle (LR/Pack/SWait/SBarrier
-    work) that `precompute_issue_times` would account for via its
-    `min_issue_quad_cycles()` accumulation. This is conservative — real
-    cross-subiter gaps in CMS-pipelined schedules are larger — but using
-    the bound means we may OVER-flag (return ok=False when the real gap
-    is actually fine), never UNDER-flag. The graph-side check is a fast
-    pre-filter; the structural-side timeline (`precompute_issue_times`)
-    remains the ground-truth dispatch for cycle-accurate verdicts.
-
-    Future work tracked in `rocm-libraries-w7f` will migrate to a
-    timeline-aware graph that can call into a shared issue-time helper
-    without the import cycle (likely by extracting the small core of
-    `precompute_issue_times` into a shared module that both
-    `ScheduleCapture` and `CMSValidator` import).
-
-    Type-switch +1 stall (bead `vf4`). When the producer and consumer
-    belong to DIFFERENT MFMA classes (standard vs 4x4 PackMFMA), the
-    structural simulator (`precompute_issue_times`,
-    CMSValidator.py:2664-2670) injects a +1 quad-cycle stall whenever the
-    inter-MFMA issue gap is below the producer's threshold
-    (`_MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5` or
-    `_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3`). This delays the
-    consumer's issue and therefore ENLARGES the real producer→consumer
-    gap by one quad-cycle. Without this layer the graph-side `actual` was
-    a strictly looser under-estimate than the simulator's report; with
-    it, graph-side `actual` matches the simulator for the direct
-    producer→consumer edge in the no-intermediate case (and remains a
-    sound lower bound when intermediates introduce additional stalls
-    that the graph cannot see). Sound under-estimate property is
-    preserved: real_actual >= formula_actual_with_penalty in every
-    direct type-switch case (the penalty is a lower bound on the true
-    enlargement, never an over-count).
+    Cross-body edges remain a `body_delta * 1000` placeholder because the
+    captured bodies are independent issue streams; the cross-body MFMA→MFMA
+    case is presumed safe (verdict True, large `actual`).
     """
-    # Classify the producer's MFMA family from its rocisa shape (variant
-    # field). The pre-e7w implementation read `mfma_finish_cycles` off the
-    # rocisa instance — but that attribute is a ClassVar on the validator
-    # dataclasses (CMSValidator.MFMA / CMSValidator.MFMAPack), NOT on the
-    # rocisa MFMAInstruction C++ class. The getattr always returned None and
-    # silently fell through to the standard 3-quad-cycle threshold, even for
-    # 4x4 PackMFMAs whose true finish is 1.
     finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None))
     expected = finish
-    # Consumer-side classification for vf4 type-switch detection. Pulled
-    # outside the same-body branch because the cross-body early-return does
-    # not need it (cross-body gaps already dwarf any +1 stall).
-    consumer_finish = _mfma_finish_cycles_for(
-        getattr(consumer, "rocisa_inst", None)
-    )
 
     if producer.body_label != consumer.body_label:
         # Cross-body: a body boundary always represents many issue cycles.
-        # Report a conservatively large `actual` so (a) the gap is always
-        # judged OK (verdict semantics: cross-body MFMA->MFMA is presumed
-        # safe, never emits TimingTooCloseFailure) and (b) telemetry /
-        # diagnostics see a numerically meaningful value rather than the
-        # misleading placeholder `actual == expected` (s7k).
-        #
-        # We don't have access to per-body issue-cycle accounting here
-        # (that lives in CMSValidator.precompute_issue_times, which we
-        # cannot import without creating a cycle — see the docstring above
-        # for the same constraint that drives the same-body sound under-
-        # estimate). A conservative under-estimate based on how many body
-        # boundaries are crossed is enough to make the diagnostic honest:
-        # each body boundary represents at least hundreds of quad-cycles
-        # in any real schedule, so 1000 quad-cycles per crossed body is
-        # both (a) a sound under-estimate that keeps the verdict True for
-        # any plausible `expected`, and (b) numerically distinguishable
-        # from `expected` (typically 3 for the standard MFMA family) in
-        # any failure formatter or telemetry consumer.
+        # Use the conservative 1000-per-body placeholder (s7k).
         body_delta = consumer.position.loop_index - producer.position.loop_index
         actual = abs(body_delta) * 1000
         return True, expected, actual
 
-    p_pos = producer.position
-    c_pos = consumer.position
-    slot_delta = c_pos.vmfma_index - p_pos.vmfma_index
-    # Same vmfma_index: consumer issues immediately adjacent to producer
-    # (sub_index breaks the tie). Gap is effectively zero quad-cycles for
-    # accumulator/operand visibility purposes.
-    if slot_delta <= 0:
-        actual = 0
-        return False, expected, actual
-    # Back-to-back MFMA-only baseline (densely packed slot stream): each
-    # MFMA slot consumes (1 + finish) quad-cycles and we measure from the
-    # producer's issue completion to the consumer's issue start.
-    actual = slot_delta * (1 + finish) - 1
-    # Subiter-aware correction. For each subiter boundary crossed between
-    # producer and consumer, the schedule guarantees at least one
-    # non-MFMA issue cycle (the body-fill machinery — LR/Pack/SWait/
-    # SBarrier — that `precompute_issue_times` accumulates via
-    # `instruction.min_issue_quad_cycles()`). This is a sound under-
-    # estimate: real cross-subiter gaps are larger because subiters
-    # contain multiple non-MFMA instructions, but treating each crossed
-    # boundary as +1 quad-cycle is enough to (a) make the parameter
-    # semantically live (different `num_mfma_per_subiter` values yield
-    # different `actual` for the same slot pair), and (b) keep the
-    # function as a lower-bound — never under-flag a real gap.
-    if num_mfma_per_subiter and num_mfma_per_subiter > 0:
-        p_subiter = p_pos.vmfma_index // num_mfma_per_subiter
-        c_subiter = c_pos.vmfma_index // num_mfma_per_subiter
-        subiter_delta = c_subiter - p_subiter
-        if subiter_delta > 0:
-            actual += subiter_delta
-    # Type-switch +1 stall (vf4). When the producer and consumer differ in
-    # MFMA class (standard vs 4x4 PackMFMA), the structural simulator
-    # (`precompute_issue_times`) injects a +1 quad-cycle stall when the
-    # inter-MFMA issue gap is below the producer's threshold. The threshold
-    # is `_MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5` for a standard
-    # producer (matched against the basic `1 + finish == 4` adjacency gap
-    # → fires) or `_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3` for a 4x4
-    # producer (matched against `1 + finish == 2` → fires). For the direct
-    # adjacency case (slot_delta == 1, no MFMAs in between) both
-    # directions trigger the penalty unconditionally; for slot_delta > 1
-    # the conservative choice is to add the same +1 — the real hardware
-    # gap is at least that large in the no-intermediate case, and chains
-    # with intermediate MFMAs of varying classes accumulate AT LEAST one
-    # boundary-stall when the producer/consumer pair differs in class
-    # (any path between them must cross at least one class boundary). So
-    # adding +1 stays a sound under-estimate of the simulator's output.
-    #
-    # Why not subtract from `expected` instead? `expected` is the
-    # producer-finish-cycle visibility threshold (3 for standard, 1 for
-    # 4x4) — an architectural minimum, not a tunable scratch field.
-    # Adjusting `actual` keeps the threshold semantically clean; the
-    # `actual >= expected` verdict reads as "delivered gap meets minimum
-    # visibility" regardless of which sources contribute to delivered.
-    if finish != consumer_finish:
-        actual += 1
+    if graph is None:
+        # No graph passed (degenerate test path): treat as zero-gap. Strict
+        # callers always pass `graph=subj_graph`.
+        return False, expected, 0
+
+    actual = cumulative_issue_cycles(graph, producer, consumer)
     return actual >= expected, expected, actual
 
 
@@ -4007,7 +4046,7 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
     # below.
     if _is_mfma_producer(p_node):
         nmps = subj_graph.num_mfma_per_subiter
-        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps)
+        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
         if not ok:
             return [TimingTooCloseFailure(
                 producer=p_node,

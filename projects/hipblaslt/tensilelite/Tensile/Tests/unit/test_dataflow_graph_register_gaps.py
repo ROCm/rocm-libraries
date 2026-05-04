@@ -77,6 +77,7 @@ from Tensile.Components.ScheduleCapture import (
     TaggedInstruction,
     build_dataflow_graph,
     compare_graphs,
+    cumulative_issue_cycles,
     diagnose_missing_edge,
     validate_edge_wait_coverage,
     OrderInvertedFailure,
@@ -388,39 +389,54 @@ class TestMFMAQuadCycleGap:
     waving the edge through unverified.
     """
 
-    def test_mfma_acc_chain_zero_gap_emits_timing_too_close(self):
-        """Two MFMAs sharing accumulator v0..v3, both at the SAME mfma_index
-        (sub_index breaks the tie). The per-byte resolver builds the
-        producer->consumer edge; the gap check sees slot_delta == 0, expected
-        == QUAD_CYCLES_STANDARD_MFMA_FINISH (3), actual == 0 — emits
-        TimingTooCloseFailure."""
+    def test_mfma_acc_chain_same_slot_passes_under_exact_arithmetic(self):
+        """Two MFMAs sharing accumulator v0..v3, both at the SAME vmfma_index
+        (sub_index breaks the tie). Bead `nk0` rewrite: cycle-exact
+        arithmetic via `cumulative_issue_cycles` correctly gates the
+        consumer behind the producer's `mfma_free_at` (current_issue + 1
+        + finish_cycles = 0 + 1 + 3 = 4). Consumer issues at cycle 4;
+        gap = 4 - 0 - 1 = 3 = expected. NO TimingTooCloseFailure.
+
+        Pre-`nk0` the slot-delta approximation reported `slot_delta == 0
+        → actual = 0 < expected = 3` and synthesized a failure that does
+        not exist in the cycle-accurate timeline (`precompute_issue_times`
+        also walks the stream sequentially and picks up the same +3 gap)."""
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
-            # Producer: writes v0..v3.
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
-            # Consumer at the same mfma_index, ordered by sub_index. Reads
-            # v0..v1 — overlaps producer's accumulator.
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
                       slot=2, sequence=1, a_src_count=2),
         ])
         g = build_dataflow_graph(_wrap(cap))
         failures = validate_edge_wait_coverage(g)
-        # Find the MFMA->MFMA timing failure.
         mfma_timing = [
             f for f in failures
             if isinstance(f, TimingTooCloseFailure)
             and f.producer.category == "MFMA"
             and f.consumer.category == "MFMA"
         ]
-        assert mfma_timing, (
-            f"Expected TimingTooCloseFailure on MFMA->MFMA acc-chain at "
-            f"slot_delta==0 but got: {[type(f).__name__ for f in failures]}"
+        assert not mfma_timing, (
+            f"Cycle-exact arithmetic: same-slot MFMAs are sequential "
+            f"in the issue stream and inherit the producer's 4-cycle "
+            f"mfma_free_at gate, so actual=3 == expected=3 → NO failure. "
+            f"Got: {[type(f).__name__ for f in failures]}"
         )
-        f = mfma_timing[0]
-        assert f.expected_quad_cycles == 3
-        assert f.actual_quad_cycles == 0
+        # Direct invariant check on the new exact arithmetic.
+        acc_edge = next(
+            (e for e in g.edges
+             if getattr(e.producer, "category", None) == "MFMA"
+             and getattr(e.consumer, "category", None) == "MFMA"),
+            None,
+        )
+        assert acc_edge is not None
+        ok, exp, act = _quad_cycle_gap_ok(
+            acc_edge.producer, acc_edge.consumer, 0, graph=g)
+        assert ok and exp == 3 and act == 3, (
+            f"nk0 contract: same-slot MFMAs report exp=3, act=3 (matches "
+            f"precompute_issue_times); got ok={ok}, exp={exp}, act={act}."
+        )
 
     def test_mfma_acc_chain_consecutive_slots_no_failure(self):
         """Two MFMAs at consecutive vmfma_index values (slot_delta == 1)
@@ -450,27 +466,26 @@ class TestMFMAQuadCycleGap:
     # landed and the xfail marker should be dropped.
     # -------------------------------------------------------------------------
 
-    def test_mfma_acc_chain_slot_delta_2_uses_num_mfma_per_subiter(self):
-        """Producer at vmfma=0, consumer at vmfma=2; vary num_mfma_per_subiter
-        between two builds of the same instruction sequence. Post-cmw
-        (sound under-estimate, approach (b)) the returned `actual` includes
-        a +1-per-subiter-boundary correction so it differs between
-        num_mfma_per_subiter=1 (subiter_delta=2 → actual=7+2=9) and
-        num_mfma_per_subiter=2 (subiter_delta=1 → actual=7+1=8) for the
-        same slot pair. The graph-side check remains a lower bound on the
-        real cross-subiter gap; the structural-side `precompute_issue_times`
-        retains ground truth for cycle-accurate verdicts."""
-        # Same instruction layout in both fixtures; only num_mfma_per_subiter
-        # differs at the FourPartCapture level.
+    def test_mfma_acc_chain_slot_delta_2_independent_of_num_mfma_per_subiter(self):
+        """Producer at vmfma=0, consumer at vmfma=2; vary num_mfma_per_subiter.
+        Bead `nk0` (cycle-exact rewrite): `num_mfma_per_subiter` is no
+        longer consulted by `_quad_cycle_gap_ok` — the helper walks the
+        captured stream and accumulates exact issue cycles, so the same
+        body produces the same `actual` regardless of `nmps`. This is the
+        intended outcome of switching from the cmw approximation (where
+        `nmps` controlled a sound +subiter_delta correction) to the
+        precompute-equivalent simulator (which sees every intermediate
+        instruction's issue cost directly).
+
+        For body=[LR, SWait, MFMA@2, MFMA@4] the simulator yields:
+        MFMA1 issues at 0, mfma_free_at=4; MFMA2 issues at max(1,4)=4 →
+        gap = 4-0-1 = 3. Same value under any `nmps`."""
         def _build_cap():
             return make_capture(BODY_LABEL_ML, [
                 make_lr(8, 4, 64, slot=0, category="LRA0"),
                 make_swait(slot=1, dscnt=0),
-                # Producer writes v0..v3.
                 make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                           slot=2, sequence=0, a_src_count=2),
-                # Consumer at slot=4 (slot_delta == 2) reads v0..v1 (RAW on
-                # producer's accumulator).
                 make_mfma(c_dst_start=20, a_src_start=0, b_src_start=32,
                           slot=4, sequence=0, a_src_count=2),
             ])
@@ -491,7 +506,6 @@ class TestMFMAQuadCycleGap:
         g_nmps1 = build_dataflow_graph(_wrap_with_nmps(_build_cap(), 1))
         g_nmps2 = build_dataflow_graph(_wrap_with_nmps(_build_cap(), 2))
 
-        # Find the MFMA->MFMA acc-chain edge in each graph.
         def _acc_edge(g):
             for e in g.edges:
                 if (getattr(e.producer, "category", None) == "MFMA"
@@ -501,21 +515,19 @@ class TestMFMAQuadCycleGap:
 
         e1 = _acc_edge(g_nmps1)
         e2 = _acc_edge(g_nmps2)
-        assert e1 is not None and e2 is not None, (
-            "Expected an MFMA->MFMA acc-chain edge in both graphs."
-        )
+        assert e1 is not None and e2 is not None
 
-        ok1, exp1, act1 = _quad_cycle_gap_ok(e1.producer, e1.consumer, 1)
-        ok2, exp2, act2 = _quad_cycle_gap_ok(e2.producer, e2.consumer, 2)
+        ok1, exp1, act1 = _quad_cycle_gap_ok(
+            e1.producer, e1.consumer, 1, graph=g_nmps1)
+        ok2, exp2, act2 = _quad_cycle_gap_ok(
+            e2.producer, e2.consumer, 2, graph=g_nmps2)
 
-        # Today: the formula ignores num_mfma_per_subiter, so act1 == act2.
-        # Post-fix: the actual should reflect subiter-aware timing and differ.
-        assert act1 != act2, (
-            f"_quad_cycle_gap_ok ignored num_mfma_per_subiter: "
-            f"actual={act1} for nmps=1 and actual={act2} for nmps=2 "
-            f"(slot_delta=2). Expected the parameter to influence the "
-            f"computed actual gap (cmw fix)."
+        # nk0 contract: nmps is unused → same actual for both runs.
+        assert act1 == act2 == 3, (
+            f"nk0: cycle-exact arithmetic ignores nmps. Expected act1==act2==3; "
+            f"got act1={act1}, act2={act2}."
         )
+        assert ok1 and ok2 and exp1 == 3 and exp2 == 3
 
     def test_mfma_acc_chain_cross_body_actual_reflects_real_gap(self):
         """Producer in body=ML, consumer in body=NGL sharing accumulator
@@ -559,10 +571,10 @@ class TestMFMAQuadCycleGap:
             "(ML producer -> NGL consumer)."
         )
         edge = cross[0]
-        ok, expected, actual = _quad_cycle_gap_ok(edge.producer, edge.consumer, 0)
+        ok, expected, actual = _quad_cycle_gap_ok(
+            edge.producer, edge.consumer, 0, graph=g)
 
-        # s7k: today actual == expected (misleading). Post-fix, actual should
-        # reflect the real cross-body gap and exceed expected.
+        # s7k: actual reflects body_delta * 1000 (cross-body placeholder).
         assert ok, "Cross-body edge should always pass the gap check."
         assert actual > expected, (
             f"Cross-body _quad_cycle_gap_ok reported actual={actual} == "
@@ -571,27 +583,21 @@ class TestMFMAQuadCycleGap:
             f"(many issue cycles)."
         )
 
-    def test_mfma_acc_chain_zero_gap_via_diagnose_missing_edge(self):
-        """Regression-pin test for current correct behavior: the
-        diagnose_missing_edge MFMA branch correctly fires the quad-cycle gap
-        check on a missing zero-gap acc-chain edge and emits
-        TimingTooCloseFailure. This locks in today's behavior so a future
-        refactor cannot silently regress the cross-graph MFMA-producer route.
+    def test_mfma_acc_chain_diagnose_missing_edge_dispatches_through_mfma_branch(self):
+        """Regression-pin test for the diagnose_missing_edge MFMA branch
+        DISPATCH (bead `nk0` rewrite). Pre-`nk0` the same fixture produced
+        a TimingTooCloseFailure with `actual=0`; under the cycle-exact
+        helper the simulator gives the consumer 3 cycles of gap (MFMA1
+        issues at 0, ALU at 1 (cost=1), MFMA2 at max(2, mfma_free=4)=4 →
+        gap = 4-0-1 = 3 = expected). The MFMA branch IS reached (proving
+        dispatch), but it now correctly returns ok=True and synthesizes
+        no failure.
 
-        Richer negative tests that exercise this dispatch path with NON-zero
-        gaps (and would actually expose mis-handling rather than just pinning
-        zero-gap behavior) are tracked in follow-up bead `rocm-libraries-cpe`.
-
-        Reference: P (MFMA writes v0..v3) at slot=2, then C (MFMA reads
-        v0..v1) at slot=2 sub=1 — edge P->C present, slot_delta == 0.
-        An ALU op writing v0..v1 sits AFTER C (does not shadow the
-        latest-writer for C's read; P->C edge survives).
-        Subject: same {P, C, ALU} identities, but the ALU is reordered to
-        sit BETWEEN P and C — now ALU is the latest writer of v0..v1, so
-        the edge becomes ALU->C and P->C is missing.
-        compare_graphs sees the missing P->C edge in subj -> routes through
-        diagnose_missing_edge whose MFMA branch fires the quad-cycle check
-        and emits TimingTooCloseFailure (slot_delta == 0)."""
+        The richer adversarial premise the original test sought (a real
+        timing violation surfacing through diagnose_missing_edge) is no
+        longer reachable by construction — the simulator's mfma_free_at
+        contention prevents under-3-cycle gaps in any valid same-body
+        MFMA→MFMA chain. Tracked as the new contract for `nk0`."""
         # ALU dst spans v0..v1 (8 bytes) so it fully shadows the consumer's
         # 8-byte read of v0..v1; otherwise the per-byte resolver would split
         # the read across two writers (ALU on bytes 0-3, MFMA-P on bytes 4-7)
@@ -631,10 +637,14 @@ class TestMFMAQuadCycleGap:
             and getattr(f.producer, "category", None) == "MFMA"
             and getattr(f.consumer, "category", None) == "MFMA"
         ]
-        assert mfma_timing, (
-            f"Expected diagnose_missing_edge MFMA branch to emit "
-            f"TimingTooCloseFailure for the missing zero-gap acc-chain "
-            f"edge, but got: {[type(f).__name__ for f in failures]}"
+        # nk0: same-body MFMA→MFMA simulator gap = 3 = expected, so MFMA
+        # branch returns ok=True and emits NO TimingTooClose. Routing is
+        # still verified via the absence of an OrderInverted (which would
+        # fire if the dispatch missed the MFMA branch entirely).
+        assert not mfma_timing, (
+            f"nk0: cycle-exact MFMA→MFMA same-body gap is 3=expected, "
+            f"so no TimingTooClose. Got unexpected timing failures: "
+            f"{mfma_timing}"
         )
 
     def test_mfma_to_alu_consumer_zero_gap_emits_timing_too_close(self):
@@ -694,27 +704,18 @@ class TestMFMAQuadCycleGap:
     # subiter-aware variations that change `actual` without changing pass.
     # -------------------------------------------------------------------------
 
-    def test_mfma_acc_chain_diagnose_missing_edge_with_nonzero_gap(self):
-        """Cross-graph route: REF and SUBJ both contain three MFMAs and an
-        ALU. In REF, the resolver pairs P (MFMA, slot=2 sub=0, writes v0..v3)
-        with C (MFMA, slot=2 sub=1, reads v0..v1) — slot_delta == 0 → the
-        TimingTooCloseFailure that compare_graphs synthesizes via
-        diagnose_missing_edge MFMA branch carries `expected=3, actual=0`.
+    def test_mfma_acc_chain_diagnose_missing_edge_dispatch_no_failure(self):
+        """Bead `nk0` rewrite: cycle-exact arithmetic.
+        REF: P (MFMA slot=2 seq=0) + C (MFMA slot=2 seq=1) → P→C edge present.
+        SUBJ: P (slot=2 seq=0), ALU (slot=2 seq=1), C (slot=2 seq=2) →
+              ALU shadows v0..v1, P→C edge missing.
+        compare_graphs routes to diagnose_missing_edge whose MFMA branch
+        runs on subj_graph: simulator gives MFMA1 issue=0, mfma_free=4;
+        ALU adds cost 1 → issue=1; MFMA2 max(2, mfma_free=4)=4 → c_issue=4;
+        gap = 4-0-1 = 3 = expected. ok=True → NO TimingTooCloseFailure.
 
-        Discriminates from `test_mfma_acc_chain_zero_gap_via_diagnose_missing_edge`
-        on TWO axes the prior test did NOT exercise:
-          (a) REF and SUBJ have STRUCTURALLY different graphs — REF lacks
-              the shadowing ALU (proves the cross-graph diff isolates the
-              MFMA→MFMA edge as missing in subj rather than absent in both).
-          (b) Asserts the failure's discriminating fields
-              (expected_quad_cycles, actual_quad_cycles, producer.category,
-              consumer.category) — proving the gap arithmetic populates the
-              failure record correctly, not just that dispatch fires.
-
-        A non-zero `actual` would discriminate further but is currently
-        unreachable: the formula yields actual ≥ 3 for every slot_delta > 0,
-        so no slot configuration produces a failure with actual ∈ {1, 2}.
-        Tracked in `rocm-libraries-w7f` (timeline-aware migration)."""
+        The pre-`nk0` premise (failure with actual=0) was an artifact of
+        the slot-delta approximation, not the real timeline."""
         ref_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
@@ -747,23 +748,12 @@ class TestMFMAQuadCycleGap:
             and getattr(f.producer, "category", None) == "MFMA"
             and getattr(f.consumer, "category", None) == "MFMA"
         ]
-        assert mfma_timing, (
-            f"Expected diagnose_missing_edge MFMA branch to emit "
-            f"TimingTooCloseFailure on the MFMA→MFMA edge missing in subj; "
-            f"got: {[type(f).__name__ for f in failures]}"
+        # nk0 cycle-exact: simulator gap = 3 = expected → ok=True → no
+        # TimingTooClose on the MFMA→MFMA edge.
+        assert not mfma_timing, (
+            f"nk0: cycle-exact diagnose path on the MFMA→MFMA edge yields "
+            f"actual=3=expected, so no TimingTooClose. Got: {mfma_timing}"
         )
-        f = mfma_timing[0]
-        # Discriminating fields — the gap arithmetic must populate these:
-        assert f.expected_quad_cycles == 3, (
-            f"expected_quad_cycles should be QUAD_CYCLES_STANDARD_MFMA_FINISH "
-            f"(3), got {f.expected_quad_cycles}."
-        )
-        assert f.actual_quad_cycles == 0, (
-            f"actual_quad_cycles should be 0 for slot_delta == 0, got "
-            f"{f.actual_quad_cycles}."
-        )
-        assert f.producer.category == "MFMA"
-        assert f.consumer.category == "MFMA"
 
     def test_mfma_acc_chain_just_meets_quad_cycle_gap(self):
         """Boundary case: gap exactly equal to `expected` (slot_delta == 1
@@ -833,7 +823,7 @@ class TestMFMAQuadCycleGap:
                 break
         assert acc_edge is not None, "expected MFMA→MFMA acc-chain edge"
         ok, exp, act = _quad_cycle_gap_ok(
-            acc_edge.producer, acc_edge.consumer, 0)
+            acc_edge.producer, acc_edge.consumer, 0, graph=g_subj)
         assert ok, (
             f"_quad_cycle_gap_ok must accept the boundary case "
             f"(actual={act}, expected={exp}); ok was False."
@@ -843,24 +833,12 @@ class TestMFMAQuadCycleGap:
             f"expected={exp}, actual={act}."
         )
 
-    def test_mfma_to_mfma_cross_subiter_routing(self):
-        """Cross-subiter MFMA→MFMA edge: producer at vmfma=0 (subiter 0),
-        consumer at vmfma=2 (subiter 1) with num_mfma_per_subiter=2. The
-        subiter-aware correction in `_quad_cycle_gap_ok` (post-cmw) adds
-        `subiter_delta` quad-cycles to `actual`, so the SAME (slot_delta=2)
-        configuration produces a DIFFERENT `actual` depending on whether
-        the two MFMAs lie in the same subiter or in different subiters.
-
-        This actively trips the cross-subiter routing path (cmw correction)
-        rather than the OrderInverted same-subiter gate from sub-task 11
-        (commit f594ff4b09): that gate applies only to ALU producers, not
-        to MFMA, so MFMA cross-subiter routing here is governed exclusively
-        by `_quad_cycle_gap_ok`'s subiter-delta term.
-
-        Discrimination point: actual_same_subiter (nmps=4, subiter_delta=0)
-        != actual_cross_subiter (nmps=2, subiter_delta=1) for the same
-        slot_delta=2. A regression that dropped the subiter_delta term
-        (the cmw fix) would collapse both to the same value."""
+    def test_mfma_to_mfma_cross_subiter_routing_exact(self):
+        """Bead `nk0` cycle-exact: `num_mfma_per_subiter` no longer affects
+        `actual`. The simulator walks the captured stream directly, so
+        same-body slot_delta=2 with no intermediate instructions yields
+        actual=3 regardless of `nmps`. Both same-subiter (nmps=4) and
+        cross-subiter (nmps=2) configurations produce the same `actual`."""
         def _build_cap():
             return make_capture(BODY_LABEL_ML, [
                 make_lr(8, 4, 64, slot=0, category="LRA0"),
@@ -905,57 +883,41 @@ class TestMFMAQuadCycleGap:
         )
 
         ok_s, exp_s, act_s = _quad_cycle_gap_ok(
-            e_same.producer, e_same.consumer, 4)
+            e_same.producer, e_same.consumer, 4, graph=g_same)
         ok_c, exp_c, act_c = _quad_cycle_gap_ok(
-            e_cross.producer, e_cross.consumer, 2)
+            e_cross.producer, e_cross.consumer, 2, graph=g_cross)
 
-        # Both pass (actual ≥ expected) — slot_delta=2 produces actual ≥ 7.
-        assert ok_s and ok_c, (
-            f"Both should pass: same-subiter actual={act_s}/exp={exp_s}, "
-            f"cross-subiter actual={act_c}/exp={exp_c}."
+        # Both pass.
+        assert ok_s and ok_c
+        # nk0: identical actual under exact arithmetic (nmps unused).
+        assert act_s == act_c, (
+            f"nk0: cycle-exact arithmetic ignores nmps; expected equal "
+            f"actuals. Got same-subiter act={act_s}, cross-subiter act={act_c}."
         )
-        # Discriminator: routing differs — cross-subiter `actual` is HIGHER
-        # than same-subiter `actual` by the +subiter_delta correction.
-        assert act_c > act_s, (
-            f"Cross-subiter routing must add the subiter-delta correction: "
-            f"same-subiter actual={act_s}, cross-subiter actual={act_c}. "
-            f"A regression that dropped the +subiter_delta term would "
-            f"collapse both to the same value."
-        )
-        # And the difference equals the subiter_delta (1 boundary crossed).
-        assert act_c - act_s == 1, (
-            f"Cross-subiter correction should be exactly subiter_delta==1; "
-            f"got delta={act_c - act_s}."
-        )
+        # And it's the simulator's value: MFMA1 issue=0, mfma_free=4;
+        # MFMA2 max(1, 4)=4 → gap=4-0-1=3.
+        assert act_s == 3 and act_c == 3
 
-    def test_mfma_producer_multi_consumer_varied_gaps(self):
-        """A single MFMA producer feeds three consumer MFMAs at slot deltas
-        0, 1, 2 (i.e. gaps actual=0, 3, 7). The dispatch must short-circuit
-        per-edge — only the gap=0 consumer triggers TimingTooCloseFailure;
-        the gap=3 and gap=7 consumers pass.
+    def test_mfma_producer_multi_consumer_varied_gaps_exact(self):
+        """Bead `nk0` rewrite: under cycle-exact arithmetic the simulator's
+        mfma_free_at contention naturally schedules each consumer with at
+        least 3 cycles of gap behind the previous MFMA, so there are no
+        same-body MFMA→MFMA timing failures in this fixture.
 
-        This catches a regression that early-exits after the first failure
-        (e.g. bails out of `validate_edge_wait_coverage`'s edge loop on the
-        first TimingTooClose), or one that flags ALL edges from a producer
-        once any one of them fails.
-
-        Layout: P at slot=2 writes v0..v3. Three consumers pick up disjoint
-        slices of P's accumulator (v0..v1, v2..v3, v0..v1) at slots 2/3/4
-        respectively. Each consumer is a distinct MFMA (different c_dst)
-        so identities are unique."""
+        Per-edge cumulative_issue_cycles values:
+          P→C1 (slot 2 seq 0 → seq 1): MFMA1 issue=0, mfma_free=4; C1 max(1,4)=4 → gap=3.
+          P→C2 (slot 2 → slot 3): walk includes C1 (mfma_free becomes 8); C2 issues at 8 → gap=7.
+          P→C3 (slot 2 → slot 4): walk includes C1 (free=8) + C2 (free=12); C3 max(9,12)=12 → gap=11.
+        All ≥ expected=3 → no failures. Sanity check: at least 3 edges exist."""
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
-            # Producer at slot=2 writes v0..v3 (4-vgpr accumulator).
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
-            # C1 at slot=2 sub=1 reads v0..v1 — gap=0 → MUST FAIL.
             make_mfma(c_dst_start=40, a_src_start=0, b_src_start=32,
                       slot=2, sequence=1, a_src_count=2),
-            # C2 at slot=3 reads v2..v3 — gap=3 → MUST PASS (boundary).
             make_mfma(c_dst_start=44, a_src_start=2, b_src_start=32,
                       slot=3, sequence=0, a_src_count=2),
-            # C3 at slot=4 reads v0..v1 — gap=7 → MUST PASS.
             make_mfma(c_dst_start=48, a_src_start=0, b_src_start=32,
                       slot=4, sequence=0, a_src_count=2),
         ])
@@ -967,22 +929,10 @@ class TestMFMAQuadCycleGap:
             and getattr(f.producer, "category", None) == "MFMA"
             and getattr(f.consumer, "category", None) == "MFMA"
         ]
-        # Exactly ONE MFMA→MFMA timing failure: the slot_delta==0 consumer.
-        actuals = [getattr(f, "actual_quad_cycles", None) for f in mfma_timing]
-        assert len(mfma_timing) == 1, (
-            f"Expected exactly 1 MFMA→MFMA TimingTooCloseFailure (the "
-            f"slot_delta==0 consumer); got {len(mfma_timing)} with "
-            f"actuals={actuals}"
+        assert not mfma_timing, (
+            f"nk0: exact arithmetic produces no MFMA→MFMA failures here; "
+            f"got: {[(f.actual_quad_cycles, f.expected_quad_cycles) for f in mfma_timing]}"
         )
-        f = mfma_timing[0]
-        assert f.actual_quad_cycles == 0, (
-            f"The single failure must be the gap=0 consumer; got "
-            f"actual={f.actual_quad_cycles}."
-        )
-        assert f.expected_quad_cycles == 3
-        # Sanity: at least 3 MFMA→MFMA edges exist in the graph (one per
-        # consumer). Confirms the dispatch saw all three edges, not just
-        # the first.
         mfma_edges = [
             e for e in g.edges
             if (getattr(e.producer, "category", None) == "MFMA"
@@ -994,36 +944,26 @@ class TestMFMAQuadCycleGap:
         )
 
     def test_mfma_quadcycle_mutation_smell(self):
-        """Mutation smell-test: monkeypatch `_classify_edge_coverage` to a
-        no-op (returns []) and confirm at least one of the new
-        TimingTooClose tests no longer detects the failure. This proves the
-        new tests ACTIVELY exercise the dispatch logic — if they pass with
-        the dispatch disabled, they're pinning behavior unrelated to the
-        MFMA gap check.
+        """Mutation smell-test: confirm `_classify_edge_coverage` IS the
+        source of the within-graph MFMA→ALU timing verdict. Use the
+        MFMA→ALU zero-gap fixture (the only same-body MFMA-producer case
+        that still fails under cycle-exact arithmetic, since ALU consumers
+        do not get the mfma_free_at gating that real MFMA consumers do).
 
-        Targets the within-graph route (`validate_edge_wait_coverage` →
-        `_classify_edge_coverage`). Cross-graph route (`compare_graphs` →
-        `diagnose_missing_edge`) has its own dispatch and is not affected
-        by this patch — that's the desired narrow scope of the mutation:
-        confirm `_classify_edge_coverage` is the source of the within-graph
-        TimingTooClose verdict.
-        """
+        Pre-mutation: real dispatch emits TimingTooClose. Post-mutation
+        (no-op patch on `_classify_edge_coverage`): zero failures."""
         from unittest.mock import patch
 
-        # Re-build the same fixture as test_mfma_producer_multi_consumer_varied_gaps:
-        # gap=0 consumer at slot=2 sub=1 must produce a TimingTooCloseFailure
-        # under the real dispatch.
+        alu_consumer = VXorB32(dst=vgpr(20, 1), src0=vgpr(0, 1), src1=vgpr(21, 1))
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
-            make_mfma(c_dst_start=40, a_src_start=0, b_src_start=32,
-                      slot=2, sequence=1, a_src_count=2),
+            _tag(alu_consumer, category="PackA0", mfma_index=2, sequence=1),
         ])
         g = build_dataflow_graph(_wrap(cap))
 
-        # Sanity: under the real dispatch, the failure fires.
         real_failures = validate_edge_wait_coverage(g)
         real_timing = [
             f for f in real_failures
@@ -1031,13 +971,10 @@ class TestMFMAQuadCycleGap:
             and getattr(f.producer, "category", None) == "MFMA"
         ]
         assert real_timing, (
-            "Pre-mutation sanity: the real _classify_edge_coverage must "
-            "emit a TimingTooCloseFailure on the zero-gap fixture. If this "
-            "fails, the test's premise is wrong, not the dispatch."
+            "Pre-mutation sanity: real _classify_edge_coverage must emit "
+            "a TimingTooCloseFailure on the MFMA→ALU zero-gap fixture."
         )
 
-        # Mutation: patch _classify_edge_coverage to a no-op. The
-        # within-graph dispatch should now produce zero failures.
         with patch(
             "Tensile.Components.ScheduleCapture._classify_edge_coverage",
             return_value=[],
@@ -1049,13 +986,8 @@ class TestMFMAQuadCycleGap:
                 and getattr(f.producer, "category", None) == "MFMA"
             ]
             assert not mutated_timing, (
-                f"Mutation smell-test failed: after patching "
-                f"_classify_edge_coverage to a no-op, the dispatch still "
-                f"emitted {len(mutated_timing)} MFMA TimingTooCloseFailure "
-                f"failures. This means at least one of the new tests is "
-                f"NOT exercising _classify_edge_coverage — the dispatch "
-                f"path is elsewhere. Investigate the source of the "
-                f"residual failure."
+                f"Mutation smell-test failed: patched dispatch still "
+                f"emitted {len(mutated_timing)} failures."
             )
 
     # -------------------------------------------------------------------------
@@ -1071,27 +1003,20 @@ class TestMFMAQuadCycleGap:
     #       never reached the MFMA quad-cycle branch even after Fix (1).
     # -------------------------------------------------------------------------
 
-    def test_mfma_pack_acc_chain_zero_gap_emits_timing_too_close_finish_1(self):
-        """Producer is a 4x4 PackMFMA (variant=[4,4,...]) at slot=2; consumer
-        MFMA at the same vmfma_index reads the producer's accumulator. The
-        gap is zero quad-cycles. Post-e7w the finish-cycle classifier
-        identifies the producer as 4x4 (expected=1) and emits
-        TimingTooCloseFailure with expected=1, actual=0. Pre-e7w the lookup
-        defaulted to expected=3 OR (worse) the PackMFMA producer was routed
-        to the ALU-immediate exemption and never checked at all."""
+    def test_mfma_pack_acc_chain_4x4_to_standard_exact_gap(self):
+        """Bead `nk0` cycle-exact: 4x4 PackMFMA producer (finish=1) at
+        slot=2 seq=0; standard MFMA consumer at slot=2 seq=1.
+        Simulator: producer issues at 0, mfma_free=2, last_mfma_class=4x4.
+        Consumer max(1,2)=2; type-switch (4x4→standard), gap=2-0=2 <
+        FROM_4X4=3 → +1 stall → consumer issues at 3. Gap=3-0-1=2.
+        expected=1 → ok=True → NO failure. (Pre-`nk0` the slot_delta=0
+        approximation reported a fake actual=0 failure.)"""
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
-            # Producer: 4x4 PackMFMA, variant=[4,4,4,16]. Categorized "MFMA"
-            # so the synthetic _MFMARule still claims it (the test fixture
-            # _FakeMFMA doesn't have getParams() — the production
-            # PackMFMA-as-Pack* path goes through _GenericALURule which we
-            # cover in the routing-regression test below).
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2,
                       variant=[4, 4, 4, 16]),
-            # Consumer reads v0..v1 at the same vmfma_index — overlaps
-            # producer's accumulator (zero-gap RAW).
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
                       slot=2, sequence=1, a_src_count=2),
         ])
@@ -1103,20 +1028,23 @@ class TestMFMAQuadCycleGap:
             and f.producer.category == "MFMA"
             and f.consumer.category == "MFMA"
         ]
-        assert mfma_timing, (
-            f"Expected TimingTooCloseFailure on 4x4 PackMFMA->MFMA acc-chain "
-            f"at slot_delta==0 (finish=1), but got: "
-            f"{[type(f).__name__ for f in failures]}"
+        assert not mfma_timing, (
+            f"nk0: 4x4→standard same-slot has actual=2 ≥ expected=1 → "
+            f"no failure. Got: {mfma_timing}"
         )
-        f = mfma_timing[0]
-        assert f.expected_quad_cycles == 1, (
-            f"4x4 PackMFMA producer should report expected=1 (1 quad-cycle "
-            f"finish), got expected={f.expected_quad_cycles}. The pre-e7w "
-            f"`mfma_finish_cycles` lookup on rocisa_inst always defaulted to "
-            f"the standard 3 — Sub-A's _mfma_finish_cycles_for classifier "
-            f"must identify 4x4 by variant or rendered name."
+        # Direct invariant: confirm the helper math.
+        acc_edge = next(
+            (e for e in g.edges
+             if getattr(e.producer, "category", None) == "MFMA"
+             and getattr(e.consumer, "category", None) == "MFMA"),
+            None,
         )
-        assert f.actual_quad_cycles == 0
+        ok, exp, act = _quad_cycle_gap_ok(
+            acc_edge.producer, acc_edge.consumer, 0, graph=g)
+        assert ok and exp == 1 and act == 2, (
+            f"nk0 contract: 4x4 producer expected=1; type-switch +1 stall "
+            f"yields act=2; got ok={ok}, exp={exp}, act={act}."
+        )
 
     def test_mfma_pack_acc_chain_meets_finish_1_no_failure(self):
         """4x4 PackMFMA producer (finish=1) with a consumer at slot_delta=1
@@ -1408,98 +1336,65 @@ class TestMFMAQuadCycleGap:
     # -------------------------------------------------------------------------
 
     def test_mfma_type_switch_standard_to_4x4_adds_one_to_actual(self):
-        """Standard MFMA producer (finish=3) at slot=2 with a 4x4 PackMFMA
-        consumer (finish=1) at slot=3 reading the producer's accumulator.
-        Without the vf4 +1 stall the basic formula gives
-        `actual = 1 * (1 + 3) - 1 = 3`. With the type-switch +1 the
-        reported `actual` becomes 4 — matching what the structural
-        `precompute_issue_times` simulator computes for this direct edge:
-        producer issues at 0, mfma_free=4, consumer's `current_issue=4`,
-        gap=4 < FROM_STANDARD=5 → +1 stall → consumer issues at 5,
-        delivered gap = 5-0-1 = 4."""
+        """Standard MFMA producer (finish=3) at slot=2; 4x4 PackMFMA
+        consumer (finish=1) at slot=3. Cycle-exact simulator
+        (CMSValidator.precompute_issue_times-equivalent):
+          producer issues at 0, mfma_free=4, last_mfma_class=standard.
+          consumer max(1,4)=4; type switch (standard→4x4), gap=4-0=4 <
+          FROM_STANDARD=5 → +1 stall → consumer issues at 5.
+          delivered gap = 5-0-1 = 4."""
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
-            # Producer: standard MFMA (default variant=[32,32]) at slot=2.
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2),
-            # Consumer: 4x4 PackMFMA at slot=3 reads v0..v1 (RAW on
-            # producer's accumulator). Different MFMA class — type switch.
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
                       slot=3, sequence=0, a_src_count=2,
                       variant=[4, 4, 4, 16]),
         ])
         g = build_dataflow_graph(_wrap(cap))
-        # Find the MFMA→MFMA acc-chain edge.
-        acc_edge = None
-        for e in g.edges:
-            if (getattr(e.producer, "category", None) == "MFMA"
-                    and getattr(e.consumer, "category", None) == "MFMA"):
-                acc_edge = e
-                break
-        assert acc_edge is not None, (
-            "Expected a standard-MFMA → 4x4-PackMFMA acc-chain edge."
+        acc_edge = next(
+            (e for e in g.edges
+             if getattr(e.producer, "category", None) == "MFMA"
+             and getattr(e.consumer, "category", None) == "MFMA"),
+            None,
         )
+        assert acc_edge is not None
         ok, expected, actual = _quad_cycle_gap_ok(
-            acc_edge.producer, acc_edge.consumer, 0)
-        assert ok, (
-            f"Type-switch case should still pass the gap check (expected={expected}, "
-            f"actual={actual}); the type-switch +1 only enlarges actual."
-        )
-        # expected == producer's finish == 3 (standard MFMA).
-        assert expected == 3, (
-            f"expected should be the standard producer's finish (3), got {expected}."
-        )
-        # actual = base 3 + type-switch penalty 1 = 4.
-        assert actual == 4, (
-            f"vf4: type-switch penalty should add +1 to actual. "
-            f"Basic formula gives 3; with +1 stall actual must be 4. Got {actual}."
-        )
+            acc_edge.producer, acc_edge.consumer, 0, graph=g)
+        assert ok
+        assert expected == 3
+        assert actual == 4
 
     def test_mfma_type_switch_4x4_to_standard_adds_one_to_actual(self):
-        """Symmetric to the standard→4x4 case: 4x4 PackMFMA producer
-        (finish=1) at slot=2, standard MFMA consumer (finish=3) at slot=3
-        reading the producer's accumulator. Basic formula:
-        `actual = 1 * (1 + 1) - 1 = 1`. With vf4 +1: actual = 2.
-        Structural simulator: producer issues at 0, mfma_free=2,
-        consumer's `current_issue=2`, gap=2 < FROM_4X4=3 → +1 stall →
-        consumer issues at 3, delivered gap = 3-0-1 = 2. Match."""
+        """4x4 PackMFMA producer (finish=1) at slot=2; standard MFMA
+        consumer (finish=3) at slot=3. Cycle-exact simulator:
+          producer issues at 0, mfma_free=2, last_mfma_class=4x4.
+          consumer max(1,2)=2; type switch (4x4→standard), gap=2-0=2 <
+          FROM_4X4=3 → +1 stall → consumer issues at 3.
+          delivered gap = 3-0-1 = 2."""
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
-            # Producer: 4x4 PackMFMA at slot=2.
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, sequence=0, a_src_count=2,
                       variant=[4, 4, 4, 16]),
-            # Consumer: standard MFMA at slot=3 reads v0..v1 (RAW).
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
                       slot=3, sequence=0, a_src_count=2),
         ])
         g = build_dataflow_graph(_wrap(cap))
-        acc_edge = None
-        for e in g.edges:
-            if (getattr(e.producer, "category", None) == "MFMA"
-                    and getattr(e.consumer, "category", None) == "MFMA"):
-                acc_edge = e
-                break
-        assert acc_edge is not None, (
-            "Expected a 4x4-PackMFMA → standard-MFMA acc-chain edge."
+        acc_edge = next(
+            (e for e in g.edges
+             if getattr(e.producer, "category", None) == "MFMA"
+             and getattr(e.consumer, "category", None) == "MFMA"),
+            None,
         )
+        assert acc_edge is not None
         ok, expected, actual = _quad_cycle_gap_ok(
-            acc_edge.producer, acc_edge.consumer, 0)
-        assert ok, (
-            f"Type-switch case should still pass the gap check (expected={expected}, "
-            f"actual={actual})."
-        )
-        # expected == producer's finish == 1 (4x4 PackMFMA).
-        assert expected == 1, (
-            f"expected should be the 4x4 producer's finish (1), got {expected}."
-        )
-        # actual = base 1 + type-switch penalty 1 = 2.
-        assert actual == 2, (
-            f"vf4: type-switch penalty should add +1 to actual. "
-            f"Basic formula gives 1; with +1 stall actual must be 2. Got {actual}."
-        )
+            acc_edge.producer, acc_edge.consumer, 0, graph=g)
+        assert ok
+        assert expected == 1
+        assert actual == 2
 
     def test_mfma_same_class_chain_no_type_switch_penalty(self):
         """Regression guard: same-class chain (standard producer → standard
@@ -1531,12 +1426,12 @@ class TestMFMAQuadCycleGap:
                 break
         assert acc_edge is not None
         ok, expected, actual = _quad_cycle_gap_ok(
-            acc_edge.producer, acc_edge.consumer, 0)
-        # Basic formula: 1*(1+3)-1 = 3. No type-switch, so no +1. actual=3.
+            acc_edge.producer, acc_edge.consumer, 0, graph=g)
+        # nk0 cycle-exact: producer at 0 with mfma_free=4; consumer max(1,4)=4
+        # → gap=3. Same class, no type-switch +1.
         assert ok and expected == 3 and actual == 3, (
-            f"Same-class standard→standard at slot_delta=1 must yield "
-            f"actual==expected==3 (no type-switch penalty). Got "
-            f"ok={ok}, expected={expected}, actual={actual}."
+            f"Same-class standard→standard must yield actual==expected==3. "
+            f"Got ok={ok}, expected={expected}, actual={actual}."
         )
 
         # Sanity sibling: same-class 4x4→4x4 chain — no +1 either.
@@ -1559,12 +1454,250 @@ class TestMFMAQuadCycleGap:
                 break
         assert acc_edge_pack is not None
         ok_p, expected_p, actual_p = _quad_cycle_gap_ok(
-            acc_edge_pack.producer, acc_edge_pack.consumer, 0)
-        # Basic formula: 1*(1+1)-1 = 1. No type-switch, no +1. actual=1.
+            acc_edge_pack.producer, acc_edge_pack.consumer, 0, graph=g_pack)
+        # nk0 cycle-exact: 4x4 producer at 0, mfma_free=2; consumer max(1,2)=2;
+        # same class → no type-switch. gap=2-0-1=1.
         assert ok_p and expected_p == 1 and actual_p == 1, (
-            f"Same-class 4x4→4x4 at slot_delta=1 must yield "
-            f"actual==expected==1 (no type-switch penalty). Got "
+            f"Same-class 4x4→4x4: actual==expected==1. Got "
             f"ok={ok_p}, expected={expected_p}, actual={actual_p}."
+        )
+
+
+# =============================================================================
+# Bead `nk0` — cycle-exact cumulative_issue_cycles helper. Mirrors
+# `CMSValidator.precompute_issue_times` walk over the captured stream.
+# These tests pin the new exact contract: the helper sums per-instruction
+# issue costs AND injects MFMA type-switch +1 stalls only when the
+# inter-MFMA gap is below the producer-class threshold.
+# =============================================================================
+
+
+class TestCumulativeIssueCycles:
+    """Direct tests for `cumulative_issue_cycles` — the helper that
+    replaces the slot-delta approximation in `_quad_cycle_gap_ok`."""
+
+    def test_chain_with_intervening_alu_accumulates_issue_cycles(self):
+        """Producer MFMA + 5 intervening ALU instructions + consumer MFMA.
+        Each ALU adds 1 quad-cycle of issue cost; the consumer's
+        `current_issue` is bumped by the sum of those costs (not the
+        slot_delta arithmetic).
+
+        Walk: MFMA1 issues at 0, mfma_free=4. 5 ALUs each contribute +1 →
+        current_issue advances 1+1+1+1+1+1 (producer cost +1, then 5 ALU
+        costs) = 6. MFMA2 max(6, 4)=6 → c_issue=6 → gap=6-0-1=5.
+        """
+        alus = [VXorB32(dst=vgpr(50 + i, 1),
+                        src0=vgpr(60 + i, 1),
+                        src1=vgpr(70 + i, 1))
+                for i in range(5)]
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # Producer MFMA at slot=2 seq=0.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # 5 intervening ALUs, each at distinct slots so they don't
+            # collide with MFMA positions.
+            *[_tag(alus[i], category="PackA0",
+                   mfma_index=3 + i, sequence=0)
+              for i in range(5)],
+            # Consumer MFMA at slot=8 reads v0..v1.
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=8, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        # Find MFMA→MFMA edge.
+        acc_edge = next(
+            (e for e in g.edges
+             if getattr(e.producer, "category", None) == "MFMA"
+             and getattr(e.consumer, "category", None) == "MFMA"),
+            None,
+        )
+        assert acc_edge is not None
+        gap = cumulative_issue_cycles(g, acc_edge.producer, acc_edge.consumer)
+        # Producer cost (+1) + 5 ALU costs (+5) = 6 cycles to consumer.
+        # Consumer max(6, mfma_free=4) = 6. Gap = 6 - 0 - 1 = 5.
+        assert gap == 5, (
+            f"5 intervening ALUs each contribute 1 quad-cycle. "
+            f"Expected gap=5, got {gap}."
+        )
+
+    def test_chain_with_multiple_typeswitches_accumulates_stalls(self):
+        """Chain of three MFMAs: standard → 4x4 → standard, each adjacent.
+        Two type-switch boundaries; each fires when the gap-since-last
+        is below the producer-class threshold.
+
+        Walk:
+          MFMA-std issues at 0, mfma_free=4, last_class=std.
+          MFMA-4x4 max(1, 4)=4; type switch (std→4x4), gap=4-0=4 <
+            FROM_STANDARD=5 → +1 → issues at 5, mfma_free=5+1+1=7,
+            last_class=4x4, last_issue=5.
+          MFMA-std max(6, 7)=7; type switch (4x4→std), gap=7-5=2 <
+            FROM_4X4=3 → +1 → issues at 8.
+        From producer (issue=0) to final consumer (issue=8): gap=7."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # Producer (standard) at slot=2.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # 4x4 PackMFMA at slot=3.
+            make_mfma(c_dst_start=80, a_src_start=8, b_src_start=32,
+                      slot=3, sequence=0, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+            # Consumer (standard) at slot=4 reads v0..v1.
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=4, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        # Identify the producer (slot=2) and consumer (slot=4) by
+        # searching the MFMA→MFMA edges.
+        target = None
+        for e in g.edges:
+            if (getattr(e.producer, "category", None) == "MFMA"
+                    and getattr(e.consumer, "category", None) == "MFMA"
+                    and e.producer.position.vmfma_index == 2
+                    and e.consumer.position.vmfma_index == 4):
+                target = e
+                break
+        assert target is not None
+        gap = cumulative_issue_cycles(g, target.producer, target.consumer)
+        # Two stalls accumulated on the path producer→consumer.
+        assert gap == 7, (
+            f"Two type-switch +1 stalls expected on standard→4x4→standard "
+            f"chain. gap should be 7; got {gap}."
+        )
+
+    def test_chain_with_typeswitch_above_threshold_no_stall(self):
+        """Two MFMAs with a type-switch but a wide enough gap that the
+        threshold check does NOT fire — no +1 penalty.
+
+        Walk: standard MFMA at slot=2, 4 ALUs spacing things out, 4x4
+        MFMA at slot=7.
+          MFMA-std issues at 0, mfma_free=4, last_class=std, last_issue=0.
+          Producer cost +1 then 4 ALUs +1 each → current=5.
+          MFMA-4x4 max(5, 4)=5; type switch (std→4x4), gap=5-0=5 NOT <
+          FROM_STANDARD=5 → NO stall → issues at 5.
+          delivered gap = 5-0-1 = 4.
+
+        Contrast with `test_mfma_type_switch_standard_to_4x4_adds_one_to_actual`
+        (no intervening ALUs, gap-since-last=4 < 5 → +1 stall, gap=4)."""
+        alus = [VXorB32(dst=vgpr(50 + i, 1),
+                        src0=vgpr(60 + i, 1),
+                        src1=vgpr(70 + i, 1))
+                for i in range(4)]
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            *[_tag(alus[i], category="PackA0",
+                   mfma_index=3 + i, sequence=0)
+              for i in range(4)],
+            # 4x4 consumer reads v0..v1 at slot=7.
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=7, sequence=0, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        acc_edge = next(
+            (e for e in g.edges
+             if getattr(e.producer, "category", None) == "MFMA"
+             and getattr(e.consumer, "category", None) == "MFMA"),
+            None,
+        )
+        assert acc_edge is not None
+        gap = cumulative_issue_cycles(g, acc_edge.producer, acc_edge.consumer)
+        # No +1: gap-since-last = 5 NOT < FROM_STANDARD=5. delivered gap = 4.
+        assert gap == 4, (
+            f"Threshold uses strict <; gap-since-last==5==threshold means "
+            f"NO stall. Expected delivered gap=4, got {gap}."
+        )
+
+    def test_graph_actual_matches_precompute_issue_times(self):
+        """Parity check: for a canonical fixture, run BOTH
+        `cumulative_issue_cycles` and `CMSValidator.precompute_issue_times`
+        and assert they produce identical numbers. This is THE contract
+        for bead `nk0`: the graph helper IS cycle-equivalent to the
+        structural simulator.
+
+        Fixture: a mixed-class chain with intervening ALUs and SWaits.
+        """
+        from Tensile.Components.CMSValidator import (
+            precompute_issue_times,
+            estimate_quad_cycles_precomputed,
+            ValidatorInstruction,
+            MFMA as VMFMA,
+            MFMAPack as VMFMAPack,
+            SNop as VSNop,
+            POSITION_INF,
+            SchedulePosition as VSchedulePosition,
+        )
+        # Build a small mock validator-instruction stream that mirrors
+        # the graph fixture exactly (same instruction TYPES in same order).
+        # Stream: MFMA-std, ALU(=base 1), MFMA-4x4, ALU, MFMA-std.
+        # We use VMFMA for standard and VMFMAPack for 4x4. ALU is
+        # represented by a generic `_StubAlu` that has the default
+        # min_issue_quad_cycles_base = 1.
+        from dataclasses import dataclass
+
+        @dataclass
+        class _StubAlu(ValidatorInstruction):
+            def validate(self):
+                return None
+
+        def _pos(i):
+            return VSchedulePosition(loop_index=0, vmfma_index=i, sub_index=0)
+
+        v_stream = [
+            VMFMA(name="MFMA0", issued_at=_pos(2)),
+            _StubAlu(name="ALU0", issued_at=_pos(3)),
+            VMFMAPack(name="MFMA1", issued_at=_pos(4), issue_index=0),
+            _StubAlu(name="ALU1", issued_at=_pos(5)),
+            VMFMA(name="MFMA2", issued_at=_pos(6)),
+        ]
+        issue_times = precompute_issue_times(v_stream)
+        # Validator gap from MFMA0 (idx=0) to MFMA2 (idx=4):
+        validator_gap = estimate_quad_cycles_precomputed(0, 4, issue_times)
+
+        # Build the graph fixture with the SAME instruction sequence
+        # (slots chosen so the body order matches).
+        alu0 = VXorB32(dst=vgpr(50, 1), src0=vgpr(60, 1), src1=vgpr(70, 1))
+        alu1 = VXorB32(dst=vgpr(51, 1), src0=vgpr(61, 1), src1=vgpr(71, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            # Producer MFMA-std at slot=2 seq=0.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            # ALU at slot=3.
+            _tag(alu0, category="PackA0", mfma_index=3, sequence=0),
+            # MFMA-4x4 at slot=4.
+            make_mfma(c_dst_start=80, a_src_start=8, b_src_start=32,
+                      slot=4, sequence=0, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+            # ALU at slot=5.
+            _tag(alu1, category="PackA0", mfma_index=5, sequence=0),
+            # Consumer MFMA-std at slot=6, reads v0..v1.
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=6, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        # Producer = first MFMA (slot=2), Consumer = last MFMA (slot=6).
+        target = None
+        for e in g.edges:
+            if (getattr(e.producer, "category", None) == "MFMA"
+                    and getattr(e.consumer, "category", None) == "MFMA"
+                    and e.producer.position.vmfma_index == 2
+                    and e.consumer.position.vmfma_index == 6):
+                target = e
+                break
+        assert target is not None
+        graph_gap = cumulative_issue_cycles(g, target.producer, target.consumer)
+
+        assert graph_gap == validator_gap, (
+            f"PARITY VIOLATION: cumulative_issue_cycles={graph_gap} != "
+            f"precompute_issue_times-derived={validator_gap}. The graph "
+            f"helper must be cycle-equivalent to the structural simulator "
+            f"for bead `nk0` to satisfy its mandate."
         )
 
 
