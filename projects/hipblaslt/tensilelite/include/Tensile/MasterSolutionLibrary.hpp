@@ -149,8 +149,10 @@ namespace TensileLite
             if(it == libraryMapping.begin())
             {
                 if(Debug::Instance().printDataInit())
+                {
                     std::cout << "Index " << index << " not in this arch's mapping range"
                               << std::endl;
+                }
                 return;
             }
             --it;
@@ -159,11 +161,15 @@ namespace TensileLite
             {
                 std::lock_guard<std::mutex> lock(solutionsGuard);
                 if(loadedFiles.find(filePrefix) != loadedFiles.end())
+                {
                     return;
+                }
             }
             if(Debug::Instance().printDataInit())
+            {
                 std::cout << "Loading library for index " << index
                           << " from file: " << filePrefix << std::endl;
+            }
 
             fs::path path(libraryDirectory);
             path = path / (filePrefix + suffix);
@@ -177,7 +183,9 @@ namespace TensileLite
 
             std::lock_guard<std::mutex> lock(solutionsGuard);
             if(loadedFiles.find(filePrefix) != loadedFiles.end())
+            {
                 return;
+            }
             // Push to cache
             indexLoadedLibraries[filePrefix] = mLibrary->library;
 
@@ -191,8 +199,10 @@ namespace TensileLite
             loadedFiles.insert(filePrefix);
 
             if(Debug::Instance().printCodeObjectInfo())
+            {
                 std::cout << "load placeholder library " << path << std::endl
                           << mLibrary->solutions.size() << " solutions loaded" << std::endl;
+            }
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,

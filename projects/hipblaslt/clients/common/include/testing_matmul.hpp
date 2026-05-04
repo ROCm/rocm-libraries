@@ -3726,18 +3726,14 @@ void testing_matmul_with_bias(const Arguments& arg,
         heuristicResult.clear();
         heuristicTuningIndex.clear();
 
-        // algo_method == 2 verifies the public index round-trip: an algo's
-        // index obtained via getIndexFromAlgo can be used by getAlgosFromIndex
-        // to re-resolve the same algo. (This is the persistence path users
-        // rely on for storing tuned algos.)
-        //
-        // Discover the device's saveable indices once via getAllAlgos, then
-        // round-trip them in batches. Probing [0..N) blindly doesn't work on
-        // per-arch shard installs: the lazy library's solution indices are
-        // globally numbered, so a non-first-alphabetical arch's smallest
-        // valid index is well above 0 and the first batch hits nothing.
+        // Verify the public index round-trip path: indices obtained via
+        // getIndexFromAlgo must round-trip through getAlgosFromIndex. We
+        // can't probe [0..N) — per-arch shard installs use globally-numbered
+        // indices that may start far above 0 — so discover the local arch's
+        // valid indices via getAllAlgos first.
+        const bool       indicesAreDiscovered = (arg.solution_index == -1);
         std::vector<int> validIndices;
-        if(arg.solution_index == -1)
+        if(indicesAreDiscovered)
         {
             std::vector<hipblasLtMatmulHeuristicResult_t> allAlgos;
             EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
@@ -3753,43 +3749,42 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   HIPBLAS_STATUS_SUCCESS);
             validIndices.reserve(allAlgos.size());
             for(auto& a : allAlgos)
+            {
                 validIndices.push_back(hipblaslt_ext::getIndexFromAlgo(a.algo));
+            }
         }
 
-        size_t                    batchStart    = 0;
-        constexpr size_t          algoIndexInc  = 100;
+        size_t           batchStart = 0;
+        constexpr size_t batchSize  = 100;
         while(1)
         {
             std::vector<int>                              algoIndex;
             std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo;
             bool                                          foundAlgo = false;
-            if(arg.solution_index == -1)
+            if(indicesAreDiscovered)
             {
                 if(batchStart >= validIndices.size())
+                {
                     break;
-                size_t batchEnd = std::min<size_t>(batchStart + algoIndexInc,
-                                                   validIndices.size());
+                }
+                size_t batchEnd
+                    = std::min<size_t>(batchStart + batchSize, validIndices.size());
                 algoIndex.assign(validIndices.begin() + batchStart,
                                  validIndices.begin() + batchEnd);
                 batchStart = batchEnd;
             }
             else
             {
-                // Explicit-index path is single-shot; CHECK_SOLUTION_FOUND
-                // below decides pass/fail.
                 algoIndex.resize(1);
                 algoIndex[0] = arg.solution_index;
             }
 
             hipblasStatus_t getStatus
                 = hipblaslt_ext::getAlgosFromIndex(handle, algoIndex, tmpAlgo);
-            // Discovered indices came from a successful getAllAlgos +
-            // getIndexFromAlgo round-trip, so any non-success here is a real
-            // regression in the index API. Explicit-index callers may pass an
-            // out-of-range index legitimately; CHECK_SOLUTION_FOUND below
-            // surfaces that case with better context.
-            if(arg.solution_index == -1)
+            if(indicesAreDiscovered)
+            {
                 EXPECT_HIPBLAS_STATUS(getStatus, HIPBLAS_STATUS_SUCCESS);
+            }
             if(tmpAlgo.empty())
             {
                 break;
@@ -3803,6 +3798,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     if(arg.use_ext_setproblem)
                     {
                         for(int32_t b = 0; b < block_count; b++)
+                        {
                             CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(M[0],
                                                                         N[0],
                                                                         K[0],
@@ -3818,10 +3814,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                         extepilogue[0],
                                                                         extinputs[b][0],
                                                                         extproblemtype));
+                        }
                     }
                     else
                     {
                         for(int32_t b = 0; b < block_count; b++)
+                        {
                             CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(
                                 matmul[b][0],
                                 alpha_in[0],
@@ -3834,6 +3832,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 matC[0],
                                 ((*dDp)[0].as<char>()) + b * size_D[0] * realDataTypeSize(To),
                                 matD[0]));
+                        }
                     }
                     for(int j = 0; j < returnedAlgoCount; j++)
                     {
@@ -3855,7 +3854,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                         }
                         CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                         if(foundAlgo)
+                        {
                             break;
+                        }
                     }
                 }
                 else
@@ -3898,6 +3899,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     auto num_batches_64
                         = std::vector<int64_t>{num_batches.begin(), num_batches.end()};
                     for(int32_t b = 0; b < block_count; b++)
+                    {
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(M,
                                                                            N,
                                                                            K,
@@ -3913,6 +3915,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                            extepilogue,
                                                                            extinputs[b],
                                                                            extproblemtype));
+                    }
                 }
                 else
                 {
@@ -3923,6 +3926,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         h_beta_void.push_back(&h_beta[i]);
                     }
                     for(int32_t b = 0; b < block_count; b++)
+                    {
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(matmul[b],
                                                                            h_alpha_void,
                                                                            da[b],
@@ -3934,6 +3938,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                            matC,
                                                                            dd[b],
                                                                            matD));
+                    }
                 }
 
                 for(int j = 0; j < returnedAlgoCount; j++)
@@ -3956,11 +3961,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                     CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     if(foundAlgo)
+                    {
                         break;
+                    }
                 }
             }
 
-            if(arg.solution_index != -1)
+            if(!indicesAreDiscovered)
             {
                 CHECK_SOLUTION_FOUND(foundAlgo);
                 foundAlgo = true;
@@ -3972,12 +3979,10 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
         // Verify the getAlgosFromIndex mixed-validity contract: a request
-        // containing a mix of valid and out-of-range indices must return
-        // HIPBLAS_STATUS_INVALID_VALUE while still producing the valid
-        // results in the output vector. Replaces the implicit coverage
-        // the [0..N) probe loop used to provide. Independent of per-arch
-        // index layout, so it doesn't reintroduce the bug this PR fixes.
-        if(arg.solution_index == -1 && !validIndices.empty())
+        // mixing valid and out-of-range indices returns INVALID_VALUE while
+        // still emitting the valid results. Replaces the implicit coverage
+        // the [0..N) probe used to provide.
+        if(indicesAreDiscovered && !validIndices.empty())
         {
             std::vector<int> mixedIndices = validIndices;
             mixedIndices.push_back(std::numeric_limits<int>::max());
