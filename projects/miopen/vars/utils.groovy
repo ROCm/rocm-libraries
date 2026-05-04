@@ -609,7 +609,7 @@ def getDockerImage(Map conf=[:])
 // New wrapper function to add GitHub commit status around getDockerImage
 def getDockerImageWithStatus(Map conf=[:]) {
     def stageName = env.STAGE_NAME ?: "Docker Image"
-    def credentialsID = env.monorepo_status_wrapper_creds
+    def credentialsID = "github-app-miopen"
     def sha = env.GIT_COMMIT
     def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
 
@@ -674,7 +674,7 @@ def buildHipClangJob(Map conf=[:]){
         def build_timeout = conf.get("build_timeout", 420)
 
         def retimage
-        def credentialsID = env.monorepo_status_wrapper_creds
+        def credentialsID = "github-app-miopen"
 
         def sha = env.GIT_COMMIT
         def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
