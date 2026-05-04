@@ -4,14 +4,14 @@
 from invoke.tasks import task
 import os
 import shlex
+import subprocess
+import sys
 
 
 def _cmake_bool(value):
     return "ON" if value else "OFF"
 
 def detect_gpu_arch():
-    import subprocess
-    import sys
     try:
         result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
         if result.returncode == 0:
@@ -96,6 +96,16 @@ def build_client(
     if rocm_path:
         cmake_c_compiler = os.path.join(rocm_path, "bin", "amdclang")
         cmake_cxx_compiler = os.path.join(rocm_path, "bin", "amdclang++")
+
+        for compiler in (cmake_c_compiler, cmake_cxx_compiler):
+            try:
+                subprocess.run([compiler, "--version"], capture_output=True, timeout=5, check=True)
+            except FileNotFoundError:
+                print(f"Error: compiler not found at {compiler}", file=sys.stderr)
+                return
+            except subprocess.SubprocessError as e:
+                print(f"Error: compiler check failed for {compiler}: {e}", file=sys.stderr)
+                return
 
     if clean and os.path.exists(build_dir):
         c.run(f"rm -rf {shlex.quote(build_dir)}")

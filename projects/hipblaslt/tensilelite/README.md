@@ -114,6 +114,9 @@ specialized builds (e.g., Debug builds) and setting the architecture.
 # build the client using tox with custom CMake flags
 cd rocm-libraries/projects/hipblaslt/tensilelite
 TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- Tensile/Tests -m common
+
+# run tests with a single pytest worker (useful for debugging)
+TENSILE_NUM_PYTEST_WORKERS=1 tox -e py3 -- Tensile/Tests -m common
 ```
 
 `invoke build-client` follows the existing `tensilelite` CMake preset by default.
@@ -127,6 +130,11 @@ Use these flags when you want to override or make that behavior explicit:
 * `--export-compile-commands`: Explicitly force `CMAKE_EXPORT_COMPILE_COMMANDS=ON`
 * `--bundle-python-deps`: Explicitly force `HIPBLASLT_BUNDLE_PYTHON_DEPS=ON`
 * `--enable-rocprof`: Sets `TENSILELITE_CLIENT_ENABLE_ROCPROFSDK=ON`
+
+### Environment Variables
+
+* `TENSILE_NUM_PYTEST_WORKERS`: Number of parallel pytest workers used by tox (default: `4`)
+* `TENSILELITE_CLIENT_ARGS`: Additional arguments passed to `invoke build-client` during tox runs
 
 ### Options
 
