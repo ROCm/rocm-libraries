@@ -157,22 +157,89 @@ def test_format_position_includes_list_suffix_for_mfmapack():
 
 
 def test_order_inverted_failure_format():
-    producer = _make_node("LRA0", "LRA0[0]", 23)
-    consumer = _make_node("MFMA", "MFMA", 20)
+    """Pinning fixture mirrors a REAL OrderInvertedFailure shape captured from
+    test_ValidateGRsCompleteBeforeLr1s.py::test_swap_global_read_order_failure:
+    GRB producer (CMS idx=3, default idx=0) and LRA1 consumer (CMS idx=2,
+    default idx=5). Both are non-MFMA categories, so both can shift across
+    schedules — CMS placed GRB later than default and LRA1 earlier, inverting
+    the producer-before-consumer order.
+
+    Capture has a sibling GRB earlier in the stream so the producer renders
+    as GRB[1] (second GRB in its category-stream); LRA1 is the only LRA1 so
+    it renders as LRA1[0]."""
+    from Tensile.Components.ScheduleCapture import SchedulePosition
+
+    @dataclass(eq=False)
+    class _TaggedStub:
+        category: str
+
+    earlier_grb = _TaggedStub(category="GRB")
+    producer_tagged = _TaggedStub(category="GRB")
+    consumer_tagged = _TaggedStub(category="LRA1")
+
+    producer = _make_node("GRB", "GRB", 3, tagged_inst=producer_tagged)
+    consumer = _make_node("LRA1", "LRA1", 2, tagged_inst=consumer_tagged)
+    capture = _capture_with(earlier_grb, consumer_tagged, producer_tagged)
+
     failure = OrderInvertedFailure(
         producer=producer,
         consumer=consumer,
-        default_producer_position=_Pos(vmfma_index=18),
-        default_consumer_position=_Pos(vmfma_index=21),
+        default_producer_position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
+        default_consumer_position=SchedulePosition(loop_index=1, vmfma_index=5, sub_index=0),
+    )
+    msg = failure.format(capture=capture)
+    assert "GRB[1] @ idx=3" in msg              # second GRB in its category-stream
+    assert "LRA1[0] @ idx=2" in msg             # first (and only) LRA1
+    assert "is issued after its consumer" in msg
+    assert "first consumer" not in msg          # only one consumer per failure; "first" dropped
+    assert "Default schedule" not in msg        # default-side prose removed
+    assert "CMS reverses" not in msg            # default-side prose removed
+    assert "must complete before" not in msg    # generic prose dropped earlier
+
+
+def test_order_inverted_failure_format_no_capture_falls_back():
+    """capture=None path: per-category [N] omitted, just the bare category."""
+    from Tensile.Components.ScheduleCapture import SchedulePosition
+    producer = _make_node("GRB", "GRB", 3)
+    consumer = _make_node("LRA1", "LRA1", 2)
+    failure = OrderInvertedFailure(
+        producer=producer,
+        consumer=consumer,
+        default_producer_position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
+        default_consumer_position=SchedulePosition(loop_index=1, vmfma_index=5, sub_index=0),
     )
     msg = failure.format(capture=None)
-    assert "LRA0" in msg
-    assert "MFMA" in msg
-    assert "@ idx=23" in msg
-    assert "@ idx=20" in msg
-    assert "issued after its consumer" in msg
-    assert "Default schedule emitted producer" in msg
-    assert "subject reverses this order" in msg
+    assert "GRB @ idx=3" in msg
+    assert "LRA1 @ idx=2" in msg
+    assert "GRB[" not in msg     # no per-category index without a capture
+    assert "LRA1[" not in msg
+
+
+def test_order_inverted_failure_format_mfma_consumer_omits_bracket():
+    """Consumer is plain MFMA (category='MFMA'): the [N] suffix is omitted
+    even when a capture is provided, because vmfma_index is the canonical
+    identity. PackMFMAs (category 'PackA*'/'PackB*') would still get [N]."""
+    from Tensile.Components.ScheduleCapture import SchedulePosition
+
+    @dataclass(eq=False)
+    class _TaggedStub:
+        category: str
+
+    producer_tagged = _TaggedStub(category="LRA0")
+    consumer_tagged = _TaggedStub(category="MFMA")
+    producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
+    consumer = _make_node("MFMA", "MFMA", 3, tagged_inst=consumer_tagged)
+    capture = _capture_with(producer_tagged, consumer_tagged)
+    failure = OrderInvertedFailure(
+        producer=producer,
+        consumer=consumer,
+        default_producer_position=SchedulePosition(loop_index=1, vmfma_index=2, sub_index=0),
+        default_consumer_position=SchedulePosition(loop_index=1, vmfma_index=3, sub_index=0),
+    )
+    msg = failure.format(capture=capture)
+    assert "LRA0[0] @ idx=5" in msg
+    assert "MFMA @ idx=3" in msg
+    assert "MFMA[" not in msg     # plain MFMA omits [N]
 
 
 def test_missing_wait_failure_format():

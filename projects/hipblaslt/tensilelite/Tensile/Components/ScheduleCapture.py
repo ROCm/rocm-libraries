@@ -461,6 +461,37 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
+def _node_label(node, capture=None) -> str:
+    """Render a node as 'category[N]' where N is its 0-based position within
+    its category's emit stream in `capture`. Plain MFMAs (category=='MFMA')
+    omit the [N] because vmfma_index already serves as their identity. Pack
+    categories ('PackA0', 'PackB1', ...) keep [N] because CMS reschedules
+    them.
+
+    Falls back to bare `category` when:
+      * capture is None (no per-category counter possible);
+      * tagged_inst isn't in capture.instructions (cross-body node);
+      * capture.instructions items lack a `category` attribute.
+    """
+    cat = node.category
+    if cat == "MFMA":
+        return cat
+    if capture is None:
+        return cat
+    tagged = getattr(node, "tagged_inst", None)
+    if tagged is None:
+        return cat
+    same_cat = [
+        t for t in capture.instructions
+        if getattr(t, "category", None) == cat
+    ]
+    try:
+        idx = same_cat.index(tagged)
+    except ValueError:
+        return cat
+    return f"{cat}[{idx}]"
+
+
 def format_position(node, capture=None) -> str:
     """Render a node's schedule position with optional list-position suffix.
 
@@ -528,16 +559,16 @@ class OrderInvertedFailure(Failure):
     default_consumer_position: object  # SchedulePosition (default-side, for diagnostics)
 
     def _format_canonical(self, capture=None) -> str:
-        producer_pos = format_position(self.producer, capture)
-        consumer_pos = format_position(self.consumer, capture)
+        # Use bare `@ idx=N` for both endpoints — the per-category `[N]` from
+        # _node_label already conveys identity within the category-stream, so
+        # the cross-category (Nth entry in list) suffix would be redundant.
+        producer_pos = f"@ idx={(getattr(self.producer, 'position', None) or self.producer.issued_at).vmfma_index}"
+        consumer_pos = f"@ idx={(getattr(self.consumer, 'position', None) or self.consumer.issued_at).vmfma_index}"
+        producer_label = _node_label(self.producer, capture)
+        consumer_label = _node_label(self.consumer, capture)
         return (
-            f"{self.producer.category}[{getattr(self.producer, 'name', '')}] "
-            f"{producer_pos} is issued after its consumer "
-            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
-            f"{consumer_pos}. The producer must complete before the consumer can use it."
-            f" Default schedule emitted producer @ "
-            f"{self.default_producer_position} and consumer @ "
-            f"{self.default_consumer_position}; subject reverses this order."
+            f"{producer_label} {producer_pos} is issued after its consumer "
+            f"{consumer_label} {consumer_pos}."
         )
 
 
@@ -789,7 +820,7 @@ class SCCConflictFailure(Failure):
             f"{self.consumer.category}[{consumer_cls}] "
             f"{consumer_pos}'s SCC read should resolve to producer "
             f"{self.producer.category}[{producer_cls}] {producer_pos}, "
-            f"but the subject schedule routes it elsewhere.{inter_desc}"
+            f"but the CMS schedule routes it elsewhere.{inter_desc}"
         )
 
 
