@@ -644,5 +644,3 @@ class TestBnormDataTypes:
         # stat tensors should be float
         mean_tensor = next(t for t in graph["tensors"] if t["name"] == "mean")
         assert mean_tensor["data_type"] == expected_stat_type
-
-

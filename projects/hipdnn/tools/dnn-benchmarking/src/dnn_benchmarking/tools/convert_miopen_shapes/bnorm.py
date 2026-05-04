@@ -81,12 +81,8 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
             _make_tensor(
                 3, "inv_variance", scale_dims, scale_strides, data_type="float"
             ),
-            _make_tensor(
-                4, "scale", scale_dims, scale_strides, data_type="float"
-            ),
-            _make_tensor(
-                5, "bias", scale_dims, scale_strides, data_type="float"
-            ),
+            _make_tensor(4, "scale", scale_dims, scale_strides, data_type="float"),
+            _make_tensor(5, "bias", scale_dims, scale_strides, data_type="float"),
             _make_tensor(6, "output_y", x_dims, x_strides, data_type=io_type),
         ]
         nodes = [
@@ -111,17 +107,11 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
         node_type = "BatchnormAttributes"
         tensors = [
             _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
-            _make_tensor(
-                2, "scale", scale_dims, scale_strides, data_type="float"
-            ),
-            _make_tensor(
-                3, "bias", scale_dims, scale_strides, data_type="float"
-            ),
+            _make_tensor(2, "scale", scale_dims, scale_strides, data_type="float"),
+            _make_tensor(3, "bias", scale_dims, scale_strides, data_type="float"),
             _make_scalar_tensor(4, "epsilon", 1e-5, data_type="float"),
             _make_tensor(5, "output_y", x_dims, x_strides, data_type=io_type),
-            _make_tensor(
-                6, "saved_mean", scale_dims, scale_strides, data_type="float"
-            ),
+            _make_tensor(6, "saved_mean", scale_dims, scale_strides, data_type="float"),
             _make_tensor(
                 7, "saved_inv_variance", scale_dims, scale_strides, data_type="float"
             ),
@@ -163,9 +153,7 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
             _make_tensor(
                 4, "inv_variance", scale_dims, scale_strides, data_type="float"
             ),
-            _make_tensor(
-                5, "scale", scale_dims, scale_strides, data_type="float"
-            ),
+            _make_tensor(5, "scale", scale_dims, scale_strides, data_type="float"),
             _make_tensor(6, "output_dx", x_dims, x_strides, data_type=io_type),
             # dscale and dbias accumulate in TAcc (float) regardless of TScaleBias
             _make_tensor(
