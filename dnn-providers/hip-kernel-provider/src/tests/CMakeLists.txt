@@ -29,6 +29,7 @@ add_executable(
     engines/plans/Batchnorm/TestBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/Batchnorm/TestBatchnormFwdTrainingPlan.cpp
     engines/plans/Batchnorm/TestBatchnormFwdTrainingActivPlan.cpp
+    engines/plans/Batchnorm/TestBatchnormBwdPlan.cpp
     engines/plans/Batchnorm/TestBatchnormCommon.cpp
     engines/plans/Batchnorm/TestBatchnormApplicabilityChecks.cpp
     engines/plans/Layernorm/TestLayernormPlanBuilder.cpp
