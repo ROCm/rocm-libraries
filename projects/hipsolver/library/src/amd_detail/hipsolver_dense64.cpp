@@ -44,6 +44,102 @@
 #include <limits>
 #include <math.h>
 
+// Host function wrapper structures for hipLaunchHostFunc (must be before extern "C")
+template<typename T>
+struct geev_host_func_params
+{
+    char  jobvl;
+    char  jobvr;
+    int   n;
+    T*    hA;
+    int   lda;
+    T*    hW;
+    T*    hVL;
+    int   ldvl;
+    T*    hVR;
+    int   ldvr;
+    T*    work;
+    int   lwork;
+    void* rwork; // float* for complex types, unused for real
+    int*  info;
+};
+
+template<typename T>
+static void geev_host_func(void* params_void)
+{
+    geev_host_func_params<T>* params = static_cast<geev_host_func_params<T>*>(params_void);
+    hipsolver::cpu_geev(params->jobvl,
+                        params->jobvr,
+                        params->n,
+                        params->hA,
+                        params->lda,
+                        params->hW,
+                        params->hVL,
+                        params->ldvl,
+                        params->hVR,
+                        params->ldvr,
+                        params->work,
+                        params->lwork,
+                        static_cast<typename std::conditional<
+                            std::is_same<T, hipFloatComplex>::value,
+                            float,
+                            typename std::conditional<std::is_same<T, hipDoubleComplex>::value,
+                                                      double,
+                                                      T>::type>::type*>(params->rwork),
+                        params->info);
+    /* delete params;  // Free heap-allocated params */
+}
+
+// Specialized version for real matrices with complex eigenvalue output
+template<typename T, typename TComplex>
+struct geev_complex_output_params
+{
+    char  jobvl;
+    char  jobvr;
+    int   n;
+    T*    hA;
+    int   lda;
+    T*    hWcopy;     // real/imag split format
+    TComplex* hW;     // complex output
+    T*    hVL;
+    int   ldvl;
+    T*    hVR;
+    int   ldvr;
+    T*    work;
+    int   lwork;
+    void* rwork;
+    int*  info;
+};
+
+template<typename T, typename TComplex>
+static void geev_complex_output_host_func(void* params_void)
+{
+    geev_complex_output_params<T, TComplex>* params =
+        static_cast<geev_complex_output_params<T, TComplex>*>(params_void);
+
+    // Call LAPACK geev with split real/imaginary output
+    hipsolver::cpu_geev(params->jobvl,
+                        params->jobvr,
+                        params->n,
+                        params->hA,
+                        params->lda,
+                        params->hWcopy,
+                        params->hVL,
+                        params->ldvl,
+                        params->hVR,
+                        params->ldvr,
+                        params->work,
+                        params->lwork,
+                        static_cast<T*>(params->rwork),
+                        params->info);
+
+    // Convert split real/imaginary to complex format
+    for(int i = 0; i < params->n; ++i)
+        params->hW[i] = TComplex(params->hWcopy[i], params->hWcopy[i + params->n]);
+
+    delete params;  // Free heap-allocated params
+}
+
 extern "C" {
 
 // The following functions are not included in the public API of rocSOLVER and must be declared
@@ -496,7 +592,6 @@ try
     CHECK_ROCBLAS_ERROR(rocblas_get_stream((rocblas_handle)handle, &stream));
 
     CHECK_HIP_ERROR(hipMemcpyAsync(hA, A, size_hA, hipMemcpyDeviceToHost, stream));
-    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     // ----- CALL LAPACK -----
     char jobvlC = (jobvl == HIPSOLVER_EIG_MODE_NOVECTOR ? 'N' : 'V');
@@ -506,125 +601,125 @@ try
     if(dataTypeA == HIP_R_32F && dataTypeW == HIP_R_32F && dataTypeVL == HIP_R_32F
        && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
     {
-        hipsolver::cpu_geev(jobvlC,
-                            jobvrC,
-                            (int)n,
-                            (float*)hA,
-                            (int)lda,
-                            (float*)hW,
-                            (float*)hVL,
-                            (int)ldvl,
-                            (float*)hVR,
-                            (int)ldvr,
-                            (float*)work,
-                            (int)lwork_computed,
-                            (float*)rwork,
-                            (int*)hInfo);
+        auto* geev_params = new geev_host_func_params<float>{jobvlC,
+                                                         jobvrC,
+                                                         (int)n,
+                                                         (float*)hA,
+                                                         (int)lda,
+                                                         (float*)hW,
+                                                         (float*)hVL,
+                                                         (int)ldvl,
+                                                         (float*)hVR,
+                                                         (int)ldvr,
+                                                         (float*)work,
+                                                         (int)lwork_computed,
+                                                         rwork,
+                                                         (int*)hInfo};
+        CHECK_HIP_ERROR(hipLaunchHostFunc(stream, geev_host_func<float>, geev_params));
+        CHECK_HIP_ERROR(hipDeviceSynchronize());
     }
     // sgeev with complex W
     else if(dataTypeA == HIP_R_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_R_32F
             && dataTypeVR == HIP_R_32F && computeType == HIP_R_32F)
     {
-        hipsolver::cpu_geev(jobvlC,
-                            jobvrC,
-                            (int)n,
-                            (float*)hA,
-                            (int)lda,
-                            (float*)hWcopy,
-                            (float*)hVL,
-                            (int)ldvl,
-                            (float*)hVR,
-                            (int)ldvr,
-                            (float*)work,
-                            (int)lwork_computed,
-                            (float*)rwork,
-                            (int*)hInfo);
-
-        hipFloatComplex* hW_f     = (hipFloatComplex*)hW;
-        float*           hWcopy_f = (float*)hWcopy;
-        for(int64_t i = 0; i < n; ++i)
-            hW_f[i] = hipFloatComplex(hWcopy_f[i], hWcopy_f[i + n]);
+        auto* geev_params = new geev_complex_output_params<float, hipFloatComplex>{jobvlC,
+                                                                               jobvrC,
+                                                                               (int)n,
+                                                                               (float*)hA,
+                                                                               (int)lda,
+                                                                               (float*)hWcopy,
+                                                                               (hipFloatComplex*)hW,
+                                                                               (float*)hVL,
+                                                                               (int)ldvl,
+                                                                               (float*)hVR,
+                                                                               (int)ldvr,
+                                                                               (float*)work,
+                                                                               (int)lwork_computed,
+                                                                               rwork,
+                                                                               (int*)hInfo};
+        CHECK_HIP_ERROR(hipLaunchHostFunc(stream, geev_complex_output_host_func<float, hipFloatComplex>, geev_params));
+        CHECK_HIP_ERROR(hipDeviceSynchronize());
     }
     // dgeev
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_R_64F && dataTypeVL == HIP_R_64F
             && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
-        hipsolver::cpu_geev(jobvlC,
-                            jobvrC,
-                            (int)n,
-                            (double*)hA,
-                            (int)lda,
-                            (double*)hW,
-                            (double*)hVL,
-                            (int)ldvl,
-                            (double*)hVR,
-                            (int)ldvr,
-                            (double*)work,
-                            (int)lwork_computed,
-                            (double*)rwork,
-                            (int*)hInfo);
+        auto* geev_params = new geev_host_func_params<double>{jobvlC,
+                                                          jobvrC,
+                                                          (int)n,
+                                                          (double*)hA,
+                                                          (int)lda,
+                                                          (double*)hW,
+                                                          (double*)hVL,
+                                                          (int)ldvl,
+                                                          (double*)hVR,
+                                                          (int)ldvr,
+                                                          (double*)work,
+                                                          (int)lwork_computed,
+                                                          rwork,
+                                                          (int*)hInfo};
+        CHECK_HIP_ERROR(hipLaunchHostFunc(stream, geev_host_func<double>, geev_params));
     }
     // dgeev with complex W
     else if(dataTypeA == HIP_R_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_R_64F
             && dataTypeVR == HIP_R_64F && computeType == HIP_R_64F)
     {
-        hipsolver::cpu_geev(jobvlC,
-                            jobvrC,
-                            (int)n,
-                            (double*)hA,
-                            (int)lda,
-                            (double*)hWcopy,
-                            (double*)hVL,
-                            (int)ldvl,
-                            (double*)hVR,
-                            (int)ldvr,
-                            (double*)work,
-                            (int)lwork_computed,
-                            (double*)rwork,
-                            (int*)hInfo);
-
-        hipDoubleComplex* hW_f     = (hipDoubleComplex*)hW;
-        double*           hWcopy_f = (double*)hWcopy;
-        for(int64_t i = 0; i < n; ++i)
-            hW_f[i] = hipDoubleComplex(hWcopy_f[i], hWcopy_f[i + n]);
+        auto* geev_params = new geev_complex_output_params<double, hipDoubleComplex>{jobvlC,
+                                                                                 jobvrC,
+                                                                                 (int)n,
+                                                                                 (double*)hA,
+                                                                                 (int)lda,
+                                                                                 (double*)hWcopy,
+                                                                                 (hipDoubleComplex*)hW,
+                                                                                 (double*)hVL,
+                                                                                 (int)ldvl,
+                                                                                 (double*)hVR,
+                                                                                 (int)ldvr,
+                                                                                 (double*)work,
+                                                                                 (int)lwork_computed,
+                                                                                 rwork,
+                                                                                 (int*)hInfo};
+        CHECK_HIP_ERROR(hipLaunchHostFunc(stream, geev_complex_output_host_func<double, hipDoubleComplex>, geev_params));
     }
     // cgeev
     else if(dataTypeA == HIP_C_32F && dataTypeW == HIP_C_32F && dataTypeVL == HIP_C_32F
             && dataTypeVR == HIP_C_32F && computeType == HIP_C_32F)
     {
-        hipsolver::cpu_geev(jobvlC,
-                            jobvrC,
-                            (int)n,
-                            (hipFloatComplex*)hA,
-                            (int)lda,
-                            (hipFloatComplex*)hW,
-                            (hipFloatComplex*)hVL,
-                            (int)ldvl,
-                            (hipFloatComplex*)hVR,
-                            (int)ldvr,
-                            (hipFloatComplex*)work,
-                            (int)lwork_computed,
-                            (float*)rwork,
-                            (int*)hInfo);
+        auto* geev_params = new geev_host_func_params<hipFloatComplex>{jobvlC,
+                                                                   jobvrC,
+                                                                   (int)n,
+                                                                   (hipFloatComplex*)hA,
+                                                                   (int)lda,
+                                                                   (hipFloatComplex*)hW,
+                                                                   (hipFloatComplex*)hVL,
+                                                                   (int)ldvl,
+                                                                   (hipFloatComplex*)hVR,
+                                                                   (int)ldvr,
+                                                                   (hipFloatComplex*)work,
+                                                                   (int)lwork_computed,
+                                                                   rwork,
+                                                                   (int*)hInfo};
+        CHECK_HIP_ERROR(hipLaunchHostFunc(stream, geev_host_func<hipFloatComplex>, geev_params));
     }
     // zgeev
     else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_C_64F && dataTypeVL == HIP_C_64F
             && dataTypeVR == HIP_C_64F && computeType == HIP_C_64F)
     {
-        hipsolver::cpu_geev(jobvlC,
-                            jobvrC,
-                            (int)n,
-                            (hipDoubleComplex*)hA,
-                            (int)lda,
-                            (hipDoubleComplex*)hW,
-                            (hipDoubleComplex*)hVL,
-                            (int)ldvl,
-                            (hipDoubleComplex*)hVR,
-                            (int)ldvr,
-                            (hipDoubleComplex*)work,
-                            (int)lwork_computed,
-                            (double*)rwork,
-                            (int*)hInfo);
+        auto* geev_params = new geev_host_func_params<hipDoubleComplex>{jobvlC,
+                                                                    jobvrC,
+                                                                    (int)n,
+                                                                    (hipDoubleComplex*)hA,
+                                                                    (int)lda,
+                                                                    (hipDoubleComplex*)hW,
+                                                                    (hipDoubleComplex*)hVL,
+                                                                    (int)ldvl,
+                                                                    (hipDoubleComplex*)hVR,
+                                                                    (int)ldvr,
+                                                                    (hipDoubleComplex*)work,
+                                                                    (int)lwork_computed,
+                                                                    rwork,
+                                                                    (int*)hInfo};
+        CHECK_HIP_ERROR(hipLaunchHostFunc(stream, geev_host_func<hipDoubleComplex>, geev_params));
     }
     else
         return HIPSOLVER_STATUS_INVALID_ENUM;

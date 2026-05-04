@@ -34,6 +34,9 @@ static bool test_left_eigenvectors
     = false; // Computing left eigenvectors is not supported in cuSOLVER.
 static bool test_right_eigenvectors = true;
 
+static bool geev_use_hipgraph = std::getenv("GEEV_USE_HIPGRAPH") != nullptr ? true : false;
+static bool print_debug_messages_geev = std::getenv("PRINT_DEBUG") != nullptr ? true : false;
+
 template <testAPI_t API,
           typename I,
           typename SIZE,
@@ -571,24 +574,100 @@ void geev_getError(const hipsolverHandle_t   handle,
     // Execute computations
     // GPU lapack
     //
-    CHECK_ROCBLAS_ERROR(hipsolver_geev(API,
-                                       handle,
-                                       params,
-                                       jobvl,
-                                       jobvr,
-                                       n,
-                                       dA.data(),
-                                       lda,
-                                       dW.data(),
-                                       dVL.data(),
-                                       ldvl,
-                                       dVR.data(),
-                                       ldvr,
-                                       dWork.data(),
-                                       dlwork,
-                                       hWork.data(),
-                                       hlwork,
-                                       dInfo.data()));
+    if(geev_use_hipgraph)
+    {
+        if(print_debug_messages_geev)
+        {
+            std::cout << "Using hipGraph for geev" << std::endl;
+        }
+
+        // Create separate handle and stream for graph operations
+        hipsolverHandle_t handle2;
+        hipsolverCreate(&handle2);
+        hipsolverDnParams_t params2;
+        hipsolverDnCreateParams(&params2);
+
+        hipStream_t stream;
+        CHECK_HIP_ERROR(hipStreamCreate(&stream));
+        CHECK_ROCBLAS_ERROR(hipsolverSetStream(handle2, stream));
+
+        // Graph capture
+        hipGraph_t graph;
+        CHECK_HIP_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+        CHECK_ROCBLAS_ERROR(hipsolver_geev(API,
+                                           handle2,
+                                           params2,
+                                           jobvl,
+                                           jobvr,
+                                           n,
+                                           dA.data(),
+                                           lda,
+                                           dW.data(),
+                                           dVL.data(),
+                                           ldvl,
+                                           dVR.data(),
+                                           ldvr,
+                                           dWork.data(),
+                                           dlwork,
+                                           hWork.data(),
+                                           hlwork,
+                                           dInfo.data()));
+
+        // Instantiate graph
+        CHECK_HIP_ERROR(hipStreamEndCapture(stream, &graph));
+        hipGraphExec_t graphExec;
+        CHECK_HIP_ERROR(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+        CHECK_HIP_ERROR(hipGraphDestroy(graph));
+
+        // Execute graph
+        CHECK_HIP_ERROR(hipGraphLaunch(graphExec, stream));
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+        // Check error status (geev is not graph-safe yet, so expect hipSuccess for now)
+        hipError_t graphError = hipGetLastError();
+        if(print_debug_messages_geev)
+        {
+            if(graphError != hipSuccess)
+            {
+                std::cout << "Graph error detected: " << hipGetErrorString(graphError)
+                          << std::endl;
+            }
+            else
+            {
+                std::cout << "Graph succeeded (hipSuccess)" << std::endl;
+            }
+        }
+        // It's OK for the test to fail while geev is not graph-safe
+        EXPECT_EQ(graphError, hipSuccess);
+
+        // Cleanup
+        hipGraphExecDestroy(graphExec);
+        hipStreamDestroy(stream);
+        hipsolverDnDestroyParams(params2);
+        hipsolverDestroy(handle2);
+    }
+    else
+    {
+        // Non-graph path
+        CHECK_ROCBLAS_ERROR(hipsolver_geev(API,
+                                           handle,
+                                           params,
+                                           jobvl,
+                                           jobvr,
+                                           n,
+                                           dA.data(),
+                                           lda,
+                                           dW.data(),
+                                           dVL.data(),
+                                           ldvl,
+                                           dVR.data(),
+                                           ldvr,
+                                           dWork.data(),
+                                           dlwork,
+                                           hWork.data(),
+                                           hlwork,
+                                           dInfo.data()));
+    }
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hWRes.transfer_from(dW));
     if(jobvl != HIPSOLVER_EIG_MODE_NOVECTOR)
