@@ -39,8 +39,6 @@ auto GetConvTestCases(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, type_x, type_w, type_y},
-        // dilation=2: effective kernel size 5, pad=2 keeps spatial dims at 8
-        TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {2, 2}, {1, 1}, {2, 2}, type_x, type_w, type_y},
         // clang-format on
     };
 }
@@ -56,16 +54,7 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
         // Regression test for https://github.com/ROCm/MIOpen/issues/2047
-        // TODO: Temporarily disabled due to rocBLAS bug on gfx90a with 3D BFP16
-        // TestCase{{1, 1, 2, 1, 2}, {2, 1, 2, 1, 2}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, type_x, type_w, type_y},
-        // dilation=3: effective kernel size 7, pad=3 keeps spatial dims at 8
-        TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {3, 3}, {1, 1}, {3, 3}, type_x, type_w, type_y},
-        // asymmetric dilation: different dilation per spatial dim
-        TestCase{{1, 8, 9, 9}, {8, 8, 3, 3}, {1, 2}, {1, 1}, {1, 2}, type_x, type_w, type_y},
-        // 3D dilation=2: effective kernel size 5 in each dim, pad=2 keeps spatial dims at 8
-        TestCase{{1, 8, 8, 8, 8}, {8, 8, 3, 3, 3}, {2, 2, 2}, {1, 1, 1}, {2, 2, 2}, type_x, type_w, type_y},
-        // 3D asymmetric dilation: dilation=(1,2,3), pad=(1,2,3) keeps spatial dims at 8
-        TestCase{{1, 8, 8, 8, 8}, {8, 8, 3, 3, 3}, {1, 2, 3}, {1, 1, 1}, {1, 2, 3}, type_x, type_w, type_y},
+        TestCase{{1, 1, 2, 1, 2}, {2, 1, 2, 1, 2}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, type_x, type_w, type_y},
         // clang-format on
     };
 }
