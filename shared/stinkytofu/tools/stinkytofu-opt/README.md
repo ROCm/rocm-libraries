@@ -67,6 +67,28 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 
+**Output flags:**
+- `--print-output`: Emit optimized IR (StinkyTofu text format)
+- `--emit-asm`: Emit optimized GPU assembly (always on for `.s` input)
+- `-o <file>`: Write output to file instead of stdout
+
+**Region selection (asm input only):**
+- `--from-label <label>`: Start processing at the given label
+- `--to-label <label>`: Stop processing at the given label (labels are any identifier defined in the assembly file)
+
+**Round-trip fidelity flags (asm input only):**
+- `--preserve-symbolic-regs`: Preserve and re-emit symbolic register names (e.g.
+  `v[vgprSerialPersist-768]`) instead of resolving them to the numeric form
+  (`v255`). Best used with no optimization passes, since passes operate on
+  numeric indices and can leave the symbolic names stale.
+- `--preserve-comments`: Preserve and re-emit trailing source comments (`// ...`
+  or `; ...`) attached to each instruction, label, or `.set` directive. Best
+  used with no optimization passes, since passes can move or rewrite the
+  instructions the comments were attached to.
+
+Both flags are off by default — `stinkytofu-opt` resolves symbolic register
+names and strips comments unless the flag is set.
+
 ### Available Passes
 
 ```bash
@@ -119,6 +141,37 @@ Apply multiple optimization passes in sequence:
     --StinkyClusterDSReadPass \
     --StinkyDAGSchedulerPass
 ```
+
+#### Example 4: Round-Trip Raw Assembly
+
+When the input is a `.s` file (raw GPU assembly), `--emit-asm` is implied and
+the tool can be used as a parse → IR → emit round-trip. By default, symbolic
+register names are resolved to numeric indices and source comments are
+stripped. Use the round-trip fidelity flags to preserve them:
+
+```bash
+# Resolve symbolic regs and strip comments (default)
+./build/tools/stinkytofu-opt/stinkytofu-opt --arch gfx1250 kernel.s
+
+# Preserve symbolic register names (e.g. v[vgprSerialPersist-768] survives
+# instead of becoming v255).
+./build/tools/stinkytofu-opt/stinkytofu-opt --arch gfx1250 kernel.s \
+    --preserve-symbolic-regs
+
+# Preserve trailing // and ; comments on each instruction, label, and .set.
+./build/tools/stinkytofu-opt/stinkytofu-opt --arch gfx1250 kernel.s \
+    --preserve-comments
+
+# Both — closest to byte-for-byte round-trip:
+./build/tools/stinkytofu-opt/stinkytofu-opt --arch gfx1250 kernel.s \
+    --preserve-symbolic-regs --preserve-comments
+```
+
+**Caveat:** both flags are designed for round-trip workflows, *not* for
+running optimization passes. Optimization passes operate on numeric
+register indices and can move or rewrite instructions, which leaves stale
+symbolic names and orphaned comments. If you need to combine round-trip
+with passes, expect manual review of the output.
 
 ### Output Files
 

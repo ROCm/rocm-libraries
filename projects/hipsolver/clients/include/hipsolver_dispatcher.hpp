@@ -54,6 +54,7 @@
 #include "testing_sygvj_hegvj.hpp"
 #include "testing_sytrd_hetrd.hpp"
 #include "testing_sytrf.hpp"
+#include "testing_sytrs.hpp"
 
 #ifdef HAVE_HIPSPARSE
 #include "testing_csrlsvchol.hpp"
@@ -99,6 +100,7 @@ class hipsolver_dispatcher
             {"potrs", testing_potrs<API_NORMAL, false, false, T>},
             {"potrs_batched", testing_potrs<API_NORMAL, true, false, T>},
             {"sytrf", testing_sytrf<API_NORMAL, false, false, T>},
+            {"sytrs_64", testing_sytrs<API_COMPAT, false, false, T, int64_t, size_t>},
         };
 
         // Grab function from the map and execute

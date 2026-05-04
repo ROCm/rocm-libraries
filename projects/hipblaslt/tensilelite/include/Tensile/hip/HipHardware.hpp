@@ -32,6 +32,10 @@
 
 #include <hip/hip_runtime.h>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     namespace hip
@@ -62,3 +66,5 @@ namespace TensileLite
         std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop, int deviceId);
     } // namespace hip
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

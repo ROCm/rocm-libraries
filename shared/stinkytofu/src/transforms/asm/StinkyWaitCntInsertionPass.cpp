@@ -504,22 +504,38 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                     }
 
                     if (auto* memTokenData = inst->getModifier<MemTokenData>()) {
-                        // check if tensorLoads.front() has any memTokens in barrier
                         auto& barrierMemTokens = memTokenData->tokens;
-                        auto& tensorLoadMemTokens =
-                            tensorLoads.front()->getModifier<MemTokenData>()->tokens;
-                        if (std::any_of(tensorLoadMemTokens.begin(), tensorLoadMemTokens.end(),
-                                        [barrierMemTokens](int token) {
-                                            return std::find(barrierMemTokens.begin(),
-                                                             barrierMemTokens.end(),
-                                                             token) != barrierMemTokens.end();
-                                        })) {
-                            tensorLoads.pop_front();
+                        int lastDependentIndex = -1;
+                        for (int i = static_cast<int>(tensorLoads.size()) - 1; i >= 0; --i) {
+                            auto* tensorLoad = tensorLoads[i];
+                            auto* tensorMemTokenData = tensorLoad->getModifier<MemTokenData>();
+                            if (tensorMemTokenData == nullptr) {
+                                continue;
+                            }
 
+                            auto& tensorLoadMemTokens = tensorMemTokenData->tokens;
+                            if (std::any_of(tensorLoadMemTokens.begin(), tensorLoadMemTokens.end(),
+                                            [barrierMemTokens](int token) {
+                                                return std::find(barrierMemTokens.begin(),
+                                                                 barrierMemTokens.end(),
+                                                                 token) != barrierMemTokens.end();
+                                            })) {
+                                lastDependentIndex = i;
+                                break;
+                            }
+                        }
+
+                        if (lastDependentIndex >= 0) {
+                            int remainingTensorLoads =
+                                static_cast<int>(tensorLoads.size()) - 1 - lastDependentIndex;
                             tensorWaits.emplace_back(inst,
                                                      WaitCntInstruction(WaitCntInstruction::kUnused,
                                                                         WaitCntInstruction::kUnused,
-                                                                        tensorLoads.size()));
+                                                                        remainingTensorLoads));
+
+                            // Loads up to lastDependentIndex are guaranteed complete after wait.
+                            tensorLoads.erase(tensorLoads.begin(),
+                                              tensorLoads.begin() + lastDependentIndex + 1);
                         }
                     }
                 }

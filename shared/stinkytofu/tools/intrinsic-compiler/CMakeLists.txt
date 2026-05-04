@@ -8,9 +8,6 @@
 
 set(SOURCES
     intrinsic-compiler.cpp
-    ../../src/serialization/asm/IRLexer.cpp
-    ../../src/serialization/asm/PatternParser.cpp
-    ../../src/serialization/logical/IRSerializer.cpp
 )
 
 add_executable(intrinsic-compiler "${SOURCES}")
