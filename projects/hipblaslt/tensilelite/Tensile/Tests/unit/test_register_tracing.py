@@ -24,12 +24,32 @@
 ################################################################################
 """Tests for register-based dependency tracing in derive_pack_must_start_after.
 
-These tests verify that the register-based dependency derivation produces
-the same must_start_after constraints as the positional code in
-_hook_up_packs_bf16, _hook_up_packs_f32, and _hook_up_packs_f32_mfma.
+ola.4 phase-2 deletion: every helper this file tests
+(`derive_pack_must_start_after`, `set_pack_needed_by_from_mfma_operands`,
+`set_lr_needed_by_from_mfma_operands`, `_hook_up_packs_f32_mfma`,
+`_build_reg_to_lr_map`, `_get_lrs_for_pack`, `add_pack_constraints`) was
+deleted as part of removing the structural Pack rule. The invariants
+those helpers encoded — Pack -> Pack and LR -> Pack RAW/WAR ordering,
+Pack -> MFMA needed_by chains — are now enforced graph-side by
+`_GenericALURule` + `validate_edge_wait_coverage` + `compare_graphs`,
+covered by `test_validate_pack_graph.py` and
+`test_dataflow_graph_register_gaps.py`.
+
+This module is `pytest.skip`-ed at collection time because its imports
+no longer resolve. The file is preserved so the migration provenance
+(test names + per-class invariant docstrings) stays browsable for
+post-mortem review; it should be deleted by a follow-up cleanup bead.
 """
 
 import pytest
+
+pytest.skip(
+    "test_register_tracing.py: helpers it tests were deleted by ola.4 "
+    "phase-2; graph-side coverage in test_validate_pack_graph.py and "
+    "test_dataflow_graph_register_gaps.py supersedes this module.",
+    allow_module_level=True,
+)
+
 from rocisa.instruction import (
     VPermB32, VSwapB32, DSLoadB128, MFMAInstruction, VCvtPkF32toBF16,
     SWaitCnt, SBarrier,
@@ -40,19 +60,13 @@ from rocisa.enum import InstType
 from Tensile.Components.CMSValidator import (
     Pack, CVTPack, MiddlePack, MFMAPack, SwapPack,
     LocalRead, MFMA,
-    derive_pack_must_start_after,
-    set_pack_needed_by_from_mfma_operands,
-    set_lr_needed_by_from_mfma_operands,
     resolve_pack_type, PACK_TYPE_MAP,
-    _compute_swap_register_pairs, _build_reg_to_lr_map,
-    _hook_up_packs_f32_mfma,
+    _compute_swap_register_pairs,
     VGPRS_PER_CONVERSION_GROUP,
     get_dst_range, get_src_ranges, get_reg_range,
     SchedulePosition,
     create_unified_timeline,
-    add_pack_constraints,
     validate_timeline, ValidationContext, isValid,
-    _get_lrs_for_pack,
 )
 from Tensile.Components.CustomSchedule import ScheduleInfo, hasCustomSchedule
 from cms_test_utils import (
