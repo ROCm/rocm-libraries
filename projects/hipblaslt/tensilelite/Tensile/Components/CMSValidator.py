@@ -1519,30 +1519,23 @@ ValidatorPassContext = ValidationContext
 # needed.
 
 
-def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: 'ValidationContext', code_path: int) -> tuple[bool, str]:
-    """
-    Verify that the number of instructions in the schedule is correct for a single code path.
-    """
-    for instruction_name in schedule_info.optSchedule.keys():
-        schedule = schedule_get(instruction_name, code_path, schedule_info)
-
-        len_actual = len(schedule)
-        len_expected = len(context.id_map[instruction_name])
-        if len_actual != len_expected:
-            return False, f"{instruction_name} has {len_actual} instructions, but {len_expected} instructions are required."
-    return True, ""
-
-
-# ---------------------------------------------------------------------------
-# Concern-based rule wrappers (stage 11 → isValid wiring)
-# ---------------------------------------------------------------------------
-
-class InstructionCountRule(StructuralRule):
-    def concerns(self) -> set[ValidationConcern]:
-        return {ValidationConcern.SCHEDULE_COMPLETENESS}
-
-    def run(self, schedule_info, context, code_path):
-        return verify_correct_number_of_instructions(schedule_info, context, code_path)
+# `verify_correct_number_of_instructions` + `InstructionCountRule` were
+# deleted in bead `4tw`. The rule guarded against
+# `len(optSchedule[K]) != len(id_map[K])` drift, which would have caused
+# the (now-empty) TIMELINE_RULES path to silently truncate instructions
+# via `min(len_a, len_b)`. With ola.1-4 closing out every Timeline
+# consumer, the drift modes the rule guarded are now caught upstream
+# and downstream of `isValid()`:
+#   * `optSchedule[K]` references too-large index → `IndexError` at
+#     `CustomSchedule.scheduleInst()` (CustomSchedule.py:410) with a
+#     clear "stream X[i] references instruction index N but only M
+#     instructions exist" message.
+#   * `optSchedule[K]` shorter than `id_map[K]` → fewer rocisa
+#     instructions emitted into the CMS macro → `compare_graphs` Phase 0
+#     in `KernelWriter.py:5225` raises `CaptureConsistencyError` on the
+#     resulting data-flow node identity mismatch between default and CMS.
+# See `Tensile/Tests/unit/test_ValidateInstructionCount.py` (deleted in
+# the same bead) for the full coverage matrix the old rule pinned.
 
 
 # `LRDataReadyRule` was deleted in bead `ola.3` phase-2. The
@@ -1583,7 +1576,10 @@ TIMELINE_RULES: list[ValidationRule] = [
 ]
 
 STRUCTURAL_RULES: list[StructuralRule] = [
-    InstructionCountRule(),
+    # `InstructionCountRule()` deleted in bead `4tw` — see comment block
+    # above the former `verify_correct_number_of_instructions` location.
+    # The list is now empty; isValid still iterates it as a no-op so the
+    # dispatch contract stays stable.
 ]
 
 
