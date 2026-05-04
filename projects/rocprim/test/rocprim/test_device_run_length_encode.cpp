@@ -153,7 +153,11 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        const std::vector<size_t> empty_sizes{0, 1};
+        auto                      sizes = test_utils::get_sizes(seed_value);
+        sizes.insert(std::end(sizes), std::begin(empty_sizes), std::end(empty_sizes));
+
+        for(size_t size : sizes)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -284,7 +288,11 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        const std::vector<size_t> empty_sizes{0, 1};
+        auto                      sizes = test_utils::get_sizes(seed_value);
+        sizes.insert(std::end(sizes), std::begin(empty_sizes), std::end(empty_sizes));
+
+        for(size_t size : sizes)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
