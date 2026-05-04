@@ -26,7 +26,7 @@ TEST(TestGraphRMSNormBackward, BuildGraph)
     x->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 64, 1, 1}).set_stride({64, 1, 1, 1}).set_data_type(DataType::FLOAT);
+    scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     // Create attributes (default: no dbias)
     RMSNormBackwardAttributes attributes;
@@ -63,7 +63,7 @@ TEST(TestGraphRMSNormBackward, BuildGraphWithDbias)
     x->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 64, 1, 1}).set_stride({64, 1, 1, 1}).set_data_type(DataType::FLOAT);
+    scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     RMSNormBackwardAttributes attributes;
     attributes.set_name("RMSNormBackwardNode").set_compute_dbias(true);

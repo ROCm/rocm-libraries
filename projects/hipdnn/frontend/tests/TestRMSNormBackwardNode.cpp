@@ -33,16 +33,16 @@ RMSNormBackwardAttributes createValidAttributes()
     xTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_x(xTensor);
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({1, 64, 1, 1});
-    scaleTensor->set_stride({64, 1, 1, 1});
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_scale(scaleTensor);
     auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({1, 64, 32, 32});
     dxTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_dx(dxTensor);
     auto dscaleTensor = std::make_shared<TensorAttributes>();
-    dscaleTensor->set_dim({1, 64, 1, 1});
-    dscaleTensor->set_stride({64, 1, 1, 1});
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_dscale(dscaleTensor);
 
     return attrs;
@@ -194,6 +194,154 @@ TEST(TestRMSNormBackwardNode, PreValidateNodeMissingDxTensor)
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
+TEST(TestRMSNormBackwardNode, PreValidateNodeInputShape)
+{
+    // dy shape doesn't match x shape
+    auto attrs = createValidAttributes();
+    attrs.get_dy()->set_dim({2, 2, 2, 2});
+    attrs.get_dy()->set_stride({8, 4, 2, 1});
+
+    const GraphAttributes graphAttributes;
+    const RMSNormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestRMSNormBackwardNode, PreValidateNodeDxShape)
+{
+    // dx shape doesn't match x shape
+    auto attrs = createValidAttributes();
+    attrs.get_dx()->set_dim({2, 2, 2, 2});
+    attrs.get_dx()->set_stride({8, 4, 2, 1});
+
+    const GraphAttributes graphAttributes;
+    const RMSNormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestRMSNormBackwardNode, PreValidateNodeWithBiasNormAxis1)
+{
+    RMSNormBackwardAttributes attrs;
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    attrs.set_scale(scaleTensor);
+
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    attrs.set_dscale(dscaleTensor);
+
+    const GraphAttributes graphAttributes;
+    const RMSNormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestRMSNormBackwardNode, PreValidateNodeWithBiasNormAxis2)
+{
+    RMSNormBackwardAttributes attrs;
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 1, 32, 32});
+    attrs.set_scale(scaleTensor);
+
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 1, 32, 32});
+    attrs.set_dscale(dscaleTensor);
+
+    const GraphAttributes graphAttributes;
+    const RMSNormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestRMSNormBackwardNode, PreValidateNodeWithBiasNormAxis3)
+{
+    RMSNormBackwardAttributes attrs;
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 1, 1, 32});
+    attrs.set_scale(scaleTensor);
+
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 1, 1, 32});
+    attrs.set_dscale(dscaleTensor);
+
+    const GraphAttributes graphAttributes;
+    const RMSNormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestRMSNormBackwardNode, PreValidateNodeWithScaleMismatch)
+{
+    RMSNormBackwardAttributes attrs;
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 1, 1, 32});
+    attrs.set_scale(scaleTensor);
+
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 1, 32, 32});
+    attrs.set_dscale(dscaleTensor);
+
+    const GraphAttributes graphAttributes;
+    const RMSNormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
 TEST(TestRMSNormBackwardNode, PreValidateNodeMissingDscaleTensor)
 {
     RMSNormBackwardAttributes attrs;
@@ -222,6 +370,74 @@ TEST(TestRMSNormBackwardNode, PreValidateNodeMissingDscaleTensor)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestRMSNormBackwardNode, PreValidateNodeWithValidInvRms)
+{
+    RMSNormBackwardAttributes attrs;
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 1, 32, 32});
+    attrs.set_scale(scaleTensor);
+
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 1, 32, 32});
+    attrs.set_dscale(dscaleTensor);
+
+    auto invRmsTensor = std::make_shared<TensorAttributes>();
+    invRmsTensor->set_dim({2, 64, 1, 1});
+    attrs.set_inv_rms(invRmsTensor);
+
+    const GraphAttributes graphAttributes;
+    const RMSNormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestRMSNormBackwardNode, PreValidateNodeWithInvalidInvRms)
+{
+    RMSNormBackwardAttributes attrs;
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 1, 32, 32});
+    attrs.set_scale(scaleTensor);
+
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 1, 32, 32});
+    attrs.set_dscale(dscaleTensor);
+
+    auto invRmsTensor = std::make_shared<TensorAttributes>();
+    invRmsTensor->set_dim({2, 1, 1, 1});
+    attrs.set_inv_rms(invRmsTensor);
+
+    const GraphAttributes graphAttributes;
+    const RMSNormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestRMSNormBackwardNode, PreValidateNodeAllValuesSet)

@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/detail/RMSNormBackwardPacker.hpp>
 #include <hipdnn_frontend/detail/RMSNormBackwardUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -57,6 +58,34 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "RMSNormBackwardNode missing dscale (output) for pre-validation");
 
+        auto dyTensor = attributes.get_dy();
+        auto xTensor = attributes.get_x();
+        auto scaleTensor = attributes.get_scale();
+        auto dxTensor = attributes.get_dx();
+        auto dscaleTensor = attributes.get_dscale();
+
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(xTensor, 2, "Input tensor (x)"));
+        HIPDNN_CHECK_ERROR(
+            detail::validateMinimumTensorDimensions(dyTensor, 2, "Gradient input tensor (dy)"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scaleTensor, 2, "Scale tensor"));
+
+        // RMSNorm preserves tensor shape - it only transforms values, not dimensions.
+        HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatch(
+            xTensor, dyTensor, "Input tensor (x)", "Gradient input tensor (dy)"));
+
+        // dx may not have dimensions set yet (will be inferred)
+        HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatchIfSet(
+            xTensor, dxTensor, "Input tensor (x)", "Gradient output tensor (dx)"));
+
+        // Validate Scale Tensor Shape (encodes normalized_shape)
+        HIPDNN_CHECK_ERROR(
+            detail::validateScaleNormalizedShape(scaleTensor, xTensor, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateTensorShapesMatchIfSet(
+            scaleTensor, dscaleTensor, "Input tensor (x)", "Gradient output tensor (dx)"));
+
+        // Validate invrms shape
+        HIPDNN_CHECK_ERROR(detail::validateNormStatsShapeIfSet(
+            attributes.get_inv_rms(), xTensor, scaleTensor, "Inverse RMS tensor"));
         return {};
     }
 
