@@ -107,7 +107,7 @@ class Pass {
 // the StinkyTofu pass execution framework.
 //
 // It does not own a Function; the Function is passed to PassManager::run(Function&).
-class PassContext {
+class STINKYTOFU_EXPORT PassContext {
     GemmTileConfig gemmConfig;
     PassFeatureConfig passConfig;
     AsmCapsConfig asmCapsConfig;
@@ -159,7 +159,7 @@ class PassContext {
     }
 };
 
-bool isDebugOnlyEnabled(const char* TYPE);
+STINKYTOFU_EXPORT bool isDebugOnlyEnabled(const char* TYPE);
 
 #define DEBUG_WITH_TYPE(TYPE, X)        \
     do {                                \

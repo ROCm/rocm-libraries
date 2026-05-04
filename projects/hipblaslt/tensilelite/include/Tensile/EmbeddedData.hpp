@@ -36,6 +36,8 @@
 #include <Tensile/Macros.hpp>
 #include <Tensile/Singleton.hpp>
 
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     /**
@@ -139,3 +141,5 @@ namespace TensileLite
 #define TENSILE_CONCATENATE_SYMBOLS2(a, b) a##b
 
 #define TENSILE_EMBED_SYMBOL_NAME TENSILE_CONCATENATE_SYMBOLS(TensileEmbeddedData, __LINE__)
+
+TENSILE_HIDDEN_END
