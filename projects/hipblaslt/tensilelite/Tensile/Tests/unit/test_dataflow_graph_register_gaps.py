@@ -1668,6 +1668,184 @@ class TestMFMAQuadCycleGap:
             f"ok={ok_p}, expected={expected_p}, actual={actual_p}."
         )
 
+    # -------------------------------------------------------------------------
+    # Audit `audit-pack-timing` — graph-side boundary parity with the
+    # 8nz-deleted structural-side TimingTooClose tests. The pre-8nz suite
+    # (test_ValidatePack.py) pinned EXACT actual_quad_cycles values one
+    # short of the threshold (actual=1 for expected=2; actual=3 for
+    # expected=5). Existing graph-side coverage pinned only the zero-gap
+    # boundary (CVT→MFMA actual=0) or the inequality only (PackMFMA→CVT1
+    # actual<5 with no exact value). These tests close the parity gap by
+    # asserting the EXACT off-by-one actual that the deleted structural
+    # tests pinned — protecting against a regression that would shift
+    # `actual` by ±1 (e.g., a future formula change that conflates
+    # finish-cycle vs issue-cycle counting) without showing up at the
+    # zero-gap or boundary-meets cases.
+    # -------------------------------------------------------------------------
+
+    def test_cvt_pack_to_mfma_one_short_pins_actual_1(self):
+        """Mirrors deleted structural test
+        `TestValidatePackTF32::test_failing_not_enough_time_CVT1_MFMA`
+        (expected=2, actual=1). CVT producer at slot=2; MFMA consumer at
+        slot=4 with NO intervening instructions between them. Same-body
+        formula: `actual = slot_delta * (1 + finish_cvt) - 1 + intervening
+                       = 2 * 1 - 1 + 0 = 1`. expected=2, actual=1 → off by
+        exactly one quad-cycle.
+
+        The pre-existing zero-gap test (`test_cvt_pack_to_mfma_zero_gap_
+        emits_timing_too_close`) pins actual=0; the boundary-meets test
+        (`test_cvt_pack_to_mfma_meets_2_cycle_gap_no_failure`) pins no
+        failure at actual=2. Without this test, a regression that always
+        reports actual=0 (e.g., a `min(actual, 0)` bug) or actual=expected
+        (e.g., a `max(actual, expected)` bug) on real off-by-one cases
+        would survive — matching the structural-side coverage exactly."""
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(50, 1), src1=vgpr(51, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(50, 2, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
+            # MFMA at slot=4 — slot_delta=2, no intervening, finish_cvt=0.
+            # actual = 2*1 - 1 + 0 = 1; expected = 2 → fails by exactly 1.
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=4, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        cvt_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.consumer, "category", None) == "MFMA"
+            and getattr(f.producer, "category", "").startswith("Pack")
+        ]
+        assert cvt_timing, (
+            f"Expected TimingTooCloseFailure on CVTPack->MFMA edge with "
+            f"slot_delta=2 and no intervening (actual=1). Got: "
+            f"{[type(f).__name__ for f in failures]}"
+        )
+        f = cvt_timing[0]
+        assert f.expected_quad_cycles == 2, (
+            f"expected=2 (QUAD_CYCLES_CVT_BEFORE_MFMA); got "
+            f"{f.expected_quad_cycles}."
+        )
+        # Decisive parity assertion vs deleted structural test: actual must
+        # be EXACTLY 1 (off-by-one boundary), not 0 and not 2.
+        assert f.actual_quad_cycles == 1, (
+            f"slot_delta=2 with finish_cvt=0 and 0 intervening → "
+            f"actual = 2*1 - 1 + 0 = 1. Got actual="
+            f"{f.actual_quad_cycles}. Mirrors deleted "
+            f"TestValidatePackTF32::test_failing_not_enough_time_CVT1_MFMA "
+            f"which pinned actual=1 on the structural side."
+        )
+
+    def test_mfma_pack_to_cvt1_three_short_pins_actual_3(self):
+        """Mirrors deleted structural test
+        `TestValidatePackTF32MFMA4x4x4::test_failing_not_enough_time_MFMA_CVT1`
+        (expected=5, actual=3). 4x4 PackMFMA producer at slot=2 sequence=0;
+        CVTPack (CVT1) consumer at slot=6 sequence=0 with THREE intervening
+        cost-1 LR instructions. cumulative_issue_cycles walk:
+          PackMFMA issue=0, mfma_free=2; current_issue +=1 → 1.
+          3 LRs each cost 1 → current_issue = 4.
+          CVT (issue cost 1, but the helper measures gap as
+            c_issue_start - p_issue - 1) → c_issue_start=4; gap=4-0-1=3.
+        expected=5, actual=3 → off by exactly 2.
+
+        Existing coverage pins actual=0 (zero-gap test) and the
+        meets-threshold case (actual==5, no failure). This test closes the
+        gap by pinning the EXACT mid-band actual=3 that the deleted
+        structural test pinned — a regression in `_mfma_pack_to_cvt_gap_ok`
+        or `cumulative_issue_cycles` that miscounts intervening contributions
+        by ±1 would change `actual` and be caught here."""
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(0, 1), src1=vgpr(1, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            self._make_real_pack_mfma(
+                acc_start=0, acc_count=4, a_start=8, a_count=2,
+                b_start=32, b_count=2, slot=2, sequence=0,
+                category="PackA0"),
+            # 3 intervening cost-1 LRs to inflate the gap from 0 to 3.
+            make_lr(80, 1, 128, slot=3, category="LRA1"),
+            make_lr(81, 1, 132, slot=4, category="LRA1"),
+            make_lr(82, 1, 136, slot=5, category="LRA1"),
+            _tag(cvt, category="PackA1", mfma_index=6, sequence=0),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        pack_to_cvt_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", "").startswith("Pack")
+            and getattr(f.consumer, "category", "").startswith("Pack")
+            and f.expected_quad_cycles == 5
+        ]
+        assert pack_to_cvt_timing, (
+            f"Expected TimingTooCloseFailure on PackMFMA->CVTPack edge "
+            f"with 3 intervening LRs (actual=3 < expected=5). Got: "
+            f"{[type(f).__name__ for f in failures]}"
+        )
+        f = pack_to_cvt_timing[0]
+        assert f.expected_quad_cycles == 5
+        # Decisive parity assertion: actual must be EXACTLY 3 — mirrors
+        # deleted TestValidatePackTF32MFMA4x4x4::test_failing_not_enough_
+        # time_MFMA_CVT1 which pinned (expected=5, actual=3).
+        assert f.actual_quad_cycles == 3, (
+            f"PackMFMA producer + 3 intervening cost-1 LRs → "
+            f"cumulative_issue_cycles=3. Got actual={f.actual_quad_cycles}. "
+            f"Mirrors the deleted structural test which pinned actual=3."
+        )
+
+    def test_cvt_pack_to_pack_alu_consumer_takes_alu_exemption(self):
+        """Consumer-awareness regression-pin for `_cvt_to_mfma_gap_ok`. The
+        carve-out targets CVT→MFMA edges ONLY: a CVT producer feeding a
+        non-MFMA Pack* consumer (e.g. another CVT) must still take the
+        ALU-immediate exemption — no TimingTooCloseFailure is emitted on
+        the CVT→Pack edge itself, even at zero gap.
+
+        Provides explicit coverage of the consumer-side branch in the
+        dispatch (the existing `test_cvt_pack_routed_to_quadcycle_not_alu`
+        only checks the MFMA-consumer path). This pins that the carve-out
+        does NOT over-fire on Pack→Pack edges — important because the
+        deleted structural tests' producer/consumer naming
+        (`producer_name='PackA0', consumer_name='PackA0'`) covered both
+        Pack→MFMA and within-Pack chains; the within-Pack chain is enforced
+        differently on the graph side (per-MFMA-only), and this test pins
+        that difference explicitly."""
+        # CVT producer writes v40.
+        cvt0 = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                               src0=vgpr(50, 1), src1=vgpr(51, 1))
+        # Second CVT consumer reads v40 — RAW edge between two PackA0
+        # instructions (CVT0 producer; another CVT-shaped Pack consumer).
+        cvt1 = VCvtPkF32toBF16(dst=vgpr(60, 1),
+                               src0=vgpr(40, 1), src1=vgpr(41, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(50, 2, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            _tag(cvt0, category="PackA0", mfma_index=2, sequence=0),
+            # Second CVT at the SAME vmfma_index — zero gap. RAW on v40.
+            _tag(cvt1, category="PackA0", mfma_index=2, sequence=1),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        # The CVT->CVT (Pack->Pack, non-MFMA-consumer) edge must NOT trigger
+        # the CVT-MFMA timing carve-out. Only the consumer-aware carve-out
+        # for MFMA consumers fires; everything else inherits the ALU
+        # exemption.
+        pack_to_pack_cvt_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", "").startswith("Pack")
+            and getattr(f.consumer, "category", "").startswith("Pack")
+            and f.expected_quad_cycles == 2
+        ]
+        assert not pack_to_pack_cvt_timing, (
+            f"CVT->CVT (Pack->Pack non-MFMA-consumer) edge must NOT trigger "
+            f"the QUAD_CYCLES_CVT_BEFORE_MFMA=2 carve-out — it should take "
+            f"the ALU-immediate exemption like any non-MFMA consumer. "
+            f"Got: {pack_to_pack_cvt_timing}"
+        )
+
 
 # =============================================================================
 # Bead `nk0` — cycle-exact cumulative_issue_cycles helper. Mirrors
