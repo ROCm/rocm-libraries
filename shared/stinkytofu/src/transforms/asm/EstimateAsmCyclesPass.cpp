@@ -214,7 +214,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             // Skip filtered basic blocks
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
-            std::cout << "Processing basic block: " << bb.getLabel() << "\n";
+            // std::cout << "Processing basic block: " << bb.getLabel() << "\n";
             // Only process the loopWithPrefetch block
 
             // if(bb.getLabel() == "LocalReadDoA_I0" || bb.getLabel() == "LocalReadDoB_I0")

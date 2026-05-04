@@ -23,12 +23,14 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <iosfwd>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -62,10 +64,23 @@ class PassResultStorage {
         T value;
     };
 
+    static constexpr uint64_t fnv1a64(std::string_view text) {
+        uint64_t hash = 1469598103934665603ULL;
+        for (char c : text) {
+            hash ^= static_cast<unsigned char>(c);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    }
+
     template <typename T>
-    static const void* typeTag() {
-        static const std::byte tag{};
-        return &tag;
+    static constexpr uint64_t typeTag() {
+#if defined(_MSC_VER)
+        constexpr std::string_view typeName = __FUNCSIG__;
+#else
+        constexpr std::string_view typeName = __PRETTY_FUNCTION__;
+#endif
+        return fnv1a64(typeName);
     }
 
    public:
@@ -102,7 +117,7 @@ class PassResultStorage {
 
    private:
     std::unique_ptr<Base> holder;
-    const void* tag = nullptr;
+    uint64_t tag = 0;
 };
 
 template <typename T>

@@ -149,7 +149,7 @@ TEST_F(EstimateAsmCyclesTest, ZeroIssueCycles) {
 TEST_F(EstimateAsmCyclesTest, OnlyProcessLabelLoopBeginL) {
     // Use a non-loop-named basic block so pass logic starts counting only
     // after it sees an explicit internal label "label_LoopBeginL".
-    BasicBlock* testBB = func->createBasicBlock("loop_body");
+    BasicBlock* testBB = func->createBasicBlock("entry");
     loopBB = testBB;
 
     // Put a non-loop instruction before the label in the same basic block.
