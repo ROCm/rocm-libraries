@@ -53,6 +53,7 @@ enum class target_arch : unsigned int
     gfx1100 = 1100,
     gfx1101 = 1101,
     gfx1102 = 1102,
+    gfx1150 = 1150,
     gfx1201 = 1201,
     unknown = std::numeric_limits<unsigned int>::max(),
 };
@@ -70,6 +71,7 @@ constexpr target_arch target_architectures[] = {
     target_arch::gfx1100,
     target_arch::gfx1101,
     target_arch::gfx1102,
+    target_arch::gfx1150,
     target_arch::gfx1201,
 };
 
@@ -116,6 +118,8 @@ constexpr target_arch get_device_arch()
     return target_arch::gfx1101;
 #elif defined(__gfx1102__)
     return target_arch::gfx1102;
+#elif defined(__gfx1150__)
+    return target_arch::gfx1150;
 #elif defined(__gfx1201__)
     return target_arch::gfx1201;
 #else
@@ -140,6 +144,7 @@ inline target_arch parse_gcn_arch(const std::string& arch_name)
                                                 "gfx1100",
                                                 "gfx1101",
                                                 "gfx1102",
+                                                "gfx1150",
                                                 "gfx1201"};
     const target_arch target_architectures[] = {
         target_arch::gfx900,
@@ -154,6 +159,7 @@ inline target_arch parse_gcn_arch(const std::string& arch_name)
         target_arch::gfx1100,
         target_arch::gfx1101,
         target_arch::gfx1102,
+        target_arch::gfx1150,
         target_arch::gfx1201,
     };
     static_assert(sizeof(target_names) / sizeof(target_names[0])
@@ -281,12 +287,14 @@ struct generator_config_defaults
 template<rocrand_rng_type GeneratorType, class T>
 struct generator_config_selector
 {
-    __host__ __device__ static constexpr unsigned int get_threads(const target_arch /*arch*/)
+    __host__ __device__
+    static constexpr unsigned int get_threads(const target_arch /*arch*/)
     {
         return generator_config_defaults<GeneratorType, T>::threads;
     }
 
-    __host__ __device__ static constexpr unsigned int get_blocks(const target_arch /*arch*/)
+    __host__ __device__
+    static constexpr unsigned int get_blocks(const target_arch /*arch*/)
     {
         return generator_config_defaults<GeneratorType, T>::blocks;
     }
@@ -300,7 +308,8 @@ struct generator_config
     unsigned int blocks;
     // When adding a new member variable, consider updating the operator< with that.
 
-    __host__ __device__ constexpr bool operator<(const generator_config& other) const
+    __host__ __device__
+    constexpr bool operator<(const generator_config& other) const
     {
         // In order to store the configs in a \ref std::map, we must define an ordering.
         return (blocks != other.blocks) ? (blocks < other.blocks) : (threads < other.threads);
@@ -309,20 +318,23 @@ struct generator_config
 
 /// @brief Returns whether the provided ordering allows the architecture-dependent
 /// selection of kernel launch parameters.
-__host__ __device__ constexpr bool is_ordering_dynamic(const rocrand_ordering ordering)
+__host__ __device__
+constexpr bool is_ordering_dynamic(const rocrand_ordering ordering)
 {
     return ordering == ROCRAND_ORDERING_PSEUDO_DYNAMIC
            || ordering == ROCRAND_ORDERING_QUASI_DEFAULT;
 }
 
 /// @brief Returns whether this ordering is applicable to pseudo-random number generators.
-__host__ __device__ constexpr bool is_ordering_pseudo(const rocrand_ordering ordering)
+__host__ __device__
+constexpr bool is_ordering_pseudo(const rocrand_ordering ordering)
 {
     return ordering != ROCRAND_ORDERING_QUASI_DEFAULT;
 }
 
 /// @brief Returns whether this ordering is applicable to quasi-random number generators.
-__host__ __device__ constexpr bool is_ordering_quasi(const rocrand_ordering ordering)
+__host__ __device__
+constexpr bool is_ordering_quasi(const rocrand_ordering ordering)
 {
     return ordering == ROCRAND_ORDERING_QUASI_DEFAULT;
 }
