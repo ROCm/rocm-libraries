@@ -156,4 +156,12 @@ jobs:
           cmake --build %BUILD_DIR%/rocisa
 
       - name: Test rocisa import
-        run: python3 -c "import os; os.add_dll_directory(os.path.abspath('${{ env.BUILD_DIR }}/rocisa/rocisa')); import sys; sys.path.insert(0, '${{ env.BUILD_DIR }}/rocisa'); import rocisa; print('rocisa import OK')"
+        run: |
+          python3 -c "
+          import os, sys
+          build_dir = os.environ['BUILD_DIR']
+          os.add_dll_directory(os.path.join(build_dir, 'rocisa', 'rocisa'))
+          sys.path.insert(0, os.path.join(build_dir, 'rocisa'))
+          import rocisa
+          print('rocisa import OK')
+          "
