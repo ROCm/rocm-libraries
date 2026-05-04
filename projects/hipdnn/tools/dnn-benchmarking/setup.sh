@@ -4,11 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HIPDNN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$HIPDNN_ROOT/../.." && pwd)"
-BUILD_DIR="$HIPDNN_ROOT/build"
 INSTALL_DIR="/opt/rocm"
 VENV_DIR="$SCRIPT_DIR/.venv"
-MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
-MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
+
 
 FORCE_BUILD=0
 usage() {
@@ -42,6 +40,22 @@ fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
+# Redirect Python's bytecode cache away from the network home directory.
+# The source tree lives on a network filesystem; without this, every import
+# writes/reads .pyc files over the network. Must be injected into the venv
+# activate script so it's set before the interpreter starts (setting it in
+# Python code is too late for that process's own imports).
+ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
+if [ ! -f "$ACTIVATE_LOCAL" ] || ! grep -q PYTHONPYCACHEPREFIX "$ACTIVATE_LOCAL"; then
+    echo 'export PYTHONPYCACHEPREFIX=/tmp/pycache' >> "$ACTIVATE_LOCAL"
+fi
+if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
+    # shellcheck disable=SC2016
+    echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \
+        >> "$VENV_DIR/bin/activate"
+fi
+export PYTHONPYCACHEPREFIX=/tmp/pycache
+
 # 2. Install requirements and package.
 # Install ROCm torch first from its dedicated index. Then editable-install the
 # package; pyproject.toml omits torch (so pip won't touch the already-installed
@@ -50,41 +64,17 @@ source "$VENV_DIR/bin/activate"
 pip install -r "$SCRIPT_DIR/requirements-rocm.txt"
 pip install -e "$SCRIPT_DIR"
 
-# 3. Build and install hipdnn
+# 3. Build and install hipDNN + providers
 # The installed cmake configs use install-tree paths; pointing CMAKE_PREFIX_PATH at
 # the raw build dir causes "non-existent path" errors in hipdnn_data_sdkConfig.cmake.
 HIPDNN_CONFIG="$INSTALL_DIR/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
 if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
-    read -r -p "This will install hipDNN to $INSTALL_DIR. Continue? [y/N] " confirm
-    case "$confirm" in
-        [yY]) ;;
-        *) echo "Aborted."; exit 0 ;;
-    esac
-    echo "Building and installing hipDNN..."
-    cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DHIPDNN_SKIP_TESTS=ON
-    cmake --build "$BUILD_DIR"
-    cmake --install "$BUILD_DIR"
-fi
-
-# 4. Build and install MIOpen provider (only with --force-build)
-if [ "$FORCE_BUILD" -eq 1 ]; then
-    if [ ! -d "$MIOPEN_PROVIDER_DIR" ]; then
-        echo "Error: miopen-provider not found at $MIOPEN_PROVIDER_DIR"
-        exit 1
-    fi
-    echo "Building and installing MIOpen provider..."
-    rm -rf "$MIOPEN_BUILD_DIR"
-    cmake -S "$MIOPEN_PROVIDER_DIR" -B "$MIOPEN_BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DCMAKE_PREFIX_PATH="$INSTALL_DIR"
-    cmake --build "$MIOPEN_BUILD_DIR"
-    cmake --install "$MIOPEN_BUILD_DIR"
-    echo ""
-    echo "MIOpen plugin installed to: $INSTALL_DIR/lib/hipdnn_plugins/engines/"
+    echo "Building and installing hipDNN and providers..."
+    cd "$WORKSPACE_ROOT"
+    cmake --preset hipdnn-providers
+    cmake --build build
+    cmake --install build
+    cd "$SCRIPT_DIR"
 fi
 
 # 5. Install hipdnn Python bindings
@@ -94,9 +84,11 @@ CMAKE_PREFIX_PATH="$INSTALL_DIR" \
     pip install -e "$HIPDNN_ROOT/python"
 
 echo ""
-echo "Setup complete. Activate with: source $VENV_DIR/bin/activate"
+echo "Setup complete. Activate the virtual environment with:"
+echo "  source $VENV_DIR/bin/activate"
 if [ "$FORCE_BUILD" -eq 1 ]; then
     echo ""
+    echo "Plugins installed to: $INSTALL_DIR/lib/hipdnn_plugins/engines/"
     echo "Run benchmarks with:"
     echo "  python -m dnn_benchmarking --graph <graph.json> \\"
     echo "    --plugin-path $INSTALL_DIR/lib/hipdnn_plugins/engines"

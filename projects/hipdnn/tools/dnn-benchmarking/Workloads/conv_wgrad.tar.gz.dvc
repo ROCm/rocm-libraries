@@ -1,0 +1,5 @@
+outs:
+- md5: 802a65080486f61a27fee48c4394e756
+  size: 10603
+  hash: md5
+  path: conv_wgrad.tar.gz

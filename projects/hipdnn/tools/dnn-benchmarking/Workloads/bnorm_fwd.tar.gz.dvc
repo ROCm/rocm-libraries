@@ -1,0 +1,5 @@
+outs:
+- md5: fe2545639da5c9bb2736b940557c501b
+  size: 1380
+  hash: md5
+  path: bnorm_fwd.tar.gz
