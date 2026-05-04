@@ -37,10 +37,8 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
   VFmaF64, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
-  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, \
-  VCmpClassF32, VMed3F32, VPrngB32, VCvtSRF32toFP8, MacroInstruction
+  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
 from rocisa.functions import vectorStaticMultiply
-from rocisa.macro import PseudoRandomGeneratorModule
 
 from ..Common import DataDirection, SemanticVersion
 from ..Common.DataType import DataType
@@ -52,6 +50,7 @@ from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
+from ..KernelWriterModules import hasSequentialValuC
 
 from math import ceil, log2
 
@@ -158,7 +157,47 @@ class GlobalWriteBatchWriter:
       self.kernel["ProblemType"]["BiasSrc"] == "D":
       self.storeBiasD = 1
 
+  @property
+  def needsAccumToDestConversion(self) -> bool:
+    """
+    Check if accumulation values need to be converted to destination type:
+    1. HighPrecisionAccumulate is enabled (accumulator precision > output precision)
+       e.g., F32 accumulator -> FP16/BF16/FP8/BF8/I32/I8 output
+    2. _GlobalAccumulation is not 'MultipleBuffer'
 
+    When True, the pack/convert module will be generated to perform:
+    - F32 -> FP16/BF16 packing
+    - F32 -> FP8/BF8 conversion (with optional stochastic rounding)
+    - F32 -> I32/I8 conversion and packing
+    """
+    return self.kernel["ProblemType"]["HighPrecisionAccumulate"] and \
+           (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer')
+
+  @property
+  def skipRearrangement(self) -> bool:
+    """
+    Check if we can skip v_mov_b32 rearrangement and use WMMA output registers directly.
+
+    skipRearrangement changes store to read from (elementSumIdx - elementSumIdx[0]),
+    but other operations (bias, activation, alpha) work on (elementSumIdx - startVgprValu).
+    These positions are only the same when no operations modify the data.
+
+    Safe to skip rearrangement only when:
+    1. hasSequentialValuC is True (WMMA output is already sequential)
+    2. needsAccumToDestConversion is False (no pack module to do the rearrangement)
+    3. Not a Beta path (Beta paths need separate alpha multiply + beta*C)
+    """
+    if self.parentWriter.states.useBias == DataDirection.READ or \
+       self.kernel.get("ActivationFuncCall", False) or \
+       self.applyAlpha or \
+       self.kernel["ProblemType"].get("UseScaleAlphaVec", 0) or \
+       self.kernel["ProblemType"].get("UseScaleAB", "") == "Vector" or \
+       self.kernel["ProblemType"].get("UseScaleCD", False):
+      return False
+
+    return hasSequentialValuC(self.kernel) and \
+           not self.needsAccumToDestConversion and \
+           not self.beta
 
   @property
   def wavelen(self) -> int:
@@ -1318,7 +1357,16 @@ class GlobalWriteBatchWriter:
       dataScaleAlphaVec = self.ss.elementDataScaleAlphaVec[elementIdx]
       mask = self.ss.elementMask[elementIdx]
       vc0 = element[3]
-      sumIdx = self.ss.elementSumIdx[elementIdx]
+
+      # When skipRearrangement is True:
+      # - Data is at WMMA output (v[0:N]), not at elementSumIdx (v[144:N])
+      # - Store should read from WMMA output directly
+      # Note: Beta paths need the rearrangement because they load C and compute rC = alpha*rC + beta*C
+      if self.skipRearrangement:
+        # WMMA output index = elementSumIdx - elementSumIdx[0] (relative offset from first element)
+        sumIdx = self.ss.elementSumIdx[elementIdx] - self.ss.elementSumIdx[0]
+      else:
+        sumIdx = self.ss.elementSumIdx[elementIdx]
 
       # CompactLoopStore look-ahead override for this store loop (see
       # _lookaheadRowInc). Separate for-loop pass from the _prolog one, so it is
@@ -1620,7 +1668,7 @@ class GlobalWriteBatchWriter:
       # pack stores, beta and non-beta reach here:
       packModule = Module("Empty pack module")
       convertModule = Module("Empty convert module")
-      if self.kernel["ProblemType"]["HighPrecisionAccumulate"] and (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer'):
+      if self.needsAccumToDestConversion:
         if self.kernel["ActivationFuncCall"] and activationCDataType == self.kernel["ProblemType"]["DestDataType"]:
           destIdx = self.activationSetPCStruct.vgprActCopy
         else:
@@ -1636,9 +1684,8 @@ class GlobalWriteBatchWriter:
                                        tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
           if self.kernel["ProblemType"]["StochasticRounding"]:
-            # Note: Current stochastic rounding FP8 converter does not support pack version
-            convertModule = stochasticRoundingCvt(self, gwvw=self.gwvw, destIdx=destIdx, elementSumIdx=self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                                  tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu, alphaScale=1.0)
           else:
             packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
                                        tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
@@ -3081,40 +3128,4 @@ def convertData(gwvw, elementSumIdx, cvtType: CvtType, roundType: RoundType = Ro
     else:
       #TODO add other convert types here.
       assert 0
-  return module
-
-# F32 to FP8 stochastic rounding conversion
-def stochasticRoundingCvt(self, gwvw, destIdx, elementSumIdx, fp8CVTVgprStruct, tmpS01, laneSGPRC, vgprTmp, inputPrefix="", prefixOffset=0):
-  vgprFp8NanInf = fp8CVTVgprStruct.vgprFp8NanInf
-  vgprFp8Temp   = fp8CVTVgprStruct.vgprFp8Temp
-  vgprFp8Min    = fp8CVTVgprStruct.vgprFp8Min
-  vgprFp8Max    = fp8CVTVgprStruct.vgprFp8Max
-  vRand = vgprTmp #seed
-  if not self.parentWriter.states.asmCaps["v_prng_b32"]:
-    vTemp0 = vgprTmp+1
-    vTemp1 = vgprTmp+2
-
-  module = Module("StochasticRoundingCvt")
-
-  for vi in range(0, gwvw):
-    sumIdxV = elementSumIdx + vi
-    formatVgpr = formatting(sumIdxV, inputPrefix, prefixOffset)
-    d = destIdx + vi//4
-
-    module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(formatVgpr), src1=vgpr(vgprFp8NanInf), comment="Nan and +/- inf"))
-    module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(formatVgpr), src1= vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
-    module.add(VCndMaskB32(dst=vgpr(formatVgpr), src0=vgpr(vgprFp8Temp), src1=vgpr(formatVgpr), src2=sgpr(tmpS01,laneSGPRC)))
-
-    if self.parentWriter.states.asmCaps["v_prng_b32"]:
-      # NOTE: Current PRNG seed implementation simply uses the value to be converted directly as seed.
-      # For thread ID-based seed design, see the legacy PRND_GENERATOR approach in tensilelite/rocisa/rocisa/include/macro.hpp
-      module.add(VPrngB32(dst=vgpr(vRand),src=vgpr(formatVgpr),comment="Pseudo Random Number Generator"))
-    else:
-      if self.parentWriter.states.asmCaps["HasVgprMSB"]:
-        module.add(PseudoRandomGeneratorModule(vRand, vgprFp8Temp, vTemp0, vTemp1))
-      else:
-        module.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprFp8Temp, vTemp0, vTemp1]))
-    # sels=[vi%4] selects which byte within the packed VGPR to write the FP8 value to
-    module.add(VCvtSRF32toFP8(dst=vgpr(d), src0=vgpr(formatVgpr), src1=vgpr(vRand), sels=[vi%4]))
-
   return module
