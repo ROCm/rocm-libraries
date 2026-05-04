@@ -1,32 +1,11 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """SubtileGeometry — abstract tile geometry definitions for the subtile-based kernel.
 
 Contains layout classes, abstract geometry base classes, and pre-defined instances.
 No emit logic lives here — concrete shape classes with emit implementations are in
-SubtileBasedKernel.py.
+Kernel.py.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
@@ -295,22 +274,22 @@ class ABGRGeometry(ABInputGeometry):
   """A/B tile geometry for global reads.
 
   The GR footprint is described as N discontiguous strips in M, each of shape
-  (blockShape[0], blockShape[1]) MMA tiles, separated by blockStride MMA tiles
-  in M. This matches the CuTe layout ((blockShape[0], blockCount), blockShape[1])
-  with stride ((1, blockStride), ldA).
+  (subtileShape[0], subtileShape[1]) MMA tiles, separated by subtileStride MMA tiles
+  in M. This matches the CuTe layout ((subtileShape[0], subtileCount), subtileShape[1])
+  with stride ((1, subtileStride), ldA).
 
-  blockCount/blockStride can be pinned explicitly (set to a non-None value) or left
+  subtileCount/subtileStride can be pinned explicitly (set to a non-None value) or left
   as None to be derived from the kernel config via for_kernel():
-    None  -> derived: blockCount=wg_m, blockStride=MT0_mma/wg_m
+    None  -> derived: subtileCount=wg_m, subtileStride=MT0_mma/wg_m
     set   -> pinned:  for_kernel() is a no-op, values are used as-is
 
-  For the contiguous TLU=1 case: blockCount=1, blockStride=0 (pinned).
-  For TLU=0 with wg_m=4: blockCount=None -> derived as 4, blockStride=MT0_mma/4.
+  For the contiguous TLU=1 case: subtileCount=1, subtileStride=0 (pinned).
+  For TLU=0 with wg_m=4: subtileCount=None -> derived as 4, subtileStride=MT0_mma/4.
   """
-  tag:         object              = field(default=None) # emit strategy tag (GRTag_1x2 | GRTag_2x2 | GRTag_TLU1) — dispatches to singledispatch emit impl
-  blockShape:  Tuple[int, int]     = (1, 1)             # MMA tiles per contiguous GR block: (rows_M, cols_K)
-  blockCount:  Optional[int]       = None               # number of blocks per wave group; None = derived from wg_m in for_kernel()
-  blockStride: Optional[int]       = None               # stride between blocks in MMA tiles (M-dim); None = derived from MT0_mma/wg_m in for_kernel()
+  tag:           object              = field(default=None) # emit strategy tag (GRTag_1x2 | GRTag_2x2 | GRTag_TLU1) — dispatches to singledispatch emit impl
+  subtileShape:  Tuple[int, int]     = (1, 1)             # MMA tiles per contiguous GR block: (rows_M, cols_K)
+  subtileCount:  Optional[int]       = None               # number of blocks per wave group; None = derived from wg_m in for_kernel()
+  subtileStride: Optional[int]       = None               # stride between blocks in MMA tiles (M-dim); None = derived from MT0_mma/wg_m in for_kernel()
 
   def localGRGranularity(self, numWaves: int) -> Tuple[int, int]:
     """Number of localSubtile rows covered by one GR load, as (M, K).
@@ -320,50 +299,50 @@ class ABGRGeometry(ABInputGeometry):
         perpDimSize = ceil(localSubtileGrid[0] / localGRGranularity(numWaves)[0])
 
     For contiguous or strided multi-block shapes (bc > 1): localSubtileGrid[0]
-    already folds blockCount in (it equals localMMATileGrid[0] / blockShape[0]),
+    already folds subtileCount in (it equals localMMATileGrid[0] / subtileShape[0]),
     so each soffset position maps to exactly one localSubtile row — granularity
     is (1, 1) and perpDimSize == localSubtileGrid[0].
 
     For bc == 1 with wave-cooperative expansion (loadRatioGR > 1): one
     buffer_load covers multiple consecutive localSubtile rows in M.  The
-    expansion factor is bytesPerLoad(numWaves) / blockSizeBytes.
+    expansion factor is bytesPerLoad(numWaves) / subtileSizeBytes.
 
-    blockCount/blockStride must be materialized via for_kernel() before use.
+    subtileCount/subtileStride must be materialized via for_kernel() before use.
     """
-    bK = int(self.blockShape[1])
-    bc = int(self.blockCount) if self.blockCount is not None else 1
+    bK = int(self.subtileShape[1])
+    bc = int(self.subtileCount) if self.subtileCount is not None else 1
     if bc > 1:
       return (1, bK)
-    blocks_per_load = self.bytesPerLoad(numWaves) / self.blockSizeBytes()
+    blocks_per_load = self.bytesPerLoad(numWaves) / self.subtileSizeBytes()
     if blocks_per_load > 1:
       return (int(blocks_per_load), bK)
     return (1, bK)
 
   def globalSubtileGrid(self, macroTile: int, depthU: int) -> Tuple[float, float]:
     glbl = self.globalMMATileGrid(macroTile, depthU)
-    return (glbl[0] / self.blockShape[0], glbl[1] / self.blockShape[1])
+    return (glbl[0] / self.subtileShape[0], glbl[1] / self.subtileShape[1])
 
-  def blockSizeBytes(self) -> float:
+  def subtileSizeBytes(self) -> float:
     """Bytes in one contiguous strip."""
-    return self.blockShape[0] * self.blockShape[1] * self.mmaTileSize
+    return self.subtileShape[0] * self.subtileShape[1] * self.mmaTileSize
 
   def bytesPerLoad(self, numWaves: int) -> int:
     """Total bytes loaded cooperatively per load round (all waves, all lanes)."""
     return int(self.loadShape.m * self.loadShape.k * self.bpe) * self.mmaLayout.waveSize * numWaves
 
   def loadsPerStrip(self, numWaves: int) -> float:
-    return self.blockSizeBytes() / self.bytesPerLoad(numWaves)
+    return self.subtileSizeBytes() / self.bytesPerLoad(numWaves)
 
   def for_kernel(self, kernel: dict, tc: str) -> 'ABGRGeometry':
-    """Return a new frozen instance with blockShape/blockCount/blockStride from kernel config.
+    """Return a new frozen instance with subtileCount/subtileStride from kernel config.
 
     The pre-defined instances (AB_B16.gr etc.) are dtype-only templates; this
     method materializes them for a specific wave-group and macro tile size.
     tc: 'A' or 'B' — selects the correct wave-group axis and macro tile key.
 
-    blockShape is expanded when cooperating waves (numWaves // wg_m) can load
-    more MMA tiles than the base blockShape covers.  This eliminates loadRatio > 1
-    cases: the effective per-load coverage IS the blockShape.
+    subtileShape is expanded when cooperating waves (numWaves // wg_m) can load
+    more MMA tiles than the base subtileShape covers.  This eliminates loadRatio > 1
+    cases: the effective per-load coverage IS the subtileShape.
     """
     wg_idx    = 0 if tc == 'A' else 1
     wg_m      = kernel["MIWaveGroup"][wg_idx]
@@ -371,10 +350,10 @@ class ABGRGeometry(ABInputGeometry):
     waveSize  = kernel["WavefrontSize"]
     mt_mma    = kernel[f"MacroTile{tc}"] // self.mmaTileShape[0]
 
-    bc      = self.blockCount if self.blockCount is not None else wg_m
-    bstride = self.blockStride if self.blockStride is not None else mt_mma // bc
+    bc      = self.subtileCount if self.subtileCount is not None else wg_m
+    bstride = self.subtileStride if self.subtileStride is not None else mt_mma // bc
 
-    return replace(self, blockCount=bc, blockStride=bstride)
+    return replace(self, subtileCount=bc, subtileStride=bstride)
 
   # --- Subtile query ---
 
@@ -383,7 +362,7 @@ class ABGRGeometry(ABInputGeometry):
     and every MMA tile that belongs to that same subtile.
 
     This method is geometry-only: it groups MMA tiles into subtiles based on
-    blockShape/blockCount/blockStride without regard to TLU or load ordering.
+    subtileShape/subtileCount/subtileStride without regard to TLU or load ordering.
     The returned mma_tiles list is in a fixed geometric order (M-outer, K-inner)
     and is not suitable as a position index for wave/GR assignment — callers
     that need load ordering must apply TLU-aware sorting on top.
@@ -394,18 +373,18 @@ class ABGRGeometry(ABInputGeometry):
 
     Returns:
         subtile_id  : (subtile_m, subtile_k) — global subtile coordinate
-        block_shape : (bM, bK) — self.blockShape as a tuple of ints
+        block_shape : (bM, bK) — self.subtileShape as a tuple of ints
         mma_tiles   : list[(row, col)] for every MMA tile in the subtile,
                       in geometric order (M-outer, K-inner); not TLU-ordered
 
-    Requires blockCount/blockStride to be materialized via for_kernel().
+    Requires subtileCount/subtileStride to be materialized via for_kernel().
     """
-    if self.blockCount is None or self.blockStride is None:
+    if self.subtileCount is None or self.subtileStride is None:
       raise RuntimeError("subtileForMmaTile requires for_kernel() to be called first")
 
-    bM, bK = int(self.blockShape[0]), int(self.blockShape[1])
-    bc      = int(self.blockCount)
-    bstr    = int(self.blockStride)
+    bM, bK = int(self.subtileShape[0]), int(self.subtileShape[1])
+    bc      = int(self.subtileCount)
+    bstr    = int(self.subtileStride)
 
     subtile_k = c // bK
     k_cols    = list(range(subtile_k * bK, (subtile_k + 1) * bK))
@@ -613,21 +592,21 @@ class MXScaleInputGeometry(TileGeometry):
 class MXScaleGRGeometry(MXScaleInputGeometry):
   """GR geometry for MX scale factors.
 
-  blockShape covers the entire global scale MMA tile grid so that all waves
+  subtileShape covers the entire global scale MMA tile grid so that all waves
   together can load all scale factors in a single buffer_load round.
-  blockShape is derived from the kernel (None = not yet materialized).
+  subtileShape is derived from the kernel (None = not yet materialized).
 
-  for_kernel sets blockShape = (mt // instM, depthU // (instK // mxBlock)).
+  for_kernel sets subtileShape = (mt // instM, depthU // (instK // mxBlock)).
   """
-  blockShape: Optional[Tuple[int, int]] = None  # None = derive from kernel; set explicitly to pin
+  subtileShape: Optional[Tuple[int, int]] = None  # None = derive from kernel; set explicitly to pin
 
   def for_kernel(self, kernel: dict, tc: str) -> 'MXScaleGRGeometry':
-    if self.blockShape is not None:
+    if self.subtileShape is not None:
       return self
     instM    = self.scaleLayout.instM
     mt_mma   = kernel[f"MacroTile{tc}"] // instM
     du_scale = kernel[f"_DepthU{tc}"] // self.instK
-    return replace(self, blockShape=(mt_mma, du_scale))
+    return replace(self, subtileShape=(mt_mma, du_scale))
 
   def emitGlobalReadOffset(self, ti: 'TileInfo', writer, kernel) -> 'Module':
     raise NotImplementedError(f"{type(self).__name__}.emitGlobalReadOffset not implemented")
@@ -666,7 +645,7 @@ class MXScaleLRGeometry(MXScaleInputGeometry):
 class MXScaleTilePair(TileGeometry):
   """Bundles GR and LR geometries for one MX scale operand (MXSA or MXSB).
 
-  Mirrors ABTilePair: GR owns the global-read layout (blockShape derived from
+  Mirrors ABTilePair: GR owns the global-read layout (subtileShape derived from
   the kernel macro tile and depthU); LR owns the local-read subtile shape.
   Common properties are delegated to gr.
   """
@@ -693,7 +672,7 @@ class MXScaleTilePair(TileGeometry):
 
 
 ################################################################################
-# Tag sentinels — pure marker types for singledispatch in SubtileBasedKernel.py
+# Tag sentinels — pure marker types for singledispatch in Kernel.py
 #
 # Each tag selects an emit strategy. Tags carry no data — they are analogous
 # to C++ tag-dispatch types (e.g. std::random_access_iterator_tag).

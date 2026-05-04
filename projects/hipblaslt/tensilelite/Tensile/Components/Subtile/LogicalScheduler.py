@@ -1,26 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """MFMATile-based logical scheduler.
 
@@ -1949,7 +1928,7 @@ class LogicalScheduler:
         For subIterKs with MFMAs: calls instructionSchedule for interleaving.
         For subIterKs without MFMAs (preloop): emits instructions sequentially.
         """
-        from Tensile.Components.Subtile.SubtileBasedInstructionScheduler import instructionSchedule
+        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
         from rocisa.code import Module
 
         module = Module(label)
@@ -2113,7 +2092,7 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.VGPR_TILES)
 
-        from Tensile.Components.Subtile.SubtileBasedKernel import RegisterTileInfo
+        from Tensile.Components.Subtile.Kernel import RegisterTileInfo
 
         cfg = self.config
 
@@ -2178,7 +2157,7 @@ class LogicalScheduler:
                 or self._nll_emitted is None:
             self.build()
 
-        from Tensile.Components.Subtile.SubtileBasedInstructionEmitter import InstructionEmitter
+        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
 
         emitter = InstructionEmitter(
             writer, kernel, self.config,
@@ -2413,7 +2392,7 @@ class LogicalScheduler:
 
     def print_emit_dep_order(self, all_partitions: List[List[List[EmittedModule]]] = None) -> str:
         """Print emit output as dependency paths (same decomposition as _extractPathsFromBeforeDeps)."""
-        from Tensile.Components.Subtile.SubtileBasedInstructionScheduler import extractPathsFromBeforeDeps
+        from Tensile.Components.Subtile.InstructionScheduler import extractPathsFromBeforeDeps
         if all_partitions is None:
             all_partitions = self._emitted
         buf = io.StringIO()

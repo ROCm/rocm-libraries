@@ -1,26 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import math
 from abc import ABC, abstractmethod
@@ -173,16 +152,16 @@ class ABGRTile:
       self.contiguousElements = config.loadShape.k
 
   @property
-  def blockShape(self) -> Tuple[int, int]:
-    return self.config.blockShape
+  def subtileShape(self) -> Tuple[int, int]:
+    return self.config.subtileShape
 
   @property
-  def blockCount(self) -> int:
-    return self.config.blockCount
+  def subtileCount(self) -> int:
+    return self.config.subtileCount
 
   @property
-  def blockStride(self) -> int:
-    return self.config.blockStride
+  def subtileStride(self) -> int:
+    return self.config.subtileStride
 
   def localGRGranularity(self, numWaves: int) -> Tuple[int, int]:
     return self.config.localGRGranularity(numWaves)
@@ -289,7 +268,7 @@ class CDTile_1x1(CDTileGeometry):
 
 # ---------------------------------------------------------------------------
 # Pre-defined instances (frozen config pairs)
-# TODO: rename configs to make the geometry explicit (blockShape, blockCount
+# TODO: rename configs to make the geometry explicit (subtileShape, subtileCount
 #       derivation policy, TLU) — e.g. AB_B16_1x2_bcN, AB_B16_2x2_bc1
 # ---------------------------------------------------------------------------
 
@@ -299,40 +278,40 @@ _B8  = dict(mmaLayout=MFMA_16x16_1B_4K_8V, instK=128, bpe=1,   supportedTypes=('
 
 # Row-major A/B: GR and LR both contiguous along K
 AB_B16 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_1x2(), **_B16, blockShape=(1, 2), loadShape=LoadShape(m=1, k=8)),   # 128-bit GR: 8 bf16 along K
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),   # 128-bit GR: 8 bf16 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)), # 128-bit LR: 8 bf16 along K
 )
 AB_B4 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_1x2(), **_B4, blockShape=(1, 2), loadShape=LoadShape(m=1, k=32)),   # 128-bit GR: 32 fp4 along K
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),   # 128-bit GR: 32 fp4 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
 )
 AB_B8 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_1x2(), **_B8, blockShape=(1, 2), loadShape=LoadShape(m=1, k=16)),                  # 128-bit GR: 16 fp8 along K
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B8, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=16)),                  # 128-bit GR: 16 fp8 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B8, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32), loadWidth=32), # 256-bit LR: 32 fp8 along K
 )
 
 AB_B4_2x2 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_2x2(), **_B4, blockShape=(2, 2), blockCount=1, blockStride=0, loadShape=LoadShape(m=1, k=32)),
+    gr=ABGRGeometry(tag=GRTag_2x2(), **_B4, subtileShape=(2, 2), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=1, k=32)),
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(2, 2), loadShape=LoadShape(m=1, k=32)),
 )
 AB_B16_2x2 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_2x2(), **_B16, blockShape=(2, 2), blockCount=1, blockStride=0, loadShape=LoadShape(m=1, k=8)),
+    gr=ABGRGeometry(tag=GRTag_2x2(), **_B16, subtileShape=(2, 2), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=1, k=8)),
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B16, subtileShape=(2, 2), loadShape=LoadShape(m=1, k=8)),
 )
 
 # Column-major A/B (TLU=1): GR and LR contiguous along M
 AB_B16_TLU1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, blockShape=(8, 1), blockCount=1, blockStride=0, loadShape=LoadShape(m=8, k=1)),   # 128-bit GR: 8 bf16 along M
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(8, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),   # 128-bit GR: 8 bf16 along M
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(8, 1), loadShape=LoadShape(m=8, k=1)),                              # 128-bit LR: 8 bf16 along M
 )
 AB_B16_TLU1_16x1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, blockShape=(16, 1), blockCount=1, blockStride=0, loadShape=LoadShape(m=16, k=1), loadWidth=32), # 256-bit GR: 16 bf16 along M
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(16, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=16, k=1), loadWidth=32), # 256-bit GR: 16 bf16 along M
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=16, k=1), loadWidth=32),                            # 256-bit LR: 16 bf16 along M
 )
 
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
-# GR: blockShape=None -> derived from kernel as (mt_mma, du_scale) to span entire macro tile
+# GR: subtileShape=None -> derived from kernel as (mt_mma, du_scale) to span entire macro tile
 # LR: subtileShape=(2,2) -> 2 scale MMA tiles in M x 2 in K per local read
 MXSA_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4, loadWidth=4))
 MXSB_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4, loadWidth=4))
@@ -438,20 +417,19 @@ class TileInfo:
       self.localMMATileGrid  = list(gr_cfg.localMMATileGrid(self.macroTile, self.depthU, self.waveGroupSize))
 
       # GR strip grid — primary scheduler-facing grid
-      self.blockShape        = list(gr_cfg.blockShape)
-      self.subtileShape      = self.blockShape   # alias: blockShape is the GR subtile unit
-      self.blockCount        = gr_cfg.blockCount
-      self.blockStride       = gr_cfg.blockStride
+      self.subtileShape        = list(gr_cfg.subtileShape)
+      self.subtileCount        = gr_cfg.subtileCount
+      self.subtileStride       = gr_cfg.subtileStride
       self.globalSubtileGrid = list(gr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
-      self.localSubtileGrid  = [int(self.localMMATileGrid[0] / self.blockShape[0]),
-                                 int(self.localMMATileGrid[1] / self.blockShape[1])]
-      self.subtileSize       = gr_cfg.blockSizeBytes()
+      self.localSubtileGrid  = [int(self.localMMATileGrid[0] / self.subtileShape[0]),
+                                 int(self.localMMATileGrid[1] / self.subtileShape[1])]
+      self.subtileSize       = gr_cfg.subtileSizeBytes()
 
       # Cooperative GR load counts (scheduler: vmcnt, loop trip count).
-      # loadRatioGR uses the global GR tile size (blockShape * blockCount),
+      # loadRatioGR uses the global GR tile size (subtileShape * subtileCount),
       # which is the full hardware granularity for one cooperative load round.
       _grBytesPerLoad      = gr_cfg.bytesPerLoad(self.numWaves)
-      _globalGRTileSize    = self.subtileSize * (int(self.blockCount) if self.blockCount else 1)
+      _globalGRTileSize    = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
       self.loadRatioGR     = _grBytesPerLoad / _globalGRTileSize if _globalGRTileSize else 0
       self.numGRPerSubtile = int(math.ceil(1.0 / self.loadRatioGR)) if self.loadRatioGR else 0
       self.numGRTotal      = int(self.localSubtileGrid[0] * self.localSubtileGrid[1] / self.loadRatioGR) if self.loadRatioGR else 0
@@ -491,8 +469,8 @@ class TileInfo:
       self.lr = None
       self.globalMMATileGrid   = list(gr_cfg.globalMMATileGrid(self.macroTile, self.depthU))
       self.localMMATileGrid    = [self.globalMMATileGrid[0] // self.waveGroupSize, self.globalMMATileGrid[1]]
-      self.blockShape          = list(gr_cfg.blockShape)
-      self.subtileShape        = self.blockShape
+      self.subtileShape          = list(gr_cfg.subtileShape)
+      self.subtileShape        = self.subtileShape
       self.globalSubtileGrid   = [1, 1]  # all waves load the full scale tile in one round
       self.localSubtileGrid    = [1, 1]
       self.subtileSize         = lr_cfg.subtileSizeBytes() // lr_cfg.subtileShape[0]
@@ -504,7 +482,7 @@ class TileInfo:
       self.loadRatioGR         = 0
       self.numGRPerSubtile     = 1
       self.numGRTotal          = 1  # one buffer_load covers the full scale tile grid
-      self.grBytesPerLoad      = gr_cfg.blockShape[0] * gr_cfg.blockShape[1] * gr_cfg.mmaTileSize
+      self.grBytesPerLoad      = gr_cfg.subtileShape[0] * gr_cfg.subtileShape[1] * gr_cfg.mmaTileSize
       self._mxBlock            = geometry.gr.scaleLayout.mxBlock
 
       _lrBytesPerLoad          = geometry.lr.loadWidth * self.waveSize
@@ -544,12 +522,12 @@ class TileInfo:
       gr_cfg = self.gr.config
       lr_cfg = self.lr.config
       mmaM, mmaK = geometry.mmaTileShape
-      self._check_dim(self.macroTile, gr_cfg.blockShape[0] * mmaM, self.globalSubtileGrid[0], self.waveGroupSize, 'macroTile[GR]')
-      self._check_dim(self.depthU,    gr_cfg.blockShape[1] * mmaK, self.globalSubtileGrid[1], 1,                 'depthU[GR]')
+      self._check_dim(self.macroTile, gr_cfg.subtileShape[0] * mmaM, self.globalSubtileGrid[0], self.waveGroupSize, 'macroTile[GR]')
+      self._check_dim(self.depthU,    gr_cfg.subtileShape[1] * mmaK, self.globalSubtileGrid[1], 1,                 'depthU[GR]')
       self._check_dim(self.macroTile, lr_cfg.subtileShape[0] * mmaM, self.lrGlobalSubtileGrid[0], self.waveGroupSize, 'macroTile[LR]')
       self._check_dim(self.depthU,    lr_cfg.subtileShape[1] * mmaK, self.lrGlobalSubtileGrid[1], 1,                 'depthU[LR]')
     elif isinstance(geometry, MXScaleTilePair):
-      # GR covers the full scale MMA tile grid (blockShape = entire grid, globalSubtileGrid=[1,1])
+      # GR covers the full scale MMA tile grid (subtileShape = entire grid, globalSubtileGrid=[1,1])
       # LR uses subtileShape; check coverage in scale MMA tile units.
       mmaM, mmaK = geometry.mmaTileShape
       lr_st = geometry.lr.subtileShape
@@ -634,7 +612,7 @@ class TileInfo:
   def globalMmaTilesForSubtile(self, sId0, sId1):
     """Return all global MMA tile coordinates belonging to subtile (sId0, sId1).
 
-    Uses gr_cfg.subtileForMmaTile to account for blockCount/blockStride.
+    Uses gr_cfg.subtileForMmaTile to account for subtileCount/subtileStride.
     The returned list is in geometric order (M-outer, K-inner).
     """
     st = self.subtileShape
@@ -1045,8 +1023,8 @@ def emitMfmaCode(writer, kernel):
   hasScaleB = tiMXSB is not None and tiMXSB.mxBlock > 0
 
   # LR subtile shape governs the MFMA register layout (always (1,2) for current geometries).
-  # Use ti.lr.subtileShape rather than ti.subtileShape (= GR blockShape, which differs for
-  # asymmetric WGs where waves_coop >= 4 expands blockShape to (2,2)).
+  # Use ti.lr.subtileShape rather than ti.subtileShape (= GR subtileShape, which differs for
+  # asymmetric WGs where waves_coop >= 4 expands subtileShape to (2,2)).
   lrSubtileShapeA = tiA.lr.subtileShape
   lrSubtileShapeB = tiB.lr.subtileShape
 
@@ -1229,7 +1207,7 @@ def mainLoop(writer, kernel):
   assert pgr in (0, 2), "SubtileBasedKernel only supports PGR=0 and PGR=2, got PGR=%d" % pgr
 
   if pgr == 2:
-    from Tensile.Components.Subtile.SubtileBasedLogicalScheduler import (
+    from Tensile.Components.Subtile.LogicalScheduler import (
         LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
         ReadGranularity)
     tiA = writer.states.a.tileInfo

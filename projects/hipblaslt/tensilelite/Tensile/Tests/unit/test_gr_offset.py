@@ -27,7 +27,7 @@ from gpu_test_helpers import (
     generate_load_params,
 )
 
-from Tensile.Components.Subtile.SubtileBasedKernel import (
+from Tensile.Components.Subtile.Kernel import (
     TileInfo, AB_B16, ABTilePair,
 )
 from rocisa.code import Module, TextBlock
@@ -42,14 +42,14 @@ from types import SimpleNamespace
 # Test configurations
 # ---------------------------------------------------------------------------
 CONFIGS = [
-    # 2x2 WG (blockCount=2, loadRatio=1.0)
+    # 2x2 WG (subtileCount=2, loadRatio=1.0)
     TileConfig(mt_a=128, mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
     TileConfig(mt_a=256, mt_b=256, depth_u=64, stride_a=64,  stride_b=64),
     # stride > depthU
     TileConfig(mt_a=128, mt_b=128, depth_u=64, stride_a=128, stride_b=128),
-    # 1x4 WG (blockCount=1, loadRatio=2.0)
+    # 1x4 WG (subtileCount=1, loadRatio=2.0)
     TileConfig(mt_a=48,  mt_b=128, depth_u=64, stride_a=64,  stride_b=64),
-    # 4x1 WG (blockCount=4, loadRatio=0.5)
+    # 4x1 WG (subtileCount=4, loadRatio=0.5)
     TileConfig(mt_a=128, mt_b=48,  depth_u=64, stride_a=64,  stride_b=64),
 ]
 

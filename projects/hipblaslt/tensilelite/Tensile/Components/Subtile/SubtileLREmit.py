@@ -1,26 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 ################################################################################
 # LR (local read) emit and alloc dispatch.
@@ -331,7 +310,7 @@ def _emitLR_1x2(tag, tile, ti, writer, kernel):
   module = Module(f"LR Load 1x2 ({ti.tc})")
   tc = ti.tc
   # TODO: Remove legacy TileInfo dependency after full migration.
-  # Uses legacy's grid/sizes/vgprTiles because TileInfo's expanded blockShape
+  # Uses legacy's grid/sizes/vgprTiles because TileInfo's expanded subtileShape
   # doesn't match the LDS layout computed from legacy values.
   legacyTi = getattr(writer.states, tc.lower()).tileInfo
   subtileSize = int(legacyTi.subtileSize)

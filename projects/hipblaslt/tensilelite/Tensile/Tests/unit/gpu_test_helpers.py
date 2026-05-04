@@ -40,7 +40,7 @@ from rocisa.container import vgpr, sgpr
 from rocisa.instruction import SLoadB32, SLoadB64, SLoadB128, SWaitCnt, VLShiftLeftB32, VMovB32
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
-from Tensile.Components.Subtile.SubtileBasedKernel import TileInfo, AB_B16
+from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
 
 # ---- Constants ----
 GFX_TARGET = "gfx950"

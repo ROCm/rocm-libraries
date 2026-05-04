@@ -41,7 +41,7 @@ from Tensile.KernelWriter import CodeModules, StateValues, StateVgprs
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriter import KernelWriter
 from Tensile.KernelWriterModules import mapAcctoArchRegs
-from Tensile.Components.Subtile.SubtileBasedKernel import TileInfo, CD_F32
+from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
 
 from gpu_test_helpers import (
     TileConfig,

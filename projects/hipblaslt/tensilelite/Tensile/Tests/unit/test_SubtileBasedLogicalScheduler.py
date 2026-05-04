@@ -15,10 +15,10 @@ Organized by pass:
   12. Integration    — Full pipeline with real instructions
 """
 
-from Tensile.Components.Subtile.SubtileBasedKernel import (
+from Tensile.Components.Subtile.Kernel import (
     TileInfo, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
 )
-from Tensile.Components.Subtile.SubtileBasedLogicalScheduler import (
+from Tensile.Components.Subtile.LogicalScheduler import (
     LogicalScheduler,
     MFMATileRange,
     ReadGranularity,
@@ -1418,7 +1418,7 @@ class TestIntegration:
 
     def test_populate_instructions_256x256_fp4(self):
         """Full pipeline: emit → populate_instructions → instructionSchedule."""
-        from Tensile.Components.Subtile.SubtileBasedInstructionScheduler import instructionSchedule
+        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
 
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
@@ -1743,7 +1743,7 @@ class TestBuildNll:
                         assert src.mtIteration == 0, \
                             f"NLL should only have LR(n=0), got mt={src.mtIteration}"
                     if em.opType == 'wait_gr':
-                        from Tensile.Components.Subtile.SubtileBasedLogicalScheduler import WaitGROp
+                        from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
                         if isinstance(src, WaitGROp) and src.wait_gr_counts:
                             cnts = src.wait_gr_counts
                             assert cnts.A == 0 and cnts.B == 0 and cnts.SA == 0 and cnts.SB == 0, \

@@ -4,10 +4,10 @@ These tests capture the expected scheduling output at specific pipeline steps
 to detect unintended regressions. 
 """
 
-from Tensile.Components.Subtile.SubtileBasedKernel import (
+from Tensile.Components.Subtile.Kernel import (
     TileInfo, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
 )
-from Tensile.Components.Subtile.SubtileBasedLogicalScheduler import (
+from Tensile.Components.Subtile.LogicalScheduler import (
     LogicalScheduler,
     ReadGranularity,
     SchedulerConfig,
