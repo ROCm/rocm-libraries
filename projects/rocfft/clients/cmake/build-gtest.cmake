@@ -23,18 +23,18 @@ include( ExternalProject )
 option( BUILD_GTEST "Download and build GoogleTest" OFF )
 
 if( NOT BUILD_GTEST )
-    find_package( GTest 1.11.0 )
+    find_package( GTest 1.11 )
 endif()
 
-if( (BUILD_GTEST OR NOT GTEST_FOUND) AND (NOT TARGET gtest) )
+if( (BUILD_GTEST OR NOT GTEST_FOUND  AND GTest_VERSION VERSION_GREATER_EQUAL "1.11") AND (NOT TARGET gtest) )
   set(GTEST_INCLUDE_DIRS
       ${CMAKE_CURRENT_BINARY_DIR}/src/gtest/googletest/include)
   set(GTEST_LIBRARIES
       ${CMAKE_CURRENT_BINARY_DIR}/src/gtest-build/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}
       ${CMAKE_CURRENT_BINARY_DIR}/src/gtest-build/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX})
   
-  set(GTEST_SRC_URL https://github.com/google/googletest/archive/release-1.11.0.tar.gz CACHE STRING "Location of GTest source code")
-  set(GTEST_SRC_SHA256 b4870bf121ff7795ba20d20bcdd8627b8e088f2d1dab299a031c1034eddc93d5 CACHE STRING "SHA256 hash of GTest source code")
+  set(GTEST_SRC_URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz CACHE STRING "Location of GTest source code")
+  set(GTEST_SRC_SHA256 65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c CACHE STRING "SHA256 hash of GTest source code")
   
   ExternalProject_Add(gtest
                       URL ${GTEST_SRC_URL}
