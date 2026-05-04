@@ -332,6 +332,16 @@ class FmhaKernelConfig:
 # =============================================================================
 
 
+def _float32_to_bf16(arr: np.ndarray) -> np.ndarray:
+    """Convert float32 array to bf16 stored as uint16 (truncate lower 16 bits)."""
+    return arr.astype(np.float32).view(np.uint32).__rshift__(16).astype(np.uint16)
+
+
+def _bf16_to_float32(arr: np.ndarray) -> np.ndarray:
+    """Convert bf16 (uint16) array back to float32."""
+    return (arr.astype(np.uint32) << 16).view(np.float32)
+
+
 def cpu_attention_fwd(
     Q: np.ndarray,
     K: np.ndarray,
@@ -794,11 +804,11 @@ class FmhaRunner:
             FmhaResult with output array, timing, TFLOPS
         """
         # Map CK dtype to numpy dtype for buffer allocation.
-        # bf16 uses fp16 as proxy (same size, different encoding handled by GPU).
+        # bf16 is stored as uint16 (upper 16 bits of float32).
         # fp8 uses uint8 (1 byte per element).
         _NP_DTYPE = {
             "fp16": np.float16,
-            "bf16": np.float16,
+            "bf16": np.uint16,
             "fp32": np.float32,
             "fp8bf16": np.uint8,
             "fp8fp32": np.uint8,
@@ -806,7 +816,7 @@ class FmhaRunner:
         }
         _NP_OUT_DTYPE = {
             "fp16": np.float16,
-            "bf16": np.float16,
+            "bf16": np.uint16,
             "fp32": np.float32,
             "fp8bf16": np.float16,
             "fp8fp32": np.float32,
@@ -814,9 +824,14 @@ class FmhaRunner:
         }
         in_dt = _NP_DTYPE.get(data_type, np.float16)
         out_dt = _NP_OUT_DTYPE.get(data_type, np.float16)
-        Q_c = np.ascontiguousarray(Q.astype(in_dt))
-        K_c = np.ascontiguousarray(K.astype(in_dt))
-        V_c = np.ascontiguousarray(V.astype(in_dt))
+        if data_type == "bf16":
+            Q_c = _float32_to_bf16(np.ascontiguousarray(Q.astype(np.float32)))
+            K_c = _float32_to_bf16(np.ascontiguousarray(K.astype(np.float32)))
+            V_c = _float32_to_bf16(np.ascontiguousarray(V.astype(np.float32)))
+        else:
+            Q_c = np.ascontiguousarray(Q.astype(in_dt))
+            K_c = np.ascontiguousarray(K.astype(in_dt))
+            V_c = np.ascontiguousarray(V.astype(in_dt))
         O_c = np.zeros(prob.o_shape(), dtype=out_dt)
 
         d_q, d_k, d_v, d_o = (ctypes.c_void_p() for _ in range(4))
@@ -988,6 +1003,10 @@ class FmhaRunner:
                 return FmhaResult(success=False, error=f"Kernel failed (rc={rc})")
 
             self._hip.hipMemcpy(O_c.ctypes.data, d_o, O_c.nbytes, self.HIP_MEMCPY_D2H)
+
+            # Convert bf16 output (uint16) back to float32 for comparison
+            if data_type == "bf16":
+                O_c = _bf16_to_float32(O_c)
 
             # appendkv is a memory op (KV cache copy), not compute -- no TFLOPS
             ops = 0 if api_family == "appendkv" else prob.num_ops
