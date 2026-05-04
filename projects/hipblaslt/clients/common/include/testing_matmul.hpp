@@ -3726,11 +3726,16 @@ void testing_matmul_with_bias(const Arguments& arg,
         heuristicResult.clear();
         heuristicTuningIndex.clear();
 
-        // Discover the device's saveable solution indices once via getAllAlgos,
-        // then round-trip them through getAlgosFromIndex. Probing [0..N) blindly
-        // doesn't work on per-arch shard installs: the lazy library's solution
-        // indices are globally numbered, so a non-first-alphabetical arch's
-        // smallest valid index is well above 0 and the first batch hits nothing.
+        // algo_method == 2 verifies the public index round-trip: an algo's
+        // index obtained via getIndexFromAlgo can be used by getAlgosFromIndex
+        // to re-resolve the same algo. (This is the persistence path users
+        // rely on for storing tuned algos.)
+        //
+        // Discover the device's saveable indices once via getAllAlgos, then
+        // round-trip them in batches. Probing [0..N) blindly doesn't work on
+        // per-arch shard installs: the lazy library's solution indices are
+        // globally numbered, so a non-first-alphabetical arch's smallest
+        // valid index is well above 0 and the first batch hits nothing.
         std::vector<int> validIndices;
         if(arg.solution_index == -1)
         {
@@ -3751,14 +3756,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                 validIndices.push_back(hipblaslt_ext::getIndexFromAlgo(a.algo));
         }
 
-        size_t batchStart  = 0;
-        int    algoIndexInc = 100;
+        size_t                    batchStart    = 0;
+        constexpr size_t          algoIndexInc  = 100;
         while(1)
         {
             std::vector<int>                              algoIndex;
             std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo;
             bool                                          foundAlgo = false;
-            bool                                          lastBatch = false;
             if(arg.solution_index == -1)
             {
                 if(batchStart >= validIndices.size())
@@ -3768,18 +3772,24 @@ void testing_matmul_with_bias(const Arguments& arg,
                 algoIndex.assign(validIndices.begin() + batchStart,
                                  validIndices.begin() + batchEnd);
                 batchStart = batchEnd;
-                lastBatch  = (batchStart >= validIndices.size());
             }
             else
             {
-                // Specify the index — the explicit-index path is single-shot;
-                // CHECK_SOLUTION_FOUND below decides pass/fail.
+                // Explicit-index path is single-shot; CHECK_SOLUTION_FOUND
+                // below decides pass/fail.
                 algoIndex.resize(1);
                 algoIndex[0] = arg.solution_index;
-                lastBatch    = true;
             }
 
-            (void)hipblaslt_ext::getAlgosFromIndex(handle, algoIndex, tmpAlgo);
+            hipblasStatus_t getStatus
+                = hipblaslt_ext::getAlgosFromIndex(handle, algoIndex, tmpAlgo);
+            // Discovered indices came from a successful getAllAlgos +
+            // getIndexFromAlgo round-trip, so any non-success here is a real
+            // regression in the index API. Explicit-index callers may pass an
+            // out-of-range index legitimately; CHECK_SOLUTION_FOUND below
+            // surfaces that case with better context.
+            if(arg.solution_index == -1)
+                EXPECT_HIPBLAS_STATUS(getStatus, HIPBLAS_STATUS_SUCCESS);
             if(tmpAlgo.empty())
             {
                 break;
@@ -3955,10 +3965,27 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_SOLUTION_FOUND(foundAlgo);
                 foundAlgo = true;
             }
-            if(lastBatch || foundAlgo)
+            if(foundAlgo)
             {
                 break;
             }
+        }
+
+        // Verify the getAlgosFromIndex mixed-validity contract: a request
+        // containing a mix of valid and out-of-range indices must return
+        // HIPBLAS_STATUS_INVALID_VALUE while still producing the valid
+        // results in the output vector. Replaces the implicit coverage
+        // the [0..N) probe loop used to provide. Independent of per-arch
+        // index layout, so it doesn't reintroduce the bug this PR fixes.
+        if(arg.solution_index == -1 && !validIndices.empty())
+        {
+            std::vector<int> mixedIndices = validIndices;
+            mixedIndices.push_back(std::numeric_limits<int>::max());
+            std::vector<hipblasLtMatmulHeuristicResult_t> mixedOut;
+            EXPECT_HIPBLAS_STATUS(
+                hipblaslt_ext::getAlgosFromIndex(handle, mixedIndices, mixedOut),
+                HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(mixedOut.size(), validIndices.size());
         }
     }
     else if(arg.algo_method == 1)

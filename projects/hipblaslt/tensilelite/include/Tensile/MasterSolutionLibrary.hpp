@@ -191,12 +191,25 @@ namespace TensileLite
             }
             else
             {
-                // index is below the smallest key in this arch's mapping —
-                // a normal occurrence when consumers scan an index range that
-                // spans solutions belonging to other arches in a per-arch
-                // shard install. Gated behind the same debug flag as the
-                // success-path "Loading library for index" print above so it
-                // remains available for diagnosis without polluting stderr.
+                // Index is below the smallest key in this arch's mapping.
+                // This branch can't tell two cases apart:
+                //   (a) routine cross-arch miss — a consumer scanning an
+                //       index range lands below the local arch's smallest
+                //       mapping key. Common on per-arch shard installs
+                //       where indices are globally numbered but each arch
+                //       only owns a subrange.
+                //   (b) genuinely bad index — caller passed an index that
+                //       belongs to no arch at all.
+                //
+                // Pre-#6840 (single global mapping) this was always (b),
+                // so an unconditional std::cerr was load-bearing. With
+                // per-arch mapping, (a) is now routine and dominates the
+                // signal: leaving it on stderr produced thousands of lines
+                // of noise per consumer scan. Trade-off: gate behind
+                // Debug::printDataInit() (the same flag used by the
+                // success-path "Loading library for index" print above),
+                // accepting that genuine bad-index diagnosis now requires
+                // opting in via the Tensile debug knob.
                 if(Debug::Instance().printDataInit())
                     std::cout << "No library found for index " << index << std::endl;
             }
