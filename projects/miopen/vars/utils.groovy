@@ -607,14 +607,15 @@ def getDockerImage(Map conf=[:])
 }
 
 def setGithubStatus(String context, String state, String description) {
-    def sha = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+    def sha = env.GIT_COMMIT
+    def targetUrl = env.RUN_DISPLAY_URL ?: env.BUILD_URL
     def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
     withCredentials([usernamePassword(credentialsId: 'github-app-miopen', usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
         sh(script: """
             curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
                 -H "Authorization: token \$GITHUB_TOKEN" \\
                 -H 'Content-Type: application/json' \\
-                -d '{"state":"${state}","context":"${context}","description":"${description}","target_url":"${env.BUILD_URL}"}'
+                -d '{"state":"${state}","context":"${context}","description":"${description}","target_url":"${targetUrl}"}'
         """)
     }
 }

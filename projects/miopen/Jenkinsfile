@@ -85,8 +85,9 @@ def checkoutRepo()
 {
     //update ref repo
     cloneUpdateRefRepo()
-    // checkout project
-    checkout scm
+    // checkout project and capture SHA for GitHub status reporting
+    def scmVars = checkout scm
+    env.GIT_COMMIT = scmVars.GIT_COMMIT
 }
 
 def withWorkingDir(Closure body) {
