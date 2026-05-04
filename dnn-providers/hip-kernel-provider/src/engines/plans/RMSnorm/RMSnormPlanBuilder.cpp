@@ -25,7 +25,6 @@ bool RMSnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipKernelHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-
     auto anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
@@ -38,7 +37,7 @@ bool RMSnormPlanBuilder::isApplicable(
     {
     case 1:
     {
-        // Kernel code always uses fp32 FLOAT_ACCUM
+        // Kernel code always uses fp32 compute type
         if(anyNodeIsNotF32Compute())
         {
             HIPDNN_PLUGIN_LOG_ERROR("RMSnorm plan builder only supports nodes with an fp32 "

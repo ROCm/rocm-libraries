@@ -90,6 +90,10 @@
 #define HIP_PLUGIN_BN_VARIANT 255
 #endif
 
+#ifndef HIP_PLUGIN_BN_USESAVED
+#define HIP_PLUGIN_BN_USESAVED 0
+#endif
+
 #ifndef HIP_PLUGIN_BN_NCHW
 #define HIP_PLUGIN_BN_NCHW 1
 #endif

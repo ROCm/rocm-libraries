@@ -105,7 +105,11 @@ set(STINKYTOFU_GENERATED_SOURCES
 # Mark generated files so CMake knows they will be created during build
 set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED TRUE)
 
-add_library(stinkytofu SHARED ${STINKYTOFU_GENERATED_SOURCES})
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+add_library(stinkytofu ${STINKYTOFU_GENERATED_SOURCES})
+if(NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
+endif()
 target_include_directories(stinkytofu
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
