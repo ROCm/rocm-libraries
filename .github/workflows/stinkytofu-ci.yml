@@ -27,6 +27,8 @@ jobs:
     runs-on: azure-linux-scale-rocm
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
+    env:
+      ROCM_PATH: /opt/rocm
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -54,8 +56,6 @@ jobs:
 
       - name: Build
         working-directory: shared/stinkytofu
-        env:
-          ROCM_PATH: /opt/rocm
         run: invoke build
 
       - name: Debug stinkytofu-opt
@@ -70,8 +70,6 @@ jobs:
 
       - name: Build rocisa
         working-directory: projects/hipblaslt/tensilelite/rocisa
-        env:
-          ROCM_PATH: /opt/rocm
         run: |
           cmake -B build \
             -DCMAKE_CXX_COMPILER="$ROCM_PATH/lib/llvm/bin/amdclang++" \
