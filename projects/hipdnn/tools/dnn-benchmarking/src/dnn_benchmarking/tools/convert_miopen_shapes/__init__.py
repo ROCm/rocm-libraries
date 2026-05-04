@@ -1,0 +1,47 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+"""Convert MIOpen driver shape files to hipDNN JSON graph files.
+
+Usage:
+    python -m dnn_benchmarking.tools.convert_miopen_shapes graphs/shapes.txt
+    dnn-convert-shapes shapes.txt --outdir graphs/generic_convolutions/
+"""
+
+from .bnorm import build_bnorm_json
+from .cli import convert_line, main, parse_line
+from .conv import ConvParams, build_conv_json, conv_io_type
+from .parsing import (
+    BNORM_FLAG_ALIASES,
+    CONV_FLAG_ALIASES,
+    is_flag,
+    normalize_args,
+    parse_args,
+)
+from .strides import (
+    conv_out_dim,
+    nchw_strides,
+    ncdhw_strides,
+    ndhwc_strides,
+    nhwc_strides,
+)
+
+__all__ = [
+    "BNORM_FLAG_ALIASES",
+    "CONV_FLAG_ALIASES",
+    "ConvParams",
+    "build_bnorm_json",
+    "build_conv_json",
+    "conv_io_type",
+    "conv_out_dim",
+    "convert_line",
+    "is_flag",
+    "main",
+    "nchw_strides",
+    "ncdhw_strides",
+    "ndhwc_strides",
+    "nhwc_strides",
+    "normalize_args",
+    "parse_args",
+    "parse_line",
+]
