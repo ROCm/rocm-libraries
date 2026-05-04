@@ -81,7 +81,7 @@ docker build -f Dockerfile.ubuntu24.prebuilt \
   -t hiptensor:prebuilt .
 ```
 
-### Providing a full tarball URL
+### Providing a full tarball URL or local path
 
 If the tarball source uses a non-standard naming convention, bypass all auto-detection by providing the complete download URL via `THEROCK_TARBALL_URL`. All other `THEROCK_*` arguments are ignored when this is set:
 
@@ -89,6 +89,36 @@ If the tarball source uses a non-standard naming convention, bypass all auto-det
 docker build -f Dockerfile.ubuntu24.prebuilt \
   --build-arg THEROCK_TARBALL_URL=https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx950-dcgpu-7.12.0.tar.gz \
   -t hiptensor:prebuilt .
+```
+
+`THEROCK_TARBALL_URL` also accepts local paths resolved relative to the Docker build context. Use a `file:///` prefix for an absolute path within the build context, or a plain relative path:
+
+```bash
+# Absolute path within the build context
+docker build -f Dockerfile.ubuntu24.prebuilt \
+  --build-arg THEROCK_TARBALL_URL=file:///therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz \
+  -t hiptensor:prebuilt .
+
+# Relative path within the build context
+docker build -f Dockerfile.ubuntu24.prebuilt \
+  --build-arg THEROCK_TARBALL_URL=tarballs/therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz \
+  -t hiptensor:prebuilt .
+```
+
+The build context is the directory passed to `docker build` (`.` by default). The tarball must be inside it — Docker cannot access files outside the build context, and passing a large directory as the context will cause Docker to transfer its entire contents to the daemon before the build starts.
+
+If the tarball lives outside the current directory, use a temporary build context containing only the tarball:
+
+```bash
+TARBALL=/path/to/therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz
+CTX=$(mktemp -d)
+cp "$TARBALL" "$CTX/"
+docker build \
+  -f "$(pwd)/Dockerfile.ubuntu24.prebuilt" \
+  --build-arg THEROCK_TARBALL_URL=$(basename "$TARBALL") \
+  -t hiptensor:prebuilt \
+  "$CTX"
+rm -rf "$CTX"
 ```
 
 ---

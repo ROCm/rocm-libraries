@@ -77,7 +77,11 @@ RUN for tool in /usr/bin/llvm*-20; do \
 # The prebuilt tar.gz is downloaded from the nightly builds in: https://rocm.nightlies.amd.com/tarball/
 #
 # To provide the full download URL directly (bypasses all auto-detection):
-# docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=https://example.com/tarball/therock-dist-linux-gfx950-dcgpu-7.12.0.tar.gz -t hiptensor:prebuilt .
+# docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx950-dcgpu-7.12.0.tar.gz -t hiptensor:prebuilt .
+#
+# To use a local tarball from the build context (file:/// prefix or any non-http path):
+# docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=file:///therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz -t hiptensor:prebuilt .
+# docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=tarballs/therock-dist-linux-gfx94X-dcgpu-7.12.0.tar.gz -t hiptensor:prebuilt .
 #
 # Options for THEROCK_URL_BASE are (may not be available externally from AMD):
 # - Stable releases: https://repo.amd.com/rocm/tarball/
@@ -98,10 +102,27 @@ ARG THEROCK_TARBALL_URL=
 RUN mkdir -p /opt/rocm
 WORKDIR /tmp
 
-RUN if [ -n "$THEROCK_TARBALL_URL" ]; then \
-        echo "Using provided tarball URL: ${THEROCK_TARBALL_URL}"; \
-        TARBALL=$(basename "$THEROCK_TARBALL_URL"); \
-        DOWNLOAD_URL="$THEROCK_TARBALL_URL"; \
+RUN --mount=type=bind,source=.,target=/build-context \
+    LOCAL_PATH=""; \
+    if [ -n "$THEROCK_TARBALL_URL" ]; then \
+        case "$THEROCK_TARBALL_URL" in \
+            http://*|https://*) \
+                echo "Using provided tarball URL: ${THEROCK_TARBALL_URL}"; \
+                TARBALL=$(basename "$THEROCK_TARBALL_URL"); \
+                DOWNLOAD_URL="$THEROCK_TARBALL_URL"; \
+                ;; \
+            file:///*) \
+                LOCAL_PATH="${THEROCK_TARBALL_URL#file://}"; \
+                echo "Using local tarball: /build-context${LOCAL_PATH}"; \
+                TARBALL=$(basename "$LOCAL_PATH"); \
+                ;; \
+            *) \
+                _p="${THEROCK_TARBALL_URL#./}"; \
+                LOCAL_PATH="/${_p#/}"; \
+                echo "Using local tarball: /build-context${LOCAL_PATH}"; \
+                TARBALL=$(basename "$LOCAL_PATH"); \
+                ;; \
+        esac; \
     else \
         if [ -n "$THEROCK_PREBUILT_ID" ]; then \
             PREFIX="$THEROCK_PREBUILT_ID"; \
@@ -157,7 +178,17 @@ RUN if [ -n "$THEROCK_TARBALL_URL" ]; then \
         fi; \
         DOWNLOAD_URL="${THEROCK_URL_BASE}${TARBALL}"; \
     fi && \
-    wget --progress=dot:giga "$DOWNLOAD_URL" && \
+    if [ -n "$LOCAL_PATH" ]; then \
+        cp "/build-context${LOCAL_PATH}" . || { \
+            echo "Error: file not found in build context: ${LOCAL_PATH}" >&2; \
+            echo "The tarball must be inside the Docker build context (the last argument to docker build)." >&2; \
+            echo "If the tarball is outside the current directory, use a temporary build context:" >&2; \
+            echo "  CTX=\$(mktemp -d) && cp /path/to/tarball.tar.gz \"\$CTX/\"" >&2; \
+            echo "  docker build -f \$(pwd)/Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=tarball.tar.gz -t <tag> \"\$CTX\"" >&2; \
+            exit 1; }; \
+    else \
+        wget --progress=dot:giga "$DOWNLOAD_URL"; \
+    fi && \
     tar -xf "$TARBALL" -C /opt/rocm --strip-components=1
 
 # ============================================================================
