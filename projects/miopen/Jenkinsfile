@@ -6,6 +6,26 @@ def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
 }
 
+// Returns the original PR branch tip SHA (pullHash) or branch HEAD SHA (hash)
+// from the Jenkins SCMRevisionAction, which is recorded before any local merge.
+// Returns null for non-SCM triggers; caller should fall back to scmVars.GIT_COMMIT.
+@NonCPS
+String getGitHubCommitHash(def build)
+{
+    def scmAction = build?.actions.find { action ->
+        action instanceof jenkins.scm.api.SCMRevisionAction
+    }
+    if (scmAction?.revision instanceof org.jenkinsci.plugins.github_branch_source.PullRequestSCMRevision)
+    {
+        return scmAction.revision.pullHash
+    }
+    else if (scmAction?.revision instanceof jenkins.plugins.git.AbstractGitSCMSource$SCMRevisionImpl)
+    {
+        return scmAction.revision.hash
+    }
+    return null
+}
+
 def get_branch_name(){
     def shared_library_branch = scm.branches[0].name
     if (shared_library_branch .contains("*/")) {
@@ -86,17 +106,10 @@ def checkoutRepo()
     //update ref repo
     cloneUpdateRefRepo()
     def scmVars = checkout scm
-    // Jenkins merges develop into the PR branch locally before running CI.
-    // The merge commit does not exist on GitHub, so status must be reported
-    // against the original PR branch tip.
-    // CHANGE_SHA is set by the GitHub Branch Source plugin for PR builds.
-    // Otherwise, use ORIG_HEAD which git sets to the pre-merge HEAD when Jenkins
-    // merges develop into the PR branch — giving the PR branch tip that exists on
-    // GitHub. Falls back to HEAD when no merge occurred (branch already in sync
-    // with develop, or a plain branch build). 
-    env.GIT_COMMIT = env.CHANGE_SHA ?: sh(returnStdout: true, script: '''
-        git rev-parse ORIG_HEAD 2>/dev/null || git rev-parse HEAD
-    ''').trim()
+    // getGitHubCommitHash reads SCMRevisionAction recorded before any local merge,
+    // giving the true PR branch tip (pullHash) or branch HEAD (hash).
+    // Falls back to scmVars.GIT_COMMIT for manual/non-SCM triggers.
+    env.GIT_COMMIT = getGitHubCommitHash(currentBuild.rawBuild) ?: scmVars.GIT_COMMIT
 }
 
 def withWorkingDir(Closure body) {
