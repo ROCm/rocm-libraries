@@ -2,6 +2,8 @@
 # Paths use forward slashes, relative to the library logic root (the LogicPath argument).
 #
 # ROCM-7144 — gfx950 logic: legacy MI / validation drift; tracked for cleanup.
+# ROCM-24036 — gfx942 aquavanjaram F8B8NBS equality: TensileLogic --check-all rejects
+#   SolutionIndex 0 (MFMA lookup vs checked-in YAML; triage whether checker or logic).
 # You may use YAML comments (#) and/or the optional "ticket" field for Jira keys.
 
 version: 1
@@ -48,3 +50,6 @@ skips:
   - path: src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_S_MX_B_BiasS_HAS_SAV_UserArgs.yaml
     solution_index: 71
     ticket: ROCM-7144
+  - path: src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/aquavanjaram/gfx942/Equality/aquavanjaram_Cijk_Alik_Bljk_F8B8NBS_BH_SAB_UserArgs.yaml
+    solution_index: 0
+    ticket: ROCM-24036
