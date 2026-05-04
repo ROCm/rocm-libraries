@@ -377,7 +377,7 @@ TEST(FmhaBwdCompat, Registry_OGradDotO_PrefersNoPadWhenAvailable)
 
 TEST(FmhaBwdCompat, Registry_OGradDotO_FallsToPaddedWhenNoPadMissing)
 {
-    // BF16 has no npad variant — falls back to padded
+    // BF16 has no npad variant -- falls back to padded
     const auto* v = findVariant(FmhaBwdOGradDotOConfig{
         .signature = {.dtype = DataType::BF16, .hdim_v = 128, .mode = FmhaMode::BATCH},
         .algorithm = {.pad_seqlen_q = false, .pad_hdim_v = false}});
@@ -412,6 +412,18 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBaseline)
                                         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16Batch)
+{
+    const auto* v =
+        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
+                                                      .hdim_q = 128,
+                                                      .hdim_v = 128,
+                                                      .mode   = FmhaMode::BATCH},
+                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_bf16_d128_batch");
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsMask)
