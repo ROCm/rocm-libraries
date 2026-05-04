@@ -53,13 +53,19 @@ protected:
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto scaleDataType = getDataTypeEnumFromType<ScaleDataType>();
-        auto scaleAttr = makeTensorAttributes(
-            "scale", scaleDataType, testCase.scaleDims, generateStrides(testCase.scaleDims));
+        auto scaleAttr
+            = makeTensorAttributes("scale",
+                                   scaleDataType,
+                                   testCase.scaleDims,
+                                   generateStrides(testCase.scaleDims, layout.strideOrder));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         // type must match scale
-        auto biasAttr = makeTensorAttributes(
-            "bias", scaleDataType, testCase.scaleDims, generateStrides(testCase.scaleDims));
+        auto biasAttr
+            = makeTensorAttributes("bias",
+                                   scaleDataType,
+                                   testCase.scaleDims,
+                                   generateStrides(testCase.scaleDims, layout.strideOrder));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         auto epsilon = std::make_shared<TensorAttributes>(1e-5f);

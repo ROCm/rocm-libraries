@@ -7,6 +7,7 @@
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_RMSNORM_LOCAL_SIZE;
 constexpr unsigned int INNER_SIZE = HIP_PLUGIN_RMSNORM_INNER_SIZE;
+constexpr unsigned int STRIDE = HIP_PLUGIN_RMSNORM_STRIDE;
 
 using InputType = HIP_PLUGIN_RMSNORM_INPUT_TYPE;
 using OutputType = HIP_PLUGIN_RMSNORM_OUTPUT_TYPE;
@@ -80,6 +81,8 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
 
     const unsigned int gid = blockIdx.x;
     const unsigned int lid = threadIdx.x;
+    const unsigned int o = gid / STRIDE;
+    const unsigned int s = gid % STRIDE;
 
     float pvar = 0.0f;
     __shared__ float ltmp[LOCAL_SIZE];
@@ -87,7 +90,7 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
     // reduce sum
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
-        size_t idx = gid * INNER_SIZE + i;
+        size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
         float tmp = to_float32<InputType>(x[idx]);
         pvar += tmp * tmp;
     }
@@ -114,7 +117,7 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
     // forward calculation
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
-        size_t idx = gid * INNER_SIZE + i;
+        size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
         float y_val = to_float32<InputType>(x[idx]) * prstd * to_float32<ScaleType>(weight[i]);
         if(bias != nullptr)
         {

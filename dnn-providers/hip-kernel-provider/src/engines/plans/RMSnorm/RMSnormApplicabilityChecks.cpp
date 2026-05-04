@@ -14,35 +14,6 @@
 
 namespace hip_kernel_provider::rmsnorm
 {
-// --- Validation Utilities ---
-
-void RMSnormValidator::validateSupportedLayout(const std::vector<int64_t>& strideOrder,
-                                               size_t numDims)
-{
-    if(numDims == 4)
-    {
-        const auto layoutNchw = hipdnn_data_sdk::utilities::TensorLayout::NCHW;
-
-        if(strideOrder != layoutNchw.strideOrder)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "RMSnorm implementation supports only NCHW layouts for 4D tensors.");
-        }
-    }
-    else
-    {
-        const auto layoutNcdhw = hipdnn_data_sdk::utilities::TensorLayout::NCDHW;
-
-        if(strideOrder != layoutNcdhw.strideOrder)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "RMSnorm implementation supports only NCDHW layouts for 5D tensors.");
-        }
-    }
-}
-
 // --- Component Validators ---
 
 void RMSnormValidator::checkTensorLayoutsAndDimsSupported()

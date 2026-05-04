@@ -102,6 +102,17 @@ int64_t RMSnormFwdPlan::getInnerSize(unsigned normalizeDim) const
     return innerSize;
 }
 
+int64_t RMSnormFwdPlan::getStride(unsigned normalizeDim) const
+{
+    int64_t stride = 1;
+    auto isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_params.x());
+    if(normalizeDim > 1 && isLayoutNHWC)
+    {
+        stride = static_cast<int64_t>(_params.x()->dims()->Get(1));
+    }
+    return stride;
+}
+
 unsigned RMSnormFwdPlan::getNormalizeDim() const
 {
     const std::vector<int64_t> scaleDims(_params.scale()->dims()->begin(),
@@ -145,6 +156,7 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const unsigned normalizeDim = getNormalizeDim();
     const int64_t outerSize = getOuterSize(normalizeDim);
     const int64_t innerSize = getInnerSize(normalizeDim);
+    const int64_t stride = getStride(normalizeDim);
     if(outerSize >= UINT32_MAX)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -175,6 +187,7 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     // Prepare compilation options
     HipKernelCompileOptions options(_params.x(), deviceProperties);
     options.add("HIP_PLUGIN_RMSNORM_INNER_SIZE", innerSize);
+    options.add("HIP_PLUGIN_RMSNORM_STRIDE", stride);
     options.add("HIP_PLUGIN_RMSNORM_INPUT_TYPE", inputTypeString);
     options.add("HIP_PLUGIN_RMSNORM_OUTPUT_TYPE", outputTypeString);
     options.add("HIP_PLUGIN_RMSNORM_SCALE_TYPE", scaleTypeString);
