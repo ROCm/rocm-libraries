@@ -388,6 +388,9 @@ struct TileConstants
     // fp16x4 groups per channel fiber.
     static constexpr int BLOCK_C4 = BLOCK_C / 4;            // 2 * waves_per_wg
 
+    // Number of conv groups processed by each thread block (block_group() * group_size() = total channels).
+    static constexpr int BLOCK_GROUPS = cfg.block_groups();
+
     // Number of uint4 vectors to store per output row (LDS epilogue path).
     static constexpr int STORE_VECS = BLOCK_Q * BLOCK_C8;
 
@@ -506,6 +509,12 @@ struct TileConstants
         static constexpr auto MakeLdsReadDescriptor()
         {
             return Shared::MakeLdsReadDescriptor();
+        }
+
+        template <int VectorSize>
+        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int k_per_group, int c_per_group)
+        {
+            return Shared::template MakeDramReadDescriptorPadded<VectorSize>(k_per_group, c_per_group);
         }
     };
 
