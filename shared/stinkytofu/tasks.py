@@ -198,6 +198,14 @@ def build(
     if sys.platform == "win32":
         _setup_msvc_env()
 
+        _vcpkg_toolchain_path = None
+        _vcpkg = shutil.which("vcpkg")
+        if _vcpkg:
+            _vcpkg_root = Path(_vcpkg).resolve().parent
+            _vcpkg_tc = _vcpkg_root / "scripts/buildsystems/vcpkg.cmake"
+            if _vcpkg_tc.exists():
+                _vcpkg_toolchain_path = _vcpkg_tc.as_posix()
+
         sep = os.pathsep
         rocm_bin_dirs = [f"{rocm_s}/bin", f"{rocm_s}/lib/llvm/bin"]
         os.environ["PATH"] = sep.join(rocm_bin_dirs) + sep + os.environ.get("PATH", "")
@@ -234,12 +242,18 @@ def build(
         if lib_exe:
             lib_posix = Path(lib_exe).as_posix()
             toolchain_file = bld / "windows_toolchain.cmake"
-            toolchain_file.write_text(
+            tc_content = ""
+            if _vcpkg_toolchain_path:
+                tc_content += f'include("{_vcpkg_toolchain_path}")\n'
+            tc_content += (
                 f'set(CMAKE_AR "{lib_posix}" CACHE FILEPATH "" FORCE)\n'
                 'set(CMAKE_CXX_CREATE_STATIC_LIBRARY "<CMAKE_AR> /OUT:<TARGET> <LINK_FLAGS> <OBJECTS>")\n'
                 'set(CMAKE_C_CREATE_STATIC_LIBRARY   "<CMAKE_AR> /OUT:<TARGET> <LINK_FLAGS> <OBJECTS>")\n'
             )
+            toolchain_file.write_text(tc_content)
             cmake_opts.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain_file.as_posix()}")
+        elif _vcpkg_toolchain_path:
+            cmake_opts.append(f"-DCMAKE_TOOLCHAIN_FILE={_vcpkg_toolchain_path}")
         else:
             print("Warning: lib.exe not found. Static library archiving will fail.")
 
