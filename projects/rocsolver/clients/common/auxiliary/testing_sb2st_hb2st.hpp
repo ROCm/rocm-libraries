@@ -353,7 +353,18 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
     if (! perf)
     {
         // cpu-lapack performance (only if not in perf mode)
-        *cpu_time_used = nan( "" );
+        using S = decltype( std::real( T{} ) );
+        std::vector<T> hAband_cpu( hAband[0], hAband[0] + ldab * n );
+        std::vector<S> hD_cpu( n );
+        std::vector<S> hE_cpu( n - 1 );
+        std::vector<T> work_cpu( n );
+
+        *cpu_time_used = get_time_us_no_sync();
+        cpu_sb2st_hb2st<T>( uplo, n, kd,
+            hAband_cpu.data(), ldab,
+            hD_cpu.data(), hE_cpu.data(),
+            work_cpu.data() );
+        *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
     sb2st_hb2st_initData<true, false, T>(

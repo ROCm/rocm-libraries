@@ -650,6 +650,16 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      rocblas_int size_w);
 
 template <typename T, typename S>
+void cpu_sb2st_hb2st(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     T* AB,
+                     rocblas_int ldab,
+                     S* D,
+                     S* E,
+                     T* work);
+
+template <typename T, typename S>
 void cpu_sytd2_hetd2(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda, S* D, S* E, T* tau);
 
 template <typename T, typename W>
