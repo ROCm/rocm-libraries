@@ -1319,6 +1319,212 @@ class TestMFMAQuadCycleGap:
         assert timing[0].actual_quad_cycles == 0
 
     # -------------------------------------------------------------------------
+    # Sub-C of bead `or9` — 4x4 PackMFMA -> CVTPack (CVT1) 5-quad-cycle
+    # settle window. CDNA 4 ISA section 7.6: a 4x4 PackMFMA writing an
+    # accumulator vgpr that a downstream CVT1 (`v_cvt_pk_bf16_f32` reading
+    # the MFMA acc) reads must have at least
+    # `QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 == 5` quad-cycles between issue
+    # completion and consumer issue start. This is the LARGEST of the four
+    # quad-cycle constants — strictly greater than the bare 4x4
+    # finish-cycle (1), so the dispatch must intercept this pair BEFORE
+    # the generic `_is_mfma_producer` branch (which would use the smaller
+    # finish-cycle threshold and false-pass real violations).
+    #
+    # Pre-or9 the structural side enforced this rule via
+    # `MFMAPack.min_quad_cycles_before_result_used = 5` set in
+    # `_handle_min_pack_quad_cycles` (CMSValidator.py:1748-1751); the
+    # graph side had no equivalent. e7w made the PackMFMA producer
+    # routable through `_is_mfma_producer`, but the resulting threshold
+    # was the 4x4 finish-cycle (1) — too weak by 4 quad-cycles. This
+    # bead adds the producer/consumer-pair-aware carve-out.
+    # -------------------------------------------------------------------------
+
+    def _make_real_pack_mfma(self, *, acc_start, acc_count, a_start,
+                              a_count, b_start, b_count, slot, sequence,
+                              category):
+        """Build a real rocisa MFMAInstruction (4x4 PackMFMA family) wrapped
+        in a TaggedInstruction. Uses the rocisa class instead of `_FakeMFMA`
+        so the producer has `getParams()` and the per-byte resolver claims
+        it via `_GenericALURule` (Pack-categorized MFMAs are excluded from
+        `_MFMARule` per ScheduleCapture.py:1980-1984). The rendered form
+        contains the `_4x4x` substring so `_mfma_finish_cycles_for` returns
+        `_QUAD_CYCLES_MFMA_4X4_FINISH == 1` — matching the production
+        TF32 4x4 PackMFMA."""
+        from rocisa.enum import InstType
+        from rocisa.instruction import MFMAInstruction
+        inst = MFMAInstruction(
+            InstType.INST_F32, InstType.INST_F32, [4, 4, 4, 16], False,
+            vgpr(acc_start, acc_count),
+            vgpr(a_start, a_count),
+            vgpr(b_start, b_count),
+        )
+        return _tag(inst, category=category,
+                    mfma_index=slot, sequence=sequence)
+
+    def test_mfma_pack_to_cvt1_zero_gap_emits_timing_too_close(self):
+        """4x4 PackMFMA producer (real `MFMAInstruction`, variant=[4,4,4,16])
+        at slot=2 sequence=0 writes its acc into v0..v3; CVTPack consumer
+        (`v_cvt_pk_bf16_f32`) at slot=2 sequence=1 reads v0 as src0. The
+        cycle-exact simulator (`cumulative_issue_cycles`, bead `nk0`)
+        reports:
+          producer issues at 0, mfma_free_at = 0+1+1 = 2.
+          consumer at p_idx+1 — current_issue += 1 (MFMA issue cost) → 1.
+          c_issue_start = 1; gap = 1 - 0 - 1 = 0.
+        expected = 5 (QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1) > actual = 0 →
+        TimingTooCloseFailure. Failure must be emitted by the new
+        PackMFMA->CVTPack branch (Sub-C of bead `or9`) which intercepts
+        the pair BEFORE the generic MFMA-producer branch — the latter
+        would have used `_mfma_finish_cycles_for(4x4) == 1` as the
+        threshold and false-passed the edge.
+
+        Uses a real rocisa MFMAInstruction (not _FakeMFMA) so the
+        Pack-categorized producer has `getParams()` and `_GenericALURule`
+        publishes (writes=(acc,), reads=(a,b,acc)) — required for the
+        per-byte resolver to form the PackMFMA->CVT edge."""
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(0, 1), src1=vgpr(1, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            self._make_real_pack_mfma(
+                acc_start=0, acc_count=4, a_start=8, a_count=2,
+                b_start=32, b_count=2, slot=2, sequence=0,
+                category="PackA0"),
+            # CVTPack consumer reading v0..v1 (RAW on the PackMFMA acc).
+            _tag(cvt, category="PackA1", mfma_index=2, sequence=1),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        pack_to_cvt_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", "").startswith("Pack")
+            and getattr(f.consumer, "category", "").startswith("Pack")
+        ]
+        assert pack_to_cvt_timing, (
+            f"Expected TimingTooCloseFailure on PackMFMA->CVTPack edge at "
+            f"zero gap (the new or9 dispatch branch must claim it BEFORE "
+            f"the generic MFMA-producer branch — which would have used "
+            f"the smaller 4x4 finish-cycle threshold of 1 and false-passed "
+            f"the edge). Got failures: "
+            f"{[type(f).__name__ for f in failures]}"
+        )
+        f = pack_to_cvt_timing[0]
+        assert f.expected_quad_cycles == 5, (
+            f"PackMFMA->CVTPack expected=5 "
+            f"(QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1), got "
+            f"expected={f.expected_quad_cycles}."
+        )
+        assert f.actual_quad_cycles < 5, (
+            f"Zero-gap pair must report actual < 5 (cycle-exact simulator "
+            f"yields actual=0 for this fixture). Got "
+            f"actual={f.actual_quad_cycles}."
+        )
+
+    def test_mfma_pack_to_cvt1_meets_5_cycle_gap_no_failure(self):
+        """4x4 PackMFMA producer at slot=2 sequence=0; CVTPack consumer at
+        slot=8 sequence=0 with FIVE intervening LR/SWait instructions.
+        Cycle-exact simulator walk:
+          producer issues at 0, mfma_free_at = 2; current_issue += 1 → 1.
+          5 intervening (LR/SWait), each cost 1 → current_issue = 6.
+          consumer (CVT) — c_issue_start = 6; gap = 6 - 0 - 1 = 5.
+        expected = 5, actual = 5 → ok=True → NO TimingTooCloseFailure."""
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(0, 1), src1=vgpr(1, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            self._make_real_pack_mfma(
+                acc_start=0, acc_count=4, a_start=8, a_count=2,
+                b_start=32, b_count=2, slot=2, sequence=0,
+                category="PackA0"),
+            # Five intervening cost-1 instructions to inflate the gap.
+            make_lr(80, 1, 128, slot=3, category="LRA1"),
+            make_lr(81, 1, 132, slot=4, category="LRA1"),
+            make_lr(82, 1, 136, slot=5, category="LRA1"),
+            make_lr(83, 1, 140, slot=6, category="LRA1"),
+            make_lr(84, 1, 144, slot=7, category="LRA1"),
+            _tag(cvt, category="PackA1", mfma_index=8, sequence=0),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        pack_to_cvt_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", "").startswith("Pack")
+            and getattr(f.consumer, "category", "").startswith("Pack")
+        ]
+        assert not pack_to_cvt_timing, (
+            f"PackMFMA->CVTPack edge with cumulative_issue_cycles >= 5 "
+            f"must NOT emit TimingTooCloseFailure. Got: {failures}"
+        )
+
+    def test_mfma_pack_to_cvt1_routed_to_pack_to_cvt_branch_not_quadcycle(self):
+        """Regression-pin for the Sub-C dispatch ordering. A producer that
+        is BOTH a 4x4 PackMFMA AND has a CVTPack consumer must be claimed
+        by the new `_is_mfma_pack_producer(p) AND _is_cvt_pack_producer(c)`
+        branch BEFORE the generic `_is_mfma_producer` branch — otherwise
+        the latter routes through `_quad_cycle_gap_ok` with the
+        4x4-finish-cycle threshold (1) and false-passes the edge.
+
+        End-to-end check: build a zero-gap PackMFMA->CVTPack edge, run it
+        through `_classify_edge_coverage`, and confirm the failure carries
+        `expected_quad_cycles == 5` (the or9 threshold) — NOT 1 (which
+        would prove the dispatch fell through to the generic MFMA branch).
+
+        Mirrors the e7w/35z dispatch-pin shape but for the new or9 branch.
+        """
+        from Tensile.Components.ScheduleCapture import (
+            _is_mfma_pack_producer, _is_cvt_pack_producer,
+            _classify_edge_coverage,
+        )
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(0, 1), src1=vgpr(1, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            self._make_real_pack_mfma(
+                acc_start=0, acc_count=4, a_start=8, a_count=2,
+                b_start=32, b_count=2, slot=2, sequence=0,
+                category="PackA0"),
+            _tag(cvt, category="PackA1", mfma_index=2, sequence=1),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        # Locate the PackMFMA -> CVTPack edge (per-byte resolver pairs the
+        # CVT's read of v0 with the PackMFMA's write of v0..v3).
+        pack_to_cvt_edges = [
+            e for e in g.edges
+            if _is_mfma_pack_producer(e.producer)
+            and _is_cvt_pack_producer(e.consumer)
+        ]
+        assert pack_to_cvt_edges, (
+            "Expected at least one PackMFMA->CVTPack edge in the graph — "
+            "the per-byte resolver should pair the CVT's read of v0 with "
+            "the PackMFMA's write."
+        )
+        edge = pack_to_cvt_edges[0]
+        edge_failures = _classify_edge_coverage(edge, g)
+        timing = [f for f in edge_failures
+                  if isinstance(f, TimingTooCloseFailure)]
+        assert timing, (
+            f"_classify_edge_coverage on a zero-gap PackMFMA->CVTPack edge "
+            f"must emit TimingTooCloseFailure. Got: "
+            f"{[type(f).__name__ for f in edge_failures]}"
+        )
+        # The decisive assertion: expected must be 5 (or9 branch), NOT 1
+        # (which would prove the dispatch fell through to the generic
+        # MFMA-producer branch using _mfma_finish_cycles_for == 1).
+        assert timing[0].expected_quad_cycles == 5, (
+            f"Dispatch ordering broken: expected_quad_cycles == "
+            f"{timing[0].expected_quad_cycles}, but the or9 PackMFMA-to-"
+            f"CVTPack branch reports 5 (QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1) "
+            f"and the generic MFMA branch reports 1 "
+            f"(_mfma_finish_cycles_for == _QUAD_CYCLES_MFMA_4X4_FINISH). "
+            f"The new or9 branch must claim the pair BEFORE the generic "
+            f"MFMA branch."
+        )
+
+    # -------------------------------------------------------------------------
     # Bead `vf4` — MFMA type-switch +1 stall penalty in the graph-side
     # `_quad_cycle_gap_ok` actual computation. The structural simulator
     # (`precompute_issue_times`, CMSValidator.py:2664-2670) injects a +1
