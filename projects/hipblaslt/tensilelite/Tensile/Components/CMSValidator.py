@@ -1367,45 +1367,11 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
                 lr.needed_by = mfma_for_linear_index[needed_by + loop_offset]
 
 
-@applies_only_once
-def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) -> None:
-    """
-    Set the needed_by field of GlobalReads based on the LR1/3 instructions.
-    If GRA or GRB is missing, this function will NOT error out.
-    If either GRA or GRB is present, the corresponding LR1/3 instruction must be present.
-    
-    Args:
-        timeline: The Timeline object containing the instructions.
-        swap_global_read_order: Whether global read order is swapped.
-    """
-    # If the global read order is swapped, we need to swap the target indices since GRAs actually load B and GRBs actually load A.
-    target_names = {"GRA": "LRA1", "GRB": "LRB1"}
-    
-    if "LRA1" not in timeline.get_instruction_names():
-        assert "LRA3" in timeline.get_instruction_names(), "LRA3 must be present if LRA1 is not"
-        target_names["GRA"] = "LRA3"
-        target_names["GRB"] = "LRB3"
-    
-    if swap_global_read_order:
-        target_names["GRA"], target_names["GRB"] = target_names["GRB"], target_names["GRA"]
-
-    for i_loop, loop in enumerate(timeline.loops):
-        for gr_name, target_name in target_names.items():
-            # NOTE: For the NGL and NLL loops, we don't have any GRs being issued at all.
-            #       Also, for testing purposes we may ommit GRAs or LRA1s to improve readability.
-            #       Another validator pass will ensure that they are present if they are needed.
-            grs = timeline.get_instructions(gr_name, loop)
-            if not grs:
-                continue
-
-            # NOTE: Can't index out of bounds since NGL and NLL loops don't issue GRs, check above would fail.
-            target = timeline.get_instructions(target_name, timeline.loops[i_loop + 1])
-            if len(target) == 0:
-                raise ValueError(f"No {target_name} instructions found in schedule.")
-            
-            _, LR_target = target[0]
-            for _, gr in grs:
-                gr.needed_by = LR_target
+# `set_gr_needed_by_from_lrs` was removed in bead `ola.1`. Its only
+# caller was `add_gr_finish_before_lr_constraints`, also removed. The
+# GR -> LR1/3 LDS-reuse coverage is now graph-side; see
+# `_collect_barrier_edges` and `validate_edge_wait_coverage` in
+# ScheduleCapture.py.
 
 @applies_only_once
 def set_gr_must_start_after_from_lr0s(timeline: Timeline, swap_global_read_order: bool, dtl_plus_lds_buf: bool = False) -> None:
@@ -3139,11 +3105,12 @@ def add_gr_not_too_early_constraints(timeline: Timeline, ctx: 'ValidationContext
     apply_must_start_after_barriers(timeline)
 
 
-def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: 'ValidationContext') -> None:
-    """Add GR.needed_by and GR.barriered_at constraints."""
-    apply_swaits(timeline)
-    set_gr_needed_by_from_lrs(timeline, ctx.swap_global_read_order)
-    apply_barriers(timeline)
+# `add_gr_finish_before_lr_constraints` was removed in bead `ola.1`.
+# The legacy rule encoded GR -> SWait(vlcnt) -> SBarrier -> LR1/3
+# LDS-reuse coverage; this is now graph-side (`gr_to_lr_lds_reuse`
+# edges in ScheduleCapture._collect_barrier_edges +
+# validate_edge_wait_coverage). See migrated tests at
+# Tensile/Tests/unit/test_ValidateGRsCompleteBeforeLr{1,3}s.py.
 
 
 def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
@@ -3245,20 +3212,20 @@ class GRAfterLRRule(ValidationRule):
         return validate_timeline(timeline)
 
 
-class GRBeforeLRRule(ValidationRule):
-    def concerns(self) -> set[ValidationConcern]:
-        return {ValidationConcern.LDS_READ_AFTER_WRITE}
-
-    def run(self, timeline, ctx):
-        add_gr_finish_before_lr_constraints(timeline, ctx)
-        return validate_timeline(timeline)
+# `GRBeforeLRRule` and its underlying `add_gr_finish_before_lr_constraints` /
+# `set_gr_needed_by_from_lrs` were removed in bead `ola.1`. The rule's
+# semantics (GR -> SWait(vlcnt) -> SBarrier -> LR1/3 LDS-reuse coverage)
+# are now enforced graph-side by `_collect_barrier_edges` (edge_kind
+# `gr_to_lr_lds_reuse`) + `validate_edge_wait_coverage` /
+# `diagnose_missing_edge` in ScheduleCapture.py. See test_ValidateGRsComplete
+# BeforeLr1s.py / Lr3s.py / test_ValidateNglAndNll.py for the migrated
+# coverage.
 
 
 TIMELINE_RULES: list[ValidationRule] = [
     LRDataReadyRule(),
     PackDataReadyRule(),
     GRAfterLRRule(),
-    GRBeforeLRRule(),
 ]
 
 STRUCTURAL_RULES: list[StructuralRule] = [

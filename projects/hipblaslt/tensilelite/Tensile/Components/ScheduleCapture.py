@@ -3908,7 +3908,7 @@ def _last_drain(waits, producer, subj_graph):
 # This is the lint that replaces:
 #   - LRDataReadyRule              (CMSValidator.py:3461)
 #   - GRAfterLRRule                (CMSValidator.py:3470)  [LDS-reuse barrier-edges]
-#   - GRBeforeLRRule               (CMSValidator.py:3480)  [LDS-reuse barrier-edges]
+#   - GRBeforeLRRule               (deleted in bead ola.1) [LDS-reuse barrier-edges]
 #   - PackDataReadyRule (ordering) (CMSValidator.py:3464)
 #
 # Same Failure types the cross-graph diagnose_missing_edge classifier

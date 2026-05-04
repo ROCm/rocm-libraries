@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,192 +22,244 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Negative regression tests for the validator's GR -> LR3 dependency path.
+"""Graph-native port of test_ValidateGRsCompleteBeforeLr3s — bead ola.1.
 
-`set_gr_needed_by_from_lrs` (CMSValidator.py:1334-1371) has a fallback: when
-LRA1/LRB1 are absent (ForceUnrollSubIter mode), it switches the GR target from
-LRA1/LRB1 to LRA3/LRB3. The existing GR test files exercise only the LR1 path;
-these tests cover the LR3 fallback by mirroring the LR1 negative tests with
-ForceUnrollSubIter setup.
+The legacy file exercised the LR3 fallback in the structural rule
+``set_gr_needed_by_from_lrs``: when LRA1/LRB1 are absent
+(ForceUnrollSubIter mode), the rule's needed_by target switches from
+LR1 to LR3. The structural rule is being deleted in this bead.
+
+Graph-side, the rule classification is unified: ``_collect_barrier_edges``
+treats every category in ``{LRA0, LRA1, LRA3, LRB0, LRB1, LRB3}`` as a
+valid LR consumer for the GR -> SWait(vlcnt) -> SBarrier -> LR pattern
+(ScheduleCapture.py:2843). So the LR3 fallback is just "the LR consumer's
+category happens to be LRA3/LRB3 instead of LRA1/LRB1" — same edge_kind,
+same wait/barrier coverage rules. This file ports the LR1 negative tests
+to assert the same Failures with LR3 categories, demonstrating the
+unification.
 """
-from typing import Any, Optional
 
-from rocisa.instruction import SWaitCnt, SBarrier
-
-from Tensile.Components.CMSValidator import add_gr_finish_before_lr_constraints
 from Tensile.Components.ScheduleCapture import (
-    MissingWaitFailure, MissingBarrierFailure, WaitTooLateFailure,
+    BODY_LABEL_ML,
+    MissingBarrierFailure,
+    MissingWaitFailure,
+    OrderInvertedFailure,
+    WaitOnWrongCounterFailure,
 )
-from cms_validation_base import CMSValidationTestBase
+
+from dataflow_fixtures import (
+    make_capture, make_gr, make_lr, make_sbarrier, make_swait,
+)
+from graph_native_validation_base import GraphNativeValidationTest
 
 
-class TestValidateGRsCompleteBeforeLr3s(CMSValidationTestBase):
-    """Mirror of TestValidateGRsCompleteBeforeLr1s for the LR3 fallback path.
+# Same register layout as the LR1 file. LR3 categories are the only
+# difference (LRA3/LRB3 in place of LRA1/LRB1).
+_GR_VGPR_BASE = 40
+_GR_VGPR_COUNT = 4
+_GR_SRD = 12
+_GR_LDS_OFFSET = 64
 
-    The schedule omits LRA1/LRB1 entirely, forcing
-    set_gr_needed_by_from_lrs (CMSValidator.py:1349-1350) into the LR3 branch.
-    Each negative test mirrors a corresponding LR1 test verbatim with the
-    target changed to LRA3.
-    """
-    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
-        kernel_updates = kernel_updates.copy() if kernel_updates else {}
-        kernel_updates.update({"ForceUnrollSubIter": True, "MIWaveTileA": 4, "MIWaveTileB": 4, "DepthU": 32})
-        super().setup_method(method, kernel_updates=kernel_updates)
+_LR_VGPR_BASE = 8
+_LR_VGPR_COUNT = 4
+_LR_LDS_OFFSET = 64
 
-    validator_passes = [add_gr_finish_before_lr_constraints]
+
+def _gr(slot: int, category: str = "GRA", *, sequence: int = 0,
+        vgpr_base: int = _GR_VGPR_BASE):
+    return make_gr(
+        vgpr_base, _GR_VGPR_COUNT, srd_sgpr_start=_GR_SRD,
+        immediate_offset=_GR_LDS_OFFSET, slot=slot,
+        category=category, sequence=sequence,
+    )
+
+
+def _lr3(slot: int, category: str = "LRA3", *, sequence: int = 0,
+         vgpr_base: int = _LR_VGPR_BASE):
+    """Single LR3 consumer at the given slot. LR3 is the
+    ForceUnrollSubIter-mode fallback target for the GR -> LR pattern."""
+    return make_lr(
+        vgpr_base, _LR_VGPR_COUNT, lds_offset=_LR_LDS_OFFSET, slot=slot,
+        category=category, sequence=sequence,
+    )
+
+
+# =============================================================================
+# Positive tests — pattern correct, edge forms with LR3 consumer
+# =============================================================================
+
+
+class TestGRBeforeLR3_Positive(GraphNativeValidationTest):
+    """Schedules with LRA3 / LRB3 consumers (ForceUnrollSubIter shape).
+    Pattern collector emits gr_to_lr_lds_reuse edge for any LR* consumer."""
 
     def test_LR3_simple_case_success(self):
-        """Baseline: GRs precede an SWait + SBarrier, then LR3s in next iteration."""
-        assert self.num_vmfma == 16
+        """Canonical placement: GR @ 0, SWait+SBarrier @ 2, LR3 @ 7."""
+        cap = make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            _gr(slot=0, category="GRB", vgpr_base=44),
+            make_swait(slot=2, vlcnt=0),
+            make_sbarrier(slot=2, sequence=1),
+            _lr3(slot=7, category="LRA3"),
+            _lr3(slot=7, category="LRB3", vgpr_base=12, sequence=1),
+        ])
+        subj = self.build_graph(self.wrap_single_body(cap))
+        self.assert_edge_exists(subj, edge_kind="gr_to_lr_lds_reuse",
+                                producer_category="GRA",
+                                consumer_category="LRA3")
+        failures = self.validate_waits(subj)
+        self.assert_no_failures(failures)
 
-        optSchedule = {
-            "SYNC": [[0, 2, 4, self.num_vmfma - 1]],
-            "LRA0": [[-1]],
-            "LRB0": [[-1]],
-            "GRA":  [[0, 0]],
-            "GRB":  [[0, 0]],
-            "LRA3": [[7, 7]],
-            "LRB3": [[7, 7]],
-        }
 
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s"),
-            SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRs"),
-            SBarrier(comment="For GRs"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR3s"),
-        ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0)
+# =============================================================================
+# Negative tests — mirror the LR1 file with LRA3/LRB3 consumers
+# =============================================================================
 
-    def test_LR3_grs_not_swait(self):
-        """GR-wait has vlcnt=-1, so apply_swaits never sets GR.guaranteed_by.
-        Fires GlobalRead._validate_needed_by line 550."""
-        assert self.num_vmfma == 16
 
-        optSchedule = {
-            "SYNC": [[0, 2, 4, self.num_vmfma - 1]],
-            "LRA0": [[-1]],
-            "LRB0": [[-1]],
-            "GRA":  [[0, 0]],
-            "GRB":  [[0, 0]],
-            "LRA3": [[7, 7]],
-            "LRB3": [[7, 7]],
-        }
+class TestGRBeforeLR3_Negatives(GraphNativeValidationTest):
+    """Each method mirrors a TestValidateGRsCompleteBeforeLr1s negative
+    test with LR3 consumers, demonstrating the unified
+    gr_to_lr_lds_reuse coverage."""
 
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s"),
-            SWaitCnt(dscnt=-1, vlcnt=-1, vscnt=-1, comment="Wait for GRs"),
-            SBarrier(comment="For GRs"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR3s"),
-        ]
-        self.validate(
-            optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=MissingWaitFailure,
+    def _ref(self):
+        """Reference: full GR -> SWait(vlcnt=0) -> SBarrier -> LR3 chain."""
+        return make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            make_swait(slot=2, vlcnt=0),
+            make_sbarrier(slot=2, sequence=1),
+            _lr3(slot=7, category="LRA3"),
+        ])
+
+    def test_LR3_grs_swait_on_wrong_counter(self):
+        """SWait fires with dscnt=0 instead of vlcnt -> WaitOnWrongCounter."""
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            make_swait(slot=2, dscnt=0),    # wrong counter
+            make_sbarrier(slot=2, sequence=1),
+            _lr3(slot=7, category="LRA3"),
+        ])
+        failures = self.compare(
+            self.wrap_single_body(self._ref()),
+            self.wrap_single_body(subj_cap),
         )
+        f = self.assert_failures_contain(
+            failures, cls=WaitOnWrongCounterFailure,
+            expected_counter="vlcnt",
+        )
+        assert f.producer.category == "GRA"
+        assert f.consumer.category == "LRA3"
+
+    def test_LR3_grs_no_swait_at_all(self):
+        """No SWait of any kind in the window -> MissingWait(vlcnt)."""
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            make_sbarrier(slot=2),
+            _lr3(slot=7, category="LRA3"),
+        ])
+        failures = self.compare(
+            self.wrap_single_body(self._ref()),
+            self.wrap_single_body(subj_cap),
+        )
+        f = self.assert_failures_contain(
+            failures, cls=MissingWaitFailure, counter_kind="vlcnt",
+        )
+        assert f.producer.category == "GRA"
+        assert f.consumer.category == "LRA3"
 
     def test_LR3_no_sbarrier(self):
-        """SBarrier omitted from syncCode, so apply_barriers leaves GR.barriered_at empty.
-        Fires GlobalRead._validate_needed_by line 557."""
-        assert self.num_vmfma == 16
-
-        optSchedule = {
-            "SYNC": [[0, 1, self.num_vmfma - 1]],
-            "LRA0": [[-1]],
-            "LRB0": [[-1]],
-            "GRA":  [[0, 0]],
-            "GRB":  [[0, 0]],
-            "LRA3": [[7, 7]],
-            "LRB3": [[7, 7]],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s"),
-            SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRs"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR3s"),
-        ]
-        self.validate(
-            optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=MissingBarrierFailure,
+        """SBarrier omitted -> MissingBarrier(role='needed_by')."""
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            make_swait(slot=2, vlcnt=0),
+            _lr3(slot=7, category="LRA3"),
+        ])
+        failures = self.compare(
+            self.wrap_single_body(self._ref()),
+            self.wrap_single_body(subj_cap),
         )
+        f = self.assert_failures_contain(
+            failures, cls=MissingBarrierFailure, role="needed_by",
+        )
+        assert f.producer.category == "GRA"
+        assert f.consumer.category == "LRA3"
 
     def test_LR3_swait_after_sbarrier(self):
-        """SBarrier sits before the GR-SWait, so no SBarrier falls between SWait and LR3.
-        Fires GlobalRead._validate_needed_by line 565."""
-        assert self.num_vmfma == 16
-
-        optSchedule = {
-            "SYNC": [[0, 2, 3, self.num_vmfma - 1]],
-            "LRA0": [[-1]],
-            "LRB0": [[-1]],
-            "GRA":  [[0, 0]],
-            "GRB":  [[0, 0]],
-            "LRA3": [[7, 7]],
-            "LRB3": [[7, 7]],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s"),
-            SBarrier(comment="For GRs"),
-            SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRs"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR3s"),
-        ]
-        self.validate(
-            optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=MissingBarrierFailure,
+        """SBarrier sits BEFORE the SWait -> required ordering inverted ->
+        MissingBarrier classification (wait drains, no barrier follows)."""
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            make_sbarrier(slot=1),                  # barrier BEFORE wait
+            make_swait(slot=2, vlcnt=0),
+            _lr3(slot=7, category="LRA3"),
+        ])
+        failures = self.compare(
+            self.wrap_single_body(self._ref()),
+            self.wrap_single_body(subj_cap),
+        )
+        self.assert_failures_contain(
+            failures, cls=MissingBarrierFailure, role="needed_by",
         )
 
     def test_LR3_guaranteed_after_first_lr3(self):
-        """GR-SWait at idx=4 lands AFTER the first LRA3 (placed at idx=3).
-        Fires GlobalRead._validate_needed_by line 561."""
-        assert self.num_vmfma == 16
-
-        optSchedule = {
-            "SYNC": [[0, 4, 4, self.num_vmfma - 1]],
-            "LRA0": [[-1]],
-            "LRB0": [[-1]],
-            "GRA":  [[0, 0, 0, 0]],
-            "GRB":  [[0, 0, 0, 0]],
-            "LRA3": [[3, 7, 7, 7]],
-            "LRB3": [[7, 7, 7, 7]],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s"),
-            SWaitCnt(dscnt=-1, vlcnt=4, vscnt=-1, comment="Wait for GRs"),
-            SBarrier(comment="For GRs"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR3s"),
-        ]
-
-        self.validate(
-            optSchedule, syncCode, 1, 4, 4, 0,
-            expected_failure=WaitTooLateFailure,
+        """4 GRs in flight; SWait+SBarrier at slot 4 land AFTER the FIRST
+        LRA3 consumer at slot 3 — wait outside [GR, LRA3) window for that
+        consumer, so the gr_to_lr_lds_reuse edge is missing in subj.
+        diagnose_missing_edge classifies as MissingWait(vlcnt)."""
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            _gr(slot=0, category="GRA", sequence=1),
+            _gr(slot=0, category="GRA", sequence=2),
+            _gr(slot=0, category="GRA", sequence=3),
+            make_swait(slot=2, vlcnt=4),
+            make_sbarrier(slot=2, sequence=1),
+            _lr3(slot=7, category="LRA3"),
+        ])
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            _gr(slot=0, category="GRA", sequence=1),
+            _gr(slot=0, category="GRA", sequence=2),
+            _gr(slot=0, category="GRA", sequence=3),
+            _lr3(slot=3, category="LRA3"),
+            make_swait(slot=4, vlcnt=4),    # AFTER LRA3 consumer
+            make_sbarrier(slot=4, sequence=1),
+        ])
+        failures = self.compare(
+            self.wrap_single_body(ref_cap),
+            self.wrap_single_body(subj_cap),
         )
+        f = self.assert_failures_contain(
+            failures, cls=MissingWaitFailure, counter_kind="vlcnt",
+        )
+        assert f.producer.category == "GRA"
+        assert f.consumer.category == "LRA3"
 
     def test_LR3_swap_global_read_order_failure(self):
-        """SwapGlobalReadOrder=True. GRBs load A and must precede LRA3, but the
-        scheduler placed waits as if no swap. Exercises the swap-after-LR3-fallback
-        ordering at CMSValidator.py:1349-1353."""
-        assert self.num_vmfma == 16
-        self.kernel["SwapGlobalReadOrder"] = True
-
-        optSchedule = {
-            "SYNC": [[0, 1, 1, 4, 4, self.num_vmfma - 1]],
-            "LRA0": [[-1]],
-            "LRB0": [[-1]],
-            "GRA":  [[0, 0]],
-            "GRB":  [[3, 3]],
-            "LRA3": [[2, 2]],
-            "LRB3": [[7, 7]],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR0s"),
-            SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRAs (loading B)"),
-            SBarrier(comment="For GRAs (loading B)"),
-            SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRBs (loading A)"),
-            SBarrier(comment="For GRBs (loading A)"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR3s"),
-        ]
-        self.validate(
-            optSchedule, syncCode, 1, 2, 2, 0,
-            expected_failure=WaitTooLateFailure,
+        """SwapGlobalReadOrder=True LR3 variant. GRB at slot=3 sits AFTER
+        LRA3 at slot=2 in subj -> OrderInverted on the cross-graph
+        GRB -> LRA3 edge."""
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            _gr(slot=0, category="GRB", vgpr_base=44),
+            make_swait(slot=1, vlcnt=0),
+            make_sbarrier(slot=1, sequence=1),
+            _lr3(slot=2, category="LRB3", vgpr_base=12),
+            _lr3(slot=5, category="LRA3"),
+        ])
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            _gr(slot=0, category="GRA"),
+            make_swait(slot=1, vlcnt=0),
+            make_sbarrier(slot=1, sequence=1),
+            _lr3(slot=2, category="LRA3"),
+            _gr(slot=3, category="GRB", vgpr_base=44),
+            make_swait(slot=4, vlcnt=0),
+            make_sbarrier(slot=4, sequence=1),
+            _lr3(slot=5, category="LRB3", vgpr_base=12),
+        ])
+        failures = self.compare(
+            self.wrap_single_body(ref_cap),
+            self.wrap_single_body(subj_cap),
+            raise_on_unexplained=False,
         )
+        f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
+        assert f.producer.category in {"GRA", "GRB"}
+        assert f.consumer.category in {"LRA3", "LRB3"}
