@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 #include <Tensile/Macros.hpp>
 #include <Tensile/Utils.hpp>
 
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     template <typename SizeIter>
@@ -345,11 +346,33 @@ namespace TensileLite
         }
         size_t totalAllocatedBytes() const
         {
-            return multiplyElementSize(totalAllocatedElements(), elementBytes());
+            // Cannot use elementSize directly as elementSize is
+            // packed size for MX data types.
+            auto const info = DataTypeInfo::Get(m_dataType);
+            assert(totalAllocatedElements() * info.elementSize % info.packing == 0);
+            return totalAllocatedElements() * info.elementSize / info.packing;
         }
 
         float elementBytes() const
         {
+            // TODO:Need to enhance this to support segment type in tensileLite.
+            // tensileLite currently maps MX data types to unsegmented
+            // types in DataTypeInfo, i.e., Float4 -> Float4x2,
+            // Float6 -> Float6x32. As a result, return elementSize is
+            // incorrect for MX data types because elementSize represents
+            // unsegmented size in bytes not segment size.
+            //
+            // To get element size (in bytes) for f4/f6/bf6, use
+            //
+            //   auto const info = DataTypeInfo::Get(m_dataType);
+            //   auto elementSize = info.elementSize / info.packing
+            //
+            // tensileLite returns sizeof(Float4x2), sizeof(Float6x32),
+            // sizeof(BFloat6x32) for rocisa::f4,f6,bf6.
+            //
+            assert(m_dataType != rocisa::DataType::Float6  &&
+                   m_dataType != rocisa::DataType::BFloat6 &&
+                   m_dataType != rocisa::DataType::Float4);
             return DataTypeInfo::Get(m_dataType).elementSize;
         }
 
@@ -446,11 +469,13 @@ namespace TensileLite
         if(decorated)
             stream << "[";
 
+        constexpr size_t packing = TypeInfo<std::remove_cv_t<T>>::Packing;
+
         if(desc.sizes()[0] > 0)
             stream << data[0];
 
-        for(size_t i = 1; i < desc.sizes()[0]; i++)
-            stream << " " << data[i];
+        for(size_t i = packing; i < desc.sizes()[0]; i += packing)
+            stream << " " << data[i / packing];
 
         if(decorated)
             stream << "]" << std::endl;
@@ -530,3 +555,4 @@ namespace TensileLite
     }
 
 } // namespace TensileLite
+TENSILE_HIDDEN_END

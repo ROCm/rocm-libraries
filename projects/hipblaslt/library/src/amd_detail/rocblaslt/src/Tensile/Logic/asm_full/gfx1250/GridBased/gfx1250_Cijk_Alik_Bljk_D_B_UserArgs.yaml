@@ -100,7 +100,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 4
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprA: false
@@ -112,7 +112,7 @@
     EnableMatrixInstruction: false
     ExpandPointerSwap: true
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
@@ -211,7 +211,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    PreloadKernArgs: 0
+    PreloadKernArgs: false
     ProblemType:
       Activation: false
       ActivationComputeDataType: 1
@@ -316,13 +316,13 @@
     ThreadTileA: 2
     ThreadTileB: 2
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0

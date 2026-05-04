@@ -55,6 +55,8 @@ TEST(TestError, ToStringReturnsCorrectStringForAllErrorCodes)
               "HIPDNN_BACKEND_ERROR");
     EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::ATTRIBUTE_NOT_SET),
               "ATTRIBUTE_NOT_SET");
+    EXPECT_EQ(hipdnn_frontend::to_string(hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED),
+              "GRAPH_NOT_SUPPORTED");
 }
 
 TEST(TestError, ToStringReturnsUnknownForInvalidCode)

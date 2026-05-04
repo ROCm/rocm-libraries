@@ -150,6 +150,12 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
     list(APPEND static_depends PACKAGE rocsolver)
   endif()
 
+  # TODO: This LAPACK dependency is only required to support geev
+  # It should be removed once geev is implemented in rocSOLVER
+  if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+      target_link_libraries(hipsolver PRIVATE lapack_libraries)
+  endif()
+
   target_link_libraries(hipsolver PRIVATE roc::rocblas roc::rocsolver)
   target_link_libraries(hipsolver PUBLIC hip::host)
 

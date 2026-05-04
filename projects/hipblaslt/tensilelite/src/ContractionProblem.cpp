@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -686,7 +686,7 @@ namespace TensileLite
         normalize();
         calcArithmeticIntensity();
     }
-
+	
     void ContractionProblemGemm::setMXScaleA(rocisa::DataType mxTypeA, int mxBlockA, std::vector<size_t> saStride)
     {
         m_mxBlockA = mxBlockA;
@@ -695,7 +695,16 @@ namespace TensileLite
         if (mxBlockA)
         {
             std::vector<size_t> saSizes = m_tensors[ContractionProblemGemm::TENSOR::A].sizes();
-            saSizes[m_boundIndices[0].a] = saSizes[m_boundIndices[0].a] / mxBlockA;
+            auto boundIdx = m_boundIndices[0].a;
+            // Scale bound dimension: use CeilDivide to handle K not divisible by mxBlock,
+            // then round up to multiple of 8 (= 256 data elements / 32 block size) so
+            // kernels that process K in 256-element chunks have valid scale data.
+            saSizes[boundIdx] = RoundUpToMultiple(
+                CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), (size_t)8);
+            // Scale free dimension: round up M to multiple of 32 so kernels that
+            // process M in 32-element blocks have valid scale data for partial blocks.
+            auto freeIdx = m_freeIndicesA[0].i;
+            saSizes[freeIdx] = RoundUpToMultiple(saSizes[freeIdx], (size_t)32);
             TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
         }
@@ -709,7 +718,16 @@ namespace TensileLite
         if (mxBlockB)
         {
             std::vector<size_t> sbSizes = m_tensors[ContractionProblemGemm::TENSOR::B].sizes();
-            sbSizes[m_boundIndices[0].b] = sbSizes[m_boundIndices[0].b] / mxBlockB;
+            auto boundIdx = m_boundIndices[0].b;
+            // Scale bound dimension: use CeilDivide to handle K not divisible by mxBlock,
+            // then round up to multiple of 8 (= 256 data elements / 32 block size) so
+            // kernels that process K in 256-element chunks have valid scale data.
+            sbSizes[boundIdx] = RoundUpToMultiple(
+                CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), (size_t)8);
+            // Scale free dimension: round up N to multiple of 32 so kernels that
+            // process N in 32-element blocks have valid scale data for partial blocks.
+            auto freeIdx = m_freeIndicesB[0].i;
+            sbSizes[freeIdx] = RoundUpToMultiple(sbSizes[freeIdx], (size_t)32);
             TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
         }
@@ -1281,10 +1299,16 @@ namespace TensileLite
             gflop += 2 * cSize * 1e-9; // Include (+ beta * C) in gflops
             cSize *= 2; // Include read C and write D in gbytes
         }
+        // TODO: for MX data types, the size is smaller than a byte
+        // so we need to use (elementSize/packing) to derive the actual
+        // byte size of a segment.
+        auto infoA = DataTypeInfo::Get(a().dataType());
+        auto infoB = DataTypeInfo::Get(b().dataType());
+        auto infoC = DataTypeInfo::Get(c().dataType());
         double gbyte
-            = (multiplyElementSize(aSize, a().elementBytes()) +
-               multiplyElementSize(bSize, b().elementBytes()) +
-               multiplyElementSize(cSize, c().elementBytes()))
+            = ((aSize * infoA.elementSize / infoA.packing) +
+               (bSize * infoB.elementSize / infoB.packing) +
+               (cSize * infoC.elementSize / infoC.packing))
               * 1e-9;
 
         m_arithmeticIntensity = gflop / gbyte;
@@ -1320,8 +1344,7 @@ namespace TensileLite
 
     size_t ContractionProblemGemm::flopsPerMac() const
     {
-        auto& aTensor = m_tensors[ContractionProblemGemm::TENSOR::A];
-        return 2 * DataTypeInfo::Get(aTensor.dataType()).packing;
+        return 2;
     }
 
     size_t ContractionProblemGemm::flopCount() const
@@ -1496,7 +1519,7 @@ namespace TensileLite
         rocisa::DataType               typeAlpha,
         rocisa::DataType               typeBeta,
         rocisa::DataType               typeComputeInputA,
-        rocisa::DataType               typeComputeInputB,
+		rocisa::DataType               typeComputeInputB,
         rocisa::DataType               typeCompute,
         double                         alpha,
         double                         beta,
