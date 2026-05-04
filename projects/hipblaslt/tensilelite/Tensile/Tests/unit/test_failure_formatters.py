@@ -36,6 +36,7 @@ import pytest
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_TO_LOOP_INDEX,
     Failure,
+    GraphNode,
     OrderInvertedFailure,
     MissingWaitFailure,
     WaitTooLateFailure,
@@ -44,6 +45,7 @@ from Tensile.Components.ScheduleCapture import (
     WrongInterleavingFailure,
     TimingTooCloseFailure,
     InvalidCounterValueFailure,
+    SchedulePosition,
     SCCConflictFailure,
     SWaitCountExceedsOutstandingFailure,
     OutOfOrderSequenceFailure,
@@ -53,39 +55,19 @@ from Tensile.Components.ScheduleCapture import (
 )
 
 
-# =============================================================================
-# Minimal synthetic stand-ins
-# =============================================================================
-# Real GraphNode/SchedulePosition aren't constructed here on purpose: format()
-# only reads attributes, so duck-typed stand-ins suffice and keep the tests
-# isolated from production capture-pipeline plumbing.
-
-
-@dataclass
-class _Pos:
-    vmfma_index: int
-    loop_index: int = 1  # default = ML; overridden by _make_node from body_label
-
-
-@dataclass
-class _Node:
-    category: str
-    name: str
-    position: _Pos
-    tagged_inst: object = None
-    body_label: str = "ML"
-
-
 def _make_node(category, name, vmfma_index, tagged_inst=None, body_label="ML"):
-    return _Node(
-        category=category,
-        name=name,
-        position=_Pos(
-            vmfma_index=vmfma_index,
+    return GraphNode(
+        identity=(category, BODY_LABEL_TO_LOOP_INDEX[body_label], (name,)),
+        position=SchedulePosition(
             loop_index=BODY_LABEL_TO_LOOP_INDEX[body_label],
+            vmfma_index=vmfma_index,
+            sub_index=0,
         ),
+        category=category,
+        rocisa_inst=None,
         tagged_inst=tagged_inst,
         body_label=body_label,
+        name=name,
     )
 
 
@@ -325,7 +307,7 @@ def test_wait_too_late_failure_format():
     producer = _make_node("LRA0", "LRA0[0]", 5)
     consumer = _make_node("MFMA", "MFMA", 10)
     failure = WaitTooLateFailure(
-        producer=producer, consumer=consumer, wait_position=_Pos(vmfma_index=12)
+        producer=producer, consumer=consumer, wait_position=SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0)
     )
     msg = failure.format(capture=None)
     assert "fires at or after the consumer" in msg
@@ -374,11 +356,11 @@ def test_missing_barrier_failure_needed_by_format():
 
 def test_wrong_interleaving_failure_format():
     pack = _make_node("PackA0", "MiddlePack_a", 0)
-    pack.issued_at = _Pos(vmfma_index=10)
+    pack.issued_at = SchedulePosition(loop_index=1, vmfma_index=10, sub_index=0)
     expected = _make_node("PackA0", "MiddlePack_b", 0)
-    expected.issued_at = _Pos(vmfma_index=11)
+    expected.issued_at = SchedulePosition(loop_index=1, vmfma_index=11, sub_index=0)
     actual = _make_node("PackA0", "MiddlePack_c", 0)
-    actual.issued_at = _Pos(vmfma_index=12)
+    actual.issued_at = SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0)
     failure = WrongInterleavingFailure(
         pack=pack, expected_next=expected, actual_next=actual
     )
@@ -391,9 +373,9 @@ def test_wrong_interleaving_failure_format():
 
 def test_timing_too_close_failure_format():
     producer = _make_node("PackA0", "CVT0_a", 0)
-    producer.issued_at = _Pos(vmfma_index=5)
+    producer.issued_at = SchedulePosition(loop_index=1, vmfma_index=5, sub_index=0)
     consumer = _make_node("MFMA", "MFMA", 0)
-    consumer.issued_at = _Pos(vmfma_index=6)
+    consumer.issued_at = SchedulePosition(loop_index=1, vmfma_index=6, sub_index=0)
     failure = TimingTooCloseFailure(
         producer=producer,
         consumer=consumer,
@@ -408,7 +390,7 @@ def test_timing_too_close_failure_format():
 
 def test_invalid_counter_value_failure_format():
     swait = _make_node("SYNC", "SWaitCnt", 0)
-    swait.issued_at = _Pos(vmfma_index=4)
+    swait.issued_at = SchedulePosition(loop_index=1, vmfma_index=4, sub_index=0)
     failure = InvalidCounterValueFailure(
         swait=swait, dscnt=-2, vlcnt=0, vscnt=-1
     )
@@ -469,7 +451,7 @@ def test_scc_conflict_failure_format_graph_shape_no_clobber():
 
 def test_swait_count_exceeds_outstanding_failure_format_dscnt():
     swait = _make_node("SYNC", "SWaitCnt", 0)
-    swait.issued_at = _Pos(vmfma_index=8)
+    swait.issued_at = SchedulePosition(loop_index=1, vmfma_index=8, sub_index=0)
     failure = SWaitCountExceedsOutstandingFailure(
         swait=swait, counter_kind="dscnt", counter_value=3, outstanding=1
     )
@@ -481,7 +463,7 @@ def test_swait_count_exceeds_outstanding_failure_format_dscnt():
 
 def test_swait_count_exceeds_outstanding_failure_format_vlcnt():
     swait = _make_node("SYNC", "SWaitCnt", 0)
-    swait.issued_at = _Pos(vmfma_index=8)
+    swait.issued_at = SchedulePosition(loop_index=1, vmfma_index=8, sub_index=0)
     failure = SWaitCountExceedsOutstandingFailure(
         swait=swait, counter_kind="vlcnt", counter_value=4, outstanding=2
     )
