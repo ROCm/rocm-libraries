@@ -46,9 +46,17 @@ namespace ck_tile::direct_conv {
 template <auto cfg>
 struct TileConstantsBase
 {
+    // Channels per group (input channel must be equal to output channel for fp16 grouped conv).
     static constexpr int GROUP_SIZE   = cfg.group_size();
+
+    // Channels per group in units of 4 (unit2)
     static constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4;
+
+    // Channel per group in units of 8 (unit4)
     static constexpr int GROUP_SIZE_8 = GROUP_SIZE / 8;
+
+    // Number of conv groups processed by each thread block (block_group() * group_size() = total channels).
+    static constexpr int BLOCK_GROUPS = cfg.block_groups();
 
     static constexpr int BLOCK_Q  = cfg.block_q();
     static constexpr int BLOCK_W  = BLOCK_Q + (cfg.kw - 1);

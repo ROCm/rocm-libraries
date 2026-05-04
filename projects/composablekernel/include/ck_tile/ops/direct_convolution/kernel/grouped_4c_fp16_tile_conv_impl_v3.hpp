@@ -380,9 +380,11 @@ struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw>
     template <typename BlockCoords_>
     __device__ static void load_to_lds(const BlockCoords_& bc,
                                        uint4* weight_lds,
-                                       const _Float16* __restrict__ wei)
+                                       const _Float16* __restrict__ wei,
+                                       int c_per_group,
+                                       int k_per_group)
     {
-        direct_conv::weight_load_to_lds<TC, cfg>(bc, weight_lds, wei);
+        direct_conv::weight_load_to_lds<TC, cfg>(bc, weight_lds, wei, c_per_group, k_per_group);
     }
 
     // Read weights from LDS into registers (this->weights[]).
@@ -463,7 +465,7 @@ __device__ void conv2d_grouped_4c_fp16_cdna4_nhwc_impl(const _Float16* __restric
     direct_conv::grouped_conv_compute_loop<
         TC, cfg, Mfma4x4x4,
         BlockCoords<cfg>, InputLoader<cfg>, WeightLoader<cfg>, OutputWriterType>(
-        in, wei, out, N, groups, hi, wi, ho, wo, py, px);
+        in, wei, out, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, py, px);
 }
 
 template <Config cfg>
@@ -549,20 +551,28 @@ inline void launch(int config_idx,
         config_idx, std::make_index_sequence<NUM_CONFIGS>{}, lp, par, in, wei, out, stream);
 }
 
+static bool channels_can_be_padded(const Conv2dParams& par)
+{
+    // Check if we can pad the input tensor in the channel dimensions such that we K=C=4 per conv group.
+    int c_per_group = par.c_tot / par.groups;
+    int k_per_group = par.k_tot / par.groups;
+    bool can_pad = c_per_group <= 4 && k_per_group <= 4;
+    return can_pad;
+}
+
+static bool is_applicable(const Conv2dParams& par)
+{
+    if(!is_applicable_base(par))
+        return false;
+    if(!channels_can_be_padded(par))
+        return false;
+    return true;
+}
+
 constexpr KernelVariant make_variant()
 {
     return {
-        .is_applicable =
-            [](const Conv2dParams& par)
-        {
-            if(!is_applicable_base(par))
-                return false;
-            if(par.channels_per_group() != 4)
-                return false;
-            if(par.c_tot % 4 != 0)
-                return false;
-            return true;
-        },
+        .is_applicable = &is_applicable,
         .config_is_compatible = [](const Conv2dParams& par, int idx)
         { return is_valid_config(par, configs[idx]); },
         .get_launch_params  = &get_launch_params,

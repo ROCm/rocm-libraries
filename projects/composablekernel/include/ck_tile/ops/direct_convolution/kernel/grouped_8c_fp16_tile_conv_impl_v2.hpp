@@ -715,9 +715,11 @@ struct WeightLoader
     template <typename BlockCoords_>
     __device__ static void load_to_lds(const BlockCoords_& bc,
                                        uint4* weight_lds,
-                                       const _Float16* __restrict__ wei)
+                                       const _Float16* __restrict__ wei,
+                                       int c_per_group,
+                                       int k_per_group)
     {
-        direct_conv::weight_load_to_lds<TC, cfg>(bc, weight_lds, wei);
+        direct_conv::weight_load_to_lds<TC, cfg>(bc, weight_lds, wei, c_per_group, k_per_group);
     }
 
     // GT-specific weight read from LDS — same as v1 (unchanged).
@@ -838,7 +840,7 @@ __device__ void conv2d_grouped_8c_fp16_cdna4_nhwc_impl_v2(const _Float16* __rest
 
     // --- Weight loading (uses start of buffer, before input phase) ---
     fp16x8_t weights_reg[cfg.kh];
-    WeightLoader<cfg>::load_to_lds(bc, lds_buf, wei);
+    WeightLoader<cfg>::load_to_lds(bc, lds_buf, wei, TC::GROUP_SIZE, TC::GROUP_SIZE);
     wait_vmcnt<0>();
     __syncthreads();
 

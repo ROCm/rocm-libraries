@@ -88,6 +88,16 @@ if(GPU_TARGETS MATCHES "gfx950")
         )
     endif()
 
+    add_gtest_executable(test_direct_conv_weight_loader test_weight_loader.cpp)
+    if(TARGET test_direct_conv_weight_loader)
+        target_compile_options(test_direct_conv_weight_loader PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+            -Wno-float-equal
+        )
+    endif()
+
     # Umbrella target: build and run all gfx950 integration tests
     set(CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS
         test_direct_conv_grouped_4c_fp16_tile_conv
@@ -95,6 +105,7 @@ if(GPU_TARGETS MATCHES "gfx950")
         test_direct_conv_grouped_8c_fp16_tile_conv
         test_direct_conv_mfma
         test_direct_conv_lds_bank_conflicts
+        test_direct_conv_weight_loader
     )
 
     foreach(test_target ${CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS})

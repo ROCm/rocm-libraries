@@ -38,6 +38,8 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                                           _Float16* __restrict__ out,
                                           int N,
                                           int groups,
+                                          int c_per_group,
+                                          int k_per_group,
                                           int hi,
                                           int wi,
                                           int ho,
@@ -76,7 +78,7 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
 
     // --- Weight loading (uses start of buffer, before input phase) ---
     WeightLoaderT wl;
-    WeightLoaderT::load_to_lds(bc, lds_buf, wei);
+    WeightLoaderT::load_to_lds(bc, lds_buf, wei, c_per_group, k_per_group);
     wait_vmcnt<0>();
     __syncthreads();
 

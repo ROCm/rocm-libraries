@@ -429,9 +429,11 @@ struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw>
     template <typename BlockCoords_>
     __device__ static void load_to_lds(const BlockCoords_& bc,
                                        uint4* weight_lds,
-                                       const _Float16* __restrict__ wei)
+                                       const _Float16* __restrict__ wei,
+                                       int c_per_group,
+                                       int k_per_group)
     {
-        direct_conv::weight_load_to_lds<TC, cfg>(bc, weight_lds, wei);
+        direct_conv::weight_load_to_lds<TC, cfg>(bc, weight_lds, wei, c_per_group, k_per_group);
     }
 
     // Read weights from LDS into registers (this->weights[]).
@@ -509,7 +511,7 @@ __device__ void conv2d_grouped_16c_fp16_cdna4_nhwc_impl_v2(const _Float16* __res
     direct_conv::grouped_conv_compute_loop<
         TC, cfg, Mfma16x16x16,
         BlockCoords<cfg>, InputLoader<cfg>, WeightLoader<cfg>, OutputWriterType>(
-        in, wei, out, N, groups, hi, wi, ho, wo, py, px);
+        in, wei, out, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, py, px);
 }
 
 template <Config cfg>
