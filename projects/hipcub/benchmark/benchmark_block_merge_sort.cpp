@@ -135,7 +135,7 @@ class merge_sort_benchmark : public primbench::benchmark_interface
         T* d_input;
         T* d_output;
         HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, items * sizeof(T)));
         HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -174,6 +174,9 @@ class merge_sort_benchmark : public primbench::benchmark_interface
                     static_assert(false, "unknown benchmark kind");
                 }
             });
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
     }
 };
 
