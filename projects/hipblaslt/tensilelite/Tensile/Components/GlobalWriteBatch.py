@@ -37,7 +37,8 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
   VFmaF64, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
-  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, VSubU32
+  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, \
+  VCmpClassF32, VMed3F32, VPrngB32, VCvtSRF32toFP8
 from rocisa.functions import vectorStaticMultiply
 
 from ..Common import DataDirection, SemanticVersion
@@ -872,6 +873,9 @@ class GlobalWriteBatchWriter:
       if waitcntInst:
         module.add(waitcntInst)
 
+    if self.kernel["ProblemType"]["StochasticRounding"]:
+      vgprRND = self.parentWriter.vgprPool.checkOut(1)
+
     module.addComment1("apply mask, calc new C and issue writes")
     # module.add(self.getBomb()) # can see store addresses just before the store inst
 
@@ -1274,9 +1278,18 @@ class GlobalWriteBatchWriter:
             packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
                                        tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                     tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          if self.kernel["ProblemType"]["StochasticRounding"]:
+            # Note: Current stochastic rounding FP8 converter does not support pack version
+            convertModule = stochasticRoundingCvt(self, gwvw=self.gwvw, destIdx=destIdx, elementSumIdx=self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                                  tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          else:
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
+          # TODO: BF8 stochastic rounding is not yet supported here.
+          #       VCvtSRF32toBF8 instruction exists but stochasticRoundingCvt() only emits VCvtSRF32toFP8.
+          #       To support BF8 SR: add SR branch here, generalize stochasticRoundingCvt() to accept bf8CVTVgprStruct,
+          #       and select VCvtSRF32toBF8 based on DestDataType.
           packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf8CVTVgprStruct=self.cvtVgprStruct, \
                                      tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isInt32():
@@ -1475,6 +1488,8 @@ class GlobalWriteBatchWriter:
 
     # Close the last N-group OOB skip label (if any) opened by _emitSubtileOobGuard.
     self._finalizeSubtileOobGuards(storeCode if self.kernel["GroupLoadStore"] else module)
+    if self.kernel["ProblemType"]["StochasticRounding"]:
+      self.parentWriter.vgprPool.checkIn(vgprRND)
 
     module.add(storeCode)
 
@@ -2688,4 +2703,32 @@ def convertData(gwvw, elementSumIdx, cvtType: CvtType, roundType: RoundType = Ro
     else:
       #TODO add other convert types here.
       assert 0
+  return module
+
+# F32 to FP8 stochastic rounding conversion
+def stochasticRoundingCvt(self, gwvw, destIdx, elementSumIdx, fp8CVTVgprStruct, tmpS01, laneSGPRC, vgprTmp, inputPrefix="", prefixOffset=0):
+  vgprFp8NanInf = fp8CVTVgprStruct.vgprFp8NanInf
+  vgprFp8Temp   = fp8CVTVgprStruct.vgprFp8Temp
+  vgprFp8Min    = fp8CVTVgprStruct.vgprFp8Min
+  vgprFp8Max    = fp8CVTVgprStruct.vgprFp8Max
+  vRand = vgprTmp #seed
+
+  module = Module("StochasticRoundingCvt")
+
+  for vi in range(0, gwvw):
+    sumIdxV = elementSumIdx + vi
+    formatVgpr = formatting(sumIdxV, inputPrefix, prefixOffset)
+    d = destIdx + vi//4
+
+    module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(formatVgpr), src1=vgpr(vgprFp8NanInf), comment="Nan and +/- inf"))
+    module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(formatVgpr), src1= vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
+    module.add(VCndMaskB32(dst=vgpr(formatVgpr), src0=vgpr(vgprFp8Temp), src1=vgpr(formatVgpr), src2=sgpr(tmpS01,laneSGPRC)))
+
+    # NOTE: Current PRNG seed implementation simply uses the value to be converted directly as seed.
+    # For thread ID-based seed design, see the legacy PRND_GENERATOR approach in tensilelite/rocisa/rocisa/include/macro.hpp
+    module.add(VPrngB32(dst=vgpr(vRand),src=vgpr(formatVgpr),comment="Pseudo Random Number Generator"))
+    # sels=[vi%4] selects which byte within the packed VGPR to write the FP8 value to
+    module.add(VCvtSRF32toFP8(dst=vgpr(d), src0=vgpr(formatVgpr), src1=vgpr(vRand), sels=[vi%4]))
+
+
   return module
