@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -343,11 +343,15 @@ template <typename T, typename Func>
 __device__ T
     trig_float(size_t idx, size_t M, size_t N, size_t lda, size_t stride, Func func)
 {
+    // M_PI is not part of ISO C/C++ and is not defined by <cmath> on Windows (MSVC CRT / clang-cl)
+    // unless _USE_MATH_DEFINES is set before the first <math.h>/<cmath> include. Use a local
+    // constexpr instead so this translation unit builds on all platforms without macro gymnastics.
+    constexpr double two_pi = 6.28318530717958647692528676655900576;
     auto calc = [&](size_t k) {
         auto b = k / stride;
         auto j = (k - b * stride) / lda;
         auto i = (k - b * stride) - j * lda;
-        return fmod(double(i + j * M + b * M * N), 2 * M_PI);
+        return fmod(double(i + j * M + b * M * N), two_pi);
     };
 
 #if defined(HIPBLASLT_USE_FP4)
@@ -482,8 +486,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
             || std::is_same_v<T, hipblaslt_e8>
             || std::is_same_v<T, hipblaslt_e5m3>)
         {
-            hipblaslt_cerr << "No support nan for HIP_R_4F_E2M1_EXT and HIP_R_6F_E2M3_EXT and "
-                              "HIP_R_6F_E3M2_EXT in hipblaslt_init_device"
+            hipblaslt_cerr << "No support nan for HIP_R_4F_E2M1 and HIP_R_6F_E2M3 and "
+                              "HIP_R_6F_E3M2 in hipblaslt_init_device"
                            << std::endl;
         }
         else
@@ -755,19 +759,19 @@ void hipblaslt_init_device(ABC_dims                 abc,
             abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count);
         break;
 #if defined(HIPBLASLT_USE_FP6)
-    case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E2M3):
         hipblaslt_init_device<hipblaslt_f6x16>(
             abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count);
         break;
 #endif
 #if defined(HIPBLASLT_USE_BF6)
-    case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E3M2):
         hipblaslt_init_device<hipblaslt_bf6x16>(
             abc, init, is_nan, static_cast<hipblaslt_bf6x16*>(A), M, N, lda, stride, batch_count);
         break;
 #endif
 #if defined(HIPBLASLT_USE_FP4)
-    case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
+    case static_cast<hipDataType>(HIP_R_4F_E2M1):
         hipblaslt_init_device<hipblaslt_f4x2>(
             abc, init, is_nan, static_cast<hipblaslt_f4x2*>(A), M, N, lda, stride, batch_count);
         break;
