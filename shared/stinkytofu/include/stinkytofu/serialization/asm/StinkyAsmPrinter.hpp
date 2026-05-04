@@ -26,6 +26,7 @@
 #include <sstream>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyMacro.hpp"
@@ -37,7 +38,7 @@ struct AsmPrinterOptions {
     int indent = 2;
 };
 
-class AsmPrinter {
+class STINKYTOFU_EXPORT AsmPrinter {
    public:
     AsmPrinter(std::ostream& os, const AsmPrinterOptions& options = AsmPrinterOptions())
         : os(os), options(options) {}

@@ -12,6 +12,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 * Replaced `install.sh` with an invoke-based task runner (`tasks.py`) to support cross-platform builds including Windows (ROCm 7.0+).
 * gtest and msgpack-cxx are now fetched automatically via CMake FetchContent if not found on the system.
+* Greatly improved MXFP4 GEMM performance when using HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT
 
 ## hipBLASLt 1.2.2 for ROCm 7.2.1
 

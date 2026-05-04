@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -428,12 +428,16 @@ namespace
             return rocisa::DataType::ComplexFloat;
         case HIP_C_64F:
             return rocisa::DataType::ComplexDouble;    
-        case HIP_R_6F_E2M3_EXT:
+        case HIP_R_6F_E2M3:
             return rocisa::DataType::Float6;
-        case HIP_R_6F_E3M2_EXT:
+        case HIP_R_6F_E3M2:
             return rocisa::DataType::BFloat6;
-        case HIP_R_4F_E2M1_EXT:
+        case HIP_R_4F_E2M1:
             return rocisa::DataType::Float4;
+        case HIP_C_32F:
+            return rocisa::DataType::ComplexFloat;
+        case HIP_C_64F:
+            return rocisa::DataType::ComplexDouble;
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -469,11 +473,15 @@ namespace
         case rocisa::DataType::ComplexDouble:
             return HIP_C_64F;    
         case rocisa::DataType::Float6:
-            return static_cast<hipDataType>(HIP_R_6F_E2M3_EXT);
+            return static_cast<hipDataType>(HIP_R_6F_E2M3);
         case rocisa::DataType::BFloat6:
-            return static_cast<hipDataType>(HIP_R_6F_E3M2_EXT);
+            return static_cast<hipDataType>(HIP_R_6F_E3M2);
         case rocisa::DataType::Float4:
-            return static_cast<hipDataType>(HIP_R_4F_E2M1_EXT);
+            return static_cast<hipDataType>(HIP_R_4F_E2M1);
+        case rocisa::DataType::ComplexFloat:
+            return HIP_C_32F;
+        case rocisa::DataType::ComplexDouble:
+            return HIP_C_64F;
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -539,17 +547,37 @@ namespace
         default:;
         }
 
+        if(typeA == rocisa::DataType::Float8_fnuz && typeB == rocisa::DataType::BFloat8_fnuz)
+        {
+            return rocisa::DataType::Float8_fnuz;
+        }
+        else if(typeA == rocisa::DataType::BFloat8_fnuz && typeB == rocisa::DataType::Float8_fnuz)
+        {
+            return rocisa::DataType::BFloat8_fnuz;
+        }
+
+        if(typeA == rocisa::DataType::Float8 && typeB == rocisa::DataType::BFloat8)
+        {
+            return rocisa::DataType::Float8;
+        }
+        else if(typeA == rocisa::DataType::BFloat8 && typeB == rocisa::DataType::Float8)
+        {
+            return rocisa::DataType::BFloat8;
+        }
+
         if(typeA == rocisa::DataType::Float8 || typeA == rocisa::DataType::BFloat8 || typeA == rocisa::DataType::Float8_fnuz || typeA == rocisa::DataType::BFloat8_fnuz || typeA == rocisa::DataType::Float6 || typeA == rocisa::DataType::BFloat6 || typeA == rocisa::DataType::Float4) return typeA;
+        
+
         return TensileLite::DataTypeInfo::Get(typeA).elementSize
                        <= TensileLite::DataTypeInfo::Get(typeB).elementSize
                    ? typeA
                    : typeB;
     }
-
-    inline const rocisa::DataType
-        roc2TensileComputeInputTypeB(const rocisa::DataType&  typeA,
-                                    const rocisa::DataType&  typeB,
-                                    const rocblaslt_compute_type& typeCompute)
+	
+	inline const rocisa::DataType
+        roc2TensileComputeInputTypeB(const rocisa::DataType&       typeA,
+                                     const rocisa::DataType&       typeB,
+                                     const rocblaslt_compute_type& typeCompute)
     {
         switch(typeCompute)
         {
@@ -576,7 +604,27 @@ namespace
         default:;
         }
 
+        if(typeA == rocisa::DataType::Float8_fnuz && typeB == rocisa::DataType::BFloat8_fnuz)
+        {
+            return rocisa::DataType::BFloat8_fnuz;
+        }
+        else if(typeA == rocisa::DataType::BFloat8_fnuz && typeB == rocisa::DataType::Float8_fnuz)
+        {
+            return rocisa::DataType::Float8_fnuz;
+        }
+
+        if(typeA == rocisa::DataType::Float8 && typeB == rocisa::DataType::BFloat8)
+        {
+            return rocisa::DataType::BFloat8;
+        }
+        else if(typeA == rocisa::DataType::BFloat8 && typeB == rocisa::DataType::Float8)
+        {
+            return rocisa::DataType::Float8;
+        }
+
         if(typeB == rocisa::DataType::Float8 || typeB == rocisa::DataType::BFloat8 || typeB == rocisa::DataType::Float8_fnuz || typeB == rocisa::DataType::BFloat8_fnuz ||typeB == rocisa::DataType::Float6 || typeB == rocisa::DataType::BFloat6 || typeB == rocisa::DataType::Float4) return typeB;
+        
+
         return TensileLite::DataTypeInfo::Get(typeA).elementSize
                        <= TensileLite::DataTypeInfo::Get(typeB).elementSize
                    ? typeA
@@ -1750,7 +1798,7 @@ namespace
             roc2TensileComputeInputTypeA(a_type, b_type, prob.compute_type));
         tensileProblem.setComputeInputTypeB(
             roc2TensileComputeInputTypeB(a_type, b_type, prob.compute_type));
-      
+
         bool isComplexInput = (a_type == rocisa::DataType::ComplexFloat
                                || a_type == rocisa::DataType::ComplexDouble);
 
@@ -1813,6 +1861,8 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Vector:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             tensileProblem.setMXScaleA(rocisa::DataType::E8, 32);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
@@ -1839,6 +1889,8 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Vector:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             tensileProblem.setMXScaleB(rocisa::DataType::E8, 32);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
@@ -1895,6 +1947,13 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+
+        if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
+            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+          tensileProblem.setMXScaleA(rocisa::DataType::E8, 32);
+        if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
+            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+          tensileProblem.setMXScaleB(rocisa::DataType::E8, 32);
 
         return tensileProblem;
     }
@@ -2002,7 +2061,7 @@ namespace
             roc2TensileComputeInputTypeA(a_type, b_type, prob.compute_type));
         tensileProblem.setComputeInputTypeB(
             roc2TensileComputeInputTypeB(a_type, b_type, prob.compute_type));
-      
+
         bool isComplexInput = (a_type == rocisa::DataType::ComplexFloat
                                || a_type == rocisa::DataType::ComplexDouble);
 
@@ -2101,6 +2160,7 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Vector:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
             tensileProblem.setMXScaleA(rocisa::DataType::E8, 32);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
@@ -2127,6 +2187,7 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Vector:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
             tensileProblem.setMXScaleB(rocisa::DataType::E8, 32);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
@@ -2198,6 +2259,13 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+
+	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
+   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+	    tensileProblem.setMXScaleA(rocisa::DataType::E8, 32);
+	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
+   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+	    tensileProblem.setMXScaleB(rocisa::DataType::E8, 32);
     }
 
     rocisa::DataType computeTypeToRocisaDataType(rocblaslt_compute_type compute_type)
@@ -2272,6 +2340,7 @@ namespace
             inputs.bias = nullptr;
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+            || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -2288,6 +2357,7 @@ namespace
         }
 
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+            || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -2922,7 +2992,6 @@ TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<voi
 {
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
     rocisa::DataType                 computeType      = rocisa::DataType::None;
-    // TODO: Check correctness of computeInputTypeA()
     rocisa::DataType                 computeInputType = data->problem.computeInputTypeA();
 
     if(data->problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
@@ -3024,6 +3093,17 @@ void initTensileGemmData(rocblaslt_handle       handle,
 #ifdef HIPBLASLT_USE_ROCROLLER
 bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
 {
+    // Do not use rocRoller for FP4 A + FP4 B with pre-swizzled (shuffled) scale layout
+    bool isFp4A = (prob.a_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
+    bool isFp4B = (prob.b_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
+    bool isShuffledScale
+        = (prob.scaleAType
+               == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
+           && prob.scaleBType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT);
+    if(isFp4A && isFp4B && isShuffledScale)
+        return false;
+
     return handle->useRocRoller == 1
            || (handle->useRocRoller == -1
                && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));

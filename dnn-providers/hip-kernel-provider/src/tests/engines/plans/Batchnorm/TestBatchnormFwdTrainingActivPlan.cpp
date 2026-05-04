@@ -3,7 +3,7 @@
 
 #include "engines/plans/batchnorm/BatchnormFwdTrainingPlan.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 namespace hip_kernel_provider::batchnorm::test
