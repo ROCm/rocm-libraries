@@ -213,7 +213,16 @@ struct MmaLayoutTestKernel
             {
                 // Sparse_idx is calculated (overwriting default 0 value) in *exactly* one lane
                 // (assert), but must be broadcast to all (warp-level "or" reduction intrinsic).
-                assert(__popcll(__ballot(sparse_idx != 0)) == 1);
+                int num_sparse_idx_calced = __popcll(__ballot(sparse_idx != 0));
+                if(num_sparse_idx_calced != 1)
+                {
+                    if(threadIdx.x == 0)
+                    {
+                        printf("There should be exactly 1 lane producing a sparse idx (got %d)!\n",
+                               num_sparse_idx_calced);
+                    }
+                    __builtin_trap();
+                }
                 sparse_idx = __reduce_or_sync(__activemask(), sparse_idx);
                 c_frag     = MmaOp::exec(a_frag, b_frag, c_frag, sparse_idx);
             }
