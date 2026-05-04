@@ -2864,6 +2864,26 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   num_batches[i]);
 
 #ifndef HIPBLASLT_USE_ROCROLLER
+        // Build CPU reference from unswizzled scale before mutating the buffer
+        if(isBlockScaling(arg.scaleA))
+            refA.emplace_back(mx_type_to_f32(TiA,
+                                             scaleDataType(arg.scaleA),
+                                             hA[i],
+                                             hScaleA[i],
+                                             A_row[i],
+                                             A_col[i],
+                                             scaleA_row,
+                                             scaleA_col));
+        if(isBlockScaling(arg.scaleB))
+            refB.emplace_back(mx_type_to_f32(TiB,
+                                             scaleDataType(arg.scaleB),
+                                             hB[i],
+                                             hScaleB[i],
+                                             B_row[i],
+                                             B_col[i],
+                                             scaleB_row,
+                                             scaleB_col));
+
         // Swizzle MX scale on CPU and upload to GPU (unconditional — kernel always expects swizzled)
         if(isBlockScaling(arg.scaleA))
         {
@@ -2912,26 +2932,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                                             do_swizzle_b,
                                             stream));
                 CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
-#ifndef HIPBLASLT_USE_ROCROLLER
-                if(isBlockScaling(arg.scaleA))
-                    refA.emplace_back(mx_type_to_f32(TiA,
-                                                     scaleDataType(arg.scaleA),
-                                                     hA[i],
-                                                     hScaleA[i],
-                                                     A_row[i],
-                                                     A_col[i],
-                                                     scaleA_row,
-                                                     scaleA_col));
-                if(isBlockScaling(arg.scaleB))
-                    refB.emplace_back(mx_type_to_f32(TiB,
-                                                     scaleDataType(arg.scaleB),
-                                                     hB[i],
-                                                     hScaleB[i],
-                                                     B_row[i],
-                                                     B_col[i],
-                                                     scaleB_row,
-                                                     scaleB_col));
-#endif
 
                 if(arg.dump_matrix)
                 {
