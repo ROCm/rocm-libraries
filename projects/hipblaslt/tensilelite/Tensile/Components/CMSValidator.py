@@ -2609,61 +2609,6 @@ def verify_swaitcnt_counters(timeline: 'Timeline') -> Optional[str]:
     return None
 
 
-def precompute_issue_times(instructions: list[ValidatorInstruction]) -> list[int]:
-    """
-    Returns a list where issue_times[i] represents the quad-cycle when instruction i starts issuing.
-
-    Args:
-        instructions: List of ValidatorInstruction objects in execution order.
-    """
-    mfma_free_at = 0
-    current_issue = 0
-    last_mfma_class: Optional[type] = None
-    last_mfma_issue = -1
-
-    issue_times = []
-    for instruction in instructions:
-        if isinstance(instruction, MFMA):
-            # MFMAs must wait for previous MFMA to finish
-            current_issue = max(current_issue, mfma_free_at)
-
-            # MFMA type switch penalty
-            current_mfma_class = type(instruction)
-            if last_mfma_class and current_mfma_class != last_mfma_class:
-                gap = current_issue - last_mfma_issue
-                threshold = MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 if last_mfma_class is MFMAPack else MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD
-                if gap < threshold:
-                    current_issue += 1
-
-            mfma_free_at = current_issue + 1 + instruction.mfma_finish_cycles  # 1 to issue + finish_cycles to complete
-
-            last_mfma_issue = current_issue
-            last_mfma_class = current_mfma_class
-
-        issue_times.append(current_issue)
-        current_issue = current_issue + instruction.min_issue_quad_cycles()
-
-    return issue_times
-
-def estimate_quad_cycles_precomputed(i_start: int, i_end: int, issue_times: list[int]) -> int:
-    """
-    Calculates the number of quad-cycles between when the instruction at i_start HAS BEEN issued
-    and when the instruction at i_end STARTS being issued.
-    
-    issue_times[i_end] is when i_end starts issuing
-    issue_times[i_start] is when i_start starts issuing
-    After i_start finishes issuing (1 cycle later), we're at issue_times[i_start] + 1
-    
-    Args:
-        i_start: Index of the starting instruction (already issued).
-        i_end: Index of the ending instruction (about to start issuing).
-        issue_times: Pre-computed list of issue times from precompute_issue_times.
-    
-    Returns:
-        Number of quad-cycles between the two instructions.
-    """
-    return issue_times[i_end] - issue_times[i_start] - 1
-
 @applies_only_once
 def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     """
@@ -2704,9 +2649,40 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     # Build helper lookup
     index_for_inst_id = {id(inst): i for i, inst in enumerate(timeline.combined_timeline)}
 
-    # Precompute issue times
-    issue_times = precompute_issue_times(timeline.combined_timeline)
-        
+    # Inline issue-time simulator. (Bead `arv` deleted the standalone
+    # `precompute_issue_times` / `estimate_quad_cycles_precomputed`
+    # helpers — graph-side `cumulative_issue_cycles` is now the source
+    # of truth for MFMA quad-cycle gap verdicts. The body below is the
+    # only surviving consumer of the simulator and is preserved here
+    # verbatim so this orchestrator stays self-contained until bead
+    # `8nz` migrates `add_pack_constraints` off `estimate_quad_cycles`.)
+    mfma_free_at = 0
+    current_issue = 0
+    last_mfma_class: Optional[type] = None
+    last_mfma_issue = -1
+
+    issue_times: list[int] = []
+    for instruction in timeline.combined_timeline:
+        if isinstance(instruction, MFMA):
+            # MFMAs must wait for previous MFMA to finish
+            current_issue = max(current_issue, mfma_free_at)
+
+            # MFMA type switch penalty
+            current_mfma_class = type(instruction)
+            if last_mfma_class and current_mfma_class != last_mfma_class:
+                gap = current_issue - last_mfma_issue
+                threshold = MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 if last_mfma_class is MFMAPack else MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD
+                if gap < threshold:
+                    current_issue += 1
+
+            mfma_free_at = current_issue + 1 + instruction.mfma_finish_cycles  # 1 to issue + finish_cycles to complete
+
+            last_mfma_issue = current_issue
+            last_mfma_class = current_mfma_class
+
+        issue_times.append(current_issue)
+        current_issue = current_issue + instruction.min_issue_quad_cycles()
+
     # Estimate number of quad-cycles between being issued and result being used
     for i_instruction, instruction in enumerate(timeline.combined_timeline):
         if not isinstance(instruction, Pack) or instruction.min_quad_cycles_before_result_used == 0:
@@ -2721,7 +2697,10 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
             continue
 
         i_needed_by = index_for_inst_id.get(id(needed_by))
-        estimate = estimate_quad_cycles_precomputed(i_instruction, i_needed_by, issue_times)
+        # Inlined `estimate_quad_cycles_precomputed`: gap between when
+        # i_instruction has finished issuing (issue_times[i] + 1) and
+        # when i_needed_by starts issuing.
+        estimate = issue_times[i_needed_by] - issue_times[i_instruction] - 1
         instruction.estimated_quad_cycles_before_result_used = estimate
 
 def _failure_to_string(result) -> Optional[str]:

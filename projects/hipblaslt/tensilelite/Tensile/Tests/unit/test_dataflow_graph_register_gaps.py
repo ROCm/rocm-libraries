@@ -1820,91 +1820,13 @@ class TestCumulativeIssueCycles:
             f"NO stall. Expected delivered gap=4, got {gap}."
         )
 
-    def test_graph_actual_matches_precompute_issue_times(self):
-        """Parity check: for a canonical fixture, run BOTH
-        `cumulative_issue_cycles` and `CMSValidator.precompute_issue_times`
-        and assert they produce identical numbers. This is THE contract
-        for bead `nk0`: the graph helper IS cycle-equivalent to the
-        structural simulator.
-
-        Fixture: a mixed-class chain with intervening ALUs and SWaits.
-        """
-        from Tensile.Components.CMSValidator import (
-            precompute_issue_times,
-            estimate_quad_cycles_precomputed,
-            ValidatorInstruction,
-            MFMA as VMFMA,
-            MFMAPack as VMFMAPack,
-            SNop as VSNop,
-            POSITION_INF,
-            SchedulePosition as VSchedulePosition,
-        )
-        # Build a small mock validator-instruction stream that mirrors
-        # the graph fixture exactly (same instruction TYPES in same order).
-        # Stream: MFMA-std, ALU(=base 1), MFMA-4x4, ALU, MFMA-std.
-        # We use VMFMA for standard and VMFMAPack for 4x4. ALU is
-        # represented by a generic `_StubAlu` that has the default
-        # min_issue_quad_cycles_base = 1.
-        from dataclasses import dataclass
-
-        @dataclass
-        class _StubAlu(ValidatorInstruction):
-            def validate(self):
-                return None
-
-        def _pos(i):
-            return VSchedulePosition(loop_index=0, vmfma_index=i, sub_index=0)
-
-        v_stream = [
-            VMFMA(name="MFMA0", issued_at=_pos(2)),
-            _StubAlu(name="ALU0", issued_at=_pos(3)),
-            VMFMAPack(name="MFMA1", issued_at=_pos(4), issue_index=0),
-            _StubAlu(name="ALU1", issued_at=_pos(5)),
-            VMFMA(name="MFMA2", issued_at=_pos(6)),
-        ]
-        issue_times = precompute_issue_times(v_stream)
-        # Validator gap from MFMA0 (idx=0) to MFMA2 (idx=4):
-        validator_gap = estimate_quad_cycles_precomputed(0, 4, issue_times)
-
-        # Build the graph fixture with the SAME instruction sequence
-        # (slots chosen so the body order matches).
-        alu0 = VXorB32(dst=vgpr(50, 1), src0=vgpr(60, 1), src1=vgpr(70, 1))
-        alu1 = VXorB32(dst=vgpr(51, 1), src0=vgpr(61, 1), src1=vgpr(71, 1))
-        cap = make_capture(BODY_LABEL_ML, [
-            # Producer MFMA-std at slot=2 seq=0.
-            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
-                      slot=2, sequence=0, a_src_count=2),
-            # ALU at slot=3.
-            _tag(alu0, category="PackA0", mfma_index=3, sequence=0),
-            # MFMA-4x4 at slot=4.
-            make_mfma(c_dst_start=80, a_src_start=8, b_src_start=32,
-                      slot=4, sequence=0, a_src_count=2,
-                      variant=[4, 4, 4, 16]),
-            # ALU at slot=5.
-            _tag(alu1, category="PackA0", mfma_index=5, sequence=0),
-            # Consumer MFMA-std at slot=6, reads v0..v1.
-            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
-                      slot=6, sequence=0, a_src_count=2),
-        ])
-        g = build_dataflow_graph(_wrap(cap))
-        # Producer = first MFMA (slot=2), Consumer = last MFMA (slot=6).
-        target = None
-        for e in g.edges:
-            if (getattr(e.producer, "category", None) == "MFMA"
-                    and getattr(e.consumer, "category", None) == "MFMA"
-                    and e.producer.position.vmfma_index == 2
-                    and e.consumer.position.vmfma_index == 6):
-                target = e
-                break
-        assert target is not None
-        graph_gap = cumulative_issue_cycles(g, target.producer, target.consumer)
-
-        assert graph_gap == validator_gap, (
-            f"PARITY VIOLATION: cumulative_issue_cycles={graph_gap} != "
-            f"precompute_issue_times-derived={validator_gap}. The graph "
-            f"helper must be cycle-equivalent to the structural simulator "
-            f"for bead `nk0` to satisfy its mandate."
-        )
+    # Bead `arv` deleted the structural-side parity test
+    # `test_graph_actual_matches_precompute_issue_times`. The
+    # `precompute_issue_times` / `estimate_quad_cycles_precomputed`
+    # helpers it imported no longer exist in CMSValidator (graph-side
+    # `cumulative_issue_cycles` is now the source of truth for MFMA
+    # quad-cycle gap verdicts; bead `nk0` established the parity that
+    # this test pinned).
 
 
 # =============================================================================
