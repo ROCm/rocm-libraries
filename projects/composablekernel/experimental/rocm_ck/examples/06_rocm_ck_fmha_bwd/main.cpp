@@ -28,6 +28,7 @@
 #include <rocm_kpack/kpack.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -689,13 +690,45 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     void* dev_dK     = nullptr;
     void* dev_dV     = nullptr;
 
+    // Optional feature buffers -- allocated only when the variant needs them.
+    // DEFERRED (NV-3): these are zero-filled "launch-survival" placeholders so
+    // the kernel can launch without dereferencing nullptr. Promoting bias /
+    // bias-grad / dropout variants from "compilation proof only" to numerical
+    // verification requires non-zero inputs and a matching CPU reference,
+    // which is intentionally not done here.
+    void* dev_bias  = nullptr;
+    void* dev_dbias = nullptr;
+
+    // Deterministic mode launches a persistent grid of num_cus workers
+    // (kUsePersistent = is_deterministic && !is_group_mode in CK Tile). Each
+    // worker iterates over its share of (batch, nhead, seqlen_k_tile) jobs
+    // and atomically accumulates partial dQ contributions into one of nsplits
+    // split-K partitions in dq_acc. ConvertDQ later reduces the splits and
+    // converts to dq's typed dtype. (See fmha_bwd_kernel.hpp:1018-1025: the
+    // dq_acc_dram_window memory op resolves to atomic_add when kUsePersistent;
+    // only the non-persistent deterministic path uses set semantics.)
+    //
+    // nsplits is sized to num_cus, which is an upper bound on i_split values
+    // the kernel may emit (i_split <= jobs_per_head / jobs_per_worker, and
+    // jobs_per_worker is sized so that worker_num * jobs_per_worker covers
+    // all jobs).
+    int num_cus = 1;
+    if(variant.spec.is_deterministic)
+    {
+        hipDeviceProp_t dev_props{};
+        HIP_CHECK(hipGetDeviceProperties(&dev_props, 0));
+        num_cus = dev_props.multiProcessorCount;
+    }
+    const int64_t nsplits          = static_cast<int64_t>(num_cus);
+    const size_t dq_acc_partitions = static_cast<size_t>(num_cus);
+
     HIP_CHECK(hipMalloc(&dev_Q, q_elems * dtype_bytes));
     HIP_CHECK(hipMalloc(&dev_K, k_elems * dtype_bytes));
     HIP_CHECK(hipMalloc(&dev_V, v_elems * dtype_bytes));
     HIP_CHECK(hipMalloc(&dev_LSE, lse_elems * sizeof(float)));
     HIP_CHECK(hipMalloc(&dev_dO, do_elems * dtype_bytes));
     HIP_CHECK(hipMalloc(&dev_D, lse_elems * sizeof(float)));
-    HIP_CHECK(hipMalloc(&dev_dQ_acc, q_elems * sizeof(float)));
+    HIP_CHECK(hipMalloc(&dev_dQ_acc, dq_acc_partitions * q_elems * sizeof(float)));
     HIP_CHECK(hipMalloc(&dev_dK, k_elems * dtype_bytes));
     HIP_CHECK(hipMalloc(&dev_dV, v_elems * dtype_bytes));
 
@@ -718,7 +751,7 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     HIP_CHECK(hipMemcpy(dev_D, host_D.data(), lse_elems * sizeof(float), hipMemcpyHostToDevice));
 
     // Zero dQ_acc, dK, dV
-    HIP_CHECK(hipMemset(dev_dQ_acc, 0, q_elems * sizeof(float)));
+    HIP_CHECK(hipMemset(dev_dQ_acc, 0, dq_acc_partitions * q_elems * sizeof(float)));
     HIP_CHECK(hipMemset(dev_dK, 0, k_elems * dtype_bytes));
     HIP_CHECK(hipMemset(dev_dV, 0, v_elems * dtype_bytes));
 
@@ -742,10 +775,18 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     const int64_t nhead_stride_lse = seqlen_q;
     const int64_t batch_stride_lse = int64_t(nhead) * seqlen_q;
 
-    // dQ_acc: same layout as Q but float
+    // dQ_acc layout matches CK Tile's upstream reference
+    // (example/ck_tile/01_fmha/fmha_bwd_runner.hpp:465):
+    //   [batch, nhead, nsplits, seqlen_q, hdim_q]
+    // nsplits is 1 in non-deterministic mode and num_cus in deterministic
+    // mode (num_cus is initialized above). Strides scale with nsplits so the
+    // non-deterministic path degenerates cleanly to [batch, nhead, seqlen_q,
+    // hdim_q] and the deterministic kernel's split_stride_dq_acc walks
+    // consecutive splits within the same (batch, nhead) tile.
     const int64_t stride_dq_acc       = hdim_q;
-    const int64_t nhead_stride_dq_acc = int64_t(seqlen_q) * hdim_q;
-    const int64_t batch_stride_dq_acc = int64_t(nhead) * seqlen_q * hdim_q;
+    const int64_t split_stride_dq_acc = int64_t(seqlen_q) * hdim_q;
+    const int64_t nhead_stride_dq_acc = nsplits * int64_t(seqlen_q) * hdim_q;
+    const int64_t batch_stride_dq_acc = int64_t(nhead) * nsplits * int64_t(seqlen_q) * hdim_q;
 
     // dK: same layout as K
     // dV: same layout as V
@@ -769,7 +810,7 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
               {static_cast<rocm_ck::index_t>(seqlen_k), static_cast<rocm_ck::index_t>(hdim_v)},
               {stride_v, nhead_stride_v, batch_stride_v});
 
-    // LSE is 1D per head — no row stride.
+    // LSE is 1D per head -- no row stride.
     // strides[0]=nhead_stride, strides[1]=batch_stride
     setTensor(args.tensors[DKV::LSE],
               dev_LSE,
@@ -781,16 +822,22 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
               {static_cast<rocm_ck::index_t>(seqlen_q), static_cast<rocm_ck::index_t>(hdim_v)},
               {stride_do, nhead_stride_do, batch_stride_do});
 
-    // D is 1D per head — same stride convention as LSE.
+    // D is 1D per head -- same stride convention as LSE.
     setTensor(args.tensors[DKV::D],
               dev_D,
               {static_cast<rocm_ck::index_t>(seqlen_q)},
               {nhead_stride_lse, batch_stride_lse});
 
+    // dQ_acc: row / nhead / batch / split strides. Layout above places splits
+    // between nhead and seqlen_q dims so split_stride_dq_acc = seqlen_q * hdim_q
+    // (one (seqlen_q, hdim_q) tile per consecutive split within a single
+    // (batch, nhead) location). The deterministic kernel uses i_split *
+    // split_stride_dq_acc to address its target partition; non-deterministic
+    // configs ignore split_stride_dq_acc.
     setTensor(args.tensors[DKV::DQ_ACC],
               dev_dQ_acc,
               {static_cast<rocm_ck::index_t>(seqlen_q), static_cast<rocm_ck::index_t>(hdim_q)},
-              {stride_dq_acc, nhead_stride_dq_acc, batch_stride_dq_acc});
+              {stride_dq_acc, nhead_stride_dq_acc, batch_stride_dq_acc, split_stride_dq_acc});
 
     setTensor(args.tensors[DKV::DK],
               dev_dK,
@@ -809,6 +856,12 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     args.scalars[DKV::SCALE].f32          = raw_scale * log2e;
     args.scalars[DKV::NUM_HEAD_Q].i32     = nhead;
     args.scalars[DKV::NHEAD_RATIO_QK].i32 = 1; // MHA (no GQA)
+    // Persistent kernel reads kargs.batch for total_jobs sizing; only used
+    // when is_deterministic && mode == BATCH but cheap to populate always.
+    // The slot is i32 -- assert and narrow explicitly so a future caller
+    // passing an out-of-range batch trips here rather than silently wrapping.
+    assert(batch > 0);
+    args.scalars[DKV::BATCH_SIZE].i32 = static_cast<int32_t>(batch);
 
     if(variant.spec.has_mask)
     {
@@ -817,8 +870,86 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
         args.scalars[DKV::MASK_TYPE].i32         = 1;  // MASK_FROM_TOP_LEFT
     }
 
-    // Launch
-    auto grid = rocm_ck::dqdkdv_grid_size(batch, nhead, seqlen_k, variant.spec.block_n0);
+    // Optional feature slot population -- see DEFERRED (NV-3) note at the
+    // dev_bias / dev_dbias declarations. Zero-filled buffers and no-drop
+    // dropout scalars let the kernel launch survive; they do NOT exercise
+    // the bias / dropout math. Promoting these variants to PASSED requires
+    // non-zero inputs and a matching CPU reference.
+    if(variant.spec.bias_type == rocm_ck::FmhaBiasType::ELEMENTWISE)
+    {
+        // Elementwise bias is per-(batch,nhead,seqlen_q,seqlen_k) in dtype.
+        const size_t bias_elems = size_t(batch) * nhead * seqlen_q * seqlen_k;
+        HIP_CHECK(hipMalloc(&dev_bias, bias_elems * dtype_bytes));
+        HIP_CHECK(hipMemset(dev_bias, 0, bias_elems * dtype_bytes));
+
+        const int64_t stride_bias       = seqlen_k;
+        const int64_t nhead_stride_bias = int64_t(seqlen_q) * seqlen_k;
+        const int64_t batch_stride_bias = int64_t(nhead) * seqlen_q * seqlen_k;
+
+        setTensor(
+            args.tensors[DKV::BIAS],
+            dev_bias,
+            {static_cast<rocm_ck::index_t>(seqlen_q), static_cast<rocm_ck::index_t>(seqlen_k)},
+            {stride_bias, nhead_stride_bias, batch_stride_bias});
+    }
+    else if(variant.spec.bias_type == rocm_ck::FmhaBiasType::ALIBI)
+    {
+        // ALiBi slope buffer is per-head (float [nhead]); placeholder zeros
+        // disable the position bias. The slope buffer is shared across all
+        // batches, so the per-batch stride must be 0 -- otherwise the device
+        // reads slope[i_batch * stride + i_head] out of bounds beyond batch 0.
+        HIP_CHECK(hipMalloc(&dev_bias, size_t(nhead) * sizeof(float)));
+        HIP_CHECK(hipMemset(dev_bias, 0, size_t(nhead) * sizeof(float)));
+
+        // Device reads alibi_slope_stride from strides[0] (per-batch stride).
+        // 0 = broadcast across batches (same nhead slopes for every batch).
+        setTensor(
+            args.tensors[DKV::BIAS], dev_bias, {static_cast<rocm_ck::index_t>(nhead)}, {0, 0, 0});
+    }
+
+    if(variant.spec.has_bias_grad)
+    {
+        // dBias has the same shape/layout as the elementwise bias tensor.
+        const size_t dbias_elems = size_t(batch) * nhead * seqlen_q * seqlen_k;
+        HIP_CHECK(hipMalloc(&dev_dbias, dbias_elems * dtype_bytes));
+        HIP_CHECK(hipMemset(dev_dbias, 0, dbias_elems * dtype_bytes));
+
+        const int64_t stride_dbias       = seqlen_k;
+        const int64_t nhead_stride_dbias = int64_t(seqlen_q) * seqlen_k;
+        const int64_t batch_stride_dbias = int64_t(nhead) * seqlen_q * seqlen_k;
+
+        setTensor(
+            args.tensors[DKV::DBIAS],
+            dev_dbias,
+            {static_cast<rocm_ck::index_t>(seqlen_q), static_cast<rocm_ck::index_t>(seqlen_k)},
+            {stride_dbias, nhead_stride_dbias, batch_stride_dbias});
+    }
+
+    if(variant.spec.has_dropout)
+    {
+        // No-drop defaults: keep every element (p_undrop = 1.0). Real RNG
+        // seeding is deferred until the dropout variant gets numerical
+        // verification.
+        args.scalars[DKV::P_UNDROP].f32    = 1.0f;
+        args.scalars[DKV::RP_UNDROP].f32   = 1.0f;
+        args.scalars[DKV::DROP_SEED].u64   = 0;
+        args.scalars[DKV::DROP_OFFSET].u64 = 0;
+    }
+
+    // Debug-only host guard: catch missing required tensor / scalar slots
+    // before the kernel launches and produces a hard-to-diagnose page fault.
+    rocm_ck::validateArgs(args, variant.spec);
+
+    // Launch grid:
+    //   * Non-deterministic: (ceil(seqlen_k / kN0), nhead, batch).
+    //   * Deterministic:     persistent grid (num_cus, 1, 1). Workers
+    //     atomically accumulate into nsplits dQ_acc partitions (atomic_add
+    //     because kUsePersistent disables the set-memory-op fast path);
+    //     ConvertDQ later reduces partitions to dq.
+    rocm_ck::GridDim grid =
+        variant.spec.is_deterministic
+            ? rocm_ck::GridDim{static_cast<unsigned>(num_cus), 1u, 1u}
+            : rocm_ck::dqdkdv_grid_size(batch, nhead, seqlen_k, variant.spec.block_n0);
     std::printf("  %s: grid=(%u,%u,%u), block=%d\n",
                 variant.name,
                 grid.x,
@@ -932,6 +1063,8 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     HIP_CHECK(hipFree(dev_dQ_acc));
     HIP_CHECK(hipFree(dev_dK));
     HIP_CHECK(hipFree(dev_dV));
+    HIP_CHECK(hipFree(dev_bias));  // hipFree(nullptr) is a no-op
+    HIP_CHECK(hipFree(dev_dbias)); // hipFree(nullptr) is a no-op
     unloadKernel(lk);
     return passed;
 }
@@ -1172,10 +1305,13 @@ int main(int argc, char** argv)
     std::printf("\nRunning DqDkDv variants:\n");
     for(const auto& v : rocm_ck::ALL_DQDKDV_VARIANTS)
     {
-        // Group mode is not yet implemented in the device bridge.
+        // Group mode device bridge is wired (commit dbb41f3055), but the
+        // host runner here builds batch-strided inputs. A separate group-mode
+        // runner is needed to exercise the variable-length sequence path
+        // (see runOGradDotOGroup for the OGradDotO equivalent).
         if(v.spec.mode == rocm_ck::FmhaMode::GROUP)
         {
-            std::printf("  %s: SKIPPED (group mode not yet "
+            std::printf("  %s: SKIPPED (group-mode host runner not yet "
                         "implemented)\n",
                         v.name);
             continue;
@@ -1349,7 +1485,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            std::printf("  (no fp16 d128 batch variant found — skipped)\n");
+            std::printf("  (no fp16 d128 batch variant found -- skipped)\n");
         }
     }
 

@@ -1,4 +1,4 @@
-# INSIGHTS.md — FMHA BWD rocm_ck Example
+# INSIGHTS.md -- FMHA BWD rocm_ck Example
 
 Design decisions and lessons learned from mapping the CK Tile FMHA backward
 kernels (OGradDotO, DqDkDv, ConvertDQ) to the rocm_ck kpack pattern.
@@ -88,6 +88,22 @@ if constexpr(K.has_mask) {
     kargs.mask_type = MASK_FROM_TOP_LEFT;
 }
 ```
+
+The mask parameters are runtime-configurable via the scalar slots, so a
+mask-enabled spec can be re-purposed for different mask shapes without
+recompilation. Host-side population for a top-left causal mask:
+
+```cpp
+namespace S = fmha_bwd_dqdkdv_slots;
+args.scalars[S::WINDOW_SIZE_LEFT].i32  = -1; // unlimited left context
+args.scalars[S::WINDOW_SIZE_RIGHT].i32 = 0;  // causal
+args.scalars[S::MASK_TYPE].i32         = static_cast<int>(
+    ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+```
+
+The device bridge reads these scalars and assigns them to `kargs` after
+the aggregate init -- the spec-time `has_mask` flag only gates which
+inheritance base is active, not the runtime mask shape.
 
 ### 1D Tensor Stride Convention
 
@@ -225,8 +241,9 @@ slot namespace already provides the same safety as PhysicalTensor's `args_slot`
 field — named constants prevent off-by-one errors.
 
 **Specific reasons against adoption:**
-- `kMaxPhysicalTensors = 8` is insufficient for FMHA BWD's 12 slots. Bumping it
-  globally bloats every `GemmSpec` NTTP with unused padding.
+- `kMaxPhysicalTensors = 8` is insufficient for FMHA BWD's 16 slots
+  (Q..DV + BIAS/DBIAS/RANDVAL + 4 group-mode SEQSTART/SEQLEN slots). Bumping
+  it globally bloats every `GemmSpec` NTTP with unused padding.
 - FMHA BWD tensors have heterogeneous types (Q/K/V are fp16, LSE/D/DQ_ACC are
   fp32, RANDVAL is uint8). PhysicalTensor's single `dtype` per tensor adds
   redundant metadata already handled by `FmhaBwdDQDKDVTypes<K>`.
