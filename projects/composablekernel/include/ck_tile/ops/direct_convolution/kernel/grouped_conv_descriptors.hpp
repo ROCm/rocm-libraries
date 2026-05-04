@@ -216,54 +216,96 @@ struct SharedDescriptors
         }
 
         // Padded DRAM descriptor for weight loading when c_per_group < GROUP_SIZE
-        // or k_per_group < GROUP_SIZE. Creates a 4D [block_groups, k_padded, KH*KW, c_padded]
-        // view over the real [block_groups, k_per_group, KH*KW, c_per_group] DRAM tensor,
-        // with pad transforms that zero-fill the extra K and C positions.
+        // or k_per_group < GROUP_SIZE.
         //
-        // Currently unused — the padded path in weight_load_to_lds uses a scalar
-        // cooperative loop instead (buffer_load_lds can't zero-pad individual elements
-        // within an 8-fp16 contiguous load for GROUP_SIZE=4). Kept for future use
-        // with larger GROUP_SIZE variants where async_load_tile may work.
+        // Builds a flat 2D [WEIGHT_LDS_PADDED_UINT4, 8] descriptor (same shape as
+        // MakeDramReadDescriptor) so the caller can reuse MakeDramReadTileDistribution
+        // and MakeLdsWriteDescriptor unchanged.
         //
-        // TODO: This requires runtime-value pad transforms (c_per_group, k_per_group
-        // are not constexpr). CK Tile's make_pad_transform accepts runtime lengths,
-        // but transform_tensor_descriptor may need all dimensions constexpr for
-        // compile-time coordinate computation. Validate before enabling.
-#if 0
+        // The chain of transforms is:
+        //   1. Raw DRAM: [BLOCK_GROUPS, k_per_group, KH_KW, c_per_group] with real strides.
+        //   2. Pad K: [BLOCK_GROUPS, GROUP_SIZE, KH_KW, c_per_group]
+        //      (k ∈ [k_per_group, GROUP_SIZE) → OOB, reads as zero).
+        //   3. Pad C: [BLOCK_GROUPS, GROUP_SIZE, KH_KW, GROUP_SIZE]
+        //      (c ∈ [c_per_group, GROUP_SIZE) → OOB, reads as zero).
+        //   4. Merge all 4 dims → [BLOCK_GROUPS * GROUP_SIZE * KH_KW * GROUP_SIZE].
+        //   5. Unmerge → [WEIGHT_LDS_SIZE_UINT4, 8].
+        //   6. Pad rows → [WEIGHT_LDS_PADDED_UINT4, 8].
+        //
+        // The buffer base pointer must be set to the start of bc.block_group in the
+        // global weight tensor (see weight_load_to_lds).
         static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int k_per_group, int c_per_group)
         {
-            constexpr int filter_size = TC::KH_KW;
-            constexpr int block_groups = TC::BLOCK_GROUPS;
-            const int CStride = 1;
+            constexpr int filter_size   = TC::KH_KW;
+            constexpr int GROUP_SIZE    = TC::GROUP_SIZE;
+            constexpr int BLOCK_GROUPS  = TC::BLOCK_GROUPS;
+            constexpr int LDS_SIZE_UINT4  = TC::Weight::WEIGHT_LDS_SIZE_UINT4;
+            constexpr int LDS_PADDED_UINT4 = TC::Weight::WEIGHT_LDS_PADDED_UINT4;
+            constexpr int right_pad_rows = LDS_PADDED_UINT4 - LDS_SIZE_UINT4;
+
+            // Step 1: raw 4D descriptor with real DRAM strides (fp16 elements).
+            const int CStride  = 1;
             const int XYStride = c_per_group;
-            const int KStride = filter_size * XYStride;
-            const int GStride = k_per_group * KStride;
+            const int KStride  = filter_size * XYStride;
+            const int GStride  = k_per_group * KStride;
 
-            const int k_pad = TC::GROUP_SIZE - k_per_group;
-            const int c_pad = TC::GROUP_SIZE - c_per_group;
-
-            const auto desc_un_padded = ck_tile::make_naive_tensor_descriptor(
-                ck_tile::make_tuple(block_groups, k_per_group,
-                        ck_tile::number<filter_size>{}, c_per_group),
+            const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
+                ck_tile::make_tuple(ck_tile::number<BLOCK_GROUPS>{}, k_per_group,
+                                    ck_tile::number<filter_size>{}, c_per_group),
                 ck_tile::make_tuple(GStride, KStride, XYStride, CStride),
-                ck_tile::number<c_per_group>{},
-                ck_tile::number<1>{}
-            );
+                ck_tile::number<1>{}, 
+                ck_tile::number<1>{});
 
-            const auto desc_padded = ck_tile::transform_tensor_descriptor(
-                desc_un_padded,
+            // Step 2+3: pad K → GROUP_SIZE, pad C → GROUP_SIZE.
+            // Use number<0>{} for left pads and compute right pads as
+            // number<GROUP_SIZE> - runtime length, expressed via make_pad_transform
+            // with the target upper length number<GROUP_SIZE>{}.
+            // This makes the padded extents compile-time (required for merge).
+            const auto desc_padded_4d = ck_tile::transform_tensor_descriptor(
+                desc_raw,
                 ck_tile::make_tuple(
-                    ck_tile::make_pass_through_transform(ck_tile::number<block_groups>{}),
-                    ck_tile::make_pad_transform(k_per_group, 0, k_pad),
+                    ck_tile::make_pass_through_transform(ck_tile::number<BLOCK_GROUPS>{}),
+                    ck_tile::make_pad_transform(k_per_group, number<0>{},
+                                               number<GROUP_SIZE>{} - k_per_group),
                     ck_tile::make_pass_through_transform(ck_tile::number<filter_size>{}),
-                    ck_tile::make_pad_transform(c_per_group, 0, c_pad)),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}, ck_tile::sequence<3>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}, ck_tile::sequence<3>{})
-            );
+                    ck_tile::make_pad_transform(c_per_group, number<0>{},
+                                               number<GROUP_SIZE>{} - c_per_group)),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
 
-            return desc_padded;
+            // Step 4: merge all 4 dims → [BLOCK_GROUPS * GROUP_SIZE * KH_KW * GROUP_SIZE].
+            const auto desc_merged = ck_tile::transform_tensor_descriptor(
+                desc_padded_4d,
+                ck_tile::make_tuple(ck_tile::make_merge_transform(
+                    ck_tile::make_tuple(ck_tile::number<BLOCK_GROUPS>{},
+                                        ck_tile::number<GROUP_SIZE>{},
+                                        ck_tile::number<filter_size>{},
+                                        ck_tile::number<GROUP_SIZE>{}))),
+                ck_tile::make_tuple(ck_tile::sequence<0, 1, 2, 3>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}));
+
+            // Step 5: unmerge → [WEIGHT_LDS_SIZE_UINT4, 8].
+            const auto desc_2d = ck_tile::transform_tensor_descriptor(
+                desc_merged,
+                ck_tile::make_tuple(ck_tile::make_unmerge_transform(
+                    ck_tile::make_tuple(ck_tile::number<LDS_SIZE_UINT4>{},
+                                        ck_tile::number<8>{}))),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0, 1>{}));
+
+            // Step 6: pad rows → [WEIGHT_LDS_PADDED_UINT4, 8].
+            const auto desc_final = ck_tile::transform_tensor_descriptor(
+                desc_2d,
+                ck_tile::make_tuple(
+                    ck_tile::make_pad_transform(ck_tile::number<LDS_SIZE_UINT4>{}, 0, right_pad_rows),
+                    ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
+
+            return desc_final;
         }
-#endif
 
         // Tile distribution for weight async loads: linear tid → row.
         static constexpr auto MakeDramReadTileDistribution()

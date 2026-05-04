@@ -72,67 +72,65 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
                                    const int k_per_group)
 {
     constexpr auto weight_dram_desc = TC::Weight::MakeDramReadDescriptor();
+    constexpr auto weight_dram_dist = TC::Weight::MakeDramReadTileDistribution();
 
     if (TC::GROUP_SIZE != c_per_group || TC::GROUP_SIZE != k_per_group)
     {
         // Padded path: c_per_group < GROUP_SIZE or k_per_group < GROUP_SIZE.
         //
-        // We cannot use async_load_tile (buffer_load_lds) here because it loads
-        // 8 contiguous fp16 elements per thread. For GROUP_SIZE=4, each row of 8
-        // fp16 spans two (k, yx) positions and the pad transform can't zero-pad
-        // individual elements within a contiguous 16-byte load.
+        // MakeDramReadDescriptorPadded returns a 2D [WEIGHT_LDS_PADDED_UINT4, 8]
+        // descriptor (same shape as MakeDramReadDescriptor) built by:
+        //   1. 4D raw DRAM view: [BLOCK_GROUPS, k_per_group, KH_KW, c_per_group]
+        //   2. Pad K → GROUP_SIZE, pad C → GROUP_SIZE (OOB reads as zero)
+        //   3. Merge all 4 dims → flat 1D
+        //   4. Unmerge → [WEIGHT_LDS_SIZE_UINT4, 8]
+        //   5. Pad rows → [WEIGHT_LDS_PADDED_UINT4, 8]
         //
-        // Instead, use a cooperative scalar loop: each thread processes a subset
-        // of the padded LDS buffer, reading real weight data from DRAM for valid
-        // (k, c) positions and writing zero for padded positions.
-        //
-        // LDS layout (matches the unpadded path): flat contiguous buffer of
-        //   BLOCK_GROUPS * GROUP_SIZE * KH_KW * GROUP_SIZE fp16 elements,
-        // indexed as [g, k, yx, c] with strides [GROUP_SIZE*KH_KW*GROUP_SIZE,
-        //   KH_KW*GROUP_SIZE, GROUP_SIZE, 1].
-        //
-        // DRAM layout (real tensor): [groups, k_per_group, KH_KW, c_per_group]
-        // with strides [k_per_group*KH_KW*c_per_group, KH_KW*c_per_group,
-        //   c_per_group, 1].
+        // The buffer base is offset to bc.block_group so the BLOCK_GROUPS
+        // dimension covers exactly this block's groups.
+        const auto weight_padded_dram_desc =
+            TC::Weight::MakeDramReadDescriptorPadded(k_per_group, c_per_group);
 
-        constexpr int GROUP_SZ = TC::GROUP_SIZE;
-        constexpr int KH_KW = cfg.kh * cfg.kw;
-        constexpr int BLOCK_GRP = cfg.block_groups();
-        constexpr int TOTAL_PADDED_ELEMS = BLOCK_GRP * GROUP_SZ * KH_KW * GROUP_SZ;
+        // Offset wei to bc.block_group * k_per_group * KH_KW * c_per_group.
+        const _Float16* wei_block =
+            wei + static_cast<size_t>(bc.block_group) * k_per_group * cfg.kh * cfg.kw * c_per_group;
 
-        // Base pointer for this block's weight slice in DRAM.
-        // block_group = blockIdx.y * block_groups() selects which group slice.
-        // In the real tensor, group g starts at offset g * k_per_group * KH_KW * c_per_group.
-        const _Float16* wei_base = wei + static_cast<size_t>(bc.block_group) * k_per_group * KH_KW * c_per_group;
+        auto weight_padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+            wei_block, weight_padded_dram_desc);
 
-        const int dram_k_stride  = KH_KW * c_per_group;
-        const int dram_g_stride  = k_per_group * dram_k_stride;
+        auto weight_padded_dram_window = ck_tile::make_tile_window(
+            weight_padded_dram_view,
+            ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
+            {0, 0},
+            weight_dram_dist);
 
-        _Float16* lds_fp16 = reinterpret_cast<_Float16*>(weight_lds);
+        constexpr auto weight_lds_desc = TC::Weight::MakeLdsWriteDescriptor();
+        auto weight_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+            reinterpret_cast<_Float16*>(weight_lds), weight_lds_desc);
 
-        const int tid = static_cast<int>(threadIdx.x);
-        for(int i = tid; i < TOTAL_PADDED_ELEMS; i += cfg.block_size())
-        {
-            // Decompose flat LDS index into 4D coordinates [g, k, yx, c].
-            const int c  = i % GROUP_SZ;
-            const int yx = (i / GROUP_SZ) % KH_KW;
-            const int k  = (i / (GROUP_SZ * KH_KW)) % GROUP_SZ;
-            const int g  = i / (GROUP_SZ * KH_KW * GROUP_SZ);
+        // LDS window needs the same distribution as the DRAM window so that
+        // store_tile knows where each thread writes its register tile elements.
+        auto weight_lds_window = ck_tile::make_tile_window(
+            weight_lds_view,
+            ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),
+            {0, 0},
+            weight_dram_dist);
 
-            _Float16 val;
-            if(k < k_per_group && c < c_per_group)
+        static_for<TC::Weight::NUM_WEIGHT_PASSES>(
+            [&]<int Pass>()
             {
-                // Valid position: read from DRAM.
-                int dram_offset = g * dram_g_stride + k * dram_k_stride + yx * c_per_group + c;
-                val = wei_base[dram_offset];
-            }
-            else
-            {
-                // Padded position: write zero.
-                val = static_cast<_Float16>(0.0f);
-            }
-            lds_fp16[i] = val;
-        }
+                // load_tile applies per-element OOB checking via the pad transforms,
+                // correctly zeroing padded K and C positions. This is correct for any
+                // c_per_group, unlike async_load_tile which issues vector loads that
+                // bypass per-element OOB checks.
+                auto weight_reg = ck_tile::load_tile(weight_padded_dram_window);
+                ck_tile::store_tile(weight_lds_window, weight_reg);
+                if constexpr(Pass < TC::Weight::NUM_WEIGHT_PASSES - 1)
+                {
+                    ck_tile::move_tile_window(weight_padded_dram_window, {cfg.block_size(), 0});
+                    ck_tile::move_tile_window(weight_lds_window, {cfg.block_size(), 0});
+                }
+            });
     }
     else
     {
@@ -146,7 +144,6 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
                                 remove_cvref_t<decltype(weight_dram_desc)>>{
                 weight_dram_buf, weight_dram_desc};
 
-        constexpr auto weight_dram_dist = TC::Weight::MakeDramReadTileDistribution();
         auto weight_dram_window = ck_tile::make_tile_window(
             weight_dram_view,
             ck_tile::make_tuple(ck_tile::number<cfg.block_size()>{}, ck_tile::number<8>{}),

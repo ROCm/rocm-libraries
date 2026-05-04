@@ -102,6 +102,10 @@ struct TileConstantsBase
         static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
         static constexpr auto MakeLdsWriteDescriptor()       { return Shared::MakeLdsWriteDescriptor(); }
         static constexpr auto MakeLdsReadDescriptor()        { return Shared::MakeLdsReadDescriptor(); }
+        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int k_per_group, int c_per_group)
+        {
+            return Shared::MakeDramReadDescriptorPadded(k_per_group, c_per_group);
+        }
     };
 
     // -----------------------------------------------------------------------
