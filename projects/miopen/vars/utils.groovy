@@ -610,14 +610,14 @@ def getDockerImage(Map conf=[:])
 def getDockerImageWithStatus(Map conf=[:]) {
     def stageName = env.STAGE_NAME ?: "Docker Image"
     def credentialsID = "github-app-miopen"
-    def sha = env.GIT_COMMIT
+    def sha = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
     def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
 
     Closure setStatus = { String state, String description ->
         withCredentials([usernamePassword(credentialsId: credentialsID, usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
             sh(script: """
                 curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
-                    -H 'Authorization: token \$GITHUB_TOKEN' \\
+                    -H "Authorization: token \$GITHUB_TOKEN" \\
                     -H 'Content-Type: application/json' \\
                     -d '{"state":"${state}","context":"${stageName}","description":"${description}"}'
             """)
@@ -676,14 +676,14 @@ def buildHipClangJob(Map conf=[:]){
         def retimage
         def credentialsID = "github-app-miopen"
 
-        def sha = env.GIT_COMMIT
+        def sha = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
         def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
 
         Closure setStatus = { String state, String description ->
             withCredentials([usernamePassword(credentialsId: credentialsID, usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
                 sh(script: """
                     curl -s -o /dev/null -w "%{http_code}" -X POST '${statusUrl}' \\
-                        -H 'Authorization: token \$GITHUB_TOKEN' \\
+                        -H "Authorization: token \$GITHUB_TOKEN" \\
                         -H 'Content-Type: application/json' \\
                         -d '{"state":"${state}","context":"${variant}","description":"${description}"}'
                 """)
