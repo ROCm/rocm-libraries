@@ -605,12 +605,23 @@ struct BlockCoords
     int block_group;
     int block_k;
     int block_c8;
+
+    // Separate input/output channel info for padded convolution.
+    // Declared before C/K so member initializer list sees them first.
+    int C_in;
+    int C_out;
+    int block_k_in;
+    int block_k_out;
+
     int C;
     int C8;
     int K;
 
-    __device__ BlockCoords(int groups)
-        : C(groups * cfg.group_size()), C8(C / 8), K(C)
+    __device__ BlockCoords(int groups,
+                           int c_per_group = cfg.group_size(),
+                           int k_per_group = cfg.group_size())
+        : C_in(groups * c_per_group), C_out(groups * k_per_group),
+          C(C_in), C8(C_in / 8), K(C_out)
     {
         const int block_q_n_idx = blockIdx.x;
         block_n     = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
@@ -618,6 +629,8 @@ struct BlockCoords
         block_group = static_cast<int>(blockIdx.y) * cfg.block_groups();
         block_k     = block_group * cfg.group_size();
         block_c8    = block_k / 8;
+        block_k_in  = block_group * c_per_group;
+        block_k_out = block_group * k_per_group;
     }
 };
 

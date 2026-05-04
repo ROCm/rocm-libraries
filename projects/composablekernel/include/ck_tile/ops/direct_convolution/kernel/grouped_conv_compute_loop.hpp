@@ -72,7 +72,7 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     uint4* output_lds = lds_buf + INPUT_TOTAL;
 
     // --- Coordinate setup ---
-    BlockCoordsT bc(groups);
+    BlockCoordsT bc(groups, c_per_group, k_per_group);
     if(bc.block_n >= N)
         return;
 
@@ -84,8 +84,8 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
 
     wl.read_from_lds(lds_buf);
 
-    InputLoaderT il(bc, input_lds, in, hi, wi, px);
-    OutputWriterT ow(bc, output_lds, out, ho, wo);
+    InputLoaderT il(bc, input_lds, in, hi, wi, px, c_per_group);
+    OutputWriterT ow(bc, output_lds, out, ho, wo, k_per_group);
 
     __syncthreads();
 

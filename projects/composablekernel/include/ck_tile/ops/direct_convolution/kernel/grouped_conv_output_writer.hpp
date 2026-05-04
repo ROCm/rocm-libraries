@@ -43,51 +43,80 @@ struct OutputWriter
     ck_tile::index_t  row_stride_elems;    // elements per output row (wo * C)
     bool              store_valid;         // whether this thread's output position is in bounds
 
+    // Additional state for padded path (k_per_group < GROUP_SIZE).
+    int               k_valid_count_;    // how many of thread's 4 output channels are valid (0-4)
+
     template <typename BlockCoords_>
     __device__ OutputWriter(const BlockCoords_& bc,
                             uint4*, // Unused, matches OutputWriterLds constructor signature.
                             _Float16* __restrict__ out,
                             int ho,
-                            int wo)
+                            int wo,
+                            int k_per_group = TC::GROUP_SIZE)
     {
-        output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C + bc.block_k;
-        row_stride_elems = wo * bc.C;
+        output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
+        row_stride_elems = wo * bc.K;
 
         // Create temporary DRAM tile_window to extract per-thread offset and validity.
         {
             constexpr auto out_dist = TC::Output::MakeDramWriteTileDistributionNarrow();
-            const auto out_desc = TC::Output::MakeDramWriteDescriptorNarrow(ho, wo, bc.C);
-            auto out_buf = OutputDramBuf{
-                output_base,
-                static_cast<ck_tile::index_t>(out_desc.get_element_space_size())};
-            auto out_view = OutputDramView{out_buf, out_desc};
 
-            auto tmp_window = ck_tile::make_tile_window(
-                out_view,
-                ck_tile::make_tuple(ck_tile::number<1>{},
-                                    ck_tile::number<TC::BLOCK_Q>{},
-                                    ck_tile::number<TC::BLOCK_C4>{},
-                                    ck_tile::number<4>{}),
-                {0, bc.block_q, 0, 0},
-                out_dist);
+            auto extract_offset_and_validity = [&](const auto& out_desc) {
+                auto out_buf = ck_tile::make_buffer_view<ck_tile::address_space_enum::global>(
+                    output_base,
+                    static_cast<ck_tile::index_t>(out_desc.get_element_space_size()));
+                auto out_view = ck_tile::tensor_view<
+                    ck_tile::remove_cvref_t<decltype(out_buf)>,
+                    ck_tile::remove_cvref_t<decltype(out_desc)>>{out_buf, out_desc};
 
-            // Extract per-thread output element offset (encodes spatial + channel position).
-            output_elem_offset = tmp_window.pre_computed_coords_[ck_tile::number<0>{}]
-                                                                [ck_tile::number<1>{}].get_offset();
+                auto tmp_window = ck_tile::make_tile_window(
+                    out_view,
+                    ck_tile::make_tuple(ck_tile::number<1>{},
+                                        ck_tile::number<TC::BLOCK_Q>{},
+                                        ck_tile::number<TC::BLOCK_C4>{},
+                                        ck_tile::number<4>{}),
+                    {0, bc.block_q, 0, 0},
+                    out_dist);
 
-            // Check validity via the pad transform's coordinate-based check.
-            // The element_space_size check is insufficient because OOB threads
-            // in the spatial dimension can still have offsets within the multi-row
-            // buffer range.
-            store_valid = ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
-                out_desc, tmp_window.pre_computed_coords_[ck_tile::number<0>{}]
-                                                        [ck_tile::number<1>{}]);
-        } // tmp_window goes out of scope — no persistent register cost
+                output_elem_offset = tmp_window.pre_computed_coords_[ck_tile::number<0>{}]
+                                                                    [ck_tile::number<1>{}].get_offset();
+                store_valid = ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
+                    out_desc, tmp_window.pre_computed_coords_[ck_tile::number<0>{}]
+                                                            [ck_tile::number<1>{}]);
+            };
+
+            if constexpr(requires { TC::Output::MakeDramWriteDescriptorNarrowPadded(int{}, int{}, int{}, int{}); })
+            {
+                if(k_per_group < TC::GROUP_SIZE)
+                {
+                    // Padded path: use padded descriptor for correct group-strided offsets.
+                    extract_offset_and_validity(
+                        TC::Output::MakeDramWriteDescriptorNarrowPadded(ho, wo, bc.K, k_per_group));
+                    k_valid_count_ = k_per_group;
+                }
+                else
+                {
+                    extract_offset_and_validity(
+                        TC::Output::MakeDramWriteDescriptorNarrow(ho, wo, bc.K));
+                    k_valid_count_ = 4;
+                }
+            }
+            else
+            {
+                // Variant without padded descriptor support: always use unpadded path.
+                extract_offset_and_validity(
+                    TC::Output::MakeDramWriteDescriptorNarrow(ho, wo, bc.K));
+                k_valid_count_ = 4;
+            }
+        } // tmp_window goes out of scope
     }
 
     // Convert fp32x4 accumulator to fp16x4 and write directly to global memory.
     __device__ __forceinline__ void flush(fp32x4_t acc_val, int p_out)
     {
+        if(!store_valid)
+            return;
+
         // 1. Convert fp32→fp16.
         __half2 halves[2];
         halves[0] = __float22half2_rn({acc_val[0], acc_val[1]});
@@ -95,11 +124,22 @@ struct OutputWriter
         auto out_reg = *reinterpret_cast<const fp16x4_t*>(halves);
 
         // 2. Direct store to DRAM: base + row offset + per-thread offset.
-        if(store_valid)
+        ck_tile::index_t store_offset = output_elem_offset
+            + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
+
+        if(k_valid_count_ == 4)
         {
-            ck_tile::index_t store_offset = output_elem_offset
-                + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
+            // Full 8B write: all 4 channels valid.
             __builtin_memcpy(output_base + store_offset, &out_reg, sizeof(out_reg));
+        }
+        else
+        {
+            // Partial write: only k_valid_count_ channels valid.
+            const _Float16* src = reinterpret_cast<const _Float16*>(&out_reg);
+            for(int i = 0; i < k_valid_count_; i++)
+            {
+                output_base[store_offset + i] = src[i];
+            }
         }
     }
 };
@@ -171,16 +211,20 @@ struct OutputWriterLds
     ck_tile::index_t  lds_buf_size;          // LDS buffer size in fp16 elements
     bool              store_valid;           // whether this thread should store to DRAM
 
+    // k_per_group for padded path (< GROUP_SIZE means partial writes).
+    int               k_per_group_;
+
     template <typename BlockCoords_>
     __device__ OutputWriterLds(const BlockCoords_& bc,
                                uint4* output_lds,
                                _Float16* __restrict__ out,
                                int ho,
-                               int wo)
+                               int wo,
+                               int k_per_group = TC::GROUP_SIZE)
     {
-        output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.C + bc.block_k;
+        output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
         lds_base = reinterpret_cast<_Float16*>(output_lds);
-        row_stride_elems = wo * bc.C;
+        row_stride_elems = wo * bc.K;
         lds_buf_size = static_cast<ck_tile::index_t>(
             ck_tile::max(TC::Weight::WEIGHT_LDS_SIZE_UINT4, TC::Output::OUTPUT_LDS_BUFFER_SIZE) *
             (sizeof(uint4) / sizeof(_Float16)));
@@ -227,25 +271,46 @@ struct OutputWriterLds
         // The is_thread_active() query marks threads with tid >= STORE_VECS as inactive.
         {
             constexpr auto store_dist = TC::Output::MakeDramWriteTileDistributionWide();
-            const auto out_desc = TC::Output::MakeDramWriteDescriptorWide(wo, bc.C);
-            auto out_buf = StoreDramBuf{
-                output_base,
-                static_cast<ck_tile::index_t>(out_desc.get_element_space_size())};
-            auto out_view = StoreDramView{out_buf, out_desc};
-            auto tmp_dram = ck_tile::make_tile_window(
-                out_view,
-                ck_tile::make_tuple(ck_tile::number<TC::Output::STORE_Q>{},
-                                    ck_tile::number<TC::BLOCK_C8>{},
-                                    ck_tile::number<8>{}),
-                {bc.block_q, 0, 0},
-                store_dist);
 
-            output_elem_offset = tmp_dram.pre_computed_coords_[ck_tile::number<0>{}]
-                                                              [ck_tile::number<1>{}].get_offset();
-            store_valid = store_dist.is_thread_active()
-                && ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
-                       out_desc, tmp_dram.pre_computed_coords_[ck_tile::number<0>{}]
-                                                              [ck_tile::number<1>{}]);
+            auto extract_store_offset = [&](const auto& out_desc) {
+                auto out_buf = ck_tile::make_buffer_view<ck_tile::address_space_enum::global>(
+                    output_base,
+                    static_cast<ck_tile::index_t>(out_desc.get_element_space_size()));
+                auto out_view = ck_tile::tensor_view<
+                    ck_tile::remove_cvref_t<decltype(out_buf)>,
+                    ck_tile::remove_cvref_t<decltype(out_desc)>>{out_buf, out_desc};
+                auto tmp_dram = ck_tile::make_tile_window(
+                    out_view,
+                    ck_tile::make_tuple(ck_tile::number<TC::Output::STORE_Q>{},
+                                        ck_tile::number<TC::BLOCK_C8>{},
+                                        ck_tile::number<8>{}),
+                    {bc.block_q, 0, 0},
+                    store_dist);
+
+                output_elem_offset = tmp_dram.pre_computed_coords_[ck_tile::number<0>{}]
+                                                                  [ck_tile::number<1>{}].get_offset();
+                store_valid = store_dist.is_thread_active()
+                    && ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
+                           out_desc, tmp_dram.pre_computed_coords_[ck_tile::number<0>{}]
+                                                                  [ck_tile::number<1>{}]);
+            };
+
+            if constexpr(requires { TC::Output::MakeDramWriteDescriptorWidePadded(int{}, int{}, int{}); })
+            {
+                if(k_per_group < TC::GROUP_SIZE)
+                    extract_store_offset(
+                        TC::Output::MakeDramWriteDescriptorWidePadded(wo, bc.K, k_per_group));
+                else
+                    extract_store_offset(
+                        TC::Output::MakeDramWriteDescriptorWide(wo, bc.K));
+            }
+            else
+            {
+                extract_store_offset(
+                    TC::Output::MakeDramWriteDescriptorWide(wo, bc.K));
+            }
+
+            k_per_group_ = k_per_group;
         }
     }
 
@@ -274,10 +339,29 @@ struct OutputWriterLds
             const uint4* output_lds_uint4 = reinterpret_cast<const uint4*>(lds_base);
             uint4 lds_data = output_lds_uint4[lds_read_offset / 8];
 
-            // 5. Store 16B to DRAM: base + row offset + per-thread offset.
+            // 5. Store to DRAM: base + row offset + per-thread offset.
             ck_tile::index_t store_offset = output_elem_offset
                 + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
-            __builtin_memcpy(output_base + store_offset, &lds_data, sizeof(lds_data));
+
+            if(k_per_group_ >= TC::GROUP_SIZE)
+            {
+                // Full 16B write: all 8 channels valid.
+                __builtin_memcpy(output_base + store_offset, &lds_data, sizeof(lds_data));
+            }
+            else
+            {
+                // Partial write: only k_per_group_ channels within each group.
+                // The 8 channels span (8 / GROUP_SIZE) groups, each with GROUP_SIZE channels.
+                const _Float16* src = reinterpret_cast<const _Float16*>(&lds_data);
+                constexpr int GROUP_SIZE = TC::GROUP_SIZE;
+                for(int g = 0; g < 8 / GROUP_SIZE; g++)
+                {
+                    for(int c = 0; c < k_per_group_; c++)
+                    {
+                        output_base[store_offset + g * GROUP_SIZE + c] = src[g * GROUP_SIZE + c];
+                    }
+                }
+            }
         }
 
     }
