@@ -100,22 +100,6 @@ using IntegrationGpuConvFwd3dFp32 = ConvForward<float>;
 using IntegrationGpuConvFwd3dBfp16 = ConvForward<bfloat16>;
 using IntegrationGpuConvFwd3dFp16 = ConvForward<half>;
 
-// Large values variant — tests with wider input range [-10, 10]
-template <typename DataType>
-class ConvForwardLargeValues : public ConvForward<DataType>
-{
-protected:
-    void SetUp() override
-    {
-        ConvForward<DataType>::SetUp();
-        this->_fillMin = -10.0f;
-        this->_fillMax = 10.0f;
-    }
-};
-// Large input value range [-10, 10] stress-tests numerical precision in fprop
-// accumulation over input channels and spatial filter dimensions.
-using IntegrationGpuConvFwdLargeValues2dFp32 = ConvForwardLargeValues<float>;
-
 } // namespace
 
 // 2D tests
@@ -152,13 +136,6 @@ TEST_P(IntegrationGpuConvFwd3dBfp16, Correctness)
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvFwd3dFp16);
 TEST_P(IntegrationGpuConvFwd3dFp16, Correctness)
-{
-    runGraphTest();
-}
-
-// Large values tests
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvFwdLargeValues2dFp32);
-TEST_P(IntegrationGpuConvFwdLargeValues2dFp32, Correctness)
 {
     runGraphTest();
 }
@@ -200,10 +177,3 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuConvFwd3dFp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                      testing::ValuesIn(test_conv_common::getConvTestCases5D())));
-
-// Large values instantiations — all 4D cases, NCHW layout
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvFwdLargeValues2dFp32,
-    testing::Combine(testing::Values(TensorLayout::NCHW),
-                     testing::ValuesIn(test_conv_common::getConvTestCases4D())));

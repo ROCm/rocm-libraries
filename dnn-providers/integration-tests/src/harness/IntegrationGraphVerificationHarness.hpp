@@ -15,7 +15,6 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
@@ -56,11 +55,6 @@ protected:
 
     virtual void runGraphTest() = 0;
 
-    // Fill range used by initializeBundle and dynamic tolerance calculation.
-    // Subclasses can set these in SetUp() to test with different value ranges.
-    float _fillMin = -1.0f;
-    float _fillMax = 1.0f;
-
     // Determine tolerance for an output tensor based on the graph and
     // configured tolerance mode for the engine.
     float getTolerance(const hipdnn_frontend::graph::Graph& graph,
@@ -91,10 +85,7 @@ protected:
                 return 0.0f;
             }
 
-            return toleranceForNode(*rootOp,
-                                    output->get_data_type(),
-                                    static_cast<double>(_fillMin),
-                                    static_cast<double>(_fillMax));
+            return toleranceForNode(*rootOp, output->get_data_type());
         }
 
         ADD_FAILURE() << "getTolerance: unhandled tolerance mode";
@@ -301,25 +292,21 @@ protected:
     {
         for(auto& tensorPair : bundle.tensors)
         {
-            auto tensorSeed
-                = seed ^ static_cast<unsigned int>(std::hash<int64_t>{}(tensorPair.first));
-            bundle.randomizeTensor(tensorPair.first, _fillMin, _fillMax, tensorSeed);
+            bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
         }
     }
 
     static float toleranceForNode(const hipdnn_frontend::graph::INode& node,
-                                  hipdnn_frontend::DataType dataType,
-                                  double fillMin,
-                                  double fillMax)
+                                  hipdnn_frontend::DataType dataType)
     {
         switch(dataType)
         {
         case hipdnn_frontend::DataType::FLOAT:
-            return toleranceForNodeTyped<float>(node, fillMin, fillMax);
+            return toleranceForNodeTyped<float>(node);
         case hipdnn_frontend::DataType::HALF:
-            return toleranceForNodeTyped<half>(node, fillMin, fillMax);
+            return toleranceForNodeTyped<half>(node);
         case hipdnn_frontend::DataType::BFLOAT16:
-            return toleranceForNodeTyped<bfloat16>(node, fillMin, fillMax);
+            return toleranceForNodeTyped<bfloat16>(node);
         default:
             ADD_FAILURE() << "toleranceForNode: unsupported data type";
             return 0.0f;
@@ -327,36 +314,17 @@ protected:
     }
 
     template <typename T>
-    static float toleranceForNodeTyped(const hipdnn_frontend::graph::INode& node,
-                                       double fillMin,
-                                       double fillMax)
+    static float toleranceForNodeTyped(const hipdnn_frontend::graph::INode& node)
     {
         namespace fe = hipdnn_frontend::graph;
         using namespace hipdnn_test_sdk::utilities;
 
-        if(const auto* fpropNode = dynamic_cast<const fe::ConvolutionFpropNode*>(&node))
-        {
-            auto wAttr = fpropNode->attributes.get_w();
-            EXPECT_NE(wAttr, nullptr) << "ConvolutionFpropNode missing weight tensor";
-            // Both input and weight use the same fill range since initializeBundle
-            // applies _fillMin/_fillMax uniformly to all tensors.
-            return conv::calculateConvFpropTolerance<T, T, float>(
-                fillMin, fillMax, fillMin, fillMax, wAttr->get_dim());
-        }
-        if(const auto* dgradNode = dynamic_cast<const fe::ConvolutionDgradNode*>(&node))
-        {
-            auto wAttr = dgradNode->attributes.get_w();
-            EXPECT_NE(wAttr, nullptr) << "ConvolutionDgradNode missing weight tensor";
-            return conv::calculateConvDgradTolerance<T, T, float>(
-                fillMin, fillMax, fillMin, fillMax, wAttr->get_dim());
-        }
-        if(const auto* wgradNode = dynamic_cast<const fe::ConvolutionWgradNode*>(&node))
-        {
-            auto dyAttr = wgradNode->attributes.get_dy();
-            EXPECT_NE(dyAttr, nullptr) << "ConvolutionWgradNode missing dy tensor";
-            return conv::calculateConvWrwTolerance<T, T, float>(
-                fillMin, fillMax, fillMin, fillMax, dyAttr->get_dim());
-        }
+        if(dynamic_cast<const fe::ConvolutionFpropNode*>(&node) != nullptr)
+            return static_cast<float>(conv::getToleranceFwd<T>());
+        if(dynamic_cast<const fe::ConvolutionDgradNode*>(&node) != nullptr)
+            return static_cast<float>(conv::getToleranceBwd<T>());
+        if(dynamic_cast<const fe::ConvolutionWgradNode*>(&node) != nullptr)
+            return static_cast<float>(conv::getToleranceWrw<T>());
         if(dynamic_cast<const fe::BatchnormInferenceNodeVarianceExt*>(&node) != nullptr)
             return static_cast<float>(batchnorm::getToleranceInferenceWithVariance<T>());
         if(dynamic_cast<const fe::BatchnormInferenceNode*>(&node) != nullptr)

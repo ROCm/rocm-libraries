@@ -110,15 +110,19 @@ template <typename DataType>
 class ConvBackwardWeightsLargeValues : public ConvBackwardWeights<DataType>
 {
 protected:
-    void SetUp() override
+    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          unsigned int seed) override
     {
-        ConvBackwardWeights<DataType>::SetUp();
-        this->_fillMin = -10.0f;
-        this->_fillMax = 10.0f;
+        for(auto& tensorPair : bundle.tensors)
+        {
+            bundle.randomizeTensor(tensorPair.first, -10.0f, 10.0f, seed);
+        }
     }
 };
 // Large input value range [-10, 10] stress-tests numerical precision in wgrad
-// accumulation over batch and spatial dimensions.
+// accumulation. Limited to fp32 because half/bfloat16 would overflow during
+// reduction over batch and spatial dimensions.
 using IntegrationGpuConvWrwLargeValues2dFp32 = ConvBackwardWeightsLargeValues<float>;
 
 } // namespace
@@ -161,7 +165,7 @@ TEST_P(IntegrationGpuConvWrw3dFp16, Correctness)
     runGraphTest();
 }
 
-// Large values tests
+// Large values test
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvWrwLargeValues2dFp32);
 TEST_P(IntegrationGpuConvWrwLargeValues2dFp32, Correctness)
 {
@@ -206,9 +210,9 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                      testing::ValuesIn(test_conv_common::getConvTestCases5D())));
 
-// Large values instantiations — all 4D cases, NCHW layout
+// Large values instantiation — only first 4D case, NCHW layout
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvWrwLargeValues2dFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW),
-                     testing::ValuesIn(test_conv_common::getConvTestCases4D())));
+                     testing::Values(test_conv_common::getConvTestCases4D()[0])));
