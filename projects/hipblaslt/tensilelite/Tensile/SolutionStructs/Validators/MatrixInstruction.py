@@ -205,9 +205,13 @@ def validateMIParameters(
         else ptype["F32XdlMathOp"]
     )
 
-    # For MFMA validation, determine the key based on MAC data types
-    macDataTypeA = ptype.get("MacDataTypeA", miDataType) if not isX else miDataType
-    macDataTypeB = ptype.get("MacDataTypeB", miDataType) if not isX else miDataType
+    # For MFMA validation, determine the key based on MAC data types.
+    # Library logic YAML often stores MacDataTypeA/B as raw enum integers; coerce to DataType.
+    def _as_mac_dtype(value):
+        return value if isinstance(value, DataType) else DataType(value)
+
+    macDataTypeA = _as_mac_dtype(ptype.get("MacDataTypeA", miDataType) if not isX else miDataType)
+    macDataTypeB = _as_mac_dtype(ptype.get("MacDataTypeB", miDataType) if not isX else miDataType)
 
     # If both MAC types are the same, use doubled character key; otherwise use combined key
     if macDataTypeA == macDataTypeB:
