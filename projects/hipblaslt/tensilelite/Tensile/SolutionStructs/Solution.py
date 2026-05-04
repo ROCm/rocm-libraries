@@ -734,6 +734,12 @@ class Solution(collections.abc.Mapping):
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
 
+    # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
+    if state["ISA"] == (12, 5, 0):
+      if ((state["LdsBlockSizePerPadMXSA"] > 0) or (state["LdsBlockSizePerPadMXSB"] > 0 )):
+        reject(state, "LdsBlockSizePerPadMXSA/LdsBlockSizePerPadMXSB support -1 and 0 for gfx1250")
+        return
+
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
@@ -2472,7 +2478,10 @@ class Solution(collections.abc.Mapping):
         multiple = 256 if isa[:2] == (12, 5) else 128
         if LdsBlockSizePerPad == -1:
           vw = state["VectorWidthA"] if "A" in tc else state["VectorWidthB"]
-          LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * bpe * vw), multiple)
+          if state["ISA"] == (12, 5, 0):
+            LdsBlockSizePerPad = 0
+          else:
+            LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * bpe * vw), multiple)
         return LdsBlockSizePerPad
 
       def getLdsBpe(tc: str) -> float:
