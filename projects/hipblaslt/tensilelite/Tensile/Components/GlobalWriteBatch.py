@@ -2730,9 +2730,10 @@ def stochasticRoundingCvt(self, gwvw, destIdx, elementSumIdx, fp8CVTVgprStruct, 
     formatVgpr = formatting(sumIdxV, inputPrefix, prefixOffset)
     d = destIdx + vi//4
 
-    module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(formatVgpr), src1=vgpr(vgprFp8NanInf), comment="Nan and +/- inf"))
-    module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(formatVgpr), src1= vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
-    module.add(VCndMaskB32(dst=vgpr(formatVgpr), src0=vgpr(vgprFp8Temp), src1=vgpr(formatVgpr), src2=sgpr(tmpS01,laneSGPRC)))
+    if not fp8CVTVgprStruct.autoTruncate:
+      module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(formatVgpr), src1=vgpr(vgprFp8NanInf), comment="Nan and +/- inf"))
+      module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(formatVgpr), src1= vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
+      module.add(VCndMaskB32(dst=vgpr(formatVgpr), src0=vgpr(vgprFp8Temp), src1=vgpr(formatVgpr), src2=sgpr(tmpS01,laneSGPRC)))
 
     if self.parentWriter.states.asmCaps["v_prng_b32"]:
       # NOTE: Current PRNG seed implementation simply uses the value to be converted directly as seed.
