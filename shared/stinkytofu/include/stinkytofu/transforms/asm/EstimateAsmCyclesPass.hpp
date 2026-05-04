@@ -25,6 +25,8 @@
 #include <memory>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 class Pass;
 class Function;
@@ -37,11 +39,11 @@ class PassContext;
 ///   auto cycles = passCtx.getResult<uint32_t>(kEstimateAsmCyclesKey);
 inline const std::string kEstimateAsmCyclesKey = "EstimateAsmCycles";
 
-std::unique_ptr<Pass> createEstimateAsmCyclesPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createEstimateAsmCyclesPass();
 
 /// Calculate estimate asm cycles for a function
 /// @param func The function to analyze
 /// @param passCtx The pass context
 /// @return The total estimated cycles
-unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx);
+STINKYTOFU_EXPORT unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx);
 }  // namespace stinkytofu
