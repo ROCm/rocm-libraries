@@ -9,6 +9,47 @@
 namespace ck_tile {
 namespace direct_conv {
 
+// -----------------------------------------------------------------------
+// WeightAccessor — register-resident filter weight buffer with 2D
+// (R, S) coordinate access via CK Tile tensor descriptor.
+//
+// Template parameters:
+//   KH, KW — filter height and width (compile-time constants).
+//
+// The underlying storage is a flat fp16x4_t[KH*KW] array. Each element
+// holds one fp16x4_t (4 fp16 values) per filter position — the MFMA
+// B-operand for a single (R, S) coordinate.
+//
+// Access methods use make_tensor_coordinate with a packed 2D [KH, KW]
+// tensor descriptor to compute the flat index from (R, S) coordinates.
+//
+// WeightAccessor serves as the base class for variant-specific
+// WeightLoader structs, which populate the weights[] array from LDS
+// and inherit the get<R,S>() / get_transposed<R,S>() accessors.
+// -----------------------------------------------------------------------
+template <int KH, int KW>
+struct WeightAccessor
+{
+    fp16x4_t weights[KH * KW];
+
+    static constexpr auto desc_ = ck_tile::make_naive_tensor_descriptor_packed(
+        ck_tile::make_tuple(ck_tile::number<KH>{}, ck_tile::number<KW>{}));
+
+    template <int R, int S>
+    __device__ __forceinline__ fp16x4_t get() const
+    {
+        constexpr auto coord = ck_tile::make_tensor_coordinate(
+            desc_, ck_tile::make_tuple(ck_tile::number<R>{}, ck_tile::number<S>{}));
+        return weights[coord.get_offset()];
+    }
+
+    template <int R, int S>
+    __device__ __forceinline__ fp16x4_t get_transposed() const
+    {
+        return get<KH - 1 - R, KW - 1 - S>();
+    }
+};
+
 // Shared weight load function for grouped convolution kernels.
 //
 // Loads weight data from global memory into LDS using async tile operations.

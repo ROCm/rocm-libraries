@@ -370,9 +370,10 @@ using BlockCoords = direct_conv::BlockCoords<cfg>;
 template <Config cfg>
 using InputLoader = direct_conv::InputLoader<TileConstants<cfg>, cfg>;
 
-// Handles weight reads from LDS into registers.
+// Handles weight loading (DRAM → LDS → registers) and provides
+// register-resident weight access via inherited WeightAccessor.
 template <Config cfg>
-struct WeightLoader
+struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw>
 {
     using TC = TileConstants<cfg>;
 
@@ -384,10 +385,8 @@ struct WeightLoader
         direct_conv::weight_load_to_lds<TC, cfg>(bc, weight_lds, wei);
     }
 
-    // Read weights from LDS into registers after sync.
-    __device__ static void read_from_lds(
-        fp16x4_t (&weights_reg)[cfg.kh * cfg.kw],
-        uint4* weight_lds)
+    // Read weights from LDS into registers (this->weights[]).
+    __device__ void read_from_lds(uint4* weight_lds)
     {
         if constexpr(cfg.direction == Direction::Dgrad)
         {
@@ -415,13 +414,13 @@ struct WeightLoader
 
             for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
             {
-                weights_reg[khw] = output_lds_fp16.template transpose_get<ck_tile::fp16x4_t>(
+                this->weights[khw] = output_lds_fp16.template transpose_get<ck_tile::fp16x4_t>(
                     weight_base + khw * TC::GROUP_SIZE, 0, true);
             }
         }
         else
         {
-            direct_conv::weight_read_fprop<TC>(weights_reg, weight_lds);
+            direct_conv::weight_read_fprop<TC>(*this, weight_lds);
         }
     }
 };

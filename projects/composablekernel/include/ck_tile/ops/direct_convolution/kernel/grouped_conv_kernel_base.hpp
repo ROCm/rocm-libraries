@@ -188,12 +188,12 @@ struct BlockCoords
 // ======================================================================
 // weight_read_fprop<TC> — shared Fprop weight-register read from LDS.
 //
-// The thread-buffer stride per filter position is TC::GROUP_SIZE_4:
-//   GROUP_SIZE=4  → GROUP_SIZE_4=1  (4c variant)
-//   GROUP_SIZE=16 → GROUP_SIZE_4=4  (16c variant)
+// Loads the weight tile via load_tile() and stores each filter position's
+// fp16x4_t into the WeightAccessor using get_as<fp16x4_t>() which
+// provides a zero-copy reinterpret view over the thread buffer.
 // ======================================================================
-template <typename TC>
-__device__ void weight_read_fprop(fp16x4_t* weights_reg, uint4* weight_lds)
+template <typename TC, int KH, int KW>
+__device__ void weight_read_fprop(WeightAccessor<KH, KW>& wa, uint4* weight_lds)
 {
     constexpr auto weight_lds_read_desc = TC::Weight::MakeLdsReadDescriptor();
     auto weight_lds_view =
@@ -210,14 +210,15 @@ __device__ void weight_read_fprop(fp16x4_t* weights_reg, uint4* weight_lds)
         weight_lds_read_dist);
 
     const auto weight_tile = ck_tile::load_tile(weight_lds_read_window);
-    const auto& buf        = weight_tile.get_thread_buffer();
 
+    // get_as<fp16x4_t>() reinterprets the thread_buffer<_Float16, KH_KW*4>
+    // as thread_buffer<fp16x4_t, KH_KW> — a zero-copy view where each
+    // element is one fp16x4_t per filter position.
+    const auto& vec_buf = weight_tile.get_thread_buffer().template get_as<ck_tile::fp16x4_t>();
     static_for<TC::KH_KW>(
         [&]<int khw>()
         {
-            __builtin_memcpy(&weights_reg[khw],
-                             &buf.get(khw * TC::GROUP_SIZE_4),
-                             sizeof(fp16x4_t));
+            wa.weights[khw] = vec_buf[ck_tile::number<khw>{}];
         });
 }
 

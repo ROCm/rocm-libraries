@@ -75,12 +75,12 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
         return;
 
     // --- Weight loading (uses start of buffer, before input phase) ---
-    fp16x4_t weights_reg[cfg.kh * cfg.kw];
+    WeightLoaderT wl;
     WeightLoaderT::load_to_lds(bc, lds_buf, wei);
     wait_vmcnt<0>();
     __syncthreads();
 
-    WeightLoaderT::read_from_lds(weights_reg, lds_buf);
+    wl.read_from_lds(lds_buf);
 
     InputLoaderT il(bc, input_lds, in, hi, wi, px);
     OutputWriterT ow(bc, output_lds, out, ho, wo);
@@ -151,16 +151,16 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                                 // Normalizing the index on interval 0,...,cfg.kh-1 range:, we get:
                                 constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
 
-                                // The final sum over the input channels for this (y,R,S) position is computed 
+                                // The final sum over the input channels for this (y,R,S) position is computed
                                 // by MFMAing the input_reg with the corresponding filter weights, and accumulating into acc[p_idx].
                                 if constexpr(cfg.direction == Direction::Dgrad)
                                     acc[p_idx] = mfma_fn(
-                                        weights_reg[(cfg.kh - 1 - R) * cfg.kw + (cfg.kw - 1 - S)],
+                                        wl.template get_transposed<R, S>(),
                                         input_reg,
                                         acc[p_idx]);
                                 else
                                     acc[p_idx] = mfma_fn(
-                                        weights_reg[R * cfg.kw + S],
+                                        wl.template get<R, S>(),
                                         input_reg,
                                         acc[p_idx]);
                             });
@@ -215,12 +215,12 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                                 constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
                                 if constexpr(cfg.direction == Direction::Dgrad)
                                     acc[p_idx] = mfma_fn(
-                                        weights_reg[(cfg.kh - 1 - R) * cfg.kw + (cfg.kw - 1 - S)],
+                                        wl.template get_transposed<R, S>(),
                                         input_reg,
                                         acc[p_idx]);
                                 else
                                     acc[p_idx] = mfma_fn(
-                                        weights_reg[R * cfg.kw + S],
+                                        wl.template get<R, S>(),
                                         input_reg,
                                         acc[p_idx]);
                             });
