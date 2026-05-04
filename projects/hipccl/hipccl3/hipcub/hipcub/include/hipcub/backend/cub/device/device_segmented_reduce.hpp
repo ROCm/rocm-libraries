@@ -74,7 +74,7 @@ struct DeviceSegmentedReduce
                              size_t&              temp_storage_bytes,
                              InputIteratorT       d_in,
                              OutputIteratorT      d_out,
-                             _HIPCUB_STD::int32_t num_segments,
+                             _HIPCUB_STD::int64_t num_segments,
                              _HIPCUB_STD::int32_t segment_size,
                              ReductionOp          reduction_op,
                              T                    initial_value,

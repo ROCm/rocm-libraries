@@ -494,33 +494,6 @@ inline void sort_keys_large_segments()
     }
 }
 
-template<typename offset_type, typename segment_index_type>
-struct segments_index_to_offset_op
-{
-    segment_index_type empty_segments_count;
-    segment_index_type segments_count;
-    offset_type        segment_length;
-    offset_type        size;
-
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE offset_type
-        operator()(segment_index_type i)
-    {
-        if(i < empty_segments_count)
-        {
-            return 0;
-        }
-        else if(i < segments_count)
-        {
-            return segment_length * static_cast<offset_type>(i - empty_segments_count);
-        }
-        else
-        {
-            return size;
-        }
-    }
-};
-
 template<typename TestFixture>
 inline void sort_keys_large_num_segments()
 {
@@ -537,7 +510,7 @@ inline void sort_keys_large_num_segments()
     using offset_type        = size_t;
     using segment_index_type = size_t;
     using segments_index_to_offset_op_t
-        = segments_index_to_offset_op<offset_type, segment_index_type>;
+        = test_utils::segments_index_to_offset_op<offset_type, segment_index_type>;
     using iota_iterator_t = test_utils::counting_iterator<offset_type>;
 
     hipStream_t stream = 0;
