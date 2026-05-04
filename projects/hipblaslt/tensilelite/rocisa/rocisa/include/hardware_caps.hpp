@@ -364,6 +364,12 @@ inline std::map<std::string, int>
 
     rv["v_prng_b32"] = tryAssembler(isaVersion, assemblerPath, "v_prng_b32 v47, v36", isDebug);
 
+    // FP8 stochastic rounding pk8 conversion with scale
+    rv["HasScaleSRPk8Cvt"] = tryAssembler(isaVersion,
+                                          assemblerPath,
+                                          "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0",
+                                          isDebug);
+
     rv["HasAtomicAdd"]
         = tryAssembler(isaVersion,
                        assemblerPath,
