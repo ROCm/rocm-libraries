@@ -14587,6 +14587,7 @@ class KernelWriterAssembly(KernelWriter):
     vgprFp8Temp: int   = -1
     vgprFp8Min: int    = -1
     vgprFp8Max: int    = -1
+    autoTruncate: bool = False
 
   class BF8CVTVgprStruct(NamedTuple):
     vgprBF8NanInf: int = -1
@@ -15208,7 +15209,8 @@ class KernelWriterAssembly(KernelWriter):
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         cvtVgpr = self.vgprPool.checkOut(4)
         cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
-                                              vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3))
+                                              vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3), \
+                                              autoTruncate=self.states.archCaps["HasFp8HwSaturation"])
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
         cvtVgpr = self.vgprPool.checkOut(4)
         cvtVgprStruct = self.BF8CVTVgprStruct(vgprBF8Temp=cvtVgpr, vgprBF8NanInf=(cvtVgpr+1), \

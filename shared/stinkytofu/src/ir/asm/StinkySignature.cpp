@@ -446,6 +446,13 @@ std::string SignatureKernelDescriptor::toString() const {
         kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_offset 0\n";
     }
 
+    // gfx12+ uses MODE.FP16_OVFL=1 so FP16/FP8/BF8 conversion overflow saturates
+    // to max instead of producing Inf/NaN. Required for v_cvt_scalef32_pk8 family
+    // to match CPU reference saturation behavior.
+    if (isaVersion[0] == 12) {
+        kStr += kdIndent + ".amdhsa_fp16_overflow 1\n";
+    }
+
     // Emit pass-through directives captured by RawAsmParser (.amdhsa_* lines
     // not modelled by the structured fields above). Each entry is already
     // formatted verbatim (with its source indentation) and includes no

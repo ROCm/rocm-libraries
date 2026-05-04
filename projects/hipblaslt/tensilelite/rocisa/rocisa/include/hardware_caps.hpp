@@ -518,6 +518,10 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});
     rv["VOP3ByteSel"]        = isaVersion[0] == 12;
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
+    // HW saturating fp32->fp8/bf8 cvt: on supported archs the cvt instruction
+    // itself clamps finite overflow to +/-fp8_max instead of requiring SW
+    // clamp setup. Covers OCP fp8 and bf8; FNUZ never has HW saturation.
+    rv["HasFp8HwSaturation"] = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
     rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
