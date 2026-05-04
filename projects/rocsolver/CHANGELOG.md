@@ -5,6 +5,18 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
+
+
+## rocSOLVER 3.33.0 for ROCm 7.13.0
+
+### Added
 
 * Computation of solution for LU factorization without pivoting
     * GETRS_NPVT (with batched and strided\_batched versions)
@@ -21,8 +33,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     * SYTRS (with batched and strided\_batched versions)
     * SYTRS_64 (with batched and strided\_batched versions)
 
-### Changed
-### Removed
 ### Optimized
 
 * Improved the performance of POTF2 and downstream functions such as POTRF.
@@ -32,9 +42,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Fixed a memory access error in SYTRF and synchronization issues in LASYF and SYTF2.
 * Fixed a synchronization issue in STEBZ and downstream functions, such as SYEVX and SYEVDX.
 * Fixed a synchronization issue in GETF2.
-
-### Known issues
-### Upcoming changes
 
 
 
