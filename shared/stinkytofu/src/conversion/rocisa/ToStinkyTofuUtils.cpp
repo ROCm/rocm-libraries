@@ -25,6 +25,7 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
+#include <nanobind/stl/vector.h>
 
 #include <algorithm>
 #include <cassert>
@@ -1113,6 +1114,9 @@ void init_stinkytofu(nb::module_ m) {
             return BackendRegistry::getArchPipeline(archArray) != nullptr;
         },
         nb::arg("arch"), "Check if the architecture is supported by StinkyTofu");
+    m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
+          "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
+          "[\"gfx1250\"]).");
     // Wrapper class to add signature support to StinkyAsmModule
     class StinkyAsmModuleWithSignature {
        private:
