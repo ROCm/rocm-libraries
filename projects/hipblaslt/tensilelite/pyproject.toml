@@ -1,0 +1,55 @@
+[project]
+name = "tensile"
+version = "5.0.0"
+requires-python = ">=3.10"
+description = "A code generation library for high-performance GEMM and tensor contraction kernels on AMD GPUs."
+license = {text = "MIT"}
+dependencies = [
+    "packaging",
+    "pyyaml",
+    "msgpack",
+    "joblib>=1.4.0",
+    "simplejson",
+    "ujson",
+    "orjson",
+    "yappi",
+    "setuptools",
+    "nanobind",
+    "cmake",
+]
+
+[project.scripts]
+Tensile = "Tensile.Tensile:main"
+TensileCreateLibrary = "Tensile.TensileCreateLibrary:run"
+TensileGetPath = "Tensile:PrintTensileRoot"
+TensileBenchmarkCluster = "Tensile.TensileBenchmarkCluster:main"
+TensileRetuneLibrary = "Tensile.TensileRetuneLibrary:main"
+
+[dependency-groups]
+dev = [
+    "rocisa",
+    "pytest>=5.4.1",
+    "pytest-xdist>=1.32.0",
+    "pytest-cov",
+    "filelock",
+    "invoke",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["Tensile*"]
+
+[tool.setuptools.package-data]
+Tensile = ["cmake/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["Tensile/Tests", "rocisa/test"]
+
+[tool.uv.sources]
+rocisa = { workspace = true }
+
+[tool.uv.workspace]
+members = ["rocisa"]
