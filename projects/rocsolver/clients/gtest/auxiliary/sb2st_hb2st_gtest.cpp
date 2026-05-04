@@ -98,8 +98,8 @@ protected:
     {
         Arguments arg = sb2st_hb2st_setup_arguments( GetParam() );
 
-        //  if (arg.peek<rocblas_int>("kd") == 0 && arg.peek<rocblas_int>("n") == 0)
-        //      testing_sb2st_hb2st_bad_arg<T>();
+        if (arg.peek<rocblas_int>("n") == 0 && arg.peek<rocblas_int>("kd") == 0)
+            testing_sb2st_hb2st_bad_arg<T>();
 
         testing_sb2st_hb2st<T>(arg);
     }
