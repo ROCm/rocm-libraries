@@ -156,7 +156,7 @@ def _rmtree(path: Path):
         "build_dir": "Override the build directory (default: build/).",
         "build_type": "CMake build type: Release, Debug, RelWithDebInfo (default: Release).",
         "tests": "Build unit tests (default: ON when building standalone).",
-        "python": "Build Python bindings.",
+        "no-python": "Disable Python bindings (enabled by default).",
         "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
@@ -169,7 +169,7 @@ def build(
     build_dir=None,
     build_type="Release",
     tests=True,
-    python=False,
+    no_python=False,
     static=False,
     jobs=None,
     clean=False,
@@ -192,7 +192,7 @@ def build(
         f"-DCMAKE_BUILD_TYPE={build_type}",
         f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
-        f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
     ]
 
