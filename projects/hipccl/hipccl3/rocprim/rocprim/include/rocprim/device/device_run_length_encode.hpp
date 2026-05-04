@@ -177,7 +177,7 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
 
             auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
 
-            if(size == 0)
+            if(size <= 1)
             {
                 // Fill out runs_count_output with zero
                 return rocprim::transform(rocprim::constant_iterator<std::size_t>(0),
