@@ -45,27 +45,18 @@ Key kernel parameters (from the first solution entry):
 - `MacroTile0: 16`, `MacroTile1: 16`, `DepthU` (varies).
 - `WaveSize: 32` — RDNA wave32 vs CDNA wave64.
 
-## Build recipe (deferred — sandbox limitation)
+## Build recipe (DONE — sub-bead `rocm-libraries-ce6`)
 
-```
-cd projects/hipblaslt/tensilelite
-Tensile/bin/Tensile \
-  ../library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/gfx1151_Cijk_Alik_Bljk_HHS_BH_Bias_HAS_SAV_UserArgs.yaml \
-  /tmp/gfx1151_audit
-```
-
-Dependencies the sandbox lacks:
-- `tensilelite-client` C++ executable (build via `invoke build-client --gpu-targets gfx1151`).
-- ROCm runtime headers / libraries.
-- AMDGPU assembler (`hipcc` / `clang -target amdgcn-amd-amdhsa`).
-
-Outputs to commit under `Tensile/Components/GFX1151_AUDIT/` once the
-build environment is available:
-- A representative `.s` slice (the main loop body of one kernel).
-- The captured CMS schedules (via `_capture_context.default` / `cms`
-  pickled or rendered).
-- A diff log of any rocisa class names that fail the
-  `CaptureUnknownInstructionError` check in `build_dataflow_graph`.
+The original recipe was wrong on two counts: (a) the named yaml
+(`gfx1151_Cijk_Alik_Bljk_HHS_BH_Bias_HAS_SAV_UserArgs.yaml`) does not
+exist in the rocBLASLt logic tree, and (b) `Tensile/bin/Tensile` only
+accepts benchmark-config yamls — passing a logic yaml raises
+`TypeError: list indices must be integers or slices, not str`. The
+right tool for compiling a logic yaml directly into kernels is
+`TensileCreateLibrary`. See
+[`GFX1151_AUDIT/README.md`](GFX1151_AUDIT/README.md) for the
+working command and the captured slice. Live build run details
+recorded in the "Live build (sub-bead ce6)" section below.
 
 ## Instruction-coverage table (static analysis)
 
@@ -275,10 +266,85 @@ What this commit DOES deliver:
   WMMA-shaped capture builds without `CaptureUnknownInstructionError`.
 
 What it DOES NOT deliver (filed as sub-beads):
-- `l6q.1.live` — run `Tensile/bin/Tensile` on the reference yaml and
-  commit the `.s` slice + captured CMS schedules.
+- `l6q.1.live` — DONE under bead `rocm-libraries-ce6`; see
+  "Live build (sub-bead ce6)" below.
 - `l6q.1.t1` — RDNA 3.5 WMMA finish-cycle timing.
 - `l6q.1.t2` — RDNA 3.5 WMMA type-switch thresholds.
 - `l6q.1.t3` — RDNA 3.5 CVT/WMMA settle windows (only relevant if
   F32X emulation lands for gfx1151).
 - `l6q.1.t4` — RDNA 3.5 per-instruction issue cost.
+
+## Live build (sub-bead ce6)
+
+Closes the deferred live-build sweep. Full slice + per-mnemonic survey
+sit in [`GFX1151_AUDIT/README.md`](GFX1151_AUDIT/README.md); summary:
+
+**Chosen yaml** (the audit's named yaml does not exist):
+```
+projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/gfx1151_Cijk_Alik_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs.yaml
+```
+(BBS = bf16 input/output, fp32 compute. 1639 lines, 6 unique
+solutions — fastest of the two suggested fall-backs.)
+
+**Build command** (corrects the audit's wrong tool name):
+```
+Tensile/bin/TensileCreateLibrary \
+  --architecture gfx1151 --no-enumerate --jobs 4 --keep-build-tmp \
+  /tmp/gfx1151_audit_ce6_logic /tmp/gfx1151_audit_ce6 HIP
+```
+(Tensile/bin/Tensile takes benchmark-config yamls; the rocBLASLt
+logic yaml is a tuning OUTPUT and is rejected by it. See
+`GFX1151_AUDIT/README.md` for the failure trace.)
+
+**Build outcome**: SUCCESS in ~7 seconds. 6 `.s` files (130-477 KB),
+6 `.o` files, packaged `.co` library. Toolchain `/opt/rocm/bin/amdclang++`
+(ROCm 7.2.53211, hipcc → clang 22.0.0). No assembler errors, no
+linker errors.
+
+**rocisa instruction classes observed** in the captured slice
+(union over all six `.s` files):
+
+- `MFMAInstruction` — rendered as `v_wmma_f32_16x16x16_bf16` (single
+  WMMA opcode in this kernel set; gfx1151 uses BBS so the bf16
+  compute variant fires)
+- `DSLoadB32`, `DSLoadB128`
+- `DSStoreB32`, `DSStoreB128`
+- `BufferLoadB32`, `BufferLoadB128`
+- `BufferLoadB16` (sub-32-bit, rendered as `buffer_load_d16_b16` /
+  `buffer_load_d16_hi_b16`)
+- `BufferStoreB16`, `BufferStoreB32` (epilogue / bias path)
+- Scalar kernarg loads `s_load_b{32,64,128,512}` (handled via
+  `_NoDataflowRule` for kernarg fetch)
+- `SWaitCnt`, `SBarrier`, `SNop`
+- generic ALU: `v_add*`, `v_mov_b32`, `v_cvt_*`, `v_rcp_*`,
+  `v_add_lshl_u32`, `v_add3_u32`
+
+**Confirmed NOT emitted** (matches static-analysis predictions):
+
+- `v_swap_*` (audit table flagged as "Likely unused on gfx1151" —
+  positive confirmation).
+- `v_pk_*`, `v_dot*`, TF32 cvt sequences (TF32 emulation OFF on
+  gfx1151 reference yamls — confirmed).
+- `s_delay_alu` (RDNA 3.x assembler hint — tensilelite gfx1151 emit
+  path relies on `s_waitcnt` only).
+- Per-counter waitcnt mnemonics (`s_waitcnt_vmcnt`,
+  `s_waitcnt_lgkmcnt`, `s_waitcnt_vscnt`, `s_waitcnt_dscnt`,
+  `s_waitcnt_loadcnt`, `s_waitcnt_storecnt`) — kernel uses unified
+  `s_waitcnt`. The audit's noted RDNA SWaitCnt-counter-semantics gap
+  remains real at the ISA level but is not exercised by the emit path
+  in this build.
+
+**New findings vs the static-analysis coverage table**:
+
+1. `BufferStoreB16` / `BufferStoreB32` are produced by the epilogue
+   and bias path — they exist in the validator's `_OPERAND_RULES`
+   (separate `_BufferStoreRule`) but were not enumerated in the
+   audit's "Instruction-coverage table". No correctness gap; the
+   table should be expanded for completeness.
+2. `s_load_b512` is a wider scalar load than the `s_load_b256` ceiling
+   the static-analysis sweep enumerated — handled correctly under the
+   generic `_NoDataflowRule` kernarg dispatch. Flagged for record.
+
+No `CaptureUnknownInstructionError`-class surprises were observed:
+every emitted mnemonic maps cleanly to an existing `_OPERAND_RULES`
+entry. The static-analysis audit's claim of "0 missing" stands.
