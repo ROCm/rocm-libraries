@@ -820,34 +820,25 @@ class WaitInsufficientFailure(Failure):
 class MissingBarrierFailure(Failure):
     producer: NodeLike
     consumer: NodeLike
-    role: str  # 'must_start_after' | 'needed_by'
+    # role distinguishes the LDS-coherence direction:
+    #   'must_start_after' - producer is LR (read), consumer is GR (overwrite)
+    #   'needed_by'        - producer is GR (write), consumer is LR (read)
+    # Used by tests to assert which scenario triggered; not rendered in the
+    # user-facing message (producer/consumer categories make the direction obvious).
+    role: str = "must_start_after"
+    wait: Optional[NodeLike] = None  # the SWaitCnt that drained the producer
 
     def _format_canonical(self, capture: "LoopBodyCapture") -> str:
-        if self.role == "must_start_after":
-            order = (
-                f"{self.producer.category} -> SWaitCnt(dscnt=0) -> SBarrier "
-                f"-> {self.consumer.category}"
-            )
-            why = (
-                f"{self.consumer.category} overwrites the LDS slot read by "
-                f"{self.producer.category}. The barrier ensures all waves "
-                f"finished reading before the write."
-            )
+        if self.wait is not None:
+            wait_pos = getattr(self.wait, 'position', None) or self.wait.issued_at
+            wait_part = f"between SWaitCnt @ idx={wait_pos.vmfma_index} and consumer"
         else:
-            order = (
-                f"{self.producer.category} -> SWaitCnt(vlcnt=0) -> SBarrier "
-                f"-> {self.consumer.category}"
-            )
-            why = (
-                f"{self.consumer.category} reads the LDS slot written by "
-                f"{self.producer.category}. The barrier ensures all waves "
-                f"finished writing before the read."
-            )
+            wait_part = "between covering SWaitCnt and consumer"
         return (
-            f"{why} Required ordering is {order}. SWaitCnt is present but no "
-            f"SBarrier appears between the SWaitCnt and "
+            f"SBarrier missing {wait_part} "
             f"{_node_with_pos(self.consumer, capture)}"
-            f"{_iter_note(self.producer, self.consumer)}."
+            f"{_iter_note(self.producer, self.consumer)}, needed for producer "
+            f"{_node_with_pos(self.producer, capture)}."
         )
 
 
@@ -3543,7 +3534,7 @@ def diagnose_missing_edge(
                         if ref_edge.edge_kind == "lr_to_gr_lds_reuse"
                         else "needed_by")
                 failures.append(MissingBarrierFailure(
-                    producer=p_node, consumer=c_node, role=role,
+                    producer=p_node, consumer=c_node, role=role, wait=last_drain,
                 ))
 
     if not failures:
@@ -4383,7 +4374,7 @@ def _classify_edge_coverage(
                         if edge.edge_kind == "lr_to_gr_lds_reuse"
                         else "needed_by")
                 failures.append(MissingBarrierFailure(
-                    producer=p_node, consumer=c_node, role=role,
+                    producer=p_node, consumer=c_node, role=role, wait=last_drain,
                 ))
 
     if not failures and raise_on_unexplained:

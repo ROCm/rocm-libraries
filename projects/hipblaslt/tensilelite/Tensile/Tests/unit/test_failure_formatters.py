@@ -296,62 +296,68 @@ def test_missing_barrier_failure_must_start_after_format():
     consumer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0[0]", 8, tagged_inst=producer_tagged)
     consumer = _make_node("GRA", "GRA[0]", 12, tagged_inst=consumer_tagged)
+    wait = _make_node("SYNC", "SWaitCnt", 10)
     capture = _capture_with(producer_tagged, consumer_tagged)
     failure = MissingBarrierFailure(
-        producer=producer, consumer=consumer, role="must_start_after"
+        producer=producer, consumer=consumer, wait=wait,
     )
     msg = failure.format(capture)
-    assert "LRA0 -> SWaitCnt(dscnt=0) -> SBarrier -> GRA" in msg
-    assert "GRA overwrites the LDS slot read by LRA0" in msg
-    assert "(of next iteration)" not in msg
+    assert msg == (
+        "SBarrier missing between SWaitCnt @ idx=10 and consumer "
+        "GRA[0] @ idx=12, needed for producer LRA0[0] @ idx=8."
+    )
 
 
 def test_missing_barrier_failure_needed_by_format():
-    """Pins the GR -> LR1 LDS-read barrier message wording."""
+    """GR -> LR1 LDS-read scenario uses the same compact wording as
+    the LR -> GR LDS-write scenario; producer/consumer categories make
+    the direction obvious."""
     producer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
     consumer_tagged = TaggedInstruction(inst=object(), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("GRA", "GRA[0]", 8, tagged_inst=producer_tagged)
     consumer = _make_node("LRA1", "LRA1[0]", 22, tagged_inst=consumer_tagged)
+    wait = _make_node("SYNC", "SWaitCnt", 18)
     capture = _capture_with(producer_tagged, consumer_tagged)
     failure = MissingBarrierFailure(
-        producer=producer, consumer=consumer, role="needed_by"
+        producer=producer, consumer=consumer, wait=wait,
     )
     msg = failure.format(capture)
-    assert "GRA -> SWaitCnt(vlcnt=0) -> SBarrier -> LRA1" in msg
-    assert "LRA1 reads the LDS slot written by GRA" in msg
-    assert "(of next iteration)" not in msg
+    assert msg == (
+        "SBarrier missing between SWaitCnt @ idx=18 and consumer "
+        "LRA1[0] @ idx=22, needed for producer GRA[0] @ idx=8."
+    )
 
 
 def test_missing_barrier_failure_format_with_capture_brackets():
-    """capture=given: consumer gets per-category [N] index in the trailing
-    reference."""
+    """capture=given: consumer gets per-category [N] index."""
     older_gra = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
     consumer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 1))
-    producer = _make_node("LRA0", "LRA0[0]", 8)
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    producer = _make_node("LRA0", "LRA0[0]", 8, tagged_inst=producer_tagged)
     consumer = _make_node("GRA", "GRA[0]", 12, tagged_inst=consumer_tagged)
-    capture = _capture_with(older_gra, consumer_tagged)
+    wait = _make_node("SYNC", "SWaitCnt", 10)
+    capture = _capture_with(producer_tagged, older_gra, consumer_tagged)
     failure = MissingBarrierFailure(
-        producer=producer, consumer=consumer, role="must_start_after",
+        producer=producer, consumer=consumer, wait=wait,
     )
     msg = failure.format(capture=capture)
-    assert msg.endswith("GRA[1] @ idx=12."), msg
+    assert "consumer GRA[1] @ idx=12" in msg
 
 
 def test_missing_barrier_failure_format_cross_iteration():
     """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix
-    on the trailing consumer reference. Mirrors the canonical lr_to_gr_lds_reuse
-    cross-body case (LR0 in ML-1, GR in ML). Producer LRA0 isn't rendered
-    in MissingBarrier's message — only consumer is — so producer needs no
-    tagged_inst entry."""
+    on the consumer rendering."""
     consumer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
-    producer = _make_node("LRA0", "LRA0[0]", 8, body_label="ML-1")
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
+    producer = _make_node("LRA0", "LRA0[0]", 8, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("GRA", "GRA[0]", 2, tagged_inst=consumer_tagged, body_label="ML")
-    capture = _capture_with(consumer_tagged)
+    wait = _make_node("SYNC", "SWaitCnt", 0, body_label="ML")
+    capture = _capture_with(producer_tagged, consumer_tagged)
     failure = MissingBarrierFailure(
-        producer=producer, consumer=consumer, role="must_start_after"
+        producer=producer, consumer=consumer, wait=wait,
     )
     msg = failure.format(capture)
-    assert msg.endswith("GRA[0] @ idx=2 (of next iteration)."), msg
+    assert "consumer GRA[0] @ idx=2 (of next iteration)" in msg
 
 
 def test_wrong_interleaving_failure_format_with_capture_brackets():
