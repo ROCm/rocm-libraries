@@ -46,8 +46,18 @@ target_include_directories(hipsolver-bench
     $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
 )
 
+# TODO: This LAPACK dependency is only required to support geev
+# It should be removed once geev is implemented in rocSOLVER
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia" AND TARGET lapack_libraries)
+  target_link_libraries(hipsolver-bench PRIVATE
+    lapack_libraries
+  )
+else()
+  target_link_libraries(hipsolver-bench PRIVATE
+    ${LAPACK_LIBRARIES}
+  )
+endif()
 target_link_libraries(hipsolver-bench PRIVATE
-  ${LAPACK_LIBRARIES}
   hipsolver-common
   clients-common
   roc::hipsolver
