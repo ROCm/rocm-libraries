@@ -181,7 +181,8 @@ def _make_mock_swap_packs(count: int, lr_base: int = LRA_BASE, vw: int = 1) -> l
 
 
 def _make_mock_swap(count: int) -> list:
-    """Create mock SMovB32 for LR/LW swap operations."""
+    """Mock LRSA/LRSB pointer-flip ops as VXorB32 (the rocisa class CMS
+    actually emits for LR-side swap operations)."""
     from rocisa.instruction import VXorB32
     return [VXorB32(dst=vgpr(0, 1), src0=vgpr(0, 1), src1=vgpr(1, 1))
             for _ in range(count)]
@@ -633,18 +634,11 @@ def _frozen_config_key(config):
 # --- Real idMap generation from kernel writer ---
 
 def _make_solution(kernel_config, asm, isaInfoMap):
-    """Create a valid Solution object from a kernel configuration dict.
-
-    Args:
-        kernel_config: Dict with keys like 'ProblemType' (with OperationType,
-                       DataType, TransposeA/B, etc.), 'MatrixInstruction',
-                       'DepthU', 'PrefetchGlobalRead', etc.
-        asm: Assembler instance from Tensile.Toolchain.Component.
-        isaInfoMap: ISA info map from makeIsaInfoMap.
-
-    Returns:
-        A valid Solution object, or raises if the config is rejected.
-    """
+    """Build a Solution from `kernel_config`, deriving the 9-element
+    MI parameters when the input carries the Tensile 4-element shape and
+    falling back to the first ISA in `isaInfoMap` if the config doesn't
+    pin one. Asserts the resulting Solution is Valid (rather than letting
+    a silently-rejected solution propagate to the kernel writer)."""
     from copy import deepcopy
     from Tensile.SolutionStructs.Solution import Solution
     from Tensile.SolutionStructs.Problem import ProblemType
@@ -692,22 +686,15 @@ def _make_solution(kernel_config, asm, isaInfoMap):
 
 
 def generate_real_idmap(kernel_config, asm, isaInfoMap):
-    """Generate a real idMap by running the kernel writer.
+    """Run the full kernel-writer pipeline so `customMainLoopSchedule`
+    populates `writer._last_id_map` / `writer._last_mfma_code`, then
+    return those alongside the Solution. The kernel-writer side-channel
+    is the only way to get rocisa instructions with real (writer-assigned)
+    register names, which the swap-pack and pack-MFMA tests need.
 
-    Creates a Solution from kernel_config, runs _getKernelSource to trigger
-    the full kernel generation pipeline (including customMainLoopSchedule
-    which stashes the idMap on the writer), then returns the stashed values.
-
-    Args:
-        kernel_config: Dict with kernel configuration (see _make_solution).
-        asm: Assembler instance.
-        isaInfoMap: ISA info map.
-
-    Returns:
-        Tuple of (id_map, mfma_code, solution) where id_map and mfma_code
-        contain real rocisa instruction objects with correct register
-        assignments.
-    """
+    Re-raises with a hint when generation fails — global state from
+    earlier tests can interfere with `hasCustomSchedule`, so the
+    "run in isolation" suggestion saves debugging time."""
     from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
 
     solution = _make_solution(kernel_config, asm, isaInfoMap)

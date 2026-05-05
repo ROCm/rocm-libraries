@@ -96,20 +96,9 @@ class CMSValidationTestBase:
         return cache[key]
 
     def validation_function(self, sched, ctx, codePathIdx, timeline=None):
-        """
-        Run each pass in ``self.validator_passes`` on the timeline, then validate.
-
-        Structural-only tests override this method directly.
-
-        Args:
-            sched: ScheduleInfo object to validate
-            ctx: ValidationContext object
-            codePathIdx: Code path index to validate
-            timeline: Timeline object for timeline-based validation (None for structural checks)
-
-        Returns:
-            Tuple of (status: bool, message: str)
-        """
+        """Run each ``self.validator_passes`` against the timeline, then
+        ``validate_timeline``. Structural-only tests override this method
+        directly and consume ``sched`` / ``ctx`` without a Timeline."""
         if not self.validator_passes:
             raise NotImplementedError("Subclasses must set validator_passes or override validation_function")
         for pass_fn in self.validator_passes:
@@ -120,14 +109,10 @@ class CMSValidationTestBase:
         return True, ""
     
     def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
-        """Initialize kernel and compute number of VMFMAs.
-
-        Args:
-            method: The test method about to run (passed by pytest automatically).
-                    Defaulted to None so subclasses can call super().setup_method(method)
-                    even when invoked without it.
-            kernel_updates: Optional dict of kernel config overrides.
-        """
+        """Build the per-test base kernel and stash ``num_vmfma`` (which
+        downstream ``validate()`` uses to size mock idMaps and mfma_code).
+        ``method`` defaults to None so subclasses can call
+        ``super().setup_method()`` outside pytest's auto-pass path."""
         self.kernel = create_base_kernel()
         if kernel_updates:
             update_kernel(self.kernel, kernel_updates)
@@ -151,33 +136,19 @@ class CMSValidationTestBase:
         expected_failure: Optional[type] = None,
         expected_fields: Optional[dict] = None,
     ):
-        """
-        Creates a ScheduleInfo and validates it using the validation function from the subclass.
+        """Build a ScheduleInfo + (optionally) Timeline for ``codePathIdx``,
+        then dispatch to the subclass's ``validation_function``.
 
-        Args:
-            optSchedule: The schedule dictionary mapping instruction types to indices
-            syncCode: List of sync instructions (SWaitCnt, SBarrier, etc.)
-            numCodePaths: Number of code paths in the schedule
-            nglshift: NGL shift value
-            nllshift: NLL shift value
-            codePathIdx: Code path index to validate
-            nllZeroDscnt: Whether to use zero dscnt for NLL loop (default: False)
-            mfmaReorder: List of MFMA reorder indices
-            snopCode: List of SNOP instructions
-            expected_failure: Expected Failure subclass (e.g. OrderInvertedFailure).
-                When set, the test asserts isinstance(timeline._last_failure,
-                expected_failure) AND that expected_fields (if given) match
-                attribute-by-attribute. When unset, the test asserts validation
-                passed.
-            expected_fields: dict of {attr_name: expected_value} to assert on
-                the typed Failure. Use this with expected_failure to bind the
-                test to semantic state rather than message text.
+        ``expected_failure`` / ``expected_fields`` (when set) bind the test
+        to typed Failure state — type, plus an attribute-by-attribute match
+        on every entry of ``expected_fields``. This is the preferred shape:
+        binding to message text breaks every time a formatter changes
+        wording. When neither is set, the test asserts validation PASSED.
 
-        For tests where the rule raises a Python AssertionError before
-        validate_timeline is reached (e.g. preprocessing precondition
-        violations), call this without expected_failure inside a
-        pytest.raises(AssertionError, match=...) block.
-        """
+        For tests where the rule raises ``AssertionError`` before
+        ``validate_timeline`` runs (e.g. precondition violation in a
+        preprocessing pass), call this without ``expected_failure`` inside
+        a ``pytest.raises(AssertionError, match=...)`` block."""
         if mfmaReorder is None:
             mfmaReorder = []
         if snopCode is None:
