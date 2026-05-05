@@ -477,6 +477,17 @@ class TestLRBeforeMFMA_MfmaReorder(GraphNativeValidationTest):
     consults a heuristic MFMA-index assignment. So a "reordered" schedule
     where MFMA-reading-LRA0 ends up at any slot is handled identically
     as long as the SWait sits before the MFMA in stream order.
+
+    E2E coverage of the production ``mfmaReorder`` pipeline (
+    ``ScheduleInfo(mfmaReorder=[...])`` -> permutation step at
+    ``CustomSchedule.py:336-337`` -> capture -> ``build_dataflow_graph``
+    -> ``validate_edge_wait_coverage``) lives in:
+
+      * ``test_mfma_reorder_e2e.py::TestMfmaReorderE2E``
+
+    This class focuses on the unit-level invariant that the graph rule
+    is REORDER-INVARIANT once the capture is built; the e2e test
+    exercises the production path that constructs the reordered capture.
     """
 
     def test_reordered_MFMA_at_late_slot_with_covering_swait(self):
