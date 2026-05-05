@@ -385,6 +385,28 @@ def test_timing_too_close_failure_format_with_capture_brackets():
     assert "PackA0[0] @ idx=5" in msg
     assert "MFMA @ idx=6" in msg
     assert "MFMA[" not in msg
+    assert "(of next iteration)" not in msg
+
+
+def test_timing_too_close_failure_format_cross_iteration():
+    """Cross-iteration Pack->MFMA timing: producer Pack in ML-1, consumer
+    MFMA in ML. Mirrors the cross-body shape now reachable in production
+    (post-2bu.3/4/5 cumulative_issue_cycles): the formatter must attach
+    the "(of next iteration)" suffix to the consumer rendering, like
+    MissingWaitFailure / WaitTooLateFailure / WaitInsufficientFailure /
+    MissingBarrierFailure already do."""
+    producer_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml-1", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
+    producer = _make_node("PackA0", "PackA0", 7, tagged_inst=producer_tagged, body_label="ML-1")
+    consumer = _make_node("MFMA", "MFMA", 0, tagged_inst=consumer_tagged, body_label="ML")
+    capture = _capture_with(producer_tagged, consumer_tagged)
+    failure = TimingTooCloseFailure(
+        producer=producer, consumer=consumer,
+        expected_quad_cycles=2, actual_quad_cycles=1,
+    )
+    msg = failure.format(capture=capture)
+    assert "PackA0[0] @ idx=7" in msg
+    assert "MFMA @ idx=0 (of next iteration)" in msg
 
 
 def test_invalid_counter_value_failure_format_single_bad():

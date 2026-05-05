@@ -721,7 +721,8 @@ class TimingTooCloseFailure(Failure):
         return (
             f"{_node_with_pos(self.producer, capture)} has "
             f"too little gap between it and "
-            f"{_node_with_pos(self.consumer, capture)}. Expected at least "
+            f"{_node_with_pos(self.consumer, capture)}"
+            f"{_iter_note(self.producer, self.consumer)}. Expected at least "
             f"{self.expected_quad_cycles} quad-cycles but only "
             f"{self.actual_quad_cycles} passed."
         )
