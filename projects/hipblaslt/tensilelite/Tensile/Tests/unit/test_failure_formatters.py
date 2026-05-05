@@ -227,8 +227,8 @@ def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
 
 
 def test_wait_insufficient_failure_format_with_capture_brackets():
-    """capture=given: producer + consumer get per-category [N] index. Wait
-    stays bare (the message already says 'SWaitCnt')."""
+    """SWaitCnt-as-subject wording: dscnt too high to drain producer.
+    Producer + consumer get per-category [N] index; wait stays bare."""
     older_lra0 = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
     producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 1))
     consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
@@ -236,21 +236,46 @@ def test_wait_insufficient_failure_format_with_capture_brackets():
     consumer = _make_node("MFMA", "MFMA", 10, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 7)
     capture = _capture_with(older_lra0, producer_tagged, consumer_tagged)
+    # Producer at position 0, queue_depth 5 -> max acceptable counter = 4.
     failure = WaitInsufficientFailure(
         producer=producer, consumer=consumer, wait=wait,
-        queue_depth_at_wait=5, counter_value=2,
+        counter_kind="dscnt", counter_value=4,
+        queue_depth_at_wait=5, producer_position=0,
     )
     msg = failure.format(capture=capture)
-    assert "MFMA @ idx=10" in msg          # plain MFMA — no bracket
-    assert "MFMA[" not in msg
-    assert "LRA0[1] @ idx=5" in msg        # producer is second LRA0
-    assert "SWaitCnt @ idx=7" in msg       # wait stays bare
+    assert msg == (
+        "SWaitCnt @ idx=7 has a dscnt that's too high to guarantee producer "
+        "LRA0[1] @ idx=5 for consumer MFMA @ idx=10. "
+        "Current value of 4 must be in range [0, 4]."
+    )
+
+
+def test_wait_insufficient_failure_format_must_be_zero():
+    """Y=0 special case: producer is the most-recent op in the queue, so
+    the only acceptable counter value is 0 (drain everything)."""
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
+    producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
+    consumer = _make_node("MFMA", "MFMA", 10, tagged_inst=consumer_tagged)
+    wait = _make_node("SYNC", "SWaitCnt", 7)
+    capture = _capture_with(producer_tagged, consumer_tagged)
+    # Producer at position 4 (last in queue), queue_depth 5 -> max acceptable = 0.
+    failure = WaitInsufficientFailure(
+        producer=producer, consumer=consumer, wait=wait,
+        counter_kind="dscnt", counter_value=2,
+        queue_depth_at_wait=5, producer_position=4,
+    )
+    msg = failure.format(capture=capture)
+    assert msg == (
+        "SWaitCnt @ idx=7 has a dscnt that's too high to guarantee producer "
+        "LRA0[0] @ idx=5 for consumer MFMA @ idx=10. "
+        "Current value of 2 must be 0."
+    )
 
 
 def test_wait_insufficient_failure_format_cross_iteration():
-    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix.
-    Producer LRA0 needs tagged_inst+capture entry because the formatter
-    renders `_node_with_pos(self.producer, capture)`; consumer MFMA is exempt."""
+    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix
+    on the consumer rendering."""
     producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
     producer = _make_node("LRA0", "LRA0[0]", 5, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("MFMA", "MFMA", 10, body_label="ML")
@@ -258,10 +283,11 @@ def test_wait_insufficient_failure_format_cross_iteration():
     capture = _capture_with(producer_tagged)
     failure = WaitInsufficientFailure(
         producer=producer, consumer=consumer, wait=wait,
-        queue_depth_at_wait=5, counter_value=2,
+        counter_kind="dscnt", counter_value=2,
+        queue_depth_at_wait=5, producer_position=0,
     )
     msg = failure.format(capture)
-    assert "@ idx=10 (of next iteration)'s producer" in msg
+    assert "consumer MFMA @ idx=10 (of next iteration)" in msg
 
 
 def test_missing_barrier_failure_must_start_after_format():

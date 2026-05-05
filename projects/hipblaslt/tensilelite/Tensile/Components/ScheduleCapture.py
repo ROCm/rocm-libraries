@@ -787,20 +787,29 @@ class WaitInsufficientFailure(Failure):
     producer: NodeLike
     consumer: NodeLike
     wait: NodeLike  # GraphNode or ValidatorInstruction (SWait)
-    queue_depth_at_wait: int
+    counter_kind: str  # 'dscnt' / 'vlcnt' / 'vscnt'
     counter_value: int
+    queue_depth_at_wait: int
+    producer_position: int  # 0-indexed FIFO position when producer entered the queue
 
     def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         wait_pos = getattr(self.wait, 'position', None) or self.wait.issued_at
+        # max acceptable counter value = queue_depth - producer_position - 1
+        # (drain enough ops that producer's slot falls inside the drained range).
+        # Counter value of -1 means "no constraint" (counter ignored), so the
+        # acceptable range is [0, max_acceptable] — -1 does NOT satisfy.
+        max_acceptable = self.queue_depth_at_wait - self.producer_position - 1
+        if max_acceptable <= 0:
+            bound = "must be 0"
+        else:
+            bound = f"must be in range [0, {max_acceptable}]"
         return (
+            f"SWaitCnt @ idx={wait_pos.vmfma_index} has a {self.counter_kind} "
+            f"that's too high to guarantee producer "
+            f"{_node_with_pos(self.producer, capture)} for consumer "
             f"{_node_with_pos(self.consumer, capture)}"
-            f"{_iter_note(self.producer, self.consumer)}'s producer "
-            f"{_node_with_pos(self.producer, capture)} "
-            f"is guaranteed by SWaitCnt @ idx={wait_pos.vmfma_index}, "
-            f"but the counter value ({self.counter_value}) leaves "
-            f"{self.queue_depth_at_wait - self.counter_value} ops still pending "
-            f"(queue depth at wait = {self.queue_depth_at_wait}). "
-            f"Tighten the wait's counter value."
+            f"{_iter_note(self.producer, self.consumer)}. "
+            f"Current value of {self.counter_value} {bound}."
         )
 
 
@@ -3496,12 +3505,15 @@ def diagnose_missing_edge(
                 # Compute queue depth at the wait's position for diagnostic.
                 depth = _queue_depth_at(insufficient, p_node, subj_graph)
                 cv = _swait_drains(insufficient, expected_counter)
+                pos = _producer_queue_position(p_node, subj_graph)
                 failures.append(WaitInsufficientFailure(
                     producer=p_node,
                     consumer=c_node,
                     wait=insufficient,
-                    queue_depth_at_wait=depth,
+                    counter_kind=expected_counter,
                     counter_value=cv if cv is not None else 0,
+                    queue_depth_at_wait=depth,
+                    producer_position=pos,
                 ))
                 wait_failure_emitted = True
             else:
@@ -4342,11 +4354,14 @@ def _classify_edge_coverage(
             if insufficient is not None:
                 depth = _queue_depth_at(insufficient, p_node, subj_graph)
                 cv = _swait_drains(insufficient, expected_counter)
+                pos = _producer_queue_position(p_node, subj_graph)
                 failures.append(WaitInsufficientFailure(
                     producer=p_node, consumer=c_node,
                     wait=insufficient,
-                    queue_depth_at_wait=depth,
+                    counter_kind=expected_counter,
                     counter_value=cv if cv is not None else 0,
+                    queue_depth_at_wait=depth,
+                    producer_position=pos,
                 ))
             else:
                 failures.append(MissingWaitFailure(
