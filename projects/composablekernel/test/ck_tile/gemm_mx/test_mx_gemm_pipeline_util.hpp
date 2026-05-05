@@ -416,21 +416,18 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         }
 
         {
-            constexpr int a_mant = ck_tile::numeric_traits<AScaleDataType>::mant;
-            constexpr int b_mant = ck_tile::numeric_traits<BScaleDataType>::mant;
-            constexpr int a_one  = ck_tile::numeric_traits<AScaleDataType>::bias << a_mant;
-            constexpr int b_one  = ck_tile::numeric_traits<BScaleDataType>::bias << b_mant;
-            std::mt19937 gen(11941);
-            std::uniform_int_distribution<int> dist_a(a_one - (3 << a_mant), a_one + (1 << a_mant));
-            std::uniform_int_distribution<int> dist_b(b_one - (3 << b_mant), b_one + (1 << b_mant));
-            for(auto& s : scale_a.mData)
-            {
-                s = AScaleDataType(static_cast<typename AScaleDataType::type>(dist_a(gen)));
-            }
-            for(auto& s : scale_b.mData)
-            {
-                s = BScaleDataType(static_cast<typename BScaleDataType::type>(dist_b(gen)));
-            }
+            // Fill scale tensors with values uniformly drawn from [0.125, 2.0] = [2^-3, 2^1].
+            // This spans 4 exponent bands centred around 1.0, keeping scales numerically
+            // well-behaved without saturating the accumulator.
+            //
+            // Per-type raw byte ranges produced (raw bytes sampled uniformly within each):
+            //   e8m0_t (bias=127, mant=0): raw in [124, 128] -> floats {0.125, 0.25, 0.5, 1.0, 2.0}
+            //   e4m3_t (bias=7,   mant=3): raw in [32,  64]  -> floats  0.125 .. 2.0
+            //   e5m3_t (bias=15,  mant=3): raw in [96,  128] -> floats  0.125 .. 2.0
+            // No generated value exceeds 2.0 for any type.
+            // A and B use different seeds so their scale values are uncorrelated.
+            ck_tile::FillUniformScaleDistribution<AScaleDataType>{0.125f, 2.0f, 11941}(scale_a);
+            ck_tile::FillUniformScaleDistribution<BScaleDataType>{0.125f, 2.0f, 11943}(scale_b);
         }
 
         // Pre-shuffle scale buffers for the hardware
