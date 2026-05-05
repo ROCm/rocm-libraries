@@ -316,6 +316,26 @@ def test_wait_too_late_failure_format():
     assert "(of next iteration)" not in msg
 
 
+def test_wait_too_late_failure_format_with_capture_brackets():
+    """capture=given: consumer renders as 'category[N] @ idx=M' with the
+    per-category-stream index. Plain MFMA omits the bracket."""
+    @dataclass(eq=False)
+    class _TaggedStub:
+        category: str
+
+    other_lra0 = _TaggedStub(category="LRA0")
+    consumer_tagged = _TaggedStub(category="LRA0")
+    producer = _make_node("MFMA", "MFMA", 5)
+    consumer = _make_node("LRA0", "LRA0", 10, tagged_inst=consumer_tagged)
+    capture = _capture_with(other_lra0, consumer_tagged)
+    failure = WaitTooLateFailure(
+        producer=producer, consumer=consumer,
+        wait_position=SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0),
+    )
+    msg = failure.format(capture=capture)
+    assert "LRA0[1] @ idx=10" in msg     # second LRA0 in its category-stream
+
+
 def test_wait_too_late_failure_format_cross_iteration():
     """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix."""
     producer = _make_node("LRA0", "LRA0[0]", 5, body_label="ML-1")
@@ -344,6 +364,31 @@ def test_wait_insufficient_failure_format():
     assert "counter value (2)" in msg
     assert "Tighten the wait" in msg
     assert "(of next iteration)" not in msg
+
+
+def test_wait_insufficient_failure_format_with_capture_brackets():
+    """capture=given: producer + consumer get per-category [N] index. Wait
+    stays bare (the message already says 'SWaitCnt')."""
+    @dataclass(eq=False)
+    class _TaggedStub:
+        category: str
+
+    older_lra0 = _TaggedStub(category="LRA0")
+    producer_tagged = _TaggedStub(category="LRA0")
+    consumer_tagged = _TaggedStub(category="MFMA")
+    producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
+    consumer = _make_node("MFMA", "MFMA", 10, tagged_inst=consumer_tagged)
+    wait = _make_node("SYNC", "SWaitCnt", 7)
+    capture = _capture_with(older_lra0, producer_tagged, consumer_tagged)
+    failure = WaitInsufficientFailure(
+        producer=producer, consumer=consumer, wait=wait,
+        queue_depth_at_wait=5, counter_value=2,
+    )
+    msg = failure.format(capture=capture)
+    assert "MFMA @ idx=10" in msg          # plain MFMA — no bracket
+    assert "MFMA[" not in msg
+    assert "LRA0[1] @ idx=5" in msg        # producer is second LRA0
+    assert "SWaitCnt @ idx=7" in msg       # wait stays bare
 
 
 def test_wait_insufficient_failure_format_cross_iteration():
@@ -381,6 +426,25 @@ def test_missing_barrier_failure_needed_by_format():
     assert "GRA -> SWaitCnt(vlcnt=0) -> SBarrier -> LRA1" in msg
     assert "LRA1 reads the LDS slot written by GRA" in msg
     assert "(of next iteration)" not in msg
+
+
+def test_missing_barrier_failure_format_with_capture_brackets():
+    """capture=given: consumer gets per-category [N] index in the trailing
+    reference."""
+    @dataclass(eq=False)
+    class _TaggedStub:
+        category: str
+
+    older_gra = _TaggedStub(category="GRA")
+    consumer_tagged = _TaggedStub(category="GRA")
+    producer = _make_node("LRA0", "LRA0[0]", 8)
+    consumer = _make_node("GRA", "GRA[0]", 12, tagged_inst=consumer_tagged)
+    capture = _capture_with(older_gra, consumer_tagged)
+    failure = MissingBarrierFailure(
+        producer=producer, consumer=consumer, role="must_start_after",
+    )
+    msg = failure.format(capture=capture)
+    assert msg.endswith("GRA[1] @ idx=12."), msg
 
 
 def test_missing_barrier_failure_format_cross_iteration():

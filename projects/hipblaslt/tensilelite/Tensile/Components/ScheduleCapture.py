@@ -492,6 +492,18 @@ def _node_label(node, capture=None) -> str:
     return f"{cat}[{idx}]"
 
 
+def _node_with_pos(node, capture=None) -> str:
+    """Render a node as 'category[N] @ idx=M' — the canonical per-Failure
+    node reference. Combines `_node_label` (per-category-stream index, MFMA
+    omits brackets) with the bare vmfma_index. Used by every Failure
+    formatter that names a producer/consumer node.
+
+    Accepts GraphNode (`position`) or ValidatorInstruction (`issued_at`).
+    """
+    pos = getattr(node, 'position', None) or node.issued_at
+    return f"{_node_label(node, capture)} @ idx={pos.vmfma_index}"
+
+
 def _iter_note(producer, consumer) -> str:
     """Return ' (of next iteration)' when consumer is exactly one loop_index
     past producer (i -> i+1). SchedulePosition.loop_index is the canonical
@@ -575,16 +587,9 @@ class OrderInvertedFailure(Failure):
     default_consumer_position: object  # SchedulePosition (default-side, for diagnostics)
 
     def _format_canonical(self, capture=None) -> str:
-        # Use bare `@ idx=N` for both endpoints — the per-category `[N]` from
-        # _node_label already conveys identity within the category-stream, so
-        # the cross-category (Nth entry in list) suffix would be redundant.
-        producer_pos = f"@ idx={(getattr(self.producer, 'position', None) or self.producer.issued_at).vmfma_index}"
-        consumer_pos = f"@ idx={(getattr(self.consumer, 'position', None) or self.consumer.issued_at).vmfma_index}"
-        producer_label = _node_label(self.producer, capture)
-        consumer_label = _node_label(self.consumer, capture)
         return (
-            f"{producer_label} {producer_pos} is issued after its consumer "
-            f"{consumer_label} {consumer_pos}."
+            f"{_node_with_pos(self.producer, capture)} is issued after its consumer "
+            f"{_node_with_pos(self.consumer, capture)}."
         )
 
 
@@ -607,13 +612,6 @@ class MissingWaitFailure(Failure):
     # counters. Empty when no SWaitCnts are in the window at all.
 
     def _format_canonical(self, capture=None) -> str:
-        producer_label = _node_label(self.producer, capture)
-        consumer_label = _node_label(self.consumer, capture)
-        p_pos = (getattr(self.producer, 'position', None) or self.producer.issued_at)
-        c_pos = (getattr(self.consumer, 'position', None) or self.consumer.issued_at)
-        producer_pos = f"@ idx={p_pos.vmfma_index}"
-        consumer_pos = f"@ idx={c_pos.vmfma_index}"
-        iter_note = _iter_note(self.producer, self.consumer)
         # Optional hint when other-counter SWaitCnts exist in the window:
         # the user could extend one of them rather than insert a new SWaitCnt.
         hint = ""
@@ -625,8 +623,9 @@ class MissingWaitFailure(Failure):
             hint = f" (existing SWaitCnts at {indices} drain other counters)"
         return (
             f"SWaitCnt({self.counter_kind}) missing between "
-            f"{producer_label} {producer_pos} and "
-            f"{consumer_label} {consumer_pos}{iter_note}{hint}."
+            f"{_node_with_pos(self.producer, capture)} and "
+            f"{_node_with_pos(self.consumer, capture)}"
+            f"{_iter_note(self.producer, self.consumer)}{hint}."
         )
 
 
@@ -641,8 +640,7 @@ class WaitTooLateFailure(Failure):
 
     def _format_canonical(self, capture=None) -> str:
         return (
-            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
-            f"{format_position(self.consumer, capture)}"
+            f"{_node_with_pos(self.consumer, capture)}"
             f"{_iter_note(self.producer, self.consumer)} is guaranteed by an "
             f"SWaitCnt @ idx={self.wait_position.vmfma_index} which fires at "
             f"or after the consumer position. Move the wait earlier in the schedule."
@@ -661,12 +659,12 @@ class WaitInsufficientFailure(Failure):
     counter_value: int
 
     def _format_canonical(self, capture=None) -> str:
+        wait_pos = getattr(self.wait, 'position', None) or self.wait.issued_at
         return (
-            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
-            f"{format_position(self.consumer, capture)}"
+            f"{_node_with_pos(self.consumer, capture)}"
             f"{_iter_note(self.producer, self.consumer)}'s producer "
-            f"{self.producer.category} {format_position(self.producer, capture)} "
-            f"is guaranteed by SWaitCnt {format_position(self.wait, capture)}, "
+            f"{_node_with_pos(self.producer, capture)} "
+            f"is guaranteed by SWaitCnt @ idx={wait_pos.vmfma_index}, "
             f"but the counter value ({self.counter_value}) leaves "
             f"{self.queue_depth_at_wait - self.counter_value} ops still pending "
             f"(queue depth at wait = {self.queue_depth_at_wait}). "
@@ -707,7 +705,7 @@ class MissingBarrierFailure(Failure):
         return (
             f"{why} Required ordering is {order}. SWaitCnt is present but no "
             f"SBarrier appears between the SWaitCnt and "
-            f"{self.consumer.category} {format_position(self.consumer, capture)}"
+            f"{_node_with_pos(self.consumer, capture)}"
             f"{_iter_note(self.producer, self.consumer)}."
         )
 
