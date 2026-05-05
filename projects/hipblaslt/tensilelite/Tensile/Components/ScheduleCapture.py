@@ -3784,21 +3784,36 @@ def _cvt_to_mfma_gap_ok(producer, consumer, subj_graph):
     `_quad_cycle_gap_ok` so callers can wrap a single
     `TimingTooCloseFailure(expected, actual)` regardless of the gap kind.
 
-    Approach: CYCLE-EXACT via `cumulative_issue_cycles` (bead `nk0`).
-    CVT (`v_cvt_pk_bf16_f32`) issues and completes in 1 cycle on the
-    vector ALU (finish=0); the helper walks the captured body's
-    instruction stream from CVT producer to MFMA consumer and accumulates
-    every intervening instruction's `min_issue_quad_cycles()` contribution
-    plus MFMA contention and type-switch stalls. Bead `8nz` deleted the
-    structural-side `precompute_issue_times` / `estimate_quad_cycles`
-    simulator that this helper originally mirrored; the graph-side path
-    is now the single source of truth.
+    Approach: SLOT-DELTA UNDER-ESTIMATE (NOT cycle-exact). Unlike the
+    sibling pair helpers `_quad_cycle_gap_ok` and `_mfma_pack_to_cvt_gap_ok`
+    which delegate to `cumulative_issue_cycles`, this function computes
+    `actual` directly as
+        `slot_delta * (1 + finish) - 1 + intervening`
+    where `slot_delta = consumer.vmfma_index - producer.vmfma_index`,
+    `finish = _QUAD_CYCLES_CVT_FINISH == 0`, and `intervening` is the
+    count of instructions sitting strictly between producer and consumer
+    in the captured body (`_count_intervening_instructions`). Each
+    intervening instruction is conservatively credited 1 quad-cycle of
+    issue time (per `min_issue_quad_cycles_base`, CMSValidator.py:298).
 
-    Cross-body CVT->MFMA edges follow the same conservative under-estimate
-    as the MFMA->MFMA cross-body branch: report `body_delta * 1000`
-    quad-cycles so (a) the gap is always judged OK and (b) telemetry sees a
-    numerically meaningful value rather than the misleading
-    `actual == expected` placeholder (s7k pattern).
+    Why this path diverges from the cycle-exact helpers: CVT producers
+    are vector-ALU instructions that issue and complete in 1 cycle
+    (finish=0), so they do NOT participate in the MFMA contention model
+    (`mfma_free_at` backlog) or the MFMA type-switch +1 stall that
+    `cumulative_issue_cycles` was built to simulate. The two phenomena
+    that simulator exists to capture are both MFMA-producer concerns;
+    for a CVT producer the simpler slot-delta + intervening-count
+    formula is a sound (under-estimate) lower bound on the real gap.
+    Unifying onto `cumulative_issue_cycles` here is a possible future
+    refactor (deferred to the cmw follow-up) but would be a behavior
+    change, not a fix.
+
+    Cross-body CVT->MFMA edges use the conservative `body_delta * 1000`
+    placeholder (s7k pattern, mirrors the cross-body branches in the
+    other gap helpers) so (a) the gap is always judged OK and (b)
+    telemetry sees a numerically meaningful value rather than the
+    misleading `actual == expected` placeholder. This placeholder will
+    be replaced with a real cross-body model in bead `2bu.4`.
     """
     expected = _QUAD_CYCLES_CVT_BEFORE_MFMA
     finish = _QUAD_CYCLES_CVT_FINISH
