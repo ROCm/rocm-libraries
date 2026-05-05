@@ -315,6 +315,158 @@ class FourPartCapture:
     # all MFMAs at subiter 0, which loses cross-subiter PLR dataflow edges.
     # Test fixtures may safely leave it unset.
     num_mfma_per_subiter: int = 0
+    # Per-architecture timing profile. None = default CDNA 4. Production
+    # callers pass the profile resolved via `_resolve_arch_profile_for_isa`
+    # from `kernel["ISA"]`; test fixtures may leave it unset to keep the
+    # historical code path bit-identical.
+    arch_profile: Optional[ArchProfile] = None
+
+
+# =============================================================================
+# ArchProfile — per-architecture quad-cycle and issue-cycle constants
+# =============================================================================
+# Quad-cycle finish-time and settle-window magic numbers used to live as
+# module-scope literals derived from CDNA 4 (gfx950) ISA section 7.6. The
+# quad-cycle simulator (`cumulative_issue_cycles`) and the four pair-specific
+# helpers (`_quad_cycle_gap_ok`, `_cvt_to_mfma_gap_ok`,
+# `_mfma_pack_to_cvt_gap_ok`, `_mfma_finish_cycles_for`) plus the
+# per-instruction issue-cost helper (`_min_issue_quad_cycles_for`) now read
+# every magic number from a per-arch `ArchProfile`. The default profile keeps
+# the historical CDNA 4 values bit-identical, so kernels (and the entire
+# unit-test suite) that don't carry an ISA tag still see the original
+# behavior. RDNA 3.5 (gfx1151) gets a separate profile with conservative
+# placeholder values pending ISA-reference confirmation; see
+# `Tensile/Components/GFX1151_AUDIT.md`.
+
+@dataclass(frozen=True)
+class ArchProfile:
+    """Per-architecture timing constants consumed by the quad-cycle simulator.
+
+    Frozen so the singleton `_DEFAULT_CDNA4_ARCH_PROFILE` is safe to share
+    across the entire test suite without any caller mutating it. New archs
+    construct a fresh `ArchProfile(...)` rather than copying-and-mutating.
+
+    Fields:
+      name: Human-readable architecture tag (e.g. "CDNA4", "GFX1151").
+      isa: ISA tuple identifying the arch (e.g. (9, 5, 0) for gfx950,
+           (11, 5, 1) for gfx1151). Used by `_resolve_arch_profile_for_isa`
+           to look up the profile from a `kernel["ISA"]` value.
+
+      Quad-cycle finish times for matrix-mul ops:
+        standard_mfma_finish_cycles   — full-tile MFMA finish window.
+        mfma_4x4_finish_cycles        — 4x4 PackMFMA finish window.
+
+      Pair-specific settle windows:
+        cvt_before_mfma_quad_cycles      — CVTPack -> MFMA visibility.
+        mfma_4x4_before_cvt_quad_cycles  — 4x4 PackMFMA -> CVT1 visibility.
+
+      MFMA type-switch thresholds:
+        mfma_type_switch_threshold_from_standard
+        mfma_type_switch_threshold_from_4x4
+            When two consecutive MFMAs differ in class, the consumer takes
+            an extra +1 quad-cycle stall if the gap is below the
+            producer-class threshold.
+
+      Per-instruction issue cost:
+        default_issue_quad_cycles  — base issue cost for non-SNop
+            instructions (CDNA 4 = 1; arch-specific overrides go here).
+
+    Adding a new arch: instantiate ArchProfile and register it in
+    `_ARCH_PROFILES_BY_ISA`. Tests that exercise the new arch attach the
+    profile to the FourPartCapture / DataflowGraph via the `arch_profile`
+    field so the resolver picks it up.
+    """
+    name: str
+    isa: Tuple[int, int, int]
+    standard_mfma_finish_cycles: int
+    mfma_4x4_finish_cycles: int
+    cvt_before_mfma_quad_cycles: int
+    mfma_4x4_before_cvt_quad_cycles: int
+    mfma_type_switch_threshold_from_standard: int
+    mfma_type_switch_threshold_from_4x4: int
+    default_issue_quad_cycles: int = 1
+
+
+# CDNA 4 (gfx950) — sourced from ISA section 7.6. These are the values that
+# lived as module-scope literals in this file before the ArchProfile
+# refactor; they remain the default everywhere a profile isn't explicitly
+# attached to keep the existing unit-test suite bit-identical.
+_DEFAULT_CDNA4_ARCH_PROFILE = ArchProfile(
+    name="CDNA4",
+    isa=(9, 5, 0),
+    standard_mfma_finish_cycles=3,         # Full-tile MFMA: 3 quad-cycles to finish.
+    mfma_4x4_finish_cycles=1,              # 4x4 PackMFMA: 1 quad-cycle.
+    cvt_before_mfma_quad_cycles=2,         # CVT pack -> MFMA settle window.
+    mfma_4x4_before_cvt_quad_cycles=5,     # 4x4 PackMFMA -> CVT1 settle window.
+    mfma_type_switch_threshold_from_standard=5,
+    mfma_type_switch_threshold_from_4x4=3,
+    default_issue_quad_cycles=1,
+)
+
+
+# RDNA 3.5 (gfx1151) — placeholder profile. RDNA 3.5 uses WMMA, not MFMA,
+# and has a fundamentally different issue model; the constants below are
+# conservative (i.e. larger or equal to the CDNA 4 values) so the gap
+# checks over-stall rather than under-stall when the gfx1151 path is
+# exercised. Each field's true RDNA 3.5 value is tracked as a sub-bead in
+# `Tensile/Components/GFX1151_AUDIT.md` (sub-beads: l6q.1.t1..t4); replace
+# with the documented value once sourced from the RDNA 3.5 ISA reference.
+_GFX1151_ARCH_PROFILE = ArchProfile(
+    name="GFX1151",
+    isa=(11, 5, 1),
+    # WMMA finish windows (placeholders — RDNA 3.5 lacks MFMA; the WMMA
+    # equivalents are roughly 1 wave-quad each on gfx1100, but gfx1151
+    # documentation has not been confirmed). Conservative = >= CDNA 4.
+    standard_mfma_finish_cycles=4,
+    mfma_4x4_finish_cycles=2,
+    # CVT->WMMA and WMMA->CVT settle windows (placeholders).
+    cvt_before_mfma_quad_cycles=3,
+    mfma_4x4_before_cvt_quad_cycles=6,
+    # Type-switch thresholds: same shape; conservative bumps from CDNA 4.
+    mfma_type_switch_threshold_from_standard=6,
+    mfma_type_switch_threshold_from_4x4=4,
+    default_issue_quad_cycles=1,
+)
+
+
+# Lookup table — extend with new archs as their profiles are characterized.
+_ARCH_PROFILES_BY_ISA: Dict[Tuple[int, int, int], ArchProfile] = {
+    _DEFAULT_CDNA4_ARCH_PROFILE.isa: _DEFAULT_CDNA4_ARCH_PROFILE,
+    _GFX1151_ARCH_PROFILE.isa: _GFX1151_ARCH_PROFILE,
+}
+
+
+def _resolve_arch_profile_for_isa(isa: Optional[Tuple[int, int, int]]) -> ArchProfile:
+    """Return the ArchProfile for an ISA tuple. Default = CDNA 4.
+
+    Unknown / missing ISAs intentionally fall back to CDNA 4 rather than
+    raising — the validator's pre-existing behavior was hardcoded CDNA 4,
+    so this keeps every uncharacterized arch on the historical code path.
+    """
+    if isa is None:
+        return _DEFAULT_CDNA4_ARCH_PROFILE
+    return _ARCH_PROFILES_BY_ISA.get(tuple(isa), _DEFAULT_CDNA4_ARCH_PROFILE)
+
+
+def _resolve_arch_profile(carrier: object) -> ArchProfile:
+    """Return the ArchProfile attached to a DataflowGraph or FourPartCapture.
+
+    `carrier` may be:
+      - DataflowGraph with `.arch_profile` set,
+      - FourPartCapture with `.arch_profile` set,
+      - GraphNode (resolves via its captured graph back-ref, if any),
+      - None (degenerate test path).
+
+    Defaults to `_DEFAULT_CDNA4_ARCH_PROFILE` when no profile is attached
+    so the historical code path stays bit-identical for callers that don't
+    plumb arch info through.
+    """
+    if carrier is None:
+        return _DEFAULT_CDNA4_ARCH_PROFILE
+    profile = getattr(carrier, "arch_profile", None)
+    if isinstance(profile, ArchProfile):
+        return profile
+    return _DEFAULT_CDNA4_ARCH_PROFILE
 
 
 # =============================================================================
@@ -449,6 +601,10 @@ class DataflowGraph:
     edges: list                            # list[DataflowEdge]
     captures: dict                         # body_label -> LoopBodyCapture
     num_mfma_per_subiter: int = 0          # copied from FourPartCapture; 0 ⇒ all-subiter-0
+    # Per-architecture timing profile. None = default CDNA 4. Copied from
+    # FourPartCapture by `build_dataflow_graph` so the four pair-specific
+    # quad-cycle helpers can resolve arch-specific constants from the graph.
+    arch_profile: Optional[ArchProfile] = None
 
     def edge_keys(self):
         """Edge-equality keys for cross-graph diff: (p_id, c_id, resource, kind)."""
@@ -2631,7 +2787,7 @@ def _intersection(a, b):
     return _reg_intersection(a, b)
 
 
-def _min_issue_quad_cycles_for(rocisa_inst) -> int:
+def _min_issue_quad_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) -> int:
     """Return the per-instruction quad-cycle issue cost.
 
     Mirrors `ValidatorInstruction.min_issue_quad_cycles()` from CMSValidator.py:
@@ -2639,19 +2795,27 @@ def _min_issue_quad_cycles_for(rocisa_inst) -> int:
         - `SNop.min_issue_quad_cycles` adds `wait_state` (CMSValidator.py:645-647).
     Every other validator dataclass keeps the base cost of 1.
 
+    `profile` defaults to the CDNA 4 arch profile (base = 1). Per-arch
+    overrides for the default issue cost come from
+    `profile.default_issue_quad_cycles`. The SNop wait-state add is
+    arch-independent (the wait_state is encoded in the SNop instruction
+    itself, not the arch).
+
     Why duplicated here. CMSValidator imports from ScheduleCapture for typed
     Failure formatters (search 'from Tensile.Components.ScheduleCapture' in
     CMSValidator.py); importing CMSValidator from here would close the cycle.
     With the structural-side simulators removed, this helper is the
     canonical per-instruction cost table.
     """
+    p = profile if profile is not None else _DEFAULT_CDNA4_ARCH_PROFILE
+    base = p.default_issue_quad_cycles
     if rocisa_inst is None:
-        return 1
+        return base
     if _is_snop(rocisa_inst):
         # Test-fixture path: _FakeSNop exposes `wait_state` directly.
         wait_state = getattr(rocisa_inst, "wait_state", None)
         if wait_state is not None:
-            return 1 + int(wait_state)
+            return base + int(wait_state)
         # Production rocisa path: SNop stores wait_state as the first param
         # (matches CMSValidator.py:1058-1060: `snop.getParams()[0]`).
         get_params = getattr(rocisa_inst, "getParams", None)
@@ -2659,14 +2823,18 @@ def _min_issue_quad_cycles_for(rocisa_inst) -> int:
             try:
                 params = get_params()
                 if params:
-                    return 1 + int(params[0])
+                    return base + int(params[0])
             except Exception:
                 pass
-        return 1
-    return 1
+        return base
+    return base
 
 
-def _make_node(tagged_inst: TaggedInstruction, body_label: str) -> GraphNode:
+def _make_node(
+    tagged_inst: TaggedInstruction,
+    body_label: str,
+    profile: Optional[ArchProfile] = None,
+) -> GraphNode:
     inst = tagged_inst.inst
     identity = _identity_for(inst, body_label, category=tagged_inst.category)
     position = make_position(body_label, tagged_inst.slot)
@@ -2679,7 +2847,7 @@ def _make_node(tagged_inst: TaggedInstruction, body_label: str) -> GraphNode:
         tagged_inst=tagged_inst,
         body_label=body_label,
         name=name,
-        issue_cycles=_min_issue_quad_cycles_for(inst),
+        issue_cycles=_min_issue_quad_cycles_for(inst, profile),
     )
 
 
@@ -2749,6 +2917,10 @@ def build_dataflow_graph(four_part_capture):
         captures[label] = body
 
     num_mfma_per_subiter = getattr(four_part_capture, 'num_mfma_per_subiter', 0) or 0
+    # Forward the FourPartCapture's arch_profile (or None) to the graph so
+    # the four pair-specific quad-cycle helpers can resolve the per-arch
+    # constants. None => default CDNA 4 (historical bit-identical path).
+    arch_profile = getattr(four_part_capture, 'arch_profile', None)
 
     nodes_by_identity = {}
     nodes_per_body = {label: [] for label in _BODY_BUILD_ORDER}
@@ -2764,7 +2936,7 @@ def build_dataflow_graph(four_part_capture):
         for tagged_inst in body.instructions:
             inst = tagged_inst.inst
             try:
-                node = _make_node(tagged_inst, label)
+                node = _make_node(tagged_inst, label, arch_profile)
             except CaptureUnknownInstructionError as e:
                 raise CaptureUnknownInstructionError(
                     f"build_dataflow_graph: cannot classify instruction "
@@ -2884,7 +3056,8 @@ def build_dataflow_graph(four_part_capture):
     edges.extend(barrier_edges)
 
     return DataflowGraph(nodes=nodes_by_identity, edges=edges, captures=captures,
-                         num_mfma_per_subiter=num_mfma_per_subiter)
+                         num_mfma_per_subiter=num_mfma_per_subiter,
+                         arch_profile=arch_profile)
 
 
 def _collect_barrier_edges(nodes_in_order):
@@ -3491,27 +3664,44 @@ def _any_drains(waits: List[GraphNode], producer: GraphNode, subj_graph: Dataflo
     return any(_wait_drains_producer(w, producer, subj_graph) for w in waits)
 
 
-# --- Quad-cycle constants (single source of truth) ---------------------------
-# CDNA 4 ISA section 7.6. Values below are the only place these magic
-# numbers live in the codebase.
-_QUAD_CYCLES_STANDARD_MFMA_FINISH = 3   # Standard MFMA: 3 quad-cycles to finish.
-_QUAD_CYCLES_MFMA_4X4_FINISH = 1        # 4x4 (Pack-flavored) MFMA: 1 quad-cycle.
-_QUAD_CYCLES_CVT_BEFORE_MFMA = 2        # CVT pack -> MFMA settle window.
-_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = 5   # 4x4 PackMFMA -> CVT1 settle window.
+# --- Quad-cycle constants (default-CDNA 4 aliases) ---------------------------
+# These module-scope names are RETAINED for two reasons:
+#   1. Backward compatibility for callers (and tests) that import them as
+#      module attributes. They now resolve from `_DEFAULT_CDNA4_ARCH_PROFILE`
+#      so any future tweak to the CDNA 4 numbers happens in exactly one
+#      place — the profile constructor.
+#   2. The classification helpers `_mfma_finish_cycles_for` /
+#      `_quad_cycle_gap_ok` use the standard / 4x4 finish-cycle values as
+#      DISCRIMINATOR sentinels (e.g. "is the previous MFMA's class the
+#      4x4 family?"). Those discriminators are class identity, not
+#      arch-specific timing — so they remain pinned to the CDNA 4 default.
+#      Per-arch overrides for the actual finish window come from the
+#      resolved profile inside each helper.
+# Source: CDNA 4 ISA section 7.6.
+_QUAD_CYCLES_STANDARD_MFMA_FINISH = _DEFAULT_CDNA4_ARCH_PROFILE.standard_mfma_finish_cycles
+_QUAD_CYCLES_MFMA_4X4_FINISH = _DEFAULT_CDNA4_ARCH_PROFILE.mfma_4x4_finish_cycles
+_QUAD_CYCLES_CVT_BEFORE_MFMA = _DEFAULT_CDNA4_ARCH_PROFILE.cvt_before_mfma_quad_cycles
+_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = _DEFAULT_CDNA4_ARCH_PROFILE.mfma_4x4_before_cvt_quad_cycles
 
-# --- MFMA Type-Switch Thresholds (single source of truth) --------------------
+# --- MFMA Type-Switch Thresholds (default-CDNA 4 aliases) --------------------
 # When `cumulative_issue_cycles` observes consecutive MFMAs of DIFFERENT
 # classes whose issue gap is below the producer's threshold, it injects a +1
 # quad-cycle stall — the consumer is forced to issue one cycle later. The
-# thresholds depend on the PRODUCER class: 5 quad-cycles required after a
-# standard MFMA, 3 after a 4x4 PackMFMA.
-_MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5
-_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3
+# thresholds depend on the PRODUCER class. Resolved from the CDNA 4 profile
+# for the legacy module-scope path; the cycle simulator inside
+# `cumulative_issue_cycles` reads the actual values from the resolved
+# profile so per-arch overrides apply.
+_MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = (
+    _DEFAULT_CDNA4_ARCH_PROFILE.mfma_type_switch_threshold_from_standard
+)
+_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = (
+    _DEFAULT_CDNA4_ARCH_PROFILE.mfma_type_switch_threshold_from_4x4
+)
 
 
-def _mfma_finish_cycles_for(rocisa_inst) -> int:
-    """Classify an MFMA-shaped rocisa instruction as standard (3 quad-cycles)
-    or 4x4 PackMFMA (1 quad-cycle).
+def _mfma_finish_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) -> int:
+    """Classify an MFMA-shaped rocisa instruction as standard or 4x4 PackMFMA
+    and return the per-arch finish-cycle count.
 
     The rocisa `MFMAInstruction` C++ class accepts a `variant` list at
     construction (`[M, N, K, blk]`, e.g. `[4, 4, 4, 16]` for the 4x4 PackMFMA
@@ -3525,14 +3715,14 @@ def _mfma_finish_cycles_for(rocisa_inst) -> int:
     model PackMFMAs). The attribute path is checked first so fixtures don't
     have to roundtrip through `str()`.
 
-    Single source of truth for per-MFMA finish cycles: the structural-side
-    `MFMA.mfma_finish_cycles` / `MFMAPack.mfma_finish_cycles` ClassVars
-    have been removed along with the simulator that consumed them.
-    Returns the standard value when the instance lacks both signals
-    (defensive fallback).
+    `profile` defaults to the CDNA 4 arch profile so the historical call
+    sites (which pass only the rocisa instance) keep returning identical
+    values. Per-arch overrides come from `profile.standard_mfma_finish_cycles`
+    and `profile.mfma_4x4_finish_cycles`.
     """
+    p = profile if profile is not None else _DEFAULT_CDNA4_ARCH_PROFILE
     if rocisa_inst is None:
-        return _QUAD_CYCLES_STANDARD_MFMA_FINISH
+        return p.standard_mfma_finish_cycles
     # Fast path: test fixtures expose `variant` directly.
     variant = getattr(rocisa_inst, "variant", None)
     if variant is not None:
@@ -3541,18 +3731,18 @@ def _mfma_finish_cycles_for(rocisa_inst) -> int:
         except (IndexError, TypeError):
             m = n = None
         if m == 4 and n == 4:
-            return _QUAD_CYCLES_MFMA_4X4_FINISH
+            return p.mfma_4x4_finish_cycles
         if m is not None:
-            return _QUAD_CYCLES_STANDARD_MFMA_FINISH
+            return p.standard_mfma_finish_cycles
     # Production rocisa MFMAInstruction does not expose `variant` as an
     # attribute — discriminate by parsing the rendered assembly form.
     try:
         rendered = str(rocisa_inst)
     except Exception:
-        return _QUAD_CYCLES_STANDARD_MFMA_FINISH
+        return p.standard_mfma_finish_cycles
     if "_4x4x" in rendered:
-        return _QUAD_CYCLES_MFMA_4X4_FINISH
-    return _QUAD_CYCLES_STANDARD_MFMA_FINISH
+        return p.mfma_4x4_finish_cycles
+    return p.standard_mfma_finish_cycles
 
 
 def _is_mfma_pack_producer(producer: GraphNode) -> bool:
@@ -3664,6 +3854,14 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
     if not captures:
         return 0
 
+    # Resolve the per-arch profile from the graph; default = CDNA 4 so
+    # callers that haven't plumbed arch info through get the historical
+    # bit-identical numbers. The simulator below uses
+    # `profile.mfma_4x4_finish_cycles` for MFMA-class discrimination
+    # (rather than the legacy module-scope alias) so per-arch overrides
+    # to the 4x4 finish window don't decouple from the discriminator.
+    profile = _resolve_arch_profile(graph)
+
     # Producer must always be strictly before consumer in stream order. The
     # SchedulePosition `__lt__` compares (loop_index, vmfma_index, sub_index)
     # so this single check covers same-body and cross-body cases uniformly.
@@ -3758,15 +3956,18 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
             is_mfma = inst is not None and _is_mfma(inst)
             if is_mfma:
                 current_issue = max(current_issue, mfma_free_at)
-                current_mfma_class = _mfma_finish_cycles_for(inst)
+                current_mfma_class = _mfma_finish_cycles_for(inst, profile)
                 if last_mfma_class is not None and current_mfma_class != last_mfma_class:
                     gap = current_issue - last_mfma_issue
-                    # Threshold is producer-class-keyed: from a 4x4 producer use
-                    # FROM_4X4=3, otherwise FROM_STANDARD=5. We discriminate by
-                    # the previous MFMA's finish cycles (1 → 4x4 family).
-                    threshold = (_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4
-                                 if last_mfma_class == _QUAD_CYCLES_MFMA_4X4_FINISH
-                                 else _MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD)
+                    # Threshold is producer-class-keyed; thresholds come from
+                    # the resolved arch profile. Discrimination uses the
+                    # profile's own 4x4 finish-cycle value so per-arch
+                    # overrides don't decouple discriminator from threshold.
+                    threshold = (
+                        profile.mfma_type_switch_threshold_from_4x4
+                        if last_mfma_class == profile.mfma_4x4_finish_cycles
+                        else profile.mfma_type_switch_threshold_from_standard
+                    )
                     if gap < threshold:
                         current_issue += 1
                 mfma_free_at = current_issue + 1 + current_mfma_class
@@ -3783,7 +3984,7 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
             # directly from `_min_issue_quad_cycles_for`. For graph-tracked
             # nodes the cost is identical (default base 1) so either path is
             # cycle-exact.
-            current_issue += _min_issue_quad_cycles_for(inst)
+            current_issue += _min_issue_quad_cycles_for(inst, profile)
 
         if c_issue_start is not None:
             break
@@ -3821,7 +4022,8 @@ def _quad_cycle_gap_ok(
     the body can't be located) we degrade gracefully by reporting an
     `actual` of 0 — strictly conservative, will fail the gap check.
     """
-    finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None))
+    profile = _resolve_arch_profile(graph)
+    finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None), profile)
     expected = finish
 
     if graph is None:
@@ -3857,7 +4059,8 @@ def _cvt_to_mfma_gap_ok(
     `cumulative_issue_cycles` walks the unified instruction stream
     across all bodies in `_BODY_BUILD_ORDER`.
     """
-    expected = _QUAD_CYCLES_CVT_BEFORE_MFMA
+    profile = _resolve_arch_profile(subj_graph)
+    expected = profile.cvt_before_mfma_quad_cycles
 
     if subj_graph is None:
         return False, expected, 0  # Strict: no graph -> conservative fail.
@@ -3903,7 +4106,8 @@ def _mfma_pack_to_cvt_gap_ok(
     PackMFMA -> CVT1 edges are enforced with the same 5-quad-cycle
     threshold as same-body edges.
     """
-    expected = _QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1
+    profile = _resolve_arch_profile(subj_graph)
+    expected = profile.mfma_4x4_before_cvt_quad_cycles
 
     if subj_graph is None:
         # Strict: no graph -> conservative fail (cannot compute gap).
