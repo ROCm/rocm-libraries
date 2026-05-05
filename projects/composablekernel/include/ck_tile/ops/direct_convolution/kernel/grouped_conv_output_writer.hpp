@@ -92,7 +92,10 @@ struct OutputWriter
                     // Padded path: use padded descriptor for correct group-strided offsets.
                     extract_offset_and_validity(
                         TC::Output::MakeDramWriteDescriptorNarrowPadded(ho, wo, bc.K, k_per_group));
-                    k_valid_count_ = k_per_group;
+                    // Compute how many of this thread's 4 output channels are valid.
+                    // output_elem_offset % k_per_group gives the channel position within the group.
+                    int c_in_group = static_cast<int>(output_elem_offset % k_per_group);
+                    k_valid_count_ = ck_tile::min(4, k_per_group - c_in_group);
                 }
                 else
                 {
@@ -211,8 +214,9 @@ struct OutputWriterLds
     ck_tile::index_t  lds_buf_size;          // LDS buffer size in fp16 elements
     bool              store_valid;           // whether this thread should store to DRAM
 
-    // k_per_group for padded path (< GROUP_SIZE means partial writes).
-    int               k_per_group_;
+    // Number of valid channels in this thread's 8-element wide store vector (0-8).
+    // Full when k_per_group >= GROUP_SIZE; partial when some channels are padded.
+    int               k_valid_in_vec_;
 
     template <typename BlockCoords_>
     __device__ OutputWriterLds(const BlockCoords_& bc,
@@ -298,19 +302,27 @@ struct OutputWriterLds
             if constexpr(requires { TC::Output::MakeDramWriteDescriptorWidePadded(int{}, int{}, int{}); })
             {
                 if(k_per_group < TC::GROUP_SIZE)
+                {
                     extract_store_offset(
                         TC::Output::MakeDramWriteDescriptorWidePadded(wo, bc.K, k_per_group));
+                    // Compute how many of this thread's 8 output channels are valid.
+                    // output_elem_offset % k_per_group gives the channel position within the group.
+                    int c_in_group = static_cast<int>(output_elem_offset % k_per_group);
+                    k_valid_in_vec_ = ck_tile::min(8, k_per_group - c_in_group);
+                }
                 else
+                {
                     extract_store_offset(
                         TC::Output::MakeDramWriteDescriptorWide(wo, bc.K));
+                    k_valid_in_vec_ = 8;
+                }
             }
             else
             {
                 extract_store_offset(
                     TC::Output::MakeDramWriteDescriptorWide(wo, bc.K));
+                k_valid_in_vec_ = 8;
             }
-
-            k_per_group_ = k_per_group;
         }
     }
 
@@ -343,23 +355,18 @@ struct OutputWriterLds
             ck_tile::index_t store_offset = output_elem_offset
                 + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
 
-            if(k_per_group_ >= TC::GROUP_SIZE)
+            if(k_valid_in_vec_ == 8)
             {
                 // Full 16B write: all 8 channels valid.
                 __builtin_memcpy(output_base + store_offset, &lds_data, sizeof(lds_data));
             }
             else
             {
-                // Partial write: only k_per_group_ channels within each group.
-                // The 8 channels span (8 / GROUP_SIZE) groups, each with GROUP_SIZE channels.
+                // Partial write: only k_valid_in_vec_ of the 8 channels are valid.
                 const _Float16* src = reinterpret_cast<const _Float16*>(&lds_data);
-                constexpr int GROUP_SIZE = TC::GROUP_SIZE;
-                for(int g = 0; g < 8 / GROUP_SIZE; g++)
+                for(int i = 0; i < k_valid_in_vec_; i++)
                 {
-                    for(int c = 0; c < k_per_group_; c++)
-                    {
-                        output_base[store_offset + g * GROUP_SIZE + c] = src[g * GROUP_SIZE + c];
-                    }
+                    output_base[store_offset + i] = src[i];
                 }
             }
         }

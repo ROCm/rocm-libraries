@@ -319,3 +319,105 @@ TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Dgrad_CyclicShift_Direct_Config75_
 {
     ASSERT_TRUE((RunDgrad<75>(1, 8, 8, 8, 8, 8, 3, 3, 1, 1)));
 }
+
+// =============================================================================
+// Padded channel tests: c_per_group and/or k_per_group < 8 (but > 4 for at least one)
+// Uses CyclicShift configs with small vector_size (indices 76-81)
+// and None fallback configs (indices 82-83).
+// =============================================================================
+
+class DirectConvGrouped8cFp16TileConvV2PaddedTest
+    : public DirectConvGrouped4cFp16TestHarness<TileConv8cV2KernelTraits>
+{
+};
+
+// --- Fprop padded: C == K ---
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C6_K6)
+{
+    // vector_size=2 config (index 80): 6 % 2 == 0
+    ASSERT_TRUE((RunFprop<80>(1, 8, 8, 8, 6, 6, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C5_K5)
+{
+    // vector_size=1 config (index 81): any channel count
+    ASSERT_TRUE((RunFprop<81>(1, 8, 8, 8, 5, 5, 3, 3, 1, 1)));
+}
+
+// --- Fprop padded: C != K ---
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C5_K8)
+{
+    // vector_size=1 config (index 81)
+    ASSERT_TRUE((RunFprop<81>(1, 8, 8, 8, 5, 8, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C8_K5)
+{
+    ASSERT_TRUE((RunFprop<81>(1, 8, 8, 8, 8, 5, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C6_K4)
+{
+    // vector_size=2 config (index 80): 6 % 2 == 0, 4 % 2 == 0; c > 4 so 8c kernel applies
+    ASSERT_TRUE((RunFprop<80>(1, 8, 8, 8, 6, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C5_K7)
+{
+    // vector_size=1 config (index 81)
+    ASSERT_TRUE((RunFprop<81>(1, 8, 8, 8, 5, 7, 3, 3, 1, 1)));
+}
+
+// --- Dgrad padded: C == K ---
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Dgrad_C6_K6)
+{
+    // vector_size=2 config (index 77): 6 % 2 == 0
+    ASSERT_TRUE((RunDgrad<77>(1, 8, 8, 8, 6, 6, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Dgrad_C5_K5)
+{
+    // vector_size=1 config (index 78)
+    ASSERT_TRUE((RunDgrad<78>(1, 8, 8, 8, 5, 5, 3, 3, 1, 1)));
+}
+
+// --- Dgrad padded: C != K ---
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Dgrad_C5_K8)
+{
+    ASSERT_TRUE((RunDgrad<78>(1, 8, 8, 8, 5, 8, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Dgrad_C8_K5)
+{
+    ASSERT_TRUE((RunDgrad<78>(1, 8, 8, 8, 8, 5, 3, 3, 1, 1)));
+}
+
+// --- No-swizzle fallback for padding ---
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_NoSwizzle_C5_K5)
+{
+    // Config 83: Fprop, None swizzle, vector_size=1
+    ASSERT_TRUE((RunFprop<83>(1, 8, 8, 8, 5, 5, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Dgrad_NoSwizzle_C5_K5)
+{
+    // Config 82: Dgrad, None swizzle, vector_size=1
+    ASSERT_TRUE((RunDgrad<82>(1, 8, 8, 8, 5, 5, 3, 3, 1, 1)));
+}
+
+// --- Larger spatial with padding ---
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C6_K6_LargerSpatial)
+{
+    ASSERT_TRUE((RunFprop<80>(4, 16, 16, 8, 6, 6, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Dgrad_C6_K6_LargerSpatial)
+{
+    ASSERT_TRUE((RunDgrad<77>(4, 16, 16, 8, 6, 6, 3, 3, 1, 1)));
+}

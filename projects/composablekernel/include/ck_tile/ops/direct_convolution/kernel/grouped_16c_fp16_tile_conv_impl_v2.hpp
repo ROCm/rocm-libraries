@@ -90,8 +90,8 @@ struct Config
         else if (swizzle_type == SwizzleType::CyclicShift)
             swz = "cyclicshift-swizzle";
 
-        std::string base = "tile_v2_grouped_16c_" + swz + "_waves_per_wg_" +
-                           std::to_string(waves_per_wg);
+        std::string vector_size_str = "_vec_" + std::to_string(vector_size);
+        std::string base = "tile_v2_grouped_16c_" + swz + "_waves_per_wg_" + std::to_string(waves_per_wg) + vector_size_str;
         if(epilogue == EpilogueType::RegistersToGlobalMemory)
             return base + "_skip_lds_epilogue";
         else
@@ -279,6 +279,39 @@ constexpr Config configs[] = {
      {.waves_per_wg = 8, .direction=Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift,
      .epilogue = EpilogueType::RegistersToGlobalMemory},
+     // Small vector load/store configs for padding cases (channels_per_group < 16)
+     // where we can't use vectorized accesses without out-of-bounds.
+     // Dgrad CyclicShift (indices 76-79)
+     {.waves_per_wg = 8, .direction = Direction::Dgrad,
+      .swizzle_type = SwizzleType::CyclicShift,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 8},
+     {.waves_per_wg = 8, .direction = Direction::Dgrad,
+      .swizzle_type = SwizzleType::CyclicShift,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4},
+     {.waves_per_wg = 8, .direction = Direction::Dgrad,
+      .swizzle_type = SwizzleType::CyclicShift,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 2},
+     {.waves_per_wg = 8, .direction = Direction::Dgrad,
+      .swizzle_type = SwizzleType::CyclicShift,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
+     // Fprop CyclicShift (indices 80-83)
+     {.waves_per_wg = 8,
+      .swizzle_type = SwizzleType::CyclicShift,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 8},
+     {.waves_per_wg = 8,
+      .swizzle_type = SwizzleType::CyclicShift,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4},
+     {.waves_per_wg = 8,
+      .swizzle_type = SwizzleType::CyclicShift,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 2},
+     {.waves_per_wg = 8,
+      .swizzle_type = SwizzleType::CyclicShift,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
+     // No-swizzle fallback for padding (indices 84-85)
+     {.waves_per_wg = 8, .direction = Direction::Dgrad,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
+     {.waves_per_wg = 8,
+      .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
@@ -296,6 +329,13 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
     // when the output fits in a single spatial tile.
     if(cfg.swizzle_type == SwizzleType::XOR && !xor_config_valid(cfg, par))
         return false;
+
+    const bool padding_needed = par.channels_per_group() != 16 || par.filters_per_group() != 16;
+    if(padding_needed && par.channels_per_group() % cfg.vector_size != 0)
+        return false;
+    if(padding_needed && par.filters_per_group() % cfg.vector_size != 0)
+        return false;
+
     return true;
 }
 
@@ -600,6 +640,14 @@ inline void launch(int config_idx,
         config_idx, std::make_index_sequence<NUM_CONFIGS>{}, lp, par, in, wei, out, stream);
 }
 
+static bool channels_can_be_padded(const Conv2dParams& par)
+{
+    int c = par.channels_per_group();
+    int k = par.filters_per_group();
+    // Only pad to 16 if at least one dimension exceeds the 8c kernel's range.
+    return c <= 16 && k <= 16 && (c > 8 || k > 8);
+}
+
 constexpr KernelVariant make_variant()
 {
     return {
@@ -608,9 +656,7 @@ constexpr KernelVariant make_variant()
         {
             if(!is_applicable_base(par))
                 return false;
-            if(par.channels_per_group() != 16)
-                return false;
-            if(par.c_tot % 16 != 0)
+            if(!channels_can_be_padded(par))
                 return false;
             return true;
         },

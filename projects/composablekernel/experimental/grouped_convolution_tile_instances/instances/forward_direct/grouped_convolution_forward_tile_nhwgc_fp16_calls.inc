@@ -109,6 +109,13 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<71, dire
 // Group 4: Cyclic-shift swizzle - Fprop indices 72-73
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<72, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<73, direct_conv::Version::v2>, SIGNATURE>);
+// Padded CyclicShift configs — Fprop indices 80-83 (vector_size = 8, 4, 2, 1)
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<80, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<81, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<82, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<83, direct_conv::Version::v2>, SIGNATURE>);
+// Padded no-swizzle fallback — Fprop index 85 (vector_size = 1)
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward16CFp16Kernel<85, direct_conv::Version::v2>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
 // Direct HIP convolution (streaming) 8c kernels — configs 9-17 are Fprop
@@ -170,3 +177,9 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<71, direc
 // Group 4: Cyclic-shift swizzle — Fprop indices 72-73
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<72, direct_conv::Version::v2>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<73, direct_conv::Version::v2>, SIGNATURE>);
+// Padded CyclicShift configs — Fprop indices 79-81 (vector_size = 4, 2, 1)
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<79, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<80, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<81, direct_conv::Version::v2>, SIGNATURE>);
+// Padded no-swizzle fallback — Fprop index 83 (vector_size = 1)
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<83, direct_conv::Version::v2>, SIGNATURE>);

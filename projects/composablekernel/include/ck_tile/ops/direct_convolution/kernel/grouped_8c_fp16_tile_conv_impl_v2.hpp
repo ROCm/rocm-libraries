@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_kernel_base.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_descriptors.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_input_loader.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/grouped_conv_weight_loader.hpp"
@@ -130,8 +131,9 @@ struct Config
         else if(swizzle_type == SwizzleType::CyclicShift)
             swz = "cyclicshift-swizzle";
 
+        std::string vector_size_str = "_vec_" + std::to_string(vector_size);
         std::string base =
-            "tile_v2_grouped_8c_" + swz + "_waves_per_wg_" + std::to_string(waves_per_wg);
+            "tile_v2_grouped_8c_" + swz + "_waves_per_wg_" + std::to_string(waves_per_wg) + vector_size_str;
         if(epilogue == EpilogueType::RegistersToGlobalMemory)
             return base + "_skip_lds_epilogue";
         else
@@ -320,6 +322,33 @@ constexpr Config configs[] = {
     {.waves_per_wg = 8, .direction = Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift,
      .epilogue = EpilogueType::RegistersToGlobalMemory},
+    // Small vector load/store configs for padding cases (channels_per_group < 8)
+    // where we can't use vectorized accesses without out-of-bounds.
+    // Dgrad CyclicShift (indices 76-78)
+    {.waves_per_wg = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4},
+    {.waves_per_wg = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 2},
+    {.waves_per_wg = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
+    // Fprop CyclicShift (indices 79-81)
+    {.waves_per_wg = 8,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4},
+    {.waves_per_wg = 8,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 2},
+    {.waves_per_wg = 8,
+     .swizzle_type = SwizzleType::CyclicShift,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
+    // No-swizzle fallback for padding (indices 82-83)
+    {.waves_per_wg = 8, .direction = Direction::Dgrad,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
+    {.waves_per_wg = 8,
+     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
@@ -345,23 +374,19 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
             return false;
         }
     }
+
+    const bool padding_needed = par.channels_per_group() != 8 || par.filters_per_group() != 8;
+    if(padding_needed && par.channels_per_group() % cfg.vector_size != 0)
+        return false;
+    if(padding_needed && par.filters_per_group() % cfg.vector_size != 0)
+        return false;
+
     return true;
 }
 
 inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
 {
-    const auto& cfg = configs[config_idx];
-
-    const int out_q    = (cfg.direction == Direction::Dgrad) ? par.w : par.q;
-    auto blocks_w      = ck_tile::integer_divide_ceil(out_q, BLOCK_Q);
-    auto blocks_w_n    = blocks_w * cfg.n_fold;
-    auto blocks_c      = ck_tile::integer_divide_ceil(par.c_tot, cfg.block_c());
-    auto blocks_n_fold = ck_tile::integer_divide_ceil(par.n, cfg.n_fold);
-
-    LaunchParams launch;
-    launch.grid       = dim3(blocks_w_n, blocks_c, blocks_n_fold);
-    launch.block_size = dim3(cfg.block_size(), 1, 1);
-    return launch;
+    return get_launch_params_impl(configs[config_idx], par);
 }
 
 // ===================================================================
@@ -475,6 +500,14 @@ struct TileConstants
         {
             return Shared::MakeLdsReadDescriptor();
         }
+
+        template <int VectorSize>
+        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(
+            int hi, int wi, int C_in, int c_per_group, int px)
+        {
+            return Shared::template MakeDramReadDescriptorPadded<VectorSize>(
+                hi, wi, C_in, c_per_group, px);
+        }
     };
 
     // -----------------------------------------------------------------------
@@ -564,6 +597,22 @@ struct TileConstants
         static CK_TILE_DEVICE auto MakeDramWriteDescriptorWide(int wo, int C)
         {
             return Shared::MakeDramWriteDescriptorWide(wo, C);
+        }
+
+        template <int VectorSize = 1>
+        static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrowPadded(
+            int ho, int wo, int K_total, int k_per_group)
+        {
+            return Shared::template MakeDramWriteDescriptorNarrowPadded<VectorSize>(
+                ho, wo, K_total, k_per_group);
+        }
+
+        template <int VectorSize = 1>
+        static CK_TILE_DEVICE auto MakeDramWriteDescriptorWidePadded(
+            int wo, int K_total, int k_per_group)
+        {
+            return Shared::template MakeDramWriteDescriptorWidePadded<VectorSize>(
+                wo, K_total, k_per_group);
         }
 
         // Tile distribution for DRAM output writes (Toeplitz-specific).
@@ -663,8 +712,9 @@ struct InputLoaderToeplitz
                                    const _Float16* __restrict__ in,
                                    int hi,
                                    int wi,
-                                   int px)
-        : shared_loader(bc, input_lds, in, hi, wi, px)
+                                   int px,
+                                   int c_per_group = TC::GROUP_SIZE)
+        : shared_loader(bc, input_lds, in, hi, wi, px, c_per_group)
     {
         // Compute the Toeplitz-specific LDS read offset.
         // Input position: input_x = 2*(lane%16) + lane/16
@@ -835,6 +885,8 @@ __device__ void conv2d_grouped_8c_fp16_cdna4_nhwc_impl_v2(const _Float16* __rest
                                                             _Float16* __restrict__ out,
                                                             int N,
                                                             int groups,
+                                                            int c_per_group,
+                                                            int k_per_group,
                                                             int hi,
                                                             int wi,
                                                             int ho,
@@ -859,21 +911,28 @@ __device__ void conv2d_grouped_8c_fp16_cdna4_nhwc_impl_v2(const _Float16* __rest
     uint4* output_lds = lds_buf + INPUT_TOTAL;
 
     // --- Coordinate setup ---
-    BlockCoords<cfg> bc(groups);
+    // For Dgrad, the kernel wrapper swaps in/out pointers. We must also swap
+    // c_per_group/k_per_group for BlockCoords, InputLoader, and OutputWriter.
+    // Weight loader always uses original c_per_group/k_per_group.
+    constexpr bool is_dgrad = (cfg.direction == Direction::Dgrad);
+    const int in_cpg  = is_dgrad ? k_per_group : c_per_group;
+    const int out_kpg = is_dgrad ? c_per_group : k_per_group;
+
+    BlockCoords<cfg> bc(groups, in_cpg, out_kpg);
     if(bc.block_n >= N)
         return;
 
     // --- Weight loading (uses start of buffer, before input phase) ---
     fp16x8_t weights_reg[cfg.kh];
-    WeightLoader<cfg>::load_to_lds(bc, lds_buf, wei, TC::GROUP_SIZE, TC::GROUP_SIZE);
+    WeightLoader<cfg>::load_to_lds(bc, lds_buf, wei, c_per_group, k_per_group);
     wait_vmcnt<0>();
     __syncthreads();
 
     WeightLoader<cfg>::read_from_lds(weights_reg, lds_buf);
 
     // --- Setup input loader and output writer ---
-    InputLoaderToeplitz<cfg> il(bc, input_lds, in, hi, wi, px);
-    OutputWriterType ow(bc, output_lds, out, ho, wo);
+    InputLoaderToeplitz<cfg> il(bc, input_lds, in, hi, wi, px, in_cpg);
+    OutputWriterType ow(bc, output_lds, out, ho, wo, out_kpg);
 
     __syncthreads();
 
@@ -1023,7 +1082,8 @@ __global__ void conv2d_grouped_8c_fp16_nhwc_cdna4_v2(const _Float16* __restrict_
                                                        int px)
 {
     conv2d_grouped_8c_fp16_cdna4_nhwc_impl_v2<cfg>(in, wei, out,
-                                                     N, groups, hi, wi, ho, wo, py, px);
+                                                     N, groups, c_per_group, k_per_group,
+                                                     hi, wi, ho, wo, py, px);
 }
 
 // ============================================================================
@@ -1085,36 +1145,23 @@ inline void launch(int config_idx,
         config_idx, std::make_index_sequence<NUM_CONFIGS>{}, lp, par, in, wei, out, stream);
 }
 
+static bool channels_can_be_padded(const Conv2dParams& par)
+{
+    int c = par.channels_per_group();
+    int k = par.filters_per_group();
+    // Only pad to 8 if at least one dimension exceeds the 4c kernel's range.
+    return c <= 8 && k <= 8 && (c > 4 || k > 4);
+}
+
 constexpr KernelVariant make_variant()
 {
     return {
         .is_applicable =
             [](const Conv2dParams& par)
         {
-            if(par.in_type != DataType::fp16)
+            if(!is_applicable_base(par))
                 return false;
-            if(par.wei_type != DataType::fp16)
-                return false;
-            if(par.out_type != DataType::fp16)
-                return false;
-            if(par.order != TensorOrder::NHWC)
-                return false;
-            if(par.direction != Direction::Fprop &&
-               par.direction != Direction::Dgrad)
-                return false;
-            if(par.kh != 3 || par.kw != 3)
-                return false;
-            if(par.k_tot != par.c_tot)
-                return false;
-            if(par.channels_per_group() != 8)
-                return false;
-            if(par.c_tot % 8 != 0)
-                return false;
-            if(par.stride_h != 1 || par.stride_w != 1)
-                return false;
-            if(par.dilation_h != 1 || par.dilation_w != 1)
-                return false;
-            if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1)
+            if(!channels_can_be_padded(par))
                 return false;
             return true;
         },

@@ -104,6 +104,7 @@ struct Config
             swz = "xor-swizzle";
         else if (swizzle_type == SwizzleType::CyclicShift)
             swz = "cyclicshift-swizzle";
+        
         std::string vector_size_str = "_vec_" + std::to_string(vector_size);
         std::string waves_c64_str = "_waves_c64_" + std::to_string(waves_c64);
         std::string waves_q4_str = "_waves_q4_" + std::to_string(waves_q4);
