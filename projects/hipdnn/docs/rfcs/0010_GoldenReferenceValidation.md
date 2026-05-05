@@ -33,31 +33,23 @@ This RFC introduces golden reference validation as a third verification mode for
 
 ### Key Benefits
 - **Deterministic baselines**: Reference data is fixed; test outcomes depend only on the engine under test
-- **No C++ reference kernel needed**: Generate golden data from PyTorch once, validate directly against real MIOpen kernels -- no need to write or maintain C++ reference implementations
-- **Regression detection**: Computed mode compares two live results -- if both change together, the test still passes. Golden mode compares against a frozen known-good output, so any change in the engine is caught
+- **Unblocks testing before C++ reference kernels exist**: Generate golden data from PyTorch and start validating immediately -- the C++ reference kernel can follow later without delaying test coverage
+- **Regression detection**: Computed mode compares the reference executor output against the engine output -- if both the reference executor and the engine drift together, the test still passes. Golden mode compares against a frozen known-good output, so any engine drift is caught
 - **Faster execution**: Eliminates runtime reference computation for large tensors
 
 ### How It Works
 
-The entire golden reference feature reduces to **7 steps** split across two pipelines:
+The entire golden reference feature reduces to **7 steps** split across two pipelines -- generation (run once) and validation (run every CI):
 
-**Generation** (run once by a developer to produce golden data):
-
-| Step | Tag | What happens |
-|------|-----|-------------|
-| 1 | `construct` | Build the graph (same as today) |
-| 2 | `execute-reference` | Run a trusted reference (CPU ref, GPU ref, or external) to produce truth |
-| 3 | `serialize` | Save inputs + outputs to disk |
-
-**Validation** (run every CI to check the engine under test):
-
-| Step | Tag | What happens |
-|------|-----|-------------|
-| 1 | `construct` | Build the graph (same as today -- shared with generation) |
-| 4 | `deserialize` | Load saved inputs from disk |
-| 5 | `execute-engine` | Run MIOpen GPU (the thing being tested) |
-| 6 | `deserialize` | Load saved reference outputs from disk |
-| 7 | `validate` | Compare engine output to saved output |
+| Step | Tag | What happens | Generation | Validation |
+|------|-----|-------------|:---:|:---:|
+| 1 | `construct` | Build the graph (same as today) | Y | Y |
+| 2 | `execute-reference` | Run a trusted reference (CPU ref, GPU ref, or external) to produce truth | Y | -- |
+| 3 | `serialize` | Save inputs + outputs to disk | Y | -- |
+| 4 | `deserialize` | Load saved inputs from disk | -- | Y |
+| 5 | `execute-engine` | Run MIOpen GPU (the thing being tested) | -- | Y |
+| 6 | `deserialize` | Load saved reference outputs from disk | -- | Y |
+| 7 | `validate` | Compare engine output to saved output | -- | Y |
 
 No reference executor runs in CI. The truth was computed once and frozen to disk. The diagrams in [The 7 Steps](#the-7-steps) show both pipelines visually.
 
@@ -65,7 +57,7 @@ No reference executor runs in CI. The truth was computed once and frozen to disk
 
 ## Problem Statement
 
-The integration test suite currently validates engine outputs by computing references at runtime via `CpuReferenceGraphExecutor` or `GpuReferenceGraphExecutor` ([`IntegrationGraphVerificationHarness.hpp:94-189`](../../src/harness/IntegrationGraphVerificationHarness.hpp)). This creates several gaps:
+The integration test suite currently validates engine outputs by computing references at runtime via [`CpuReferenceGraphExecutor`](../../test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp) or [`GpuReferenceGraphExecutor`](../../../../dnn-providers/integration-tests/src/harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp). This creates several gaps:
 
 1. **Circular dependency risk**: If the reference executor has a bug, both sides produce the same wrong answer and the test passes
 2. **Coverage gap**: Operations not yet implemented in the reference executor cannot be tested (e.g., instead of writing a C++ SDPA reference kernel, golden data lets us use PyTorch's output as truth via `--external-reference`)
@@ -106,7 +98,7 @@ The graph construction (step 1) is shared by both pipelines -- the same `buildGr
 
 **Who calls it**: Both the generation pipeline and the validation pipeline.
 
-**What exists today**: This step already works. Every test fixture (e.g., `IntegrationGpuConvForward.cpp:33-77`) implements `buildGraph()` which creates a `graph::Graph`, adds tensors with explicit **names** (e.g., `"x"`, `"w"`, `"y"`), creates operations, validates, and builds the operation graph.
+**What exists today**: This step already works. Every test fixture (e.g., `IntegrationGpuConvForward.cpp`) implements `buildGraph()` which creates a `graph::Graph`, adds tensors with explicit **names** (e.g., `"x"`, `"w"`, `"y"`), creates operations, validates, and builds the operation graph.
 
 **What changes**: Nothing. The graph construction code is untouched.
 
@@ -522,7 +514,7 @@ The first thing Step 4 does is serialize the current graph and compare its hash 
 
 **Who calls it**: The validation pipeline.
 
-**What exists today**: `executeGpuGraph()` at `IntegrationGraphVerificationHarness.hpp:340-353`:
+**What exists today**: `executeGpuGraph()` in `IntegrationGraphVerificationHarness.hpp`:
 
 ```cpp
 void executeGpuGraph(hipdnnHandle_t handle,
@@ -774,7 +766,7 @@ private:
     // Existing computed verification flow, extracted verbatim from current verifyGraph()
     void verifyGraphComputed(graph::Graph& graph, unsigned int seed)
     {
-        // ... existing code from IntegrationGraphVerificationHarness.hpp:94-189 ...
+        // ... existing code from IntegrationGraphVerificationHarness.hpp ...
     }
 
     void verifyGraphGolden(graph::Graph& graph, const std::filesystem::path& goldenDir)
