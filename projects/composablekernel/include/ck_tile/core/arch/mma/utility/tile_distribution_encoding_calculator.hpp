@@ -18,6 +18,7 @@ namespace ck_tile::core::arch::mma {
  * @tparam MmaOp          Intrinsic (amdgcn_mma).
  * @tparam CTranspose     Whether we are using CTranspose.
  * @tparam SFactor        Swizzle factor. Not implemented.
+ * @tparam kIter          K composition factor (consecutive intrinsic calls to form larger k dim).
  * @tparam AttrNumAccessA Requested NumAccess for the A matrix. Must be multiple of "fundamental"
  *                        NumAccess for intrinsic. See details in amdgcn_mma.hpp.
  * @tparam AttrNumAccessB Requested NumAccess for the B matrix.
@@ -25,6 +26,7 @@ namespace ck_tile::core::arch::mma {
 template <typename MmaOp,
           bool CTranspose        = false,
           index_t SFactor        = 1,
+          index_t kIter          = 1,
           index_t AttrNumAccessA = MmaOp::kAKNumAccess,
           index_t AttrNumAccessB = MmaOp::kBKNumAccess>
 struct TileDistrEncCalc
@@ -56,7 +58,7 @@ struct TileDistrEncCalc
         tuple<sequence<MajorDimSize>,
               sequence<NumAccess,
                        MmaOp::kK / MmaOp::kABKPerLane,
-                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize>>,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize * kIter>>,
         tuple<sequence<0, 2, 1>>,
         tuple<sequence<0, 1, 0>>,
         sequence<2, 2>,
@@ -118,9 +120,9 @@ struct TileDistrEncCalc
     static_assert(TileDistrEncRegMap<CWarpDstrEncoding>::num_lanes == MmaOp::WaveSize);
 
     static_assert(TileDistrEncRegMap<AWarpDstrEncoding>::num_vector_items ==
-                  vector_traits<typename MmaOp::AVecType>::vector_size);
+                  vector_traits<typename MmaOp::AVecType>::vector_size * kIter);
     static_assert(TileDistrEncRegMap<BWarpDstrEncoding>::num_vector_items ==
-                  vector_traits<typename MmaOp::BVecType>::vector_size);
+                  vector_traits<typename MmaOp::BVecType>::vector_size * kIter);
     static_assert(TileDistrEncRegMap<CWarpDstrEncoding>::num_vector_items ==
                   vector_traits<typename MmaOp::CVecType>::vector_size);
 };

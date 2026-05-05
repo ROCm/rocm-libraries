@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_calculator.hpp"
+#include "ck_tile/core/tensor/static_distributed_tensor.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 
 #include "amdgcn_mma.hpp"
@@ -41,14 +43,14 @@ constexpr inline int getPipelineFlags()
  * (e.g., mfma or wmma), this class performs fragment-wise (MmaTile) decomposition to
  * matrix-multiply input WaveTiles of (A: WaveTileM x WaveTileK) x (B: WaveTileK x WaveTileN) and
  * accumulates results into output WaveTile (C: WaveTileM x WaveTileN).
- * @tparam ADataType      Data type of input WaveTile A
- * @tparam BDataType      Data type of input WaveTile B
- * @tparam CDataType      Data type of input/output WaveTile C (accumulator)
+ * @tparam ADataType_     Data type of input WaveTile A
+ * @tparam BDataType_     Data type of input WaveTile B
+ * @tparam CDataType_     Data type of input/output WaveTile C (accumulator)
  * @tparam WaveTileM      Mma WaveTile M dimension
  * @tparam WaveTileN      Mma WaveTile K dimension
  * @tparam WaveTileK      Mma WaveTile M dimension
  * @tparam AccumPolicy    The fragment order of the accum. registers (row or col major frag order)
- * @tparam SwapAB     Swaps A and B input vectors
+ * @tparam CTranspose     Swaps A and B input vectors
  * @tparam CompilerTarget The compiler target
  * @tparam MmaOp_         Backend wrapper class that will perform the mma op (e.g., mfma or wmma)
  * @tparam MmaTransforms  The set of transforms to be applied to input/output WaveTiles
@@ -60,23 +62,23 @@ constexpr inline int getPipelineFlags()
  * output WaveTile. This is a powerful example of how to build a flexible and reusable mma driver
  * that can adapt to different hardware capabilities and requirements.
  */
-template <typename ADataType,
-          typename BDataType,
-          typename CDataType,
+template <typename ADataType_,
+          typename BDataType_,
+          typename CDataType_,
           uint32_t WaveTileM,
           uint32_t WaveTileN,
           uint32_t WaveTileK,
           MmaOpFamily OpFamily,
           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
-          bool SwapAB                = false,
+          bool CTranspose            = false,
           typename CompilerTarget =
               decltype(get_compiler_target()), // TODO: c++20 amdgcn_target_arch_id GfxTargetId =
                                                // get_compiler_target(),
           typename MmaOp_ =
-              typename MmaDefaultSelector<ADataType, // TODO: c++20 MmaOpI MmaOp = typename
-                                                     // MmaDefaultSelector<ADataType,
-                                          BDataType,
-                                          CDataType,
+              typename MmaDefaultSelector<ADataType_, // TODO: c++20 MmaOpI MmaOp = typename
+                                                      // MmaDefaultSelector<ADataType_,
+                                          BDataType_,
+                                          CDataType_,
                                           WaveTileM,
                                           WaveTileN,
                                           WaveTileK,
@@ -85,34 +87,68 @@ template <typename ADataType,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<SwapAB>(),
-                                            WaveWiseMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, SwapAB, CompilerTarget, MmaOp_, MmaTransforms>>
+struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<CTranspose>(),
+                                            WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CTranspose, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<SwapAB>(),
-                                 WaveWiseMmaPipeline<ADataType, BDataType, CDataType, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, SwapAB, CompilerTarget, MmaOp_, MmaTransforms>>;
+    using Base = MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<CTranspose>(),
+                                 WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, OpFamily, AccumPolicy, CTranspose, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
     using MmaOp = MmaOp_;
 
-    // Fragment dimensions
-    constexpr static uint32_t FragM = MmaOp::kM;
-    constexpr static uint32_t FragN = MmaOp::kN;
-    constexpr static uint32_t FragK = MmaOp::kK;
+    using ADataType = typename MmaOp::ADataType;
+    using BDataType = typename MmaOp::BDataType;
+    using CDataType = typename MmaOp::CDataType;
 
-    // Fragment counts for decomposition
-    constexpr static uint32_t FragsM = WaveTileM / FragM;
-    constexpr static uint32_t FragsN = WaveTileN / FragN;
-    constexpr static uint32_t FragsK = WaveTileK / FragK;
-    constexpr static uint32_t FragsC = FragsM * FragsN;
+    static_assert(std::is_same_v<ADataType, ADataType_>);
+    static_assert(std::is_same_v<BDataType, BDataType_>);
+    static_assert(std::is_same_v<CDataType, CDataType_>);
 
-    // Vector types for packed registers in each fragment
-    using InternalAVecT = typename MmaOp::AVecType;
-    using InternalBVecT = typename MmaOp::BVecType;
-    using InternalCVecT = typename MmaOp::CVecType;
+    // TODO: Check where this should come from.
+    static constexpr index_t ABNumAccess   = 1;
+    static constexpr index_t SwizzleFactor = 1;
 
-    // Buffer types for WaveTiles
-    using AVecType = InternalAVecT[FragsM][FragsK];
-    using BVecType = InternalBVecT[FragsN][FragsK];
-    using CVecType = InternalCVecT[FragsM][FragsN];
+    // WaveTile dimensions (Used to be fragment dims but higher level expects these to include k
+    // iteration!)
+    constexpr static index_t kM = WaveTileM;
+    constexpr static index_t kN = WaveTileN;
+    constexpr static index_t kK = WaveTileK;
+
+    // Fragment counts for composition
+    constexpr static uint32_t FragsM = WaveTileM / MmaOp::kM;
+    constexpr static uint32_t FragsN = WaveTileN / MmaOp::kN;
+    constexpr static uint32_t FragsK = WaveTileK / MmaOp::kK;
+
+    // No MN composition for now! Only K composition (kIter).
+    static_assert(FragsM == 1);
+    static_assert(FragsN == 1);
+
+    // K0 or kABKPerLane (plus MmaPipeline k iter!)
+    // TODO: Check if this makes sense with numAccess and Compression.
+    static constexpr index_t kKPerThread = MmaOp::kABKPerLane * FragsK;
+
+    // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
+    // A layout.
+    using EncCalc =
+        TileDistrEncCalc<MmaOp, CTranspose, SwizzleFactor, FragsK, ABNumAccess, ABNumAccess>;
+    using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
+    using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
+    using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;
+
+    using AWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(AWarpDstrEncoding{}))>;
+    using BWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(BWarpDstrEncoding{}))>;
+    using CWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(CWarpDstrEncoding{}))>;
+
+    // Full static distributed tensor types including composition. This is the baseline input and
+    // output format for all exec and transform functions.
+    using AWarpTensor = static_distributed_tensor<ADataType, AWarpDstr>;
+    using BWarpTensor = static_distributed_tensor<BDataType, BWarpDstr>;
+    using CWarpTensor = static_distributed_tensor<CDataType, CWarpDstr>;
+
+    // We use these thread_buffer types internally in a number of places, because it allow us to
+    // directly select the ext_vectors for individual MmaOp calls.
+    using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
+    using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
+    using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
 
     // Transforms
     using ATransform = typename MmaTransforms::ATransform;
@@ -121,48 +157,52 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
     using DTransform = typename MmaTransforms::DTransform;
 
     // Sanity checks
-    static_assert(WaveTileM >= FragM, "WaveTileM must be larger than FragM");
-    static_assert(WaveTileN >= FragN, "WaveTileN must be larger than FragN");
-    static_assert(WaveTileK >= FragK, "WaveTileK must be larger than FragK");
-    static_assert(WaveTileM % FragM == 0u, "WaveTileM must be a multiple of FragM");
-    static_assert(WaveTileN % FragN == 0u, "WaveTileN must be a multiple of FragN");
-    static_assert(WaveTileK % FragK == 0u, "WaveTileK must be a multiple of FragK");
+    static_assert(WaveTileM >= MmaOp::kM, "WaveTileM must be larger than MmaOp::kM");
+    static_assert(WaveTileN >= MmaOp::kN, "WaveTileN must be larger than MmaOp::kN");
+    static_assert(WaveTileK >= MmaOp::kK, "WaveTileK must be larger than MmaOp::kK");
+    static_assert(WaveTileM % MmaOp::kM == 0u, "WaveTileM must be a multiple of MmaOp::kM");
+    static_assert(WaveTileN % MmaOp::kN == 0u, "WaveTileN must be a multiple of MmaOp::kN");
+    static_assert(WaveTileK % MmaOp::kK == 0u, "WaveTileK must be a multiple of MmaOp::kK");
 
-    template <typename VecTA, typename VecTB, typename VecTC>
-    CK_TILE_DEVICE static void execImpl(std::tuple<VecTA, VecTB, VecTC>& vecs)
+    // TODO: Why does this even need to be a template? The types should be known.
+    template <typename ATensor, typename BTensor, typename CTensor>
+    CK_TILE_DEVICE static void execImpl(ATensor& a, BTensor& b, CTensor& c)
     {
-        auto& [a_frag, b_frag, c_frag] = vecs;
+        static_assert(
+            detail::is_similiar_distributed_tensor_v<remove_cvref_t<CTensor>, CWarpTensor> &&
+            detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>, AWarpTensor> &&
+            detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>, BWarpTensor>);
+
+        auto& a_buf = reinterpret_cast<const AThreadBufType&>(a);
+        auto& b_buf = reinterpret_cast<const BThreadBufType&>(b);
+        auto& c_buf = reinterpret_cast<CThreadBufType&>(c);
 
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
         {
-            // "Row-major" accumulation over the N-dimension fragments first.
-            // Pseudo code here, but we would basically iterate over the fragments in row-major
-            // order. We also have to ensure that the incoming vector WaveTiles are converted to
-            // native vector types before passing to the FragWiseMma exec function.
             for(uint32_t bm = 0u; bm < FragsM; ++bm)
             {
                 for(uint32_t bn = 0u; bn < FragsN; ++bn)
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_frag[bm][bn] =
-                            MmaOp::exec(a_frag[bm][bk], b_frag[bn][bk], c_frag[bm][bn]);
+                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(a_buf.at(bm * FragsK + bk),
+                                                                 b_buf.at(bn * FragsK + bk),
+                                                                 c_buf.at(bm * FragsN + bn));
                     }
                 }
             }
         }
         else if constexpr(AccumPolicy == MmaAccumPolicy::COL_MAJOR)
         {
-            // "Col-major" accumulation over the M-dimension fragments first.
-            // Pseudo code here, but we would basically iterate over the blocks in col-major order
             for(uint32_t bn = 0u; bn < FragsN; ++bn)
             {
                 for(uint32_t bm = 0u; bm < FragsM; ++bm)
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_frag[bm][bn] =
-                            MmaOp::exec(a_frag[bm][bk], b_frag[bn][bk], c_frag[bm][bn]);
+                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(a_buf.at(bm * FragsK + bk),
+                                                                 b_buf.at(bn * FragsK + bk),
+                                                                 c_buf.at(bm * FragsN + bn));
                     }
                 }
             }

@@ -188,6 +188,10 @@ struct MmaDefaultSelector<ADataType,
         std::conditional_t<IsSupported16x16,
                            CandidateOp16x16,
                            std::conditional_t<IsSupported4x4, CandidateOp4x4, DefaultOp>>>;
+
+    // TODO: Do not allow M / N composition for now.
+    static_assert(SelectedOp::kM == WaveTileM);
+    static_assert(SelectedOp::kN == WaveTileN);
 };
 
 } // namespace ck_tile::core::arch::mma
