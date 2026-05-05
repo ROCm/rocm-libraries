@@ -60,7 +60,7 @@ Meanwhile, the `idMap` — built in `CustomSchedule.py` — already contains the
 | **07**   | Make idMap/mfmaCode mandatory, delete dead code    | **Done**        | All fallbacks removed, mock test infra built, all 421 tests pass               |
 | **08**   | Register-based Pack→MFMA needed_by                 | **Done**        | `set_pack_needed_by_from_mfma_operands` — not yet wired into validation loop   |
 | **09**   | Tile-math function deletion                        | **Blocked**     | must_start_after dual-path validated; see Known Issues 1, 3, 6 for remaining   |
-| **10**   | SWaitCnt counter verification                      | **Done**        | `verify_swaitcnt_counters` — not yet wired as ValidatorPass                    |
+| **10**   | SWaitCnt counter verification                      | **Removed**     | `verify_swaitcnt_counters` deleted (bead `hof`): unreliable across loop boundaries (we don't know what's still outstanding from outside the captured loop) |
 | **11**   | Multi-ISA framework (ValidationConcern, catalog)   | **Done**        | Wired into `isValid`: `ValidationRule`/`StructuralRule` dispatch via `active_concerns()` |
 | **12**   | gfx1151 rules                                      | **Not started** | Unblocked: needs `LWAfterLRRule`, `LWBeforeLRRule`, `GRVgprReadyRule`          |
 | **13**   | findValidPositions query                           | **Done**        | Brute-force query wrapping isValid                                             |

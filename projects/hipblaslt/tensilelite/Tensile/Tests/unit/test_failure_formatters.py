@@ -46,7 +46,6 @@ from Tensile.Components.ScheduleCapture import (
     SchedulePosition,
     SCCConflictFailure,
     SlotKey,
-    SWaitCountExceedsOutstandingFailure,
     OutOfOrderSequenceFailure,
     LoopBodyCapture,
     TaggedInstruction,
@@ -490,29 +489,6 @@ def test_scc_conflict_failure_format_graph_shape_no_clobber():
     assert "Intervening SCC writer" not in msg
     assert "GRIncA[1] @ idx=4" in msg     # producer is 2nd GRIncA
     assert "GRIncA[2] @ idx=6" in msg     # consumer is 3rd
-
-
-def test_swait_count_exceeds_outstanding_failure_format_dscnt():
-    swait = _make_node("SYNC", "SWaitCnt", 0)
-    swait.issued_at = SchedulePosition(loop_index=1, vmfma_index=8, sub_index=0)
-    failure = SWaitCountExceedsOutstandingFailure(
-        swait=swait, counter_kind="dscnt", counter_value=3, outstanding=1
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "SWaitCnt @ idx=8" in msg
-    assert "dscnt=3" in msg
-    assert "1 DS loads" in msg
-
-
-def test_swait_count_exceeds_outstanding_failure_format_vlcnt():
-    swait = _make_node("SYNC", "SWaitCnt", 0)
-    swait.issued_at = SchedulePosition(loop_index=1, vmfma_index=8, sub_index=0)
-    failure = SWaitCountExceedsOutstandingFailure(
-        swait=swait, counter_kind="vlcnt", counter_value=4, outstanding=2
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "vlcnt=4" in msg
-    assert "2 VM loads" in msg
 
 
 def test_out_of_order_sequence_failure_sequence_format():

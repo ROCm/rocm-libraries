@@ -819,25 +819,6 @@ class SCCConflictFailure(Failure):
 
 
 # ----------------------------------------------------------------------------
-# 11. SWaitCountExceedsOutstandingFailure — SWait references too many ops.
-# ----------------------------------------------------------------------------
-@dataclass
-class SWaitCountExceedsOutstandingFailure(Failure):
-    swait: object
-    counter_kind: str  # 'dscnt' | 'vlcnt'
-    counter_value: int
-    outstanding: int
-
-    def _format_canonical(self, capture) -> str:
-        load_kind = "DS loads" if self.counter_kind == "dscnt" else "VM loads"
-        return (
-            f"SWaitCnt @ idx={self.swait.issued_at.vmfma_index} has "
-            f"{self.counter_kind}={self.counter_value} but only {self.outstanding} "
-            f"{load_kind} are outstanding."
-        )
-
-
-# ----------------------------------------------------------------------------
 # 12. OutOfOrderSequenceFailure — instruction A came after B that should follow it.
 #     Used by CVT0/CVT1 pair ordering (CMSValidator.py:1642). The historical
 #     `verify_ascending_order` emitter was retired in bead wx9.11; that

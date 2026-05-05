@@ -1264,67 +1264,6 @@ def _compute_swap_register_pairs(vw: int, total_regs: int) -> list[tuple[int, in
 
 
 
-def verify_swaitcnt_counters(timeline: 'Timeline') -> Optional[str]:
-    """Verify that SWaitCnt counter values match the actual number of outstanding memory operations.
-
-    Counts DSLoad* instructions for dscnt and BufferLoad*/GlobalLoad* for vlcnt,
-    then checks each SWaitCnt's counter value against the actual count.
-
-    Returns an error message if a mismatch is found, None if all counters are correct.
-    Only runs if rocisa_inst is available on instructions (requires idMap).
-    """
-    from rocisa.instruction import DSLoadInstruction, GlobalReadInstruction
-
-    # Check if rocisa_inst is available
-    has_rocisa = False
-    for inst in timeline.combined_timeline:
-        if inst.rocisa_inst is not None:
-            has_rocisa = True
-            break
-    if not has_rocisa:
-        return None
-
-    # Count outstanding memory operations and verify at each SWaitCnt
-    outstanding_ds = 0  # lgkmcnt / dscnt counter
-    outstanding_vm = 0  # vmcnt / vlcnt counter
-
-    for inst in timeline.combined_timeline:
-        if isinstance(inst, LocalRead) and inst.rocisa_inst is not None:
-            if isinstance(inst.rocisa_inst, DSLoadInstruction):
-                outstanding_ds += 1
-        elif isinstance(inst, GlobalRead) and inst.rocisa_inst is not None:
-            if isinstance(inst.rocisa_inst, GlobalReadInstruction):
-                outstanding_vm += 1
-        elif isinstance(inst, SWait):
-            from Tensile.Components.ScheduleCapture import SWaitCountExceedsOutstandingFailure, LoopBodyCapture
-            # SWaitCountExceedsOutstandingFailure._format_canonical doesn't
-            # consume capture (it just renders swait.issued_at.vmfma_index),
-            # but Failure.format makes capture mandatory at the boundary —
-            # pass an explicit empty capture rather than threading the
-            # timeline through the structural-rule machinery just for this.
-            empty_cap = LoopBodyCapture(instructions=[])
-            if inst.dscnt >= 0:
-                if inst.dscnt > outstanding_ds:
-                    return SWaitCountExceedsOutstandingFailure(
-                        swait=inst,
-                        counter_kind="dscnt",
-                        counter_value=inst.dscnt,
-                        outstanding=outstanding_ds,
-                    ).format(empty_cap)
-                outstanding_ds = inst.dscnt
-            if inst.vlcnt >= 0:
-                if inst.vlcnt > outstanding_vm:
-                    return SWaitCountExceedsOutstandingFailure(
-                        swait=inst,
-                        counter_kind="vlcnt",
-                        counter_value=inst.vlcnt,
-                        outstanding=outstanding_vm,
-                    ).format(empty_cap)
-                outstanding_vm = inst.vlcnt
-
-    return None
-
-
 # Bead `8nz`: `estimate_quad_cycles` (the structural-side issue-time
 # simulator) was deleted. Quad-cycle visibility (CDNA 4 ISA section 7.6)
 # is now enforced exclusively by the graph-side helpers in
