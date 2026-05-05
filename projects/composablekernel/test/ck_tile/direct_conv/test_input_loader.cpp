@@ -37,7 +37,8 @@ using namespace grouped_4c_tile::v3;
 // configs[49] — Fprop, CyclicShift, vector_size=1, waves_c64=2 (any c)
 // ============================================================================
 static constexpr int CFG_UNPADDED = 9;
-static constexpr int CFG_VEC1    = 49;
+static constexpr int CFG_VEC2     = 48;
+static constexpr int CFG_VEC1     = 49;
 
 // ============================================================================
 // Test kernel: templated on config index.
@@ -65,20 +66,23 @@ __global__ void test_input_load_kernel(const _Float16* __restrict__ in,
 
     // Fill LDS with sentinel to detect uninitialized reads.
     for(int i = threadIdx.x; i < LDS_C8; i += BLOCK_SIZE)
+    {
         lds_buf[i] = uint4{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
+    }
     __syncthreads();
 
     // Construct InputLoader and prefetch first row (row 0) into LDS buffer 0.
     ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, c_per_group);
     il.prefetch_tile_to_lds(0);
 
-    ck_tile::direct_conv::wait_vmcnt<0>();
     __syncthreads();
 
     // Copy LDS contents to global memory for host verification.
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);
     for(int i = threadIdx.x; i < LDS_FP16; i += BLOCK_SIZE)
+    {
         lds_out[i] = lds_fp16[i];
+    }
 #endif
 }
 
@@ -99,7 +103,9 @@ protected:
         const int total = hi * wi * C_total;
         std::vector<_Float16> inp(total);
         for(int i = 0; i < total; i++)
+        {
             inp[i] = static_cast<_Float16>(static_cast<float>((i % 13) + 1));
+        }
         return inp;
     }
 
@@ -168,43 +174,47 @@ protected:
         // w_actual = w - px is the spatial position in the real input tensor.
         constexpr auto swizzle = cfg.swizzle_type;
         for(int w = 0; w < BLOCK_W; w++)
-        for(int c8 = 0; c8 < BLOCK_C8; c8++)
-        for(int c = 0; c < 8; c++)
         {
-            int lds_idx = w * BLOCK_C8 * 8 + c8 * 8 + c;
-            float actual = static_cast<float>(lds_host[lds_idx]);
-
-            // Compute the physical DRAM c8 that was loaded into this LDS slot.
-            int c8_phys;
-            if constexpr(swizzle == SwizzleType::CyclicShift)
-                c8_phys = (c8 + w) % BLOCK_C8;
-            else if constexpr(swizzle == SwizzleType::XOR)
-                c8_phys = c8 ^ w;
-            else
-                c8_phys = c8;
-
-            int global_ch    = c8_phys * 8 + c;
-            int group_idx    = global_ch / GROUP_SIZE;
-            int group_local_c = global_ch % GROUP_SIZE;
-            int w_actual     = w - px;
-
-            float expected;
-            if(group_local_c < c_per_group && w_actual >= 0 && w_actual < wi)
+            for(int c8 = 0; c8 < BLOCK_C8; c8++)
             {
-                int flat_c = group_idx * c_per_group + group_local_c;
-                expected = read_input(inp_host, wi, C_total, 0, w_actual, flat_c);
-            }
-            else
-            {
-                expected = 0.0f;
-            }
+                for(int c = 0; c < 8; c++)
+                {
+                    int lds_idx = w * BLOCK_C8 * 8 + c8 * 8 + c;
+                    float actual = static_cast<float>(lds_host[lds_idx]);
 
-            EXPECT_EQ(actual, expected)
-                << "cfg=" << CfgIdx
-                << " w=" << w << " c8=" << c8 << " c=" << c
-                << " c8_phys=" << c8_phys
-                << " group=" << group_idx << " gc=" << group_local_c
-                << " w_actual=" << w_actual;
+                    // Compute the physical DRAM c8 that was loaded into this LDS slot.
+                    int c8_phys;
+                    if constexpr(swizzle == SwizzleType::CyclicShift)
+                        c8_phys = (c8 + w) % BLOCK_C8;
+                    else if constexpr(swizzle == SwizzleType::XOR)
+                        c8_phys = c8 ^ w;
+                    else
+                        c8_phys = c8;
+
+                    int global_ch    = c8_phys * 8 + c;
+                    int group_idx    = global_ch / GROUP_SIZE;
+                    int group_local_c = global_ch % GROUP_SIZE;
+                    int w_actual     = w - px;
+
+                    float expected;
+                    if(group_local_c < c_per_group && w_actual >= 0 && w_actual < wi)
+                    {
+                        int flat_c = group_idx * c_per_group + group_local_c;
+                        expected = read_input(inp_host, wi, C_total, 0, w_actual, flat_c);
+                    }
+                    else
+                    {
+                        expected = 0.0f;
+                    }
+
+                    EXPECT_EQ(actual, expected)
+                        << "cfg=" << CfgIdx
+                        << " w=" << w << " c8=" << c8 << " c=" << c
+                        << " c8_phys=" << c8_phys
+                        << " group=" << group_idx << " gc=" << group_local_c
+                        << " w_actual=" << w_actual;
+                }
+            }
         }
 
         ck_tile::hip_check_error(hipFree(d_in));
@@ -217,19 +227,18 @@ protected:
 // ============================================================================
 
 // Unpadded path: c_per_group == GROUP_SIZE.
-TEST_F(InputLoaderTest, Unpadded_C4)
-{
-    run_and_verify<CFG_UNPADDED>(GROUP_SIZE);
-}
+TEST_F(InputLoaderTest, Unpadded_C4) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE); }
 
 // Padded path: c_per_group < GROUP_SIZE.
 TEST_F(InputLoaderTest, Vec1_C3) { run_and_verify<CFG_VEC1>(3); }
 TEST_F(InputLoaderTest, Vec1_C2) { run_and_verify<CFG_VEC1>(2); }
 TEST_F(InputLoaderTest, Vec1_C1) { run_and_verify<CFG_VEC1>(1); }
+TEST_F(InputLoaderTest, Vec2_C2) { run_and_verify<CFG_VEC2>(2); }
 
 // Padded path with spatial padding (px = 1).
 TEST_F(InputLoaderTest, Vec1_C3_px1) { run_and_verify<CFG_VEC1>(3, 1); }
 TEST_F(InputLoaderTest, Vec1_C1_px1) { run_and_verify<CFG_VEC1>(1, 1); }
+TEST_F(InputLoaderTest, Vec2_C2_px1) { run_and_verify<CFG_VEC2>(2, 1); }
 
 // Unpadded with spatial padding.
 TEST_F(InputLoaderTest, Unpadded_C4_px1) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE, 1); }

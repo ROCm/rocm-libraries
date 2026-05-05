@@ -38,6 +38,9 @@ using namespace grouped_4c_tile::v3;
 // configs[49] — Fprop, CyclicShift, vector_size=1, direct DRAM (OutputWriter)
 // ============================================================================
 static constexpr int CFG_DIRECT   = 9;
+static constexpr int CFG_VEC8     = 43;
+static constexpr int CFG_VEC4     = 47;
+static constexpr int CFG_VEC2     = 48;
 static constexpr int CFG_VEC1     = 49;
 
 // ============================================================================
@@ -146,37 +149,41 @@ protected:
         int expected_written = 0;
 
         for(int q = 0; q < wo; q++)
-        for(int k = 0; k < K_total; k++)
         {
-            int idx = 0 * wo * K_total + q * K_total + k;
-            float val = static_cast<float>(out_host[idx]);
-            bool is_sentinel = (val == static_cast<float>(SENTINEL));
-
-            // Expected behavior: row 0, q < BLOCK_Q should be written.
-            bool should_write = (q < BLOCK_Q);
-
-            if(should_write)
-                expected_written++;
-            if(!is_sentinel)
-                written_count++;
-
-            if(q >= BLOCK_Q)
+            for(int k = 0; k < K_total; k++)
             {
-                // Beyond tile: must remain sentinel.
-                EXPECT_TRUE(is_sentinel)
-                    << "q=" << q << " k=" << k << " val=" << val
-                    << " (should be sentinel beyond BLOCK_Q)";
+                int idx = 0 * wo * K_total + q * K_total + k;
+                float val = static_cast<float>(out_host[idx]);
+                bool is_sentinel = (val == static_cast<float>(SENTINEL));
+
+                // Expected behavior: row 0, q < BLOCK_Q should be written.
+                bool should_write = (q < BLOCK_Q);
+
+                if(should_write)
+                    expected_written++;
+                if(!is_sentinel)
+                    written_count++;
+
+                if(q >= BLOCK_Q)
+                {
+                    // Beyond tile: must remain sentinel.
+                    EXPECT_TRUE(is_sentinel)
+                        << "q=" << q << " k=" << k << " val=" << val
+                        << " (should be sentinel beyond BLOCK_Q)";
+                }
             }
         }
 
         // Row 1 should be entirely sentinel.
         for(int q = 0; q < wo; q++)
-        for(int k = 0; k < K_total; k++)
         {
-            int idx = 1 * wo * K_total + q * K_total + k;
-            float val = static_cast<float>(out_host[idx]);
-            EXPECT_EQ(val, static_cast<float>(SENTINEL))
-                << "Row 1 should be untouched: q=" << q << " k=" << k;
+            for(int k = 0; k < K_total; k++)
+            {
+                int idx = 1 * wo * K_total + q * K_total + k;
+                float val = static_cast<float>(out_host[idx]);
+                EXPECT_EQ(val, static_cast<float>(SENTINEL))
+                    << "Row 1 should be untouched: q=" << q << " k=" << k;
+            }
         }
 
         // For unpadded case: all K_total * BLOCK_Q positions should be written.
@@ -190,14 +197,16 @@ protected:
         // Verify written values are non-zero (converted from fp32 accumulator).
         // Each thread writes (threadIdx.x * 4 + k + 1) which is always >= 1.
         for(int q = 0; q < BLOCK_Q && q < wo; q++)
-        for(int k = 0; k < K_total; k++)
         {
-            int idx = 0 * wo * K_total + q * K_total + k;
-            float val = static_cast<float>(out_host[idx]);
-            if(val != static_cast<float>(SENTINEL))
+            for(int k = 0; k < K_total; k++)
             {
-                EXPECT_GT(val, 0.0f)
-                    << "Written value should be positive: q=" << q << " k=" << k;
+                int idx = 0 * wo * K_total + q * K_total + k;
+                float val = static_cast<float>(out_host[idx]);
+                if(val != static_cast<float>(SENTINEL))
+                {
+                    EXPECT_GT(val, 0.0f)
+                        << "Written value should be positive: q=" << q << " k=" << k;
+                }
             }
         }
 
@@ -210,20 +219,28 @@ protected:
 // ============================================================================
 
 // Unpadded path: k_per_group == GROUP_SIZE.
-TEST_F(OutputWriterTest, Direct_K4)
-{
-    run_and_verify<CFG_DIRECT>(GROUP_SIZE);
-}
-
-TEST_F(OutputWriterTest, Vec1_K4)
-{
-    run_and_verify<CFG_VEC1>(GROUP_SIZE);
-}
+TEST_F(OutputWriterTest, Direct_K4) { run_and_verify<CFG_DIRECT>(GROUP_SIZE); }
+TEST_F(OutputWriterTest, Vec1_K4) { run_and_verify<CFG_VEC1>(GROUP_SIZE); }
+TEST_F(OutputWriterTest, Vec2_K4) { run_and_verify<CFG_VEC2>(GROUP_SIZE); }
+TEST_F(OutputWriterTest, Vec4_K4) { run_and_verify<CFG_VEC4>(GROUP_SIZE); }
+TEST_F(OutputWriterTest, Vec8_K4) { run_and_verify<CFG_VEC8>(GROUP_SIZE); }
 
 // Padded path: k_per_group < GROUP_SIZE, CyclicShift swizzle.
 TEST_F(OutputWriterTest, Vec1_K3) { run_and_verify<CFG_VEC1>(3); }
 TEST_F(OutputWriterTest, Vec1_K2) { run_and_verify<CFG_VEC1>(2); }
 TEST_F(OutputWriterTest, Vec1_K1) { run_and_verify<CFG_VEC1>(1); }
+
+TEST_F(OutputWriterTest, Vec2_K3) { run_and_verify<CFG_VEC2>(3); }
+TEST_F(OutputWriterTest, Vec2_K2) { run_and_verify<CFG_VEC2>(2); }
+TEST_F(OutputWriterTest, Vec2_K1) { run_and_verify<CFG_VEC2>(1); }
+
+TEST_F(OutputWriterTest, Vec4_K3) { run_and_verify<CFG_VEC4>(3); }
+TEST_F(OutputWriterTest, Vec4_K2) { run_and_verify<CFG_VEC4>(2); }
+TEST_F(OutputWriterTest, Vec4_K1) { run_and_verify<CFG_VEC4>(1); }
+
+TEST_F(OutputWriterTest, Vec8_K3) { run_and_verify<CFG_VEC8>(3); }
+TEST_F(OutputWriterTest, Vec8_K2) { run_and_verify<CFG_VEC8>(2); }
+TEST_F(OutputWriterTest, Vec8_K1) { run_and_verify<CFG_VEC8>(1); }
 
 // Padded path: k_per_group < GROUP_SIZE, no swizzle.
 TEST_F(OutputWriterTest, Direct_K3) { run_and_verify<CFG_DIRECT>(3); }

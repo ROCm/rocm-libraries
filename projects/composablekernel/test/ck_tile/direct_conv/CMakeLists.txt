@@ -118,14 +118,16 @@ if(GPU_TARGETS MATCHES "gfx950")
         )
     endif()
 
-    # Umbrella target: build and run all gfx950 integration tests
+    # Umbrella target: build and run all gfx950 integration tests CK Tile direct convs.
     set(CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS
         test_direct_conv_grouped_4c_fp16_tile_conv
         test_direct_conv_grouped_16c_fp16_tile_conv
         test_direct_conv_grouped_8c_fp16_tile_conv
         test_direct_conv_mfma
         test_direct_conv_lds_bank_conflicts
+        test_direct_conv_input_loader
         test_direct_conv_weight_loader
+        test_direct_conv_output_writer
     )
 
     foreach(test_target ${CK_TILE_DIRECT_CONV_INTEGRATION_TEST_TARGETS})
