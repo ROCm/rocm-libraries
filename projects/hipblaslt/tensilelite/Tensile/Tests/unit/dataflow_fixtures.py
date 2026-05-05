@@ -134,6 +134,20 @@ class _FakeSBarrier(_FakeInstBase):
         return "s_barrier"
 
 
+@dataclass
+class _FakeSNop(_FakeInstBase):
+    """Stand-in for SNop. `wait_state` mirrors the rocisa.SNop constructor's
+    `waitState` argument, exposed as the attribute name that
+    `_min_issue_quad_cycles_for` reads on the test-fixture path
+    (ScheduleCapture.py: SNop branch). `_is_snop` matches by class-name
+    `_FakeSNop`, registered in `_SNOP_CLASS_NAMES` (ScheduleCapture.py:1314).
+    """
+    wait_state: int = 0
+
+    def __str__(self):
+        return f"s_nop {self.wait_state}"
+
+
 # =============================================================================
 # Helpers for register construction
 # =============================================================================
@@ -270,6 +284,25 @@ def make_sbarrier(slot: int, *, sequence: int = 0) -> TaggedInstruction:
     return TaggedInstruction(
         inst=inst,
         category="BARRIER",
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                     mfma_index=slot, sequence=sequence),
+    )
+
+
+def make_snop(slot: int, *, wait_state: int = 0,
+              sequence: int = 0) -> TaggedInstruction:
+    """Build a TaggedInstruction wrapping `_FakeSNop` with `wait_state`.
+
+    `wait_state` controls the additional quad-cycle issue cost added by
+    `_min_issue_quad_cycles_for` (returns `1 + wait_state` for SNop).
+    Mirrors `rocisa.SNop(waitState=...)`. See `cumulative_issue_cycles`
+    walk in ScheduleCapture.py — the SNop's per-instruction cost is read
+    inline (SNop instances are not graph nodes).
+    """
+    inst = _FakeSNop(wait_state=wait_state)
+    return TaggedInstruction(
+        inst=inst,
+        category="SNOP",
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
     )

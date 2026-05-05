@@ -86,7 +86,8 @@ from Tensile.Components.ScheduleCapture import (
 )
 
 from dataflow_fixtures import (
-    make_lr, make_gr, make_dtl_buffer_load, make_mfma, make_swait, make_capture,
+    make_lr, make_gr, make_dtl_buffer_load, make_mfma, make_swait, make_snop,
+    make_capture,
 )
 
 
@@ -1996,6 +1997,162 @@ class TestCumulativeIssueCycles:
         assert gap == 4, (
             f"Threshold uses strict <; gap-since-last==5==threshold means "
             f"NO stall. Expected delivered gap=4, got {gap}."
+        )
+
+    # ---------------------------------------------------------------
+    # Bead `yh0` — SNop wait_state coverage. `_min_issue_quad_cycles_for`
+    # returns `1 + wait_state` for SNop; the cumulative_issue_cycles walk
+    # consumes that value when an SNop sits between an MFMA producer and
+    # an MFMA consumer. Pre-`yh0` the only callers exercising this branch
+    # were heavy integration tests, so a mutation `return 1` (eliminating
+    # the wait_state contribution) silently passed every unit test.
+    # The three tests below pin the SNop contribution at the cycle-exact
+    # boundaries where finish-latency stops dominating.
+    # ---------------------------------------------------------------
+    @pytest.mark.parametrize("wait_state,expected_gap", [
+        (0, 3),  # Cost path = 1+1 = 2; finish path = 4 dominates → gap=3.
+        (3, 4),  # Cost path = 1+(1+3) = 5 dominates → consumer_issue=5,
+                 # gap=4. Mutation `return 1` would give 3.
+        (5, 6),  # Cost path = 1+(1+5) = 7 dominates → gap=6.
+                 # Mutation would give 3.
+    ])
+    def test_snop_wait_state_shifts_consumer_issue(self, wait_state, expected_gap):
+        """Producer MFMA + intervening SNop(wait_state=N) + consumer MFMA.
+        Once N is large enough to dominate over the producer's finish=4
+        bound, the consumer's issue start tracks `producer_cost + (1 + N)`
+        exactly. Walk for standard producer at slot=2:
+          MFMA-std issues at 0, mfma_free_at=0+1+3=4, last_issue=0.
+          Producer cost +1 → current_issue=1.
+          SNop adds (1 + wait_state) → current_issue = 2 + wait_state.
+          MFMA-std consumer current_issue = max(2+wait_state, 4).
+          Gap = max(2+wait_state, 4) - 0 - 1 = max(wait_state+1, 3).
+        For wait_state=0 the bound is finish (gap=3); from wait_state>=3
+        the SNop dominates and each unit of wait_state shifts the gap
+        by 1. The mutation `_min_issue_quad_cycles_for SNop` →
+        `return 1` collapses all expected_gap values to 3 (the
+        finish-bound), so wait_state ∈ {3, 5} catch the regression.
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            make_snop(slot=3, wait_state=wait_state),
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=4, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        acc_edge = next(
+            (e for e in g.edges
+             if getattr(e.producer, "category", None) == "MFMA"
+             and getattr(e.consumer, "category", None) == "MFMA"),
+            None,
+        )
+        assert acc_edge is not None
+        gap = cumulative_issue_cycles(g, acc_edge.producer, acc_edge.consumer)
+        assert gap == expected_gap, (
+            f"SNop(wait_state={wait_state}) between standard MFMAs should "
+            f"give gap={expected_gap}; got {gap}. If the SNop wait_state "
+            f"contribution were silently dropped (e.g. "
+            f"`_min_issue_quad_cycles_for` for SNop returned 1 instead of "
+            f"`1 + wait_state`), the gap would collapse to the finish-bound "
+            f"value 3."
+        )
+
+    def test_snop_wait_state_above_finish_dominates_standard_mfma(self):
+        """Standard MFMA producer (finish=3) + SNop(wait_state=3) + standard
+        consumer. The SNop's contribution (1 + 3 = 4 quad-cycles) ADDED to
+        the producer's own issue cost (+1) puts current_issue at 5 — past
+        the producer's finish bound (mfma_free_at = 0 + 1 + 3 = 4). The
+        consumer therefore issues at 5, not at 4. Gap = 5 - 0 - 1 = 4.
+
+        This pins the contract that SNop wait_state is NOT silently
+        absorbed by MFMA finish latency once it exceeds the absorbable
+        slack. The mutation `_min_issue_quad_cycles_for` SNop branch →
+        `return 1` would re-collapse the gap to 3 (finish-bound), so this
+        test fails meaningfully if wait_state stops contributing.
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2),
+            make_snop(slot=3, wait_state=3),
+            make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
+                      slot=4, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        acc_edge = next(
+            (e for e in g.edges
+             if getattr(e.producer, "category", None) == "MFMA"
+             and getattr(e.consumer, "category", None) == "MFMA"),
+            None,
+        )
+        assert acc_edge is not None
+        gap = cumulative_issue_cycles(g, acc_edge.producer, acc_edge.consumer)
+        assert gap == 4, (
+            f"SNop(wait_state=3) between standard MFMAs: cost path = "
+            f"1 (producer) + (1 + 3) (snop) = 5 dominates the "
+            f"finish path (mfma_free_at = 4). Expected gap=4, got {gap}. "
+            f"If SNop wait_state were dropped, the gap would collapse to "
+            f"the finish-bound value 3."
+        )
+
+    def test_snop_wait_state_dominates_4x4_mfma_finish(self):
+        """Mirror of `test_4x4mfma_pack_parallel`: a 4x4 PackMFMA producer
+        (finish=1) + SNop(wait_state=2) + standard consumer. The 4x4
+        finish bound (mfma_free_at = 0 + 1 + 1 = 2) is shorter than the
+        SNop's contribution (1 + 2 = 3), so the SNop unambiguously
+        dominates the consumer's earliest issue.
+
+        Walk:
+          MFMA-4x4 issues at 0, mfma_free_at=2, last_class=4x4, last_issue=0.
+          Producer cost +1 → current_issue=1.
+          SNop(wait_state=2) +3 → current_issue=4.
+          MFMA-std consumer max(4, 2) = 4. Type switch (4x4 → std):
+            gap-since-last = 4 - 0 = 4 NOT < FROM_4X4=3 → no +1 stall.
+          Consumer issues at 4 → gap = 4 - 0 - 1 = 3.
+
+        Mutation `_min_issue_quad_cycles_for` SNop → `return 1` walk:
+          Producer cost +1 → 1. SNop +1 → 2. Consumer max(2, 2) = 2.
+          Type switch gap = 2 - 0 = 2 < FROM_4X4=3 → +1 stall → 3.
+          Gap = 3 - 0 - 1 = 2.
+
+        So the mutation drops the gap by 1 (the lost SNop wait_state),
+        with the type-switch stall partially masking the regression but
+        not erasing it. This is the asymmetric case the bead `yh0`
+        callout names: 4x4 finish=1 < SNop's 3, so the SNop's
+        wait_state is observable even at low values.
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            # 4x4 PackMFMA producer at slot=2.
+            make_mfma(c_dst_start=80, a_src_start=8, b_src_start=32,
+                      slot=2, sequence=0, a_src_count=2,
+                      variant=[4, 4, 4, 16]),
+            make_snop(slot=3, wait_state=2),
+            # Standard consumer at slot=4 reads v0..v1 (writes the 4x4
+            # producer's c_dst — the dataflow edge fires off the c_dst
+            # accumulator chain).
+            make_mfma(c_dst_start=84, a_src_start=80, b_src_start=32,
+                      slot=4, sequence=0, a_src_count=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        acc_edge = next(
+            (e for e in g.edges
+             if getattr(e.producer, "category", None) == "MFMA"
+             and getattr(e.consumer, "category", None) == "MFMA"),
+            None,
+        )
+        assert acc_edge is not None
+        gap = cumulative_issue_cycles(g, acc_edge.producer, acc_edge.consumer)
+        assert gap == 3, (
+            f"4x4 PackMFMA (finish=1) + SNop(wait_state=2) + standard MFMA: "
+            f"SNop cost (1 + 2 = 3) dominates over 4x4 finish bound (=2). "
+            f"Expected gap=3, got {gap}. If SNop wait_state were dropped, "
+            f"the gap would collapse to 2 (with a type-switch +1 stall "
+            f"partially masking the loss)."
         )
 
     # Bead `arv` deleted the structural-side parity test
