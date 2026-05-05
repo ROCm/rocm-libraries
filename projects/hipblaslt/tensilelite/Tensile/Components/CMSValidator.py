@@ -844,17 +844,16 @@ def create_unified_timeline(
 class Timeline:
     def __init__(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution',
                  id_map: dict, mfma_code: list):
-        """
-        Create a timeline from the provided schedule_info which contains only the instructions inside `instruction_names_to_add`.
+        """Build a Timeline restricted to the categories in
+        ``instruction_names_to_add``. Only one ``code_path`` is materialized
+        per Timeline — multi-codepath validation builds N Timelines so
+        per-codepath schedule disagreements are isolated.
 
-        Args:
-            instruction_names_to_add:   The list of instruction names to add to the timeline.
-            code_path:                  The code path to create a timeline out of.
-            schedule_info:              The schedule information to add to the timeline.
-            kernel:                     The kernel to add to the timeline.
-            id_map:                     Maps schedule keys to lists of rocisa instruction objects.
-            mfma_code:                  Flat list of MFMA rocisa instructions in execution order.
-        """
+        Asserts the per-iteration suffix scheme (LRA0/LRA1/... or 0..3 for
+        ForceUnrollSubIter) matches what DepthU + matrixInstK derive. A
+        mismatched schedule key here means upstream drift between the CMS
+        author's iteration count and the kernel's, which would otherwise
+        surface as a confusing IndexError deep in the validators."""
         
         available_keys = schedule_info.optSchedule.keys()
         has_lr1s = "LRA1" in available_keys or "LRB1" in available_keys
@@ -926,9 +925,6 @@ class Timeline:
         self._linearize_timeline()
     
     def _populate_instructions(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> None:
-        """
-        Populates all timelines with instructions from schedule_info.
-        """
         assert kernel["DirectToLds"], "Only DirectToLds cases are supported by validator."
         assert kernel.get("LocalSplitU", 1) == 1, "Only LocalSplitU=1 cases are supported by validator."
 
@@ -1063,9 +1059,9 @@ class Timeline:
 
     @staticmethod
     def _should_add(cls: type[ValidatorInstruction], name: str, loop: str, kernel: 'Solution') -> bool:
-        """
-        Determine if an instruction should be added to a given loop.
-        """
+        """Per-loop instruction filter: GR/GRInc only fire in main loops;
+        only LR0 / Pack0 reach NLL (the rest of LR/Pack live in the
+        main-loop bodies). Encodes the CMS pipeline-stage contract."""
         if issubclass(cls, GlobalRead):
             # No GRs issued in NGL or NLL
             return loop == MAIN_LOOP or loop == MAIN_LOOP_PREV
@@ -1092,33 +1088,20 @@ class Timeline:
         return self._timelines[index]
 
     def get_instruction_names(self) -> list[str]:
-        """
-        Return the names of all instructions scheduled in the timeline.
-        """
         return list(self._instructions_for_name_combined.keys())
 
     def get_instructions(self, name: str, loop: str) -> list[tuple[int, ValidatorInstruction]]:
-        """
-        Return the instructions scheduled with a given name (e.g. "GRA").
-        """
         return self._instructions_for_name[loop][name]
-    
+
     def get_instructions_combined(self, name: str) -> list[tuple[int, ValidatorInstruction]]:
-        """
-        Return the instructions scheduled with a given name (e.g. "GRA") across all loops.
-        """
         return self._instructions_for_name_combined[name]
 
     def get_instructions_at(self, index: int, loop: str) -> list[ValidatorInstruction]:
-        """
-        Return the instructions scheduled at a given VMFMA index.
-        """
         return self._instructions_at_index[loop][index+1]
 
     def _linearize_timeline(self) -> None:
-        """
-        Generate the linear timelines and the lookup tables for instructions by name.
-        """
+        """Materialize the per-loop and combined linear timelines plus the
+        per-name lookup tables that ``get_instructions*`` indexes into."""
         self.combined_timeline.clear()
         self._instructions_for_name_combined.clear()
         i_combined = 0
@@ -1299,20 +1282,14 @@ def _failure_to_string(result: object) -> Optional[str]:
 
 
 def validate_timeline(timeline: Timeline) -> Optional[str]:
-    """
-    Validate the timeline by calling the validate method of each instruction.
+    """Iterate every instruction in stream order; the first one whose
+    ``validate()`` returns non-None ends the walk.
 
-    Side effect: stashes the raw Failure object on `timeline._last_failure`
-    (or None on success) so test infrastructure can assert on type + fields
-    without parsing the formatted string. Production callers consume only
-    the returned string.
-
-    Args:
-        timeline: The Timeline object to validate.
-
-    Returns:
-        Error message if validation fails, None if validation passes.
-    """
+    Side effect: stashes the typed Failure (when one is returned) on
+    ``timeline._last_failure`` so test infrastructure can assert on type +
+    fields without parsing message text. Production callers consume only
+    the returned string. Rules still on the legacy str path leave
+    ``_last_failure`` None."""
     timeline._last_failure = None
     for loop in timeline.loops:
         for instruction in timeline._timelines[loop]:
@@ -1330,19 +1307,10 @@ def validate_timeline(timeline: Timeline) -> Optional[str]:
 
 
 def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> list[list[int]]:
-    """
-    Helper function to get the schedule for a given instruction name and code path.
-    When multiple code paths are provided, return the schedule for the given code path.
-    If only one code path is implemented, return that schedule.
-
-    Args:
-        name: The name of the instruction to get the schedule for (e.g. "LRA0", "LRB0", "SYNC")
-        code_path: The code path to get the schedule for (0-indexed)
-        schedule_info: The schedule information (ScheduleInfo object)
-
-    Returns:
-        The schedule for the given instruction name and code path.
-    """
+    """When the schedule has only one code path, return it (broadcast for
+    all callers regardless of ``code_path``); otherwise return the slice
+    for ``code_path``. Lets multi-codepath rules iterate ``code_path`` in
+    a loop without special-casing single-codepath schedules."""
     assert code_path >= 0, f"Code path {code_path} is not valid. Must be >= 0."
     schedules = schedule_info.optSchedule[name]
     return schedules[0] if len(schedules) == 1 else schedules[code_path]
