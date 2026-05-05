@@ -131,8 +131,8 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
         // Initialize A, B, and scales to random values
         ck_tile::FillUniformDistribution<ADataType>{-2.f, 2.f, seed++}(a_host);
         ck_tile::FillUniformDistribution<BDataType>{-2.f, 2.f, seed++}(b_host);
-        ck_tile::FillUniformScaleDistribution<ScaleType>{0.125f, 2.0f, seed++}(scale_a_host);
-        ck_tile::FillUniformScaleDistribution<ScaleType>{0.125f, 2.0f, seed++}(scale_b_host);
+        ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(scale_a_host);
+        ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(scale_b_host);
         break;
     case 1:
         // Initialize A, B, and scales to 1.0
@@ -229,9 +229,8 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
             ck_tile::host_tensor_descriptor(M, N, stride_C, is_row_major(CLayout{})));
         c_m_n_host_ref.SetZero();
 
-        ck_tile::
-            reference_mx_gemm<ADataType, BDataType, ScaleType, ScaleType, AccDataType, CDataType>(
-                a_host, b_host, c_m_n_host_ref, scale_a_host, scale_b_host);
+        ck_tile::reference_mx_gemm<ADataType, BDataType, ScaleType, ScaleType, AccDataType, CDataType>(
+            a_host, b_host, c_m_n_host_ref, scale_a_host, scale_b_host);
 
         const float max_accumulated_value =
             *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
