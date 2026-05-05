@@ -2,48 +2,81 @@
 # SPDX-License-Identifier:  MIT
 
 include(GoogleTest)
+include(CheckToolVersion)
 
 find_package(Python3 COMPONENTS Interpreter)
 
+findandcheckllvmsymbolizer()
+
 set(CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
 set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated global check executable paths" FORCE)
+
+# Resolve the path to the test name validator script once at include time
+set(_TEST_NAME_VALIDATOR_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/scripts/test_name_validator.py"
+    CACHE INTERNAL "Path to the common test name validator script"
+)
 
 # Builds the test environment list with optional code coverage support
 # ~~~
 # Parameters:
 #   OUT_VAR - The name of the variable to store the result in (will be set in PARENT_SCOPE)
+#   COVERAGE - If TRUE, add LLVM_PROFILE_FILE to the environment
 # ~~~
-function(_build_test_environment_list_internal OUT_VAR)
+function(_build_test_environment_list_internal OUT_VAR COVERAGE)
     set(ENVIRONMENT_LIST "")
     if(DEFINED TEST_ENVIRONMENT)
         set(ENVIRONMENT_LIST ${TEST_ENVIRONMENT})
     endif()
 
-    if(HIPDNN_ENABLE_COVERAGE)
-        # Ensure coverage report directory exists
-        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/coverage_report/profraw")
+    if(COVERAGE)
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/coverage-report/profraw")
 
-        # For code coverage builds, we want each profraw file to have a unique name.  The %m in the
-        # LLVM_PROFILE_FILE environment variable will auto generate a unique id.
         list(APPEND ENVIRONMENT_LIST
-             "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage_report/profraw/%m.profraw"
+             "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/%m.profraw"
         )
     endif()
 
     set(${OUT_VAR} ${ENVIRONMENT_LIST} PARENT_SCOPE)
-endfunction() # _build_test_environment_list_internal
+endfunction()
 
-# Creates a dummy target for test name validation
-# Test name validation is disabled for hipblaslt-provider
+# Creates a custom target to validate test names using a Python script.
+# Validation runs when the script exists at the common cmake/scripts/ location and
+# SKIP_TEST_NAME_VALIDATION is not set; otherwise a dummy target is created.
 function(_create_test_name_validation_target_internal prefix_name)
-    add_custom_target(
-        ${prefix_name}-validate_test_names COMMAND ${CMAKE_COMMAND} -E echo
-                                    "Test name validation skipped for hipblaslt-provider"
-        COMMENT "Skipping test name validation"
-    )
-endfunction() # _create_test_name_validation_target_internal
+    if(Python3_FOUND AND EXISTS "${_TEST_NAME_VALIDATOR_SCRIPT}" AND NOT SKIP_TEST_NAME_VALIDATION)
+        set(TEST_EXECUTABLES_FILE ${CMAKE_BINARY_DIR}/${prefix_name}_test_executables.txt)
+        list(REMOVE_DUPLICATES CHECK_EXECUTABLE_PATHS_GLOBAL)
+        file(WRITE ${TEST_EXECUTABLES_FILE} "")
+        foreach(test_executable ${CHECK_EXECUTABLE_PATHS_GLOBAL})
+            file(APPEND ${TEST_EXECUTABLES_FILE} "${test_executable}\n")
+        endforeach()
 
-enable_testing() # Cmake wont discover or run tests without this line
+        add_custom_command(
+            OUTPUT ${CMAKE_BINARY_DIR}/${prefix_name}_test_names_validated
+            COMMAND
+                ${Python3_EXECUTABLE} ${_TEST_NAME_VALIDATOR_SCRIPT}
+                --test-executables ${TEST_EXECUTABLES_FILE} --build-dir ${CMAKE_BINARY_DIR} --strict
+            COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_BINARY_DIR}/${prefix_name}_test_names_validated
+            DEPENDS ${_TEST_NAME_VALIDATOR_SCRIPT} ${CHECK_DEPENDS_GLOBAL}
+            COMMENT "Validating test names with --gtest_list_tests test collection"
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            VERBATIM
+        )
+
+        add_custom_target(
+            ${prefix_name}-validate_test_names DEPENDS ${CMAKE_BINARY_DIR}/${prefix_name}_test_names_validated
+            COMMENT "Validating test names"
+        )
+    else()
+        add_custom_target(
+            ${prefix_name}-validate_test_names COMMAND ${CMAKE_COMMAND} -E echo
+                                        "Test name validation skipped"
+            COMMENT "Skipping test name validation"
+        )
+    endif()
+endfunction()
+
+enable_testing()
 
 # Internal helper function to create a ctest target
 # ~~~
@@ -55,37 +88,30 @@ enable_testing() # Cmake wont discover or run tests without this line
 #   COMMENT - Comment describing the target
 # ~~~
 function(_add_ctest_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMENT)
-    # Build the ctest command
     set(CTEST_CMD ${CMAKE_COMMAND} -E env ${CTEST_ENV} ${CMAKE_CTEST_COMMAND})
 
-    # Add label filter if specified
     if(NOT "${LABEL}" STREQUAL "")
         list(APPEND CTEST_CMD -L "${LABEL}")
     endif()
 
-    # Always add --output-on-failure
     list(APPEND CTEST_CMD --output-on-failure)
 
-    # Add --verbose if requested
     if(VERBOSE)
         list(APPEND CTEST_CMD --verbose)
     endif()
 
-    # Add configuration
     list(APPEND CTEST_CMD -C ${CMAKE_CFG_INTDIR})
 
-    # Create the target with prefix
     set(FULL_TARGET_NAME "${PREFIX_NAME}-${TARGET_NAME}")
     add_custom_target(${FULL_TARGET_NAME} COMMAND ${CTEST_CMD} COMMENT "${COMMENT}" USES_TERMINAL)
     add_dependencies(${FULL_TARGET_NAME} ${PREFIX_NAME}-validate_test_names)
     message(VERBOSE "Created ${FULL_TARGET_NAME} target")
-endfunction() # _add_ctest_target_internal
+endfunction()
 
 # Internal helper function to create the check targets for running tests via ctest
-function(_create_ctest_targets_internal prefix_name)
+function(_create_ctest_targets_internal prefix_name coverage)
     # cmake-format: off
-    # Build test environment once for all ctest targets
-    _build_test_environment_list_internal(CTEST_ENV)
+    _build_test_environment_list_internal(CTEST_ENV ${coverage})
 
     # Regular targets (without --verbose)
     _add_ctest_target_internal(${prefix_name} "check_ctest" "" FALSE "Running all tests via ctest")
@@ -97,40 +123,39 @@ function(_create_ctest_targets_internal prefix_name)
     _add_ctest_target_internal(${prefix_name} "unit-check_ctest-verbose" "unit_test" TRUE "Running unit tests via ctest (verbose)")
     _add_ctest_target_internal(${prefix_name} "integration-check_ctest-verbose" "integration_test" TRUE "Running integration tests via ctest (verbose)")
     # cmake-format: on
-endfunction() # create_ctest_targets
+endfunction()
 
 # Finalizes and creates all of the test targets
 #
-# Arguments:
-#   prefix_name - Prefix to add to all target names (e.g., "hipblaslt-provider" creates "hipblaslt-provider-check")
+# Usage:
+#   finalize_test_targets(<prefix_name> [ENABLE_COVERAGE])
 #
-# Creates prefixed targets (e.g., "hipblaslt-provider-check", "hipblaslt-provider-unit-check", etc.)
-# In standalone builds (non-superbuild), also creates unprefixed aliases for backward compatibility
+# Arguments:
+#   prefix_name      - Prefix for all target names (e.g., "miopen-provider" creates "miopen-provider-check")
+#   ENABLE_COVERAGE  - Optional flag to enable code coverage profraw collection in the test environment
 function(finalize_test_targets prefix_name)
+    cmake_parse_arguments(ARG "ENABLE_COVERAGE" "" "" ${ARGN})
+
     _create_test_name_validation_target_internal(${prefix_name})
 
-    _create_ctest_targets_internal(${prefix_name})
+    _create_ctest_targets_internal(${prefix_name} ${ARG_ENABLE_COVERAGE})
 
     # cmake-format: off
-    # Determine if we should create legacy aliases (only in standalone builds)
     set(CREATE_ALIASES FALSE)
     if(NOT ROCM_LIBS_SUPERBUILD)
         set(CREATE_ALIASES TRUE)
     endif()
 
-    # Create prefixed test targets that depend on the prefixed _ctest targets
-    # Regular targets (without --verbose)
     add_custom_target(${prefix_name}-check DEPENDS ${prefix_name}-check_ctest COMMENT "Running all tests via ctest")
     add_custom_target(${prefix_name}-unit-check DEPENDS ${prefix_name}-unit-check_ctest COMMENT "Running unit tests via ctest")
     add_custom_target(${prefix_name}-integration-check DEPENDS ${prefix_name}-integration-check_ctest COMMENT "Running integration tests via ctest")
     message(STATUS "Created ctest targets: ${prefix_name}-check, ${prefix_name}-unit-check, ${prefix_name}-integration-check")
-    # Verbose targets (with --verbose)
+
     add_custom_target(${prefix_name}-check-verbose DEPENDS ${prefix_name}-check_ctest-verbose COMMENT "Running all tests via ctest (verbose)")
     add_custom_target(${prefix_name}-unit-check-verbose DEPENDS ${prefix_name}-unit-check_ctest-verbose COMMENT "Running unit tests via ctest (verbose)")
     add_custom_target(${prefix_name}-integration-check-verbose DEPENDS ${prefix_name}-integration-check_ctest-verbose COMMENT "Running integration tests via ctest (verbose)")
     message(STATUS "Created ctest verbose targets: ${prefix_name}-check-verbose, ${prefix_name}-unit-check-verbose, ${prefix_name}-integration-check-verbose")
 
-    # Create legacy unprefixed aliases for backward compatibility (standalone builds only)
     if(CREATE_ALIASES)
         add_custom_target(check DEPENDS ${prefix_name}-check COMMENT "Alias for ${prefix_name}-check")
         add_custom_target(unit-check DEPENDS ${prefix_name}-unit-check COMMENT "Alias for ${prefix_name}-unit-check")
@@ -141,7 +166,7 @@ function(finalize_test_targets prefix_name)
         message(STATUS "Created legacy alias targets for backward compatibility")
     endif()
     # cmake-format: on
-endfunction() # finalize_test_targets
+endfunction()
 
 # ~~~
 # Internal helper function to record, configure, and register a ctest test target. Assumes that the
@@ -158,31 +183,28 @@ endfunction() # finalize_test_targets
 #   EXTRA_LABELS - (Optional) Additional labels to apply to the test (semicolon-separated list)
 # ~~~
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
-    # Parse optional extra labels from remaining arguments
     set(EXTRA_LABELS ${ARGN})
-    message(STATUS "Appending ${APPEND_FUNCTION_SUFFIX} check target: ${TARGET} in working directory: ${WORKING_DIR}")
+    set(TARGET_EXE ${TARGET})
 
-    # Track the dependencies for test name validation
+    if(CMAKE_EXECUTABLE_SUFFIX)
+        set(TARGET_EXE "${TARGET_EXE}${CMAKE_EXECUTABLE_SUFFIX}")
+    endif()
+
+    message(STATUS "Appending ${APPEND_FUNCTION_SUFFIX} check target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
+
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
         CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
     )
-    # Track the binary paths for test name validation
-    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} "${CMAKE_INSTALL_BINDIR}/${TARGET}"
+    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} "${CMAKE_INSTALL_BINDIR}/${TARGET_EXE}"
         CACHE INTERNAL "Accumulated global check executable paths" FORCE
     )
-
-    # Track this test target for later use in generating installed CTestTestfile.cmake
-    set_property(GLOBAL APPEND PROPERTY HIPDNN_TEST_TARGETS ${TARGET})
 
     set_target_properties(
         ${TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
 
-    # Track this test target for later use in generating installed CTestTestfile.cmake
-    set_property(GLOBAL APPEND PROPERTY HIPBLASLT_TEST_TARGETS ${TARGET})
+    set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_TEST_TARGETS ${TARGET})
 
-    # Make test executables relocatable so they can find libraries when build directory is moved
-    # Include both the main lib directory and the engine plugin directories
     set_target_properties(
         ${TARGET}
         PROPERTIES
@@ -192,10 +214,8 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
             BUILD_RPATH_USE_ORIGIN TRUE
     )
 
-    # Install test executables to bin directory
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-    # Combine primary label with any extra labels
     set(ALL_LABELS ${APPEND_FUNCTION_SUFFIX})
     if(EXTRA_LABELS)
         list(APPEND ALL_LABELS ${EXTRA_LABELS})
@@ -203,17 +223,18 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
-endfunction() # _add_test_target_internal
+endfunction()
 
 # ~~~
 # Adds a unit test target
+#
 # Usage:
 #   add_unit_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...])
 # ~~~
 function(add_unit_test_target TARGET WORKING_DIR)
     cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
     _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
-endfunction() # add_unit_test_target
+endfunction()
 
 # ~~~
 # Adds an integration test target
@@ -224,32 +245,33 @@ endfunction() # add_unit_test_target
 function(add_integration_test_target TARGET WORKING_DIR)
     cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
     _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
-endfunction() # add_integration_test_target
+endfunction()
 
-# Install CTest configuration files for direct test execution This should be called once at the end
-# of the main CMakeLists.txt after all tests are registered
-function(install_hipblaslt_plugin_ctest_files)
-    # Define the CTest installation directory
-    set(HIPBLASLT_PLUGIN_CTEST_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/hipblaslt_plugin")
+# Install CTest configuration files for direct test execution. This should be called once at the end
+# of the main CMakeLists.txt after all tests are registered.
+#
+# Usage:
+#   install_provider_ctest_files(<install_subdir>)
+#
+# Parameters:
+#   INSTALL_SUBDIR - Subdirectory under CMAKE_INSTALL_BINDIR for the CTestTestfile.cmake
+function(install_provider_ctest_files INSTALL_SUBDIR)
+    set(CTEST_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/${INSTALL_SUBDIR}")
 
-    # Generate a new CTestTestfile.cmake that references installed test executables
     set(INSTALLED_CTEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
 
     file(WRITE "${INSTALLED_CTEST_FILE}"
-         "# Autogenerated CTestTestfile for installed hipblaslt_plugin tests\n"
+         "# Autogenerated CTestTestfile for installed ${INSTALL_SUBDIR} tests\n"
     )
-    file(APPEND "${INSTALLED_CTEST_FILE}" "# Generated by hipblaslt_plugin build system\n\n")
+    file(APPEND "${INSTALLED_CTEST_FILE}" "# Generated by ${PROJECT_NAME} build system\n\n")
 
-    # Get all test targets that were registered
-    get_property(all_tests GLOBAL PROPERTY HIPBLASLT_TEST_TARGETS)
+    get_property(all_tests GLOBAL PROPERTY ${PROJECT_NAME}_TEST_TARGETS)
 
     foreach(test_target ${all_tests})
         file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
 
-    # Install the generated CTestTestfile.cmake to HIPBLASLT_PLUGIN_CTEST_FILE_INSTALL_PATH
     install(FILES "${INSTALLED_CTEST_FILE}"
-            DESTINATION ${HIPBLASLT_PLUGIN_CTEST_FILE_INSTALL_PATH} RENAME CTestTestfile.cmake
+            DESTINATION ${CTEST_INSTALL_PATH} RENAME CTestTestfile.cmake
     )
-
-endfunction() # install_hipblaslt_plugin_ctest_files
+endfunction()
