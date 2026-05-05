@@ -13,7 +13,6 @@
 #include <stdio.h>
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 #include <concepts>
-#include <type_traits>
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 namespace ck_tile::core::arch::mma {

@@ -11,7 +11,6 @@
 #include "ck_tile/core/numeric/ext_vector_base.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
-#include "ck_tile/core/numeric/numeric.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/ops/common/utils.hpp"
