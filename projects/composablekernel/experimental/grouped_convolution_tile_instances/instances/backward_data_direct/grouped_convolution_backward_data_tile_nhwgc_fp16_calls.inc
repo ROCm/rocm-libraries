@@ -52,6 +52,14 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<34, direc
 // Cyclic shift swizzle
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<42, direct_conv::Version::v3>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<43, direct_conv::Version::v3>, SIGNATURE>);
+// Small vector load size for padded cases (Dgrad configs 44-46)
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<44, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<45, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<48, direct_conv::Version::v3>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<49, direct_conv::Version::v3>, SIGNATURE>);
+// Enable thse configurations when fixed.
+//run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<52, direct_conv::Version::v3>, SIGNATURE>);
+//run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData4CFp16Kernel<53, direct_conv::Version::v3>, SIGNATURE>);
 
 
 ////////////////////////////////////////////////////////////////////////
@@ -114,19 +122,6 @@ run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData8CFp16Kernel<5>, SIGNAT
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData8CFp16Kernel<6>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData8CFp16Kernel<7>, SIGNATURE>);
 run_alg(run_direct_conv<direct_conv::DirectHipConvBwdData8CFp16Kernel<8>, SIGNATURE>);
-
-////////////////////////////////////////////////////////////////////////
-// Direct CK Tile convolution (streaming) 8c v1 kernels — Dgrad configs 0-8
-////////////////////////////////////////////////////////////////////////
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData8CFp16Kernel<0, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData8CFp16Kernel<1, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData8CFp16Kernel<2, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData8CFp16Kernel<3, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData8CFp16Kernel<4, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData8CFp16Kernel<5, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData8CFp16Kernel<6, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData8CFp16Kernel<7, direct_conv::Version::v1>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData8CFp16Kernel<8, direct_conv::Version::v1>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
 // Direct CK Tile convolution (streaming) 8c v2 kernels — Dgrad configs

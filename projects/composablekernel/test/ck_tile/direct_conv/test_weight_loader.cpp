@@ -34,14 +34,12 @@ using namespace grouped_4c_tile::v3;
 // Config indices used by the tests
 //
 // configs[9]  — Fprop, vector_size=8 (default, full GROUP_SIZE)  → unpadded
-// configs[47] — Fprop, CyclicShift, vector_size=4               → c%4==0
-// configs[48] — Fprop, CyclicShift, vector_size=2               → c%2==0
-// configs[49] — Fprop, CyclicShift, vector_size=1               → any c
+// configs[46] — Fprop, CyclicShift, vector_size=2               → c%2==0
+// configs[47] — Fprop, CyclicShift, vector_size=1               → any c
 // ============================================================================
 static constexpr int CFG_UNPADDED = 9;
-static constexpr int CFG_VEC4    = 47;
-static constexpr int CFG_VEC2    = 48;
-static constexpr int CFG_VEC1    = 49;
+static constexpr int CFG_VEC2    = 46;
+static constexpr int CFG_VEC1    = 47;
 
 // ============================================================================
 // Test kernel: templated on config index.
@@ -179,18 +177,11 @@ TEST_F(WeightLoaderTest, Unpadded_C4_K4)
 }
 
 // C padding only (k == GROUP_SIZE).
-TEST_F(WeightLoaderTest, Vec4_C4_K4) { run_and_verify<CFG_VEC4>(4, GROUP_SIZE); }
 TEST_F(WeightLoaderTest, Vec2_C2_K4) { run_and_verify<CFG_VEC2>(2, GROUP_SIZE); }
 TEST_F(WeightLoaderTest, Vec1_C1_K4) { run_and_verify<CFG_VEC1>(1, GROUP_SIZE); }
 TEST_F(WeightLoaderTest, Vec1_C3_K4) { run_and_verify<CFG_VEC1>(3, GROUP_SIZE); }
 
-// K padding only (c == GROUP_SIZE).
-TEST_F(WeightLoaderTest, Vec4_C4_K3) { run_and_verify<CFG_VEC4>(GROUP_SIZE, 3); }
-TEST_F(WeightLoaderTest, Vec4_C4_K2) { run_and_verify<CFG_VEC4>(GROUP_SIZE, 2); }
-TEST_F(WeightLoaderTest, Vec4_C4_K1) { run_and_verify<CFG_VEC4>(GROUP_SIZE, 1); }
-
 // Both C and K padded.
-TEST_F(WeightLoaderTest, Vec4_C4_K3_both) { run_and_verify<CFG_VEC4>(4, 3); }
 TEST_F(WeightLoaderTest, Vec2_C2_K3)      { run_and_verify<CFG_VEC2>(2, 3); }
 TEST_F(WeightLoaderTest, Vec2_C2_K2)      { run_and_verify<CFG_VEC2>(2, 2); }
 TEST_F(WeightLoaderTest, Vec1_C3_K3)      { run_and_verify<CFG_VEC1>(3, 3); }
@@ -237,7 +228,6 @@ TEST_F(ValidConfigTest, C4_valid_all)
 {
     auto p = make_params(4);
     EXPECT_TRUE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC4]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC2]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
 }
@@ -247,7 +237,6 @@ TEST_F(ValidConfigTest, C3_only_vec1)
 {
     auto p = make_params(3);
     EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
     EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
 }
@@ -257,7 +246,6 @@ TEST_F(ValidConfigTest, C2_vec2_and_vec1)
 {
     auto p = make_params(2);
     EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC2]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
 }
@@ -267,7 +255,6 @@ TEST_F(ValidConfigTest, C1_only_vec1)
 {
     auto p = make_params(1);
     EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
     EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
 }
@@ -278,7 +265,6 @@ TEST_F(ValidConfigTest, WrongDirection_rejected)
     auto p = make_params(4);
     p.direction = Direction::Dgrad;
     EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
 }
 
 // groups not a multiple of block_groups(): all configs reject.
@@ -296,7 +282,6 @@ TEST_F(ValidConfigTest, C3_K2_only_vec1)
 {
     auto p = make_params(3, 2);
     EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
     EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
 }
@@ -305,7 +290,6 @@ TEST_F(ValidConfigTest, C2_K4_vec2_and_vec1)
 {
     auto p = make_params(2, 4);
     EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC2]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
 }
@@ -314,7 +298,6 @@ TEST_F(ValidConfigTest, C1_K3_only_vec1)
 {
     auto p = make_params(1, 3);
     EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
-    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
     EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
     EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
 }

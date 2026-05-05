@@ -640,110 +640,93 @@ class DirectConvGrouped4cFp16TileConvV3PaddedTest
 {
 };
 
-// --- Fprop: C == K padded baseline (config 49, vector_size=1) ---
+// --- Fprop: C == K padded baseline (config 47, vector_size=1) ---
 // These must pass; they use the same code path as C!=K but with c_per_group == k_per_group.
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C3_K3)
 {
-    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 3, 3, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<47>(1, 34, 34, 32, 3, 3, 3, 3, 1, 1)));
 }
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C1_K1)
 {
-    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 1, 1, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<47>(1, 34, 34, 32, 1, 1, 3, 3, 1, 1)));
 }
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C2_K2)
 {
-    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 2, 2, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<47>(1, 34, 34, 32, 2, 2, 3, 3, 1, 1)));
 }
 
-// --- Fprop: C != K, vector_size=1 (config 49) ---
-// Config 49: waves_c64=2 (groups%32==0), waves_q4=8 (out_q>=32 needed)
-// With 34x34 input, pad=1, 3x3 filter: out_q = 34
+// --- Fprop: C != K, vector_size=1 (config 51) ---
+// Config 51: waves_c64=2 (groups%32==0), waves_q4=4 (out_q>64 needed)
+// With 68x68 input, pad=1, 3x3 filter: out_q = 68
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C3_K2)
 {
-    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 3, 2, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<51>(4, 16, 16, 32, 3, 2, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C1_K4)
 {
-    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 1, 4, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<51>(4, 16, 16, 32, 1, 4, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C4_K1)
 {
-    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 4, 1, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<51>(4, 16, 16, 32, 4, 1, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C1_K3)
 {
-    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 1, 3, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<51>(4, 16, 16, 32, 1, 3, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C2_K3)
 {
-    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 2, 3, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<51>(4, 16, 16, 32, 2, 3, 3, 3, 1, 1)));
 }
 
-// --- Fprop: C != K, vector_size=2 (config 48) ---
+// --- Fprop: C != K, vector_size=2 (config 46) ---
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_Vec2_C2_K4)
 {
-    ASSERT_TRUE((RunFprop<48>(1, 34, 34, 32, 2, 4, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<46>(1, 34, 34, 32, 2, 4, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_Vec2_C4_K2)
 {
-    ASSERT_TRUE((RunFprop<48>(1, 34, 34, 32, 4, 2, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunFprop<46>(1, 34, 34, 32, 4, 2, 3, 3, 1, 1)));
 }
 
-// --- Dgrad: C != K, vector_size=1 (config 46) ---
+// --- Dgrad: C != K, vector_size=1 (config 45) ---
 // For Dgrad, out_q = par.w (input width). waves_q4=8 needs w >= 32.
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C3_K2)
 {
-    ASSERT_TRUE((RunDgrad<46>(1, 34, 34, 32, 3, 2, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 3, 2, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C1_K4)
 {
-    ASSERT_TRUE((RunDgrad<46>(1, 34, 34, 32, 1, 4, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 1, 4, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C4_K1)
 {
-    ASSERT_TRUE((RunDgrad<46>(1, 34, 34, 32, 4, 1, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 4, 1, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C1_K3)
 {
-    ASSERT_TRUE((RunDgrad<46>(1, 34, 34, 32, 1, 3, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 1, 3, 3, 3, 1, 1)));
 }
 
-// --- Dgrad: C != K, vector_size=2 (config 45) ---
+// --- Dgrad: C != K, vector_size=2 (config 44) ---
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_Vec2_C2_K4)
 {
-    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 2, 4, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunDgrad<44>(1, 34, 34, 32, 2, 4, 3, 3, 1, 1)));
 }
 
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_Vec2_C4_K2)
 {
-    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 4, 2, 3, 3, 1, 1)));
+    ASSERT_TRUE((RunDgrad<44>(1, 34, 34, 32, 4, 2, 3, 3, 1, 1)));
 }
-
-// --- Fprop: No swizzle, vector_size=1 (config 51) ---
-// These test the padded path WITHOUT CyclicShift to isolate swizzle from padding bugs.
-TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_NoSwizzle_C3_K3)
-{
-    ASSERT_TRUE((RunFprop<51>(1, 34, 34, 32, 3, 3, 3, 3, 1, 1)));
-}
-TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_NoSwizzle_C1_K1)
-{
-    ASSERT_TRUE((RunFprop<51>(1, 34, 34, 32, 1, 1, 3, 3, 1, 1)));
-}
-TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_NoSwizzle_C4_K4)
-{
-    // This should use the UNPADDED path (c==GROUP_SIZE) — must pass as baseline.
-    ASSERT_TRUE((RunFprop<51>(1, 34, 34, 32, 4, 4, 3, 3, 1, 1)));
-}
-

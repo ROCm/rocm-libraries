@@ -79,6 +79,7 @@ struct Config
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 
     // Size of the vector loads/stores
+    // TODO: We should use different load and store vector sizes.
     int vector_size = 8;
 
     // Total number of waves.
@@ -103,9 +104,10 @@ struct Config
             swz = "xor-swizzle";
         else if (swizzle_type == SwizzleType::CyclicShift)
             swz = "cyclicshift-swizzle";
+        std::string vector_size_str = "_vec_" + std::to_string(vector_size);
         std::string waves_c64_str = "_waves_c64_" + std::to_string(waves_c64);
         std::string waves_q4_str = "_waves_q4_" + std::to_string(waves_q4);
-        std::string base = "v3_grouped_4c_" + swz + waves_c64_str + waves_q4_str;
+        std::string base = "v3_grouped_4c_" + swz + waves_c64_str + waves_q4_str + vector_size_str;
         if (epilogue == EpilogueType::RegistersToGlobalMemory)
             return  base + "_skip_lds_epilogue";
         else
@@ -232,22 +234,34 @@ constexpr Config configs[] = {
      .epilogue = EpilogueType::RegistersToGlobalMemory},
      // Small vector load/store configs for padding cases (channels_per_group < 4) 
      // where we can't use vectorized accesses without out-of-bounds.
-     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 4},
+     // The only relevant vector size are 1 and 1 since we need the number of both input and output channels
+     // to be divisible by the vector size, and we have at most 4 channels per group.
+     // In the K=C=4 case, we are able to use the full 8-wide vector size for better performance.
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift, .vector_size = 2},
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift, .vector_size = 1},
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Fprop,
-     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 4},
-     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Fprop,
      .swizzle_type = SwizzleType::CyclicShift, .vector_size = 2},
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Fprop,
      .swizzle_type = SwizzleType::CyclicShift, .vector_size = 1},
-     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::None, .vector_size = 1},
-     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Fprop,
-     .swizzle_type = SwizzleType::None, .vector_size = 1},
+     {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 2},
+     {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 1},
+     {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Fprop,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 2},
+     {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Fprop,
+     .swizzle_type = SwizzleType::CyclicShift, .vector_size = 1},
+     // TODO: These configurations produce wrong results.
+    //  {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Dgrad,
+    //  .swizzle_type = SwizzleType::CyclicShift, .vector_size = 2},
+    //  {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Dgrad,
+    //  .swizzle_type = SwizzleType::CyclicShift, .vector_size = 1},
+    //  {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Fprop,
+    //  .swizzle_type = SwizzleType::CyclicShift, .vector_size = 2},
+    //  {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Fprop,
+    //  .swizzle_type = SwizzleType::CyclicShift, .vector_size = 1},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
