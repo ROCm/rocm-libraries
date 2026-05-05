@@ -40,6 +40,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
+option(ENABLE_HIP_KERNEL_ENGINE "Build the HIP kernel engine" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
