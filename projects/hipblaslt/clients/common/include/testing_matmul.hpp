@@ -3728,7 +3728,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         const bool indicesAreDiscovered = (arg.solution_index == -1);
 
-        auto discoverValidIndices = [&]() -> std::vector<int> {
+        std::vector<int> validIndices;
+        auto             discoverValidIndices = [&]() {
             std::vector<hipblasLtMatmulHeuristicResult_t> allAlgos;
             EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
                                                              gemmType,
@@ -3741,17 +3742,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                              arg.compute_type,
                                                              allAlgos),
                                   HIPBLAS_STATUS_SUCCESS);
-            std::vector<int> indices;
-            indices.reserve(allAlgos.size());
+            validIndices.reserve(allAlgos.size());
             for(auto& a : allAlgos)
             {
-                indices.push_back(hipblaslt_ext::getIndexFromAlgo(a.algo));
+                validIndices.push_back(hipblaslt_ext::getIndexFromAlgo(a.algo));
             }
-            return indices;
         };
 
-        const std::vector<int> validIndices
-            = indicesAreDiscovered ? discoverValidIndices() : std::vector<int>{};
+        if(indicesAreDiscovered)
+        {
+            discoverValidIndices();
+        }
 
         bool selectionWasAttempted = false;
 
@@ -3782,16 +3783,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                 return std::vector<int>{arg.solution_index};
             };
 
-            auto fetchAlgosForBatch = [&](std::vector<int>& batch) {
-                std::vector<hipblasLtMatmulHeuristicResult_t> candidates;
-                const auto status
-                    = hipblaslt_ext::getAlgosFromIndex(handle, batch, candidates);
-                if(indicesAreDiscovered)
-                {
-                    EXPECT_HIPBLAS_STATUS(status, HIPBLAS_STATUS_SUCCESS);
-                }
-                return candidates;
-            };
+            auto fetchAlgosForBatch
+                = [&](std::vector<int>&                              batch,
+                      std::vector<hipblasLtMatmulHeuristicResult_t>& candidates) {
+                      candidates.clear();
+                      const auto status
+                          = hipblaslt_ext::getAlgosFromIndex(handle, batch, candidates);
+                      if(indicesAreDiscovered)
+                      {
+                          EXPECT_HIPBLAS_STATUS(status, HIPBLAS_STATUS_SUCCESS);
+                      }
+                  };
 
             auto configureExtGemmForCurrentProblem = [&]() {
                 if(arg.use_ext_setproblem)
@@ -3881,92 +3883,100 @@ void testing_matmul_with_bias(const Arguments& arg,
             };
 
             auto collectTuningsForFirstViableAlgo
-                = [&](const std::vector<hipblasLtMatmulHeuristicResult_t>& candidates,
-                      auto& gemmObject) -> bool {
-                bool foundAlgo = false;
-                for(int j = 0; j < returnedAlgoCount; j++)
-                {
-                    for(size_t t = 0; t < tuningVec.size(); t++)
-                    {
-                        size_t tmpWorkspaceSize = 0;
-                        if(gemmObject.isAlgoSupported(
-                               candidates[j].algo, tuningVec[t], tmpWorkspaceSize)
-                           != HIPBLAS_STATUS_SUCCESS)
-                        {
-                            continue;
-                        }
-                        if(tmpWorkspaceSize > max_workspace_size)
-                        {
-                            continue;
-                        }
-                        heuristicResult.push_back(candidates[j]);
-                        heuristicTuningIndex.push_back(t);
-                        workspace_size = std::max(workspace_size, tmpWorkspaceSize);
-                        foundAlgo      = true;
-                    }
-                    CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
-                    if(foundAlgo)
-                    {
-                        break;
-                    }
-                }
-                return foundAlgo;
-            };
+                = [&](std::vector<hipblasLtMatmulHeuristicResult_t>& candidates,
+                      auto&                                          gemmObject,
+                      bool&                                          foundAlgo) {
+                      foundAlgo = false;
+                      for(int j = 0; j < returnedAlgoCount; j++)
+                      {
+                          for(size_t t = 0; t < tuningVec.size(); t++)
+                          {
+                              size_t tmpWorkspaceSize = 0;
+                              if(gemmObject.isAlgoSupported(
+                                     candidates[j].algo, tuningVec[t], tmpWorkspaceSize)
+                                 != HIPBLAS_STATUS_SUCCESS)
+                              {
+                                  continue;
+                              }
+                              if(tmpWorkspaceSize > max_workspace_size)
+                              {
+                                  continue;
+                              }
+                              heuristicResult.push_back(candidates[j]);
+                              heuristicTuningIndex.push_back(t);
+                              workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                              foundAlgo      = true;
+                          }
+                          CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+                          if(foundAlgo)
+                          {
+                              break;
+                          }
+                      }
+                  };
 
             auto collectAllSupportedAlgosViaCAPI
-                = [&](const std::vector<hipblasLtMatmulHeuristicResult_t>& candidates) -> bool {
-                bool foundAlgo = false;
-                for(int j = 0; j < returnedAlgoCount; j++)
-                {
-                    size_t tmpWorkspaceSize = 0;
-                    if(hipblaslt_ext::matmulIsAlgoSupported(handle,
-                                                            matmul[0][0],
-                                                            alpha_in[0],
-                                                            matA[0],
-                                                            matB[0],
-                                                            &h_beta[0],
-                                                            matC[0],
-                                                            matD[0],
-                                                            candidates[j].algo,
-                                                            tmpWorkspaceSize)
-                           == HIPBLAS_STATUS_SUCCESS
-                       && tmpWorkspaceSize <= max_workspace_size)
-                    {
-                        heuristicResult.push_back(candidates[j]);
-                        heuristicTuningIndex.push_back(0);
-                        workspace_size = std::max(workspace_size, tmpWorkspaceSize);
-                        foundAlgo      = true;
-                    }
-                    CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
-                }
-                return foundAlgo;
-            };
+                = [&](std::vector<hipblasLtMatmulHeuristicResult_t>& candidates,
+                      bool&                                          foundAlgo) {
+                      foundAlgo = false;
+                      for(int j = 0; j < returnedAlgoCount; j++)
+                      {
+                          size_t tmpWorkspaceSize = 0;
+                          if(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                                  matmul[0][0],
+                                                                  alpha_in[0],
+                                                                  matA[0],
+                                                                  matB[0],
+                                                                  &h_beta[0],
+                                                                  matC[0],
+                                                                  matD[0],
+                                                                  candidates[j].algo,
+                                                                  tmpWorkspaceSize)
+                                 == HIPBLAS_STATUS_SUCCESS
+                             && tmpWorkspaceSize <= max_workspace_size)
+                          {
+                              heuristicResult.push_back(candidates[j]);
+                              heuristicTuningIndex.push_back(0);
+                              workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                              foundAlgo      = true;
+                          }
+                          CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+                      }
+                  };
 
             auto trySelectFromBatch
-                = [&](const std::vector<hipblasLtMatmulHeuristicResult_t>& candidates) -> bool {
-                returnedAlgoCount = candidates.size();
-                if(do_grouped_gemm)
-                {
-                    configureGroupedGemmForCurrentProblem();
-                    return collectTuningsForFirstViableAlgo(candidates, groupedGemmVec[0]);
-                }
-                if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-                {
-                    configureExtGemmForCurrentProblem();
-                    return collectTuningsForFirstViableAlgo(candidates, gemmVec[0]);
-                }
-                return collectAllSupportedAlgosViaCAPI(candidates);
-            };
+                = [&](std::vector<hipblasLtMatmulHeuristicResult_t>& candidates,
+                      bool&                                          foundAlgo) {
+                      returnedAlgoCount = candidates.size();
+                      foundAlgo         = false;
+                      if(do_grouped_gemm)
+                      {
+                          configureGroupedGemmForCurrentProblem();
+                          collectTuningsForFirstViableAlgo(
+                              candidates, groupedGemmVec[0], foundAlgo);
+                          return;
+                      }
+                      if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                      {
+                          configureExtGemmForCurrentProblem();
+                          collectTuningsForFirstViableAlgo(candidates, gemmVec[0], foundAlgo);
+                          return;
+                      }
+                      collectAllSupportedAlgosViaCAPI(candidates, foundAlgo);
+                  };
 
             while(auto batch = nextBatchOfIndices())
             {
-                const auto candidates = fetchAlgosForBatch(*batch);
+                std::vector<hipblasLtMatmulHeuristicResult_t> candidates;
+                fetchAlgosForBatch(*batch, candidates);
                 if(candidates.empty())
                 {
                     break;
                 }
                 selectionWasAttempted = true;
-                if(trySelectFromBatch(candidates))
+                bool foundAlgo        = false;
+                trySelectFromBatch(candidates, foundAlgo);
+                if(foundAlgo)
                 {
                     break;
                 }
@@ -3980,7 +3990,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             EXPECT_HIPBLAS_STATUS(
                 hipblaslt_ext::getAlgosFromIndex(handle, mixedIndices, mixedOut),
                 HIPBLAS_STATUS_INVALID_VALUE);
+#ifdef GOOGLE_TEST
             EXPECT_EQ(mixedOut.size(), validIndices.size());
+#endif
         };
 
         searchForSupportedAlgoViaIndexAPI();
