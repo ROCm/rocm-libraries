@@ -606,23 +606,47 @@ def getDockerImage(Map conf=[:])
     return [dockerImage, image]
 }
 
-// New wrapper function to add gitStatusWrapper around getDockerImage
-def getDockerImageWithStatus(Map conf=[:]) {
-    def stageName = env.STAGE_NAME ?: "Docker Image"  
-    def credentialsID = env.monorepo_status_wrapper_creds
-    
-    gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${stageName}", account: 'ROCm', repo: 'rocm-libraries') {
+def setGithubStatus(String context, String state, String description) {
+    def sha = env.GIT_COMMIT
+    def targetUrl = env.RUN_DISPLAY_URL ?: env.BUILD_URL
+    def statusUrl = "https://api.github.com/repos/ROCm/rocm-libraries/statuses/${sha}"
+    withCredentials([usernamePassword(credentialsId: 'github-app-miopen', usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
+        def code = '0'
         try {
-            return getDockerImage(conf) 
+            retry(3) {
+                code = sh(returnStdout: true, script: """
+                    curl -s -w "%{http_code}" -o /dev/null -X POST '${statusUrl}' \\
+                        -H "Authorization: token \$GITHUB_TOKEN" \\
+                        -H 'Content-Type: application/json' \\
+                        -d '{"state":"${state}","context":"${context}","description":"${description}","target_url":"${targetUrl}"}'
+                """).trim()
+                if (!code.startsWith('2')) {
+                    error("GitHub status POST returned ${code}")
+                }
+            }
+        } catch (Exception e) {
+            echo "WARNING: GitHub status POST failed after retries (context=${context}, state=${state}, code=${code})"
         }
-        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-                echo "The job was cancelled or aborted"
-                throw e
-        }
-        catch (Exception ex) {
-            echo "Error in getDockerImageWithStatus: ${ex.message}"
-            throw ex
-        }
+    }
+}
+
+def getDockerImageWithStatus(Map conf=[:]) {
+    def stageName = env.STAGE_NAME ?: "Docker Image"
+    setGithubStatus(stageName, 'pending', 'In progress')
+    try {
+        def result = getDockerImage(conf)
+        setGithubStatus(stageName, 'success', 'Completed successfully')
+        return result
+    }
+    catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        echo "The job was cancelled or aborted"
+        setGithubStatus(stageName, 'error', 'Job cancelled or aborted')
+        throw e
+    }
+    catch (Exception ex) {
+        echo "Error in getDockerImageWithStatus: ${ex.message}"
+        setGithubStatus(stageName, 'failure', 'Stage failed')
+        throw ex
     }
 }
 
@@ -658,9 +682,8 @@ def buildHipClangJob(Map conf=[:]){
         def build_timeout = conf.get("build_timeout", 420)
 
         def retimage
-        def credentialsID = env.monorepo_status_wrapper_creds
-
-        gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${variant}", account: 'ROCm', repo: 'rocm-libraries') {
+        setGithubStatus(variant, 'pending', 'In progress')
+        try {
             try {
                 (retimage, image) = getDockerImage(conf)
                 if (needs_gpu) {
@@ -679,6 +702,7 @@ def buildHipClangJob(Map conf=[:]){
             }
             catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
                 echo "The job was cancelled or aborted"
+                setGithubStatus(variant, 'error', 'Job cancelled or aborted')
                 throw e
             }
             catch(Exception ex) {
@@ -719,6 +743,14 @@ def buildHipClangJob(Map conf=[:]){
                     cmake_build(conf)
                 }
             }
+            setGithubStatus(variant, 'success', 'Completed successfully')
+        }
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+            throw e  // already set status above
+        }
+        catch (Exception ex) {
+            setGithubStatus(variant, 'failure', 'Stage failed')
+            throw ex
         }
         return retimage
 }

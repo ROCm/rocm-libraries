@@ -25,6 +25,9 @@ private:
                                     const std::vector<int64_t>& affineTensorIds,
                                     const std::vector<int64_t>& statTensorIds);
 
+    static void checkAffineNormalizedShape(const std::vector<int64_t>& affineDims,
+                                           const std::vector<int64_t>& ioDims);
+
 public:
     RMSnormValidator(
         const std::unordered_map<int64_t,
