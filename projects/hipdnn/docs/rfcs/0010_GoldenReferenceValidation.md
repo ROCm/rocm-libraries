@@ -454,6 +454,8 @@ void verifyGoldenIntegrity(const GoldenManifest& manifest,
 }
 ```
 
+`computeSha256()` takes either a byte buffer (for the graph fingerprint) or a file path (for integrity checks) and returns a lowercase hex SHA-256 string. Implementation uses OpenSSL's EVP interface, which is already a ROCm build dependency.
+
 #### Versioning
 
 The manifest stores `generator_version` and `reference_executor_hash`. No comparison logic is built on these fields -- they exist for diagnostics and forensics. When the reference executor changes, regenerate golden data. "Truth should be truth."
