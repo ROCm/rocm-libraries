@@ -3,12 +3,12 @@
 
 #include "HipKernelContainer.hpp"
 #include "CurrentDevicePropertyProvider.hpp"
-#include "engines/HipKernelEngine.hpp"
-#include "engines/plans/RMSnorm/RMSnormBwdPlanBuilder.hpp"
-#include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
-#include "engines/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
-#include "engines/plans/batchnorm/BatchnormPlanBuilder.hpp"
-#include "engines/plans/layernorm/LayernormPlanBuilder.hpp"
+#include "engines/hip_kernel_engine/HipKernelEngine.hpp"
+#include "engines/hip_kernel_engine/plans/RMSnorm/RMSnormBwdPlanBuilder.hpp"
+#include "engines/hip_kernel_engine/plans/RMSnorm/RMSnormPlanBuilder.hpp"
+#include "engines/hip_kernel_engine/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
+#include "engines/hip_kernel_engine/plans/batchnorm/BatchnormPlanBuilder.hpp"
+#include "engines/hip_kernel_engine/plans/layernorm/LayernormPlanBuilder.hpp"
 #include "hip/HipKernelCompiler.hpp"
 
 #ifdef HIPDNN_ENGINE_ASM_SDPA

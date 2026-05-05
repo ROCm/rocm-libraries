@@ -22,25 +22,6 @@ add_executable(
     TestHipKernelContext.cpp
     TestHipKernelUtils.cpp
     TestHipKernelPluginPublic.cpp
-    engines/TestHipKernelEngine.cpp
-    engines/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
-    engines/plans/Batchnorm/TestBatchnormFwdTrainingActivPlanBuilder.cpp
-    engines/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp
-    engines/plans/Batchnorm/TestBatchnormFwdInferenceWithVariancePlan.cpp
-    engines/plans/Batchnorm/TestBatchnormFwdTrainingPlan.cpp
-    engines/plans/Batchnorm/TestBatchnormFwdTrainingActivPlan.cpp
-    engines/plans/Batchnorm/TestBatchnormBwdPlan.cpp
-    engines/plans/Batchnorm/TestBatchnormCommon.cpp
-    engines/plans/Batchnorm/TestBatchnormApplicabilityChecks.cpp
-    engines/plans/Layernorm/TestLayernormPlanBuilder.cpp
-    engines/plans/Layernorm/TestLayernormFwdPlan.cpp
-    engines/plans/Layernorm/TestLayernormApplicabilityChecks.cpp
-    engines/plans/TestPlanUtils.cpp
-    engines/plans/RMSnorm/TestRMSnormPlanBuilder.cpp
-    engines/plans/RMSnorm/TestRMSnormFwdPlan.cpp
-    engines/plans/RMSnorm/TestRMSnormBwdPlanBuilder.cpp
-    engines/plans/RMSnorm/TestRMSnormBwdPlan.cpp
-    engines/plans/RMSnorm/TestRMSnormApplicabilityChecks.cpp
     hip/TestHipProgramAndKernel.cpp
     hip/TestHipKernelCompileOptions.cpp
 )
@@ -64,6 +45,8 @@ if(ENABLE_ASM_SDPA_ENGINE)
         add_subdirectory(engines/asm_sdpa_engine)
     endif()
 endif()
+
+add_subdirectory(engines/hip_kernel_engine)
 
 clang_tidy_check(hip_kernel_provider_tests)
 

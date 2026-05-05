@@ -126,11 +126,6 @@ message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 # ============================================================================
-# Kernel embedding (must come before src so KERNEL_GENERATED_SOURCES is set)
-# ============================================================================
-add_subdirectory(kernels)
-
-# ============================================================================
 # Plugin library targets and tests
 # ============================================================================
 add_subdirectory(src)

@@ -24,7 +24,7 @@ HipKernelEngine
 ### Key Components
 
 - **Engines** (`src/engines/`): High-level operation orchestration
-- **Plans** (`src/engines/plans/`): Kernel-specific execution logic
+- **Plans** (`src/engines/hip_kernel_engine/plans/`): Kernel-specific execution logic
 - **HIP Infrastructure** (`src/hip/`): HIPRTC wrapper classes for compilation and execution
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
