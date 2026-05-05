@@ -338,7 +338,7 @@ class LocalRead(ValidatorInstruction):
     def done_idx(self) -> SchedulePosition:
         return self.guaranteed_by
 
-    def validate(self):
+    def validate(self) -> Optional[str]:
         """Bead ``ola.3`` phase-2: the LR-data-ready rule
         (``add_local_read_constraints`` + ``set_lr_needed_by_for_VMFMA``)
         was deleted. LR -> MFMA wait-coverage now lives graph-side via
@@ -383,7 +383,7 @@ class Pack(ValidatorInstruction):
     # Only meaningful for TF32 subclasses (CVTPack, MiddlePack, MFMAPack); None for BF16 packs.
     group_index: Optional[int] = None
 
-    def validate(self):
+    def validate(self) -> Optional[str]:
         """No-op after bead `ola.4` phase-2. The Pack-ordering rule moved
         graph-side; the ValidatorInstruction abstract method still requires
         an override on every subclass, so this preserves the contract.
@@ -1141,10 +1141,10 @@ class Timeline:
             self.combined_timeline.extend(self._timelines[loop_name])
 
 
-def applies_only_once(func):
+def applies_only_once(func: Callable) -> Callable:
     """Decorator: skips the function if it has already been applied to this timeline."""
     @functools.wraps(func)
-    def wrapper(timeline, *args, **kwargs):
+    def wrapper(timeline: 'Timeline', *args, **kwargs):
         if func in timeline._applied_passes:
             return
         result = func(timeline, *args, **kwargs)
@@ -1277,7 +1277,7 @@ def _compute_swap_register_pairs(vw: int, total_regs: int) -> list[tuple[int, in
 # graph-native coverage of the rules previously pinned by the (now
 # removed) `TimingTooClose*` tests in `test_ValidatePack.py`.
 
-def _failure_to_string(result) -> Optional[str]:
+def _failure_to_string(result: object) -> Optional[str]:
     """Boundary helper: a rule's validate() may return either a legacy
     string OR a typed Failure. Normalize to string for the existing
     isValid contract.
