@@ -47,7 +47,6 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML_PREV,
     MissingWaitFailure,
     WaitInsufficientFailure,
-    WaitTooLateFailure,
 )
 
 from dataflow_fixtures import (
@@ -308,7 +307,3 @@ class TestValidateNll(GraphNativeValidationTest):
         self.assert_no_failures(failures)
 
 
-# Keep imports referenced so linters don't flag them as unused. This
-# Failure subclass is exposed so the graph-native tests above can be
-# extended with finer-grained assertions if/when needed.
-_ = (WaitTooLateFailure,)

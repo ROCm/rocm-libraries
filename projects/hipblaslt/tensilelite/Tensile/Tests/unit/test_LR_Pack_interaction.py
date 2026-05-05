@@ -25,12 +25,11 @@
 """Cross-cutting LR/Pack negative regression tests (graph-native).
 
 Migrated from the legacy ``CMSValidationTestBase`` shape that ran
-``[add_local_read_constraints, add_pack_constraints]`` and asserted on
-``WaitTooLateFailure``. The legacy LR rule and its ``LR.needed_by``
-machinery have been removed; the equivalent coverage graph-side is the
-LR -> MFMA RAW edge classified by ``validate_edge_wait_coverage``, which
-emits ``MissingWaitFailure`` (or ``WaitTooLateFailure``) on dscnt when
-no qualifying SWaitCnt sits in the producer -> consumer window.
+``[add_local_read_constraints, add_pack_constraints]``. The legacy LR
+rule and its ``LR.needed_by`` machinery have been removed; the equivalent
+coverage graph-side is the LR -> MFMA RAW edge classified by
+``validate_edge_wait_coverage``, which emits ``MissingWaitFailure`` on
+dscnt when no qualifying SWaitCnt sits in the producer -> consumer window.
 
 This file covered Category 4 from the validator regression-test plan:
 schedules where BOTH the LR and the Pack are positioned after the MFMA

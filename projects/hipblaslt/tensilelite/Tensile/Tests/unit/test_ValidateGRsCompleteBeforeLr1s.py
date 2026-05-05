@@ -47,10 +47,10 @@ Acceptance criterion: commenting out the gr_to_lr_lds_reuse branch in
 negative tests below — verifying these tests bind to the graph-side
 classifier and not to the (now-removed) structural rule.
 
-The legacy ``WaitTooLateFailure`` cases (``test_guaranteed_after_first_lr1``,
-``test_swap_global_read_order_failure``) map to ``MissingWaitFailure`` /
-``MissingBarrierFailure`` in the graph: when the GR's covering wait sits
-AT or AFTER the consumer LR1, the wait falls outside ``waits_in_window``'s
+The wait-after-consumer cases (``test_guaranteed_after_first_lr1``,
+``test_swap_global_read_order_failure``) surface as ``MissingWaitFailure`` /
+``MissingBarrierFailure``: when the GR's covering wait sits AT or AFTER
+the consumer LR1, the wait falls outside ``waits_in_window``'s
 [producer, consumer) range and the classifier reports a missing-wait
 condition. This is the same defect under a different name — both indicate
 the schedule cannot guarantee LDS coherence at the LR1 read.
@@ -335,11 +335,11 @@ class TestGRBeforeLR1_MissingBarrier(GraphNativeValidationTest):
         )
 
 
-class TestGRBeforeLR1_WaitTooLate(GraphNativeValidationTest):
-    """The legacy ``WaitTooLateFailure`` cases: the SWait that would cover
-    the GR fires AT or AFTER the LR1 consumer. In the graph model this is
-    a MissingWaitFailure (the wait isn't in the [producer, consumer)
-    window) — same underlying defect, different Failure subclass."""
+class TestGRBeforeLR1_WaitAfterConsumer(GraphNativeValidationTest):
+    """SWait that would cover the GR fires AT or AFTER the LR1 consumer.
+    Surfaces as MissingWaitFailure — the wait isn't in the [producer,
+    consumer) window, which from the consumer's perspective is
+    indistinguishable from no wait at all."""
 
     def test_guaranteed_after_first_lr1(self):
         """4 GRs in flight; SWait(vlcnt=4) is at slot 4, but the FIRST LR1
@@ -382,9 +382,9 @@ class TestGRBeforeLR1_WaitTooLate(GraphNativeValidationTest):
         OrderInvertedFailure for the GRB -> LRA1 cross-graph edge whose
         positions are reversed in subj relative to ref.
 
-        The legacy ``WaitTooLateFailure`` for the same defect is one
-        symptom of the order inversion. The graph reports the more
-        fundamental issue: the producer is positioned after its consumer."""
+        The wait-after-consumer view of this defect is one symptom of the
+        order inversion. The graph reports the more fundamental issue: the
+        producer is positioned after its consumer."""
         ref_cap = make_capture(BODY_LABEL_ML, [
             _gr(slot=0, category="GRA"),
             _gr(slot=0, category="GRB", vgpr_base=44),

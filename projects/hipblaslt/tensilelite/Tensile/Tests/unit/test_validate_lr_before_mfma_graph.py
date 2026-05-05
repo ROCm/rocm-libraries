@@ -41,7 +41,7 @@ waits, yielding MissingWaitFailure on dscnt).
 
 Migration mapping:
 
-  Legacy WaitTooLateFailure         ->  MissingWaitFailure(counter_kind="dscnt")
+  SWait at-or-after consumer        ->  MissingWaitFailure(counter_kind="dscnt")
   Legacy "no failure"               ->  empty failure list
 
 The legacy tests' positional/SWait constructions are translated into
@@ -225,7 +225,8 @@ class TestLRBeforeMFMA_LRB0(GraphNativeValidationTest):
     """Variant where LRB0 is the producer being uncovered.
 
     Mirrors the third sub-case of legacy ``test_simple_LR0`` (LRB0 @ idx 6
-    with SYNC @ idx 3 fires WaitTooLateFailure on LRB0).
+    with SYNC @ idx 3 — SWait fires before the LR producer, so it doesn't
+    drain LRB0; surfaces as MissingWaitFailure).
     """
 
     def test_LRB0_swait_before_lr_does_not_cover(self):

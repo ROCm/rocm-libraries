@@ -780,25 +780,7 @@ class MissingWaitFailure(Failure):
 
 
 # ----------------------------------------------------------------------------
-# 4. WaitTooLateFailure — SWait fires at/after the consumer.
-# ----------------------------------------------------------------------------
-@dataclass
-class WaitTooLateFailure(Failure):
-    producer: NodeLike
-    consumer: NodeLike
-    wait_position: SchedulePosition
-
-    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
-        return (
-            f"{_node_with_pos(self.consumer, capture)}"
-            f"{_iter_note(self.producer, self.consumer)} is guaranteed by an "
-            f"SWaitCnt @ idx={self.wait_position.vmfma_index} which fires at "
-            f"or after the consumer position. Move the wait earlier in the schedule."
-        )
-
-
-# ----------------------------------------------------------------------------
-# 5. WaitInsufficientFailure — wait at correct position but counter value too lax.
+# 4. WaitInsufficientFailure — wait at correct position but counter value too lax.
 # ----------------------------------------------------------------------------
 @dataclass
 class WaitInsufficientFailure(Failure):

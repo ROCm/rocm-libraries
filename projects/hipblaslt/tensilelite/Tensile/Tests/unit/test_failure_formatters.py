@@ -39,7 +39,6 @@ from Tensile.Components.ScheduleCapture import (
     GraphNode,
     OrderInvertedFailure,
     MissingWaitFailure,
-    WaitTooLateFailure,
     WaitInsufficientFailure,
     MissingBarrierFailure,
     WrongInterleavingFailure,
@@ -227,36 +226,6 @@ def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
     )
 
 
-def test_wait_too_late_failure_format_with_capture_brackets():
-    """capture=given: consumer renders as 'category[N] @ idx=M' with the
-    per-category-stream index. Plain MFMA omits the bracket."""
-    other_lra0 = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 1))
-    producer = _make_node("MFMA", "MFMA", 5)
-    consumer = _make_node("LRA0", "LRA0", 10, tagged_inst=consumer_tagged)
-    capture = _capture_with(other_lra0, consumer_tagged)
-    failure = WaitTooLateFailure(
-        producer=producer, consumer=consumer,
-        wait_position=SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0),
-    )
-    msg = failure.format(capture=capture)
-    assert "LRA0[1] @ idx=10" in msg     # second LRA0 in its category-stream
-
-
-def test_wait_too_late_failure_format_cross_iteration():
-    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix.
-    Consumer is plain MFMA (exempt from [N]); producer is only used for the
-    iter_note loop_index check, never labeled, so an empty capture suffices."""
-    producer = _make_node("LRA0", "LRA0[0]", 5, body_label="ML-1")
-    consumer = _make_node("MFMA", "MFMA", 10, body_label="ML")
-    failure = WaitTooLateFailure(
-        producer=producer, consumer=consumer,
-        wait_position=SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0),
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "@ idx=10 (of next iteration) is guaranteed" in msg
-
-
 def test_wait_insufficient_failure_format_with_capture_brackets():
     """capture=given: producer + consumer get per-category [N] index. Wait
     stays bare (the message already says 'SWaitCnt')."""
@@ -401,8 +370,8 @@ def test_timing_too_close_failure_format_cross_iteration():
     MFMA in ML. Mirrors the cross-body shape now reachable in production
     (post-2bu.3/4/5 cumulative_issue_cycles): the formatter must attach
     the "(of next iteration)" suffix to the consumer rendering, like
-    MissingWaitFailure / WaitTooLateFailure / WaitInsufficientFailure /
-    MissingBarrierFailure already do."""
+    MissingWaitFailure / WaitInsufficientFailure / MissingBarrierFailure
+    already do."""
     producer_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml-1", 0, 0))
     consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("PackA0", "PackA0", 7, tagged_inst=producer_tagged, body_label="ML-1")

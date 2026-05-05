@@ -434,7 +434,7 @@ class GlobalRead(ValidatorInstruction):
     def _validate_needed_by(self):
         """Validate: GR -> SWait -> SBarrier -> LR1. Returns Failure or None."""
         from Tensile.Components.ScheduleCapture import (
-            MissingWaitFailure, MissingBarrierFailure, WaitTooLateFailure,
+            MissingWaitFailure, MissingBarrierFailure,
         )
 
         # If needed_by is at inf, the constraint is not active (e.g. no LR1s).
@@ -465,10 +465,11 @@ class GlobalRead(ValidatorInstruction):
                 producer=self, consumer=self.needed_by, role="needed_by",
             )
 
-        # 3. Guaranteed after needed
+        # 3. Guaranteed after needed — semantically equivalent to no wait from the
+        # consumer's perspective, so surface as MissingWaitFailure.
         if self.guaranteed_by > self.needed_by.issued_at:
-            return WaitTooLateFailure(
-                producer=self, consumer=self.needed_by, wait_position=self.guaranteed_by,
+            return MissingWaitFailure(
+                producer=self, consumer=self.needed_by, counter_kind="vlcnt",
             )
 
         # 4. No Barrier between SWait and LR1
