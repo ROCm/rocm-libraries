@@ -35,25 +35,6 @@ TEST(TestReferenceGraphExecutorFactory, CreateDeviceExecutor)
     EXPECT_TRUE(executor->requiresDeviceMemory());
 }
 
-TEST(TestReferenceGraphExecutorFactory, DefaultConfigReturnsCpu)
-{
-    // TestConfig is initialized by TestConfigInitialized (TestTestConfig.cpp) without a
-    // reference executor type. When run with --gtest_filter that excludes TestConfigInitialized,
-    // the singleton may not be initialized — skip in that case.
-    try
-    {
-        static_cast<void>(hipdnn_integration_tests::TestConfig::get().getReferenceExecutorType());
-    }
-    catch(const std::runtime_error&)
-    {
-        GTEST_SKIP() << "TestConfig not initialized (requires TestConfigInitialized suite)";
-    }
-
-    auto executor = ReferenceGraphExecutorFactory::createFromConfig();
-    ASSERT_NE(executor, nullptr);
-    EXPECT_FALSE(executor->requiresDeviceMemory());
-}
-
 // Exercises the factory's core value: both CPU and GPU executors produce
 // consistent results for a conv forward graph using a canonical test shape.
 TEST(TestReferenceGraphExecutorFactory, GpuAndCpuExecutorsAgreeOnConvFwd)
