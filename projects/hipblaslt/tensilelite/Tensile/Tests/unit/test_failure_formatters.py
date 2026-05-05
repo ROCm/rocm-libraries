@@ -405,37 +405,72 @@ def test_missing_barrier_failure_format_cross_iteration():
 
 
 def test_wrong_interleaving_failure_format():
-    pack = _make_node("PackA0", "MiddlePack_a", 0)
-    pack.issued_at = SchedulePosition(loop_index=1, vmfma_index=10, sub_index=0)
-    expected = _make_node("PackA0", "MiddlePack_b", 0)
-    expected.issued_at = SchedulePosition(loop_index=1, vmfma_index=11, sub_index=0)
-    actual = _make_node("PackA0", "MiddlePack_c", 0)
-    actual.issued_at = SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0)
+    """Empty capture: bare 'PackA0 @ idx=N' for each of pack /
+    expected_next / actual_next (no per-category-stream [N] without a
+    capture containing the tagged_inst)."""
+    pack = _make_node("PackA0", "PackA0", 10)
+    expected = _make_node("PackA0", "PackA0", 11)
+    actual = _make_node("PackA0", "PackA0", 12)
     failure = WrongInterleavingFailure(
         pack=pack, expected_next=expected, actual_next=actual
     )
     msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "wrong interleaving" in msg
-    assert "MiddlePack_a" in msg
-    assert "MiddlePack_b" in msg
-    assert "MiddlePack_c" in msg
+    assert msg == (
+        "PackA0 @ idx=10 has wrong interleaving. Should have been "
+        "followed by PackA0 @ idx=11 but was followed by PackA0 @ idx=12."
+    )
+
+
+def test_wrong_interleaving_failure_format_with_capture_brackets():
+    """Capture given: pack / expected_next / actual_next get per-category
+    [N] index — disambiguates the three same-category Packs."""
+    pack_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 0))
+    expected_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 1))
+    actual_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 2))
+    pack = _make_node("PackA0", "PackA0", 10, tagged_inst=pack_tagged)
+    expected = _make_node("PackA0", "PackA0", 11, tagged_inst=expected_tagged)
+    actual = _make_node("PackA0", "PackA0", 12, tagged_inst=actual_tagged)
+    capture = _capture_with(pack_tagged, expected_tagged, actual_tagged)
+    failure = WrongInterleavingFailure(
+        pack=pack, expected_next=expected, actual_next=actual
+    )
+    msg = failure.format(capture=capture)
+    assert "PackA0[0] @ idx=10" in msg
+    assert "PackA0[1] @ idx=11" in msg
+    assert "PackA0[2] @ idx=12" in msg
 
 
 def test_timing_too_close_failure_format():
-    producer = _make_node("PackA0", "CVT0_a", 0)
-    producer.issued_at = SchedulePosition(loop_index=1, vmfma_index=5, sub_index=0)
-    consumer = _make_node("MFMA", "MFMA", 0)
-    consumer.issued_at = SchedulePosition(loop_index=1, vmfma_index=6, sub_index=0)
+    """Empty capture: bare 'PackA0 @ idx=N' / 'MFMA @ idx=N'. Plain MFMA
+    omits [N] either way per _node_label's MFMA discriminator."""
+    producer = _make_node("PackA0", "PackA0", 5)
+    consumer = _make_node("MFMA", "MFMA", 6)
     failure = TimingTooCloseFailure(
-        producer=producer,
-        consumer=consumer,
-        expected_quad_cycles=2,
-        actual_quad_cycles=1,
+        producer=producer, consumer=consumer,
+        expected_quad_cycles=2, actual_quad_cycles=1,
     )
     msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "too little gap" in msg
-    assert "Expected at least 2 quad-cycles" in msg
-    assert "only 1 passed" in msg
+    assert msg == (
+        "PackA0 @ idx=5 has too little gap between it and MFMA @ idx=6. "
+        "Expected at least 2 quad-cycles but only 1 passed."
+    )
+
+
+def test_timing_too_close_failure_format_with_capture_brackets():
+    """Capture given: producer Pack gets [N]; plain-MFMA consumer omits."""
+    producer_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
+    producer = _make_node("PackA0", "PackA0", 5, tagged_inst=producer_tagged)
+    consumer = _make_node("MFMA", "MFMA", 6, tagged_inst=consumer_tagged)
+    capture = _capture_with(producer_tagged, consumer_tagged)
+    failure = TimingTooCloseFailure(
+        producer=producer, consumer=consumer,
+        expected_quad_cycles=2, actual_quad_cycles=1,
+    )
+    msg = failure.format(capture=capture)
+    assert "PackA0[0] @ idx=5" in msg
+    assert "MFMA @ idx=6" in msg
+    assert "MFMA[" not in msg
 
 
 def test_invalid_counter_value_failure_format():

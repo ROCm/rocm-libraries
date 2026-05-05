@@ -722,25 +722,12 @@ class WrongInterleavingFailure(Failure):
     actual_next: object  # MiddlePack (next_scheduled_middle_16) — same shape choice
 
     def _format_canonical(self, capture) -> str:
-        # The structural-side `MiddlePack.validate` (CMSValidator.py:420)
-        # emits with ValidatorInstructions (carry `issued_at:
-        # SchedulePosition`); the graph-side
-        # `validate_middle_pack_pair_interleaving` (bead `dpi`) emits with
-        # GraphNodes (carry `position: SchedulePosition`). Both shapes
-        # expose vmfma_index via a SchedulePosition attribute under
-        # different names — pick whichever exists. Same convention as
-        # `TimingTooCloseFailure._format_canonical` (post-bead `35z`).
-        def _idx(node):
-            pos = getattr(node, "issued_at", None)
-            if pos is None:
-                pos = getattr(node, "position", None)
-            return getattr(pos, "vmfma_index", "?") if pos is not None else "?"
         return (
-            f"{self.pack.name} @ idx={_idx(self.pack)} has wrong "
+            f"{_node_with_pos(self.pack, capture)} has wrong "
             f"interleaving. Should have been followed by "
-            f"{self.expected_next.name} @ idx={_idx(self.expected_next)} "
+            f"{_node_with_pos(self.expected_next, capture)} "
             f"but was followed by "
-            f"{self.actual_next.name} @ idx={_idx(self.actual_next)}."
+            f"{_node_with_pos(self.actual_next, capture)}."
         )
 
 
@@ -755,24 +742,10 @@ class TimingTooCloseFailure(Failure):
     actual_quad_cycles: int
 
     def _format_canonical(self, capture) -> str:
-        # Producer/consumer may be either a validator-side ValidatorInstruction
-        # (carries `issued_at: SchedulePosition`) or a graph-side GraphNode
-        # (carries `position: SchedulePosition`). The structural Pack.validate
-        # path emits with ValidatorInstructions; the graph-side
-        # `_classify_edge_coverage` / `diagnose_missing_edge` emit with
-        # GraphNodes (Sub-A bead `e7w` for the MFMA branch, Sub-B bead `35z`
-        # for the CVT->MFMA branch). Both shapes expose vmfma_index via a
-        # SchedulePosition attribute under different names — pick whichever
-        # exists so the canonical formatter works for both.
-        def _idx(node):
-            pos = getattr(node, "issued_at", None)
-            if pos is None:
-                pos = getattr(node, "position", None)
-            return getattr(pos, "vmfma_index", "?") if pos is not None else "?"
         return (
-            f"{self.producer.name} @ idx={_idx(self.producer)} has "
-            f"too little gap between it and {self.consumer.name} @ idx="
-            f"{_idx(self.consumer)}. Expected at least "
+            f"{_node_with_pos(self.producer, capture)} has "
+            f"too little gap between it and "
+            f"{_node_with_pos(self.consumer, capture)}. Expected at least "
             f"{self.expected_quad_cycles} quad-cycles but only "
             f"{self.actual_quad_cycles} passed."
         )
