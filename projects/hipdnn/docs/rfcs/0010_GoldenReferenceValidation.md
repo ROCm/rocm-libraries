@@ -29,7 +29,11 @@
 
 ## Executive Summary
 
-This RFC introduces golden reference validation as a third verification mode for the integration test suite, alongside the existing CPU reference and GPU reference modes. Golden reference validation compares engine outputs against pre-computed, version-controlled reference data rather than computing references at runtime.
+The integration test suite currently supports two verification modes. This RFC adds a third:
+
+1. **CPU reference** (existing) -- compute reference on CPU at runtime
+2. **GPU reference** (existing) -- compute reference on GPU at runtime
+3. **Golden reference** (new) -- compare against pre-computed, version-controlled reference data from disk
 
 ### Key Benefits
 - **Deterministic baselines**: Reference data is fixed; test outcomes depend only on the engine under test
