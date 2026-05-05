@@ -13,6 +13,28 @@
 
 using namespace gpu_ref;
 
+// Decompose a linear element index into strided offsets for two tensors.
+// Computes multi-dimensional coordinates from linearIdx using dims (innermost-last),
+// then dot-products with each tensor's strides to get physical offsets.
+__device__ inline void decomposeAndComputeOffsets(long long linearIdx,
+                                                  const long long* dims,
+                                                  const long long* refStrides,
+                                                  const long long* implStrides,
+                                                  int ndim,
+                                                  long long& refOffset,
+                                                  long long& implOffset)
+{
+    refOffset = 0;
+    implOffset = 0;
+    for(int d = ndim - 1; d >= 0; --d)
+    {
+        long long coord = linearIdx % dims[d];
+        linearIdx /= dims[d];
+        refOffset += coord * refStrides[d];
+        implOffset += coord * implStrides[d];
+    }
+}
+
 // Floating-point allClose validation kernel.
 // For each element i: passes if |impl[i] - ref[i]| <= atol + rtol * |ref[i]|
 // Fails on NaN or Inf in either tensor.
@@ -33,8 +55,16 @@ extern "C" __global__ void validateAllClose(ValidatorArgs args)
     const auto* ref = static_cast<const DATA_TYPE*>(args.reference);
     const auto* impl = static_cast<const DATA_TYPE*>(args.implementation);
 
-    auto refVal = toAccum(ref[idx]);
-    auto implVal = toAccum(impl[idx]);
+    long long refIdx = idx;
+    long long implIdx = idx;
+    if(args.ndim > 0)
+    {
+        decomposeAndComputeOffsets(
+            idx, args.dims, args.refStrides, args.implStrides, args.ndim, refIdx, implIdx);
+    }
+
+    auto refVal = toAccum(ref[refIdx]);
+    auto implVal = toAccum(impl[implIdx]);
 
     if(isnan(refVal) || isnan(implVal) || isinf(refVal) || isinf(implVal))
     {
@@ -70,7 +100,15 @@ extern "C" __global__ void validateExact(ValidatorArgs args)
     const auto* ref = static_cast<const DATA_TYPE*>(args.reference);
     const auto* impl = static_cast<const DATA_TYPE*>(args.implementation);
 
-    if(ref[idx] != impl[idx])
+    long long refIdx = idx;
+    long long implIdx = idx;
+    if(args.ndim > 0)
+    {
+        decomposeAndComputeOffsets(
+            idx, args.dims, args.refStrides, args.implStrides, args.ndim, refIdx, implIdx);
+    }
+
+    if(ref[refIdx] != impl[implIdx])
     {
         atomicMax(args.failureFlag, 1);
     }
