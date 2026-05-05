@@ -625,3 +625,94 @@ TEST_F(DirectConvGrouped4cFp16TileConvV3CyclicShiftSwizzleTest, Dgrad_V3_CyclicS
     ASSERT_TRUE((RunDgrad<43>(2, 64, 64, 32, 4, 4, 3, 3, 0, 0)));
 }
 
+// =============================================================================
+// V3 C != K padded convolution tests
+//
+// Configs 44-46: Dgrad CyclicShift, vector_size = {4, 2, 1}
+// Configs 47-49: Fprop CyclicShift, vector_size = {4, 2, 1}
+//
+// vector_size=1 (configs 46/49) supports any c_per_group/k_per_group in {1,2,3,4}
+// vector_size=2 (configs 45/48) requires c_per_group % 2 == 0 and k_per_group % 2 == 0
+// =============================================================================
+
+class DirectConvGrouped4cFp16TileConvV3PaddedTest
+    : public DirectConvGrouped4cFp16TestHarness<TileConvKernelTraits>
+{
+};
+
+// --- Fprop: C != K, vector_size=1 (config 49) ---
+// Config 49: waves_c64=2 (groups%32==0), waves_q4=8 (out_q>=32 needed)
+// With 34x34 input, pad=1, 3x3 filter: out_q = 34
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C3_K2)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 3, 2, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C1_K4)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 1, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C4_K1)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 4, 1, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C1_K3)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 1, 3, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C2_K3)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 2, 3, 3, 3, 1, 1)));
+}
+
+// --- Fprop: C != K, vector_size=2 (config 48) ---
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_Vec2_C2_K4)
+{
+    ASSERT_TRUE((RunFprop<48>(1, 34, 34, 32, 2, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_Vec2_C4_K2)
+{
+    ASSERT_TRUE((RunFprop<48>(1, 34, 34, 32, 4, 2, 3, 3, 1, 1)));
+}
+
+// --- Dgrad: C != K, vector_size=1 (config 46) ---
+// For Dgrad, out_q = par.w (input width). waves_q4=8 needs w >= 32.
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C3_K2)
+{
+    ASSERT_TRUE((RunDgrad<46>(1, 34, 34, 32, 3, 2, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C1_K4)
+{
+    ASSERT_TRUE((RunDgrad<46>(1, 34, 34, 32, 1, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C4_K1)
+{
+    ASSERT_TRUE((RunDgrad<46>(1, 34, 34, 32, 4, 1, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C1_K3)
+{
+    ASSERT_TRUE((RunDgrad<46>(1, 34, 34, 32, 1, 3, 3, 3, 1, 1)));
+}
+
+// --- Dgrad: C != K, vector_size=2 (config 45) ---
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_Vec2_C2_K4)
+{
+    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 2, 4, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_Vec2_C4_K2)
+{
+    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 4, 2, 3, 3, 1, 1)));
+}
+

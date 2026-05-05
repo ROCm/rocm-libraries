@@ -230,7 +230,8 @@ constexpr Config configs[] = {
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift,
      .epilogue = EpilogueType::RegistersToGlobalMemory},
-     // Small vector load/store configs
+     // Small vector load/store configs for padding cases (channels_per_group < 4) 
+     // where we can't use vectorized accesses without out-of-bounds.
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
      .swizzle_type = SwizzleType::CyclicShift, .vector_size = 4},
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
@@ -261,6 +262,8 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
 
     const bool padding_needed = par.channels_per_group() != 4 || par.filters_per_group() != 4;
     if (padding_needed && par.channels_per_group() % cfg.vector_size != 0)
+        return false;
+    if (padding_needed && par.filters_per_group() % cfg.vector_size != 0)
         return false;
     
     return true;

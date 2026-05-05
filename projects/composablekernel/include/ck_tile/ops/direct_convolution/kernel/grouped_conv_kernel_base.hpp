@@ -287,7 +287,6 @@ inline bool is_applicable_base(const Conv2dParams& par)
     if(par.direction != Direction::Fprop &&
        par.direction != Direction::Dgrad) return false;
     if(par.kh != 3 || par.kw != 3)       return false;
-    if(par.k_tot != par.c_tot)           return false;
     if(par.stride_h != 1 || par.stride_w != 1)       return false;
     if(par.dilation_h != 1 || par.dilation_w != 1)   return false;
     if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1) return false;
@@ -303,7 +302,7 @@ LaunchParams get_launch_params_impl(const Config& cfg, const Conv2dParams& par)
     const int out_q    = (cfg.direction == Direction::Dgrad) ? par.w : par.q;
     auto blocks_w      = ck_tile::integer_divide_ceil(out_q, cfg.block_q());
     auto blocks_w_n    = blocks_w * cfg.n_fold;
-    auto blocks_c      = ck_tile::integer_divide_ceil(par.c_tot, cfg.block_c());
+    auto blocks_c      = ck_tile::integer_divide_ceil(par.groups, cfg.block_groups());
     auto blocks_n_fold = ck_tile::integer_divide_ceil(par.n, cfg.n_fold);
 
     LaunchParams launch;
