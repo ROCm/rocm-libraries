@@ -3025,6 +3025,14 @@ namespace TensileLite
                     cuCount                  = pAMDGPU->computeUnitCount;
                 }
 
+                /// Constructor for testing: inject cuCount so selection logic can be
+                /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
+                WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
+                    : value(value)
+                    , cuCount(cuCountForTest)
+                {
+                }
+
                 static std::string Type()
                 {
                     return "WorkgroupMappingXCCCheck";

@@ -51,6 +51,7 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     friend class DefUseChainUpdater;
     friend class DefUseChainBuilder;
 
+    const HwInstDesc* hwInstDesc;
     int issueCycles;
     int latencyCycles;
 
@@ -63,8 +64,6 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     // instructions that DEFINE the values USED by this instruction
     // (producers of this instruction's operands).
     std::vector<StinkyInstruction*> sources;
-
-    const HwInstDesc* hwInstDesc;
 
     // Modifiers are extra bits/fields in the instruction encoding that
     // tweak how the operation is performed, without needing a completely
