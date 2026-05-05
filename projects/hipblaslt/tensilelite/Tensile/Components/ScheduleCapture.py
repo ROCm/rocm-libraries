@@ -771,10 +771,13 @@ class InvalidCounterValueFailure(Failure):
     vscnt: int
 
     def _format_canonical(self, capture) -> str:
+        bad = [(name, val) for name, val in
+               (("dscnt", self.dscnt), ("vlcnt", self.vlcnt), ("vscnt", self.vscnt))
+               if val < -1]
+        bad_str = ", ".join(f"{name}={val}" for name, val in bad)
         return (
             f"SWaitCnt @ idx={self.swait.issued_at.vmfma_index} is invalid: "
-            f"dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}. "
-            f"All counter fields must be >= -1 (with -1 meaning 'don't care')."
+            f"{bad_str}. All counter fields must be >= -1."
         )
 
 

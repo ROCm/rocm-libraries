@@ -423,17 +423,33 @@ def test_timing_too_close_failure_format_with_capture_brackets():
     assert "MFMA[" not in msg
 
 
-def test_invalid_counter_value_failure_format():
+def test_invalid_counter_value_failure_format_single_bad():
+    """Only the field below -1 appears in the message; valid fields (>= -1)
+    are omitted so the user sees just what's wrong."""
     swait = _make_node("SYNC", "SWaitCnt", 0)
     swait.issued_at = SchedulePosition(loop_index=1, vmfma_index=4, sub_index=0)
     failure = InvalidCounterValueFailure(
         swait=swait, dscnt=-2, vlcnt=0, vscnt=-1
     )
     msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "SWaitCnt @ idx=4 is invalid" in msg
-    assert "dscnt=-2" in msg
-    assert "vlcnt=0" in msg
-    assert ">= -1" in msg
+    assert msg == (
+        "SWaitCnt @ idx=4 is invalid: dscnt=-2. "
+        "All counter fields must be >= -1."
+    )
+
+
+def test_invalid_counter_value_failure_format_multiple_bad():
+    """Two fields below -1 -> both listed, comma-separated."""
+    swait = _make_node("SYNC", "SWaitCnt", 0)
+    swait.issued_at = SchedulePosition(loop_index=1, vmfma_index=7, sub_index=0)
+    failure = InvalidCounterValueFailure(
+        swait=swait, dscnt=-2, vlcnt=-1, vscnt=-3
+    )
+    msg = failure.format(LoopBodyCapture(instructions=[]))
+    assert msg == (
+        "SWaitCnt @ idx=7 is invalid: dscnt=-2, vscnt=-3. "
+        "All counter fields must be >= -1."
+    )
 
 
 def test_scc_conflict_failure_format_with_capture_brackets():
