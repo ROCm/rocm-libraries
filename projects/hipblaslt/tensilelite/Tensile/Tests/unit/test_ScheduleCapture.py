@@ -160,7 +160,7 @@ class TestLoopBodyCaptureBuilder:
 # FourPartCapture shape
 # =============================================================================
 
-def _make_body(num_mfma):
+def _make_body(num_mfma: int) -> LoopBodyCapture:
     """Build a LoopBodyCapture with `num_mfma` MFMA-tagged entries."""
     b = LoopBodyCaptureBuilder()
     for i in range(num_mfma):
@@ -168,7 +168,12 @@ def _make_body(num_mfma):
     return b.finalize()
 
 
-def _make_capture(source, num_mfma, num_codepaths=1, extra_main_cats=None):
+def _make_capture(
+    source: str,
+    num_mfma: int,
+    num_codepaths: int = 1,
+    extra_main_cats=None,
+) -> FourPartCapture:
     """Build a FourPartCapture with consistent MFMA counts.
 
     extra_main_cats: list of (category, count) to add to main_loop[0] for testing

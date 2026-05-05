@@ -29,6 +29,8 @@ assert on Failure type and field, not on string content. If a formatter's
 wording legitimately changes, only this file's tests update.
 """
 
+from typing import Optional
+
 import pytest
 
 from Tensile.Components.ScheduleCapture import (
@@ -52,7 +54,13 @@ from Tensile.Components.ScheduleCapture import (
 )
 
 
-def _make_node(category, name, vmfma_index, tagged_inst=None, body_label="ML"):
+def _make_node(
+    category: str,
+    name: str,
+    vmfma_index: int,
+    tagged_inst: Optional[TaggedInstruction] = None,
+    body_label: str = "ML",
+) -> GraphNode:
     return GraphNode(
         identity=(category, BODY_LABEL_TO_LOOP_INDEX[body_label], (name,)),
         position=SchedulePosition(
@@ -68,7 +76,7 @@ def _make_node(category, name, vmfma_index, tagged_inst=None, body_label="ML"):
     )
 
 
-def _capture_with(*tagged_instructions):
+def _capture_with(*tagged_instructions: TaggedInstruction) -> LoopBodyCapture:
     """Build a LoopBodyCapture whose .instructions list is exactly the given list.
 
     The instructions need only support `==` against themselves (default object
