@@ -2678,10 +2678,13 @@ def build_dataflow_graph(four_part_capture):
 
     Phase 1 — node construction. Walks bodies in execution order
     (ML-1 -> ML -> NGL -> NLL). Every captured instruction becomes a
-    node EXCEPT SWait/SBarrier/SNop (scheduler-choice; sidecar only)
-    and LCC (out-of-scope: default emits it outside _loopBody, CMS
-    bakes it into the macro). Per-body sidecar `_graph_nodes` is
-    attached so wait/barrier helpers can find sync ops in stream order.
+    node EXCEPT SWait/SBarrier/SNop (scheduler-choice; sidecar only).
+    LCC instructions (SSubU32 + SCmpEQI32, per LCC_AUDIT.md from
+    bead 2bu.1) ARE nodes — their per-instruction issue cycles
+    contribute to `cumulative_issue_cycles` walks. Cross-body cycle
+    counting (sibling beads 2bu.3/4/5) depends on this.
+    Per-body sidecar `_graph_nodes` is attached so wait/barrier
+    helpers can find sync ops in stream order.
 
     Phase 2 — edge formation by RESOURCE RESOLUTION. For each consumer's
     read resource R, walk producers in stream-position order
@@ -2761,10 +2764,12 @@ def build_dataflow_graph(four_part_capture):
             nodes_per_body[label].append(node)
 
             # Cross-graph identity set: only "real" instructions
-            # participate (excludes scheduler-choice SWait/SBarrier/SNop
-            # and out-of-scope LCC).
-            if (not (_is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst))
-                    and node.identity[0] != "LCC"):
+            # participate (excludes scheduler-choice SWait/SBarrier/SNop).
+            # LCC instructions (SSubU32 + SCmpEQI32) ARE included — their
+            # per-instruction issue cycles contribute to
+            # `cumulative_issue_cycles` walks; cross-body cycle counting
+            # (sibling beads 2bu.3/4/5) depends on it.
+            if not (_is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst)):
                 nodes_by_identity[node.identity] = node
 
         # Stash per-body GraphNodes on the LoopBodyCapture for the helpers.

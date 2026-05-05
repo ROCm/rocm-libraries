@@ -308,6 +308,50 @@ def make_snop(slot: int, *, wait_state: int = 0,
     )
 
 
+def make_lcc_pair(slot: int, *,
+                  loop_counter_name: str = "LoopCounterL",
+                  end_counter: int = 0,
+                  sequence_start: int = 0
+                  ) -> Sequence[TaggedInstruction]:
+    """Build the canonical LCC instruction pair (SSubU32 + SCmpEQI32).
+
+    Mirrors `closeLoop(..., finalLoop=False)` sub-branch A from
+    `KernelWriterAssembly.py:6883-6892`:
+
+        SSubU32(dst=loopCounter, src0=loopCounter, src1=hex(1))
+        SCmpEQI32(src0=loopCounter, src1=hex(endCounter))
+
+    Per `LCC_AUDIT.md` (bead 2bu.1) every captured CMS schedule emits
+    exactly this 2-instruction pair into the LCC bucket; both are
+    1-quad-cycle SALU ops.
+
+    Uses real rocisa classes (no `_Fake*` shim) — `_class_tag_from_category`
+    returns "LCC" so the resulting nodes carry the LCC identity tag and
+    `_SCCRule` publishes their reads/writes (sgpr loop counter + SCC).
+    Both instructions are placed at the same `mfma_index` slot with
+    consecutive `sequence` values (matches the dominant CMS layout
+    `'LCC' : [[N, N]]` from `CustomSchedule.py` — see audit Step 3).
+    """
+    from rocisa.instruction import SSubU32, SCmpEQI32
+    counter = sgpr(loop_counter_name, 1)
+    sub = SSubU32(dst=counter, src0=counter, src1=hex(1))
+    cmp_ = SCmpEQI32(src0=counter, src1=hex(end_counter))
+    return (
+        TaggedInstruction(
+            inst=sub,
+            category="LCC",
+            slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                         mfma_index=slot, sequence=sequence_start),
+        ),
+        TaggedInstruction(
+            inst=cmp_,
+            category="LCC",
+            slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                         mfma_index=slot, sequence=sequence_start + 1),
+        ),
+    )
+
+
 def make_capture(body_label: str, instructions: Sequence[TaggedInstruction]
                  ) -> LoopBodyCapture:
     """Construct a LoopBodyCapture with the given pre-built TaggedInstructions.

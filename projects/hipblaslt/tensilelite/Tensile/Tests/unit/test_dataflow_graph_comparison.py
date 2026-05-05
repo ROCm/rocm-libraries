@@ -149,15 +149,23 @@ class TestCleanComparison:
         # identity-set sizes despite subject having 3 extra sync ops.
         assert set(g_ref.nodes.keys()) == set(g_subj.nodes.keys())
 
-    def test_lcc_excluded_from_identity_set(self):
-        """Loop-counter code (category 'LCC') is emitted by CMS inside the
-        macro body but by the default-side scheduler OUTSIDE _loopBody (in
-        closeLoop). The two schedulers capture different scopes for LCC.
-        The identity-set comparison must exclude cls=LCC so the asymmetry
-        doesn't surface as a CMS-only diff.
+    def test_lcc_included_in_identity_set(self):
+        """Loop-counter code (category 'LCC' — `SSubU32` + `SCmpEQI32`,
+        per `Components/LCC_AUDIT.md` from bead 2bu.1) IS a full graph
+        participant as of bead 2bu.2. Its per-instruction issue cycles
+        contribute to `cumulative_issue_cycles` walks, which is what
+        sibling beads 2bu.3 / 2bu.4 / 2bu.5 use for cross-body cycle
+        counting. Identical captures with an LCC node both yield the
+        same identity set including the LCC entry, and `compare_graphs`
+        returns empty (no spurious LCC-only diff).
 
-        Use a stand-in instruction class — cls=LCC comes from the category
-        mapping (LCC -> 'LCC'), so any inst type works.
+        Note: in real captures the default-side scheduler emits LCC
+        outside `_loopBody` while CMS bakes it into the macro, so the
+        two captures CAN differ in LCC presence. That asymmetry surfaces
+        through `compare_graphs` now and is intentionally part of the
+        scope of beads 2bu.3 / 2bu.4 / 2bu.5 — this test only pins the
+        symmetric case to confirm LCC nodes participate in identity
+        comparison.
         """
         from dataclasses import dataclass
 
@@ -169,30 +177,35 @@ class TestCleanComparison:
         from Tensile.Components.ScheduleCapture import (
             TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
         )
-        ti_lcc = TaggedInstruction(
-            inst=_LccInst(),
-            category="LCC",
-            slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
-                         mfma_index=0, sequence=0),
-        )
-        # Reference has the LCC; subject doesn't (mirrors CMS vs default).
+
+        def _build_ti():
+            return TaggedInstruction(
+                inst=_LccInst(),
+                category="LCC",
+                slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                             mfma_index=0, sequence=0),
+            )
+
         ref_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
-            ti_lcc,
+            _build_ti(),
             make_mfma(0, 8, 32, slot=3, a_src_count=4),
         ])
         subj_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
+            _build_ti(),
             make_mfma(0, 8, 32, slot=3, a_src_count=4),
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
-        # Identity sets must match (LCC excluded from both).
+        # Identity sets match — both include the LCC node.
         assert set(g_ref.nodes.keys()) == set(g_subj.nodes.keys())
-        # No LCC in either identity set.
-        assert not any(ident[0] == "LCC" for ident in g_ref.nodes.keys())
+        assert any(ident[0] == "LCC" for ident in g_ref.nodes.keys()), (
+            f"LCC nodes should participate in the identity set as of 2bu.2; "
+            f"got cls tags {sorted({i[0] for i in g_ref.nodes.keys()})}"
+        )
         assert compare_graphs(g_ref, g_subj) == []
 
 
