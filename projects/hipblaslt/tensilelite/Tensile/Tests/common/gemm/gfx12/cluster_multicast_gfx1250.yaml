@@ -38,7 +38,7 @@ BenchmarkProblems:
       DataType: F8
       MacDataTypeA: F8
       MacDataTypeB: F4
-      DestDataType: F8
+      DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: True
