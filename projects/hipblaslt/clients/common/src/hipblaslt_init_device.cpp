@@ -222,6 +222,23 @@ __device__ T random_hpl(size_t idx)
     return T(double(r) / double(std::numeric_limits<decltype(r)>::max()) - 0.5);
 }
 
+/*! \brief  generate a random number in [-6.0,6.0] doubles  */
+template <typename T>
+__device__ T random_low_precision(size_t idx)
+{
+    auto r = pseudo_random_device(idx);
+    return T(double(r) / double(std::numeric_limits<decltype(r)>::max()) * 12.0 - 6.0);
+}
+
+/*! \brief  generate a random number in [-6.0,6.0] for int8  */
+template <>
+__device__ int8_t random_low_precision(size_t idx)
+{
+    auto r = pseudo_random_device(idx);
+    auto v = nearbyint(double(r) / double(std::numeric_limits<decltype(r)>::max()) * 12. - 6.);
+    return int8_t(v > 127.f ? 127.f : v < -128.f ? -128.f : v);
+}
+
 /*! \brief  generate a random number in [-1.0,1.0] doubles  */
 template <>
 __device__ int8_t random_hpl(size_t idx)
@@ -284,6 +301,16 @@ __device__ hipblaslt_f4x2 random_hpl(size_t idx)
     auto r1 = static_cast<double>(pseudo_random_device(2 * idx + 1)) / cvt_max_ui32_to_double - 0.5;
     return hipblaslt_f4x2(r0, r1);
 }
+
+template <>
+__device__ hipblaslt_f4x2 random_low_precision(size_t idx)
+{
+    constexpr auto cvt_max_ui32_to_double
+        = static_cast<double>(std::numeric_limits<uint32_t>::max());
+    auto r0 = static_cast<double>(pseudo_random_device(2 * idx)) / cvt_max_ui32_to_double * 12.0 - 6.0;
+    auto r1 = static_cast<double>(pseudo_random_device(2 * idx + 1)) / cvt_max_ui32_to_double * 12.0 - 6.0;
+    return hipblaslt_f4x2(r0, r1);
+}
 #endif
 
 #if defined(HIPBLASLT_USE_FP6)
@@ -300,6 +327,37 @@ __device__ hipblaslt_f6x16 random_hpl(size_t idx)
         r[i] = static_cast<double>(pseudo_random_device(type::packed_size * idx + i))
                    / cvt_max_ui32_to_double
                - 0.5;
+    }
+    return hipblaslt_f6x16(r[0],
+                           r[1],
+                           r[2],
+                           r[3],
+                           r[4],
+                           r[5],
+                           r[6],
+                           r[7],
+                           r[8],
+                           r[9],
+                           r[10],
+                           r[11],
+                           r[12],
+                           r[13],
+                           r[14],
+                           r[15]);
+}
+
+template <>
+__device__ hipblaslt_f6x16 random_low_precision(size_t idx)
+{
+    using type                          = hipblaslt_f6x16;
+    double         r[type::packed_size] = {0.0};
+    constexpr auto cvt_max_ui32_to_double
+        = static_cast<double>(std::numeric_limits<uint32_t>::max());
+    for(size_t i = 0; i < type::packed_size; i++)
+    {
+        r[i] = static_cast<double>(pseudo_random_device(type::packed_size * idx + i))
+                   / cvt_max_ui32_to_double
+               * 12.0 - 6.0;
     }
     return hipblaslt_f6x16(r[0],
                            r[1],
@@ -352,11 +410,50 @@ __device__ hipblaslt_bf6x16 random_hpl(size_t idx)
                             r[14],
                             r[15]);
 }
+
+template <>
+__device__ hipblaslt_bf6x16 random_low_precision(size_t idx)
+{
+    using type                          = hipblaslt_bf6x16;
+    double         r[type::packed_size] = {0.0};
+    constexpr auto cvt_max_ui32_to_double
+        = static_cast<double>(std::numeric_limits<uint32_t>::max());
+    for(size_t i = 0; i < type::packed_size; i++)
+    {
+        r[i] = static_cast<double>(pseudo_random_device(type::packed_size * idx + i))
+                   / cvt_max_ui32_to_double
+               * 12.0 - 6.0;
+    }
+    return hipblaslt_bf6x16(r[0],
+                            r[1],
+                            r[2],
+                            r[3],
+                            r[4],
+                            r[5],
+                            r[6],
+                            r[7],
+                            r[8],
+                            r[9],
+                            r[10],
+                            r[11],
+                            r[12],
+                            r[13],
+                            r[14],
+                            r[15]);
+}
 #endif
 
 /*! \brief  generate a random number in range [2^-3,2^-2,2^-1,2^0,]2^1,2^2,2^3]] */
 template <>
 __device__ hipblaslt_e8 random_hpl<hipblaslt_e8>(size_t idx)
+{
+    hipblaslt_e8 val;
+    val.data = ((pseudo_random_device(idx) % 7 - 3) + 127);
+    return val;
+}
+
+template <>
+__device__ hipblaslt_e8 random_low_precision<hipblaslt_e8>(size_t idx)
 {
     hipblaslt_e8 val;
     val.data = ((pseudo_random_device(idx) % 7 - 3) + 127);
@@ -683,6 +780,11 @@ void hipblaslt_init_device(ABC_dims                 abc,
             else
             fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                 return random_hpl<T>(idx);
+            });
+            break;
+        case hipblaslt_initialization::uniform_low_precision:
+            fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
+                return random_low_precision<T>(idx);
             });
             break;
         case hipblaslt_initialization::special:
