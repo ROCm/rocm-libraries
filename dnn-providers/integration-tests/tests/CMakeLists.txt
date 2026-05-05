@@ -3,7 +3,10 @@
 
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    TestGraphDescription.cpp
+    TestNodeTypeToString.cpp
     TestPlatformUtils.cpp
+    TestSupportMatrixCollector.cpp
     TestTestConfig.cpp
     TestTestSettings.cpp
     TestGpuReferenceGraphExecutor.cpp
