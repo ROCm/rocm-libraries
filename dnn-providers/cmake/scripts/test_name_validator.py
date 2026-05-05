@@ -342,7 +342,7 @@ def main() -> int:
             print(f"{test_name:<50} {status:<10}")
             if issues:
                 for issue in issues:
-                    print(f"  → {issue}")
+                    print(f"  -> {issue}")
 
     print(f"\nWarning: {invalid_count} test(s) have non-conforming names")
     print(

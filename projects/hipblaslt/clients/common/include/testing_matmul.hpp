@@ -287,7 +287,10 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         case HIP_R_8F_E4M3:
             return mx_type_to_f32(
                 buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_f8>(), row, col, srow, scol);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
         case HIP_R_8F_E5M3_EXT:
+#pragma GCC diagnostic pop
             return mx_type_to_f32(
                 buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_e5m3>(), row, col, srow, scol);
         default:

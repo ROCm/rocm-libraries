@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <cstring>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <mutex>
@@ -418,6 +419,29 @@ hipdnnEnginePluginExecutionContext_t
     return plugin->createExecutionContext(handle, engineConfig, &serializedGraphData);
 }
 
+hipdnnEnginePluginExecutionContext_t
+    EnginePluginResourceManager::createExecutionContextFromSerialized(
+        int64_t engineId,
+        const hipdnnPluginConstData_t* engineConfig,
+        const hipdnnPluginConstData_t* serializedContext) const
+{
+    THROW_IF_NULL(engineConfig, HIPDNN_STATUS_BAD_PARAM, "Engine config cannot be null");
+    THROW_IF_NULL(
+        serializedContext, HIPDNN_STATUS_BAD_PARAM, "Serialized execution context cannot be null");
+
+    auto it = _engineIdToHandle.find(engineId);
+    if(it == _engineIdToHandle.end())
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Invalid engine ID: " + std::to_string(engineId));
+    }
+
+    auto handle = it->second;
+    auto plugin = _handleToPlugin.at(handle);
+
+    return plugin->createExecutionContextFromSerialized(handle, engineConfig, serializedContext);
+}
+
 void EnginePluginResourceManager::destroyExecutionContext(
     int64_t engineId, hipdnnEnginePluginExecutionContext_t executionContext) const
 {
@@ -437,6 +461,17 @@ std::shared_ptr<const EngineExecutionContextWrapper>
     return std::make_shared<EngineExecutionContextWrapper>(rm, engineId, engineConfig, graphDesc);
 }
 
+std::shared_ptr<const EngineExecutionContextWrapper>
+    EnginePluginResourceManager::createExecutionContextFromSerialized(
+        const std::shared_ptr<EnginePluginResourceManager>& rm,
+        int64_t engineId,
+        const hipdnnPluginConstData_t* engineConfig,
+        const hipdnnPluginConstData_t* serializedContext)
+{
+    return std::make_shared<EngineExecutionContextWrapper>(
+        rm, engineId, engineConfig, serializedContext);
+}
+
 size_t EnginePluginResourceManager::getWorkspaceSize(
     int64_t engineId, hipdnnEnginePluginExecutionContext_t executionContext) const
 {
@@ -454,6 +489,47 @@ size_t EnginePluginResourceManager::getWorkspaceSize(
     auto plugin = _handleToPlugin.at(handle);
 
     return plugin->getWorkspaceSize(handle, executionContext);
+}
+
+void EnginePluginResourceManager::serializeExecutionContext(
+    int64_t engineId,
+    hipdnnEnginePluginExecutionContext_t executionContext,
+    std::vector<uint8_t>& serializedContext) const
+{
+    THROW_IF_NULL(executionContext, HIPDNN_STATUS_BAD_PARAM, "Execution context cannot be null");
+
+    auto it = _engineIdToHandle.find(engineId);
+    if(it == _engineIdToHandle.end())
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Invalid engine ID: " + std::to_string(engineId));
+    }
+
+    auto handle = it->second;
+    auto plugin = _handleToPlugin.at(handle);
+
+    hipdnnPluginConstData_t pluginData{nullptr, 0};
+    plugin->serializeExecutionContext(handle, executionContext, &pluginData);
+
+    try
+    {
+        THROW_IF_NULL(pluginData.ptr,
+                      HIPDNN_STATUS_PLUGIN_ERROR,
+                      "Serialized execution context payload is null");
+        THROW_IF_TRUE(pluginData.size == 0,
+                      HIPDNN_STATUS_PLUGIN_ERROR,
+                      "Serialized execution context payload is empty");
+
+        serializedContext.resize(pluginData.size);
+        std::memcpy(serializedContext.data(), pluginData.ptr, pluginData.size);
+    }
+    catch(...)
+    {
+        plugin->destroySerializedExecutionContext(handle, &pluginData);
+        throw;
+    }
+
+    plugin->destroySerializedExecutionContext(handle, &pluginData);
 }
 
 void EnginePluginResourceManager::executeOpGraph(
@@ -485,9 +561,7 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                    "Engine_plugin_resource_manager::execute_op_graph failed: variantPackDesc is "
                    "not finalized");
 
-    auto config = executionPlanDesc->getEngineConfig();
-    auto engine = config->getEngine();
-    auto engineId = engine->getEngineId();
+    auto engineId = executionPlanDesc->getEngineId();
     void* workspace = variantPackDesc->getWorkspace();
 
     auto& tensorIds = variantPackDesc->getTensorIds();
@@ -591,6 +665,18 @@ EngineExecutionContextWrapper::EngineExecutionContextWrapper(
     , _engineId(engineId)
 {
     _executionContext = _rm->createExecutionContext(engineId, engineConfig, graphDesc);
+}
+
+EngineExecutionContextWrapper::EngineExecutionContextWrapper(
+    const std::shared_ptr<EnginePluginResourceManager>& rm,
+    int64_t engineId,
+    const hipdnnPluginConstData_t* engineConfig,
+    const hipdnnPluginConstData_t* serializedContext)
+    : _rm(rm)
+    , _engineId(engineId)
+{
+    _executionContext
+        = _rm->createExecutionContextFromSerialized(engineId, engineConfig, serializedContext);
 }
 
 EngineExecutionContextWrapper::~EngineExecutionContextWrapper()

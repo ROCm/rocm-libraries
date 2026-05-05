@@ -1316,6 +1316,79 @@ public:
         return deserialize(nullptr, data);
     }
 
+    /** @brief Serialize the compiled backend execution plan to a byte vector.
+     *
+     * Requires build_plans() or build() to have finalized the execution plan.
+     * The returned data is intended for from_compiled_plan_binary().
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error serialize_compiled_plan(std::vector<uint8_t>& data) const
+    {
+        if(!_executionPlanDesc || !_executionPlanDesc->valid())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has no compiled execution plan. Call build() or build_plans() first."};
+        }
+
+        size_t planByteSize = 0;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetSerializedExecutionPlanExt(
+                _executionPlanDesc->get(), 0, &planByteSize, nullptr),
+            "Failed to query serialized compiled plan size");
+
+        if(planByteSize == 0)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR, "Backend returned zero-length compiled plan"};
+        }
+
+        data.resize(planByteSize);
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetSerializedExecutionPlanExt(
+                _executionPlanDesc->get(), planByteSize, &planByteSize, data.data()),
+            "Failed to serialize compiled plan");
+        data.resize(planByteSize);
+
+        return {};
+    }
+
+    /** @brief Serialize the compiled backend execution plan to a byte vector. */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::pair<std::vector<uint8_t>, Error> to_compiled_plan_binary() const
+    {
+        std::vector<uint8_t> data;
+        auto err = serialize_compiled_plan(data);
+        return {std::move(data), std::move(err)};
+    }
+
+    /** @brief Deserialize a compiled backend execution plan for execution.
+     *
+     * This restores only the compiled plan. It does not restore the frontend
+     * operation graph structure; execute using UID-based variant packs.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error deserialize_compiled_plan(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        hipdnnBackendDescriptor_t executionPlan = nullptr;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendCreateAndDeserializeExecutionPlanExt(
+                handle, &executionPlan, data.data(), data.size()),
+            "Failed to deserialize compiled plan");
+
+        _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+        _engineConfigDesc.reset();
+        resetGraphDesc();
+        _sub_nodes.clear();
+
+        return {};
+    }
+
+    /** @brief Deserialize a compiled backend execution plan for execution. */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error from_compiled_plan_binary(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        return deserialize_compiled_plan(handle, data);
+    }
+
     // ── JSON string serialization (always available) ────────────────────
 
     /** @brief Serialize a previously built graph to a JSON string.
@@ -1696,6 +1769,13 @@ public:
                   void* workspace) const
     {
         HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name());
+
+        if(!_executionPlanDesc || !_executionPlanDesc->valid())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has no compiled execution plan. Call build() or "
+                    "from_compiled_plan_binary() first."};
+        }
 
         auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);

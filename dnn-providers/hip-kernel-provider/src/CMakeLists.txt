@@ -95,7 +95,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
 
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets()
+    if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
+        finalize_test_targets("${PROJECT_NAME}" ENABLE_COVERAGE)
+    else()
+        finalize_test_targets("${PROJECT_NAME}")
+    endif()
 
-    install_hip_kernel_provider_ctest_files()
+    install_provider_ctest_files("hip_kernel_provider")
 endif()

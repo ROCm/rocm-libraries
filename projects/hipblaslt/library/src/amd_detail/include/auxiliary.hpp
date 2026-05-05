@@ -125,6 +125,10 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "bf16_r";
     case HIP_R_8I:
         return "i8_r";
+    case HIP_C_32F:
+        return "f32_c";
+    case HIP_C_64F: 
+        return "f64_c";    
     case HIP_R_32I:
         return "i32_r";
     case HIP_R_8F_E4M3_FNUZ:
@@ -143,11 +147,10 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "bf6_r";
     case HIP_R_4F_E2M1:
         return "f4_r";
-    case HIP_C_32F:
-        return "f32_c";
-    case HIP_C_64F: 
-        return "f64_c";    
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
     case static_cast<hipDataType>(HIP_R_8F_E5M3_EXT):
+#pragma GCC diagnostic pop
         return "e5m3_r";
     default:
         return "non-supported type";

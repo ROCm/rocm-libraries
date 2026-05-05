@@ -3,14 +3,16 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-if(HIPKERNELPROVIDER_ENABLE_TESTS)
+# Finds or fetches GTest for the calling provider.
+# Call this from your CMakeLists.txt after deciding tests should be built.
+function(fetch_gtest_dependency)
     include(FetchContent)
 
     # Try to find GTest first
     find_package(GTest CONFIG QUIET)
 
     if(NOT GTest_FOUND)
-        message(STATUS "Fetching GTest for standalone plugin build")
+        message(STATUS "Fetching GTest for standalone ${PROJECT_NAME} build")
 
         fetchcontent_declare(
             googletest URL https://github.com/google/googletest/archive/refs/tags/v1.16.0.zip
@@ -25,4 +27,4 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     else()
         message(STATUS "Found system GTest")
     endif()
-endif()
+endfunction()
