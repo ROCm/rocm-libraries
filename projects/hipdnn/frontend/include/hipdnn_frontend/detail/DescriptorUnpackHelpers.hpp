@@ -434,6 +434,13 @@ template <typename T>
             tensor->set_value(val);
             break;
         }
+        case DataType::BOOLEAN:
+        {
+            bool val = false;
+            std::memcpy(&val, valueBytes.data(), sizeof(bool));
+            tensor->set_value(val);
+            break;
+        }
         default:
             break;
         }

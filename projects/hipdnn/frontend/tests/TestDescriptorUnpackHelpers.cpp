@@ -577,6 +577,26 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueInt6
     EXPECT_EQ(tensor->get_pass_by_value<int64_t>().value(), K_SCALAR_VALUE);
 }
 
+TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueBoolean)
+{
+    static constexpr bool K_SCALAR_VALUE = true;
+    expectScalarByValueTensorMocks(
+        *_mockBackend, _fakeDesc, K_UID, HIPDNN_DATA_BOOLEAN, K_SCALAR_VALUE);
+
+    std::shared_ptr<TensorAttributes> tensor;
+    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->get_uid(), K_UID);
+    EXPECT_EQ(tensor->get_data_type(), DataType::BOOLEAN);
+    EXPECT_EQ(tensor->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(tensor->get_stride(), (std::vector<int64_t>{1}));
+    EXPECT_TRUE(tensor->get_pass_by_value());
+    ASSERT_TRUE(tensor->get_pass_by_value<bool>().has_value());
+    EXPECT_EQ(tensor->get_pass_by_value<bool>().value(), K_SCALAR_VALUE);
+}
+
 TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesPassByValuePreserves4dDims)
 {
     static constexpr float K_SCALAR_VALUE = 1e-5f;

@@ -19,7 +19,7 @@ foreach(flag_var
     string(STRIP "${${flag_var}}" ${flag_var})
 endforeach()
 
-add_compile_options(-fno-rtti -fno-exceptions)
+add_compile_options(-fno-rtti -fno-exceptions -Wall)
 
 # Hide all symbols by default; only STINKYTOFU_EXPORT symbols are visible.
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
