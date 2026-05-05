@@ -90,9 +90,11 @@ Two pipelines share the same set of steps:
 
 ![Validation Pipeline](images/validation_pipeline.png)
 
-The graph fingerprint check is the **first gate**. Before loading any tensors or running any engine, the harness serializes the current graph and compares its hash to the stored `graph.bin`. If the graph definition has changed since golden data was generated, everything after it would be meaningless -- so it fails immediately.
+The graph fingerprint check is the **first gate**. Before loading any tensors or running any engine, the harness serializes the current graph and compares its hash to the stored `graph.bin`. If the hash differs, the golden data may no longer match the graph the engine will execute, so the test fails immediately and asks the developer to regenerate. This check is conservative -- it may reject golden data that is still technically valid (e.g., when only internal UIDs changed but tensor names and shapes are the same). That is by design: a false failure is cheap (just regenerate), while a false pass is dangerous.
 
-The graph construction (step 1) is shared by both pipelines -- the same `buildGraph()` code produces the same graph. This is critical: it means golden data and the test under execution always agree on tensor names, shapes, and semantics.
+This assumes `graph.to_binary()` produces identical bytes for the same logical graph. If the serialization is non-deterministic (e.g., map iteration order varies), the fingerprint will fire spuriously. If that becomes an issue, the check can be replaced with a semantic comparison.
+
+The graph construction (step 1) is shared by both pipelines -- the same `buildGraph()` code produces the same graph. This means golden data and the test under execution always agree on tensor names, shapes, and semantics.
 
 ---
 
@@ -492,7 +494,7 @@ Strides are stored in the manifest for documentation and belt-and-suspenders val
 
 **Before loading tensors, verify the graph hasn't changed** (graph fingerprint check):
 
-The first thing Step 4 does is serialize the current graph and compare its hash to the stored `graph.bin` hash in the manifest. If they differ, the graph definition has changed since golden data was generated -- any value comparison would be meaningless. This is a hard FAIL with a message to regenerate.
+The first thing Step 4 does is serialize the current graph and compare its hash to the stored `graph.bin` hash in the manifest. If they differ, the graph definition has changed since golden data was generated -- the golden data may no longer correspond to the current graph. This is a hard FAIL with a message to regenerate.
 
 **What can go wrong** (from pen test):
 - Graph definition changed since generation → hard FAIL on graph fingerprint mismatch
