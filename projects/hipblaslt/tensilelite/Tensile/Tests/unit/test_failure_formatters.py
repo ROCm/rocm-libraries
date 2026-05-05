@@ -29,8 +29,6 @@ assert on Failure type and field, not on string content. If a formatter's
 wording legitimately changes, only this file's tests update.
 """
 
-from dataclasses import dataclass
-
 import pytest
 
 from Tensile.Components.ScheduleCapture import (
@@ -47,9 +45,11 @@ from Tensile.Components.ScheduleCapture import (
     InvalidCounterValueFailure,
     SchedulePosition,
     SCCConflictFailure,
+    SlotKey,
     SWaitCountExceedsOutstandingFailure,
     OutOfOrderSequenceFailure,
     LoopBodyCapture,
+    TaggedInstruction,
     _ordinal,
     format_position,
 )
@@ -153,15 +153,9 @@ def test_order_inverted_failure_format():
     Capture has a sibling GRB earlier in the stream so the producer renders
     as GRB[1] (second GRB in its category-stream); LRA1 is the only LRA1 so
     it renders as LRA1[0]."""
-    from Tensile.Components.ScheduleCapture import SchedulePosition
-
-    @dataclass(eq=False)
-    class _TaggedStub:
-        category: str
-
-    earlier_grb = _TaggedStub(category="GRB")
-    producer_tagged = _TaggedStub(category="GRB")
-    consumer_tagged = _TaggedStub(category="LRA1")
+    earlier_grb = TaggedInstruction(inst=object(), category="GRB", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(inst=object(), category="GRB", slot=SlotKey(0, "ml", 0, 1))
+    consumer_tagged = TaggedInstruction(inst=object(), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
 
     producer = _make_node("GRB", "GRB", 3, tagged_inst=producer_tagged)
     consumer = _make_node("LRA1", "LRA1", 2, tagged_inst=consumer_tagged)
@@ -205,14 +199,8 @@ def test_order_inverted_failure_format_mfma_consumer_omits_bracket():
     """Consumer is plain MFMA (category='MFMA'): the [N] suffix is omitted
     even when a capture is provided, because vmfma_index is the canonical
     identity. PackMFMAs (category 'PackA*'/'PackB*') would still get [N]."""
-    from Tensile.Components.ScheduleCapture import SchedulePosition
-
-    @dataclass(eq=False)
-    class _TaggedStub:
-        category: str
-
-    producer_tagged = _TaggedStub(category="LRA0")
-    consumer_tagged = _TaggedStub(category="MFMA")
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 3, tagged_inst=consumer_tagged)
     capture = _capture_with(producer_tagged, consumer_tagged)
@@ -232,11 +220,8 @@ def test_missing_wait_failure_format():
     """Plain same-iteration scenario: producer LRA0 in ML, consumer MFMA in
     ML, no SWaitCnt(dscnt) between. With a capture provided, producer renders
     as LRA0[0] (first LRA0 in stream); consumer is plain MFMA so no [N]."""
-    @dataclass(eq=False)
-    class _TaggedStub:
-        category: str
-    producer_tagged = _TaggedStub(category="LRA0")
-    consumer_tagged = _TaggedStub(category="MFMA")
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 0, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 2, tagged_inst=consumer_tagged)
     capture = _capture_with(producer_tagged, consumer_tagged)
@@ -254,11 +239,8 @@ def test_missing_wait_failure_format_cross_iteration():
     consumer GRB @ idx=6 in ML. The "(of next iteration)" suffix appends to
     the consumer's position because ML-1 -> ML IS the cross-loop-iteration
     transition in the captured 4-body model."""
-    @dataclass(eq=False)
-    class _TaggedStub:
-        category: str
-    producer_tagged = _TaggedStub(category="LRA0")
-    consumer_tagged = _TaggedStub(category="GRB")
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="GRB", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("GRB", "GRB", 6, tagged_inst=consumer_tagged, body_label="ML")
     # The capture passed in is the body the consumer lives in; fixture uses
@@ -319,12 +301,8 @@ def test_wait_too_late_failure_format():
 def test_wait_too_late_failure_format_with_capture_brackets():
     """capture=given: consumer renders as 'category[N] @ idx=M' with the
     per-category-stream index. Plain MFMA omits the bracket."""
-    @dataclass(eq=False)
-    class _TaggedStub:
-        category: str
-
-    other_lra0 = _TaggedStub(category="LRA0")
-    consumer_tagged = _TaggedStub(category="LRA0")
+    other_lra0 = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 1))
     producer = _make_node("MFMA", "MFMA", 5)
     consumer = _make_node("LRA0", "LRA0", 10, tagged_inst=consumer_tagged)
     capture = _capture_with(other_lra0, consumer_tagged)
@@ -369,13 +347,9 @@ def test_wait_insufficient_failure_format():
 def test_wait_insufficient_failure_format_with_capture_brackets():
     """capture=given: producer + consumer get per-category [N] index. Wait
     stays bare (the message already says 'SWaitCnt')."""
-    @dataclass(eq=False)
-    class _TaggedStub:
-        category: str
-
-    older_lra0 = _TaggedStub(category="LRA0")
-    producer_tagged = _TaggedStub(category="LRA0")
-    consumer_tagged = _TaggedStub(category="MFMA")
+    older_lra0 = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 1))
+    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 10, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 7)
@@ -431,12 +405,8 @@ def test_missing_barrier_failure_needed_by_format():
 def test_missing_barrier_failure_format_with_capture_brackets():
     """capture=given: consumer gets per-category [N] index in the trailing
     reference."""
-    @dataclass(eq=False)
-    class _TaggedStub:
-        category: str
-
-    older_gra = _TaggedStub(category="GRA")
-    consumer_tagged = _TaggedStub(category="GRA")
+    older_gra = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 1))
     producer = _make_node("LRA0", "LRA0[0]", 8)
     consumer = _make_node("GRA", "GRA[0]", 12, tagged_inst=consumer_tagged)
     capture = _capture_with(older_gra, consumer_tagged)
@@ -510,49 +480,58 @@ def test_invalid_counter_value_failure_format():
 def test_scc_conflict_failure_format_graph_shape():
     """Graph-native shape (mrj.2) — populated by diagnose_missing_edge
     when an SCC reference edge is missing from the subject graph due to
-    an intervening SCC writer."""
-    class _FakeInst:
-        pass
-    producer_inst = type("SCmpEQU32", (_FakeInst,), {})()
-    intervening_inst = type("SAddU32", (_FakeInst,), {})()
-    consumer_inst = type("SCSelectB32", (_FakeInst,), {})()
+    an intervening SCC writer. capture=None: bare 'category @ idx=N' for
+    every node; brackets only appear with a capture."""
     producer = _make_node("GRIncA", "scc_producer", 4)
-    producer.rocisa_inst = producer_inst
     intervening = _make_node("GRIncA", "scc_clobber", 5)
-    intervening.rocisa_inst = intervening_inst
     consumer = _make_node("GRIncA", "scc_consumer", 6)
-    consumer.rocisa_inst = consumer_inst
     failure = SCCConflictFailure(
-        producer=producer,
-        consumer=consumer,
-        intervening_writer=intervening,
+        producer=producer, consumer=consumer, intervening_writer=intervening,
     )
     msg = failure.format(capture=None)
-    assert "GRIncA[SCSelectB32]" in msg
-    assert "@ idx=6" in msg
-    assert "GRIncA[SCmpEQU32]" in msg
-    assert "@ idx=4" in msg
-    assert "Intervening SCC writer" in msg
-    assert "GRIncA[SAddU32]" in msg
-    assert "@ idx=5" in msg
+    assert "GRIncA @ idx=6's SCC read should resolve" in msg
+    assert "producer GRIncA @ idx=4" in msg
+    assert "Intervening SCC writer GRIncA @ idx=5" in msg
+
+
+def test_scc_conflict_failure_format_with_capture_brackets():
+    """capture=given: producer / consumer / intervening_writer get the
+    per-category-stream [N] index. The user schedules SCC instructions by
+    position, so the index is the right discriminator."""
+    other_grinca = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 1))
+    intervening_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 2))
+    consumer_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 3))
+    producer = _make_node("GRIncA", "scc_producer", 4, tagged_inst=producer_tagged)
+    intervening = _make_node("GRIncA", "scc_clobber", 5, tagged_inst=intervening_tagged)
+    consumer = _make_node("GRIncA", "scc_consumer", 6, tagged_inst=consumer_tagged)
+    capture = _capture_with(other_grinca, producer_tagged, intervening_tagged, consumer_tagged)
+    failure = SCCConflictFailure(
+        producer=producer, consumer=consumer, intervening_writer=intervening,
+    )
+    msg = failure.format(capture=capture)
+    assert "GRIncA[1] @ idx=4" in msg     # producer is 2nd GRIncA in stream
+    assert "GRIncA[2] @ idx=5" in msg     # intervening is 3rd
+    assert "GRIncA[3] @ idx=6" in msg     # consumer is 4th
 
 
 def test_scc_conflict_failure_format_graph_shape_no_clobber():
     """Graph-native shape with no identifiable intervening writer — should
-    still render producer/consumer info without an Intervening clause."""
-    producer = _make_node("GRIncA", "scc_producer", 4)
-    producer.rocisa_inst = type("SCmpEQU32", (), {})()
-    consumer = _make_node("GRIncA", "scc_consumer", 6)
-    consumer.rocisa_inst = type("SCSelectB32", (), {})()
+    still render producer/consumer info with [N] index when a capture is
+    given, and without an Intervening clause."""
+    older_grinca = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 1))
+    consumer_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 2))
+    producer = _make_node("GRIncA", "scc_producer", 4, tagged_inst=producer_tagged)
+    consumer = _make_node("GRIncA", "scc_consumer", 6, tagged_inst=consumer_tagged)
+    capture = _capture_with(older_grinca, producer_tagged, consumer_tagged)
     failure = SCCConflictFailure(
-        producer=producer,
-        consumer=consumer,
-        intervening_writer=None,
+        producer=producer, consumer=consumer, intervening_writer=None,
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(capture=capture)
     assert "Intervening SCC writer" not in msg
-    assert "GRIncA[SCmpEQU32]" in msg
-    assert "GRIncA[SCSelectB32]" in msg
+    assert "GRIncA[1] @ idx=4" in msg     # producer is 2nd GRIncA
+    assert "GRIncA[2] @ idx=6" in msg     # consumer is 3rd
 
 
 def test_swait_count_exceeds_outstanding_failure_format_dscnt():

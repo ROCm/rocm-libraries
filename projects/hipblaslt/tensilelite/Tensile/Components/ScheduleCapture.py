@@ -817,24 +817,16 @@ class SCCConflictFailure(Failure):
     intervening_writer: object = None   # GraphNode (subject-side SCC writer that clobbered the producer)
 
     def _format_canonical(self, capture=None) -> str:
-        producer_pos = format_position(self.producer, capture)
-        consumer_pos = format_position(self.consumer, capture)
         inter_desc = ""
         if self.intervening_writer is not None:
-            inter_pos = format_position(self.intervening_writer, capture)
-            inter_cls = type(getattr(self.intervening_writer,
-                                    "rocisa_inst", None)).__name__
             inter_desc = (
                 f" Intervening SCC writer "
-                f"{self.intervening_writer.category}[{inter_cls}] "
-                f"{inter_pos} clobbered the producer's SCC value."
+                f"{_node_with_pos(self.intervening_writer, capture)} "
+                f"clobbered the producer's SCC value."
             )
-        producer_cls = type(getattr(self.producer, "rocisa_inst", None)).__name__
-        consumer_cls = type(getattr(self.consumer, "rocisa_inst", None)).__name__
         return (
-            f"{self.consumer.category}[{consumer_cls}] "
-            f"{consumer_pos}'s SCC read should resolve to producer "
-            f"{self.producer.category}[{producer_cls}] {producer_pos}, "
+            f"{_node_with_pos(self.consumer, capture)}'s SCC read should "
+            f"resolve to producer {_node_with_pos(self.producer, capture)}, "
             f"but the CMS schedule routes it elsewhere.{inter_desc}"
         )
 
