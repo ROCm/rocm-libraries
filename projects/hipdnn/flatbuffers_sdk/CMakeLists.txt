@@ -162,6 +162,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/device_properties.fbs
             schemas/engine_config.fbs
             schemas/engine_details.fbs
+            schemas/execution_plan.fbs
             schemas/graph.fbs
             schemas/knob_value.fbs
             schemas/layernorm_attributes.fbs
