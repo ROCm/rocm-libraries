@@ -17,9 +17,13 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess:
     if entry_point:
         cmd = [entry_point, *args]
     else:
-        cmd = [sys.executable, "-c",
-               "from dnn_benchmarking.tools.convert_miopen_shapes import main; "
-               "import sys; sys.exit(main())", *args]
+        cmd = [
+            sys.executable,
+            "-c",
+            "from dnn_benchmarking.tools.convert_miopen_shapes import main; "
+            "import sys; sys.exit(main())",
+            *args,
+        ]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -132,8 +136,7 @@ class TestFileProcessing:
     def test_invalid_line_warns_but_succeeds(self, tmp_path: Path) -> None:
         shapes = tmp_path / "shapes.txt"
         shapes.write_text(
-            "convbfp16 -n 1 -c 8 -H 4 -W 4 -k 16 -y 1 -x 1 -F 1\n"
-            "matmul -n 1 -c 8\n"
+            "convbfp16 -n 1 -c 8 -H 4 -W 4 -k 16 -y 1 -x 1 -F 1\n" "matmul -n 1 -c 8\n"
         )
         outdir = tmp_path / "out"
         result = _run_cli(str(shapes), "--outdir", str(outdir))
@@ -143,9 +146,7 @@ class TestFileProcessing:
 
     def test_f0_file_produces_three_jsons_per_line(self, tmp_path: Path) -> None:
         shapes = tmp_path / "shapes.txt"
-        shapes.write_text(
-            "convbfp16 -n 1 -c 8 -H 4 -W 4 -k 16 -y 1 -x 1 -F 0\n"
-        )
+        shapes.write_text("convbfp16 -n 1 -c 8 -H 4 -W 4 -k 16 -y 1 -x 1 -F 0\n")
         outdir = tmp_path / "out"
         result = _run_cli(str(shapes), "--outdir", str(outdir))
         assert result.returncode == 0
