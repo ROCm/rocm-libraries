@@ -161,10 +161,10 @@ namespace rocsparse
             const I col = csr_row_ptr[row] + lid - idx_base;
 
             // Stream all of this row blocks' matrix values into local memory
+            const I max_to_load = csr_row_ptr[stop_row] - csr_row_ptr[row];
 #ifdef ROCSPARSE_WITH_ASAN
             // Under ASAN, always use bounds-checked path to avoid intentional OOB reads
             // in the fast path below (which are safe on dGPUs but trigger ASAN errors).
-            const I max_to_load = csr_row_ptr[stop_row] - csr_row_ptr[row];
             for(I i = 0; (lid + i) < max_to_load; i += WG_SIZE)
             {
                 partial_sums[lid + i] = alpha * rocsparse::conj_val(csr_val[col + i], conj);
@@ -188,7 +188,6 @@ namespace rocsparse
                 // However, this may change in the future (e.g. with shared virtual memory.)
                 // This causes a minor performance loss because this is the last workgroup
                 // to be launched, and this loop can't be unrolled.
-                const I max_to_load = csr_row_ptr[stop_row] - csr_row_ptr[row];
                 for(I i = 0; (lid + i) < max_to_load; i += WG_SIZE)
                 {
                     partial_sums[lid + i] = alpha * rocsparse::conj_val(csr_val[col + i], conj);
