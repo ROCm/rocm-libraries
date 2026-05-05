@@ -738,8 +738,8 @@ class OrderInvertedFailure(Failure):
 
     def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         return (
-            f"{_node_with_pos(self.producer, capture)} is issued after its consumer "
-            f"{_node_with_pos(self.consumer, capture)}."
+            f"Producer {_node_with_pos(self.producer, capture)} is issued "
+            f"after consumer {_node_with_pos(self.consumer, capture)}."
         )
 
 
@@ -772,8 +772,8 @@ class MissingWaitFailure(Failure):
             )
             hint = f" (existing SWaitCnts at {indices} drain other counters)"
         return (
-            f"SWaitCnt({self.counter_kind}) missing between "
-            f"{_node_with_pos(self.producer, capture)} and "
+            f"SWaitCnt({self.counter_kind}) missing between producer "
+            f"{_node_with_pos(self.producer, capture)} and consumer "
             f"{_node_with_pos(self.consumer, capture)}"
             f"{_iter_note(self.producer, self.consumer)}{hint}."
         )
@@ -804,8 +804,8 @@ class WaitInsufficientFailure(Failure):
         else:
             bound = f"must be in range [0, {max_acceptable}]"
         return (
-            f"SWaitCnt @ idx={wait_pos.vmfma_index} has a {self.counter_kind} "
-            f"that's too high to guarantee producer "
+            f"{self.counter_kind} for SWaitCnt @ idx={wait_pos.vmfma_index} "
+            f"is too high to guarantee producer "
             f"{_node_with_pos(self.producer, capture)} for consumer "
             f"{_node_with_pos(self.consumer, capture)}"
             f"{_iter_note(self.producer, self.consumer)}. "
@@ -854,12 +854,12 @@ class TimingTooCloseFailure(Failure):
 
     def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         return (
-            f"{_node_with_pos(self.producer, capture)} has "
-            f"too little gap between it and "
+            f"Not enough quad-cycles between producer "
+            f"{_node_with_pos(self.producer, capture)} and consumer "
             f"{_node_with_pos(self.consumer, capture)}"
-            f"{_iter_note(self.producer, self.consumer)}. Expected at least "
-            f"{self.expected_quad_cycles} quad-cycles but only "
-            f"{self.actual_quad_cycles} passed."
+            f"{_iter_note(self.producer, self.consumer)}. "
+            f"Need at least {self.expected_quad_cycles} quad-cycles "
+            f"but only {self.actual_quad_cycles} guaranteed."
         )
 
 
@@ -912,7 +912,7 @@ class OverriddenInputFailure(Failure):
             f"incorrectly scheduled between producer "
             f"{_node_with_pos(self.producer, capture)} and consumer "
             f"{_node_with_pos(self.consumer, capture)}, clobbering the "
-            f"{self.resource} the consumer needs."
+            f"{self.resource} that the consumer needs."
         )
 
 

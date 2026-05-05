@@ -473,7 +473,7 @@ class TestSCCClobberFailure:
         # Capture for format() is the subj's main body — same body whose
         # tagged_insts the failure's GraphNodes point at.
         msg = f.format(subj.captures["ML"])
-        assert "clobbering the SCC the consumer needs" in msg
+        assert "clobbering the SCC that the consumer needs" in msg
 
     def test_no_clobber_yields_no_scc_conflict_failure(self):
         """Positive path: without an intervening writer, the SCC edge is

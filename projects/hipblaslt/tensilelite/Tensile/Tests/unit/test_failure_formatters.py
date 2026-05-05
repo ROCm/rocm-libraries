@@ -135,7 +135,8 @@ def test_order_inverted_failure_format():
     msg = failure.format(capture=capture)
     assert "GRB[1] @ idx=3" in msg              # second GRB in its category-stream
     assert "LRA1[0] @ idx=2" in msg             # first (and only) LRA1
-    assert "is issued after its consumer" in msg
+    assert "is issued after consumer" in msg
+    assert msg.startswith("Producer ")
     assert "first consumer" not in msg          # only one consumer per failure; "first" dropped
     assert "Default schedule" not in msg        # default-side prose removed
     assert "CMS reverses" not in msg            # default-side prose removed
@@ -176,7 +177,7 @@ def test_missing_wait_failure_format():
         producer=producer, consumer=consumer, counter_kind="dscnt"
     )
     msg = failure.format(capture=capture)
-    assert msg == "SWaitCnt(dscnt) missing between LRA0[0] @ idx=0 and MFMA @ idx=2."
+    assert msg == "SWaitCnt(dscnt) missing between producer LRA0[0] @ idx=0 and consumer MFMA @ idx=2."
 
 
 def test_missing_wait_failure_format_cross_iteration():
@@ -202,7 +203,7 @@ def test_missing_wait_failure_format_cross_iteration():
         producer=producer, consumer=consumer, counter_kind="vlcnt"
     )
     msg = failure.format(capture=capture)
-    assert msg == "SWaitCnt(vlcnt) missing between GRA[0] @ idx=2 and LRA1[0] @ idx=4 (of next iteration)."
+    assert msg == "SWaitCnt(vlcnt) missing between producer GRA[0] @ idx=2 and consumer LRA1[0] @ idx=4 (of next iteration)."
 
 
 def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
@@ -222,14 +223,15 @@ def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
     )
     msg = failure.format(capture)
     assert msg == (
-        "SWaitCnt(dscnt) missing between LRA0[0] @ idx=5 and MFMA @ idx=10 "
+        "SWaitCnt(dscnt) missing between producer LRA0[0] @ idx=5 and consumer MFMA @ idx=10 "
         "(existing SWaitCnts at idx=7 drain other counters)."
     )
 
 
-def test_wait_insufficient_failure_format_with_capture_brackets():
-    """SWaitCnt-as-subject wording: dscnt too high to drain producer.
-    Producer + consumer get per-category [N] index; wait stays bare."""
+def test_wait_insufficient_failure_format_dscnt_range():
+    """dscnt-as-subject wording with range bound. Fixture: producer is at
+    FIFO position 2 in a queue of depth 5, so max acceptable counter value
+    is 5-2-1=2. Current value 4 is OUT of range [0, 2] -> failure."""
     older_lra0 = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
     producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 1))
     consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
@@ -237,30 +239,52 @@ def test_wait_insufficient_failure_format_with_capture_brackets():
     consumer = _make_node("MFMA", "MFMA", 10, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 7)
     capture = _capture_with(older_lra0, producer_tagged, consumer_tagged)
-    # Producer at position 0, queue_depth 5 -> max acceptable counter = 4.
     failure = WaitInsufficientFailure(
         producer=producer, consumer=consumer, wait=wait,
         counter_kind="dscnt", counter_value=4,
-        queue_depth_at_wait=5, producer_position=0,
+        queue_depth_at_wait=5, producer_position=2,
     )
     msg = failure.format(capture=capture)
     assert msg == (
-        "SWaitCnt @ idx=7 has a dscnt that's too high to guarantee producer "
+        "dscnt for SWaitCnt @ idx=7 is too high to guarantee producer "
         "LRA0[1] @ idx=5 for consumer MFMA @ idx=10. "
-        "Current value of 4 must be in range [0, 4]."
+        "Current value of 4 must be in range [0, 2]."
+    )
+
+
+def test_wait_insufficient_failure_format_vlcnt_range():
+    """vlcnt variant: GR producer in vlcnt FIFO, LR1 consumer waits on the
+    drain. Fixture: producer is at FIFO position 1 in queue depth 4,
+    max acceptable = 4-1-1 = 2. Current value 3 is OUT of range [0, 2]."""
+    producer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
+    producer = _make_node("GRA", "GRA", 3, tagged_inst=producer_tagged)
+    consumer = _make_node("LRA1", "LRA1", 8, tagged_inst=consumer_tagged)
+    wait = _make_node("SYNC", "SWaitCnt", 6)
+    capture = _capture_with(producer_tagged, consumer_tagged)
+    failure = WaitInsufficientFailure(
+        producer=producer, consumer=consumer, wait=wait,
+        counter_kind="vlcnt", counter_value=3,
+        queue_depth_at_wait=4, producer_position=1,
+    )
+    msg = failure.format(capture=capture)
+    assert msg == (
+        "vlcnt for SWaitCnt @ idx=6 is too high to guarantee producer "
+        "GRA[0] @ idx=3 for consumer LRA1[0] @ idx=8. "
+        "Current value of 3 must be in range [0, 2]."
     )
 
 
 def test_wait_insufficient_failure_format_must_be_zero():
-    """Y=0 special case: producer is the most-recent op in the queue, so
-    the only acceptable counter value is 0 (drain everything)."""
+    """Y=0 special case: producer is the most-recent op in the queue (last
+    to drain), so the only acceptable counter value is 0 (drain everything).
+    Fixture: producer at position 4 in queue depth 5, max acceptable = 0."""
     producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
     consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 10, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 7)
     capture = _capture_with(producer_tagged, consumer_tagged)
-    # Producer at position 4 (last in queue), queue_depth 5 -> max acceptable = 0.
     failure = WaitInsufficientFailure(
         producer=producer, consumer=consumer, wait=wait,
         counter_kind="dscnt", counter_value=2,
@@ -268,7 +292,7 @@ def test_wait_insufficient_failure_format_must_be_zero():
     )
     msg = failure.format(capture=capture)
     assert msg == (
-        "SWaitCnt @ idx=7 has a dscnt that's too high to guarantee producer "
+        "dscnt for SWaitCnt @ idx=7 is too high to guarantee producer "
         "LRA0[0] @ idx=5 for consumer MFMA @ idx=10. "
         "Current value of 2 must be 0."
     )
@@ -276,7 +300,8 @@ def test_wait_insufficient_failure_format_must_be_zero():
 
 def test_wait_insufficient_failure_format_cross_iteration():
     """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix
-    on the consumer rendering."""
+    on the consumer rendering. Fixture: producer at position 2 in queue depth
+    5, max acceptable = 2; current value 4 fails."""
     producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
     producer = _make_node("LRA0", "LRA0[0]", 5, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("MFMA", "MFMA", 10, body_label="ML")
@@ -284,11 +309,12 @@ def test_wait_insufficient_failure_format_cross_iteration():
     capture = _capture_with(producer_tagged)
     failure = WaitInsufficientFailure(
         producer=producer, consumer=consumer, wait=wait,
-        counter_kind="dscnt", counter_value=2,
-        queue_depth_at_wait=5, producer_position=0,
+        counter_kind="dscnt", counter_value=4,
+        queue_depth_at_wait=5, producer_position=2,
     )
     msg = failure.format(capture)
     assert "consumer MFMA @ idx=10 (of next iteration)" in msg
+    assert "Current value of 4 must be in range [0, 2]." in msg
 
 
 def test_missing_barrier_failure_must_start_after_format():
@@ -380,7 +406,7 @@ def test_overridden_input_failure_format_pack_pair():
     assert msg == (
         "PackA0[2] @ idx=12 is incorrectly scheduled between producer "
         "PackA0[0] @ idx=10 and consumer PackA0[1] @ idx=11, clobbering "
-        "the vgpr the consumer needs."
+        "the vgpr that the consumer needs."
     )
 
 
@@ -471,7 +497,7 @@ def test_overridden_input_failure_format_scc_clobber():
     assert msg == (
         "GRIncA[2] @ idx=5 is incorrectly scheduled between producer "
         "GRIncA[1] @ idx=4 and consumer GRIncA[3] @ idx=6, clobbering "
-        "the SCC the consumer needs."
+        "the SCC that the consumer needs."
     )
 
 
