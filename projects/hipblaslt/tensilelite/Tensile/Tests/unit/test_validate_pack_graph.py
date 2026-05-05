@@ -72,7 +72,6 @@ from rocisa.instruction import (
 
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
-    LoopBodyCapture,
     SLOT_KIND_MFMA,
     SlotKey,
     TaggedInstruction,
@@ -499,7 +498,7 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
         # No WrongInterleavingFailure — pair is contiguous.
         for f in failures:
             assert not isinstance(f, WrongInterleavingFailure), (
-                f"unexpected WrongInterleavingFailure: {f.format(LoopBodyCapture(instructions=[]))}"
+                f"unexpected WrongInterleavingFailure: {repr(f)}"
             )
 
     def test_middlepack_pair_interleaved_with_mfma_emits_wrong_interleaving(self):
@@ -542,7 +541,7 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
         # Two violations: PackA0[L] and PackB0[L] both have a stranger as next.
         assert len(wrong_interleavings) == 2, (
             f"expected 2 WrongInterleavingFailures, got {len(wrong_interleavings)}: "
-            + ", ".join(f.format(LoopBodyCapture(instructions=[])) for f in wrong_interleavings)
+            + ", ".join(repr(f) for f in wrong_interleavings)
         )
         # Verify the PackA0 leader's failure: leader@4, expected consumer@6,
         # actual next is PackB0 leader @ 5.
@@ -602,5 +601,5 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
         for f in failures:
             assert not isinstance(f, WrongInterleavingFailure), (
                 f"unexpected WrongInterleavingFailure on unpaired MiddlePacks: "
-                f"{f.format(LoopBodyCapture(instructions=[]))}"
+                f"{repr(f)}"
             )

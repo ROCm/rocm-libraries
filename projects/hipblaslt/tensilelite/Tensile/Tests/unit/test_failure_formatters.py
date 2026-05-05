@@ -103,15 +103,6 @@ def test_ordinal(n, expected):
 # =============================================================================
 
 
-def test_format_position_empty_capture_returns_idx_only():
-    """tagged_inst not in (empty) capture.instructions -> bare '@ idx=N'.
-    Same fallback path that legacy callers triggered with capture=None;
-    the fallback now routes through the tagged_inst-not-found branch
-    instead of a removed top-level short-circuit."""
-    node = _make_node("LRA0", "LRA0[0]", 7)
-    assert format_position(node, LoopBodyCapture(instructions=[])) == "@ idx=7"
-
-
 def test_format_position_excludes_list_suffix_for_plain_mfma():
     """MFMAs are fixed by the underlying instruction loop — no list suffix."""
     other = object()
@@ -224,52 +215,44 @@ def test_missing_wait_failure_format_cross_iteration():
     test_negative_prev_iter_lr0_not_drained — producer LRA0 @ idx=5 in ML-1,
     consumer GRB @ idx=6 in ML. The "(of next iteration)" suffix appends to
     the consumer's position because ML-1 -> ML IS the cross-loop-iteration
-    transition in the captured 4-body model."""
+    transition in the captured 4-body model.
+
+    Both producer and consumer tagged_insts go in the capture so the strict
+    [N] lookup succeeds; in production a Failure with nodes from multiple
+    bodies is rendered against a unified capture or the per-body capture
+    that contains every referenced node's tagged_inst."""
     producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
     consumer_tagged = TaggedInstruction(inst=object(), category="GRB", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("GRB", "GRB", 6, tagged_inst=consumer_tagged, body_label="ML")
-    # The capture passed in is the body the consumer lives in; fixture uses
-    # the consumer's body to keep the per-category index meaningful for it.
-    capture = _capture_with(consumer_tagged)
+    capture = _capture_with(producer_tagged, consumer_tagged)
     failure = MissingWaitFailure(
         producer=producer, consumer=consumer, counter_kind="dscnt"
     )
     msg = failure.format(capture=capture)
-    assert msg == "SWaitCnt(dscnt) missing between LRA0 @ idx=5 and GRB[0] @ idx=6 (of next iteration)."
+    assert msg == "SWaitCnt(dscnt) missing between LRA0[0] @ idx=5 and GRB[0] @ idx=6 (of next iteration)."
 
 
 def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
     """When the window contains a wrong-counter SWaitCnt (former
     WaitOnWrongCounterFailure case), MissingWaitFailure surfaces it via
     nearby_other_counter_waits + appends a hint to the message."""
-    producer = _make_node("LRA0", "LRA0", 5)
-    consumer = _make_node("MFMA", "MFMA", 10)
-    wrong_wait = _make_node("SYNC", "SWaitCnt", 7)
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
+    consumer = _make_node("MFMA", "MFMA", 10)        # MFMA exempt from [N]
+    wrong_wait = _make_node("SYNC", "SWaitCnt", 7)   # SYNC not labeled, only its idx is read
+    capture = _capture_with(producer_tagged)
     failure = MissingWaitFailure(
         producer=producer,
         consumer=consumer,
         counter_kind="dscnt",
         nearby_other_counter_waits=[wrong_wait],
     )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
+    msg = failure.format(capture)
     assert msg == (
-        "SWaitCnt(dscnt) missing between LRA0 @ idx=5 and MFMA @ idx=10 "
+        "SWaitCnt(dscnt) missing between LRA0[0] @ idx=5 and MFMA @ idx=10 "
         "(existing SWaitCnts at idx=7 drain other counters)."
     )
-
-
-def test_wait_too_late_failure_format():
-    producer = _make_node("LRA0", "LRA0[0]", 5)
-    consumer = _make_node("MFMA", "MFMA", 10)
-    failure = WaitTooLateFailure(
-        producer=producer, consumer=consumer, wait_position=SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0)
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "fires at or after the consumer" in msg
-    assert "@ idx=12" in msg
-    assert "Move the wait earlier" in msg
-    assert "(of next iteration)" not in msg
 
 
 def test_wait_too_late_failure_format_with_capture_brackets():
@@ -289,7 +272,9 @@ def test_wait_too_late_failure_format_with_capture_brackets():
 
 
 def test_wait_too_late_failure_format_cross_iteration():
-    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix."""
+    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix.
+    Consumer is plain MFMA (exempt from [N]); producer is only used for the
+    iter_note loop_index check, never labeled, so an empty capture suffices."""
     producer = _make_node("LRA0", "LRA0[0]", 5, body_label="ML-1")
     consumer = _make_node("MFMA", "MFMA", 10, body_label="ML")
     failure = WaitTooLateFailure(
@@ -298,24 +283,6 @@ def test_wait_too_late_failure_format_cross_iteration():
     )
     msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "@ idx=10 (of next iteration) is guaranteed" in msg
-
-
-def test_wait_insufficient_failure_format():
-    producer = _make_node("LRA0", "LRA0[0]", 5)
-    consumer = _make_node("MFMA", "MFMA", 10)
-    wait = _make_node("SYNC", "SWaitCnt", 7)
-    failure = WaitInsufficientFailure(
-        producer=producer,
-        consumer=consumer,
-        wait=wait,
-        queue_depth_at_wait=5,
-        counter_value=2,
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "queue depth at wait = 5" in msg
-    assert "counter value (2)" in msg
-    assert "Tighten the wait" in msg
-    assert "(of next iteration)" not in msg
 
 
 def test_wait_insufficient_failure_format_with_capture_brackets():
@@ -340,37 +307,49 @@ def test_wait_insufficient_failure_format_with_capture_brackets():
 
 
 def test_wait_insufficient_failure_format_cross_iteration():
-    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix."""
-    producer = _make_node("LRA0", "LRA0[0]", 5, body_label="ML-1")
+    """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix.
+    Producer LRA0 needs tagged_inst+capture entry because the formatter
+    renders `_node_with_pos(self.producer, capture)`; consumer MFMA is exempt."""
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
+    producer = _make_node("LRA0", "LRA0[0]", 5, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("MFMA", "MFMA", 10, body_label="ML")
     wait = _make_node("SYNC", "SWaitCnt", 7, body_label="ML")
+    capture = _capture_with(producer_tagged)
     failure = WaitInsufficientFailure(
         producer=producer, consumer=consumer, wait=wait,
         queue_depth_at_wait=5, counter_value=2,
     )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
+    msg = failure.format(capture)
     assert "@ idx=10 (of next iteration)'s producer" in msg
 
 
 def test_missing_barrier_failure_must_start_after_format():
-    producer = _make_node("LRA0", "LRA0[0]", 8)
-    consumer = _make_node("GRA", "GRA[0]", 12)
+    """Pins the LR0 -> GR LDS-write barrier message wording."""
+    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
+    producer = _make_node("LRA0", "LRA0[0]", 8, tagged_inst=producer_tagged)
+    consumer = _make_node("GRA", "GRA[0]", 12, tagged_inst=consumer_tagged)
+    capture = _capture_with(producer_tagged, consumer_tagged)
     failure = MissingBarrierFailure(
         producer=producer, consumer=consumer, role="must_start_after"
     )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
+    msg = failure.format(capture)
     assert "LRA0 -> SWaitCnt(dscnt=0) -> SBarrier -> GRA" in msg
     assert "GRA overwrites the LDS slot read by LRA0" in msg
     assert "(of next iteration)" not in msg
 
 
 def test_missing_barrier_failure_needed_by_format():
-    producer = _make_node("GRA", "GRA[0]", 8)
-    consumer = _make_node("LRA1", "LRA1[0]", 22)
+    """Pins the GR -> LR1 LDS-read barrier message wording."""
+    producer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
+    producer = _make_node("GRA", "GRA[0]", 8, tagged_inst=producer_tagged)
+    consumer = _make_node("LRA1", "LRA1[0]", 22, tagged_inst=consumer_tagged)
+    capture = _capture_with(producer_tagged, consumer_tagged)
     failure = MissingBarrierFailure(
         producer=producer, consumer=consumer, role="needed_by"
     )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
+    msg = failure.format(capture)
     assert "GRA -> SWaitCnt(vlcnt=0) -> SBarrier -> LRA1" in msg
     assert "LRA1 reads the LDS slot written by GRA" in msg
     assert "(of next iteration)" not in msg
@@ -394,31 +373,18 @@ def test_missing_barrier_failure_format_with_capture_brackets():
 def test_missing_barrier_failure_format_cross_iteration():
     """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix
     on the trailing consumer reference. Mirrors the canonical lr_to_gr_lds_reuse
-    cross-body case (LR0 in ML-1, GR in ML)."""
+    cross-body case (LR0 in ML-1, GR in ML). Producer LRA0 isn't rendered
+    in MissingBarrier's message — only consumer is — so producer needs no
+    tagged_inst entry."""
+    consumer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0[0]", 8, body_label="ML-1")
-    consumer = _make_node("GRA", "GRA[0]", 2, body_label="ML")
+    consumer = _make_node("GRA", "GRA[0]", 2, tagged_inst=consumer_tagged, body_label="ML")
+    capture = _capture_with(consumer_tagged)
     failure = MissingBarrierFailure(
         producer=producer, consumer=consumer, role="must_start_after"
     )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert msg.endswith("GRA @ idx=2 (of next iteration)."), msg
-
-
-def test_wrong_interleaving_failure_format():
-    """Empty capture: bare 'PackA0 @ idx=N' for each of pack /
-    expected_next / actual_next (no per-category-stream [N] without a
-    capture containing the tagged_inst)."""
-    pack = _make_node("PackA0", "PackA0", 10)
-    expected = _make_node("PackA0", "PackA0", 11)
-    actual = _make_node("PackA0", "PackA0", 12)
-    failure = WrongInterleavingFailure(
-        pack=pack, expected_next=expected, actual_next=actual
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert msg == (
-        "PackA0 @ idx=10 has wrong interleaving. Should have been "
-        "followed by PackA0 @ idx=11 but was followed by PackA0 @ idx=12."
-    )
+    msg = failure.format(capture)
+    assert msg.endswith("GRA[0] @ idx=2 (of next iteration)."), msg
 
 
 def test_wrong_interleaving_failure_format_with_capture_brackets():
@@ -438,22 +404,6 @@ def test_wrong_interleaving_failure_format_with_capture_brackets():
     assert "PackA0[0] @ idx=10" in msg
     assert "PackA0[1] @ idx=11" in msg
     assert "PackA0[2] @ idx=12" in msg
-
-
-def test_timing_too_close_failure_format():
-    """Empty capture: bare 'PackA0 @ idx=N' / 'MFMA @ idx=N'. Plain MFMA
-    omits [N] either way per _node_label's MFMA discriminator."""
-    producer = _make_node("PackA0", "PackA0", 5)
-    consumer = _make_node("MFMA", "MFMA", 6)
-    failure = TimingTooCloseFailure(
-        producer=producer, consumer=consumer,
-        expected_quad_cycles=2, actual_quad_cycles=1,
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert msg == (
-        "PackA0 @ idx=5 has too little gap between it and MFMA @ idx=6. "
-        "Expected at least 2 quad-cycles but only 1 passed."
-    )
 
 
 def test_timing_too_close_failure_format_with_capture_brackets():
@@ -484,24 +434,6 @@ def test_invalid_counter_value_failure_format():
     assert "dscnt=-2" in msg
     assert "vlcnt=0" in msg
     assert ">= -1" in msg
-
-
-def test_scc_conflict_failure_format_graph_shape():
-    """Graph-native shape (mrj.2) — populated by diagnose_missing_edge
-    when an SCC reference edge is missing from the subject graph due to
-    an intervening SCC writer. Empty capture: bare 'category @ idx=N' for
-    every node; brackets only appear when the capture contains the
-    relevant tagged_inst."""
-    producer = _make_node("GRIncA", "scc_producer", 4)
-    intervening = _make_node("GRIncA", "scc_clobber", 5)
-    consumer = _make_node("GRIncA", "scc_consumer", 6)
-    failure = SCCConflictFailure(
-        producer=producer, consumer=consumer, intervening_writer=intervening,
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "GRIncA @ idx=6's SCC read should resolve" in msg
-    assert "producer GRIncA @ idx=4" in msg
-    assert "Intervening SCC writer GRIncA @ idx=5" in msg
 
 
 def test_scc_conflict_failure_format_with_capture_brackets():
@@ -618,16 +550,25 @@ def test_format_works_without_reference_in_scope():
     Replaces the brittle 'no field references the reference graph' assertion.
     If the Failure tried to dereference unrelated data, the format call would
     raise AttributeError or KeyError.
+
+    capture is constructed in the same scope as the failure (the producer
+    needs tagged_inst -> capture lookup to succeed under strict mode); the
+    test demonstrates that format() reads only the failure + capture, not
+    any other data in the calling scope.
     """
     def _build():
-        return MissingWaitFailure(
-            producer=_make_node("LRA0", "LRA0[0]", 5),
-            consumer=_make_node("MFMA", "MFMA", 10),
-            counter_kind="dscnt",
+        producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+        return (
+            MissingWaitFailure(
+                producer=_make_node("LRA0", "LRA0[0]", 5, tagged_inst=producer_tagged),
+                consumer=_make_node("MFMA", "MFMA", 10),
+                counter_kind="dscnt",
+            ),
+            _capture_with(producer_tagged),
         )
 
-    failure = _build()
-    # In this scope, the function's locals are gone — the format must work
-    # purely from data on the Failure.
-    msg = failure.format(LoopBodyCapture(instructions=[]))
+    failure, capture = _build()
+    # Function's locals are gone except for what we returned; format() must
+    # work purely from the failure + capture handed back.
+    msg = failure.format(capture)
     assert isinstance(msg, str) and msg

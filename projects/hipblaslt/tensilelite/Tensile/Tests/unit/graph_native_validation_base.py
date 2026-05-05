@@ -294,11 +294,17 @@ class GraphNativeValidationTest:
 
     @staticmethod
     def assert_no_failures(failures: list) -> None:
-        """Assert the failure list is empty (positive-test path)."""
+        """Assert the failure list is empty (positive-test path).
+
+        Renders each unexpected Failure via repr() rather than .format() —
+        the helper has no capture in scope (test infrastructure layer above
+        the per-body context), and Failure.format requires a real capture
+        for the per-category-stream [N] index. repr() shows the dataclass
+        fields, which is sufficient diagnostic output for "this list was
+        supposed to be empty".
+        """
         if failures:
-            from Tensile.Components.ScheduleCapture import LoopBodyCapture
-            empty_cap = LoopBodyCapture(instructions=[])
-            descriptions = [f"{type(f).__name__}: {f.format(empty_cap)}" for f in failures]
+            descriptions = [f"{type(f).__name__}: {f!r}" for f in failures]
             raise AssertionError(
                 f"assert_no_failures: expected empty failure list, got "
                 f"{len(failures)} failures:\n  " + "\n  ".join(descriptions)

@@ -468,28 +468,36 @@ def _node_label(node, capture) -> str:
     categories ('PackA0', 'PackB1', ...) keep [N] because CMS reschedules
     them.
 
-    `capture` is mandatory — formatters always have access to one (the
-    body the Failure was detected in). Pass `LoopBodyCapture(instructions=[])`
-    explicitly if the calling context genuinely lacks a capture.
-
-    Falls back to bare `category` when:
-      * tagged_inst isn't in capture.instructions (cross-body node);
-      * capture.instructions items lack a `category` attribute.
+    Strict: every non-MFMA node MUST carry a `tagged_inst` AND that
+    `tagged_inst` MUST be present in `capture.instructions`. The fallback
+    paths for "no tagged_inst" or "lookup miss" were removed — any caller
+    that can't satisfy this contract is using the formatter incorrectly
+    and should thread a real capture / populate tagged_inst before
+    calling.
     """
     cat = node.category
     if cat == "MFMA":
         return cat
     tagged = getattr(node, "tagged_inst", None)
     if tagged is None:
-        return cat
+        raise ValueError(
+            f"_node_label: node with category={cat!r} has no tagged_inst; "
+            f"every non-MFMA node passed to a Failure formatter must carry "
+            f"tagged_inst so the per-category-stream [N] index can be computed"
+        )
     same_cat = [
         t for t in capture.instructions
         if getattr(t, "category", None) == cat
     ]
     try:
         idx = same_cat.index(tagged)
-    except ValueError:
-        return cat
+    except ValueError as exc:
+        raise ValueError(
+            f"_node_label: node tagged_inst={tagged!r} (category={cat!r}) not "
+            f"found in capture's same-category stream "
+            f"({len(same_cat)} {cat} instructions in capture); "
+            f"the caller passed a capture that doesn't contain the node"
+        ) from exc
     return f"{cat}[{idx}]"
 
 
@@ -522,19 +530,13 @@ def _iter_note(producer, consumer) -> str:
 
 
 def format_position(node, capture) -> str:
-    """Render a node's schedule position with optional list-position suffix.
+    """Render a node's schedule position with cross-category list-position
+    suffix. MFMAs omit the list suffix (not user-scheduled).
 
-    MFMAs are excluded from the list-position suffix because they aren't
-    user-scheduled (their order is fixed by the underlying instruction loop).
-    Everything else, including MFMAPack (category 'PackA*'/'PackB*'), gets
-    the (Nth entry in list) suffix because the CMS user controls placement.
-
-    The discriminator is the category tag, NOT isinstance — MFMAPack's
-    multiple inheritance from both Pack and MFMA would confuse isinstance.
-
-    `capture` is mandatory. If the node's tagged_inst isn't in the given
-    capture (e.g. when the node is from a different body in the unified
-    4-body graph), the list-position suffix is silently omitted.
+    Strict: non-MFMA nodes MUST carry `tagged_inst` AND it MUST appear in
+    `capture.instructions`. Used today only by ConstraintViolationFailure
+    (#13, slated for deletion in bead `pcz`); the strict contract matches
+    `_node_label`'s.
     """
     # Accept GraphNode (has `position`) or ValidatorInstruction (has `issued_at`).
     pos = getattr(node, "position", None) or node.issued_at
@@ -543,11 +545,18 @@ def format_position(node, capture) -> str:
         return base
     tagged_inst = getattr(node, "tagged_inst", None)
     if tagged_inst is None:
-        return base
+        raise ValueError(
+            f"format_position: node with category={node.category!r} has no "
+            f"tagged_inst; cannot compute cross-category list position"
+        )
     try:
         list_pos = capture.instructions.index(tagged_inst)
-    except ValueError:
-        return base
+    except ValueError as exc:
+        raise ValueError(
+            f"format_position: node tagged_inst={tagged_inst!r} not found in "
+            f"capture.instructions (capture has {len(capture.instructions)} "
+            f"items)"
+        ) from exc
     return f"{base} ({_ordinal(list_pos + 1)} entry in list)"
 
 
