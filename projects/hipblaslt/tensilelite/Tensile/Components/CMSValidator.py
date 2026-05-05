@@ -1562,7 +1562,6 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
     """
     kernel = context.kernel
 
-    # Set mfma_reorder from schedule info
     context.mfma_reorder = scheduleInfo.mfmaReorder or []
 
     # Determine required concerns from kernel config + ISA catalog.
@@ -1644,7 +1643,6 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
                 f"{len(wait_failures)} failure(s):\n  {summary}"
             )
 
-    # All rules passed, considered valid.
     return True, ""
 
 
