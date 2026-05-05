@@ -28,10 +28,26 @@ default scheduler (SIA3) and the CMS scheduler so the two can be diffed for
 discrepancies. See plans/then-let-s-work-on-jaunty-reddy.md for design context.
 """
 
+from __future__ import annotations
+
 import functools
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
+
+if TYPE_CHECKING:
+    # Imported only for type hints — CMSValidator imports from this module at
+    # runtime, so a hard import here would create a cycle. PEP 563
+    # (from __future__ import annotations) keeps these names as strings at
+    # runtime; resolution is on-demand for static analyzers only.
+    from Tensile.Components.CMSValidator import ValidatorInstruction
+
+# Type alias: every Failure-formatter parameter accepts either a graph-side
+# GraphNode (carries `position`, `category`, `tagged_inst`) or a structural-side
+# ValidatorInstruction (carries `issued_at` and exposes `category` via property).
+# Both shapes are exercised across the test suite; `_node_label` /
+# `_node_with_pos` discriminate via getattr probes.
+NodeLike = Union["GraphNode", "ValidatorInstruction"]
 
 
 # =============================================================================
@@ -461,7 +477,7 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
-def _node_label(node, capture) -> str:
+def _node_label(node: NodeLike, capture: "LoopBodyCapture") -> str:
     """Render a node as 'category[N]' where N is its 0-based position within
     its category's emit stream in `capture`. Plain MFMAs (category=='MFMA')
     omit the [N] because vmfma_index already serves as their identity. Pack
@@ -501,7 +517,7 @@ def _node_label(node, capture) -> str:
     return f"{cat}[{idx}]"
 
 
-def _node_with_pos(node, capture) -> str:
+def _node_with_pos(node: NodeLike, capture: "LoopBodyCapture") -> str:
     """Render a node as 'category[N] @ idx=M' — the canonical per-Failure
     node reference. Combines `_node_label` (per-category-stream index, MFMA
     omits brackets) with the bare vmfma_index. Used by every Failure
@@ -513,7 +529,7 @@ def _node_with_pos(node, capture) -> str:
     return f"{_node_label(node, capture)} @ idx={pos.vmfma_index}"
 
 
-def _iter_note(producer, consumer) -> str:
+def _iter_note(producer: NodeLike, consumer: NodeLike) -> str:
     """Return ' (of next iteration)' when consumer is exactly one loop_index
     past producer (i -> i+1). SchedulePosition.loop_index is the canonical
     cross-body iteration counter, so the numeric +1 test captures every
@@ -538,13 +554,13 @@ class Failure:
     GraphNode.body_label is the source of truth.
     """
 
-    def format(self, capture) -> str:
+    def format(self, capture: "LoopBodyCapture") -> str:
         """Stable boundary method. Delegates to the subclass canonical
         formatter. `capture` is mandatory — pass an explicit
         `LoopBodyCapture(instructions=[])` if the calling context lacks one."""
         return self._format_canonical(capture)
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         raise NotImplementedError("subclasses must implement _format_canonical()")
 
 
@@ -559,12 +575,12 @@ class Failure:
 # ----------------------------------------------------------------------------
 @dataclass
 class OrderInvertedFailure(Failure):
-    producer: object  # GraphNode (subject-side)
-    consumer: object  # GraphNode (subject-side)
-    default_producer_position: object  # SchedulePosition (default-side, for diagnostics)
-    default_consumer_position: object  # SchedulePosition (default-side, for diagnostics)
+    producer: NodeLike  # GraphNode (subject-side)
+    consumer: NodeLike  # GraphNode (subject-side)
+    default_producer_position: SchedulePosition  # default-side, for diagnostics
+    default_consumer_position: SchedulePosition  # default-side, for diagnostics
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         return (
             f"{_node_with_pos(self.producer, capture)} is issued after its consumer "
             f"{_node_with_pos(self.consumer, capture)}."
@@ -582,14 +598,14 @@ class OrderInvertedFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class MissingWaitFailure(Failure):
-    producer: object
-    consumer: object
+    producer: NodeLike
+    consumer: NodeLike
     counter_kind: str  # 'dscnt' / 'vlcnt' / 'vscnt'
-    nearby_other_counter_waits: list = field(default_factory=list)
-    # ^ list[GraphNode] — SWaitCnts present in the window but draining other
-    # counters. Empty when no SWaitCnts are in the window at all.
+    nearby_other_counter_waits: List[NodeLike] = field(default_factory=list)
+    # ^ SWaitCnts present in the window but draining other counters.
+    # Empty when no SWaitCnts are in the window at all.
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         # Optional hint when other-counter SWaitCnts exist in the window:
         # the user could extend one of them rather than insert a new SWaitCnt.
         hint = ""
@@ -612,11 +628,11 @@ class MissingWaitFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class WaitTooLateFailure(Failure):
-    producer: object
-    consumer: object
+    producer: NodeLike
+    consumer: NodeLike
     wait_position: SchedulePosition
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         return (
             f"{_node_with_pos(self.consumer, capture)}"
             f"{_iter_note(self.producer, self.consumer)} is guaranteed by an "
@@ -630,13 +646,13 @@ class WaitTooLateFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class WaitInsufficientFailure(Failure):
-    producer: object
-    consumer: object
-    wait: object  # GraphNode
+    producer: NodeLike
+    consumer: NodeLike
+    wait: NodeLike  # GraphNode or ValidatorInstruction (SWait)
     queue_depth_at_wait: int
     counter_value: int
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         wait_pos = getattr(self.wait, 'position', None) or self.wait.issued_at
         return (
             f"{_node_with_pos(self.consumer, capture)}"
@@ -655,11 +671,11 @@ class WaitInsufficientFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class MissingBarrierFailure(Failure):
-    producer: object
-    consumer: object
+    producer: NodeLike
+    consumer: NodeLike
     role: str  # 'must_start_after' | 'needed_by'
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         if self.role == "must_start_after":
             order = (
                 f"{self.producer.category} -> SWaitCnt(dscnt=0) -> SBarrier "
@@ -693,11 +709,11 @@ class MissingBarrierFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class WrongInterleavingFailure(Failure):
-    pack: object  # MiddlePack — validator-side ValidatorInstruction OR graph-side GraphNode
-    expected_next: object  # MiddlePack (pair_consumer) — same shape choice
-    actual_next: object  # MiddlePack (next_scheduled_middle_16) — same shape choice
+    pack: NodeLike  # MiddlePack — validator-side ValidatorInstruction OR graph-side GraphNode
+    expected_next: NodeLike  # MiddlePack (pair_consumer) — same shape choice
+    actual_next: NodeLike  # MiddlePack (next_scheduled_middle_16) — same shape choice
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         return (
             f"{_node_with_pos(self.pack, capture)} has wrong "
             f"interleaving. Should have been followed by "
@@ -712,12 +728,12 @@ class WrongInterleavingFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class TimingTooCloseFailure(Failure):
-    producer: object  # Pack
-    consumer: object  # Pack/MFMA
+    producer: NodeLike  # Pack
+    consumer: NodeLike  # Pack/MFMA
     expected_quad_cycles: int
     actual_quad_cycles: int
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         return (
             f"{_node_with_pos(self.producer, capture)} has "
             f"too little gap between it and "
@@ -733,12 +749,12 @@ class TimingTooCloseFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class InvalidCounterValueFailure(Failure):
-    swait: object  # SWait validator instruction
+    swait: "ValidatorInstruction"  # SWait validator instruction (structural-rule emitter)
     dscnt: int
     vlcnt: int
     vscnt: int
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         bad = [(name, val) for name, val in
                (("dscnt", self.dscnt), ("vlcnt", self.vlcnt), ("vscnt", self.vscnt))
                if val < -1]
@@ -767,11 +783,11 @@ class InvalidCounterValueFailure(Failure):
 # ----------------------------------------------------------------------------
 @dataclass
 class SCCConflictFailure(Failure):
-    producer: object = None             # GraphNode (subject-side SCC writer the consumer SHOULD have read)
-    consumer: object = None             # GraphNode (subject-side SCC reader)
-    intervening_writer: object = None   # GraphNode (subject-side SCC writer that clobbered the producer)
+    producer: Optional[NodeLike] = None             # subject-side SCC writer the consumer SHOULD have read
+    consumer: Optional[NodeLike] = None             # subject-side SCC reader
+    intervening_writer: Optional[NodeLike] = None   # subject-side SCC writer that clobbered the producer
 
-    def _format_canonical(self, capture) -> str:
+    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
         inter_desc = ""
         if self.intervening_writer is not None:
             inter_desc = (
