@@ -22,6 +22,26 @@ Subsequently, you can run just the Tensile unit tests via:
 tox -e unit -- Tensile/Tests/unit
 ```
 
+### Generate coverage report with Tox
+
+```
+cd rocm-libraries/projects/hipblaslt/tensilelite
+tox -e coverage
+```
+
+This will:
+- Run all unit tests with coverage
+- Run all common tests with coverage
+- Generate HTML, XML, and JSON reports
+- Display a summary in the terminal
+
+```
+cd rocm-libraries/projects/hipblaslt/tensilelite
+tox -e coverage-unit
+```
+
+Runs only Python unit tests.
+
 ### Build client with invoke and Run a Test (Default Path)
 
 This workflow uses `invoke` to build the C++ client into the default `build_tmp` directory.
