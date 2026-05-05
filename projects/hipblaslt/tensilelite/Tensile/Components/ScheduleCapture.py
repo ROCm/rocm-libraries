@@ -363,7 +363,7 @@ class SchedulePosition:
             return self.loop_index < other.loop_index
 
 
-def make_position(body_label, slot) -> SchedulePosition:
+def make_position(body_label: str, slot: SlotKey) -> SchedulePosition:
     """Construct a SchedulePosition from a TaggedInstruction.slot SlotKey.
 
     The body_label maps to loop_index via BODY_LABEL_TO_LOOP_INDEX so cross-body
@@ -1177,7 +1177,7 @@ SWAIT_CATEGORY = "SYNC"
 SBARRIER_CATEGORY = "BARRIER"
 
 
-def counter_for(node_or_category) -> str:
+def counter_for(node_or_category: Union[str, GraphNode, "ValidatorInstruction"]) -> str:
     """Return the SWaitCnt counter that gates the given producer.
 
     'dscnt' for LR/LW (LDS ops); 'vlcnt' for GR (vector-memory loads).
@@ -1197,7 +1197,7 @@ def counter_for(node_or_category) -> str:
     )
 
 
-def _swait_drains(swait_node, counter: str):
+def _swait_drains(swait_node: GraphNode, counter: str) -> Optional[int]:
     """Return the counter value the SWait imposes on `counter`, or None if it
     doesn't constrain that counter.
 
@@ -1220,7 +1220,7 @@ def _swait_drains(swait_node, counter: str):
     return v
 
 
-def _all_nodes_in_order(subj_graph):
+def _all_nodes_in_order(subj_graph: Optional[DataflowGraph]):
     """Yield every node in execution order across all bodies.
 
     Used by the wait/barrier helpers below to walk cross-body windows
@@ -1237,8 +1237,14 @@ def _all_nodes_in_order(subj_graph):
             yield node
 
 
-def waits_in_window(subj_graph, start: SchedulePosition, end: SchedulePosition,
-                    *, counter=None, exclude_counter=None):
+def waits_in_window(
+    subj_graph: DataflowGraph,
+    start: SchedulePosition,
+    end: SchedulePosition,
+    *,
+    counter: Optional[str] = None,
+    exclude_counter: Optional[str] = None,
+) -> List[GraphNode]:
     """Return SWaitCnt nodes (as GraphNodes) whose position is in [start, end)
     and whose counter field constrains the requested counter.
 
@@ -1268,7 +1274,9 @@ def waits_in_window(subj_graph, start: SchedulePosition, end: SchedulePosition,
     return out
 
 
-def barriers_in_window(subj_graph, start: SchedulePosition, end: SchedulePosition):
+def barriers_in_window(
+    subj_graph: DataflowGraph, start: SchedulePosition, end: SchedulePosition
+) -> List[GraphNode]:
     """Return SBarrier nodes whose position is in (start, end) — exclusive on
     both ends. A barrier at the producer's position doesn't cover the producer;
     a barrier at the consumer's position doesn't precede the consumer.
@@ -1698,7 +1706,7 @@ def _split_category_iter(category):
     return base, (int(suffix) if suffix else 0)
 
 
-def _node_subiter(node, num_mfma_per_subiter) -> int:
+def _node_subiter(node: GraphNode, num_mfma_per_subiter: int) -> int:
     """Inner-unroll subiteration index for a graph node.
 
     "Subiter" = which inner unroll subiteration this node belongs to within
@@ -1754,7 +1762,7 @@ def _byte_keys_for_resource(resource):
     return tuple((rt, name, base + i) for i in range(count))
 
 
-def _resolve_producers(read_resource, consumer, latest_writer):
+def _resolve_producers(read_resource: Any, consumer: GraphNode, latest_writer: Dict[Any, Tuple[GraphNode, Any]]):
     """Yield (producer_node, overlap) pairs for `consumer`'s read of `read_resource`.
 
     `latest_writer` is the per-byte map maintained by build_dataflow_graph
@@ -2666,7 +2674,7 @@ def _min_issue_quad_cycles_for(rocisa_inst) -> int:
     return 1
 
 
-def _make_node(tagged_inst, body_label: str) -> GraphNode:
+def _make_node(tagged_inst: TaggedInstruction, body_label: str) -> GraphNode:
     inst = tagged_inst.inst
     identity = _identity_for(inst, body_label, category=tagged_inst.category)
     position = make_position(body_label, tagged_inst.slot)
@@ -3036,8 +3044,12 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
 # CaptureConsistencyError BEFORE comparison runs.
 
 
-def compare_graphs(reference: DataflowGraph, subject: DataflowGraph,
-                   *, raise_on_unexplained=True) -> list:
+def compare_graphs(
+    reference: DataflowGraph,
+    subject: DataflowGraph,
+    *,
+    raise_on_unexplained: bool = True,
+) -> List["Failure"]:
     """Compare two dataflow graphs as edge sets keyed on
     (producer.identity, consumer.identity, register, edge_kind).
 
@@ -3113,8 +3125,12 @@ def compare_graphs(reference: DataflowGraph, subject: DataflowGraph,
     return failures
 
 
-def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
-                          *, raise_on_unexplained=True) -> list:
+def diagnose_missing_edge(
+    ref_edge: DataflowEdge,
+    subj_graph: DataflowGraph,
+    *,
+    raise_on_unexplained: bool = True,
+) -> List["Failure"]:
     """Classify why a reference edge is absent from the CMS subject graph.
 
     See plan §"Comparison and diagnosis" for the phased classifier:
@@ -3412,7 +3428,7 @@ def diagnose_missing_edge(ref_edge: DataflowEdge, subj_graph: DataflowGraph,
     return failures
 
 
-def _queue_depth_at(wait_node, producer, subj_graph) -> int:
+def _queue_depth_at(wait_node: GraphNode, producer: GraphNode, subj_graph: DataflowGraph) -> int:
     """Replay the per-counter FIFO from start of the graph to wait_node.position
     and return the queue depth at the wait's moment for the producer's counter.
 
@@ -3436,7 +3452,7 @@ def _queue_depth_at(wait_node, producer, subj_graph) -> int:
     return depth
 
 
-def _producer_queue_position(producer, subj_graph) -> int:
+def _producer_queue_position(producer: GraphNode, subj_graph: DataflowGraph) -> int:
     """Return the producer's position in the per-counter FIFO at the moment
     it joined (zero-indexed from the queue head AT THAT MOMENT). Cross-body
     aware via _all_nodes_in_order."""
@@ -3456,7 +3472,7 @@ def _producer_queue_position(producer, subj_graph) -> int:
     return queue_size
 
 
-def _wait_drains_producer(wait_node, producer, subj_graph) -> bool:
+def _wait_drains_producer(wait_node: GraphNode, producer: GraphNode, subj_graph: DataflowGraph) -> bool:
     """True if `wait_node` drains `producer` — i.e. the wait's counter cap
     is low enough that the producer's slot in the FIFO falls inside the
     drained range at the wait's moment.
@@ -3487,7 +3503,7 @@ def _wait_drains_producer(wait_node, producer, subj_graph) -> bool:
     return target_id in drained_ids
 
 
-def _any_drains(waits, producer, subj_graph) -> bool:
+def _any_drains(waits: List[GraphNode], producer: GraphNode, subj_graph: DataflowGraph) -> bool:
     return any(_wait_drains_producer(w, producer, subj_graph) for w in waits)
 
 
@@ -3558,7 +3574,7 @@ def _mfma_finish_cycles_for(rocisa_inst) -> int:
     return _QUAD_CYCLES_STANDARD_MFMA_FINISH
 
 
-def _is_mfma_pack_producer(producer) -> bool:
+def _is_mfma_pack_producer(producer: GraphNode) -> bool:
     """Return True for a 4x4 PackMFMA producer.
 
     PackMFMAs (TF32 4x4 emulation) are syntactically `MFMAInstruction` rocisa
@@ -3579,7 +3595,7 @@ def _is_mfma_pack_producer(producer) -> bool:
     return _is_mfma(inst)
 
 
-def _is_mfma_producer(producer) -> bool:
+def _is_mfma_producer(producer: GraphNode) -> bool:
     """True for any producer subject to MFMA quad-cycle finish-time gating.
 
     Two shapes:
@@ -3595,7 +3611,7 @@ def _is_mfma_producer(producer) -> bool:
     return _is_mfma_pack_producer(producer)
 
 
-def _is_cvt_pack_producer(producer) -> bool:
+def _is_cvt_pack_producer(producer: GraphNode) -> bool:
     """True for a CVTPack producer (TF32 v_cvt_pk_bf16_f32 family).
 
     CVTPacks are categorized `Pack*` (PackA0/PackA1/PackB0/PackB1/PackA3/
@@ -3618,7 +3634,7 @@ def _is_cvt_pack_producer(producer) -> bool:
     if inst is None:
         return False
     return _is_cvt_pack(inst)
-def cumulative_issue_cycles(graph, producer, consumer) -> int:
+def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer: GraphNode) -> int:
     """Return the exact number of quad-cycles between producer's issue
     completion and consumer's issue start (bead `nk0`).
 
@@ -3794,7 +3810,12 @@ def cumulative_issue_cycles(graph, producer, consumer) -> int:
     return c_issue_start - p_issue_start - 1
 
 
-def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter=0, graph=None):
+def _quad_cycle_gap_ok(
+    producer: GraphNode,
+    consumer: GraphNode,
+    num_mfma_per_subiter: int = 0,
+    graph: Optional[DataflowGraph] = None,
+) -> Tuple[bool, int, int]:
     """Verify that enough quad-cycles separate an MFMA producer from its
     consumer for the producer's result to be visible.
 
@@ -3829,7 +3850,9 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter=0, graph=None):
     return actual >= expected, expected, actual
 
 
-def _cvt_to_mfma_gap_ok(producer, consumer, subj_graph):
+def _cvt_to_mfma_gap_ok(
+    producer: GraphNode, consumer: GraphNode, subj_graph: Optional[DataflowGraph]
+) -> Tuple[bool, int, int]:
     """Verify that enough quad-cycles separate a CVTPack producer from its
     downstream MFMA consumer for the CVT result to be visible.
 
@@ -3860,7 +3883,9 @@ def _cvt_to_mfma_gap_ok(producer, consumer, subj_graph):
     return actual >= expected, expected, actual
 
 
-def _mfma_pack_to_cvt_gap_ok(producer, consumer, subj_graph):
+def _mfma_pack_to_cvt_gap_ok(
+    producer: GraphNode, consumer: GraphNode, subj_graph: Optional[DataflowGraph]
+) -> Tuple[bool, int, int]:
     """Verify that enough quad-cycles separate a 4x4 PackMFMA producer from
     its downstream CVTPack (CVT1) consumer for the accumulator to settle.
 
@@ -3905,7 +3930,7 @@ def _mfma_pack_to_cvt_gap_ok(producer, consumer, subj_graph):
     return actual >= expected, expected, actual
 
 
-def _is_alu_producer(producer):
+def _is_alu_producer(producer: GraphNode) -> bool:
     """Producers whose results are immediately visible (no SWaitCnt drain
     required, no quad-cycle gap modeled). Includes scalar/vector ALU,
     GRInc (SAdd-family on SRD), and m0 setters.
@@ -3959,7 +3984,9 @@ def _is_alu_producer(producer):
     return True
 
 
-def _first_insufficient(waits, producer, subj_graph):
+def _first_insufficient(
+    waits: List[GraphNode], producer: GraphNode, subj_graph: DataflowGraph
+) -> Optional[GraphNode]:
     """Return the first wait (in stream order) that does NOT drain the producer
     despite drainable counter. None if every wait drains, or no wait applies."""
     for w in waits:
@@ -3968,7 +3995,9 @@ def _first_insufficient(waits, producer, subj_graph):
     return None
 
 
-def _last_drain(waits, producer, subj_graph):
+def _last_drain(
+    waits: List[GraphNode], producer: GraphNode, subj_graph: DataflowGraph
+) -> Optional[GraphNode]:
     """Return the latest wait that drained the producer, else None."""
     drainers = [w for w in waits if _wait_drains_producer(w, producer, subj_graph)]
     if not drainers:
@@ -3996,7 +4025,9 @@ def _last_drain(waits, producer, subj_graph):
 # the (single) graph, classify whether the schedule covers it".
 
 
-def validate_edge_wait_coverage(graph, *, raise_on_unexplained=False):
+def validate_edge_wait_coverage(
+    graph: DataflowGraph, *, raise_on_unexplained: bool = False
+) -> List["Failure"]:
     """Validate that every dataflow edge has a covering wait/barrier in
     the captured stream.
 
@@ -4040,7 +4071,9 @@ def validate_edge_wait_coverage(graph, *, raise_on_unexplained=False):
     return failures
 
 
-def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
+def _classify_edge_coverage(
+    edge: DataflowEdge, subj_graph: DataflowGraph, *, raise_on_unexplained: bool = False
+) -> List["Failure"]:
     """Per-edge coverage classifier — same logic diagnose_missing_edge
     runs in compare_graphs, but driven from a single graph rather than
     a missing-edge diff.
@@ -4224,7 +4257,7 @@ def _classify_edge_coverage(edge, subj_graph, *, raise_on_unexplained=False):
 #      (Mirrors `MiddlePack.validate` line 426-433.)
 
 
-def validate_middle_pack_pair_interleaving(graph):
+def validate_middle_pack_pair_interleaving(graph: DataflowGraph) -> List["WrongInterleavingFailure"]:
     """Bead `dpi`: graph-side MiddlePack pair-interleaving check.
 
     Walks the unified node stream once and enforces the
