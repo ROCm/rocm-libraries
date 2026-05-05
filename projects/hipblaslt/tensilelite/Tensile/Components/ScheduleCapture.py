@@ -2858,10 +2858,8 @@ def build_dataflow_graph(four_part_capture):
     # =========================================================================
     # SBarrier-edge collectors (cross-wave LDS-reuse)
     # =========================================================================
-    # Two patterns mirror the legacy CMSValidator structural rules
-    # `apply_must_start_after_barriers` and `apply_barriers` (both removed;
-    # this collector is now the sole source of LR0 -> GR LDS-reuse
-    # coverage):
+    # This collector is the sole source of LR0 -> GR LDS-reuse coverage.
+    # Two patterns:
     #
     #   lr_to_gr_lds_reuse  (must_start_after):
     #     Producer LR0/LR1 -> SWaitCnt(dscnt drain) -> SBarrier -> Consumer GR
@@ -3494,10 +3492,8 @@ def _any_drains(waits: List[GraphNode], producer: GraphNode, subj_graph: Dataflo
 
 
 # --- Quad-cycle constants (single source of truth) ---------------------------
-# CDNA 4 ISA section 7.6. The structural-side `QUAD_CYCLES_*` /
-# `MFMA_TYPE_SWITCH_THRESHOLD_*` constants and the `estimate_quad_cycles`
-# simulator that consumed them have been removed. The values below are now
-# the only place these magic numbers live in the code base.
+# CDNA 4 ISA section 7.6. Values below are the only place these magic
+# numbers live in the codebase.
 _QUAD_CYCLES_STANDARD_MFMA_FINISH = 3   # Standard MFMA: 3 quad-cycles to finish.
 _QUAD_CYCLES_MFMA_4X4_FINISH = 1        # 4x4 (Pack-flavored) MFMA: 1 quad-cycle.
 _QUAD_CYCLES_CVT_BEFORE_MFMA = 2        # CVT pack -> MFMA settle window.
@@ -3996,16 +3992,10 @@ def _last_drain(
 # =============================================================================
 # Self-validation: per-edge wait coverage
 # =============================================================================
-# Edges are now reorder-invariant (register-name resolution). The
+# Edges are reorder-invariant (register-name resolution). The
 # scheduler-correctness check — does the schedule have a covering
 # s_waitcnt that drains each producer before its consumer reads? —
 # is a SEPARATE pass over the graph + the captured stream.
-#
-# This is the lint that replaces:
-#   - LRDataReadyRule              (CMSValidator.py:3461)
-#   - GRAfterLRRule                (removed)  [LDS-reuse barrier-edges]
-#   - GRBeforeLRRule               (removed)  [LDS-reuse barrier-edges]
-#   - PackDataReadyRule (ordering) (CMSValidator.py:3464)
 #
 # Same Failure types the cross-graph diagnose_missing_edge classifier
 # emits — the wiring is just driven differently. Instead of "for each
@@ -4053,8 +4043,6 @@ def validate_edge_wait_coverage(
     # MiddlePack pair-interleaving is a stream-shape invariant, not an
     # edge-shape invariant, so it's a sibling pass driven from the same
     # entry point (rather than per-edge inside _classify_edge_coverage).
-    # Returns the same WrongInterleavingFailure shape the (now-removed)
-    # structural-side MiddlePack.validate used to emit.
     failures.extend(validate_middle_pack_pair_interleaving(graph))
     return failures
 
@@ -4212,19 +4200,12 @@ def _classify_edge_coverage(
 #
 # TF32 emulation packs come in groups of 24, the middle 16 of which compute
 # bf16 error terms via paired (v_cvt_f32_bf16, v_sub_f32) instructions
-# bound to the `MiddlePack` validator dataclass (CMSValidator.py:415,
-# PACK_TYPE_MAP entries lines 627-630). Each pair shares a temporary VGPR,
-# which the validator-side rule `MiddlePack.validate` enforces by requiring
-# the two halves of every pair appear back-to-back in stream order: no
-# OTHER MiddlePack (from any category, including the same one) may sit
-# between a pair's leader (even index in its category's middle-16 list) and
-# its consumer (the next, odd index).
-#
-# The structural rule (`_hook_up_middle_16_pairs` / `_hook_up_packs_f32`
-# in CMSValidator.py) wires `pack.pair_consumer` and `pack.next_scheduled_
-# middle_16` then asserts identity at `MiddlePack.validate` time. The
-# graph-side equivalent here works directly off the GraphNode stream,
-# without any cross-reference to validator-side dataclasses (avoids an
+# bound to the `MiddlePack` validator dataclass. Each pair shares a
+# temporary VGPR, so the two halves of every pair must appear back-to-back
+# in stream order: no OTHER MiddlePack (from any category) may sit between
+# a pair's leader (even index in its category's middle-16 list) and its
+# consumer (the next, odd index). This works directly off the GraphNode
+# stream — no cross-reference to validator-side dataclasses (would form an
 # import cycle: CMSValidator imports ScheduleCapture, not the other way).
 #
 # Pair-detection algorithm:
@@ -4235,11 +4216,10 @@ def _classify_edge_coverage(
 #   3. Within each category, pair MiddlePacks by adjacency in the
 #      category-local stream order: pair (0, 1), (2, 3), (4, 5), ...
 #      Each pair's first element is the LEADER; the second is the
-#      CONSUMER. (Mirrors `_hook_up_middle_16_pairs` line 1944.)
+#      CONSUMER.
 #   4. For each LEADER, scan the GLOBAL MiddlePack stream and find the
 #      first MiddlePack node positioned strictly after the leader. If it
 #      isn't the leader's CONSUMER, emit `WrongInterleavingFailure`.
-#      (Mirrors `MiddlePack.validate` line 426-433.)
 
 
 def validate_middle_pack_pair_interleaving(graph: DataflowGraph) -> List["WrongInterleavingFailure"]:
