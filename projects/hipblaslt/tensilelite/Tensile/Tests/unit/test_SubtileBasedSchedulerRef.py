@@ -84,8 +84,6 @@ def make_256x256_bf16():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
     )
 
 
@@ -132,8 +130,7 @@ def make_384x256_bf16():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=2,
-        numPartitionsN=1,
+        partitionSizeM=6,
     )
 
 
@@ -227,8 +224,7 @@ def make_320x320_bf16():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=5,
+        partitionSizeN=2,
     )
 
 
@@ -363,8 +359,6 @@ def make_256x256_bf16_pgr0():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=0,
     )
 
@@ -420,8 +414,6 @@ def make_256x256_bf16_pgr1():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 
@@ -486,8 +478,6 @@ def make_256x256_fp4():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
     )
 
 
@@ -556,8 +546,6 @@ def make_128x128_bf16():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
     )
 
 
@@ -644,8 +632,6 @@ def make_128x128_fp4():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
     )
 
 
@@ -744,8 +730,6 @@ def make_256x256_fp4_pgr0():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=0,
     )
 
@@ -815,8 +799,6 @@ def make_256x256_fp4_pgr1():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 
@@ -883,8 +865,6 @@ def make_128x128_bf16_pgr1():
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 
@@ -1070,8 +1050,6 @@ def make_128x128_fp4_pgr1():
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=1,
-        numPartitionsN=1,
         pgr=1,
     )
 

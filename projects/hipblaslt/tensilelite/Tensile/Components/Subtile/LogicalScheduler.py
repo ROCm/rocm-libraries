@@ -138,12 +138,18 @@ class SchedulerConfig:
     lrSB: Optional[ReadGranularity] = None
     grSA: Optional[ReadGranularity] = None
     grSB: Optional[ReadGranularity] = None
-    numPartitionsM: int = 1   # partition grid in M dimension
-    numPartitionsN: int = 1   # partition grid in N dimension
+    partitionSizeM: int = 0   # partition size in M dimension (0 = full dim)
+    partitionSizeN: int = 0   # partition size in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
 
     def __post_init__(self):
         assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
+        if self.partitionSizeM == 0:
+            self.partitionSizeM = self.numMFMATilesM
+        if self.partitionSizeN == 0:
+            self.partitionSizeN = self.numMFMATilesN
+        assert 1 <= self.partitionSizeM <= self.numMFMATilesM
+        assert 1 <= self.partitionSizeN <= self.numMFMATilesN
         self.plr = 0 if self.pgr == 0 else 1
         # Forcing offsetPartition to 1.
         self.offsetPartition = 1 if self.pgr >= 2 else 0
@@ -155,39 +161,37 @@ class SchedulerConfig:
         return self.lrSA is not None and self.lrSB is not None
 
     @property
+    def numPartitionsM(self) -> int:
+        return (self.numMFMATilesM + self.partitionSizeM - 1) // self.partitionSizeM
+
+    @property
+    def numPartitionsN(self) -> int:
+        return (self.numMFMATilesN + self.partitionSizeN - 1) // self.partitionSizeN
+
+    @property
     def numPartitions(self) -> int:
         return self.numPartitionsM * self.numPartitionsN
 
-    @property
-    def partitionSizeM(self) -> int:
-        assert self.numMFMATilesM % self.numPartitionsM == 0
-        return self.numMFMATilesM // self.numPartitionsM
-
-    @property
-    def partitionSizeN(self) -> int:
-        assert self.numMFMATilesN % self.numPartitionsN == 0
-        return self.numMFMATilesN // self.numPartitionsN
-
     @staticmethod
     def get_partition_candidates(tileInfoA, tileInfoB) -> list:
-        """Return partition candidates as [(numPartitionsM, numPartitionsN), ...].
+        """Return partition candidates as [(partitionSizeM, partitionSizeN), ...].
 
-        Enumerates all divisors of MAX(M, N) in ascending order and
-        partitions the larger dimension. Starts with (1, 1).
-        This will only produces 1xN or Nx1 partitions to allow VGPR pressure reduction.
+        Enumerates partition sizes that evenly divide the larger dimension,
+        in descending order (fewer partitions first). Starts with (M, N) —
+        the single-partition case. Only produces Mx* or *xN partitions.
         """
         M = tileInfoA.localMMATileGrid[0]
         N = tileInfoB.localMMATileGrid[0]
         maxDim = max(M, N)
 
-        divisors = sorted(d for d in range(1, maxDim + 1) if maxDim % d == 0)
+        divisor_sizes = sorted(
+            (maxDim // d for d in range(1, maxDim + 1) if maxDim % d == 0),
+            reverse=True)
 
-        candidates = []
-        for d in divisors:
-            if N >= M:
-                candidates.append((1, d))
-            else:
-                candidates.append((d, 1))
+        if N >= M:
+            candidates = [(M, s) for s in divisor_sizes]
+        else:
+            candidates = [(s, N) for s in divisor_sizes]
 
         return candidates
 
@@ -441,8 +445,8 @@ class LogicalScheduler:
         piN = pi // cfg.numPartitionsM
         a0 = piM * cfg.partitionSizeM
         b0 = piN * cfg.partitionSizeN
-        return {'A': (a0, a0 + cfg.partitionSizeM),
-                'B': (b0, b0 + cfg.partitionSizeN)}
+        return {'A': (a0, min(a0 + cfg.partitionSizeM, cfg.numMFMATilesM)),
+                'B': (b0, min(b0 + cfg.partitionSizeN, cfg.numMFMATilesN))}
 
     def place_LRs(self) -> List[List[SubIterKSlot]]:
         """Place MFMAs and LRs based on read granularities.

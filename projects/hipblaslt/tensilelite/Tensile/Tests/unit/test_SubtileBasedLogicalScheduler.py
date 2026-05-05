@@ -99,7 +99,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
     return kernel
 
 
-def make_cfg_256x256_fp4(depthU=256, k_gran=1, numPartM=1, numPartN=1,
+def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
                          grSA_k=2, grSA_mn=8, grSB_k=2, grSB_mn=8, pgr=2):
     """Build FP4 config with scale tensors. k_gran applies to LR A/B."""
     kernel = create_kernel(256, 256, fp4=True, depthU=depthU)
@@ -119,13 +119,13 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, numPartM=1, numPartN=1,
         lrSB=ReadGranularity(mn=2, k=2),
         grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]),
-        numPartitionsM=numPartM,
-        numPartitionsN=numPartN,
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
         pgr=pgr,
     )
 
 
-def make_cfg_bf16(MT0=256, MT1=256, depthU=64, numPartM=1, numPartN=1,
+def make_cfg_bf16(MT0=256, MT1=256, depthU=64, partSizeM=0, partSizeN=0,
                   miWaveGroup=None, sourceSwap=False):
     """Build BF16 config without scale tensors."""
     kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU,
@@ -140,8 +140,8 @@ def make_cfg_bf16(MT0=256, MT1=256, depthU=64, numPartM=1, numPartN=1,
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=numPartM,
-        numPartitionsN=numPartN,
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
     )
 
 
@@ -162,7 +162,7 @@ def make_cfg_bf16_pgr0(MT0=256, MT1=256, depthU=64):
     )
 
 
-def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, numPartM=1, numPartN=1):
+def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, partSizeM=0, partSizeN=0):
     """Build BF16 config with pgr=1."""
     kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
     tiA = makeTileInfo('A', kernel)
@@ -175,8 +175,8 @@ def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, numPartM=1, numPartN=1):
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=1, k=2),
         grB=ReadGranularity(mn=1, k=2),
-        numPartitionsM=numPartM,
-        numPartitionsN=numPartN,
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
         pgr=1,
     )
 
@@ -444,7 +444,7 @@ class TestPlaceLRs:
         """MT=256x256, DU=256, FP4, k=1, 2x2 partition.
         8x8 tiles → 4 partitions of 4x4. Column-major traversal.
         """
-        cfg = make_cfg_256x256_fp4(numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(partSizeM=4, partSizeN=4)
         assert cfg.numPartitions == 4
         assert cfg.partitionSizeM == 4
         assert cfg.partitionSizeN == 4
@@ -504,7 +504,7 @@ class TestPlaceLRs:
         """MT=256x256, DU=512, FP4, k=1, 2x2 partition.
         numSubIterK=4. 4 partitions × 4 subIterKs = 16 slots.
         """
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         assert cfg.numPartitions == 4
         assert cfg.numSubIterK == 4
 
@@ -537,7 +537,7 @@ class TestPlaceLRs:
         """MT=256x256, DU=256, FP4, k=2, 2x2 partition.
         Each partition: A/B loaded per side, wrapping across partitions.
         """
-        cfg = make_cfg_256x256_fp4(k_gran=2, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(k_gran=2, partSizeM=4, partSizeN=4)
         assert cfg.numPartitions == 4
 
         sched = LogicalScheduler(cfg)
@@ -566,7 +566,7 @@ class TestPlaceLRs:
         """MT=320x320, BF16, DU=64, k=1, 10x1 partition. No scale.
         B never changes → only A wrapping LRs needed.
         """
-        cfg = make_cfg_bf16(320, 320, numPartM=10, numPartN=1)
+        cfg = make_cfg_bf16(320, 320, partSizeM=1, partSizeN=10)
         assert cfg.numMFMATilesM == 10
         assert cfg.numMFMATilesN == 10
         assert cfg.numSubIterK == 2
@@ -719,7 +719,7 @@ class TestAssignVgprTiles:
 
     def test_DU512_partition_2x2(self):
         """DU=512 + 2x2 partition. All partitions have tile maps."""
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         sched.assign_vgpr_tiles()
 
@@ -779,7 +779,7 @@ class TestPlaceGRs:
         Spaced-out distribution: tensors split into smaller atoms across more slots;
         scale GRs migrate to the last slot of the last partition.
         """
-        cfg = make_cfg_256x256_fp4(numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         slots = sched.place_GRs()
         parts = sched._partitions
@@ -816,7 +816,7 @@ class TestPlaceGRs:
         Spaced-out distribution: A k=0-2 and k=2-4 chunks split across slots within P0;
         B n+1 starts in P0 s3; SA/SB migrate to P3 s3 (last slot of last partition).
         """
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         sched.place_GRs()
         parts = sched._partitions
@@ -843,7 +843,7 @@ class TestPlaceGRs:
 
     def test_10x1_bf16(self):
         """320x320, BF16, 10x1 partition. No scales."""
-        cfg = make_cfg_bf16(320, 320, numPartM=10, numPartN=1)
+        cfg = make_cfg_bf16(320, 320, partSizeM=1, partSizeN=10)
         sched = LogicalScheduler(cfg)
         sched.place_GRs()
         parts = sched._partitions
@@ -957,7 +957,7 @@ class TestAnnotateDeps:
 
     def test_2x2_DU512(self):
         """256x256, DU512, FP4, 2x2 partition. Per-partition deps."""
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         sched.annotate_deps()
         parts = sched._partitions
@@ -1075,7 +1075,7 @@ class TestRemoveCrossDeps:
 
     def test_2x2_DU512(self):
         """256x256, DU512, FP4, 2x2 partition. Spot checks."""
-        cfg = make_cfg_256x256_fp4(depthU=512, numPartM=2, numPartN=2)
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4)
         sched = LogicalScheduler(cfg)
         sched.remove_cross_deps()
         parts = sched._partitions
@@ -1139,7 +1139,7 @@ class TestInsertGrLrInc:
 
     def test_multipartition_bf16_gr_inc_only_at_base_id_0(self):
         """128x128, BF16, 2x2 partition. gr_inc only at tileId_start=0."""
-        cfg = make_cfg_bf16(128, 128, numPartM=2, numPartN=2)
+        cfg = make_cfg_bf16(128, 128, partSizeM=2, partSizeN=2)
         assert cfg.numPartitions == 4
 
         sched = LogicalScheduler(cfg)
@@ -1439,12 +1439,12 @@ class TestFromTileInfo:
 class TestPartitionCandidates:
 
     def test_square(self):
-        """M==N: partitions N."""
+        """M==N: partitions N, sizes descending (divisors only)."""
         kernel = create_kernel(256, 256)
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
-        assert candidates == [(1, 1), (1, 2), (1, 4), (1, 8)]
+        assert candidates == [(8, 8), (8, 4), (8, 2), (8, 1)]
 
     def test_n_larger(self):
         """N > M: partitions N."""
@@ -1452,7 +1452,7 @@ class TestPartitionCandidates:
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
-        assert candidates == [(1, 1), (1, 2), (1, 4), (1, 8)]
+        assert candidates == [(2, 8), (2, 4), (2, 2), (2, 1)]
 
     def test_m_larger(self):
         """M > N: partitions M."""
@@ -1460,16 +1460,16 @@ class TestPartitionCandidates:
         tiA = makeTileInfo('A', kernel)
         tiB = makeTileInfo('B', kernel)
         candidates = SchedulerConfig.get_partition_candidates(tiA, tiB)
-        assert candidates == [(1, 1), (2, 1), (4, 1), (8, 1)]
+        assert candidates == [(8, 2), (4, 2), (2, 2), (1, 2)]
 
     def test_prime_dim(self):
-        """Prime-sized dimension: only (1,1) and (prime,1)."""
+        """Prime-sized dimension: only full and single-tile sizes."""
         cfg_tiA = MagicMock()
         cfg_tiB = MagicMock()
         cfg_tiA.localMMATileGrid = [5, 2]
         cfg_tiB.localMMATileGrid = [3, 2]
         candidates = SchedulerConfig.get_partition_candidates(cfg_tiA, cfg_tiB)
-        assert candidates == [(1, 1), (5, 1)]
+        assert candidates == [(5, 3), (1, 3)]
 
     def test_composite(self):
         """Composite dimension with mixed prime factors."""
@@ -1478,7 +1478,8 @@ class TestPartitionCandidates:
         cfg_tiA.localMMATileGrid = [2, 2]
         cfg_tiB.localMMATileGrid = [6, 2]
         candidates = SchedulerConfig.get_partition_candidates(cfg_tiA, cfg_tiB)
-        assert candidates == [(1, 1), (1, 2), (1, 3), (1, 6)]
+        assert candidates == [(2, 6), (2, 3), (2, 2), (2, 1)]
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1529,15 +1530,15 @@ class TestGetNumVgpr:
         scaleTiA = makeTileInfo('MXSA', kernel)
         scaleTiB = makeTileInfo('MXSB', kernel)
 
-        def _build_and_count(numPartM, numPartN):
-            cfg = make_cfg_256x256_fp4(numPartM=numPartM, numPartN=numPartN)
+        def _build_and_count(partSizeM, partSizeN):
+            cfg = make_cfg_256x256_fp4(partSizeM=partSizeM, partSizeN=partSizeN)
             sched = LogicalScheduler(cfg)
             sched.build()
             return sched.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
 
-        vgpr_1x1 = _build_and_count(1, 1)
-        vgpr_1x2 = _build_and_count(1, 2)
-        vgpr_1x4 = _build_and_count(1, 4)
+        vgpr_1x1 = _build_and_count(0, 0)
+        vgpr_1x2 = _build_and_count(0, 4)
+        vgpr_1x4 = _build_and_count(0, 2)
 
         assert vgpr_1x1 >= vgpr_1x2
         assert vgpr_1x2 >= vgpr_1x4
@@ -2022,7 +2023,7 @@ class TestPGR0Config:
                 numMFMATilesM=8, numMFMATilesN=8, numSubIterK=2,
                 lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
                 grA=ReadGranularity(mn=1, k=2), grB=ReadGranularity(mn=1, k=2),
-                pgr=0, numPartitionsN=2,
+                pgr=0, partitionSizeN=4,
             )
 
 
