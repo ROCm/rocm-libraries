@@ -154,6 +154,7 @@ If a golden file references a tensor name that does not exist in the runtime gra
 - [ ] Unit test: Rename a tensor UID, verify golden validation still works (name unchanged)
 - [ ] Unit test: Rename a tensor name, verify golden validation fails with clear diagnostic
 - [ ] Unit test: Add a new output tensor not in golden data, verify hard FAIL
+- [ ] Generator refuses to write golden data if any tensor name is empty or duplicated within the graph
 
 ---
 
