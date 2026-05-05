@@ -102,6 +102,7 @@ def getRequiredParametersMin() -> set:
         'TDMInst',
         'UnrollLoopSwapGlobalReadOrder',
         'Use64bShadowLimit',
+        'Use64bShadowLimitMX',
         'UseInstOffsetForGRO',
         'UseSgprForGRO',
         'VectorStore',
@@ -113,5 +114,6 @@ def getRequiredParametersMin() -> set:
         'WorkGroup',
         'DtlPlusLdsBuf',
         'MinGRIncPerMfma',
-        'UsePLRPack'
+        'UsePLRPack',
+        'UseSubtileImpl'
     })

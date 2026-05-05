@@ -2,15 +2,41 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## (Unreleased) hipTensor 2.3.0
+## Since last release ROCm 7.12
 
 ### Added
-
-* Added support for contractions with both data and compute types FP16 and BF16 for gfx11 and gfx12 targets.
+* Added Windows support.
+* Added contraction support with FP16 and BF16 data and compute types for gfx11 and gfx12 targets.
 * Added support for the following new GPU targets:
   * gfx11: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153.
   * gfx12: gfx1200, gfx1201.
-* Added unary element-wise operators to contraction.
+* Added unary element-wise operators to contraction, including the new `BilinearUnary` class, dedicated instances, samples, and tests.
+* Added Dockerfiles (prebuilt and full build) and documentation to streamline hipTensor build environment setup. 
+* Added the `CREATE_TEST_APP_LOCAL_DEPLOY` CMake option to stage required ROCm DLLs on Windows, and updated the Windows build documentation accordingly.
+
+### Changed
+* Replaced numeric UID-based actor-critic kernel lookup with platform-stable string-based kernel name comparison to enable cross-platform compatibility.
+* Adopted FNV-1a string hashing in place of `std::hash` to ensure plan cache files are portable across platforms.
+* Switched to ROCm-provided CMake install functions (`rocm_export_targets`) for consistency with other ROCm libraries. 
+* Adapted hipTensor to CK namespace changes for `host_tensor` functions.
+* Cleaned up `rtest` script formatting and removed invalid run commands from `rtest.xml`.
+
+### Removed
+* Removed the legacy `.jenkins` folder since CI migration to rocJenkins.
+
+### Optimized
+* Improved column-major contraction performance by applying CK-style stride reordering for column-major inputs.
+* Achieved 2x–3x speedup in contraction TFLOPS/s by using switch-case dispatch in `HiptensorUnaryOp` instead of static table lookup.
+
+### Resolved issues
+* Fixed use-after-free bug where `hiptensorCreatePlan` held dangling pointers to user-provided descriptors; the plan now deep-copies all descriptors.
+* Fixed incorrect BF16 results in contraction with unary ops caused by silent `bhalf_t`-to-float integer promotion in cross-type overloads.
+
+### Known issues 
+* Unary operations in contraction are not currently supported with `HIPTENSOR_ALGO_ACTOR_CRITIC` for problems with both F16 datatypes and compute types, or both BF16 datatypes and compute types.
+
+### Upcoming changes
+* Add support for trinary contraction.
 
 ## hipTensor 2.2.0 for ROCm 7.2.0
 

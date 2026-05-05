@@ -93,7 +93,7 @@ TEST(TestRMSNormFwdSignatureKey, CreateFromNodeAndTensorMap)
 {
     const RMSNormFwdSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 2, 1, 1};
     auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();

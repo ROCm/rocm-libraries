@@ -26,6 +26,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace stinkytofu {
@@ -33,6 +34,37 @@ namespace stinkytofu {
 enum class HighBitSel : int { NONE = -1, LOW = 0, HIGH = 1 };
 
 enum class MatrixFmt : uint8_t { FP4 = 0, FP6 = 1, FP8 = 2 };
+
+enum class MUBUFScope : uint8_t {
+    SCOPE_NONE = 0,
+    SCOPE_CU = 1,
+    SCOPE_SE = 2,
+    SCOPE_DEV = 3,
+    SCOPE_SYS = 4
+};
+
+inline std::string_view toString(MUBUFScope scope) {
+    switch (scope) {
+        case MUBUFScope::SCOPE_CU:
+            return "SCOPE_CU";
+        case MUBUFScope::SCOPE_SE:
+            return "SCOPE_SE";
+        case MUBUFScope::SCOPE_DEV:
+            return "SCOPE_DEV";
+        case MUBUFScope::SCOPE_SYS:
+            return "SCOPE_SYS";
+        default:
+            return "";
+    }
+}
+
+inline MUBUFScope parseMUBUFScope(std::string_view scope) {
+    if (scope == "SCOPE_CU") return MUBUFScope::SCOPE_CU;
+    if (scope == "SCOPE_SE") return MUBUFScope::SCOPE_SE;
+    if (scope == "SCOPE_DEV") return MUBUFScope::SCOPE_DEV;
+    if (scope == "SCOPE_SYS") return MUBUFScope::SCOPE_SYS;
+    return MUBUFScope::SCOPE_NONE;
+}
 
 struct Modifier {
     enum class Type : uint8_t {
@@ -151,7 +183,7 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     MUBUFModifiers(bool offen = false, int offset12 = 0, bool glc = false, bool slc = false,
                    bool nt = false, bool lds = false, bool isStore = false,
                    bool hasMUBUFConst = false, bool hasGLCModifier = false,
-                   bool hasSC0Modifier = false)
+                   bool hasSC0Modifier = false, MUBUFScope scope = MUBUFScope::SCOPE_NONE)
         : TypedModifier<MUBUFModifiers>(),
           offset12(offset12),
           offen(offen),
@@ -162,7 +194,8 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
           isStore(isStore),
           hasMUBUFConst(hasMUBUFConst),
           hasGLCModifier(hasGLCModifier),
-          hasSC0Modifier(hasSC0Modifier) {}
+          hasSC0Modifier(hasSC0Modifier),
+          scope(scope) {}
 
     int offset12;
     uint32_t offen : 1;
@@ -174,6 +207,7 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t hasMUBUFConst : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
+    MUBUFScope scope;
 };
 
 struct SMEMModifiers : public TypedModifier<SMEMModifiers> {

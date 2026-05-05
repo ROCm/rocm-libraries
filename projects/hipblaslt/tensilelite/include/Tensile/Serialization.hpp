@@ -43,3 +43,9 @@
 #include <Tensile/Serialization/Predicates.hpp>
 #include <Tensile/Serialization/Properties.hpp>
 #include <Tensile/Serialization/SolutionLibrary.hpp>
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
+
+TENSILE_HIDDEN_END
