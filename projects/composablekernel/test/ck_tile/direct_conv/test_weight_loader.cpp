@@ -196,6 +196,13 @@ TEST_F(WeightLoaderTest, Vec2_C2_K2)      { run_and_verify<CFG_VEC2>(2, 2); }
 TEST_F(WeightLoaderTest, Vec1_C3_K3)      { run_and_verify<CFG_VEC1>(3, 3); }
 TEST_F(WeightLoaderTest, Vec1_C1_K1)      { run_and_verify<CFG_VEC1>(1, 1); }
 
+// C < K cases (input channels fewer than output channels).
+TEST_F(WeightLoaderTest, Vec1_C2_K4)      { run_and_verify<CFG_VEC1>(2, 4); }
+TEST_F(WeightLoaderTest, Vec1_C1_K3)      { run_and_verify<CFG_VEC1>(1, 3); }
+TEST_F(WeightLoaderTest, Vec2_C2_K4_asym) { run_and_verify<CFG_VEC2>(2, 4); }
+TEST_F(WeightLoaderTest, Vec1_C1_K2)      { run_and_verify<CFG_VEC1>(1, 2); }
+TEST_F(WeightLoaderTest, Vec1_C3_K2)      { run_and_verify<CFG_VEC1>(3, 2); }
+
 // ============================================================================
 // Validity tests — is_valid_config gates configs by vector_size vs c_per_group
 // ============================================================================
@@ -282,4 +289,32 @@ TEST_F(ValidConfigTest, NonAlignedGroups_rejected)
     p.c_tot  = p.groups * 4;
     p.k_tot  = p.groups * 4;
     EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC1]));
+}
+
+// C != K: vector_size must divide both c_per_group and k_per_group.
+TEST_F(ValidConfigTest, C3_K2_only_vec1)
+{
+    auto p = make_params(3, 2);
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+}
+
+TEST_F(ValidConfigTest, C2_K4_vec2_and_vec1)
+{
+    auto p = make_params(2, 4);
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
+}
+
+TEST_F(ValidConfigTest, C1_K3_only_vec1)
+{
+    auto p = make_params(1, 3);
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_UNPADDED]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC4]));
+    EXPECT_FALSE(is_valid_config(p, configs[CFG_VEC2]));
+    EXPECT_TRUE(is_valid_config(p, configs[CFG_VEC1]));
 }

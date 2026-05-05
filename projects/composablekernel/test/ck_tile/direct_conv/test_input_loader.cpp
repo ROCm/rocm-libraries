@@ -51,14 +51,17 @@ __global__ void test_input_load_kernel(const _Float16* __restrict__ in,
                                        int c_per_group,
                                        int hi,
                                        int wi,
-                                       int px)
+                                       int px,
+                                       int k_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
     using TC = TileConstants<configs[CfgIdx]>;
     constexpr auto cfg = configs[CfgIdx];
     constexpr int BLOCK_SIZE = cfg.block_size();
 
-    ck_tile::direct_conv::BlockCoords<cfg> bc(groups, c_per_group, c_per_group);
+    // When k_per_group is 0 (default), use c_per_group for both (backward compat).
+    const int kpg = (k_per_group > 0) ? k_per_group : c_per_group;
+    ck_tile::direct_conv::BlockCoords<cfg> bc(groups, c_per_group, kpg);
 
     constexpr int LDS_C8 = TC::INPUT_LDS_BUFFER_SIZE_C8;
     constexpr int LDS_FP16 = TC::INPUT_LDS_BUFFER_SIZE_FP16;
@@ -119,8 +122,10 @@ protected:
     }
 
     // Launch the kernel for the given config index and verify LDS contents.
+    // k_per_group controls the output channel count passed to BlockCoords.
+    // When 0 (default), uses c_per_group for backward compatibility.
     template <int CfgIdx>
-    void run_and_verify(int c_per_group, int px = 0)
+    void run_and_verify(int c_per_group, int px = 0, int k_per_group = 0)
     {
         using TC = TileConstants<configs[CfgIdx]>;
         constexpr auto cfg = configs[CfgIdx];
@@ -148,7 +153,7 @@ protected:
             d_in, inp_host.data(), inp_host.size() * sizeof(_Float16), hipMemcpyHostToDevice));
 
         test_input_load_kernel<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
-            d_in, d_lds_out, groups, c_per_group, hi, wi, px);
+            d_in, d_lds_out, groups, c_per_group, hi, wi, px, k_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
         std::vector<_Float16> lds_host(LDS_FP16);
@@ -242,3 +247,15 @@ TEST_F(InputLoaderTest, Vec2_C2_px1) { run_and_verify<CFG_VEC2>(2, 1); }
 
 // Unpadded with spatial padding.
 TEST_F(InputLoaderTest, Unpadded_C4_px1) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE, 1); }
+
+// C != K tests: verify InputLoader works correctly when BlockCoords has C_in != C_out.
+// The InputLoader should only depend on c_per_group (C_in), not k_per_group (C_out).
+TEST_F(InputLoaderTest, Vec1_C3_K2)     { run_and_verify<CFG_VEC1>(3, 0, 2); }
+TEST_F(InputLoaderTest, Vec1_C1_K4)     { run_and_verify<CFG_VEC1>(1, 0, 4); }
+TEST_F(InputLoaderTest, Vec1_C2_K3)     { run_and_verify<CFG_VEC1>(2, 0, 3); }
+TEST_F(InputLoaderTest, Vec2_C2_K4)     { run_and_verify<CFG_VEC2>(2, 0, 4); }
+TEST_F(InputLoaderTest, Vec1_C3_K1)     { run_and_verify<CFG_VEC1>(3, 0, 1); }
+
+// C != K with spatial padding.
+TEST_F(InputLoaderTest, Vec1_C3_K2_px1) { run_and_verify<CFG_VEC1>(3, 1, 2); }
+TEST_F(InputLoaderTest, Vec1_C1_K4_px1) { run_and_verify<CFG_VEC1>(1, 1, 4); }

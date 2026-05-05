@@ -54,13 +54,16 @@ __global__ void test_output_write_kernel(_Float16* __restrict__ out,
                                           int groups,
                                           int k_per_group,
                                           int ho,
-                                          int wo)
+                                          int wo,
+                                          int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
     using TC = TileConstants<configs[CfgIdx]>;
     constexpr auto cfg = configs[CfgIdx];
 
-    ck_tile::direct_conv::BlockCoords<cfg> bc(groups, cfg.group_size(), k_per_group);
+    // When c_per_group is 0 (default), use GROUP_SIZE for backward compatibility.
+    const int cpg = (c_per_group > 0) ? c_per_group : cfg.group_size();
+    ck_tile::direct_conv::BlockCoords<cfg> bc(groups, cpg, k_per_group);
 
     // Weight LDS (unused but needed for OutputWriterLds constructor signature).
     __shared__ uint4 dummy_lds[1];
@@ -91,8 +94,10 @@ protected:
     static constexpr _Float16 SENTINEL = static_cast<_Float16>(-999.0f);
 
     // Launch the kernel and verify output contents.
+    // c_per_group controls the input channel count passed to BlockCoords.
+    // When 0 (default), uses GROUP_SIZE for backward compatibility.
     template <int CfgIdx>
-    void run_and_verify(int k_per_group)
+    void run_and_verify(int k_per_group, int c_per_group = 0)
     {
         using TC = TileConstants<configs[CfgIdx]>;
         constexpr auto cfg = configs[CfgIdx];
@@ -117,7 +122,7 @@ protected:
             d_out, out_host.data(), out_size * sizeof(_Float16), hipMemcpyHostToDevice));
 
         test_output_write_kernel<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
-            d_out, groups, k_per_group, ho, wo);
+            d_out, groups, k_per_group, ho, wo, c_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
         ck_tile::hip_check_error(hipMemcpy(
@@ -246,3 +251,13 @@ TEST_F(OutputWriterTest, Vec8_K1) { run_and_verify<CFG_VEC8>(1); }
 TEST_F(OutputWriterTest, Direct_K3) { run_and_verify<CFG_DIRECT>(3); }
 TEST_F(OutputWriterTest, Direct_K2) { run_and_verify<CFG_DIRECT>(2); }
 TEST_F(OutputWriterTest, Direct_K1) { run_and_verify<CFG_DIRECT>(1); }
+
+// C != K tests: verify OutputWriter works correctly when BlockCoords has C_in != C_out.
+// The OutputWriter should only depend on k_per_group (C_out), not c_per_group (C_in).
+TEST_F(OutputWriterTest, Vec1_C3_K2)  { run_and_verify<CFG_VEC1>(2, 3); }
+TEST_F(OutputWriterTest, Vec1_C1_K4)  { run_and_verify<CFG_VEC1>(4, 1); }
+TEST_F(OutputWriterTest, Vec1_C2_K3)  { run_and_verify<CFG_VEC1>(3, 2); }
+TEST_F(OutputWriterTest, Vec2_C2_K4)  { run_and_verify<CFG_VEC2>(4, 2); }
+TEST_F(OutputWriterTest, Vec1_C3_K1)  { run_and_verify<CFG_VEC1>(1, 3); }
+TEST_F(OutputWriterTest, Direct_C3_K2) { run_and_verify<CFG_DIRECT>(2, 3); }
+TEST_F(OutputWriterTest, Direct_C1_K4) { run_and_verify<CFG_DIRECT>(4, 1); }

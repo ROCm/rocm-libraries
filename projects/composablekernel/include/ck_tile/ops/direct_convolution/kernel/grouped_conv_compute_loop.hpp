@@ -72,11 +72,24 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
     uint4* output_lds = lds_buf + INPUT_TOTAL;
 
     // --- Coordinate setup ---
-    BlockCoordsT bc(groups, c_per_group, k_per_group);
+    //
+    // For Dgrad the pointers are already swapped by the kernel wrapper:
+    //   in  = output gradient (K channels per group)
+    //   out = input gradient  (C channels per group)
+    // So the "input" channel count is k_per_group and the "output" channel
+    // count is c_per_group — the reverse of Fprop.  The weight tensor is
+    // NOT swapped (always GKYXC), so the weight loader keeps the original
+    // c_per_group / k_per_group.
+    constexpr bool is_dgrad = (cfg.direction == Direction::Dgrad);
+    const int in_cpg  = is_dgrad ? k_per_group : c_per_group;
+    const int out_kpg = is_dgrad ? c_per_group : k_per_group;
+
+    BlockCoordsT bc(groups, in_cpg, out_kpg);
     if(bc.block_n >= N)
         return;
 
     // --- Weight loading (uses start of buffer, before input phase) ---
+    // Weight tensor layout is always GKYXC with the original c/k_per_group.
     WeightLoaderT wl;
     WeightLoaderT::load_to_lds(bc, lds_buf, wei, c_per_group, k_per_group);
     wait_vmcnt<0>();
@@ -84,8 +97,8 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
 
     wl.read_from_lds(lds_buf);
 
-    InputLoaderT il(bc, input_lds, in, hi, wi, px, c_per_group);
-    OutputWriterT ow(bc, output_lds, out, ho, wo, k_per_group);
+    InputLoaderT il(bc, input_lds, in, hi, wi, px, in_cpg);
+    OutputWriterT ow(bc, output_lds, out, ho, wo, out_kpg);
 
     __syncthreads();
 

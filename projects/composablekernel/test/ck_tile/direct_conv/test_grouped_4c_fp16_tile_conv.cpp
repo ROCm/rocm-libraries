@@ -640,6 +640,21 @@ class DirectConvGrouped4cFp16TileConvV3PaddedTest
 {
 };
 
+// --- Fprop: C == K padded baseline (config 49, vector_size=1) ---
+// These must pass; they use the same code path as C!=K but with c_per_group == k_per_group.
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C3_K3)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 3, 3, 3, 3, 1, 1)));
+}
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C1_K1)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 1, 1, 3, 3, 1, 1)));
+}
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C2_K2)
+{
+    ASSERT_TRUE((RunFprop<49>(1, 34, 34, 32, 2, 2, 3, 3, 1, 1)));
+}
+
 // --- Fprop: C != K, vector_size=1 (config 49) ---
 // Config 49: waves_c64=2 (groups%32==0), waves_q4=8 (out_q>=32 needed)
 // With 34x34 input, pad=1, 3x3 filter: out_q = 34
