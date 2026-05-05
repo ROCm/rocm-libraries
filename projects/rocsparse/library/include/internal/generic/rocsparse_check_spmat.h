@@ -36,12 +36,12 @@ extern "C" {
 *  \brief Check matrix to see if it is valid.
 *
 *  \details
-*  \p rocsparse_check_spmat checks if the input matrix is valid.
+*  \p rocsparse_check_spmat checks whether the input matrix is valid.
 *
-*  \p rocsparse_check_spmat requires two steps to complete. First the user calls \p rocsparse_check_spmat
-*  with the stage parameter set to \ref rocsparse_check_spmat_stage_buffer_size which determines the
-*  size of the temporary buffer needed in the second step. The user allocates this buffer and calls
-*  \p rocsparse_check_spmat with the stage parameter set to \ref rocsparse_check_spmat_stage_compute
+*  \p rocsparse_check_spmat requires two steps to complete. First, call \p rocsparse_check_spmat
+*  with the stage parameter set to \ref rocsparse_check_spmat_stage_buffer_size, which determines the
+*  size of the temporary buffer needed in the second step. Allocate this buffer and call
+*  \p rocsparse_check_spmat with the stage parameter set to \ref rocsparse_check_spmat_stage_compute,
 *  which checks the input matrix for errors. Any detected errors in the input matrix are reported in the
 *  \p data_status (passed to the function as a host pointer).
 *
@@ -57,12 +57,12 @@ extern "C" {
 *
 *  \note
 *  This function writes the required allocation size (in bytes) to \p buffer_size and
-*  returns without performing the checking operation, when stage is equal to
+*  returns without performing the checking operation when \p stage is equal to
 *  \ref rocsparse_check_spmat_stage_buffer_size.
 *
 *  \note
-*  The sparse matrix formats currently supported are: rocsparse_format_coo, rocsparse_format_csr,
-*  rocsparse_format_csc and rocsparse_format_ell.
+*  The sparse matrix formats currently supported are: \p rocsparse_format_coo, \p rocsparse_format_csr,
+*  \p rocsparse_format_csc, and \p rocsparse_format_ell.
 *
 *  \note check_spmat requires two stages to complete. The first stage
 *  \ref rocsparse_check_spmat_stage_buffer_size will return the size of the temporary storage buffer
@@ -76,11 +76,11 @@ extern "C" {
 *  This routine does not support batched computation.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  mat         matrix descriptor.
 *  @param[out]
-*  data_status modified to indicate the status of the data
+*  data_status modified to indicate the status of the data.
 *  @param[in]
 *  stage       check_matrix stage for the matrix computation.
 *  @param[out]
@@ -93,12 +93,12 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_pointer \p mat, \p buffer_size, \p temp_buffer or \p data_status pointer
+*  \retval     rocsparse_status_invalid_pointer \p mat, \p buffer_size, \p temp_buffer, or \p data_status pointer
 *              is invalid.
-*  \retval     rocsparse_status_invalid_value the value of stage is incorrect.
+*  \retval     rocsparse_status_invalid_value the value of \p stage is incorrect.
 *
 *  \par Example
-*  In this example we want to check whether a matrix is upper triangular. The matrix passed to
+*  This example checks whether a matrix is upper triangular. The matrix passed to
 *  \ref rocsparse_check_spmat is invalid because it contains an entry in the lower triangular
 *  part of the matrix.
 *  \snippet example_rocsparse_check_spmat.cpp doc example
