@@ -37,7 +37,6 @@ foreach(arch IN LISTS archs)
     )
     add_custom_target(matrix-transform-cp-${arch} ALL
         DEPENDS ${output_library}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}"
-        COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltTransform.hsaco"
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library/hipblasltTransform_${arch}.hsaco"
     )
 endforeach()

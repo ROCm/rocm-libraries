@@ -117,4 +117,24 @@ inline std::vector<BatchnormTestCase> getBnFwdTrainingFull3dTestCases()
     };
 }
 
+inline std::vector<BatchnormTestCase> getBnBwdSmoke2dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 1, 1}, seed},
+        {{32, 3, 1, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwdSmoke3dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed},
+        {{2, 3, 2, 4, 4}, seed},
+    };
+}
+
 } // namespace hip_kernel_provider::batchnorm::test::common

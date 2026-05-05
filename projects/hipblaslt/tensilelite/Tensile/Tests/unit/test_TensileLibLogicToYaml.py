@@ -438,6 +438,7 @@ BenchmarkProblems:
     - UseSgprForGRO: [1]
     - VectorWidthA: [1]
     - VectorWidthB: [1]
+    - WavefrontSize: [64]
     - WorkGroupMapping: [1]
     - WorkGroupMappingXCC: [2]
     - Groups:

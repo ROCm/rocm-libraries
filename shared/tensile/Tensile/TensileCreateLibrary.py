@@ -31,6 +31,7 @@ if __name__ == "__main__":
     exit(1)
 
 import collections
+import copy
 import itertools
 import os
 import re
@@ -61,7 +62,7 @@ from .Common import (
 from .KernelWriterAssembly import KernelWriterAssembly
 from .KernelWriterBase import KernelWriterBase
 from .KernelWriterSource import KernelWriterSource
-from .SolutionLibrary import MasterSolutionLibrary
+from .SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
 from .SolutionStructs import Solution
 from .TensileCreateLib.KernelFileContext import KernelFileContextManager
 from .TensileCreateLib.ParseArguments import parseArguments
@@ -1024,6 +1025,58 @@ def applyNaming(masterLibraries: Dict[str, MasterSolutionLibrary]) -> None:
                 sol.originalSolution["codeObjectFile"] = name
 
 
+def _renameFallbackPlaceholders(node, arch: str) -> None:
+    """Walk a library tree, appending "_<arch>" to fallback PlaceholderLibrary names."""
+    if node is None:
+        return
+    if isinstance(node, PlaceholderLibrary):
+        if "fallback" in node.filenamePrefix and not node.filenamePrefix.endswith("_" + arch):
+            node.filenamePrefix = node.filenamePrefix + "_" + arch
+        return
+    rows = getattr(node, "rows", None)
+    if rows:
+        for row in rows:
+            _renameFallbackPlaceholders(row.get("library"), arch)
+    mapping = getattr(node, "mapping", None)
+    if mapping:
+        for child in mapping.values():
+            _renameFallbackPlaceholders(child, arch)
+
+
+def renameFallbacksPerArch(masterLibraries: Dict[str, MasterSolutionLibrary]) -> None:
+    """Make fallback lazy library filenames arch-specific.
+
+    After addFallback() and applyNaming(), each per-arch master holds a lazy
+    entry whose key (and matching PlaceholderLibrary.filenamePrefix in the
+    master's library tree) ends in "_fallback". The serializer writes one
+    "*_fallback.dat" per unique key, so without per-arch suffixes every
+    arch's master points at the same shared file. That file's contents
+    differ across builds (solution.name strings are not stable across
+    Tensile encoding revisions), so two single-arch shard installs landing
+    in the same prefix overlay-clobber each other and break runtime symbol
+    lookup. Append "_<arch>" so each per-arch master references its own
+    per-arch fallback file.
+
+    Note: addFallback() aliases the same MasterSolutionLibrary across
+    multiple arch keys when an arch lacks tuned logic, and insert() shares
+    PlaceholderLibrary refs across arch masters via library.merge(). Deep
+    copy each per-arch master so the rename does not leak between arches.
+    """
+    for arch in list(masterLibraries.keys()):
+        master = copy.deepcopy(masterLibraries[arch])
+        masterLibraries[arch] = master
+
+        renamed = {}
+        for name, lib in master.lazyLibraries.items():
+            if "fallback" in name and not name.endswith("_" + arch):
+                renamed[name + "_" + arch] = lib
+            else:
+                renamed[name] = lib
+        master.lazyLibraries = renamed
+
+        _renameFallbackPlaceholders(master.library, arch)
+
+
 def makeSolutions(
     masterLibraries: dict, separate: bool
 ):  # -> Generator[Solution]:# is breaking tensile
@@ -1091,9 +1144,13 @@ def generateLogicData(
     libraries = parseLibraryLogicFiles(logicFiles)
     logicList = libraries if not printLevel else Utils.tqdm(libraries, desc="Processing logic data")
     masterLibraries = makeMasterLibraries(logicList, separate)
+    fallbackAdded = False
     if separate and "fallback" in masterLibraries:
         addFallback(masterLibraries)
+        fallbackAdded = True
     applyNaming(masterLibraries)
+    if fallbackAdded:
+        renameFallbacksPerArch(masterLibraries)
     for lib in masterLibraries.values():
         lib.version = version
 
