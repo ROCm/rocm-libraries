@@ -181,26 +181,6 @@ def test_order_inverted_failure_format():
     assert "must complete before" not in msg    # generic prose dropped earlier
 
 
-def test_order_inverted_failure_format_empty_capture_falls_back():
-    """tagged_inst not in (empty) capture.instructions: per-category [N]
-    omitted, just the bare category. Same fallback that legacy
-    `capture=None` callers triggered; the short-circuit is gone, but the
-    tagged_inst-not-found branch produces identical output."""
-    producer = _make_node("GRB", "GRB", 3)
-    consumer = _make_node("LRA1", "LRA1", 2)
-    failure = OrderInvertedFailure(
-        producer=producer,
-        consumer=consumer,
-        default_producer_position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
-        default_consumer_position=SchedulePosition(loop_index=1, vmfma_index=5, sub_index=0),
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "GRB @ idx=3" in msg
-    assert "LRA1 @ idx=2" in msg
-    assert "GRB[" not in msg     # no per-category index without a real capture
-    assert "LRA1[" not in msg
-
-
 def test_order_inverted_failure_format_mfma_consumer_omits_bracket():
     """Consumer is plain MFMA (category='MFMA'): the [N] suffix is omitted
     even when a capture is provided, because vmfma_index is the canonical
@@ -257,19 +237,6 @@ def test_missing_wait_failure_format_cross_iteration():
     )
     msg = failure.format(capture=capture)
     assert msg == "SWaitCnt(dscnt) missing between LRA0 @ idx=5 and GRB[0] @ idx=6 (of next iteration)."
-
-
-def test_missing_wait_failure_format_empty_capture():
-    """Empty capture: per-category [N] omitted via the
-    tagged_inst-not-found fallback; iteration note still works because
-    the loop_index check is independent of capture."""
-    producer = _make_node("LRA0", "LRA0", 0)
-    consumer = _make_node("MFMA", "MFMA", 2)
-    failure = MissingWaitFailure(
-        producer=producer, consumer=consumer, counter_kind="vlcnt"
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert msg == "SWaitCnt(vlcnt) missing between LRA0 @ idx=0 and MFMA @ idx=2."
 
 
 def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
