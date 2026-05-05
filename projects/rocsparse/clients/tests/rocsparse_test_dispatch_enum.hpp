@@ -41,6 +41,7 @@ struct rocsparse_test_dispatch_enum
         ijaxyt,
         iabct,
         ijabct,
+        iabct_sddmm,
         ijabct_sddmm
     } value_type;
 };

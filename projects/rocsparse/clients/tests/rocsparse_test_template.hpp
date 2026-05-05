@@ -258,6 +258,7 @@ namespace
                     break;
                 }
                 case rocsparse_test_dispatch_enum::iabct:
+                case rocsparse_test_dispatch_enum::iabct_sddmm:
                 {
                     s << rocsparse_indextype2string(arg.index_type_I) << '_'
                       << rocsparse_datatype2string(arg.a_type) << '_'

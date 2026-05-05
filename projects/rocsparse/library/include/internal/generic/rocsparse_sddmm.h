@@ -227,7 +227,13 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  This routine supports execution in a hipGraph context only when \p alg == \ref rocsparse_sddmm_alg_default.
 *
 *  \note
-*  This routine does not support batched computation.
+*  Batched computation is supported for the \ref rocsparse_format_coo format when
+*  \p alg == \ref rocsparse_sddmm_alg_default. The batch count is taken from the
+*  sparse matrix \f$C\f$ and must match the batch counts of the dense matrices
+*  \f$A\f$ and \f$B\f$. The per-batch strides are configured via
+*  \ref rocsparse_dnmat_set_strided_batch and \ref rocsparse_coo_set_strided_batch.
+*  All other formats and algorithms currently return \ref rocsparse_status_not_implemented
+*  when the batch count is greater than one.
 *
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.

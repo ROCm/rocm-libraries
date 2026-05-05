@@ -51,12 +51,15 @@ namespace rocsparse
                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                            const A* __restrict__ dense_A,
                            int64_t lda,
+                           int64_t batch_stride_A,
                            const B* __restrict__ dense_B,
                            int64_t ldb,
+                           int64_t batch_stride_B,
                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                            C* __restrict__ coo_val,
                            const I* __restrict__ coo_row_ind,
                            const I* __restrict__ coo_col_ind,
+                           int64_t              batch_stride_C,
                            rocsparse_index_base coo_base,
                            bool                 is_host_mode)
     {
@@ -85,6 +88,17 @@ namespace rocsparse
         {
             return;
         }
+
+        // Offset pointers for the current batch so the rest of the kernel
+        // can address the batched inputs as though they were single matrices.
+        // Note: batched computation is currently only supported for the COO
+        // (struct-of-arrays) format. The AOS case keeps a single batch.
+        const uint32_t batch = hipBlockIdx_y;
+        dense_A              = dense_A + batch_stride_A * batch;
+        dense_B              = dense_B + batch_stride_B * batch;
+        coo_row_ind          = coo_row_ind + batch_stride_C * batch;
+        coo_col_ind          = coo_col_ind + batch_stride_C * batch;
+        coo_val              = coo_val + batch_stride_C * batch;
 
         const I i = coo_row_ind[innz * ((AOS) ? 2 : 1)] - coo_base;
         const I j = coo_col_ind[innz * ((AOS) ? 2 : 1)] - coo_base;
