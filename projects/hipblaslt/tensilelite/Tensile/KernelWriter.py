@@ -2528,8 +2528,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tdmInited: bool = False
 
     # TODO: This can probably be moved later, after setupnewtile
-    if not tdmA:
-      module.add(self.removeGRSrdVariableSgprsFromPool(kernel))
+    # Always release GR-related SGPRs from the pool. regardless of whether
+    # it is a TDM or non-TDM kernel.
+    module.add(self.removeGRSrdVariableSgprsFromPool(kernel))
 
     # tile assignments
     if not kernel["UseSubtileImpl"]:

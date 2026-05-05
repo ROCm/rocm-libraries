@@ -2021,15 +2021,6 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
       return
 
-    if tdmInst > 0:
-      # TODO: remove this restriction when PGR=2 is fully supported
-      # if state["PrefetchGlobalRead"] > 1:
-      #   reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
-      #   return
-
-      if (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
-        reject(state, printRejectionReason, "Currently TDM only supports TN")
-
     # DepthU == -1?
     if state["DepthU"] == -1:
       depthuList = [1024,512,256,128,64,32,16]
