@@ -86,85 +86,116 @@ struct InputLoader
                 : input_lds_ptr(input_lds),
                   padded_(c_per_group != TC::GROUP_SIZE)
     {
-        if(padded_)
-        {
-            // ---- Padded path: c_per_group < GROUP_SIZE ----
-            // Store scalar state for creating temporary tile_windows per row.
-            hi_               = hi;
-            wi_               = wi;
-            C_in_             = bc.C_in;
-            c_per_group_      = c_per_group;
-            px_               = px;
-            current_row_      = 0;
-            block_q_          = bc.block_q;
-            input_base_padded_ = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C_in + bc.block_k_in;
+        constexpr auto input_dram_dist = TC::Input::MakeDramReadTileDistribution();
+        constexpr auto tile_lengths = ck_tile::make_tuple(
+            ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
+            ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{});
 
-            // Mark async path members as unused.
-            load_active = false;
-            input_voffset = 0;
-            store_input_lds = nullptr;
-            row_stride_bytes = 0;
-            is_valid = 0;
-        }
-        else
-        {
-            // ---- Unpadded path: c_per_group == GROUP_SIZE ----
-            // Create temporary DRAM tile_window to extract per-thread offsets.
+        // Extract load_active from a tile_window's warp-level LDS mapping.
+        // The thread's LDS write position must fall within the BLOCK_W region;
+        // threads beyond BLOCK_W are inactive and must not write to LDS.
+        auto compute_load_active = [&](const auto& dram_window) {
+            constexpr auto lds_store_desc = TC::Input::MakeLdsWriteDescriptor();
+            auto warp_bottom_idx =
+                dram_window.pre_computed_warp_coords_[ck_tile::number<0>{}]
+                                                     [ck_tile::number<0>{}].get_bottom_index();
+            auto lds_offset = ck_tile::make_tensor_coordinate(lds_store_desc, warp_bottom_idx).get_offset();
+            const int lane_id = ck_tile::get_lane_id();
+            return lds_offset + lane_id * 8 < TC::BLOCK_W * TC::BLOCK_C8 * 8;
+        };
+
+        // ---- Unpadded init: extracted as a lambda so it can be called from
+        // both the has_padded_descriptor=true (but padded_=false) case and
+        // the has_padded_descriptor=false case without code duplication. ----
+        auto init_unpadded = [&]() {
             const auto input_dram_desc = TC::Input::MakeDramReadDescriptor(hi, wi, bc.C, px);
             const _Float16* input_base = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k;
             const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
                 input_base, input_dram_desc);
 
-            constexpr auto input_dram_dist = TC::Input::MakeDramReadTileDistribution();
-            {
-                auto tmp_dram_window = ck_tile::make_tile_window(
-                    input_dram_view,
-                    ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
-                                        ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
-                    {0, bc.block_q, 0, 0},
-                    input_dram_dist);
+            auto tmp_dram_window = ck_tile::make_tile_window(
+                input_dram_view, tile_lengths, {0, bc.block_q, 0, 0}, input_dram_dist);
 
-                // Extract per-thread DRAM source element offset.
-                auto dram_elem_offset = tmp_dram_window.pre_computed_coords_[ck_tile::number<0>{}]
-                                                                            [ck_tile::number<1>{}].get_offset();
+            load_active = compute_load_active(tmp_dram_window);
 
-                // Extract per-thread pad-transform validity flag.
-                is_valid = ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
-                    input_dram_desc, tmp_dram_window.pre_computed_coords_[ck_tile::number<0>{}]
-                                                                         [ck_tile::number<1>{}]);
+            // Extract per-thread DRAM source element offset.
+            auto dram_elem_offset = tmp_dram_window.pre_computed_coords_[ck_tile::number<0>{}]
+                                                                        [ck_tile::number<1>{}].get_offset();
 
-                // Extract lane-0 LDS destination offset.
-                constexpr auto lds_store_desc = TC::Input::MakeLdsWriteDescriptor();
-                auto warp_adaptor_bottom_idx =
-                    tmp_dram_window.pre_computed_warp_coords_[ck_tile::number<0>{}]
-                                                             [ck_tile::number<0>{}].get_bottom_index();
-                auto lds_coord = ck_tile::make_tensor_coordinate(lds_store_desc, warp_adaptor_bottom_idx);
-                auto warp_lds_offset = lds_coord.get_offset();
+            // Extract per-thread pad-transform validity flag.
+            is_valid = ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
+                input_dram_desc, tmp_dram_window.pre_computed_coords_[ck_tile::number<0>{}]
+                                                                     [ck_tile::number<1>{}]);
 
-                // Determine load_active from the thread's LDS write position.
-                {
-                    const int lane_id = ck_tile::get_lane_id();
-                    load_active = (warp_lds_offset + lane_id * 8
-                                   < TC::BLOCK_W * TC::BLOCK_C8 * 8);
-                }
+            // Create buffer resource.
+            auto elem_space_size = input_dram_desc.get_element_space_size();
+            input_rsrc = ck_tile::make_builtin_buffer_resource(
+                input_base,
+                static_cast<uint32_t>(elem_space_size * sizeof(_Float16)));
 
-                // Create buffer resource.
-                auto elem_space_size = input_dram_desc.get_element_space_size();
-                input_rsrc = ck_tile::make_builtin_buffer_resource(
-                    input_base,
-                    static_cast<uint32_t>(elem_space_size * sizeof(_Float16)));
+            // Per-thread DRAM byte offset.
+            input_voffset = static_cast<ck_tile::index_t>(dram_elem_offset * sizeof(_Float16));
 
-                // Per-thread DRAM byte offset.
-                input_voffset = static_cast<ck_tile::index_t>(dram_elem_offset * sizeof(_Float16));
-
-                // LDS destination pointer.
-                auto* lds_fp16_base = reinterpret_cast<CK_TILE_LDS_ADDR _Float16*>(
-                    reinterpret_cast<uintptr_t>(reinterpret_cast<_Float16*>(&input_lds[0])));
-                store_input_lds = lds_fp16_base + warp_lds_offset;
-            } // tmp_dram_window goes out of scope
+            // LDS destination pointer.
+            constexpr auto lds_store_desc = TC::Input::MakeLdsWriteDescriptor();
+            auto warp_adaptor_bottom_idx =
+                tmp_dram_window.pre_computed_warp_coords_[ck_tile::number<0>{}]
+                                                         [ck_tile::number<0>{}].get_bottom_index();
+            auto warp_lds_offset = ck_tile::make_tensor_coordinate(
+                lds_store_desc, warp_adaptor_bottom_idx).get_offset();
+            auto* lds_fp16_base = reinterpret_cast<CK_TILE_LDS_ADDR _Float16*>(
+                reinterpret_cast<uintptr_t>(reinterpret_cast<_Float16*>(&input_lds[0])));
+            store_input_lds = lds_fp16_base + warp_lds_offset;
 
             // Row stride in bytes.
             row_stride_bytes = static_cast<ck_tile::index_t>(wi * bc.C * sizeof(_Float16));
+        };
+
+        // Check at compile time whether this variant supports padded input loading.
+        constexpr bool has_padded_descriptor =
+            requires { TC::Input::template MakeDramReadDescriptorPadded<1>(int{}, int{}, int{}, int{}, int{}); };
+
+        if constexpr(has_padded_descriptor)
+        {
+            if(padded_)
+            {
+                // ---- Padded path: c_per_group < GROUP_SIZE ----
+                // Store scalar state for creating temporary tile_windows per row.
+                hi_               = hi;
+                wi_               = wi;
+                C_in_             = bc.C_in;
+                c_per_group_      = c_per_group;
+                px_               = px;
+                current_row_      = 0;
+                block_q_          = bc.block_q;
+                input_base_padded_ = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C_in + bc.block_k_in;
+
+                // Extract load_active using the padded DRAM descriptor (correct strides).
+                {
+                    const auto padded_desc =
+                        TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
+                            hi, wi, bc.C_in, c_per_group, px);
+                    auto padded_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+                        input_base_padded_, padded_desc);
+                    auto tmp_window = ck_tile::make_tile_window(
+                        padded_view, tile_lengths, {0, bc.block_q, 0, 0}, input_dram_dist);
+                    load_active = compute_load_active(tmp_window);
+                }
+
+                // Mark async path members as unused.
+                input_voffset = 0;
+                store_input_lds = nullptr;
+                row_stride_bytes = 0;
+                is_valid = 0;
+            }
+            else
+            {
+                init_unpadded();
+            }
+        }
+        else
+        {
+            init_unpadded();
         }
 
         // Precompute per-thread MFMA LDS read offsets for each kw slice.
@@ -211,16 +242,16 @@ struct InputLoader
 
     __device__ __forceinline__ void prefetch_tile_to_lds(int lds_buffer_index)
     {
-        if(padded_)
+        if(load_active)
         {
-            prefetch_tile_to_lds_padded(lds_buffer_index);
-        }
-        else
-        {
-            if(load_active)
+            if (padded_)
+            {
+                prefetch_tile_to_lds_padded(lds_buffer_index);
+            }
+            else 
             {
                 CK_TILE_LDS_ADDR _Float16* lds_dest =
-                    store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
+                store_input_lds + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
 
                 ck_tile::amd_async_buffer_load<_Float16, 8,
                     ck_tile::amd_buffer_coherence_enum::coherence_default, true>(
@@ -265,12 +296,8 @@ struct InputLoader
             // Load from DRAM with per-element OOB checking (pad transform zeros padded channels).
             auto input_reg = ck_tile::load_tile(padded_dram_window);
 
-            // Create LDS write window with padded descriptor.
-            // The tile distribution maps threads to TOTAL_SPATIAL spatial positions,
-            // but the LDS buffer only has BLOCK_W entries.  The padded descriptor
-            // extends the spatial dim to TOTAL_SPATIAL and marks positions >= BLOCK_W
-            // as OOB so store_tile suppresses out-of-bounds writes.
-            constexpr auto lds_write_desc = TC::Input::MakeLdsWriteDescriptorPadded();
+            // Create LDS write window
+            constexpr auto lds_write_desc = TC::Input::MakeLdsWriteDescriptor();
             _Float16* lds_base = reinterpret_cast<_Float16*>(input_lds_ptr)
                                  + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
             auto lds_write_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
