@@ -48,8 +48,7 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
 
     io_type = _bnorm_io_type(operation)
 
-    is_3d = "-D" in args
-    D: Optional[int] = _int(args, "-D", 1) if is_3d else None
+    is_3d = _int(args, "-D", 0) > 0
 
     if is_3d and D is not None:
         x_dims = [N, C, D, H, W]
