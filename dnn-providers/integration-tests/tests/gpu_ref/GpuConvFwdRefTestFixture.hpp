@@ -5,7 +5,6 @@
 
 #include "ConvShapeCase.hpp"
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -15,14 +14,11 @@
 
 #include <hipdnn_gpu_ref/GpuFpReferenceConvolution.hpp>
 
-#include <cstdint>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 // ============================================================================
 // Shared infrastructure for forward convolution GPU-vs-CPU reference tests.
-// Included by both the fast (unit) and slow (integration) test binaries.
 // ============================================================================
 
 namespace gpu_conv_fwd_ref_test
@@ -136,72 +132,6 @@ protected:
                                      tolerance(tc),
                                      tc.layout);
     }
-};
-
-using TestGpuConvFwdRefShapesFp32 = ConvFwdShapeSuite<float>;
-using TestGpuConvFwdRefShapesFp16 = ConvFwdShapeSuite<half>;
-using TestGpuConvFwdRefShapesBfp16 = ConvFwdShapeSuite<bfloat16>;
-
-// One-liner subclasses — each creates a distinct GTest-visible type so that
-// INSTANTIATE_TEST_SUITE_P can use clean tier-only prefixes (Smoke, Standard, Comprehensive, Full)
-// while the suite name itself carries dimensionality and layout information.
-
-// Default layout (NCL / NCHW / NCDHW)
-class TestGpuConvFwdRef1dFp32 : public ConvFwdShapeSuite<float>
-{
-};
-class TestGpuConvFwdRef2dFp32 : public ConvFwdShapeSuite<float>
-{
-};
-class TestGpuConvFwdRef3dFp32 : public ConvFwdShapeSuite<float>
-{
-};
-class TestGpuConvFwdRef1dFp16 : public ConvFwdShapeSuite<half>
-{
-};
-class TestGpuConvFwdRef2dFp16 : public ConvFwdShapeSuite<half>
-{
-};
-class TestGpuConvFwdRef3dFp16 : public ConvFwdShapeSuite<half>
-{
-};
-class TestGpuConvFwdRef1dBfp16 : public ConvFwdShapeSuite<bfloat16>
-{
-};
-class TestGpuConvFwdRef2dBfp16 : public ConvFwdShapeSuite<bfloat16>
-{
-};
-class TestGpuConvFwdRef3dBfp16 : public ConvFwdShapeSuite<bfloat16>
-{
-};
-
-// Channel-last layout (NLC / NHWC / NDHWC)
-class TestGpuConvFwdRefNlc1dFp32 : public ConvFwdShapeSuite<float>
-{
-};
-class TestGpuConvFwdRefNhwc2dFp32 : public ConvFwdShapeSuite<float>
-{
-};
-class TestGpuConvFwdRefNdhwc3dFp32 : public ConvFwdShapeSuite<float>
-{
-};
-class TestGpuConvFwdRefNlc1dFp16 : public ConvFwdShapeSuite<half>
-{
-};
-class TestGpuConvFwdRefNhwc2dFp16 : public ConvFwdShapeSuite<half>
-{
-};
-class TestGpuConvFwdRefNdhwc3dFp16 : public ConvFwdShapeSuite<half>
-{
-};
-class TestGpuConvFwdRefNlc1dBfp16 : public ConvFwdShapeSuite<bfloat16>
-{
-};
-class TestGpuConvFwdRefNhwc2dBfp16 : public ConvFwdShapeSuite<bfloat16>
-{
-};
-class TestGpuConvFwdRefNdhwc3dBfp16 : public ConvFwdShapeSuite<bfloat16>
-{
 };
 
 } // namespace gpu_conv_fwd_ref_test

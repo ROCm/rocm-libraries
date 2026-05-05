@@ -5,7 +5,6 @@
 
 #include "ConvShapeCase.hpp"
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -15,14 +14,11 @@
 
 #include <hipdnn_gpu_ref/GpuFpReferenceConvolution.hpp>
 
-#include <cstdint>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 // ============================================================================
 // Shared infrastructure for weight-gradient (wgrad) GPU-vs-CPU reference tests.
-// Included by both the fast (unit) and slow (integration) test binaries.
 // ============================================================================
 
 namespace gpu_conv_wgrad_ref_test
@@ -131,72 +127,6 @@ protected:
                                      tolerance(tc),
                                      tc.layout);
     }
-};
-
-using TestGpuConvWrwRefShapesFp32 = ConvWgradShapeSuite<float>;
-using TestGpuConvWrwRefShapesFp16 = ConvWgradShapeSuite<half>;
-using TestGpuConvWrwRefShapesBfp16 = ConvWgradShapeSuite<bfloat16>;
-
-// One-liner subclasses — each creates a distinct GTest-visible type so that
-// INSTANTIATE_TEST_SUITE_P can use clean tier-only prefixes (Smoke, Standard, Comprehensive, Full)
-// while the suite name itself carries dimensionality and layout information.
-
-// Default layout (NCL / NCHW / NCDHW)
-class TestGpuConvWrwRef1dFp32 : public ConvWgradShapeSuite<float>
-{
-};
-class TestGpuConvWrwRef2dFp32 : public ConvWgradShapeSuite<float>
-{
-};
-class TestGpuConvWrwRef3dFp32 : public ConvWgradShapeSuite<float>
-{
-};
-class TestGpuConvWrwRef1dFp16 : public ConvWgradShapeSuite<half>
-{
-};
-class TestGpuConvWrwRef2dFp16 : public ConvWgradShapeSuite<half>
-{
-};
-class TestGpuConvWrwRef3dFp16 : public ConvWgradShapeSuite<half>
-{
-};
-class TestGpuConvWrwRef1dBfp16 : public ConvWgradShapeSuite<bfloat16>
-{
-};
-class TestGpuConvWrwRef2dBfp16 : public ConvWgradShapeSuite<bfloat16>
-{
-};
-class TestGpuConvWrwRef3dBfp16 : public ConvWgradShapeSuite<bfloat16>
-{
-};
-
-// Channel-last layout (NLC / NHWC / NDHWC)
-class TestGpuConvWrwRefNlc1dFp32 : public ConvWgradShapeSuite<float>
-{
-};
-class TestGpuConvWrwRefNhwc2dFp32 : public ConvWgradShapeSuite<float>
-{
-};
-class TestGpuConvWrwRefNdhwc3dFp32 : public ConvWgradShapeSuite<float>
-{
-};
-class TestGpuConvWrwRefNlc1dFp16 : public ConvWgradShapeSuite<half>
-{
-};
-class TestGpuConvWrwRefNhwc2dFp16 : public ConvWgradShapeSuite<half>
-{
-};
-class TestGpuConvWrwRefNdhwc3dFp16 : public ConvWgradShapeSuite<half>
-{
-};
-class TestGpuConvWrwRefNlc1dBfp16 : public ConvWgradShapeSuite<bfloat16>
-{
-};
-class TestGpuConvWrwRefNhwc2dBfp16 : public ConvWgradShapeSuite<bfloat16>
-{
-};
-class TestGpuConvWrwRefNdhwc3dBfp16 : public ConvWgradShapeSuite<bfloat16>
-{
 };
 
 } // namespace gpu_conv_wgrad_ref_test

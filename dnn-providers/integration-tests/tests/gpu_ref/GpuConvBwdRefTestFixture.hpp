@@ -5,7 +5,6 @@
 
 #include "ConvShapeCase.hpp"
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -15,14 +14,11 @@
 
 #include <hipdnn_gpu_ref/GpuFpReferenceConvolution.hpp>
 
-#include <cstdint>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 // ============================================================================
 // Shared infrastructure for backward-data (dgrad) GPU-vs-CPU reference tests.
-// Included by both the fast (unit) and slow (integration) test binaries.
 // ============================================================================
 
 namespace gpu_conv_bwd_ref_test
@@ -126,72 +122,6 @@ protected:
                                      tolerance(tc),
                                      tc.layout);
     }
-};
-
-using TestGpuConvBwdRefShapesFp32 = ConvBwdShapeSuite<float>;
-using TestGpuConvBwdRefShapesFp16 = ConvBwdShapeSuite<half>;
-using TestGpuConvBwdRefShapesBfp16 = ConvBwdShapeSuite<bfloat16>;
-
-// One-liner subclasses — each creates a distinct GTest-visible type so that
-// INSTANTIATE_TEST_SUITE_P can use clean tier-only prefixes (Smoke, Standard, Comprehensive, Full)
-// while the suite name itself carries dimensionality and layout information.
-
-// Default layout (NCL / NCHW / NCDHW)
-class TestGpuConvBwdRef1dFp32 : public ConvBwdShapeSuite<float>
-{
-};
-class TestGpuConvBwdRef2dFp32 : public ConvBwdShapeSuite<float>
-{
-};
-class TestGpuConvBwdRef3dFp32 : public ConvBwdShapeSuite<float>
-{
-};
-class TestGpuConvBwdRef1dFp16 : public ConvBwdShapeSuite<half>
-{
-};
-class TestGpuConvBwdRef2dFp16 : public ConvBwdShapeSuite<half>
-{
-};
-class TestGpuConvBwdRef3dFp16 : public ConvBwdShapeSuite<half>
-{
-};
-class TestGpuConvBwdRef1dBfp16 : public ConvBwdShapeSuite<bfloat16>
-{
-};
-class TestGpuConvBwdRef2dBfp16 : public ConvBwdShapeSuite<bfloat16>
-{
-};
-class TestGpuConvBwdRef3dBfp16 : public ConvBwdShapeSuite<bfloat16>
-{
-};
-
-// Channel-last layout (NLC / NHWC / NDHWC)
-class TestGpuConvBwdRefNlc1dFp32 : public ConvBwdShapeSuite<float>
-{
-};
-class TestGpuConvBwdRefNhwc2dFp32 : public ConvBwdShapeSuite<float>
-{
-};
-class TestGpuConvBwdRefNdhwc3dFp32 : public ConvBwdShapeSuite<float>
-{
-};
-class TestGpuConvBwdRefNlc1dFp16 : public ConvBwdShapeSuite<half>
-{
-};
-class TestGpuConvBwdRefNhwc2dFp16 : public ConvBwdShapeSuite<half>
-{
-};
-class TestGpuConvBwdRefNdhwc3dFp16 : public ConvBwdShapeSuite<half>
-{
-};
-class TestGpuConvBwdRefNlc1dBfp16 : public ConvBwdShapeSuite<bfloat16>
-{
-};
-class TestGpuConvBwdRefNhwc2dBfp16 : public ConvBwdShapeSuite<bfloat16>
-{
-};
-class TestGpuConvBwdRefNdhwc3dBfp16 : public ConvBwdShapeSuite<bfloat16>
-{
 };
 
 } // namespace gpu_conv_bwd_ref_test

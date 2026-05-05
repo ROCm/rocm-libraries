@@ -13,6 +13,68 @@
 using namespace gpu_conv_bwd_ref_test;
 using namespace gpu_conv_ref_test;
 
+// One-liner subclasses — each creates a distinct GTest-visible type so that
+// INSTANTIATE_TEST_SUITE_P can use clean tier-only prefixes (Smoke, Standard, Comprehensive, Full)
+// while the suite name itself carries dimensionality and layout information.
+
+// Default layout (NCL / NCHW / NCDHW)
+class TestGpuConvBwdRef1dFp32 : public ConvBwdShapeSuite<float>
+{
+};
+class TestGpuConvBwdRef2dFp32 : public ConvBwdShapeSuite<float>
+{
+};
+class TestGpuConvBwdRef3dFp32 : public ConvBwdShapeSuite<float>
+{
+};
+class TestGpuConvBwdRef1dFp16 : public ConvBwdShapeSuite<half>
+{
+};
+class TestGpuConvBwdRef2dFp16 : public ConvBwdShapeSuite<half>
+{
+};
+class TestGpuConvBwdRef3dFp16 : public ConvBwdShapeSuite<half>
+{
+};
+class TestGpuConvBwdRef1dBfp16 : public ConvBwdShapeSuite<bfloat16>
+{
+};
+class TestGpuConvBwdRef2dBfp16 : public ConvBwdShapeSuite<bfloat16>
+{
+};
+class TestGpuConvBwdRef3dBfp16 : public ConvBwdShapeSuite<bfloat16>
+{
+};
+
+// Channel-last layout (NLC / NHWC / NDHWC)
+class TestGpuConvBwdRefNlc1dFp32 : public ConvBwdShapeSuite<float>
+{
+};
+class TestGpuConvBwdRefNhwc2dFp32 : public ConvBwdShapeSuite<float>
+{
+};
+class TestGpuConvBwdRefNdhwc3dFp32 : public ConvBwdShapeSuite<float>
+{
+};
+class TestGpuConvBwdRefNlc1dFp16 : public ConvBwdShapeSuite<half>
+{
+};
+class TestGpuConvBwdRefNhwc2dFp16 : public ConvBwdShapeSuite<half>
+{
+};
+class TestGpuConvBwdRefNdhwc3dFp16 : public ConvBwdShapeSuite<half>
+{
+};
+class TestGpuConvBwdRefNlc1dBfp16 : public ConvBwdShapeSuite<bfloat16>
+{
+};
+class TestGpuConvBwdRefNhwc2dBfp16 : public ConvBwdShapeSuite<bfloat16>
+{
+};
+class TestGpuConvBwdRefNdhwc3dBfp16 : public ConvBwdShapeSuite<bfloat16>
+{
+};
+
 // Alias to avoid verbose braced-init-list issues inside EXPECT_THROW macros
 using Vec = std::vector<int64_t>;
 
