@@ -372,16 +372,11 @@ protected:
         executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
-    IReferenceGraphExecutor& getReferenceExecutor()
+    static IReferenceGraphExecutor& getReferenceExecutor()
     {
-        if(!_referenceExecutor)
-        {
-            _referenceExecutor = ReferenceGraphExecutorFactory::createFromConfig();
-        }
-        return *_referenceExecutor;
+        static auto executor = ReferenceGraphExecutorFactory::createFromConfig();
+        return *executor;
     }
-
-    std::unique_ptr<IReferenceGraphExecutor> _referenceExecutor;
 
     std::string getOutputTensorName(int64_t tensorId)
     {

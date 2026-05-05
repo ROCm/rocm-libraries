@@ -4,6 +4,8 @@
 #include <argparse.hpp>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -145,11 +147,14 @@ int main(int argc, char** argv) noexcept
             }
         }
 
-        // Parse --reference-executor argument
+        // Parse --reference-executor argument (case-insensitive)
         std::optional<hipdnn_integration_tests::ReferenceExecutorType> refExecType;
         if(parser.is_used("--reference-executor"))
         {
             auto val = parser.get<std::string>("--reference-executor");
+            std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
             if(val == "gpu")
             {
                 refExecType = hipdnn_integration_tests::ReferenceExecutorType::GPU;

@@ -5,9 +5,9 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -75,10 +75,9 @@ public:
         // If CLI didn't provide a value, check env var once at init
         if(!instance._referenceExecutorType.has_value())
         {
-            const char* envVal = std::getenv("HIPDNN_TEST_REFERENCE_EXECUTOR");
-            if(envVal != nullptr)
+            auto val = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_REFERENCE_EXECUTOR");
+            if(!val.empty())
             {
-                std::string val(envVal);
                 std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
                     return static_cast<char>(std::tolower(c));
                 });
