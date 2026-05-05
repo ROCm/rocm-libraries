@@ -27,17 +27,19 @@
 #include <utility>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
+
 namespace stinkytofu {
 
 class StinkyInstruction;
 
 /// One-line, JSON-safe label for a DAG node (opcode / mnemonic + trimmed operands).
-std::string instructionJsonLabel(const StinkyInstruction& inst);
+STINKYTOFU_EXPORT std::string instructionJsonLabel(const StinkyInstruction& inst);
 
 /// UTF-8 JSON for tools/stinkytofu-analysis: register-dependency edges plus before/after
 /// instruction order per region (schema stinkytofu-dag-schedule-v1). Used by PassManager pass-order
 /// snapshots.
-class DAGScheduleJsonCollector {
+class STINKYTOFU_EXPORT DAGScheduleJsonCollector {
    public:
     DAGScheduleJsonCollector(std::string outputPath, std::string functionName);
     ~DAGScheduleJsonCollector();

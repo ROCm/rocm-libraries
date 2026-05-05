@@ -3,7 +3,7 @@
 
 #include <string>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "BatchnormFwdTrainingPlanBuilder.hpp"

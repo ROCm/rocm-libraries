@@ -70,10 +70,13 @@ def _generate_single_solution(perm, problemType, constantParams, assembler, debu
         solution.update(perm)
 
         mi = solution["MatrixInstruction"]
-        wavefrontSize = solution["WavefrontSize"]
         workgroup = solution["WorkGroup"]
         ptype = solution["ProblemType"]
         isa = solution["ISA"]
+
+        if solution["WavefrontSize"] == -1:
+            solution["WavefrontSize"] = 32 if isaInfoMap[isa].archCaps["HasWave32"] else 64
+        wavefrontSize = solution["WavefrontSize"]
 
         if len(mi) == 9:
             miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap)
