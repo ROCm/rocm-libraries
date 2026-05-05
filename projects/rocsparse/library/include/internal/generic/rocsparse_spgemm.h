@@ -90,6 +90,8 @@ extern "C" {
 *  <table>
 *  <caption id="spgemm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / D / compute_type
+*  <tr><td>rocsparse_datatype_f16_r
+*  <tr><td>rocsparse_datatype_bf16_r
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
 *  <tr><td>rocsparse_datatype_f32_c
