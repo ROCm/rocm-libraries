@@ -3,8 +3,16 @@
 
 """Stride computation helpers and convolution output-dimension formula."""
 
+import enum
 import math
 from typing import List
+
+
+class Layout(enum.Enum):
+    NCHW = "NCHW"
+    NHWC = "NHWC"
+    NCDHW = "NCDHW"
+    NDHWC = "NDHWC"
 
 
 def nchw_strides(N: int, C: int, H: int, W: int) -> List[int]:
@@ -25,33 +33,37 @@ def ndhwc_strides(N: int, C: int, D: int, H: int, W: int) -> List[int]:
     return [D * H * W * C, 1, H * W * C, W * C, C]
 
 
-_VALID_2D_LAYOUTS = {"NCHW", "NHWC"}
-_VALID_3D_LAYOUTS = {"NCDHW", "NDHWC"}
+_VALID_2D_LAYOUTS = {Layout.NCHW, Layout.NHWC}
+_VALID_3D_LAYOUTS = {Layout.NCDHW, Layout.NDHWC}
 
 
 def _input_strides(
-    layout: str, N: int, C: int, H: int, W: int, D: int = 0
+    layout: Layout, N: int, C: int, H: int, W: int, D: int = 0
 ) -> List[int]:
     """Return strides for an input tensor given its memory layout."""
     if D > 0:
         if layout not in _VALID_3D_LAYOUTS:
             raise ValueError(
-                f"Unsupported 3D layout {layout!r}, expected one of {sorted(_VALID_3D_LAYOUTS)}"
+                f"Unsupported 3D layout {layout!r}, expected one of {sorted(l.value for l in _VALID_3D_LAYOUTS)}"
             )
-        if layout == "NDHWC":
-            return ndhwc_strides(N, C, D, H, W)
-        return ncdhw_strides(N, C, D, H, W)
+        match layout:
+            case Layout.NDHWC:
+                return ndhwc_strides(N, C, D, H, W)
+            case Layout.NCDHW:
+                return ncdhw_strides(N, C, D, H, W)
     if layout not in _VALID_2D_LAYOUTS:
         raise ValueError(
-            f"Unsupported 2D layout {layout!r}, expected one of {sorted(_VALID_2D_LAYOUTS)}"
+            f"Unsupported 2D layout {layout!r}, expected one of {sorted(l.value for l in _VALID_2D_LAYOUTS)}"
         )
-    if layout == "NHWC":
-        return nhwc_strides(N, C, H, W)
-    return nchw_strides(N, C, H, W)
+    match layout:
+        case Layout.NHWC:
+            return nhwc_strides(N, C, H, W)
+        case Layout.NCHW:
+            return nchw_strides(N, C, H, W)
 
 
 def _weight_strides(
-    K: int, Cg: int, R: int, S: int, D: int = 0, layout: str = "NCHW"
+    K: int, Cg: int, R: int, S: int, D: int = 0, layout: Layout = Layout.NCHW
 ) -> List[int]:
     """Weight strides for dims [K, Cg, R, S] (or [K, Cg, D, R, S] for 3D).
 
@@ -61,18 +73,22 @@ def _weight_strides(
     if D > 0:
         if layout not in _VALID_3D_LAYOUTS:
             raise ValueError(
-                f"Unsupported 3D weight layout {layout!r}, expected one of {sorted(_VALID_3D_LAYOUTS)}"
+                f"Unsupported 3D weight layout {layout!r}, expected one of {sorted(l.value for l in _VALID_3D_LAYOUTS)}"
             )
-        if layout == "NDHWC":
-            return [D * R * S * Cg, 1, R * S * Cg, S * Cg, Cg]
-        return [Cg * D * R * S, D * R * S, R * S, S, 1]
+        match layout:
+            case Layout.NDHWC:
+                return [D * R * S * Cg, 1, R * S * Cg, S * Cg, Cg]
+            case Layout.NCDHW:
+                return [Cg * D * R * S, D * R * S, R * S, S, 1]
     if layout not in _VALID_2D_LAYOUTS:
         raise ValueError(
-            f"Unsupported 2D weight layout {layout!r}, expected one of {sorted(_VALID_2D_LAYOUTS)}"
+            f"Unsupported 2D weight layout {layout!r}, expected one of {sorted(l.value for l in _VALID_2D_LAYOUTS)}"
         )
-    if layout == "NHWC":
-        return [R * S * Cg, 1, S * Cg, Cg]
-    return [Cg * R * S, R * S, S, 1]
+    match layout:
+        case Layout.NHWC:
+            return [R * S * Cg, 1, S * Cg, Cg]
+        case Layout.NCHW:
+            return [Cg * R * S, R * S, S, 1]
 
 
 def conv_out_dim(dim_in: int, pad: int, dilation: int, kernel: int, stride: int) -> int:

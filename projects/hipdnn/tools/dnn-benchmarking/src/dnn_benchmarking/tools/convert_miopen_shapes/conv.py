@@ -9,7 +9,7 @@ import warnings
 from typing import Any, Dict, List
 
 from .parsing import CONV_FLAG_ALIASES, get_int_arg, normalize_args
-from .strides import _input_strides, _weight_strides, conv_out_dim
+from .strides import Layout, _input_strides, _weight_strides, conv_out_dim
 from .tensors import _join_prefix, _make_tensor
 
 
@@ -39,11 +39,13 @@ class ConvMode(enum.Enum):
     CROSS_CORRELATION = "conv"
     CONVOLUTION = "trans"
 
+
 CONV_IO_TYPE: Dict[str, str] = {
     "conv": "float",
     "convfp16": "half",
     "convbfp16": "bfloat16",
 }
+
 
 class PadMode(enum.Enum):
     DEFAULT = "default"
@@ -76,9 +78,9 @@ class ConvParams:
     groups: int
     F: int
     spatial_dim: int
-    in_layout: str
-    fil_layout: str
-    out_layout: str
+    in_layout: Layout
+    fil_layout: Layout
+    out_layout: Layout
     conv_mode: ConvMode = ConvMode.CROSS_CORRELATION
     D: int = 0
     D_f: int = 0
@@ -214,9 +216,9 @@ class ConvParams:
             groups=groups,
             F=get_int_arg(args, "-F", 0),
             spatial_dim=spatial_dim,
-            in_layout=args.get("--in_layout", "NCDHW" if is_3d else "NCHW"),
-            fil_layout=args.get("--fil_layout", "NCDHW" if is_3d else "NCHW"),
-            out_layout=args.get("--out_layout", "NCDHW" if is_3d else "NCHW"),
+            in_layout=Layout(args.get("--in_layout", "NCDHW" if is_3d else "NCHW")),
+            fil_layout=Layout(args.get("--fil_layout", "NCDHW" if is_3d else "NCHW")),
+            out_layout=Layout(args.get("--out_layout", "NCDHW" if is_3d else "NCHW")),
             conv_mode=conv_mode,
             D=get_int_arg(args, "--in_d", 32) if is_3d else 0,
             D_f=D_f,
@@ -313,12 +315,10 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
 
 
 def _conv_filename(prefix: str, p: ConvParams) -> str:
-    direction = p.direction.label
-
     if p.is_3d:
         return _join_prefix(
             prefix,
-            f"conv_{direction}"
+            f"conv_{p.direction.label}"
             f"_n{p.N}c{p.C}D{p.D}H{p.H}W{p.W}"
             f"_k{p.K}Df{p.D_f}R{p.R}S{p.S}"
             f"_pd{p.pad_d}p{p.pad_h}q{p.pad_w}"
@@ -327,7 +327,7 @@ def _conv_filename(prefix: str, p: ConvParams) -> str:
         )
     return _join_prefix(
         prefix,
-        f"conv_{direction}"
+        f"conv_{p.direction.label}"
         f"_n{p.N}c{p.C}H{p.H}W{p.W}"
         f"_k{p.K}R{p.R}S{p.S}"
         f"_p{p.pad_h}q{p.pad_w}"

@@ -20,6 +20,7 @@ from .parsing import (
     parse_args,
 )
 from .strides import (
+    Layout,
     conv_out_dim,
     nchw_strides,
     ncdhw_strides,
@@ -35,6 +36,7 @@ __all__ = [
     "build_bnorm_json",
     "build_conv_json",
     "CONV_IO_TYPE",
+    "Layout",
     "conv_out_dim",
     "convert_line",
     "get_int_arg",

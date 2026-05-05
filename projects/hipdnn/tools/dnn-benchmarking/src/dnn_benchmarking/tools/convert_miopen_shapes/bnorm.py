@@ -9,12 +9,13 @@ import warnings
 from typing import Any, Dict, List
 
 from .parsing import BNORM_FLAG_ALIASES, get_int_arg, normalize_args
-from .strides import _input_strides, nchw_strides, ncdhw_strides
+from .strides import Layout, _input_strides, nchw_strides, ncdhw_strides
 from .tensors import _join_prefix, _make_scalar_tensor, _make_tensor
 
 # ---------------------------------------------------------------------------
 # Batchnorm type resolution
 # ---------------------------------------------------------------------------
+
 
 class BnormDirection(enum.Enum):
     FORWARD_TRAINING = "fwd"
@@ -48,7 +49,7 @@ class BnormParams:
     H: int
     W: int
     D: int
-    layout: str
+    layout: Layout
     mode: BnormMode
     forw: int
     back: int
@@ -57,7 +58,7 @@ class BnormParams:
     def from_args(cls, args: Dict[str, str]) -> "BnormParams":
         args = normalize_args(args, BNORM_FLAG_ALIASES)
         D = get_int_arg(args, "-D", 0)
-        default_layout = "NCDHW" if D > 0 else "NCHW"
+        default_layout = Layout.NCDHW if D > 0 else Layout.NCHW
 
         activ_mode = args.get("--activ_mode", args.get("-f", "0"))
         if activ_mode != "0":
@@ -110,7 +111,7 @@ class BnormParams:
             H=get_int_arg(args, "-H", 32),
             W=get_int_arg(args, "-W", 32),
             D=D,
-            layout=args.get("-L", default_layout),
+            layout=Layout(args["-L"]) if "-L" in args else default_layout,
             mode=mode,
             forw=get_int_arg(args, "--forw", 1),
             back=get_int_arg(args, "--back", 0),
@@ -135,7 +136,9 @@ class BnormParams:
     def input_dims_and_strides(self) -> tuple[List[int], List[int]]:
         if self.is_3d:
             dims = [self.N, self.C, self.D, self.H, self.W]
-            strides = _input_strides(self.layout, self.N, self.C, self.H, self.W, self.D)
+            strides = _input_strides(
+                self.layout, self.N, self.C, self.H, self.W, self.D
+            )
         else:
             dims = [self.N, self.C, self.H, self.W]
             strides = _input_strides(self.layout, self.N, self.C, self.H, self.W)
@@ -296,10 +299,8 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
 def _bnorm_filename(prefix: str, operation: str, args: Dict[str, str]) -> str:
     p = BnormParams.from_args(args)
 
-    direction = p.direction.value
-
     if p.is_3d:
         return _join_prefix(
-            prefix, f"bnorm_{direction}_n{p.N}c{p.C}D{p.D}H{p.H}W{p.W}"
+            prefix, f"bnorm_{p.direction.value}_n{p.N}c{p.C}D{p.D}H{p.H}W{p.W}"
         )
-    return _join_prefix(prefix, f"bnorm_{direction}_n{p.N}c{p.C}H{p.H}W{p.W}")
+    return _join_prefix(prefix, f"bnorm_{p.direction.value}_n{p.N}c{p.C}H{p.H}W{p.W}")

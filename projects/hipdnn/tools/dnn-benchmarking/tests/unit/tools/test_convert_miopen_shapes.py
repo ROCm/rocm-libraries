@@ -23,6 +23,7 @@ from dnn_benchmarking.tools.convert_miopen_shapes import (
     parse_args,
     parse_line,
 )
+from dnn_benchmarking.tools.convert_miopen_shapes.strides import Layout
 
 
 class TestStrideHelpers:
@@ -50,41 +51,21 @@ class TestStrideHelpers:
 class TestLayoutValidation:
     """Tests for layout validation in stride helpers."""
 
-    def test_invalid_2d_input_layout_raises(self) -> None:
-        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
-
-        with pytest.raises(ValueError, match="Unsupported 2D layout"):
-            _input_strides("HWCN", 2, 3, 4, 5)
-
-    def test_invalid_3d_input_layout_raises(self) -> None:
-        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
-
-        with pytest.raises(ValueError, match="Unsupported 3D layout"):
-            _input_strides("HWCN", 2, 3, 4, 5, D=4)
-
-    def test_invalid_2d_weight_layout_raises(self) -> None:
-        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _weight_strides
-
-        with pytest.raises(ValueError, match="Unsupported 2D weight layout"):
-            _weight_strides(8, 4, 3, 3, layout="HWCN")
-
-    def test_invalid_3d_weight_layout_raises(self) -> None:
-        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _weight_strides
-
-        with pytest.raises(ValueError, match="Unsupported 3D weight layout"):
-            _weight_strides(8, 4, 3, 3, D=4, layout="HWCN")
+    def test_invalid_layout_raises(self) -> None:
+        with pytest.raises(ValueError):
+            Layout("HWCN")
 
     def test_valid_2d_layouts_accepted(self) -> None:
         from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
 
-        _input_strides("NCHW", 2, 3, 4, 5)
-        _input_strides("NHWC", 2, 3, 4, 5)
+        _input_strides(Layout.NCHW, 2, 3, 4, 5)
+        _input_strides(Layout.NHWC, 2, 3, 4, 5)
 
     def test_valid_3d_layouts_accepted(self) -> None:
         from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
 
-        _input_strides("NCDHW", 2, 3, 4, 5, D=4)
-        _input_strides("NDHWC", 2, 3, 4, 5, D=4)
+        _input_strides(Layout.NCDHW, 2, 3, 4, 5, D=4)
+        _input_strides(Layout.NDHWC, 2, 3, 4, 5, D=4)
 
 
 class TestConvOutDim:
@@ -183,9 +164,9 @@ class TestBuildConvJson:
             groups=1,
             F=1,
             spatial_dim=2,
-            in_layout="NCHW",
-            fil_layout="NCHW",
-            out_layout="NCHW",
+            in_layout=Layout.NCHW,
+            fil_layout=Layout.NCHW,
+            out_layout=Layout.NCHW,
         )
         defaults.update(overrides)
         return ConvParams(**defaults)
@@ -227,8 +208,8 @@ class TestBuildConvJson:
         assert node["outputs"] == {"dw_tensor_uid": 0}
 
     def test_nhwc_layout_produces_different_strides(self) -> None:
-        p_nchw = self._make_params(in_layout="NCHW")
-        p_nhwc = self._make_params(in_layout="NHWC")
+        p_nchw = self._make_params(in_layout=Layout.NCHW)
+        p_nhwc = self._make_params(in_layout=Layout.NHWC)
         g_nchw = build_conv_json(p_nchw)
         g_nhwc = build_conv_json(p_nhwc)
         # Input tensor (uid=1) strides should differ
@@ -251,16 +232,16 @@ class TestBuildConvJson:
             "--fil_d": "3",
         }
         p = ConvParams.from_args(args)
-        assert p.in_layout == "NCDHW"
-        assert p.fil_layout == "NCDHW"
-        assert p.out_layout == "NCDHW"
+        assert p.in_layout is Layout.NCDHW
+        assert p.fil_layout is Layout.NCDHW
+        assert p.out_layout is Layout.NCDHW
 
     def test_2d_conv_defaults_to_nchw_layout(self) -> None:
         args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1"}
         p = ConvParams.from_args(args)
-        assert p.in_layout == "NCHW"
-        assert p.fil_layout == "NCHW"
-        assert p.out_layout == "NCHW"
+        assert p.in_layout is Layout.NCHW
+        assert p.fil_layout is Layout.NCHW
+        assert p.out_layout is Layout.NCHW
 
     def test_conv_mode_defaults_to_cross_correlation(self) -> None:
         p = self._make_params()
@@ -273,7 +254,15 @@ class TestBuildConvJson:
         assert graph["nodes"][0]["parameters"]["conv_mode"] == "CONVOLUTION"
 
     def test_conv_mode_parsed_from_args(self) -> None:
-        args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1", "-m": "trans"}
+        args = {
+            "-n": "1",
+            "-c": "4",
+            "-H": "4",
+            "-W": "4",
+            "-k": "8",
+            "-F": "1",
+            "-m": "trans",
+        }
         p = ConvParams.from_args(args)
         assert p.conv_mode == "CONVOLUTION"
 
@@ -283,19 +272,42 @@ class TestBuildConvJson:
         assert p.conv_mode == "CROSS_CORRELATION"
 
     def test_conv_mode_long_flag(self) -> None:
-        args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1", "--mode": "trans"}
+        args = {
+            "-n": "1",
+            "-c": "4",
+            "-H": "4",
+            "-W": "4",
+            "-k": "8",
+            "-F": "1",
+            "--mode": "trans",
+        }
         p = ConvParams.from_args(args)
         assert p.conv_mode == "CONVOLUTION"
 
     def test_conv_mode_invalid_raises(self) -> None:
-        args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1", "-m": "invalid"}
+        args = {
+            "-n": "1",
+            "-c": "4",
+            "-H": "4",
+            "-W": "4",
+            "-k": "8",
+            "-F": "1",
+            "-m": "invalid",
+        }
         with pytest.raises(ValueError, match="Unknown conv mode"):
             ConvParams.from_args(args)
 
     def test_pad_mode_same_computes_padding(self) -> None:
         args = {
-            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
-            "-k": "16", "-y": "3", "-x": "3", "-F": "1", "-z": "same",
+            "-n": "1",
+            "-c": "3",
+            "-H": "8",
+            "-W": "8",
+            "-k": "16",
+            "-y": "3",
+            "-x": "3",
+            "-F": "1",
+            "-z": "same",
         }
         p = ConvParams.from_args(args)
         assert p.pad_h == 1
@@ -303,9 +315,17 @@ class TestBuildConvJson:
 
     def test_pad_mode_same_ignores_explicit_padding(self) -> None:
         args = {
-            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
-            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
-            "-p": "99", "-q": "99", "-z": "same",
+            "-n": "1",
+            "-c": "3",
+            "-H": "8",
+            "-W": "8",
+            "-k": "16",
+            "-y": "3",
+            "-x": "3",
+            "-F": "1",
+            "-p": "99",
+            "-q": "99",
+            "-z": "same",
         }
         p = ConvParams.from_args(args)
         assert p.pad_h == 1
@@ -313,9 +333,17 @@ class TestBuildConvJson:
 
     def test_pad_mode_valid_zeroes_padding(self) -> None:
         args = {
-            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
-            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
-            "-p": "5", "-q": "5", "-z": "valid",
+            "-n": "1",
+            "-c": "3",
+            "-H": "8",
+            "-W": "8",
+            "-k": "16",
+            "-y": "3",
+            "-x": "3",
+            "-F": "1",
+            "-p": "5",
+            "-q": "5",
+            "-z": "valid",
         }
         p = ConvParams.from_args(args)
         assert p.pad_h == 0
@@ -323,9 +351,16 @@ class TestBuildConvJson:
 
     def test_pad_mode_default_uses_explicit_padding(self) -> None:
         args = {
-            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
-            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
-            "-p": "2", "-q": "3",
+            "-n": "1",
+            "-c": "3",
+            "-H": "8",
+            "-W": "8",
+            "-k": "16",
+            "-y": "3",
+            "-x": "3",
+            "-F": "1",
+            "-p": "2",
+            "-q": "3",
         }
         p = ConvParams.from_args(args)
         assert p.pad_h == 2
@@ -333,9 +368,17 @@ class TestBuildConvJson:
 
     def test_pad_mode_same_with_dilation(self) -> None:
         args = {
-            "-n": "1", "-c": "3", "-H": "16", "-W": "16",
-            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
-            "-l": "2", "-j": "2", "-z": "same",
+            "-n": "1",
+            "-c": "3",
+            "-H": "16",
+            "-W": "16",
+            "-k": "16",
+            "-y": "3",
+            "-x": "3",
+            "-F": "1",
+            "-l": "2",
+            "-j": "2",
+            "-z": "same",
         }
         p = ConvParams.from_args(args)
         assert p.pad_h == 2
@@ -343,8 +386,15 @@ class TestBuildConvJson:
 
     def test_pad_mode_same_with_kernel_5(self) -> None:
         args = {
-            "-n": "1", "-c": "3", "-H": "16", "-W": "16",
-            "-k": "16", "-y": "5", "-x": "5", "-F": "1", "-z": "same",
+            "-n": "1",
+            "-c": "3",
+            "-H": "16",
+            "-W": "16",
+            "-k": "16",
+            "-y": "5",
+            "-x": "5",
+            "-F": "1",
+            "-z": "same",
         }
         p = ConvParams.from_args(args)
         assert p.pad_h == 2
@@ -352,8 +402,15 @@ class TestBuildConvJson:
 
     def test_pad_mode_long_flag(self) -> None:
         args = {
-            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
-            "-k": "16", "-y": "3", "-x": "3", "-F": "1", "--pad_mode": "valid",
+            "-n": "1",
+            "-c": "3",
+            "-H": "8",
+            "-W": "8",
+            "-k": "16",
+            "-y": "3",
+            "-x": "3",
+            "-F": "1",
+            "--pad_mode": "valid",
         }
         p = ConvParams.from_args(args)
         assert p.pad_h == 0
@@ -361,17 +418,32 @@ class TestBuildConvJson:
 
     def test_pad_mode_invalid_raises(self) -> None:
         args = {
-            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
-            "-k": "16", "-y": "3", "-x": "3", "-F": "1", "-z": "bad",
+            "-n": "1",
+            "-c": "3",
+            "-H": "8",
+            "-W": "8",
+            "-k": "16",
+            "-y": "3",
+            "-x": "3",
+            "-F": "1",
+            "-z": "bad",
         }
         with pytest.raises(ValueError, match="Unknown pad_mode"):
             ConvParams.from_args(args)
 
     def test_pad_mode_same_3d(self) -> None:
         args = {
-            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
-            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
-            "--spatial_dim": "3", "--in_d": "8", "--fil_d": "3",
+            "-n": "1",
+            "-c": "3",
+            "-H": "8",
+            "-W": "8",
+            "-k": "16",
+            "-y": "3",
+            "-x": "3",
+            "-F": "1",
+            "--spatial_dim": "3",
+            "--in_d": "8",
+            "--fil_d": "3",
             "-z": "same",
         }
         p = ConvParams.from_args(args)
@@ -397,9 +469,9 @@ class TestBuildConvJson:
             groups=1,
             F=1,
             spatial_dim=3,
-            in_layout="NCDHW",
-            fil_layout="NCDHW",
-            out_layout="NCDHW",
+            in_layout=Layout.NCDHW,
+            fil_layout=Layout.NCDHW,
+            out_layout=Layout.NCDHW,
             D=4,
             D_f=3,
             pad_d=1,
@@ -484,14 +556,14 @@ class TestBuildBnormJson:
 
         args = {"-n": "2", "-c": "16", "-H": "8", "-W": "8", "-D": "4"}
         p = BnormParams.from_args(args)
-        assert p.layout == "NCDHW"
+        assert p.layout is Layout.NCDHW
 
     def test_2d_default_layout_is_nchw(self) -> None:
         from dnn_benchmarking.tools.convert_miopen_shapes.bnorm import BnormParams
 
         args = {"-n": "2", "-c": "16", "-H": "8", "-W": "8"}
         p = BnormParams.from_args(args)
-        assert p.layout == "NCHW"
+        assert p.layout is Layout.NCHW
 
 
 class TestParseLine:
@@ -799,9 +871,9 @@ class TestConvFlagAliases:
             "-O": "NHWC",
         }
         p = ConvParams.from_args(args)
-        assert p.in_layout == "NHWC"
-        assert p.fil_layout == "NHWC"
-        assert p.out_layout == "NHWC"
+        assert p.in_layout is Layout.NHWC
+        assert p.fil_layout is Layout.NHWC
+        assert p.out_layout is Layout.NHWC
 
 
 class TestBnormFlagAliases:
