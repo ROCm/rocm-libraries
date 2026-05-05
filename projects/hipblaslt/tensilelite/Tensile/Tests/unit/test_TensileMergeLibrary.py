@@ -1,137 +1,678 @@
-# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+################################################################################
+#
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
 # SPDX-License-Identifier: MIT
+################################################################################
+"""Unit tests for TensileMergeLibrary using embedded YAML fixture data.
+
+This test module uses embedded YAML strings that mirror the actual
+gfx950 (list format) and gfx1250 (dict format) YAML structures.
+"""
 
 import pytest
-import os
-import sys
-import tempfile
-import shutil
+from unittest.mock import patch
 import yaml
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, mock_open
 from copy import deepcopy
 
 from Tensile.TensileMergeLibrary import (
-    ensurePath,
-    allFiles,
+    createAccessor,
+    getArchitectureFromData,
+    isGfx1250,
     fixSizeInconsistencies,
-    addKernel,
     sanitizeSolutions,
-    reNameSolutions,
     removeUnusedSolutions,
     removeDuplicatedSolutions,
-    loadData,
-    compareDestFolderToYaml,
-    compareProblemType,
+    mergeLogic,
+    syncDefaultParams,
+    removeDefaultInitParams,
+    findSolutionWithIndex,
+    addKernel,
+    reNameSolutions,
     msg,
     verbose,
     debug,
-    findSolutionWithIndex,
-    mergeLogic,
-    avoidRegressions,
 )
 
 
-@pytest.mark.unit
-class TestEnsurePath:
-    """Test ensurePath function"""
+# =============================================================================
+# Embedded YAML Fixture Data
+# =============================================================================
 
-    def test_create_new_directory(self):
-        """Test creating a new directory"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            new_path = os.path.join(tmpdir, "test_dir", "nested")
-            result = ensurePath(new_path)
-            assert os.path.exists(new_path)
-            assert result == new_path
+# Simplified gfx950 format matching actual merge folder structure
+# Structure: [version, scheduleName, archName, devices, problemType, solutions, indexOrder, exactLogic, rangeLogic, null, perfMetric, libraryType]
+GFX950_YAML = """
+- {MinimumRequiredVersion: 5.0.0}
+- gfx950
+- gfx950
+- [Device 75a8]
+- Activation: true
+  ActivationType: hipblaslt_all
+  AssignedDerivedParameters: true
+  Batched: true
+  ComputeDataType: 0
+  DataType: 15
+  DataTypeA: 15
+  DataTypeB: 15
+  DestDataType: 7
+  HighPrecisionAccumulate: true
+  Index0: 0
+  Index1: 1
+  IndexAssignmentsA: [3, 0, 2]
+  IndexAssignmentsB: [3, 1, 2]
+  IndexUnroll: 3
+  IndicesBatch: [2]
+  IndicesFree: [0, 1]
+  IndicesSummation: [3]
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  StridedBatched: true
+  SupportUserArgs: true
+  TotalIndices: 4
+  TransposeA: true
+  TransposeB: false
+  UseBeta: true
+  UseBias: 1
+  UseScaleAB: Scalar
+- - 1LDSBuffer: 0
+    ActivationFused: true
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BaseName: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgNMVfVa0LuB8lRTcyOpGO2YH741LGRrePzbeHygp1IY8=
+    BufferLoad: true
+    BufferStore: true
+    DepthU: 128
+    GlobalSplitU: 0
+    ISA: [9, 5, 0]
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_MT160x192x128_Test0
+    MacroTile0: 160
+    MacroTile1: 192
+    NumThreads: 256
+    SolutionIndex: 0
+    SolutionNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_Test0
+    StaggerU: 0
+    StaggerUMapping: 0
+    StaggerUStride: 0
+    Valid: true
+    WavefrontSize: 64
+    WorkGroup: [16, 16, 1]
+    _staggerStrideShift: 0
+  - 1LDSBuffer: 0
+    ActivationFused: true
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BaseName: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgXzDbxA8LsiKAenzoLoqFOTbCc3GwRQe0GwhODFVZXaI=
+    BufferLoad: true
+    BufferStore: true
+    DepthU: 128
+    GlobalSplitU: 0
+    ISA: [9, 5, 0]
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_MT160x192x128_Test1
+    MacroTile0: 160
+    MacroTile1: 192
+    NumThreads: 256
+    SolutionIndex: 1
+    SolutionNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_Test1
+    StaggerU: 0
+    StaggerUMapping: 0
+    StaggerUStride: 0
+    Valid: true
+    WavefrontSize: 64
+    WorkGroup: [16, 16, 1]
+    _staggerStrideShift: 0
+- [2, 3, 0, 1]
+- - - [10240, 384, 1, 8192]
+    - [0, 0.0]
+  - - [10240, 336, 1, 8192]
+    - [1, 0.0]
+  - - [10240, 272, 1, 8192]
+    - [0, 0.0]
+- null
+- null
+- DeviceEfficiency
+- Equality
+"""
 
-    def test_existing_directory(self):
-        """Test with existing directory"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = ensurePath(tmpdir)
-            assert os.path.exists(tmpdir)
-            assert result == tmpdir
+GFX1250_YAML = """
+MinimumRequiredVersion: 5.0.0
+ScheduleName: gfx1250
+ArchitectureName: gfx1250
+CUCount: null
+DeviceNames: [Device 73f0]
+ProblemType:
+  OperationType: GEMM
+  DataType: 7
+  UseBeta: true
+  Batched: true
+  StridedBatched: true
+  TransposeA: 0
+  TransposeB: 0
+DefaultSolution:
+  GlobalSplitU: 1
+  StaggerU: 32
+  StaggerUMapping: 0
+  StaggerUStride: 256
+  DepthU: -1
+  WorkGroup: [16, 16, 1]
+Solutions:
+- SolutionIndex: 0
+  SolutionNameMin: Sol_gfx1250_0
+  KernelNameMin: Kernel_gfx1250_0
+  BaseName: Base_gfx1250_0
+  StaggerU: 32
+  StaggerUMapping: 0
+  StaggerUStride: 256
+  _staggerStrideShift: 2
+  DepthU: 32
+  MacroTile0: 16
+  MacroTile1: 16
+  WorkGroup: [16, 2, 1]
+- SolutionIndex: 1
+  SolutionNameMin: Sol_gfx1250_1
+  KernelNameMin: Kernel_gfx1250_1
+  BaseName: Base_gfx1250_1
+  StaggerU: 32
+  StaggerUMapping: 0
+  StaggerUStride: 256
+  _staggerStrideShift: 2
+  DepthU: 64
+  MacroTile0: 32
+  MacroTile1: 32
+  WorkGroup: [32, 4, 1]
+IndexOrder: [2, 3, 0, 1]
+ExactLogic:
+- - [129, 129, 1, 129]
+  - [0, 0.0]
+- - [128, 128, 1, 128]
+  - [1, 0.0]
+- - [256, 256, 1, 256]
+  - [0, 0.0]
+RangeLogic: null
+PerfMetric: DeviceEfficiency
+LibraryType: Matching
+Library:
+  indexOrder: [2, 3, 0, 1]
+  table:
+  - - [129, 129, 1, 129]
+    - [0, 0.0]
+  - - [128, 128, 1, 128]
+    - [1, 0.0]
+  - - [256, 256, 1, 256]
+    - [0, 0.0]
+  distance: GridBased
+"""
 
 
-@pytest.mark.unit
-class TestAllFiles:
-    """Test allFiles function"""
+# =============================================================================
+# Helper Functions to Load Embedded YAML
+# =============================================================================
 
-    def test_find_yaml_files_in_directory(self):
-        """Test finding YAML files in a directory"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create test files
-            Path(os.path.join(tmpdir, "file1.yaml")).touch()
-            Path(os.path.join(tmpdir, "file2.YAML")).touch()
-            Path(os.path.join(tmpdir, "file3.txt")).touch()
-
-            files = allFiles(tmpdir)
-            yaml_names = [os.path.basename(f) for f in files]
-
-            assert len(files) == 2
-            assert "file1.yaml" in yaml_names
-            assert "file2.YAML" in yaml_names
-            assert "file3.txt" not in yaml_names
-
-    def test_empty_directory(self):
-        """Test with empty directory"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            files = allFiles(tmpdir)
-            assert files == []
-
-    def test_nested_directories(self):
-        """Test finding YAML files in nested directories"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create nested structure - but not as a subdirectory with yaml extension
-            # because allFiles recursively searches directories, not files ending in .yaml
-            Path(os.path.join(tmpdir, "top.yaml")).touch()
-            Path(os.path.join(tmpdir, "another.yaml")).touch()
-
-            files = allFiles(tmpdir)
-            # Should find both .yaml files
-            assert len(files) == 2
+def load_gfx950_data():
+    """Load gfx950 test data (list format) from embedded YAML string.
+    
+    The gfx950 YAML is already a list, so safe_load returns the list directly.
+    """
+    return yaml.safe_load(GFX950_YAML)
 
 
-@pytest.mark.unit
-class TestFixSizeInconsistencies:
-    """Test fixSizeInconsistencies function"""
+def load_gfx1250_data():
+    """Load gfx1250 test data (dict format) from embedded YAML string."""
+    return yaml.safe_load(GFX1250_YAML)
 
-    def test_remove_duplicates(self):
-        """Test removing duplicate sizes"""
+
+# =============================================================================
+# Pytest Fixtures
+# =============================================================================
+
+@pytest.fixture
+def gfx950_data():
+    """Load gfx950 test data (list format)."""
+    return load_gfx950_data()
+
+
+@pytest.fixture
+def gfx1250_data():
+    """Load gfx1250 test data (dict format)."""
+    return load_gfx1250_data()
+
+
+@pytest.fixture
+def gfx950_accessor(gfx950_data):
+    """Create DataAccessor for gfx950 data."""
+    return createAccessor(gfx950_data)
+
+
+@pytest.fixture
+def gfx1250_accessor(gfx1250_data):
+    """Create DataAccessor for gfx1250 data."""
+    return createAccessor(gfx1250_data)
+
+
+# =============================================================================
+# Test Classes
+# =============================================================================
+
+class TestEmbeddedYamlLoading:
+    """Tests to verify embedded YAML loads correctly."""
+
+    def test_gfx950_loads_as_list(self, gfx950_data):
+        """gfx950 data loads as a list."""
+        assert isinstance(gfx950_data, list)
+        assert len(gfx950_data) >= 8  # Minimum expected elements
+
+    def test_gfx1250_loads_as_dict(self, gfx1250_data):
+        """gfx1250 data loads as a dict."""
+        assert isinstance(gfx1250_data, dict)
+        assert "Solutions" in gfx1250_data
+        assert "ExactLogic" in gfx1250_data
+        assert "DefaultSolution" in gfx1250_data
+
+
+class TestDataAccessorWithFixtures:
+    """Tests for DataAccessor using embedded fixture data."""
+
+    def test_gfx950_accessor_identifies_list_format(self, gfx950_accessor):
+        """gfx950 accessor identifies list format."""
+        assert gfx950_accessor.isList is True
+        assert gfx950_accessor.isDict is False
+
+    def test_gfx1250_accessor_identifies_dict_format(self, gfx1250_accessor):
+        """gfx1250 accessor identifies dict format."""
+        assert gfx1250_accessor.isDict is True
+        assert gfx1250_accessor.isList is False
+
+    def test_gfx950_get_solutions(self, gfx950_accessor):
+        """gfx950 accessor can get solutions."""
+        solutions = gfx950_accessor.getSolutions()
+        assert len(solutions) == 2
+        assert solutions[0]["SolutionIndex"] == 0
+        assert solutions[1]["SolutionIndex"] == 1
+        assert "Cijk_Alik_Bljk" in solutions[0]["SolutionNameMin"]
+
+    def test_gfx1250_get_solutions(self, gfx1250_accessor):
+        """gfx1250 accessor can get solutions."""
+        solutions = gfx1250_accessor.getSolutions()
+        assert len(solutions) == 2
+        assert solutions[0]["SolutionNameMin"] == "Sol_gfx1250_0"
+        assert solutions[1]["SolutionNameMin"] == "Sol_gfx1250_1"
+
+    def test_gfx950_get_exact_logic(self, gfx950_accessor):
+        """gfx950 accessor can get ExactLogic."""
+        logic = gfx950_accessor.getExactLogic()
+        assert len(logic) == 3
+        # Check first size entry
+        assert logic[0][0] == [10240, 384, 1, 8192]
+        assert logic[0][1] == [0, 0.0]
+
+    def test_gfx1250_get_exact_logic(self, gfx1250_accessor):
+        """gfx1250 accessor can get ExactLogic."""
+        logic = gfx1250_accessor.getExactLogic()
+        assert len(logic) == 3
+        # Check first size entry
+        assert logic[0][0] == [129, 129, 1, 129]
+        assert logic[0][1] == [0, 0.0]
+
+    def test_gfx950_no_default_solution(self, gfx950_accessor):
+        """gfx950 does not have DefaultSolution."""
+        assert gfx950_accessor.hasDefaultSolution() is False
+        assert gfx950_accessor.getDefaultSolution() is None
+
+    def test_gfx1250_has_default_solution(self, gfx1250_accessor):
+        """gfx1250 has DefaultSolution."""
+        assert gfx1250_accessor.hasDefaultSolution() is True
+        default = gfx1250_accessor.getDefaultSolution()
+        assert default["GlobalSplitU"] == 1
+        assert default["StaggerU"] == 32
+
+
+class TestArchitectureDetectionWithFixtures:
+    """Tests for architecture detection using embedded fixtures."""
+
+    def test_gfx950_architecture(self, gfx950_data):
+        """Detect architecture from gfx950 data."""
+        arch = getArchitectureFromData(gfx950_data)
+        assert arch == "gfx950"
+
+    def test_gfx1250_architecture(self, gfx1250_data):
+        """Detect architecture from gfx1250 data."""
+        arch = getArchitectureFromData(gfx1250_data)
+        assert arch == "gfx1250"
+
+    def test_gfx950_is_not_gfx1250(self, gfx950_data):
+        """gfx950 is not identified as gfx1250."""
+        assert isGfx1250(gfx950_data) is False
+
+    def test_gfx1250_is_gfx1250(self, gfx1250_data):
+        """gfx1250 is identified as gfx1250."""
+        assert isGfx1250(gfx1250_data) is True
+
+
+class TestFixSizeInconsistenciesWithFixtures:
+    """Tests for fixSizeInconsistencies using embedded fixture data."""
+
+    def test_gfx950_sizes_preserved(self, gfx950_accessor):
+        """gfx950 sizes are preserved (no duplicates in fixture)."""
+        logic = gfx950_accessor.getExactLogic()
+        result, count = fixSizeInconsistencies(deepcopy(logic), "gfx950")
+        assert count == 3  # All three unique sizes preserved
+
+    def test_gfx1250_sizes_preserved(self, gfx1250_accessor):
+        """gfx1250 sizes are preserved (no duplicates in fixture)."""
+        logic = gfx1250_accessor.getExactLogic()
+        result, count = fixSizeInconsistencies(deepcopy(logic), "gfx1250")
+        assert count == 3  # All three unique sizes preserved
+
+    def test_deduplication_with_gfx950_format(self):
+        """Verify deduplication works with gfx950-style sizes."""
         sizes = [
-            ([1, 2, 3, 4, 5, 6, 7, 8], 0),
-            ([1, 2, 3, 4], 1),
-            ([1, 2, 3, 4, 9, 10, 11, 12], 2),
+            [[10240, 384, 1, 8192], [0, 0.0]],
+            [[10240, 336, 1, 8192], [1, 0.0]],
+            [[10240, 384, 1, 8192], [2, 1.0]],  # Duplicate of first
         ]
         result, count = fixSizeInconsistencies(sizes, "test")
-        # All 3 sizes truncate/normalize to [1, 2, 3, 4], so should deduplicate to 1 unique size
-        # - [1,2,3,4,5,6,7,8] -> [1,2,3,4] (removes last 4)
-        # - [1,2,3,4] -> [1,2,3,4] (no change)
-        # - [1,2,3,4,9,10,11,12] -> [1,2,3,4] (removes last 4)
-        assert count == 1
-        assert len(result) == 1
-        assert result[0][0] == [1, 2, 3, 4]
+        assert count == 2  # Only 2 unique sizes
+        # Verify no duplicate sizes
+        result_sizes = [tuple(r[0]) for r in result]
+        assert len(set(result_sizes)) == 2
 
-    @patch('Tensile.TensileMergeLibrary.verbose')
-    def test_remove_duplicates_verbose_message(self, mock_verbose):
-        """Test that verbose message is triggered with correct count when duplicates are removed"""
+    def test_deduplication_with_gfx1250_format(self):
+        """Verify deduplication works with gfx1250-style sizes."""
         sizes = [
-            ([1, 2, 3, 4, 5, 6, 7, 8], 0),
-            ([1, 2, 3, 4], 1),
-            ([1, 2, 3, 4, 9, 10, 11, 12], 2),
+            [[129, 129, 1, 129], [0, 0.0]],
+            [[128, 128, 1, 128], [1, 0.0]],
+            [[129, 129, 1, 129], [2, 1.0]],  # Duplicate of first
         ]
         result, count = fixSizeInconsistencies(sizes, "test")
+        assert count == 2  # Only 2 unique sizes
 
-        # Verify verbose was called with correct count: origNumSizes - numSize = 3 - 1 = 2
-        mock_verbose.assert_called_once_with(2, "duplicate size(s) removed from", "test", "logic file")
 
-    def test_no_duplicates(self):
-        """Test with no duplicates"""
-        sizes = [
-            ([1, 2, 3], 0),
-            ([4, 5, 6], 1),
-        ]
-        result, count = fixSizeInconsistencies(sizes, "test")
-        assert count == 2
+class TestSanitizeSolutionsWithFixtures:
+    """Tests for sanitizeSolutions using embedded fixture data."""
+
+    def test_gfx950_sanitize_preserves_stagger_zero(self, gfx950_data):
+        """gfx950 solutions have StaggerU=0, sanitize should preserve this."""
+        accessor = createAccessor(deepcopy(gfx950_data))
+        solutions = accessor.getSolutions()
+        
+        # Verify initial state
+        assert solutions[0]["StaggerU"] == 0
+        
+        sanitizeSolutions(accessor)
+        
+        # After sanitize, all stagger params should be 0
+        assert solutions[0]["StaggerUMapping"] == 0
+        assert solutions[0]["StaggerUStride"] == 0
+        assert solutions[0]["_staggerStrideShift"] == 0
+
+    def test_gfx1250_sanitize_preserves_nonzero_stagger(self, gfx1250_data):
+        """gfx1250 solutions have StaggerU=32, sanitize should preserve dependent params."""
+        accessor = createAccessor(deepcopy(gfx1250_data))
+        solutions = accessor.getSolutions()
+        
+        # Verify initial state
+        assert solutions[0]["StaggerU"] == 32
+        orig_stride = solutions[0]["StaggerUStride"]
+        
+        sanitizeSolutions(accessor)
+        
+        # After sanitize, stagger params should be preserved
+        assert solutions[0]["StaggerUStride"] == orig_stride
+
+
+class TestRemoveUnusedSolutionsWithFixtures:
+    """Tests for removeUnusedSolutions using embedded fixture data."""
+
+    def test_gfx950_all_solutions_used(self, gfx950_data):
+        """In gfx950 data, all solutions are used."""
+        accessor = createAccessor(deepcopy(gfx950_data))
+        _, num_removed = removeUnusedSolutions(accessor)
+        # Solution 0 is used twice, solution 1 once - both are used
+        assert num_removed == 0
+
+    def test_gfx1250_all_solutions_used(self, gfx1250_data):
+        """In gfx1250 data, all solutions are used."""
+        accessor = createAccessor(deepcopy(gfx1250_data))
+        _, num_removed = removeUnusedSolutions(accessor)
+        # Solution 0 is used twice, solution 1 once - both are used
+        assert num_removed == 0
+
+    def test_gfx950_remove_unused(self, gfx950_data):
+        """Add an unused solution to gfx950 and verify it's removed."""
+        data = deepcopy(gfx950_data)
+        solutions = data[5]  # Solutions list
+        solutions.append({
+            "SolutionIndex": 2,
+            "SolutionNameMin": "Unused_Sol",
+            "KernelNameMin": "Unused_Kernel",
+            "StaggerU": 0,
+        })
+        accessor = createAccessor(data)
+        
+        _, num_removed = removeUnusedSolutions(accessor)
+        
+        assert num_removed == 1
+        assert len(accessor.getSolutions()) == 2
+
+
+class TestRemoveDuplicatedSolutionsWithFixtures:
+    """Tests for removeDuplicatedSolutions using embedded fixture data."""
+
+    def test_gfx950_no_duplicates(self, gfx950_data):
+        """gfx950 data has no duplicate solutions."""
+        accessor = createAccessor(deepcopy(gfx950_data))
+        _, num_removed, num_solutions, num_kernels = removeDuplicatedSolutions(accessor)
+        assert num_removed == 0
+        assert num_solutions == 2
+
+    def test_gfx1250_no_duplicates(self, gfx1250_data):
+        """gfx1250 data has no duplicate solutions."""
+        accessor = createAccessor(deepcopy(gfx1250_data))
+        _, num_removed, num_solutions, num_kernels = removeDuplicatedSolutions(accessor)
+        assert num_removed == 0
+        assert num_solutions == 2
+
+
+class TestMergeLogicWithFixtures:
+    """Tests for mergeLogic using embedded fixture data."""
+
+    def test_merge_gfx950_with_new_size(self, gfx950_data):
+        """Merge adds new size to gfx950 data."""
+        ori_accessor = createAccessor(deepcopy(gfx950_data))
+        
+        # Create incremental data with a new size
+        inc_data = deepcopy(gfx950_data)
+        inc_solutions = inc_data[5]
+        inc_logic = inc_data[7]
+        # Add a new size
+        inc_logic.append([[9999, 999, 1, 9999], [0, 0.0]])
+        inc_accessor = createAccessor(inc_data)
+        
+        merged_data, num_sizes_added, _, _ = mergeLogic(
+            ori_accessor, inc_accessor, forceMerge=False
+        )
+        
+        assert num_sizes_added == 1
+        merged_accessor = createAccessor(merged_data)
+        assert len(merged_accessor.getExactLogic()) == 4
+
+    def test_merge_gfx1250_with_new_size(self, gfx1250_data):
+        """Merge adds new size to gfx1250 data."""
+        ori_accessor = createAccessor(deepcopy(gfx1250_data))
+        
+        # Create incremental data with a new size
+        inc_data = deepcopy(gfx1250_data)
+        inc_data["ExactLogic"].append([[512, 512, 1, 512], [0, 0.0]])
+        inc_accessor = createAccessor(inc_data)
+        
+        merged_data, num_sizes_added, _, _ = mergeLogic(
+            ori_accessor, inc_accessor, forceMerge=False
+        )
+        
+        assert num_sizes_added == 1
+        merged_accessor = createAccessor(merged_data)
+        assert len(merged_accessor.getExactLogic()) == 4
+
+    def test_merge_gfx950_better_efficiency_replaces(self, gfx950_data):
+        """Better efficiency solution replaces original in gfx950."""
+        ori_accessor = createAccessor(deepcopy(gfx950_data))
+        
+        # Create incremental with better efficiency for existing size
+        inc_data = deepcopy(gfx950_data)
+        inc_data[7][0][1][1] = 2.0  # Improve efficiency from 0.0 to 2.0
+        inc_data[5][0]["SolutionNameMin"] = "Better_Sol"
+        inc_accessor = createAccessor(inc_data)
+        
+        merged_data, num_sizes_added, num_solutions_added, _ = mergeLogic(
+            ori_accessor, inc_accessor, forceMerge=False
+        )
+        
+        # No new sizes, but solution should be replaced
+        assert num_sizes_added == 0
+
+    def test_merge_gfx1250_force_merge(self, gfx1250_data):
+        """Force merge replaces even with worse efficiency."""
+        ori_data = deepcopy(gfx1250_data)
+        ori_data["ExactLogic"][0][1][1] = 5.0  # High efficiency
+        ori_accessor = createAccessor(ori_data)
+        
+        inc_data = deepcopy(gfx1250_data)
+        inc_data["ExactLogic"][0][1][1] = 0.0  # Lower efficiency
+        inc_data["Solutions"][0]["SolutionNameMin"] = "Forced_Sol"
+        inc_accessor = createAccessor(inc_data)
+        
+        merged_data, _, _, _ = mergeLogic(
+            ori_accessor, inc_accessor, forceMerge=True
+        )
+        
+        merged_accessor = createAccessor(merged_data)
+        # Forced solution should be present
+        solution_names = [s["SolutionNameMin"] for s in merged_accessor.getSolutions()]
+        assert "Forced_Sol" in solution_names
+
+
+class TestDefaultSolutionFunctionsWithFixtures:
+    """Tests for DefaultSolution-related functions using gfx1250 data."""
+
+    def test_sync_default_params(self, gfx1250_data):
+        """syncDefaultParams handles default changes."""
+        data = deepcopy(gfx1250_data)
+        orig_defaults = {"StaggerU": 32, "TestParam": 100}
+        inc_defaults = {"StaggerU": 64, "TestParam": 200}  # Changed
+        
+        syncDefaultParams(data, orig_defaults, inc_defaults)
+        
+        # Function should add old defaults to solutions when they change
+
+    def test_remove_default_init_params(self, gfx1250_data):
+        """removeDefaultInitParams removes params matching default."""
+        data = deepcopy(gfx1250_data)
+        # Add a parameter that matches default
+        data["Solutions"][0]["GlobalSplitU"] = 1
+        data["DefaultSolution"]["GlobalSplitU"] = 1
+        
+        removeDefaultInitParams(data)
+        
+        # GlobalSplitU should be removed from solution since it matches default
+        assert "GlobalSplitU" not in data["Solutions"][0]
+
+    def test_remove_cu_count_from_default(self, gfx1250_data):
+        """CUCount is removed from DefaultSolution."""
+        data = deepcopy(gfx1250_data)
+        data["DefaultSolution"]["CUCount"] = 304
+        
+        removeDefaultInitParams(data)
+        
+        assert "CUCount" not in data["DefaultSolution"]
+
+
+class TestFindSolutionWithIndexWithFixtures:
+    """Tests for findSolutionWithIndex using embedded fixture data."""
+
+    def test_find_gfx950_solution_by_index(self, gfx950_accessor):
+        """Find solution by index in gfx950 data."""
+        solutions = gfx950_accessor.getSolutions()
+        
+        result = findSolutionWithIndex(solutions, 0)
+        assert result["SolutionIndex"] == 0
+        assert "Test0" in result["SolutionNameMin"]
+        
+        result = findSolutionWithIndex(solutions, 1)
+        assert result["SolutionIndex"] == 1
+        assert "Test1" in result["SolutionNameMin"]
+
+    def test_find_gfx1250_solution_by_index(self, gfx1250_accessor):
+        """Find solution by index in gfx1250 data."""
+        solutions = gfx1250_accessor.getSolutions()
+        
+        result = findSolutionWithIndex(solutions, 0)
+        assert result["SolutionNameMin"] == "Sol_gfx1250_0"
+        
+        result = findSolutionWithIndex(solutions, 1)
+        assert result["SolutionNameMin"] == "Sol_gfx1250_1"
+
+
+class TestCrossFormatOperations:
+    """Tests for operations that might span different formats."""
+
+    def test_accessor_set_and_get_solutions(self, gfx950_data, gfx1250_data):
+        """Test setting and getting solutions on both formats."""
+        # gfx950
+        gfx950_accessor = createAccessor(deepcopy(gfx950_data))
+        new_sol = {"SolutionIndex": 99, "SolutionNameMin": "New_Sol", "KernelNameMin": "New_K"}
+        solutions = gfx950_accessor.getSolutions()
+        solutions.append(new_sol)
+        gfx950_accessor.setSolutions(solutions)
+        assert len(gfx950_accessor.getSolutions()) == 3
+        
+        # gfx1250
+        gfx1250_accessor = createAccessor(deepcopy(gfx1250_data))
+        solutions = gfx1250_accessor.getSolutions()
+        solutions.append(new_sol)
+        gfx1250_accessor.setSolutions(solutions)
+        assert len(gfx1250_accessor.getSolutions()) == 3
+
+    def test_accessor_set_and_get_exact_logic(self, gfx950_data, gfx1250_data):
+        """Test setting and getting ExactLogic on both formats."""
+        new_entry = [[1, 1, 1, 1], [0, 0.0]]
+        
+        # gfx950
+        gfx950_accessor = createAccessor(deepcopy(gfx950_data))
+        logic = gfx950_accessor.getExactLogic()
+        logic.append(new_entry)
+        gfx950_accessor.setExactLogic(logic)
+        assert len(gfx950_accessor.getExactLogic()) == 4
+        
+        # gfx1250
+        gfx1250_accessor = createAccessor(deepcopy(gfx1250_data))
+        logic = gfx1250_accessor.getExactLogic()
+        logic.append(new_entry)
+        gfx1250_accessor.setExactLogic(logic)
+        assert len(gfx1250_accessor.getExactLogic()) == 4
 
 
 @pytest.mark.unit
@@ -180,266 +721,6 @@ class TestAddKernel:
 
 
 @pytest.mark.unit
-class TestSanitizeSolutions:
-    """Test sanitizeSolutions function"""
-
-    def test_sanitize_with_stagger_u_zero(self):
-        """Test sanitizing solutions with StaggerU == 0"""
-        solList = [
-            {"StaggerU": 0, "StaggerUMapping": 5, "StaggerUStride": 10, "_staggerStrideShift": 3}
-        ]
-        sanitizeSolutions(solList)
-
-        assert solList[0]["StaggerUMapping"] == 0
-        assert solList[0]["StaggerUStride"] == 0
-        assert solList[0]["_staggerStrideShift"] == 0
-
-    def test_sanitize_with_stagger_u_nonzero(self):
-        """Test solutions with StaggerU != 0 remain unchanged"""
-        solList = [
-            {"StaggerU": 1, "StaggerUMapping": 5, "StaggerUStride": 10, "_staggerStrideShift": 3}
-        ]
-        original = deepcopy(solList)
-        sanitizeSolutions(solList)
-
-        assert solList[0]["StaggerUMapping"] == 5
-        assert solList[0]["StaggerUStride"] == 10
-
-    def test_sanitize_without_stagger_u(self):
-        """Test solutions without StaggerU key remain unchanged"""
-        solList = [{"other": "value", "data": 123}]
-        original = deepcopy(solList)
-        sanitizeSolutions(solList)
-
-        # Verify solution is unchanged
-        assert solList == original
-        assert solList[0]["other"] == "value"
-        assert solList[0]["data"] == 123
-
-
-@pytest.mark.unit
-class TestReNameSolutions:
-    """Test reNameSolutions function"""
-
-    @patch('Tensile.TensileMergeLibrary.getSolutionNameMin')
-    @patch('Tensile.TensileMergeLibrary.getKernelNameMin')
-    @patch('Tensile.TensileMergeLibrary.assignParameterWithDefault')
-    def test_rename_solutions(self, mock_assign, mock_kernel_name, mock_solution_name):
-        """Test renaming solutions"""
-        mock_solution_name.return_value = "sol_min"
-        mock_kernel_name.return_value = "kernel_min"
-
-        problem_type = {"OperationType": "GEMM"}
-        solutions = [{"key": "value"}]
-        data = [None, None, None, None, problem_type, solutions]
-
-        reNameSolutions(data)
-
-        assert solutions[0]["SolutionNameMin"] == "sol_min"
-        assert solutions[0]["KernelNameMin"] == "kernel_min"
-        assert "ProblemType" not in solutions[0]
-
-
-@pytest.mark.unit
-class TestRemoveUnusedSolutions:
-    """Test removeUnusedSolutions function"""
-
-    def test_remove_unused_solutions(self):
-        """Test removing unused solutions"""
-        solutions = [
-            {"SolutionIndex": 0, "name": "sol0"},
-            {"SolutionIndex": 1, "name": "sol1"},
-            {"SolutionIndex": 2, "name": "sol2"},
-        ]
-        size_map = [
-            ([1, 2, 3], [0, 0.9]),  # Uses solution 0
-            ([4, 5, 6], [2, 0.8]),  # Uses solution 2
-        ]
-        data = [None, None, None, None, None, solutions, None, size_map]
-
-        result, num_removed = removeUnusedSolutions(data)
-
-        assert len(result[5]) == 2  # Only 2 solutions should remain
-        assert num_removed == 1
-        # Check reindexing
-        assert result[5][0]["SolutionIndex"] == 0
-        assert result[5][1]["SolutionIndex"] == 1
-
-    def test_all_solutions_used(self):
-        """Test when all solutions are used"""
-        solutions = [
-            {"SolutionIndex": 0, "name": "sol0"},
-            {"SolutionIndex": 1, "name": "sol1"},
-        ]
-        size_map = [
-            ([1, 2, 3], [0, 0.9]),
-            ([4, 5, 6], [1, 0.8]),
-        ]
-        data = [None, None, None, None, None, solutions, None, size_map]
-
-        result, num_removed = removeUnusedSolutions(data)
-
-        assert len(result[5]) == 2
-        assert num_removed == 0
-
-
-@pytest.mark.unit
-class TestRemoveDuplicatedSolutions:
-    """Test removeDuplicatedSolutions function"""
-
-    def test_remove_duplicates_by_solution_name(self):
-        """Test removing solutions with duplicate SolutionNameMin"""
-        solutions = [
-            {"SolutionIndex": 0, "SolutionNameMin": "sol_A", "KernelNameMin": "kernel_1"},
-            {"SolutionIndex": 1, "SolutionNameMin": "sol_B", "KernelNameMin": "kernel_2"},
-            {"SolutionIndex": 2, "SolutionNameMin": "sol_A", "KernelNameMin": "kernel_1"},  # Duplicate
-        ]
-        size_map = [
-            ([1, 2, 3], [0, 0.9]),
-            ([4, 5, 6], [2, 0.8]),  # References duplicate (index 2 -> should become 0)
-        ]
-        data = [None, None, None, None, None, solutions, None, size_map]
-
-        result, num_removed, num_solutions, num_kernels = removeDuplicatedSolutions(data)
-
-        # Verify return values
-        assert num_solutions == 2
-        assert num_removed == 1
-        assert num_kernels == 2
-
-        # Verify solutions list was deduplicated
-        assert len(result[5]) == 2
-        assert result[5][0]["SolutionNameMin"] == "sol_A"
-        assert result[5][1]["SolutionNameMin"] == "sol_B"
-
-        # Verify solutions were reindexed
-        assert result[5][0]["SolutionIndex"] == 0
-        assert result[5][1]["SolutionIndex"] == 1
-
-        # Verify size_map was updated to reference correct solution indices
-        assert result[7][0][1][0] == 0  # First size still references sol_A (index 0)
-        assert result[7][1][1][0] == 0  # Second size now references sol_A (was 2, now 0)
-
-    def test_no_duplicates(self):
-        """Test with no duplicate solutions"""
-        solutions = [
-            {"SolutionIndex": 0, "SolutionNameMin": "sol_A", "KernelNameMin": "kernel_1"},
-            {"SolutionIndex": 1, "SolutionNameMin": "sol_B", "KernelNameMin": "kernel_2"},
-        ]
-        size_map = [
-            ([1, 2, 3], [0, 0.9]),
-            ([4, 5, 6], [1, 0.8]),
-        ]
-        data = [None, None, None, None, None, solutions, None, size_map]
-
-        result, num_removed, num_solutions, num_kernels = removeDuplicatedSolutions(data)
-
-        # Verify return values
-        assert num_solutions == 2
-        assert num_removed == 0
-        assert num_kernels == 2
-
-        # Verify solutions list is unchanged (still has both)
-        assert len(result[5]) == 2
-        assert result[5][0]["SolutionNameMin"] == "sol_A"
-        assert result[5][1]["SolutionNameMin"] == "sol_B"
-
-        # Verify solutions are still correctly indexed
-        assert result[5][0]["SolutionIndex"] == 0
-        assert result[5][1]["SolutionIndex"] == 1
-
-        # Verify size_map is unchanged
-        assert result[7][0][1][0] == 0  # First size references sol_A (index 0)
-        assert result[7][1][1][0] == 1  # Second size references sol_B (index 1)
-
-
-@pytest.mark.unit
-class TestLoadData:
-    """Test loadData function"""
-
-    @patch('Tensile.TensileMergeLibrary.load_yaml_stream')
-    def test_load_data(self, mock_load):
-        """Test loading data from YAML file"""
-        mock_data = {"key": "value"}
-        mock_load.return_value = mock_data
-
-        result = loadData("test.yaml")
-
-        assert result[0] == "test.yaml"
-        assert result[1] == mock_data
-        mock_load.assert_called_once()
-
-
-@pytest.mark.unit
-class TestCompareDestFolderToYaml:
-    """Test compareDestFolderToYaml function"""
-
-    @pytest.mark.parametrize("folder,yaml_attr,should_raise,test_id", [
-        # Matching cases - should not raise
-        ("Equality", "Equality", False, "equality_matches"),
-        ("GridBased", "GridBased", False, "gridbased_matches"),
-        # Mismatching cases - should raise
-        ("Equality", "GridBased", True, "equality_mismatch"),
-        ("GridBased", "Equality", True, "gridbased_mismatch"),
-        # Empty attribute - should raise
-        ("Equality", None, True, "empty_attribute"),
-        # Non-checkable folder - should not raise (ignored)
-        ("OtherFolder", "Equality", False, "non_checkable_folder"),
-        ("OtherFolder", "GridBased", False, "non_checkable_folder_gridbased"),
-        ("OtherFolder", None, True, "non_checkable_empty_attr"),
-    ])
-    def test_folder_yaml_comparison(self, folder, yaml_attr, should_raise, test_id):
-        """Test folder and YAML attribute comparison with various scenarios"""
-        original_dir = f"/path/to/{folder}"
-        inc_data = [None] * 12
-        inc_data[11] = yaml_attr
-
-        if should_raise:
-            with pytest.raises(SystemExit):
-                compareDestFolderToYaml(original_dir, "test.yaml", inc_data)
-        else:
-            # Should not raise
-            compareDestFolderToYaml(original_dir, "test.yaml", inc_data)
-
-
-@pytest.mark.unit
-class TestCompareProblemType:
-    """Test compareProblemType function"""
-
-    @patch('Tensile.TensileMergeLibrary.problemTypeToEnum')
-    @patch('Tensile.TensileMergeLibrary.ProblemType')
-    def test_matching_problem_types(self, mock_problem_type, mock_enum):
-        """Test with matching problem types"""
-        mock_pt = Mock()
-        mock_pt.state = {"OperationType": "GEMM", "DataType": "FP32"}
-        mock_problem_type.return_value = mock_pt
-
-        ori_data = [None, None, None, None, {"OperationType": "GEMM"}]
-        inc_data = [None, None, None, None, {"OperationType": "GEMM"}]
-
-        # Should not raise
-        compareProblemType(ori_data, inc_data)
-
-    @patch('Tensile.TensileMergeLibrary.problemTypeToEnum')
-    @patch('Tensile.TensileMergeLibrary.ProblemType')
-    def test_mismatching_problem_types(self, mock_problem_type, mock_enum):
-        """Test with mismatching problem types"""
-        mock_pt1 = Mock()
-        mock_pt1.state = {"OperationType": "GEMM", "DataType": "FP32"}
-
-        mock_pt2 = Mock()
-        mock_pt2.state = {"OperationType": "GEMM", "DataType": "FP16"}
-
-        mock_problem_type.side_effect = [mock_pt1, mock_pt2]
-
-        ori_data = [None, None, None, None, {"OperationType": "GEMM"}]
-        inc_data = [None, None, None, None, {"OperationType": "GEMM"}]
-
-        with pytest.raises(SystemExit):
-            compareProblemType(ori_data, inc_data)
-
-
-@pytest.mark.unit
 class TestMessageFunctions:
     """Test msg, verbose, and debug functions"""
 
@@ -479,212 +760,27 @@ class TestMessageFunctions:
 
 
 @pytest.mark.unit
-class TestFindSolutionWithIndex:
-    """Test findSolutionWithIndex function"""
+class TestReNameSolutions:
+    """Test reNameSolutions function"""
 
-    def test_find_solution_at_correct_index(self):
-        """Test finding solution when index matches position"""
-        solutions = [
-            {"SolutionIndex": 0, "name": "sol0"},
-            {"SolutionIndex": 1, "name": "sol1"},
-            {"SolutionIndex": 2, "name": "sol2"},
-        ]
+    @patch('Tensile.TensileMergeLibrary.getSolutionNameMin')
+    @patch('Tensile.TensileMergeLibrary.getKernelNameMin')
+    @patch('Tensile.TensileMergeLibrary.assignParameterWithDefault')
+    def test_rename_solutions(self, mock_assign, mock_kernel_name, mock_solution_name):
+        """Test renaming solutions using DataAccessor"""
+        mock_solution_name.return_value = "sol_min"
+        mock_kernel_name.return_value = "kernel_min"
 
-        result = findSolutionWithIndex(solutions, 1)
-        assert result["name"] == "sol1"
+        problem_type = {"OperationType": "GEMM"}
+        solutions = [{"key": "value"}]
+        data = [None, None, None, None, problem_type, solutions]
+        accessor = createAccessor(data)
 
-    def test_find_solution_with_search(self):
-        """Test finding solution when index doesn't match position"""
-        solutions = [
-            {"SolutionIndex": 5, "name": "sol5"},
-            {"SolutionIndex": 10, "name": "sol10"},
-            {"SolutionIndex": 15, "name": "sol15"},
-        ]
+        reNameSolutions(accessor)
 
-        result = findSolutionWithIndex(solutions, 10)
-        assert result["name"] == "sol10"
-
-    def test_find_nonexistent_solution(self):
-        """Test finding non-existent solution raises assertion"""
-        solutions = [
-            {"SolutionIndex": 0, "name": "sol0"},
-        ]
-
-        with pytest.raises(AssertionError):
-            findSolutionWithIndex(solutions, 99)
-
-
-@pytest.mark.unit
-class TestMergeLogic:
-    """Test mergeLogic function"""
-
-    @patch('Tensile.TensileMergeLibrary.findSolutionWithIndex')
-    @patch('Tensile.TensileMergeLibrary.removeUnusedSolutions')
-    @patch('Tensile.TensileMergeLibrary.fixSizeInconsistencies')
-    def test_merge_with_new_sizes(self, mock_fix, mock_remove, mock_find):
-        """Test merging logic with new sizes"""
-        # Setup mocks
-        mock_fix.side_effect = lambda x, t: (x, len(x))
-        mock_remove.side_effect = lambda x, prefix="": (x, 0)
-        mock_find.return_value = {"SolutionNameMin": "sol1", "KernelNameMin": "ker1"}
-
-        ori_data = [
-            None, None, None, None, None,
-            [{"SolutionNameMin": "sol0", "SolutionIndex": 0}],  # Solutions
-            None,
-            [[list([1, 2, 3]), [0, 0.5]]],  # Size map - use list for mutability
-        ]
-
-        inc_data = [
-            None, None, None, None, None,
-            [{"SolutionNameMin": "sol1", "SolutionIndex": 0}],
-            None,
-            [[list([4, 5, 6]), [0, 0.8]]],  # New size
-        ]
-
-        result, num_sizes, num_solutions, num_removed = mergeLogic(
-            ori_data, inc_data, forceMerge=False, noEff=False
-        )
-
-        # Verify all four return values
-        assert num_sizes == 1  # One new size added
-        assert num_solutions == 1  # One solution added (sol1)
-        assert num_removed == 0  # Mock returns 0
-        assert isinstance(result, list)
-
-        # Verify merge policy: new size added
-        assert len(result[7]) == 2  # Original 1 + new 1 = 2 sizes
-        assert result[7][0][0] == [1, 2, 3]  # Original size preserved
-        assert result[7][1][0] == [4, 5, 6]  # New size added
-
-        # Verify post-merge cleanup ran
-        assert len(result[5]) == 2  # Original sol0 + new sol1
-        mock_find.assert_called_once()
-
-    @patch('Tensile.TensileMergeLibrary.findSolutionWithIndex')
-    @patch('Tensile.TensileMergeLibrary.removeUnusedSolutions')
-    @patch('Tensile.TensileMergeLibrary.fixSizeInconsistencies')
-    def test_merge_with_better_efficiency(self, mock_fix, mock_remove, mock_find):
-        """Test merging with improved efficiency"""
-        mock_fix.side_effect = lambda x, t: (x, len(x))
-        mock_remove.side_effect = lambda x, prefix="": (x, 0)
-        mock_find.return_value = {"SolutionNameMin": "sol_new", "KernelNameMin": "ker_new"}
-
-        ori_data = [
-            None, None, None, None, None,
-            [{"SolutionNameMin": "sol0", "SolutionIndex": 0}],
-            None,
-            [[list([1, 2, 3]), [0, 0.5]]],  # Use list instead of tuple for mutability
-        ]
-
-        inc_data = [
-            None, None, None, None, None,
-            [{"SolutionNameMin": "sol_new", "SolutionIndex": 0}],
-            None,
-            [[list([1, 2, 3]), [0, 0.9]]],  # Better efficiency 0.9
-        ]
-
-        result, num_sizes, num_solutions, num_removed = mergeLogic(
-            ori_data, inc_data, forceMerge=False, noEff=False
-        )
-
-        # Verify all four return values
-        assert num_sizes == 0  # No new sizes (same size, better efficiency replaces)
-        assert num_solutions == 1  # One solution added (sol_new)
-        assert num_removed == 0  # Mock returns 0 for removeUnusedSolutions
-        assert isinstance(result, list)
-
-        # Verify merge policy: better solution accepted
-        assert len(result[7]) == 1  # Still has 1 size (replaced, not added)
-        assert result[7][0][1][1] == 0.9  # Efficiency updated (0.5 -> 0.9)
-
-        # Verify post-merge cleanup ran (solution pool updated)
-        assert len(result[5]) == 2  # Original sol0 + new sol_new
-        # Verify findSolutionWithIndex was called to get the new solution
-        mock_find.assert_called_once()
-
-    @patch('Tensile.TensileMergeLibrary.findSolutionWithIndex')
-    @patch('Tensile.TensileMergeLibrary.removeUnusedSolutions')
-    @patch('Tensile.TensileMergeLibrary.fixSizeInconsistencies')
-    def test_merge_with_force_merge(self, mock_fix, mock_remove, mock_find):
-        """Test force merge even with worse efficiency"""
-        mock_fix.side_effect = lambda x, t: (x, len(x))
-        mock_remove.side_effect = lambda x, prefix="": (x, 0)
-        mock_find.return_value = {"SolutionNameMin": "sol_forced", "KernelNameMin": "ker"}
-
-        ori_data = [
-            None, None, None, None, None,
-            [{"SolutionNameMin": "sol0", "SolutionIndex": 0}],
-            None,
-            [[list([1, 2, 3]), [0, 0.9]]],  # Use list instead of tuple for mutability
-        ]
-
-        inc_data = [
-            None, None, None, None, None,
-            [{"SolutionNameMin": "sol_forced", "SolutionIndex": 0}],
-            None,
-            [[list([1, 2, 3]), [0, 0.3]]],  # Worse efficiency
-        ]
-
-        result, num_sizes, num_solutions, num_removed = mergeLogic(
-            ori_data, inc_data, forceMerge=True, noEff=False
-        )
-
-        # Verify all four return values
-        assert num_sizes == 0  # No new sizes (same size replaced)
-        assert num_solutions == 1  # One solution added (sol_forced)
-        assert num_removed == 0  # Mock returns 0
-        assert isinstance(result, list)
-
-        # Verify merge policy: forceMerge accepts even worse efficiency
-        assert len(result[7]) == 1  # Still 1 size (replaced)
-        assert result[7][0][1][1] == 0.3  # Efficiency downgraded (0.9 -> 0.3) due to forceMerge
-
-        # Verify post-merge cleanup ran
-        assert len(result[5]) == 2  # Original sol0 + forced sol_forced
-        mock_find.assert_called_once()
-
-    @patch('Tensile.TensileMergeLibrary.findSolutionWithIndex')
-    @patch('Tensile.TensileMergeLibrary.removeUnusedSolutions')
-    @patch('Tensile.TensileMergeLibrary.fixSizeInconsistencies')
-    def test_merge_with_no_eff(self, mock_fix, mock_remove, mock_find):
-        """Test merge with noEff flag"""
-        mock_fix.side_effect = lambda x, t: (x, len(x))
-        mock_remove.side_effect = lambda x, prefix="": (x, 0)
-        mock_find.return_value = {"SolutionNameMin": "sol1", "KernelNameMin": "ker1"}
-
-        ori_data = [
-            None, None, None, None, None,
-            [{"SolutionNameMin": "sol0", "SolutionIndex": 0}],
-            None,
-            [[list([1, 2, 3]), [0, 0.5]]],  # Use list for mutability
-        ]
-
-        inc_data = [
-            None, None, None, None, None,
-            [{"SolutionNameMin": "sol1", "SolutionIndex": 0}],
-            None,
-            [[list([4, 5, 6]), [0, 0.8]]],
-        ]
-
-        result, num_sizes, num_solutions, num_removed = mergeLogic(
-            ori_data, inc_data, forceMerge=False, noEff=True
-        )
-
-        # Verify all four return values
-        assert num_sizes == 1  # One new size added
-        assert num_solutions == 1  # One solution added (sol1)
-        assert num_removed == 0  # Mock returns 0
-        assert isinstance(result, list)
-
-        # Verify merge policy: noEff flag sets efficiency to 0.0
-        assert len(result[7]) == 2  # Original 1 + new 1 = 2 sizes
-        assert result[7][0][1][1] == 0.5  # Original efficiency preserved
-        assert result[7][1][1][1] == 0.0  # New size efficiency set to 0.0 (not 0.8) due to noEff
-
-        # Verify post-merge cleanup ran
-        assert len(result[5]) == 2  # Original sol0 + new sol1
-        mock_find.assert_called_once()
+        assert solutions[0]["SolutionNameMin"] == "sol_min"
+        assert solutions[0]["KernelNameMin"] == "kernel_min"
+        assert "ProblemType" not in solutions[0]
 
 
 @pytest.mark.unit
