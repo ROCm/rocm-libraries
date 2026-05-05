@@ -10,6 +10,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace test_reduction_common
@@ -21,15 +22,18 @@ struct ReductionTestCase
     std::vector<int64_t> yDims;
     hipdnn_frontend::ReductionMode mode;
     unsigned seed;
+    std::string note;
 
     ReductionTestCase(std::vector<int64_t>&& xDimsLocal,
                       std::vector<int64_t>&& yDimsLocal,
                       hipdnn_frontend::ReductionMode modeLocal,
-                      unsigned seedLocal)
+                      unsigned seedLocal,
+                      std::string noteLocal = {})
         : xDims(std::move(xDimsLocal))
         , yDims(std::move(yDimsLocal))
         , mode(modeLocal)
         , seed(seedLocal)
+        , note(std::move(noteLocal))
     {
         if(xDims.size() != yDims.size())
         {
@@ -77,6 +81,10 @@ struct ReductionTestCase
         vecToStream(ss, tc.yDims);
         ss << " mode:" << tc.mode;
         ss << " seed:" << tc.seed;
+        if(!tc.note.empty())
+        {
+            ss << " note:" << tc.note;
+        }
         ss << ")";
 
         return ss;
