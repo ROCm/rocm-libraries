@@ -532,12 +532,24 @@ class TestMFMAQuadCycleGap:
         )
         assert ok1 and ok2 and exp1 == 3 and exp2 == 3
 
-    def test_mfma_acc_chain_cross_body_actual_reflects_real_gap(self):
+    def test_mfma_acc_chain_cross_body_uses_unified_simulator(self):
         """Producer in body=ML, consumer in body=NGL sharing accumulator
-        v0..v3. The cross-body early-return at ScheduleCapture.py:2922-2925
-        reports `(True, expected, expected)`; the diagnostic is misleading
-        because `actual` should be much larger than `expected` (a full body
-        boundary's worth of issue cycles)."""
+        v0..v3. Bead `2bu.3`: cross-body MFMA->MFMA edges now route through
+        `cumulative_issue_cycles` walking the unified instruction stream
+        (ML-1 -> ML -> NGL -> NLL). The previous `body_delta * 1000`
+        placeholder always reported ok=True regardless of the actual gap;
+        the unified simulator computes a real cycle count.
+
+        Arithmetic for this fixture:
+          unified stream = [ML-1 MFMA_filler, ML LR, ML SWait, ML MFMA1,
+                            NGL MFMA2, NLL MFMA_filler]
+          Walk from MFMA1 (producer, idx=3) to MFMA2 (consumer, idx=4):
+            i=3 MFMA1: current_issue=max(0,0)=0; mfma_free_at=0+1+3=4;
+                       p_issue_start=0; current_issue += 1 = 1.
+            i=4 MFMA2: current_issue=max(1,4)=4; same class (3==3), no
+                       type-switch stall; c_issue_start=4. Break.
+          gap = 4 - 0 - 1 = 3 (== QUAD_CYCLES_STANDARD_MFMA_FINISH).
+        """
         ml_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
@@ -577,13 +589,147 @@ class TestMFMAQuadCycleGap:
         ok, expected, actual = _quad_cycle_gap_ok(
             edge.producer, edge.consumer, 0, graph=g)
 
-        # s7k: actual reflects body_delta * 1000 (cross-body placeholder).
-        assert ok, "Cross-body edge should always pass the gap check."
-        assert actual > expected, (
-            f"Cross-body _quad_cycle_gap_ok reported actual={actual} == "
-            f"expected={expected}; this is the misleading early-return s7k "
-            f"flags. Expected actual to reflect the real cross-body gap "
-            f"(many issue cycles)."
+        # 2bu.3: unified simulator computes the exact cross-body cycle gap.
+        # This fixture's intermediate-free MFMA pair gates exactly on the
+        # producer's mfma_free_at backlog, yielding actual=3=expected.
+        assert ok, "Cross-body gap of 3 meets the 3-cycle MFMA finish."
+        assert expected == 3, f"Expected QUAD_CYCLES_STANDARD_MFMA_FINISH=3; got {expected}."
+        assert actual == 3, (
+            f"Bead 2bu.3 contract: cross-body MFMA->MFMA actual is the "
+            f"unified-stream cycle count, not body_delta*1000. For this "
+            f"fixture (one MFMA in ML, one MFMA in NGL, no intervening "
+            f"work between them) the gap is exactly mfma_free_at = 3. "
+            f"Got actual={actual}. If actual==1000, the cross-body branch "
+            f"was reintroduced; if actual==0, the unified walk failed to "
+            f"locate producer or consumer in the cross-body stream."
+        )
+
+    def test_mfma_acc_chain_cross_body_type_switch_stall_applied(self):
+        """Bead `2bu.3`: cross-body MFMA->MFMA pairs that DIFFER in MFMA
+        class (4x4 producer vs standard consumer) must have the type-switch
+        +1 stall applied across the body boundary, just like same-body
+        pairs. The placeholder (`actual = body_delta * 1000`) couldn't
+        compute this — it returned a fixed sentinel regardless of the MFMA
+        flavors. The unified simulator walks the unified stream and applies
+        the FROM_4X4=3 threshold check.
+
+        Fixture: 4x4 PackMFMA producer at end of ML-1, standard MFMA
+        consumer at start of ML, no intermediates. Producer's c_dst v0..v3
+        is read by consumer (RAW acc-chain edge across the body boundary).
+
+        Arithmetic:
+          unified stream = [ML-1 MFMA1(4x4), ML MFMA2(std), NGL filler, NLL filler]
+          i=0 MFMA1: current_issue=max(0,0)=0; mfma_free_at=0+1+1=2;
+                     last_class=4x4=1; p_issue_start=0; current_issue=1.
+          i=1 MFMA2: current_issue=max(1,2)=2; class differs (1->3), gap
+                     since last MFMA = 2-0=2 < FROM_4X4=3 → +1 stall,
+                     current_issue=3; c_issue_start=3.
+          gap = 3 - 0 - 1 = 2.
+          expected = _mfma_finish_cycles_for(4x4 producer) = 1.
+          ok = True (2 >= 1).
+        """
+        ml_prev_cap = make_capture(BODY_LABEL_ML_PREV, [
+            # Producer in ML-1: 4x4 PackMFMA (variant=[4,4]) writing v0..v3.
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=0, sequence=0, a_src_count=2,
+                      variant=[4, 4]),
+        ])
+        ml_cap = make_capture(BODY_LABEL_ML, [
+            # Consumer in ML: standard MFMA reading v0..v1.
+            make_mfma(c_dst_start=20, a_src_start=0, b_src_start=32,
+                      slot=0, sequence=0, a_src_count=2),
+        ])
+        ngl_filler = make_capture(BODY_LABEL_NGL, [make_mfma(
+            c_dst_start=200, a_src_start=204, b_src_start=208, slot=0)])
+        nll_filler = make_capture(BODY_LABEL_NLL, [make_mfma(
+            c_dst_start=240, a_src_start=244, b_src_start=248, slot=0)])
+        four = FourPartCapture(
+            main_loop={0: ml_cap},
+            main_loop_prev={0: ml_prev_cap},
+            n_gl={0: ngl_filler},
+            n_ll={0: nll_filler},
+            num_mfma=1, num_codepaths=1, source="cms",
+        )
+        g = build_dataflow_graph(four)
+
+        cross = [e for e in g.edges
+                 if getattr(e.producer, "category", None) == "MFMA"
+                 and getattr(e.consumer, "category", None) == "MFMA"
+                 and e.producer.body_label != e.consumer.body_label]
+        assert cross, (
+            "Expected a cross-body MFMA->MFMA acc-chain edge "
+            "(ML-1 4x4 producer -> ML standard consumer)."
+        )
+        edge = cross[0]
+        ok, expected, actual = _quad_cycle_gap_ok(
+            edge.producer, edge.consumer, 0, graph=g)
+        assert expected == 1, (
+            f"4x4 PackMFMA producer expected = 1 quad-cycle "
+            f"(_QUAD_CYCLES_MFMA_4X4_FINISH); got {expected}."
+        )
+        assert ok and actual == 2, (
+            f"2bu.3: cross-body 4x4->standard MFMA pair must apply the "
+            f"FROM_4X4=3 type-switch stall in the unified walk. "
+            f"Expected actual=2 (mfma_free_at=2 + 1 type-switch stall = 3, "
+            f"gap = 3 - 0 - 1 = 2). Got ok={ok}, actual={actual}. "
+            f"If actual==1, the type-switch stall is not being applied "
+            f"across the body boundary (placeholder may have been "
+            f"reintroduced or unified walk skipped the cross-body span)."
+        )
+
+    def test_mfma_acc_chain_cross_body_strict_when_graph_missing(self):
+        """Bead `2bu.3`: when no graph is provided, `_quad_cycle_gap_ok`
+        returns `(False, expected, 0)` — strict, conservative. The
+        previous cross-body branch unconditionally returned
+        `(True, expected, body_delta * 1000)` even without a graph,
+        masking real issues in degenerate test paths. The unified path
+        treats missing-graph as a hard failure regardless of whether the
+        producer and consumer share a body.
+
+        This is the negative pin: drop the cross-body branch and the
+        result for a cross-body pair WITHOUT a graph flips from
+        ok=True/actual=1000 to ok=False/actual=0.
+        """
+        ml_cap = make_capture(BODY_LABEL_ML, [
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=0, sequence=0, a_src_count=2),
+        ])
+        ngl_cap = make_capture(BODY_LABEL_NGL, [
+            make_mfma(c_dst_start=20, a_src_start=0, b_src_start=32,
+                      slot=0, sequence=0, a_src_count=2),
+        ])
+        ml_prev_filler = make_capture(BODY_LABEL_ML_PREV, [make_mfma(
+            c_dst_start=200, a_src_start=204, b_src_start=208, slot=0)])
+        nll_filler = make_capture(BODY_LABEL_NLL, [make_mfma(
+            c_dst_start=240, a_src_start=244, b_src_start=248, slot=0)])
+        four = FourPartCapture(
+            main_loop={0: ml_cap},
+            main_loop_prev={0: ml_prev_filler},
+            n_gl={0: ngl_cap},
+            n_ll={0: nll_filler},
+            num_mfma=1, num_codepaths=1, source="cms",
+        )
+        g = build_dataflow_graph(four)
+        cross = [e for e in g.edges
+                 if getattr(e.producer, "category", None) == "MFMA"
+                 and getattr(e.consumer, "category", None) == "MFMA"
+                 and e.producer.body_label != e.consumer.body_label]
+        assert cross, "Expected a cross-body MFMA->MFMA acc-chain edge."
+        edge = cross[0]
+        # No graph passed: with the cross-body placeholder REMOVED, the
+        # function falls through to the strict `graph is None` branch
+        # regardless of whether producer/consumer share a body.
+        ok, expected, actual = _quad_cycle_gap_ok(
+            edge.producer, edge.consumer, 0, graph=None)
+        assert not ok, (
+            "2bu.3: cross-body pair without a graph must report ok=False. "
+            "The pre-2bu.3 placeholder returned ok=True / actual=body_delta*1000 "
+            "for any cross-body pair regardless of graph presence — this is "
+            "the regression to pin."
+        )
+        assert expected == 3 and actual == 0, (
+            f"Expected (False, 3, 0) for graph=None; got "
+            f"(ok={ok}, expected={expected}, actual={actual})."
         )
 
     def test_mfma_acc_chain_diagnose_missing_edge_dispatches_through_mfma_branch(self):

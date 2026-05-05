@@ -3784,15 +3784,15 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter=0, graph=None):
 
     Returns (ok, expected_quad_cycles, actual_quad_cycles).
 
-    Bead `nk0` rewrite: the same-body branch now delegates to
-    `cumulative_issue_cycles`, which simulates the captured body's
-    instruction stream cycle-exactly (the canonical implementation
-    post-`8nz`; the structural-side `precompute_issue_times` it
-    originally mirrored has been deleted). The previous slot-delta
-    approximation, the subiter +1 correction (cmw), and the unconditional
-    type-switch +1 (vf4) are all subsumed by the helper — the helper sees
-    every intermediate instruction's issue cost and applies the type-switch
-    stall only when the actual gap-since-last-MFMA is below the threshold.
+    Bead `2bu.3` unification: same-body and cross-body share ONE code
+    path that delegates to `cumulative_issue_cycles`. The hardware MFMA
+    pipeline does not reset at body boundaries — `mfma_free_at` and the
+    type-switch stall carry through — so the cross-body cycle gap is
+    just the same simulator extended over the body boundary. The previous
+    `body_delta * 1000` cross-body placeholder (which always returned
+    ok=True regardless of how tight the boundary actually was) is gone;
+    `cumulative_issue_cycles` now walks the unified instruction stream
+    across all bodies in `_BODY_BUILD_ORDER` (extended by bead `2bu.5`).
 
     `num_mfma_per_subiter` is retained as a positional parameter for
     backward compatibility with existing call sites and tests but is no
@@ -3800,20 +3800,9 @@ def _quad_cycle_gap_ok(producer, consumer, num_mfma_per_subiter=0, graph=None):
     DataflowGraph the producer/consumer belong to; when omitted (or when
     the body can't be located) we degrade gracefully by reporting an
     `actual` of 0 — strictly conservative, will fail the gap check.
-
-    Cross-body edges remain a `body_delta * 1000` placeholder because the
-    captured bodies are independent issue streams; the cross-body MFMA→MFMA
-    case is presumed safe (verdict True, large `actual`).
     """
     finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None))
     expected = finish
-
-    if producer.body_label != consumer.body_label:
-        # Cross-body: a body boundary always represents many issue cycles.
-        # Use the conservative 1000-per-body placeholder (s7k).
-        body_delta = consumer.position.loop_index - producer.position.loop_index
-        actual = abs(body_delta) * 1000
-        return True, expected, actual
 
     if graph is None:
         # No graph passed (degenerate test path): treat as zero-gap. Strict
