@@ -324,6 +324,14 @@ If both produce the same outputs (within tolerance), the external reference is v
 | Python reads serialized graph | Phase 2 | Python and C++ disagree on operation parameters | Single source of truth (flatbuffer) |
 | Cross-validation health check | Phase 2 | Python implementation bug (correct params, wrong math) | Generate from both sources, compare outputs |
 
+**Acceptance criteria**:
+- [ ] `--reference-executor cpu` calls `CpuReferenceGraphExecutor` (default)
+- [ ] `--reference-executor gpu` calls `GpuReferenceGraphExecutor`
+- [ ] `--external-reference <dir>` reads raw binary files by tensor name, skips executor
+- [ ] External reference with missing output tensor file (e.g., `Y.bin` absent): **hard FAIL** naming the missing file
+- [ ] `reference_executor` field written to manifest for all three sources (`cpu`, `gpu`, `external`)
+- [ ] Generator validates reference outputs contain no NaN/Inf before writing
+
 ---
 
 ## Step 3: serialize -- Save Inputs and Outputs to Disk
