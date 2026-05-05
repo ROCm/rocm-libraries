@@ -243,7 +243,7 @@ class block_adjacent_difference_benchmark : public primbench::benchmark_interfac
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("name", "adjacent_difference")
+            .add("algo", "adjacent_difference")
             .add("subalgo", Benchmark::name)
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())
@@ -262,7 +262,7 @@ class block_adjacent_difference_benchmark : public primbench::benchmark_interfac
         // Round up size to the next multiple of items_per_block
         const auto items = num_blocks * items_per_block;
 
-        const std::vector<T> input = benchmark_utils::get_random_data<T>(size, T(0), T(10));
+        const std::vector<T> input = benchmark_utils::get_random_data<T>(items, T(0), T(10));
         T*                   d_input;
         T*                   d_output;
         HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
@@ -303,8 +303,8 @@ class block_adjacent_difference_partial_tile_benchmark : public primbench::bench
     primbench::json meta() const override
     {
         return primbench::json{}
-            .add("algo", Benchmark::name)
-            .add("subalgo", "adjacent_difference_partial_tile")
+            .add("algo", "adjacent_difference")
+            .add("subalgo", Benchmark::name)
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())
             .add("block_size", BlockSize)
@@ -356,8 +356,6 @@ class block_adjacent_difference_partial_tile_benchmark : public primbench::bench
                     d_input,
                     d_tile_sizes,
                     d_output);
-                HIP_CHECK(hipGetLastError());
-                HIP_CHECK(hipDeviceSynchronize());
             });
 
         HIP_CHECK(hipFree(d_input));
