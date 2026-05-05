@@ -310,11 +310,23 @@ class TestLRAfterPackGraph(GraphNativeValidationTest):
         between LR and Pack and emits no failure. MFMA is slotted with a
         2-cycle settle window after the CVTPack producer (35z's
         QUAD_CYCLES_CVT_BEFORE_MFMA = 2 requirement).
+
+        Bead `2bu.4` switched `_cvt_to_mfma_gap_ok` to the cycle-exact
+        `cumulative_issue_cycles` walk, which only counts instructions
+        actually present in the captured stream (not slot-index gaps).
+        Two intervening LRs (cost 1 each) populate the captured stream
+        between Pack and MFMA so the cycle-exact walk computes
+        `gap = CVT(1) + LR(1) + LR(1) - 1 = 2`, exactly meeting the
+        threshold. Pre-`2bu.4` the slot-delta arithmetic gave gap=2 from
+        the slot-index gap alone (slot_delta=3 → 2); the cycle-exact
+        walk requires real intervening instructions.
         """
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
             make_swait(slot=2, dscnt=0),
             _pack_vcvt(out_vgpr=40, lr_vgpr=8, slot=3, category="PackA0"),
+            make_lr(60, 1, lds_offset=80, slot=4, category="LRA1"),
+            make_lr(61, 1, lds_offset=84, slot=5, category="LRA1"),
             make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
                       slot=6, a_src_count=1),
         ])

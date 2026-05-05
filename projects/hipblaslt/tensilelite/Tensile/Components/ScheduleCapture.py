@@ -3483,7 +3483,6 @@ def _any_drains(waits, producer, subj_graph) -> bool:
 _QUAD_CYCLES_STANDARD_MFMA_FINISH = 3   # Standard MFMA: 3 quad-cycles to finish.
 _QUAD_CYCLES_MFMA_4X4_FINISH = 1        # 4x4 (Pack-flavored) MFMA: 1 quad-cycle.
 _QUAD_CYCLES_CVT_BEFORE_MFMA = 2        # CVT pack -> MFMA settle window.
-_QUAD_CYCLES_CVT_FINISH = 0             # CVT issues + finishes in 1 cycle (finish=0).
 _QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = 5   # 4x4 PackMFMA -> CVT1 settle window.
 
 # --- MFMA Type-Switch Thresholds (single source of truth, post-`8nz`) --------
@@ -3818,75 +3817,29 @@ def _cvt_to_mfma_gap_ok(producer, consumer, subj_graph):
     downstream MFMA consumer for the CVT result to be visible.
 
     Sub-B of bead `35z`. The threshold is fixed at
-    `_QUAD_CYCLES_CVT_BEFORE_MFMA == 2` (CDNA 4 ISA 7.6). Bead `8nz`
-    deleted the structural-side mirror (`QUAD_CYCLES_CVT_BEFORE_MFMA`,
-    `Pack.min_quad_cycles_before_result_used`, `_handle_min_pack_quad_cycles`,
-    `estimate_quad_cycles`); this helper is now the only enforcement path.
+    `_QUAD_CYCLES_CVT_BEFORE_MFMA == 2` (CDNA 4 ISA 7.6).
 
     Returns `(ok, expected, actual)` — same triple shape as
     `_quad_cycle_gap_ok` so callers can wrap a single
     `TimingTooCloseFailure(expected, actual)` regardless of the gap kind.
 
-    Approach: SLOT-DELTA UNDER-ESTIMATE (NOT cycle-exact). Unlike the
-    sibling pair helpers `_quad_cycle_gap_ok` and `_mfma_pack_to_cvt_gap_ok`
-    which delegate to `cumulative_issue_cycles`, this function computes
-    `actual` directly as
-        `slot_delta * (1 + finish) - 1 + intervening`
-    where `slot_delta = consumer.vmfma_index - producer.vmfma_index`,
-    `finish = _QUAD_CYCLES_CVT_FINISH == 0`, and `intervening` is the
-    count of instructions sitting strictly between producer and consumer
-    in the captured body (`_count_intervening_instructions`). Each
-    intervening instruction is conservatively credited 1 quad-cycle of
-    issue time (per `min_issue_quad_cycles_base`, CMSValidator.py:298).
-
-    Why this path diverges from the cycle-exact helpers: CVT producers
-    are vector-ALU instructions that issue and complete in 1 cycle
-    (finish=0), so they do NOT participate in the MFMA contention model
-    (`mfma_free_at` backlog) or the MFMA type-switch +1 stall that
-    `cumulative_issue_cycles` was built to simulate. The two phenomena
-    that simulator exists to capture are both MFMA-producer concerns;
-    for a CVT producer the simpler slot-delta + intervening-count
-    formula is a sound (under-estimate) lower bound on the real gap.
-    Unifying onto `cumulative_issue_cycles` here is a possible future
-    refactor (deferred to the cmw follow-up) but would be a behavior
-    change, not a fix.
-
-    Cross-body CVT->MFMA edges use the conservative `body_delta * 1000`
-    placeholder (s7k pattern, mirrors the cross-body branches in the
-    other gap helpers) so (a) the gap is always judged OK and (b)
-    telemetry sees a numerically meaningful value rather than the
-    misleading `actual == expected` placeholder. This placeholder will
-    be replaced with a real cross-body model in bead `2bu.4`.
+    Bead `2bu.4` unification: same-body and cross-body share ONE code
+    path that delegates to `cumulative_issue_cycles`. The previous
+    slot-delta formula (`slot_delta * (1 + finish) - 1 + intervening`)
+    was DOUBLE-COUNTING — it charged 1 cycle per slot-INDEX gap AND
+    +intervening for actual instructions in those slots. The cycle-exact
+    walk only counts actual instructions, producing a smaller (more
+    conservative) `actual` for densely-populated streams. The previous
+    `body_delta * 1000` cross-body placeholder is also gone;
+    `cumulative_issue_cycles` walks the unified instruction stream
+    across all bodies in `_BODY_BUILD_ORDER` (extended by bead `2bu.5`).
     """
     expected = _QUAD_CYCLES_CVT_BEFORE_MFMA
-    finish = _QUAD_CYCLES_CVT_FINISH
 
-    if producer.body_label != consumer.body_label:
-        body_delta = consumer.position.loop_index - producer.position.loop_index
-        actual = abs(body_delta) * 1000
-        return True, expected, actual
+    if subj_graph is None:
+        return False, expected, 0  # Strict: no graph -> conservative fail.
 
-    p_pos = producer.position
-    c_pos = consumer.position
-    slot_delta = c_pos.vmfma_index - p_pos.vmfma_index
-    if slot_delta < 0:
-        actual = 0
-        return False, expected, actual
-    if slot_delta == 0:
-        # Same vmfma_index slot — the consumer issues immediately adjacent
-        # to the producer (sub_index breaks the tie). No instructions can
-        # sit between them at the same slot, so actual=0 (clearly < 2).
-        actual = 0
-        return False, expected, actual
-    base = slot_delta * (1 + finish) - 1
-    # Count actual intervening instructions in the captured body to get a
-    # tighter under-estimate. Each contributes >= 1 quad-cycle of issue
-    # time per `min_issue_quad_cycles_base` (CMSValidator.py:298). This
-    # avoids the false-positive mode where a real CMS schedule with many
-    # interleaved CVTs/SWaits between a CVT producer and its MFMA
-    # consumer was flagged as too-tight despite being structurally fine.
-    intervening = _count_intervening_instructions(producer, consumer, subj_graph)
-    actual = base + intervening
+    actual = cumulative_issue_cycles(subj_graph, producer, consumer)
     return actual >= expected, expected, actual
 
 
@@ -3933,47 +3886,6 @@ def _mfma_pack_to_cvt_gap_ok(producer, consumer, subj_graph):
 
     actual = cumulative_issue_cycles(subj_graph, producer, consumer)
     return actual >= expected, expected, actual
-
-
-def _count_intervening_instructions(producer, consumer, subj_graph) -> int:
-    """Count instructions sitting strictly between producer and consumer in
-    the captured body's instruction stream.
-
-    Walks `subj_graph.captures[producer.body_label].instructions` and
-    counts the entries whose `(slot.mfma_index, slot.sequence)` tuple
-    sits strictly between the producer's and consumer's
-    `(vmfma_index, sub_index)`. Returns 0 if the body capture is missing
-    or empty (defensive for synthesized graphs in unit tests that may
-    not populate `captures`).
-
-    Used by `_cvt_to_mfma_gap_ok` to refine its sound under-estimate of
-    the real quad-cycle gap; could in principle be reused by
-    `_quad_cycle_gap_ok` in a future revision (cmw follow-up) to replace
-    the current `subiter_delta` proxy with a direct intervening-count.
-    """
-    captures = getattr(subj_graph, "captures", None)
-    if not captures:
-        return 0
-    body = captures.get(producer.body_label)
-    if body is None:
-        return 0
-    instructions = getattr(body, "instructions", None)
-    if not instructions:
-        return 0
-    p_key = (producer.position.vmfma_index, producer.position.sub_index)
-    c_key = (consumer.position.vmfma_index, consumer.position.sub_index)
-    lo, hi = (p_key, c_key) if p_key < c_key else (c_key, p_key)
-    count = 0
-    for ti in instructions:
-        slot = getattr(ti, "slot", None)
-        if slot is None:
-            continue
-        key = (getattr(slot, "mfma_index", None), getattr(slot, "sequence", None))
-        if key[0] is None or key[1] is None:
-            continue
-        if lo < key < hi:
-            count += 1
-    return count
 
 
 def _is_alu_producer(producer):
