@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 """TestValidateNgl + TestValidateNll: graph-native cross-body
-GR -> LR1 / LR0 wait coverage (beads ola.1 + ola.3).
+GR -> LR1 / LR0 wait coverage.
 
 The legacy ``TestValidateNgl`` exercised the structural-rule shift-value
 reasoning: GRs scheduled in the NGL (no-global-load) tail body still need
@@ -34,13 +34,12 @@ producer in body=NGL, consumer in body=ML. Body order is
 consumer in ML, we get the same cross-body shape with the standard
 filler-body machinery from ``GraphNativeValidationTest.wrap_single_body``.
 
-The legacy ``TestValidateNll`` exercised
-``add_local_read_constraints``: SWaitCnts whose dscnt cap accidentally
-includes a later LR1 leave earlier LR0s in flight when a consumer MFMA
-fires. Bead ola.3 phase-2 deleted that rule; the equivalent coverage
-graph-side is the LR0 -> MFMA RAW edge classified by
-``validate_edge_wait_coverage`` (``MissingWaitFailure(dscnt)`` /
-``WaitInsufficientFailure(dscnt)``).
+The legacy ``TestValidateNll`` exercised ``add_local_read_constraints``:
+SWaitCnts whose dscnt cap accidentally includes a later LR1 leave
+earlier LR0s in flight when a consumer MFMA fires. That structural rule
+has been removed; the equivalent coverage graph-side is the LR0 -> MFMA
+RAW edge classified by ``validate_edge_wait_coverage``
+(``MissingWaitFailure(dscnt)`` / ``WaitInsufficientFailure(dscnt)``).
 """
 
 from Tensile.Components.ScheduleCapture import (
@@ -182,7 +181,7 @@ class TestValidateNgl(GraphNativeValidationTest):
 
 
 # =============================================================================
-# TestValidateNll — graph-native LR-data-ready coverage (bead ola.3 phase-2)
+# TestValidateNll — graph-native LR-data-ready coverage
 # =============================================================================
 # Legacy ``TestValidateNll`` exercised ``add_local_read_constraints``:
 # the NLL-tail SWaitCnt's dscnt cap was set assuming an LRA1 had been

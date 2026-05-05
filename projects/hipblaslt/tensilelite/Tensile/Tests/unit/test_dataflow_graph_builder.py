@@ -326,7 +326,7 @@ class TestWaitCoverage:
         nearby_other_counter_waits populated (the wrong-counter SWait at
         slot=1 is surfaced so the user can extend it). The former
         WaitOnWrongCounterFailure was collapsed into MissingWaitFailure
-        in bead `hof`."""
+        — see bead `hof`."""
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, vlcnt=0, dscnt=-1),

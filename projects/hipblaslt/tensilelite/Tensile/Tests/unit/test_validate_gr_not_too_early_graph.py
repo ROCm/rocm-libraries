@@ -22,12 +22,11 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Graph-native ports of test_ValidateGlobalReadsNotTooEarly.py — bead ola.2.
+"""Graph-native ports of test_ValidateGlobalReadsNotTooEarly.py.
 
-Sub-task ola.2 of the CMS validation migration epic (`br show
-rocm-libraries-ola`): replace structural rule `add_gr_not_too_early_constraints`
-(CMSValidator.py:3113) — and its `GR.must_start_after` constraint annotations —
-with graph-native edge-coverage checks.
+Replaces the (now-removed) structural rule
+`add_gr_not_too_early_constraints` — and its `GR.must_start_after`
+constraint annotations — with graph-native edge-coverage checks.
 
 Rule analysis:
   * The structural rule encodes:
@@ -44,15 +43,15 @@ Rule analysis:
     iteration body and `_collect_pattern` walks across bodies in execution
     order, so cross-body edges form naturally.
 
-Mutation-smell-test (acceptance criterion from r4o, recorded on the parent
-bead): commenting out the `lr_to_gr_lds_reuse` branch in
-`_classify_edge_coverage` (ScheduleCapture.py, currently lines 4001-4014)
-must break at least one test in this file. `test_missing_barrier_lr_drained`
-satisfies this — it asserts a `MissingBarrierFailure` driven through the
+Mutation-smell-test (acceptance criterion): commenting out the
+`lr_to_gr_lds_reuse` branch in `_classify_edge_coverage`
+(ScheduleCapture.py, currently lines 4001-4014) must break at least one
+test in this file. `test_missing_barrier_lr_drained` satisfies this — it
+asserts a `MissingBarrierFailure` driven through the
 `validate_edge_wait_coverage` path (subject graph has a covering wait but
 no barrier between drain and consumer).
 
-Production-side deletions (bead `ola.2` phase 2, landed):
+Production-side deletions (landed):
   * `add_gr_not_too_early_constraints`, `set_gr_must_start_after_from_lr0s`,
     `set_gr_must_start_after_from_grinc`, `apply_must_start_after_barriers`,
     `_apply_must_start_after_barriers_single`, `GRAfterLRRule`, the
@@ -572,7 +571,7 @@ class TestGRNotTooEarlyDtlPlusLdsBufGraph(GraphNativeValidationTest):
 
 
 # =============================================================================
-# DTL vs non-DTL path coverage — bead wa6
+# DTL vs non-DTL path coverage
 # =============================================================================
 # Pin the two distinct production code paths feeding the LR0 -> GR LDS-reuse
 # invariant:
@@ -916,8 +915,8 @@ class TestNonDTLPathCoverage(GraphNativeValidationTest):
         flags the inversion (default schedule has producer<consumer in
         stream order, subject has producer>consumer).
 
-        Note: the bead text says "LW emitted AFTER the next-iter LR that
-        consumes it"; the more direct OrderInverted surface for the
+        Note: the failure shape is "LW emitted AFTER the next-iter LR
+        that consumes it"; the more direct OrderInverted surface for the
         non-DTL chain is the GR->LW vgpr RAW edge in the SAME body, since
         the LW->LR LDS handoff isn't tracked register-side (LDS is not in
         the per-byte resolver's address space). Same Failure type, same

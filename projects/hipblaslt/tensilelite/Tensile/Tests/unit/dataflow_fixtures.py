@@ -321,9 +321,9 @@ def make_lcc_pair(slot: int, *,
         SSubU32(dst=loopCounter, src0=loopCounter, src1=hex(1))
         SCmpEQI32(src0=loopCounter, src1=hex(endCounter))
 
-    Per `LCC_AUDIT.md` (bead 2bu.1) every captured CMS schedule emits
-    exactly this 2-instruction pair into the LCC bucket; both are
-    1-quad-cycle SALU ops.
+    Per `LCC_AUDIT.md` every captured CMS schedule emits exactly this
+    2-instruction pair into the LCC bucket; both are 1-quad-cycle SALU
+    ops.
 
     Uses real rocisa classes (no `_Fake*` shim) — `_class_tag_from_category`
     returns "LCC" so the resulting nodes carry the LCC identity tag and

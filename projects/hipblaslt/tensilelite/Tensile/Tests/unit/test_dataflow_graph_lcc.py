@@ -22,7 +22,7 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""LCC (loop-counter code) graph-node coverage (bead 2bu.2).
+"""LCC (loop-counter code) graph-node coverage.
 
 Per `LCC_AUDIT.md` the loop-counter code emitted by `closeLoop(...,
 finalLoop=False)` and routed into the CMS macro under category "LCC"
@@ -31,12 +31,10 @@ consists of exactly two SALU instructions per codepath:
     SSubU32(dst=loopCounter, src0=loopCounter, src1=1)
     SCmpEQI32(src0=loopCounter, src1=hex(endCounter))
 
-Each is 1 quad-cycle. As of bead 2bu.2 these instructions are full
-participants in the dataflow graph: nodes appear in `nodes_by_identity`
-with `category == "LCC"` and `issue_cycles == 1`, and they contribute
-to `cumulative_issue_cycles` walks. (The behavioral consequences for
-cross-body validation are scoped to sibling beads 2bu.3 / 2bu.4 / 2bu.5;
-this file just pins the foundation.)
+Each is 1 quad-cycle. These instructions are full participants in the
+dataflow graph: nodes appear in `nodes_by_identity` with
+`category == "LCC"` and `issue_cycles == 1`, and they contribute to
+`cumulative_issue_cycles` walks.
 
 The `LCC not in nll_categories` invariant in `test_ScheduleCapture.py`
 is preserved because `n_ll` has `\\useLoop == 0` — the macro itself

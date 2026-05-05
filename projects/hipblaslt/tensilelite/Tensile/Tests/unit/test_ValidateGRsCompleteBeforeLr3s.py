@@ -22,12 +22,12 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Graph-native port of test_ValidateGRsCompleteBeforeLr3s — bead ola.1.
+"""Graph-native port of test_ValidateGRsCompleteBeforeLr3s.
 
 The legacy file exercised the LR3 fallback in the structural rule
 ``set_gr_needed_by_from_lrs``: when LRA1/LRB1 are absent
 (ForceUnrollSubIter mode), the rule's needed_by target switches from
-LR1 to LR3. The structural rule is being deleted in this bead.
+LR1 to LR3. The structural rule has been removed.
 
 Graph-side, the rule classification is unified: ``_collect_barrier_edges``
 treats every category in ``{LRA0, LRA1, LRA3, LRB0, LRB1, LRB3}`` as a

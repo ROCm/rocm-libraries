@@ -22,16 +22,15 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Cross-cutting LR/Pack negative regression tests (graph-native — bead ola.3).
+"""Cross-cutting LR/Pack negative regression tests (graph-native).
 
 Migrated from the legacy ``CMSValidationTestBase`` shape that ran
 ``[add_local_read_constraints, add_pack_constraints]`` and asserted on
 ``WaitTooLateFailure``. The legacy LR rule and its ``LR.needed_by``
-machinery were deleted by ola.3 phase-2; the equivalent coverage
-graph-side is the LR -> MFMA RAW edge classified by
-``validate_edge_wait_coverage``, which emits ``MissingWaitFailure``
-(or ``WaitTooLateFailure``) on dscnt when no qualifying SWaitCnt sits
-in the producer -> consumer window.
+machinery have been removed; the equivalent coverage graph-side is the
+LR -> MFMA RAW edge classified by ``validate_edge_wait_coverage``, which
+emits ``MissingWaitFailure`` (or ``WaitTooLateFailure``) on dscnt when
+no qualifying SWaitCnt sits in the producer -> consumer window.
 
 This file covered Category 4 from the validator regression-test plan:
 schedules where BOTH the LR and the Pack are positioned after the MFMA
@@ -42,8 +41,8 @@ because instructions validate in linear issue order.
 Graph-native equivalent: place the LR after its consumer MFMA (no SWait
 in window) -> the LR -> MFMA edge has no covering wait -> the
 classifier emits a dscnt failure on that edge regardless of the Pack
-ordering. The pack-side coverage of the same shape is the
-ola.4-tracked ``test_validate_pack_graph.py``.
+ordering. The pack-side coverage of the same shape lives in
+``test_validate_pack_graph.py``.
 """
 
 from Tensile.Components.ScheduleCapture import (

@@ -22,17 +22,16 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""SCC sentinel + _SCCRule edge formation (bead mrj.1).
+"""SCC sentinel + _SCCRule edge formation.
 
-Sub-task 1 of the SCC migration epic (`br show rocm-libraries-mrj`):
-verify that build_dataflow_graph emits SCC RAW edges between SCC
+Verify that build_dataflow_graph emits SCC RAW edges between SCC
 producers and SCC consumers AFTER the rule attaches the SCC sentinel
 to per-opcode reads/writes.
 
-NO failure-wiring assertions live here — that's bead mrj.2. These
-tests only assert that the edge SHAPE is correct; the SCC clobber
-diagnostic in `diagnose_missing_edge` is built on top of these edges
-in the next sub-task.
+NO failure-wiring assertions live here. These tests only assert that
+the edge SHAPE is correct; the SCC clobber diagnostic in
+`diagnose_missing_edge` is built on top of these edges and covered
+elsewhere.
 
 Per-opcode flag-table coverage is also exercised here so any future
 addition / removal in `_SCC_OPCODE_FLAGS` is caught by a unit test
@@ -186,8 +185,8 @@ class TestSCCRuleExtract:
         assert sgpr_reads == [50, 51]
 
     def test_scmplgu32_writes_scc(self):
-        """SCmpLgU32 added to the table beyond the 5 the bead lists by
-        name — covered to catch flag-table drift."""
+        """SCmpLgU32 added to the table beyond the 5 canonical names —
+        covered to catch flag-table drift."""
         inst = SCmpLgU32(sgpr(60, 1), sgpr(61, 1))
         w = self._wrap_and_populate(inst)
         assert self._has_scc(w.writes)
@@ -227,7 +226,7 @@ class TestSCCRuleExtract:
         assert sgpr_reads == [50, 51]
 
     def test_table_covers_all_five_canonical_opcodes(self):
-        """The bead spec calls out a minimum 5-opcode coverage. Pin it."""
+        """Minimum 5-opcode coverage. Pin it."""
         for cls in ("SCmpEQU32", "SAddU32", "SSubU32",
                     "SAddCU32", "SSubBU32", "SCSelectB32"):
             assert cls in _SCC_OPCODE_FLAGS, (
@@ -235,8 +234,8 @@ class TestSCCRuleExtract:
             )
 
     def test_sbitcmp1b32_writes_scc_does_not_read(self):
-        """Bead ckj defense-in-depth: SBitcmp1B32 has the same dst=nullptr
-        shape as SCmp* (`getParams() == [src0, src1]`), so without the
+        """Defense-in-depth: SBitcmp1B32 has the same dst=nullptr shape
+        as SCmp* (`getParams() == [src0, src1]`), so without the
         _SCC_OPCODE_FLAGS entry the generic rule would misclassify
         params[0]=src0 as a write at sgpr 50. _SCCRule must claim it with
         shape="no_dst" so both srcs land as reads only and SCC is the
@@ -384,8 +383,8 @@ class TestSCCEdgeFormation:
 
 
 # =============================================================================
-# Failure-shape wiring (bead mrj.2): compare_graphs(default, subj) classifies
-# an SCC clobber as SCCConflictFailure with producer/consumer/intervening_writer.
+# Failure-shape wiring: compare_graphs(default, subj) classifies an SCC
+# clobber as SCCConflictFailure with producer/consumer/intervening_writer.
 # =============================================================================
 
 
@@ -466,11 +465,11 @@ class TestSCCClobberFailure:
         assert type(f.consumer.rocisa_inst).__name__ == "SCSelectB32"
         assert type(f.intervening_writer.rocisa_inst).__name__ == "SAddU32"
         # Format must mention the intervening writer. The clsname is no
-        # longer in the message (post-bead `hof`: SCC failures use the
-        # per-category-stream [N] index, since the user schedules by
-        # position not by opcode); the rocisa_inst class identity is
-        # still on the Failure object for callers that want it (asserted
-        # above on lines 465-467).
+        # longer in the message — SCC failures use the per-category-stream
+        # [N] index, since the user schedules by position not by opcode
+        # (see bead `hof`); the rocisa_inst class identity is still on
+        # the Failure object for callers that want it (asserted above on
+        # lines 465-467).
         # Capture for format() is the subj's main body — same body whose
         # tagged_insts the failure's GraphNodes point at.
         msg = f.format(subj.captures["ML"])

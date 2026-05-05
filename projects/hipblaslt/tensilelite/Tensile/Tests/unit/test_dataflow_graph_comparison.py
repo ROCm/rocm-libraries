@@ -151,10 +151,9 @@ class TestCleanComparison:
 
     def test_lcc_included_in_identity_set(self):
         """Loop-counter code (category 'LCC' — `SSubU32` + `SCmpEQI32`,
-        per `Components/LCC_AUDIT.md` from bead 2bu.1) IS a full graph
-        participant as of bead 2bu.2. Its per-instruction issue cycles
-        contribute to `cumulative_issue_cycles` walks, which is what
-        sibling beads 2bu.3 / 2bu.4 / 2bu.5 use for cross-body cycle
+        per `Components/LCC_AUDIT.md`) is a full graph participant. Its
+        per-instruction issue cycles contribute to
+        `cumulative_issue_cycles` walks, which drives cross-body cycle
         counting. Identical captures with an LCC node both yield the
         same identity set including the LCC entry, and `compare_graphs`
         returns empty (no spurious LCC-only diff).
@@ -162,10 +161,8 @@ class TestCleanComparison:
         Note: in real captures the default-side scheduler emits LCC
         outside `_loopBody` while CMS bakes it into the macro, so the
         two captures CAN differ in LCC presence. That asymmetry surfaces
-        through `compare_graphs` now and is intentionally part of the
-        scope of beads 2bu.3 / 2bu.4 / 2bu.5 — this test only pins the
-        symmetric case to confirm LCC nodes participate in identity
-        comparison.
+        through `compare_graphs`; this test only pins the symmetric case
+        to confirm LCC nodes participate in identity comparison.
         """
         from dataclasses import dataclass
 
@@ -247,7 +244,7 @@ class TestPerFailureDiagnosis:
         MissingWaitFailure with nearby_other_counter_waits surfaced (the
         wrong-counter SWait at slot=1). The former
         WaitOnWrongCounterFailure was collapsed into MissingWaitFailure
-        in bead `hof`."""
+        — see bead `hof`."""
         subj_cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, vlcnt=0),
@@ -617,11 +614,10 @@ class TestDiagnoseMissingEdgeDefenses:
 #   #6 SSubU32 writes ShadowLimit+0; #9 SCSelectB32 reads ShadowLimit+0 (RAW)
 # Reversal puts the consumers before the producers — wrong code.
 #
-# As of bead wx9.10, `_writes()` / `_reads()` model scalar ALU registers, so
-# these reversals form RAW edges that compare_graphs flips into typed
-# OrderInvertedFailures. Bead wx9.11 retired the now-redundant
-# `verify_ascending_order` structural rule; the test below is the
-# replacement coverage.
+# `_writes()` / `_reads()` model scalar ALU registers, so these reversals
+# form RAW edges that compare_graphs flips into typed
+# OrderInvertedFailures. The (now-removed) `verify_ascending_order`
+# structural rule used to cover this; the test below is the replacement.
 
 
 class TestGRIncReorderDetection:
@@ -723,7 +719,7 @@ class TestGRIncReorderDetection:
         )
 
 class TestVgprChainReorderDetection:
-    """Coverage proof for non-GRIncA categories — bead wx9.10 task #4.
+    """Coverage proof for non-GRIncA categories.
 
     Mirrors `TestGRIncReorderDetection` but exercises a vgpr ALU chain
     with a different category tag (`LRA0`, modeling a Local Read Address
@@ -768,7 +764,7 @@ class TestVgprChainReorderDetection:
     def test_reversed_vgpr_chain_should_be_detected(self):
         """A reversed vgpr RAW chain (different category, different op
         family from GRIncA) must also surface as `OrderInvertedFailure`.
-        Proves the wx9.10 coverage isn't GRIncA-specific.
+        Proves the scalar-ALU coverage isn't GRIncA-specific.
         """
         ref_chain = self._make_vgpr_chain(base_slot=0, reversed_order=False)
         ref_cap = make_capture(BODY_LABEL_ML, [

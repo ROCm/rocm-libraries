@@ -22,12 +22,11 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""SCC clobber detection — graph-native (bead mrj.3 rewrite, mrj.4 cleanup).
+"""SCC clobber detection — graph-native.
 
 Tests use the graph-based ``compare_graphs`` -> ``diagnose_missing_edge`` ->
-``SCCConflictFailure`` path landed in mrj.1 / mrj.2. The prior structural
-SCC overlap check and its ``SCCConflictFailure`` structural fields were
-removed in mrj.4.
+``SCCConflictFailure`` path. The prior structural SCC overlap check and
+its ``SCCConflictFailure`` structural fields have been removed.
 
 The shape under test: an SCC producer + SCC consumer chain with an
 unrelated SCC writer landing inside the producer/consumer window,
@@ -314,7 +313,7 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
     # =========================================================================
 
     def test_gr_simple(self):
-        """Mirrors legacy `test_gr_simple` — Group 1 / Group 4 in the bead.
+        """Mirrors legacy `test_gr_simple` — Group 1 / Group 4.
 
         Two conflict assertions (legacy lines 81 and 91 of the original
         file): a SCmpEQU32 -> SCSelectB32 chain whose SCC value is

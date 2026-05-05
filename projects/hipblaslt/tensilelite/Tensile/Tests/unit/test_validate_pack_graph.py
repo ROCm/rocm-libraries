@@ -22,13 +22,12 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Graph-native ports of test_ValidatePack.py — bead ola.4 + bead wao.
+"""Graph-native ports of test_ValidatePack.py.
 
-Sub-task ola.4 of the CMS validation migration epic (`br show
-rocm-libraries-ola`): replace the structural rule `add_pack_constraints`
-in CMSValidator.py with graph-side equivalents. Bead wao closes out the
-final 5 legacy classes whose tests had no obvious graph-native twin in
-the deletion commit (`afb69530da`).
+Replaces the (now-removed) structural rule `add_pack_constraints` in
+CMSValidator.py with graph-side equivalents. Closes out the final 5
+legacy classes whose tests had no obvious graph-native twin in the
+deletion commit (`afb69530da`).
 
 Scope of this file:
   * LR -> Pack RAW dependency tests (TestLRAfterPack / _LR1 / _LR3): the
@@ -43,10 +42,10 @@ Scope of this file:
     no SWait coverage requirement so no wait-coverage failure follows.
   * MiddlePack pair-interleaving (`WrongInterleavingFailure`): the f32
     pair-consumer ordering invariant in `_hook_up_packs_f32` is mirrored
-    graph-side by `validate_middle_pack_pair_interleaving` (bead `dpi`).
-  * Bead `wao` additions: BF16 LR1 -> Pack1 (v_perm flavor), Pack/MFMA
-    same-slot boundary, and the VSwap-Pack class — VSwap reading LR-output
-    and Pack-before-Swap reorder. See `TestSwapPackGraph` below.
+    graph-side by `validate_middle_pack_pair_interleaving`.
+  * BF16 LR1 -> Pack1 (v_perm flavor), Pack/MFMA same-slot boundary, and
+    the VSwap-Pack class — VSwap reading LR-output and Pack-before-Swap
+    reorder. See `TestSwapPackGraph` below.
 
 # =============================================================================
 # Migration table — test_ValidatePack.py (deleted afb69530da)
@@ -59,7 +58,7 @@ Scope of this file:
 #         graph-native model: the structural validator ran kernel-flag
 #         arithmetic the graph doesn't replicate).
 #
-# Bead wao: TestValidatePackBF16PLRPack (5 tests)
+# TestValidatePackBF16PLRPack (5 tests)
 #   test_passing_plr_pack
 #       -> TestLRAfterPack_BF16Graph::test_BF16_pack_after_LR_baseline_passing
 #                                                        [REDUNDANT]
@@ -68,13 +67,13 @@ Scope of this file:
 #                 graph tracks register identities, not counts]
 #   test_fail_too_early_plr_pack
 #       -> TestLRAfterPack_BF16_LR1Graph::test_BF16_LR1_pack_before_LR_swait_too_late
-#                                                        [PORTED in wao]
+#                                                        [PORTED]
 #   test_fail_too_early_more_lrs_plr_pack
 #       -> n/a   [OBSOLETE: LR-count variation, same reason as above]
 #   test_fail_too_early_less_lrs_plr_pack
 #       -> n/a   [OBSOLETE: LR-count variation, same reason as above]
 #
-# Bead wao: TestValidatePackTF32MFMAReorder (2 tests)
+# TestValidatePackTF32MFMAReorder (2 tests)
 #   test_passing
 #       -> TestLRAfterPackGraph::test_LR0_baseline_passing
 #                                                        [REDUNDANT]
@@ -85,7 +84,7 @@ Scope of this file:
 #         validator's MFMA-position math; LR -> Pack RAW edge formation
 #         is independent of MFMA reorder.]
 #
-# Bead wao: TestValidatePackTF32MFMA4x4x4MultipleTiles (4 tests)
+# TestValidatePackTF32MFMA4x4x4MultipleTiles (4 tests)
 #   test_passing_multiple_tiles_different_timings
 #       -> TestLRAfterPackGraph::test_LR0_baseline_passing
 #                                                        [REDUNDANT]
@@ -95,7 +94,7 @@ Scope of this file:
 #                 inherently honor tile boundaries.]
 #   test_failing_tile1_packs_actually_too_late
 #       -> TestPackAfterMFMASameSlotGraph::test_pack_same_slot_as_mfma_orderinverted
-#                                                        [PORTED in wao:
+#                                                        [PORTED:
 #         the boundary case Pack@N and MFMA@N at SAME mfma_index, Pack
 #         appearing AFTER MFMA in stream order. Existing graph test only
 #         covers the strict Pack@N+1 / MFMA@N case.]
@@ -106,7 +105,7 @@ Scope of this file:
 #         already covered. The legacy test asserts on isValid()'s exact
 #         error message string, which is structural-validator-specific.]
 #
-# Bead wao: TestValidatePackTF32MFMA4x4x4SwapPacks (6 tests)
+# TestValidatePackTF32MFMA4x4x4SwapPacks (6 tests)
 #   test_passing_vw_combinations
 #       -> n/a   [OBSOLETE: VectorWidth kernel parameter does not affect
 #                 graph-native edge formation; per-register identity is
@@ -116,10 +115,10 @@ Scope of this file:
 #                 has no graph-native counterpart.]
 #   test_fail_swap_before_lr_done
 #       -> TestSwapPackGraph::test_swap_lr_raw_swait_after_swap
-#                                                        [PORTED in wao]
+#                                                        [PORTED]
 #   test_fail_regular_pack_before_swap_done
 #       -> TestSwapPackGraph::test_pack_before_swap_orderinverted
-#                                                        [PORTED in wao]
+#                                                        [PORTED]
 #   test_swap_depends_on_specific_lrs_vw4
 #       -> n/a   [OBSOLETE: relies on production-side per-LR-index swap
 #                 mapping (`_logical_reg_to_lr_index`); graph-native
@@ -135,11 +134,9 @@ Scope of this file:
 #       -> test_dataflow_graph_register_gaps.py::TestCumulativeIssueCycles::
 #          test_snop_wait_state_dominates_4x4_mfma_finish (and siblings)
 #                                                        [REDUNDANT:
-#         restored coverage in the validator-branch yh0 commit
-#         (8c945ed8b5) — SNop wait_state propagation is graph-native.]
-#
-# Production-side `add_pack_constraints` deletion is in scope for a later
-# bead (see `br show rocm-libraries-ola.4` "Deletion checklist").
+#         SNop wait_state propagation is graph-native; the
+#         `_min_issue_quad_cycles_for` helper applies the wait_state
+#         contribution unconditionally.]
 """
 
 from rocisa.container import vgpr
@@ -311,15 +308,15 @@ class TestLRAfterPackGraph(GraphNativeValidationTest):
         2-cycle settle window after the CVTPack producer (35z's
         QUAD_CYCLES_CVT_BEFORE_MFMA = 2 requirement).
 
-        Bead `2bu.4` switched `_cvt_to_mfma_gap_ok` to the cycle-exact
+        `_cvt_to_mfma_gap_ok` uses the cycle-exact
         `cumulative_issue_cycles` walk, which only counts instructions
         actually present in the captured stream (not slot-index gaps).
         Two intervening LRs (cost 1 each) populate the captured stream
         between Pack and MFMA so the cycle-exact walk computes
         `gap = CVT(1) + LR(1) + LR(1) - 1 = 2`, exactly meeting the
-        threshold. Pre-`2bu.4` the slot-delta arithmetic gave gap=2 from
-        the slot-index gap alone (slot_delta=3 → 2); the cycle-exact
-        walk requires real intervening instructions.
+        threshold. The earlier slot-delta arithmetic gave gap=2 from the
+        slot-index gap alone (slot_delta=3 → 2); the cycle-exact walk
+        requires real intervening instructions.
         """
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
@@ -490,7 +487,7 @@ class TestLRAfterPack_LR1Graph(GraphNativeValidationTest):
 
 
 # =============================================================================
-# MiddlePack pair-interleaving tests (bead `dpi`)
+# MiddlePack pair-interleaving tests
 # =============================================================================
 # Graph-native ports of the legacy
 # `TestValidatePackTF32CrossPackInterleaving::test_failing_interleaved` and
@@ -556,7 +553,7 @@ def _pack_middle_vsub(out_vgpr: int, src0_vgpr: int, src1_vgpr: int, *,
 
 
 class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
-    """Bead `dpi`: graph-native MiddlePack pair-interleaving classifier.
+    """Graph-native MiddlePack pair-interleaving classifier.
 
     Mirrors the legacy `MiddlePack.validate` semantics on the dataflow
     graph side: for each MiddlePack pair-leader (even-indexed within its
@@ -700,7 +697,7 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
 
 
 # =============================================================================
-# Bead `wao` ports — see migration table in module docstring.
+# Late-stage Pack ports — see migration table in module docstring.
 # =============================================================================
 # Each test below has a docstring naming the legacy test it ports.
 # Tests are alive (no xfail/skip) and use real `TaggedInstruction`s wrapping
@@ -709,7 +706,7 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
 
 
 class TestLRAfterPack_BF16_LR1Graph(GraphNativeValidationTest):
-    """Bead `wao`: BF16 LR1 -> Pack1 (v_perm flavor) coverage.
+    """BF16 LR1 -> Pack1 (v_perm flavor) coverage.
 
     Existing graph-native coverage uses VCvt-style packs for the LR1 case
     (`TestLRAfterPack_LR1Graph`) and VPerm-style packs only for LR0
@@ -763,7 +760,7 @@ class TestLRAfterPack_BF16_LR1Graph(GraphNativeValidationTest):
 
 
 class TestPackAfterMFMASameSlotGraph(GraphNativeValidationTest):
-    """Bead `wao`: Pack/MFMA same-slot boundary coverage.
+    """Pack/MFMA same-slot boundary coverage.
 
     Existing graph-native test (`TestPackAfterMFMAGraph::test_LR0_Pack_after_MFMA`)
     verifies the strictly-after case (Pack at slot 5, MFMA at slot 4).
@@ -854,7 +851,7 @@ def _swap_pack(dst_vgpr: int, src_vgpr: int, *, slot: int,
 
 
 class TestSwapPackGraph(GraphNativeValidationTest):
-    """Bead `wao`: VSwap-Pack coverage.
+    """VSwap-Pack coverage.
 
     Two ports from `TestValidatePackTF32MFMA4x4x4SwapPacks`:
 

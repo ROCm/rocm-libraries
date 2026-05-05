@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 """End-to-end integration test exercising ``mfmaReorder`` through the
-graph-native validator (bead rocm-libraries-x7t).
+graph-native validator.
 
 Background
 ----------

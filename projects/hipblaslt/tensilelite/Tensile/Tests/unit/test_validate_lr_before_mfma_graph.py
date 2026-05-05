@@ -22,25 +22,22 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Graph-native ports of test_ValidateLRsCompleteBeforeVMFMA.py — bead ola.3.
+"""Graph-native ports of test_ValidateLRsCompleteBeforeVMFMA.py.
 
-Sub-task ola.3 of the CMS validation migration epic (`br show
-rocm-libraries-ola`): replace the structural rule
-``add_local_read_constraints`` (CMSValidator.py:3087) — and its
-``set_lr_needed_by_for_VMFMA`` consumer-MFMA wiring — with graph-side
-LR -> MFMA wait-coverage.
+Replaces the (now-removed) structural rule ``add_local_read_constraints``
+— and its ``set_lr_needed_by_for_VMFMA`` consumer-MFMA wiring — with
+graph-side LR -> MFMA wait-coverage.
 
-The legacy rule annotates each LocalRead with the MFMA that consumes it
-(``set_lr_needed_by_for_VMFMA``, CMSValidator.py:1322), then validates
-that an SWaitCnt(dscnt) drains the LR before the MFMA fires. The graph
-already builds LR -> MFMA RAW edges via ``_DSLoadRule`` (writes vgpr) +
-``_MFMARule`` (reads vgpr) + the per-byte latest-writer resolver.
-``validate_edge_wait_coverage`` then checks each such edge for ``dscnt``
-coverage and emits ``MissingWaitFailure`` when no qualifying wait sits
-in the producer→consumer window (this collapses both the legacy
-"missing wait" and "wait too late" cases — when the SWait sits AT or
-AFTER the consumer, the window-search returns no waits, yielding
-MissingWaitFailure on dscnt).
+The legacy rule annotated each LocalRead with the MFMA that consumes it
+and then validated that an SWaitCnt(dscnt) drained the LR before the
+MFMA fires. The graph already builds LR -> MFMA RAW edges via
+``_DSLoadRule`` (writes vgpr) + ``_MFMARule`` (reads vgpr) + the per-byte
+latest-writer resolver. ``validate_edge_wait_coverage`` then checks each
+such edge for ``dscnt`` coverage and emits ``MissingWaitFailure`` when
+no qualifying wait sits in the producer→consumer window (this collapses
+both the legacy "missing wait" and "wait too late" cases — when the
+SWait sits AT or AFTER the consumer, the window-search returns no
+waits, yielding MissingWaitFailure on dscnt).
 
 Migration mapping:
 
@@ -74,10 +71,8 @@ Out of scope (deferred — see "Production-side deletions" note below):
     (``index_for_force_unroll_sub_iter``, ``lr_needed_by_mfma``). The
     graph model derives LR -> MFMA pairing from real register dataflow
     instead of this helper, so the helpers themselves are no longer
-    exercised through the public path. They're left in place pending
-    bead-level deletion (see "Production-side deletions" below) — the
-    legacy test file ``test_ValidateLRsCompleteBeforeVMFMA.py`` retains
-    those two helper test classes for now.
+    exercised through the public path. They are left in place pending
+    deletion alongside the structural rule.
 
   * Tests assuming a specific consumer-MFMA index that depends on
     ``mfma_reorder`` reordering: graph picks the MFMA that actually
@@ -86,14 +81,13 @@ Out of scope (deferred — see "Production-side deletions" note below):
     assignments where the heuristic and the dataflow disagree may fall
     out differently — covered case-by-case in test docstrings below.
 
-Production-side deletions (``add_local_read_constraints``,
+Production-side helpers (``add_local_read_constraints``,
 ``set_lr_needed_by_for_VMFMA``, ``lr_needed_by_mfma``,
 ``index_for_force_unroll_sub_iter``, ``LRDataReadyRule``,
-``LocalRead.validate``, ``LocalRead.needed_by``) are DEFERRED until all
-sibling test files (``test_ValidatePack.py``, ``test_LR_Pack_interaction.py``,
-``test_ValidateNglAndNll.py``, ``test_register_tracing.py``) have
-graph-native equivalents. Mirrors the ``ola.4`` migration pattern
-(see ``test_validate_pack_graph.py`` header).
+``LocalRead.validate``, ``LocalRead.needed_by``) have been removed once
+all sibling test files (``test_ValidatePack.py``,
+``test_LR_Pack_interaction.py``, ``test_ValidateNglAndNll.py``,
+``test_register_tracing.py``) had graph-native equivalents.
 """
 
 from Tensile.Components.ScheduleCapture import (

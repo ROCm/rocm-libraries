@@ -22,7 +22,7 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Graph-native port of test_ValidateGRsCompleteBeforeLr1s — bead ola.1.
+"""Graph-native port of test_ValidateGRsCompleteBeforeLr1s.
 
 Migrates the ``add_gr_finish_before_lr_constraints`` structural-rule tests to
 the dataflow-graph wait-coverage model. The legacy rule encoded:
@@ -41,12 +41,11 @@ Failures (MissingWaitFailure / MissingBarrierFailure) via two paths:
     (correct GR->SWait->SBarrier->LR pattern) the per-edge classifier
     re-validates wait sufficiency / barrier presence.
 
-Acceptance criterion (bead comment 2026-05-01 20:57 UTC):
-    Commenting out the gr_to_lr_lds_reuse branch in
-    ``_collect_barrier_edges`` (or the LDS-reuse barrier branch in
-    ``_classify_edge_coverage`` / ``diagnose_missing_edge``) MUST break
-    the negative tests below — verifying these tests bind to the
-    graph-side classifier and not to the deleted structural rule.
+Acceptance criterion: commenting out the gr_to_lr_lds_reuse branch in
+``_collect_barrier_edges`` (or the LDS-reuse barrier branch in
+``_classify_edge_coverage`` / ``diagnose_missing_edge``) MUST break the
+negative tests below — verifying these tests bind to the graph-side
+classifier and not to the (now-removed) structural rule.
 
 The legacy ``WaitTooLateFailure`` cases (``test_guaranteed_after_first_lr1``,
 ``test_swap_global_read_order_failure``) map to ``MissingWaitFailure`` /

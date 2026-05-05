@@ -22,33 +22,33 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Graph-native ports of the GRInc -> GR ordering tests (bead ola.2 phase 2).
+"""Graph-native ports of the GRInc -> GR ordering tests.
 
 The legacy structural rule `add_gr_not_too_early_constraints` encoded two
 distinct invariants in a single pass:
 
   1. LR0 -> SWait(dscnt=0) -> SBarrier -> GR    (lr_to_gr_lds_reuse, cross-wave
-     LDS sync). Already migrated to graph-native in phase 1
-     (`test_validate_gr_not_too_early_graph.py`).
+     LDS sync). Migrated to graph-native in
+     `test_validate_gr_not_too_early_graph.py`.
 
   2. last GRInc<X> -> first GR<X>                (intra-wave SRD ordering;
-     GRInc writes the SRD sgprs that GR reads). This file ports phase 2 of
-     ola.2 to graph-native: the dataflow graph forms a real RAW edge from
-     the GRInc's SAddU32 (which writes the SRD sgpr) to the GR's
-     BufferLoad (which reads it), and `compare_graphs` flips a reversed
-     order into `OrderInvertedFailure`.
+     GRInc writes the SRD sgprs that GR reads). This file covers the
+     graph-native port: the dataflow graph forms a real RAW edge from the
+     GRInc's SAddU32 (which writes the SRD sgpr) to the GR's BufferLoad
+     (which reads it), and `compare_graphs` flips a reversed order into
+     `OrderInvertedFailure`.
 
-Note on the SCC sentinel (mrj epic): the SCC machinery added in mrj.1-4
-detects an UNRELATED SCC writer landing between an SCC producer/consumer
-pair (clobber). That is a DIFFERENT invariant from GRInc->GR ordering —
-the GRInc SAddU32 writes both the SRD sgpr AND SCC; the GR's BufferLoad
-reads the SRD sgpr but NOT SCC. The ordering arc this file pins is the
-SRD RAW edge (not an SCC edge).
+Note on the SCC sentinel: the SCC machinery detects an UNRELATED SCC
+writer landing between an SCC producer/consumer pair (clobber). That is
+a DIFFERENT invariant from GRInc->GR ordering — the GRInc SAddU32 writes
+both the SRD sgpr AND SCC; the GR's BufferLoad reads the SRD sgpr but
+NOT SCC. The ordering arc this file pins is the SRD RAW edge (not an
+SCC edge).
 
 Mutation-smell-test (acceptance criterion): commenting out the SCC clobber
-branch in `diagnose_missing_edge` (ScheduleCapture.py:3197-3237) does NOT
-break tests in this file (correct — the GRInc->GR arc is sgpr-RAW, not
-SCC). But commenting out the `_GenericALURule` path (which publishes the
+branch in `diagnose_missing_edge` (ScheduleCapture.py) does NOT break
+tests in this file (correct — the GRInc->GR arc is sgpr-RAW, not SCC).
+But commenting out the `_GenericALURule` path (which publishes the
 SAddU32 sgpr write) DOES break this file's negative tests, because it's
 that rule that lets the dataflow graph see the GRInc -> GR sgpr RAW edge
 in the first place.
