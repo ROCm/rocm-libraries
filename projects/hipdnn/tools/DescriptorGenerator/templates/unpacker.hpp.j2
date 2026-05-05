@@ -148,25 +148,12 @@ namespace hipdnn_frontend::detail
     // Unpack {{ edt.name }}
     {
 {% if edt.sentinel %}
-        // Packer omits this attribute when the value is {{ edt.sentinel }}, so
-        // genuine absence is expected and silently tolerated. Real backend
-        // failures (descriptor errors, type-conversion failures) still
+        // Packer omits this attribute when the value is {{ edt.sentinel }}; the
+        // backend reports count=0 in that case and unpackGraphDataType returns
+        // DataType::NOT_SET, which is the default we want to keep. Real
+        // backend failures (descriptor errors, type-conversion failures) still
         // propagate via the explicit Err check.
-        auto [{{ edt.camel_name }}Opt, {{ edt.camel_name }}Err] = unpackOptionalGraphDataType(
-            opDesc, {{ edt.attr_name }}, "{{ op.effective_error_label }} {{ edt.effective_error_label }}");
-        if({{ edt.camel_name }}Err.is_bad())
-        {
-            return {{ edt.camel_name }}Err;
-        }
-        if({{ edt.camel_name }}Opt.has_value())
-        {
-{% if edt.frontend_uses_member_access %}
-            attributes.{{ edt.frontend_member_name }} = *{{ edt.camel_name }}Opt;
-{% else %}
-            attributes.{{ edt.frontend_setter_name }}(*{{ edt.camel_name }}Opt);
 {% endif %}
-        }
-{% else %}
         auto [{{ edt.camel_name }}, {{ edt.camel_name }}Err] = unpackGraphDataType(
             opDesc, {{ edt.attr_name }}, "{{ op.effective_error_label }} {{ edt.effective_error_label }}");
         if({{ edt.camel_name }}Err.is_bad())
@@ -177,7 +164,6 @@ namespace hipdnn_frontend::detail
         attributes.{{ edt.frontend_member_name }} = {{ edt.camel_name }};
 {% else %}
         attributes.{{ edt.frontend_setter_name }}({{ edt.camel_name }});
-{% endif %}
 {% endif %}
     }
 

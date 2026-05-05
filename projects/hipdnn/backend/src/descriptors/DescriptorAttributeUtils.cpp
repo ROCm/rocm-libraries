@@ -222,6 +222,19 @@ void getDataType(hipdnn_flatbuffers_sdk::data_objects::DataType source,
 {
     checkGetArgs(HIPDNN_TYPE_DATA_TYPE, attributeType, errorPrefix);
 
+    // UNSET storage means the field was never assigned a value. Report count=0 so
+    // callers can distinguish "absent" from a real value, matching the pattern
+    // used by getString and other optional-by-default getters. Validation that a
+    // particular field must be set lives in the descriptor's finalize().
+    if(source == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 0;
+        return;
+    }
+
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
         THROW_IF_NULL(elementCount,

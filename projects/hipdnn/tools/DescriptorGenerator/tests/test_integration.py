@@ -2105,28 +2105,33 @@ class TestTensorArrayFieldCamelCase:
 
 class TestExtraDataTypeFieldsUnpacker:
     """Verify the ``extra_data_type_fields`` block in ``unpacker.hpp.j2`` emits
-    correctly-propagating error handling for both the sentinel-gated branch
-    (must use the new ``unpackOptionalGraphDataType`` helper) and the
-    non-sentinel branch (must still use ``unpackGraphDataType`` and propagate
-    every error).
+    correctly-propagating error handling for both the sentinel-gated and
+    non-sentinel branches. Both branches now share the same code path: they
+    call ``unpackGraphDataType`` and assign its result directly. The backend
+    reports count=0 when storage is at the sentinel, in which case
+    ``unpackGraphDataType`` returns ``DataType::NOT_SET`` — which is the
+    frontend default the assignment preserves.
 
-    Regression guard for a reviewer-flagged bug: the prior sentinel branch
-    swallowed *all* errors from ``unpackGraphDataType`` (not just "attribute
-    absent"), masking real backend failures.
+    Regression guard for a reviewer-flagged bug: an earlier sentinel branch
+    swallowed *all* errors from the helper (not just "attribute absent"),
+    masking real backend failures.
     """
 
-    def test_sentinel_branch_uses_optional_helper(self, sdpa_config, generator):
+    def test_sentinel_branch_uses_unpack_graph_data_type(self, sdpa_config, generator):
         """SDPA's ``mma_core_mode`` (sentinel: ``DataType::NOT_SET``) must
-        render the optional helper, propagate real errors, and only assign
-        when a value is present.
+        render ``unpackGraphDataType``, propagate real errors, and assign the
+        result directly to the attributes member.
         """
         rendered = generator._render_template("unpacker.hpp.j2", sdpa_config)
 
-        # New helper is invoked for the sentinel branch
-        assert "unpackOptionalGraphDataType(" in rendered, (
-            "sentinel branch must use unpackOptionalGraphDataType, not "
-            "the unconditional unpackGraphDataType helper"
-        )
+        # The unified helper is invoked for the sentinel branch
+        assert (
+            "unpackGraphDataType(" in rendered
+        ), "sentinel branch must use unpackGraphDataType"
+        # The removed optional helper must not be referenced
+        assert (
+            "unpackOptionalGraphDataType(" not in rendered
+        ), "unpackOptionalGraphDataType has been removed and must not appear"
         # Targets the correct attribute
         assert "HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT" in rendered
 
@@ -2138,14 +2143,10 @@ class TestExtraDataTypeFieldsUnpacker:
             "return mmaCoreModeErr;" in rendered
         ), "sentinel branch must return the propagated error"
 
-        # Value is only assigned when present (absence is silently tolerated)
-        assert (
-            "if(mmaCoreModeOpt.has_value())" in rendered
-        ), "sentinel branch must gate the assignment on has_value()"
         # Member-access assignment (sdpa.yaml uses bare member name)
         assert (
-            "attributes.mma_core_mode = *mmaCoreModeOpt" in rendered
-        ), "sentinel branch must assign via *Opt dereference"
+            "attributes.mma_core_mode = mmaCoreMode" in rendered
+        ), "sentinel branch must assign the unpacked value directly"
 
         # Regression guard: the old swallowing pattern is gone
         assert "if(!mmaCoreModeErr.is_bad())" not in rendered, (
@@ -2155,8 +2156,8 @@ class TestExtraDataTypeFieldsUnpacker:
 
     def test_non_sentinel_branch_propagates_errors(self, generator):
         """A synthetic config with an ``ExtraDataTypeField`` whose ``sentinel``
-        is empty must render the original ``unpackGraphDataType`` helper
-        and the standard ``if(...Err.is_bad()) { return ...Err; }`` chain.
+        is empty must render ``unpackGraphDataType`` and the standard
+        ``if(...Err.is_bad()) { return ...Err; }`` chain.
 
         No in-tree config exercises this branch, so the test builds the
         OperationConfig directly.
@@ -2177,15 +2178,14 @@ class TestExtraDataTypeFieldsUnpacker:
         )
         rendered = generator._render_template("unpacker.hpp.j2", config)
 
-        # The original helper is used for the non-sentinel branch
+        # The unified helper is used for the non-sentinel branch
         assert (
             "unpackGraphDataType(" in rendered
         ), "non-sentinel branch must use unpackGraphDataType"
-        # The optional helper is NOT used here (synthetic config has no
-        # sentinel-gated entries)
+        # The removed optional helper must not be referenced
         assert (
             "unpackOptionalGraphDataType(" not in rendered
-        ), "non-sentinel branch must not invoke the optional helper"
+        ), "unpackOptionalGraphDataType has been removed and must not appear"
         # Targets the correct attribute
         assert "HIPDNN_ATTR_OP_EXTRA_DT" in rendered
 
