@@ -114,7 +114,7 @@ The graph construction (step 1) is shared by both pipelines -- the same `buildGr
 
 **Invariant**: Golden data maps tensors by **name** (e.g., `"X"`, `"W"`, `"Y"`), never by UID.
 
-UIDs are assigned during `buildGraph()` and can change across refactors. Names are set explicitly by test authors and are part of the test's semantic contract. The golden data loader resolves names to UIDs at load time:
+UIDs are assigned during `buildGraph()` and can change across refactors. Names are set explicitly by test authors and are part of the test's semantic contract. Names must be unique within a graph -- if two tensors share a name, the manifest silently drops one and the name-to-UID map silently overwrites the other, causing wrong data to load with no error. The generator enforces this at write time. The golden data loader resolves names to UIDs at load time:
 
 ```cpp
 // Resolve golden tensor names to runtime UIDs
