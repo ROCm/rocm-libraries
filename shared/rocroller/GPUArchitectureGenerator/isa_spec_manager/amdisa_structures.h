@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <cstdint>
 
 namespace amdisa
 {
