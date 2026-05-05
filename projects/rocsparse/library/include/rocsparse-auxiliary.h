@@ -2833,6 +2833,26 @@ rocsparse_status rocsparse_csc_set_strided_batch(rocsparse_spmat_descr descr,
                                                  int64_t               rows_values_batch_stride);
 
 /*! \ingroup aux_module
+ *  \brief Set the batch count and batch stride in the sparse ELL matrix descriptor
+ *
+ *  @param[inout]
+ *  descr        the pointer to the sparse ELL matrix descriptor.
+ *  @param[in]
+ *  batch_count  batch_count of the sparse ELL matrix.
+ *  @param[in]
+ *  batch_stride batch stride of the sparse ELL matrix. The same stride is
+ *               applied to both the column indices and the values arrays.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_ell_set_strided_batch(rocsparse_spmat_descr descr,
+                                                 rocsparse_int         batch_count,
+                                                 int64_t               batch_stride);
+
+/*! \ingroup aux_module
  *  \brief Get the requested attribute data from the sparse matrix descriptor
  *
  *  @param[in]

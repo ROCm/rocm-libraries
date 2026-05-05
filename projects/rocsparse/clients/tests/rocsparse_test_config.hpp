@@ -153,6 +153,12 @@ struct rocsparse_test_config_ijabct
 {
 };
 
+struct rocsparse_test_config_iabct_sddmm
+    : rocsparse_test_config_template<rocsparse_test_dispatch_enum::iabct_sddmm,
+                                     rocsparse_test_numeric_types_enum::all>
+{
+};
+
 struct rocsparse_test_config_ijabct_sddmm
     : rocsparse_test_config_template<rocsparse_test_dispatch_enum::ijabct_sddmm,
                                      rocsparse_test_numeric_types_enum::all>

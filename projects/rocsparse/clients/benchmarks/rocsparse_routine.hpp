@@ -126,6 +126,7 @@ ROCSPARSE_DO_ROUTINE(prune_dense2csr_by_percentage)		\
 ROCSPARSE_DO_ROUTINE(roti)					\
 ROCSPARSE_DO_ROUTINE(sctr)					\
 ROCSPARSE_DO_ROUTINE(sddmm)					\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_ell)				\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_coo)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csc)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csr)			\
