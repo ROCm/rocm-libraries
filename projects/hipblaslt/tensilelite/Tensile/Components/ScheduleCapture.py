@@ -438,8 +438,14 @@ _GFX1151_ARCH_PROFILE = ArchProfile(
     # match a 4x4 producer here because no opcode renders as `_4x4x*`.
     mfma_4x4_finish_cycles=0,
     # CVT->WMMA and WMMA->CVT settle windows. Unreachable on gfx1151
-    # today (UseMFMAF32XEmulation is OFF). Left as conservative placeholders
-    # pending sub-bead `l6q.1.t3`.
+    # today (UseMFMAF32XEmulation is OFF). RDNA 3.5 ISA §7.9.1 (page 77)
+    # only documents WMMA->WMMA and WMMA->VALU dependency rules; no
+    # CVT->WMMA settle window is specified, and §5.6 (page 44) states
+    # hardware resolves normal VALU data dependencies. Per the
+    # "DO NOT invent values" rule, `cvt_before_mfma_quad_cycles` is left
+    # at the conservative placeholder (bead `rocm-libraries-8ea`).
+    # `mfma_4x4_before_cvt_quad_cycles` is 0 because no 4x4 WMMA family
+    # exists on RDNA 3.5 (Table 33 page 75 — bead `j3n`).
     cvt_before_mfma_quad_cycles=3,
     mfma_4x4_before_cvt_quad_cycles=0,
     # Type-switch thresholds. RDNA 3.5 §7.9.1 documents type-switch as a

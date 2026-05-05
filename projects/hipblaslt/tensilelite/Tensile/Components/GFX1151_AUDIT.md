@@ -173,7 +173,7 @@ class.
 |-------------------------------------------------|-----------------|-------------------|------------------------------------|
 | standard_mfma_finish_cycles                     | 3               | 1                 | RDNA 3.5 ISA §7.9.1 page 77 / sub-bead `l6q.1.t1` (resolved — bead `xlh`) |
 | mfma_4x4_finish_cycles                          | 1               | 0                 | RDNA 3.5 ISA §7.9 Table 33 page 75 / sub-bead `l6q.1.t1` (no 4x4 family — bead `xlh`) |
-| cvt_before_mfma_quad_cycles                     | 2               | 3                 | placeholder; TF32 emul OFF on gfx1151 / sub-bead `l6q.1.t3` |
+| cvt_before_mfma_quad_cycles                     | 2               | 3                 | placeholder; ISA inconclusive, TF32 emul OFF on gfx1151 / sub-bead `l6q.1.t3` (bead `rocm-libraries-8ea`) |
 | mfma_4x4_before_cvt_quad_cycles                 | 5               | 0                 | RDNA 3.5 ISA §7.9 Table 33 page 75 / sub-bead `l6q.1.t3` (no 4x4 family — bead `j3n`) |
 | mfma_type_switch_threshold_from_standard        | 5               | 6                 | placeholder; ISA inconclusive / sub-bead `l6q.1.t2` (bead `j3n`) |
 | mfma_type_switch_threshold_from_4x4             | 3               | 0                 | RDNA 3.5 ISA §7.9 Table 33 page 75 / sub-bead `l6q.1.t2` (no 4x4 family — bead `j3n`) |
@@ -225,6 +225,37 @@ class.
   4x4-family-doesn't-exist conclusion; bundled into bead `j3n` because
   the validator's CVT-pack path only fires when both the 4x4 family AND
   TF32 emulation are active).
+
+### Bead `rocm-libraries-8ea` — CVT/WMMA settle windows
+
+- `cvt_before_mfma_quad_cycles`: Old 3 → **No change (3)**. Source:
+  RDNA 3.5 ISA §7.9.1 "WMMA Scheduling" (page 77) and §5.6 "Data
+  Dependency Resolution" (page 44). The §7.9.1 rule table enumerates
+  four cases for WMMA scheduling and **all four list WMMA as the first
+  instruction** (WMMA→WMMA matrix-D overlap, WMMA→WMMA same-VGPR
+  Matrix-C, WMMA→WMMA overlapped Matrix-C, WMMA→VALU read of D). No
+  entry covers CVT (or any VALU op) as the *first* instruction with
+  WMMA second — i.e. there is no documented CVT→WMMA settle window on
+  RDNA 3.5. §5.6 (page 44) confirms the general rule: "Shader hardware
+  can resolve most data dependencies"; only long-latency operations
+  (memory waits) and the specific WMMA→WMMA / WMMA→VALU cases above
+  need explicit shader handling. A `grep -in "cvt\|convert"
+  /home/alvasile/ISAs/RDNA3.5.txt | grep -i
+  "stall\|wait\|depend\|hazard\|latency\|wmma\|matrix"` returned no
+  hits — the manual is silent on CVT/WMMA hazards. Per the bead's
+  "DO NOT invent values" rule (and matching the j3n precedent for
+  `mfma_type_switch_threshold_from_standard`), the conservative
+  placeholder of 3 is preserved. The path is unreachable on shipping
+  gfx1151 anyway because `UseMFMAF32XEmulation: false` in every
+  inspected gfx1151 reference yaml; the placeholder only has to be
+  defensible if the F32X emulation path is ever activated for this
+  arch.
+- `mfma_4x4_before_cvt_quad_cycles`: **No change (0)**. Already
+  resolved under bead `j3n` — RDNA 3.5 ISA §7.9 Table 33 (page 75)
+  lists only 16x16x16 WMMA opcodes; the 4x4 family does not exist on
+  this arch, so the field is unreachable and 0 is the correct
+  no-constraint sentinel. Re-confirmed by re-grepping the ISA for
+  "4x4" — only the diagrammatic example is returned, never an opcode.
 
 ### Bead `b0t` — per-instruction issue cost
 
