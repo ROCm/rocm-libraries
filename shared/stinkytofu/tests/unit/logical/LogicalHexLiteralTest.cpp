@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
 
@@ -185,12 +186,14 @@ intrinsic SerializeTest {
     auto cleanPatterns = IntrinsicPatternConverter::irToPatterns(irModules);
 
     // Serialize to file and deserialize back
-    std::string tempFile = "/tmp/test_hex_literal.st.bc";
+    auto tempPath = std::filesystem::temp_directory_path() / "test_hex_literal.st.bc";
+    std::string tempFile = tempPath.string();
     bool serializeOk = IRSerializer::serializeToFile(cleanPatterns, tempFile);
     ASSERT_TRUE(serializeOk) << "Serialization should succeed";
 
     // Deserialize
     auto deserialized = IRSerializer::deserializeFromFile(tempFile);
+    std::filesystem::remove(tempPath);
 
     ASSERT_EQ(deserialized.size(), 1) << "Should deserialize 1 intrinsic";
 
