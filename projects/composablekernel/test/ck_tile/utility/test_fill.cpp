@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ck_tile/host/fill.hpp"
+#include "ck_tile/host/host_tensor.hpp"
 #include "ck_tile/host/joinable_thread.hpp"
 #include "ck_tile/core/numeric/e4m3.hpp"
 #include "ck_tile/core/numeric/e5m3.hpp"
@@ -428,18 +429,20 @@ TYPED_TEST(FillUniformScaleDistributionTest, NulloptSeedProducesRandomOutput)
     EXPECT_NE(0, std::memcmp(a.data(), b.data(), a.size() * sizeof(S)));
 }
 
-// 16. Range overload: passing a std::vector directly compiles and fills correctly.
-TYPED_TEST(FillUniformScaleDistributionTest, RangeOverloadFillsVector)
+// 16. Range overload: passing a ck_tile::HostTensor directly compiles and fills correctly.
+TYPED_TEST(FillUniformScaleDistributionTest, RangeOverloadFillsHostTensor)
 {
     using S = TypeParam;
-    std::vector<S> buf(1000);
+    ck_tile::HostTensor<S> buf({1000});
     ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, 7}(buf);
     auto [min_r, max_r] = expected_raw_range<S>(0.125f, 2.0f);
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i       = 0;
+    for(const S& v : buf)
     {
-        int raw = static_cast<int>(static_cast<typename S::type>(buf[i]));
+        int raw = static_cast<int>(static_cast<typename S::type>(v));
         EXPECT_GE(raw, min_r) << "index " << i;
         EXPECT_LE(raw, max_r) << "index " << i;
+        ++i;
     }
 }
 
