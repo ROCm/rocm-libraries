@@ -1366,7 +1366,19 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
     if context.default_capture is not None and context.cms_capture is not None:
         from Tensile.Components.ScheduleCapture import (
             build_dataflow_graph, compare_graphs, validate_edge_wait_coverage,
+            _resolve_arch_profile_for_isa,
         )
+        # Attach the per-arch quad-cycle profile derived from this kernel's
+        # ISA tuple so the four pair-specific gap helpers consult arch-
+        # appropriate finish-cycle / settle-window values. Unknown ISAs
+        # fall back to the CDNA 4 default for historical compatibility.
+        arch_profile = _resolve_arch_profile_for_isa(
+            tuple(kernel["ISA"]) if "ISA" in kernel else None
+        )
+        if context.default_capture.arch_profile is None:
+            context.default_capture.arch_profile = arch_profile
+        if context.cms_capture.arch_profile is None:
+            context.cms_capture.arch_profile = arch_profile
         ref_graph = build_dataflow_graph(context.default_capture)
         subj_graph = build_dataflow_graph(context.cms_capture)
         graph_failures = compare_graphs(

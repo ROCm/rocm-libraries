@@ -5997,6 +5997,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       from Tensile.Components.ScheduleCapture import (
         FourPartCapture, LoopBodyCapture, clone_loop_body,
         build_dataflow_graph, compare_graphs, validate_edge_wait_coverage,
+        _resolve_arch_profile_for_isa,
       )
       assert loopCopies == 1, (
         f"Phase 5 capture relocation requires loopCopies==1 under CMS; "
@@ -6010,6 +6011,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
         n_ll = ctx.default_n_ll if ctx.default_n_ll is not None else LoopBodyCapture(instructions=[])
         if main is not None:
           num_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
+          # Resolve the per-arch quad-cycle profile from the kernel's ISA
+          # tuple so the validator's gap checks pick up the right
+          # finish-cycle / settle-window values for this kernel's target.
+          # Unknown ISAs fall back to CDNA 4 (historical default).
+          arch_profile = _resolve_arch_profile_for_isa(
+            tuple(kernel["ISA"]) if "ISA" in kernel else None
+          )
           ctx.default = FourPartCapture(
             main_loop={0: main},
             main_loop_prev={0: clone_loop_body(main)},
@@ -6019,7 +6027,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
             num_codepaths=1,
             source="default-sia3",
             num_mfma_per_subiter=self.states.numMfmaPerIter,
+            arch_profile=arch_profile,
           )
+          # CMS-side capture must use the same profile so both graphs
+          # compare apples-to-apples through the per-arch helpers.
+          if ctx.cms is not None:
+            ctx.cms.arch_profile = arch_profile
           if ctx.cms is not None:
             kernel_label = (
               f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}"
