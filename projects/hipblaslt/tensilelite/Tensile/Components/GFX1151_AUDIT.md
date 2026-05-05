@@ -279,51 +279,79 @@ What it DOES NOT deliver (filed as sub-beads):
 Closes the deferred live-build sweep. Full slice + per-mnemonic survey
 sit in [`GFX1151_AUDIT/README.md`](GFX1151_AUDIT/README.md); summary:
 
-**Chosen yaml** (the audit's named yaml does not exist):
+> **Note (redo).** A first attempt (commit `e056707a79`) silently
+> fell back to the BBS yaml because the agent searched the develop
+> checkout where the audit's documented HHS yaml does not exist. The
+> long-term-plans worktree carries the HHS yaml at exactly the
+> documented path. The BBS slice
+> (`GFX1151_AUDIT/sample_kernel_MT16x16_BBS_BH.s`) was committed in
+> the first run; it has been removed and superseded by the HHS slice
+> recorded below. The BBS findings are subsumed by the HHS findings
+> (HHS observed everything BBS did, plus the half-precision opcodes
+> BBS could not exercise).
+
+**Chosen yaml** (the audit's originally documented file):
 ```
-projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/gfx1151_Cijk_Alik_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs.yaml
+projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/gfx1151_Cijk_Alik_Bljk_HHS_BH_Bias_HAS_SAV_UserArgs.yaml
 ```
-(BBS = bf16 input/output, fp32 compute. 1639 lines, 6 unique
-solutions — fastest of the two suggested fall-backs.)
+(HHS = f16 input/output, fp32 compute. 196 KB yaml, 3 unique
+solutions emitted by `TensileCreateLibrary`.)
 
 **Build command** (corrects the audit's wrong tool name):
 ```
-Tensile/bin/TensileCreateLibrary \
-  --architecture gfx1151 --no-enumerate --jobs 4 --keep-build-tmp \
-  /tmp/gfx1151_audit_ce6_logic /tmp/gfx1151_audit_ce6 HIP
+env -C <worktree>/projects/hipblaslt/tensilelite \
+  PYTHONPATH=<worktree>/projects/hipblaslt/tensilelite \
+  python3 Tensile/bin/TensileCreateLibrary \
+    --architecture gfx1151 --no-enumerate --jobs 4 --keep-build-tmp \
+    /tmp/gfx1151_audit_ce6_hhs_logic /tmp/gfx1151_audit_ce6_hhs HIP
 ```
-(Tensile/bin/Tensile takes benchmark-config yamls; the rocBLASLt
-logic yaml is a tuning OUTPUT and is rejected by it. See
-`GFX1151_AUDIT/README.md` for the failure trace.)
+(`Tensile/bin/Tensile` takes benchmark-config yamls; the rocBLASLt
+logic yaml is a tuning OUTPUT and is rejected by it.
+`PYTHONPATH=<worktree>/...` is required so the worktree's Tensile
+package — which knows about `UseCustomMainLoopSchedule` — runs
+instead of the develop checkout's older `pip install -e` shadow. See
+`GFX1151_AUDIT/README.md` for full provenance.)
 
-**Build outcome**: SUCCESS in ~7 seconds. 6 `.s` files (130-477 KB),
-6 `.o` files, packaged `.co` library. Toolchain `/opt/rocm/bin/amdclang++`
-(ROCm 7.2.53211, hipcc → clang 22.0.0). No assembler errors, no
-linker errors.
+**Build outcome**: SUCCESS. 3 `.s` files (122 KB, 132 KB, 146 KB),
+3 `.o` files, packaged `.co` library. Toolchain
+`/opt/rocm/bin/amdclang++` (ROCm 7.2.53211, hipcc → clang 22.0.0).
+No assembler errors, no linker errors.
 
-**rocisa instruction classes observed** in the captured slice
-(union over all six `.s` files):
+**rocisa instruction classes observed** in the captured HHS slice
+(union over all three `.s` files; 108 distinct mnemonics):
 
-- `MFMAInstruction` — rendered as `v_wmma_f32_16x16x16_bf16` (single
-  WMMA opcode in this kernel set; gfx1151 uses BBS so the bf16
-  compute variant fires)
+- `MFMAInstruction` — rendered as `v_wmma_f32_16x16x16_f16` (single
+  WMMA opcode in this kernel set; HHS exercises the f16 compute
+  variant — BBS exercised the bf16 variant)
 - `DSLoadB32`, `DSLoadB128`
 - `DSStoreB32`, `DSStoreB128`
 - `BufferLoadB32`, `BufferLoadB128`
 - `BufferLoadB16` (sub-32-bit, rendered as `buffer_load_d16_b16` /
   `buffer_load_d16_hi_b16`)
 - `BufferStoreB16`, `BufferStoreB32` (epilogue / bias path)
-- Scalar kernarg loads `s_load_b{32,64,128,512}` (handled via
-  `_NoDataflowRule` for kernarg fetch)
+- Scalar kernarg loads `s_load_b{32,64,128,256,512}` (full B32-B512
+  ladder; handled via `_NoDataflowRule`)
 - `SWaitCnt`, `SBarrier`, `SNop`
+- half-precision conversion + mix FMA: `v_cvt_f16_f32`,
+  `v_cvt_f32_f16`, `v_fma_mix_f32` (HHS-exclusive vs the BBS run)
 - generic ALU: `v_add*`, `v_mov_b32`, `v_cvt_*`, `v_rcp_*`,
-  `v_add_lshl_u32`, `v_add3_u32`
+  `v_add_lshl_u32`, `v_lshl_add_u32`, `s_cmpk_lg_u32`
+
+**Mnemonics observed in HHS but NOT in the prior BBS slice**
+(genuinely new findings):
+
+- `v_wmma_f32_16x16x16_f16` (HHS-only WMMA opcode)
+- `v_cvt_f16_f32`, `v_cvt_f32_f16` (half conversions on input/store path)
+- `v_fma_mix_f32` (mixed-precision FMA — half-promote MAC)
+- `s_load_b256` (additional kernarg-load width that fills the
+  previously-flagged B128/B512 gap)
+- `s_cmpk_lg_u32` (additional immediate-compare variant)
 
 **Confirmed NOT emitted** (matches static-analysis predictions):
 
 - `v_swap_*` (audit table flagged as "Likely unused on gfx1151" —
-  positive confirmation).
-- `v_pk_*`, `v_dot*`, TF32 cvt sequences (TF32 emulation OFF on
+  positive confirmation, holds for both BBS and HHS).
+- `v_pk_*`, `v_dot*`, full TF32 cvt sequences (TF32 emulation OFF on
   gfx1151 reference yamls — confirmed).
 - `s_delay_alu` (RDNA 3.x assembler hint — tensilelite gfx1151 emit
   path relies on `s_waitcnt` only).
@@ -332,18 +360,32 @@ linker errors.
   `s_waitcnt_loadcnt`, `s_waitcnt_storecnt`) — kernel uses unified
   `s_waitcnt`. The audit's noted RDNA SWaitCnt-counter-semantics gap
   remains real at the ISA level but is not exercised by the emit path
-  in this build.
+  in this build either.
 
 **New findings vs the static-analysis coverage table**:
 
-1. `BufferStoreB16` / `BufferStoreB32` are produced by the epilogue
-   and bias path — they exist in the validator's `_OPERAND_RULES`
-   (separate `_BufferStoreRule`) but were not enumerated in the
-   audit's "Instruction-coverage table". No correctness gap; the
-   table should be expanded for completeness.
-2. `s_load_b512` is a wider scalar load than the `s_load_b256` ceiling
-   the static-analysis sweep enumerated — handled correctly under the
-   generic `_NoDataflowRule` kernarg dispatch. Flagged for record.
+1. `v_fma_mix_f32` — fires from the HHS half-precision compute path.
+   Currently absorbed by `_GenericALURule`. The audit's
+   "Instruction-coverage table" does not enumerate the mix-FMA family
+   (`VFmaMixF32`, and possibly `VFmaMixF16` if a different kernel
+   shape produces it). No correctness gap; recommend adding the
+   class to the table for completeness.
+2. `v_cvt_f16_f32` / `v_cvt_f32_f16` — half/single conversions are
+   absorbed by `_GenericALURule`. They were not specifically called
+   out in the audit's coverage table (which enumerated the BF16/TF32
+   conversion family but not the F16 pair). Recommend adding
+   `VCvtF16toF32` / `VCvtF32toF16` for completeness.
+3. `s_load_b256` — fills the previously-noted gap between `b128` and
+   `b512` in the audit's coverage table. Handled by `_NoDataflowRule`.
+   The full `B32`-`B512` kernarg-load ladder is now empirically
+   observed.
+4. `BufferStoreB16` / `BufferStoreB32` (carryover from the BBS run) —
+   produced by epilogue + bias path; absorbed by `_BufferStoreRule`
+   but still not enumerated in the audit's coverage table. Same
+   recommendation as before.
+5. `s_load_b512` (carryover) — wider than the `s_load_b256` ceiling
+   the static-analysis sweep enumerated; handled correctly under the
+   generic `_NoDataflowRule` kernarg dispatch.
 
 No `CaptureUnknownInstructionError`-class surprises were observed:
 every emitted mnemonic maps cleanly to an existing `_OPERAND_RULES`
