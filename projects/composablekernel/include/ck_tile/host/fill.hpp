@@ -479,24 +479,33 @@ struct FillConstant
     }
 };
 
-/// @brief Fills a range with uniformly distributed random ExMy scale values.
-///
-/// Accepts human-readable float bounds and maps them to the raw byte range of the
-/// target scale type by re-centering the IEEE 754 exponent into the type's own
-/// bias space. Sampling is then uniform over raw bytes, which is uniform over
-/// representable values of the type.
-///
-/// Fields: min_scale_ (lower float bound), max_scale_ (upper float bound, no value
-/// generated exceeds it), seed_ (RNG seed; nullopt for random device).
-/// Precondition: min_scale_ <= max_scale_. Violating this crashes at runtime.
-/// Usage:
-///   FillUniformScaleDistribution<e8m0_t>{0.125f, 2.0f, 42}(scale_tensor);
-///   FillUniformScaleDistribution<e4m3_t>{0.125f, 2.0f}(buf.begin(), buf.end());
+/**
+ * @brief Fills a range with uniformly distributed random ExMy (exponent-mantissa) scale values.
+ *
+ * Accepts human-readable float bounds and maps them to the raw byte range of the
+ * target scale type by re-centering the IEEE 754 exponent into the type's own
+ * bias space. Sampling is then uniform over raw bytes, which is uniform over
+ * representable values of the type.
+ *
+ * @tparam ScaleType An ExMy scale type (e.g. e8m0_t, e4m3_t, e5m3_t).
+ *
+ * @note Both bounds snap down to the nearest representable power-of-two in ScaleType space.
+ *       If min_scale_ is not an exact power-of-two, the effective lower bound is lower than
+ *       requested; if max_scale_ is not an exact power-of-two, the effective upper bound is
+ *       also lower than requested.
+ *
+ * Fields: min_scale_ (lower float bound), max_scale_ (upper float bound, no value
+ * generated exceeds it), seed_ (RNG seed; nullopt for random device, default 11939).
+ * Precondition: min_scale_ <= max_scale_. Violating this is undefined behavior.
+ * Usage:
+ *   FillUniformScaleDistribution<e8m0_t>{0.125f, 2.0f, 42}(scale_tensor);
+ *   FillUniformScaleDistribution<e4m3_t>{0.125f, 2.0f}(buf.begin(), buf.end());
+ */
 template <typename ScaleType>
 struct FillUniformScaleDistribution
 {
-    float min_scale_;
-    float max_scale_;
+    float min_scale_{0.125f};
+    float max_scale_{2.0f};
     std::optional<uint32_t> seed_{11939};
 
     template <typename ForwardIter>
@@ -518,7 +527,8 @@ struct FillUniformScaleDistribution
         const int ieee_max = static_cast<int>(numeric_utils<float>::get_exponent(max_scale_));
 
         // Absolute limits of the raw byte space for this type.
-        // raw=0 is the denorm-zero for e4m3/e5m3 (decodes to 0.0, not a valid scale).
+        // raw=0 is reserved: denorm-zero for e4m3/e5m3 (decodes to 0.0), and subnormal
+        // territory for e8m0 (2^-127) — excluded to keep all generated values usable as scales.
         // binary_max is the last finite raw value (binary_nan - 1 for all ExMy types).
         constexpr int raw_min = 1;
         constexpr int raw_max = static_cast<int>(numeric<ScaleType>::binary_max);
@@ -530,8 +540,15 @@ struct FillUniformScaleDistribution
         // max_r uses mant=0 (not | mant_mask) so it decodes to exactly max_scale — the
         // power-of-two itself. This ensures no generated value exceeds max_scale_ in float space.
         // std::max/min clamp to the valid byte range, preventing out-of-range or NaN raw values.
-        const int min_r = std::max(((ieee_min - float_bias) + type_bias) << mant_bits, raw_min);
-        const int max_r = std::min(((ieee_max - float_bias) + type_bias) << mant_bits, raw_max);
+        const int min_r =
+            std::max(((ieee_min - float_bias) + type_bias) * (1 << mant_bits), raw_min);
+        const int max_r =
+            std::min(((ieee_max - float_bias) + type_bias) * (1 << mant_bits), raw_max);
+
+        // Precondition: clamping must not invert the range. This can happen when both bounds
+        // exceed the type's representable range in the same direction (both too large or too
+        // small). If triggered, use bounds within the type's representable range.
+        assert(min_r <= max_r);
 
         // Sample raw bytes uniformly in [min_r, max_r], then construct ScaleType directly
         // from the raw byte — bypassing the float ctor which would discard mantissa bits.

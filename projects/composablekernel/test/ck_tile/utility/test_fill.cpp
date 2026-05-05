@@ -3,9 +3,10 @@
 
 #include "ck_tile/host/fill.hpp"
 #include "ck_tile/host/joinable_thread.hpp"
-#include "ck_tile/core/numeric/e8m0.hpp"
 #include "ck_tile/core/numeric/e4m3.hpp"
 #include "ck_tile/core/numeric/e5m3.hpp"
+#include "ck_tile/core/numeric/e8m0.hpp"
+
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -191,9 +192,11 @@ static std::pair<int, int> expected_raw_range(float min_f, float max_f)
     constexpr int mant_bits  = ck_tile::numeric_traits<ScaleType>::mant;
     const int ieee_min       = static_cast<int>(ck_tile::numeric_utils<float>::get_exponent(min_f));
     const int ieee_max       = static_cast<int>(ck_tile::numeric_utils<float>::get_exponent(max_f));
-    const int min_r          = ((ieee_min - float_bias) + type_bias) << mant_bits;
-    const int max_r          = ((ieee_max - float_bias) + type_bias)
-                      << mant_bits; // mant=0: decodes to exactly max_f
+    constexpr int raw_min    = 1;
+    constexpr int raw_max    = static_cast<int>(ck_tile::numeric<ScaleType>::binary_max);
+    const int scale          = 1 << mant_bits;
+    const int min_r          = std::max(((ieee_min - float_bias) + type_bias) * scale, raw_min);
+    const int max_r          = std::min(((ieee_max - float_bias) + type_bias) * scale, raw_max);
     return {min_r, max_r};
 }
 
@@ -350,18 +353,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, EmptyRangeNoCrash)
         (ck_tile::FillUniformScaleDistribution<S>{1.0f, 1.0f, 0}(buf.begin(), buf.end())));
 }
 
-// 11. Inverted bounds (min_scale > max_scale): std::uniform_int_distribution requires
-//     a <= b and terminates (crash or exception) when violated. Documented here so
-//     callers know this is not a safe call — the function has no guard of its own.
-TYPED_TEST(FillUniformScaleDistributionTest, InvertedBoundsCrashes)
-{
-    using S = TypeParam;
-    std::vector<S> buf(100);
-    EXPECT_DEATH(
-        (ck_tile::FillUniformScaleDistribution<S>{4.0f, 0.0625f, 1}(buf.begin(), buf.end())), "");
-}
-
-// 12. For e8m0 (mant=0), every generated value is exactly within [min_scale, max_scale].
+// 11. For e8m0 (mant=0), every generated value is exactly within [min_scale, max_scale].
 //     Each exponent band has exactly one value so no overshoot is possible.
 TEST(FillUniformScaleDistributionE8M0, StrictFloatBounds)
 {
@@ -377,7 +369,7 @@ TEST(FillUniformScaleDistributionE8M0, StrictFloatBounds)
     }
 }
 
-// 13. No generated value exceeds max_scale_ in float space, for any ExMy type.
+// 12. No generated value exceeds max_scale_ in float space, for any ExMy type.
 //     max_r is set to the exact power-of-two raw byte (mant=0), so the highest
 //     possible output is exactly max_scale_.
 TYPED_TEST(FillUniformScaleDistributionTest, StrictFloatUpperBound)
@@ -393,7 +385,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, StrictFloatUpperBound)
     }
 }
 
-// 14. When min_scale is not an exact power of two it snaps down to the nearest lower
+// 13. When min_scale is not an exact power of two it snaps down to the nearest lower
 //     power-of-two exponent, so some generated values will be below min_scale.
 TYPED_TEST(FillUniformScaleDistributionTest, NonPowerOfTwoMinSnapsBelow)
 {
@@ -411,7 +403,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, NonPowerOfTwoMinSnapsBelow)
         << "Expected some values below non-power-of-two min_scale due to exponent snapping";
 }
 
-// 15. Extreme bounds that exceed the type's representable range clamp safely
+// 14. Extreme bounds that exceed the type's representable range clamp safely
 //     and still produce only finite, positive values — no NaN, no crash.
 TYPED_TEST(FillUniformScaleDistributionTest, ExtremeOutOfRangeBoundsClampSafely)
 {
@@ -423,6 +415,31 @@ TYPED_TEST(FillUniformScaleDistributionTest, ExtremeOutOfRangeBoundsClampSafely)
         float f = static_cast<float>(buf[i]);
         EXPECT_TRUE(std::isfinite(f)) << "index " << i;
         EXPECT_GT(f, 0.f) << "index " << i;
+    }
+}
+
+// 15. nullopt seed: two calls produce different outputs (random device seeding).
+TYPED_TEST(FillUniformScaleDistributionTest, NulloptSeedProducesRandomOutput)
+{
+    using S = TypeParam;
+    std::vector<S> a(500), b(500);
+    ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, std::nullopt}(a.begin(), a.end());
+    ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, std::nullopt}(b.begin(), b.end());
+    EXPECT_NE(0, std::memcmp(a.data(), b.data(), a.size() * sizeof(S)));
+}
+
+// 16. Range overload: passing a std::vector directly compiles and fills correctly.
+TYPED_TEST(FillUniformScaleDistributionTest, RangeOverloadFillsVector)
+{
+    using S = TypeParam;
+    std::vector<S> buf(1000);
+    ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, 7}(buf);
+    auto [min_r, max_r] = expected_raw_range<S>(0.125f, 2.0f);
+    for(std::size_t i = 0; i < buf.size(); ++i)
+    {
+        int raw = static_cast<int>(static_cast<typename S::type>(buf[i]));
+        EXPECT_GE(raw, min_r) << "index " << i;
+        EXPECT_LE(raw, max_r) << "index " << i;
     }
 }
 

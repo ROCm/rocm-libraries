@@ -66,8 +66,8 @@ int run_mx_flatmm_with_layouts(const ck_tile::ArgParser& arg_parser,
     {
         auto a_buffer_bytes = a_host.get_element_space_size_in_bytes();
         auto b_buffer_bytes = b_origin_host.get_element_space_size_in_bytes();
-        ck_tile::FillUniformDistribution<>{-1.f, 1.f}(scale_a);
-        ck_tile::FillUniformDistribution<>{-1.f, 1.f}(scale_b);
+        ck_tile::FillUniformScaleDistribution<ScaleType>{0.125f, 2.0f}(scale_a);
+        ck_tile::FillUniformScaleDistribution<ScaleType>{0.125f, 2.0f}(scale_b);
         std::vector<int8_t> random_bufA(a_buffer_bytes);
         std::vector<int8_t> random_bufB(b_buffer_bytes);
         std::random_device rd;
@@ -89,8 +89,8 @@ int run_mx_flatmm_with_layouts(const ck_tile::ArgParser& arg_parser,
         {
             ck_tile::FillUniformDistribution<>{0.0f, 1.0f}(a_host);
             ck_tile::FillUniformDistribution<>{-.5f, .5f}(b_origin_host);
-            ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_a);
-            ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_b);
+            ck_tile::FillUniformScaleDistribution<ScaleType>{0.125f, 2.0f}(scale_a);
+            ck_tile::FillUniformScaleDistribution<ScaleType>{0.125f, 2.0f}(scale_b);
         }
         else if(init_method == 1)
         {
