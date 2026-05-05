@@ -27,7 +27,7 @@ inline Error hasEngineConfigs(hipdnnBackendDescriptor_t engineHeuristicDesc)
 
     if(availableEngineCount == 0)
     {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+        return {ErrorCode::GRAPH_NOT_SUPPORTED,
                 "No engine configurations available for the graph."};
     }
 
@@ -48,11 +48,11 @@ inline Error
                                              0,
                                              &availableEngineCount,
                                              nullptr),
-        "Failed to get attribue from the engine heuristic descriptor.");
+        "Failed to get attribute from the engine heuristic descriptor.");
 
     if(availableEngineCount == 0)
     {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+        return {ErrorCode::GRAPH_NOT_SUPPORTED,
                 "No engine configurations available for the graph."};
     }
 
@@ -86,7 +86,7 @@ inline Error
 
     if(count == 0)
     {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+        return {ErrorCode::GRAPH_NOT_SUPPORTED,
                 "No engine configurations retrieved from the heuristic desc."};
     }
 
