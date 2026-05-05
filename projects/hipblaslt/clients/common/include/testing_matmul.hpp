@@ -3782,7 +3782,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 return std::vector<int>{arg.solution_index};
             };
 
-            auto fetchAlgosForBatch = [&](const std::vector<int>& batch) {
+            auto fetchAlgosForBatch = [&](std::vector<int>& batch) {
                 std::vector<hipblasLtMatmulHeuristicResult_t> candidates;
                 const auto status
                     = hipblaslt_ext::getAlgosFromIndex(handle, batch, candidates);
