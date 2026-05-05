@@ -3,6 +3,7 @@
 
 """MIOpen argument parsing and flag alias normalization."""
 
+import warnings
 from typing import Dict, List
 
 
@@ -34,11 +35,12 @@ def parse_args(tokens: List[str]) -> Dict[str, str]:
                 result[tok] = "1"  # boolean flag
                 i += 1
         else:
+            warnings.warn(f"Stray value ignored: {tok!r}", stacklevel=2)
             i += 1
     return result
 
 
-def _int(args: Dict[str, str], key: str, default: int = 0) -> int:
+def get_int_arg(args: Dict[str, str], key: str, default: int = 0) -> int:
     return int(args.get(key, default))
 
 
@@ -78,6 +80,7 @@ CONV_FLAG_ALIASES: Dict[str, str] = {
     "--dilation_w": "-j",
     "--group_count": "-g",
     "--forw": "-F",
+    "--mode": "-m",
     # Short → long (3D / layout parameters)
     "-_": "--spatial_dim",
     "-!": "--in_d",
@@ -88,6 +91,17 @@ CONV_FLAG_ALIASES: Dict[str, str] = {
     "-I": "--in_layout",
     "-f": "--fil_layout",
     "-O": "--out_layout",
+    "--pad_mode": "-z",
+    "--tensor_vect": "-Z",
+    "--trans_output_pad_h": "-Y",
+    "--trans_output_pad_w": "-X",
+    "--trans_output_pad_d": "-%",
+    "--bias": "-b",
+    "--vector_length": "-L",
+    "--pad_val": "-r",
+    "--wei_cast_type": "-R",
+    "--out_cast_type": "-T",
+    "--in_cast_type": "-U",
 }
 
 BNORM_FLAG_ALIASES: Dict[str, str] = {
@@ -97,7 +111,15 @@ BNORM_FLAG_ALIASES: Dict[str, str] = {
     "--in_h": "-H",
     "--in_w": "-W",
     "--in_d": "-D",
+    "--layout": "-L",
+    "--mode": "-m",
+    "--alpha": "-A",
+    "--beta": "-B",
+    "--activ_mode": "-f",
     # Short → long
     "-F": "--forw",
     "-b": "--back",
+    "--run": "-r",
+    "--save": "-s",
+    "--inverse_variance": "-I",
 }

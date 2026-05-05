@@ -8,12 +8,13 @@ Usage:
     dnn-convert-shapes shapes.txt --outdir graphs/generic_convolutions/
 """
 
-from .bnorm import build_bnorm_json
+from .bnorm import BnormParams, build_bnorm_json
 from .cli import convert_line, main, parse_line
 from .conv import ConvParams, build_conv_json, conv_io_type
 from .parsing import (
     BNORM_FLAG_ALIASES,
     CONV_FLAG_ALIASES,
+    get_int_arg,
     is_flag,
     normalize_args,
     parse_args,
@@ -29,12 +30,14 @@ from .strides import (
 __all__ = [
     "BNORM_FLAG_ALIASES",
     "CONV_FLAG_ALIASES",
+    "BnormParams",
     "ConvParams",
     "build_bnorm_json",
     "build_conv_json",
     "conv_io_type",
     "conv_out_dim",
     "convert_line",
+    "get_int_arg",
     "is_flag",
     "main",
     "nchw_strides",

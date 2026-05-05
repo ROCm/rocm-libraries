@@ -4,11 +4,12 @@
 """CLI entry point and line-level dispatch for MIOpen shape conversion."""
 
 import argparse
+import dataclasses
 import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bnorm import _bnorm_filename, build_bnorm_json
 from .conv import ConvParams, _conv_filename, build_conv_json, conv_io_type
@@ -68,22 +69,46 @@ def parse_line(line: str) -> Optional[Tuple[str, Dict[str, str]]]:
     return operation, args
 
 
+_DIRECTION_BITS = [1, 2, 4]
+
+
+def _expand_directions(F: int) -> List[int]:
+    """Expand an MIOpen -F bitmask into individual direction values.
+
+    F=0 means all directions (1, 2, 4).  Otherwise each set bit selects
+    a direction: 1=fwd, 2=dgrad, 4=wgrad.  E.g. F=3 → [1, 2], F=5 → [1, 4].
+    """
+    if F == 0:
+        return list(_DIRECTION_BITS)
+    return [bit for bit in _DIRECTION_BITS if F & bit]
+
+
 def convert_line(
     operation: str, args: Dict[str, str], prefix: str
-) -> Tuple[str, Dict[str, Any]]:
-    """Convert parsed MIOpen args to (filename_stem, json_dict)."""
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """Convert parsed MIOpen args to a list of (filename_stem, json_dict).
+
+    Returns multiple entries when F selects more than one direction
+    (F=0 for all, or bitmask combinations like F=3 for fwd+dgrad).
+    """
     if operation in _CONV_OPERATIONS:
         p = ConvParams.from_args(args)
-        graph = build_conv_json(p, io_type=conv_io_type(operation))
-        name_stem = _conv_filename(prefix, p)
+        directions = _expand_directions(p.F)
+        results = []
+        for f in directions:
+            p_dir = dataclasses.replace(p, F=f)
+            graph = build_conv_json(p_dir, io_type=conv_io_type(operation))
+            name_stem = _conv_filename(prefix, p_dir)
+            graph["name"] = name_stem
+            results.append((name_stem, graph))
+        return results
     elif operation in _BNORM_OPERATIONS:
         graph = build_bnorm_json(operation, args)
         name_stem = _bnorm_filename(prefix, operation, args)
+        graph["name"] = name_stem
+        return [(name_stem, graph)]
     else:
         raise ValueError(f"Unsupported operation: {operation!r}")
-
-    graph["name"] = name_stem
-    return name_stem, graph
 
 
 # ---------------------------------------------------------------------------
@@ -142,57 +167,66 @@ def _process_inline_args(args_str: str, output: Optional[str]) -> int:
     parsed_args = parse_args(flag_tokens)
 
     try:
-        name_stem, graph = convert_line(operation, parsed_args, "")
+        results = convert_line(operation, parsed_args, "")
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    if output:
-        out_path = Path(output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        out_path = Path(f"{name_stem}.json")
+    if output and len(results) > 1:
+        print(
+            "ERROR: --output cannot be used when F selects multiple directions. "
+            "Omit --output to write each direction to a separate file.",
+            file=sys.stderr,
+        )
+        return 1
 
-    out_path.write_text(json.dumps(graph, indent=4) + "\n")
-    print(f"Written: {out_path}")
+    for name_stem, graph in results:
+        if output:
+            out_path = Path(output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            out_path = Path(f"{name_stem}.json")
+
+        out_path.write_text(json.dumps(graph, indent=4) + "\n")
+        print(f"Written: {out_path}")
     return 0
 
 
 def _process_file(input_path: Path, outdir: Path) -> Tuple[int, int, int]:
     """Process one shape file. Returns (written, skipped, warnings)."""
     prefix = input_path.stem.lower().replace("-", "_")
-    lines = input_path.read_text().splitlines()
 
     written = 0
     skipped = 0
     warnings = 0
     seen_stems: Dict[str, int] = {}
 
-    for lineno, raw_line in enumerate(lines, start=1):
-        parsed = parse_line(raw_line)
-        if parsed is None:
-            skipped += 1
-            continue
+    with open(input_path) as fh:
+        for lineno, raw_line in enumerate(fh, start=1):
+            parsed = parse_line(raw_line)
+            if parsed is None:
+                skipped += 1
+                continue
 
-        operation, args = parsed
-        try:
-            name_stem, graph = convert_line(operation, args, prefix)
-        except Exception as exc:
-            print(f"  WARNING line {lineno}: {exc}", file=sys.stderr)
-            warnings += 1
-            continue
+            operation, args = parsed
+            try:
+                results = convert_line(operation, args, prefix)
+            except Exception as exc:
+                print(f"  WARNING line {lineno}: {exc}", file=sys.stderr)
+                warnings += 1
+                continue
 
-        # Deduplicate: if same stem appears more than once, append a counter
-        count = seen_stems.get(name_stem, 0)
-        seen_stems[name_stem] = count + 1
-        if count > 0:
-            unique_stem = f"{name_stem}_{count}"
-        else:
-            unique_stem = name_stem
+            for name_stem, graph in results:
+                count = seen_stems.get(name_stem, 0)
+                seen_stems[name_stem] = count + 1
+                if count > 0:
+                    unique_stem = f"{name_stem}_{count}"
+                else:
+                    unique_stem = name_stem
 
-        out_path = outdir / f"{unique_stem}.json"
-        out_path.write_text(json.dumps(graph, indent=4) + "\n")
-        written += 1
+                out_path = outdir / f"{unique_stem}.json"
+                out_path.write_text(json.dumps(graph, indent=4) + "\n")
+                written += 1
 
     return written, skipped, warnings
 
@@ -235,7 +269,7 @@ def main() -> int:
         total_warnings += warns
 
     print(f"\nTotal: {total_written} files written, {total_warnings} warnings.")
-    return 0 if total_warnings == 0 else 1
+    return 0
 
 
 if __name__ == "__main__":

@@ -3,10 +3,12 @@
 
 """Batchnorm type resolution and hipDNN JSON graph construction."""
 
-from typing import Any, Dict, Optional
+import dataclasses
+import warnings
+from typing import Any, Dict, List
 
-from .parsing import BNORM_FLAG_ALIASES, _int, normalize_args
-from .strides import _input_strides
+from .parsing import BNORM_FLAG_ALIASES, get_int_arg, normalize_args
+from .strides import _input_strides, nchw_strides, ncdhw_strides
 from .tensors import _join_prefix, _make_scalar_tensor, _make_tensor
 
 # ---------------------------------------------------------------------------
@@ -25,6 +27,116 @@ def _bnorm_io_type(operation: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Batchnorm parsed parameters
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class BnormParams:
+    """Parsed batchnorm parameters extracted from MIOpen driver args."""
+
+    N: int
+    C: int
+    H: int
+    W: int
+    D: int
+    layout: str
+    mode: int
+    forw: int
+    back: int
+
+    @classmethod
+    def from_args(cls, args: Dict[str, str]) -> "BnormParams":
+        args = normalize_args(args, BNORM_FLAG_ALIASES)
+        D = get_int_arg(args, "-D", 0)
+        default_layout = "NCDHW" if D > 0 else "NCHW"
+
+        activ_mode = args.get("--activ_mode", args.get("-f", "0"))
+        if activ_mode != "0":
+            warnings.warn(
+                "Fused activation (--activ_mode / -f) is not supported in "
+                "hipDNN batchnorm nodes; use a separate pointwise node",
+                stacklevel=2,
+            )
+        alpha = args.get("-A", "1.0")
+        beta = args.get("-B", "0.")
+        if alpha not in ("1", "1.0") or beta not in ("0", "0.", "0.0"):
+            warnings.warn(
+                f"Non-default alpha={alpha}/beta={beta} scaling is not "
+                "supported in hipDNN batchnorm graphs",
+                stacklevel=2,
+            )
+        if args.get("-s", "0") != "0":
+            warnings.warn(
+                "Save mode (-s/--save) for running mean/variance is not "
+                "supported; hipDNN batchnorm graphs do not populate "
+                "next_running_mean/variance tensors",
+                stacklevel=2,
+            )
+        if args.get("-r", "0") != "0":
+            warnings.warn(
+                "Run mode (-r/--run) for running mean/variance is not "
+                "supported; hipDNN batchnorm graphs do not use "
+                "prev_running_mean/variance tensors",
+                stacklevel=2,
+            )
+        if args.get("-I", "0") != "0":
+            warnings.warn(
+                "Inverse variance flag (-I/--inverse_variance) is ignored; "
+                "hipDNN batchnorm always uses inv_variance semantics",
+                stacklevel=2,
+            )
+
+        return cls(
+            N=get_int_arg(args, "-n", 32),
+            C=get_int_arg(args, "-c", 3),
+            H=get_int_arg(args, "-H", 32),
+            W=get_int_arg(args, "-W", 32),
+            D=D,
+            layout=args.get("-L", default_layout),
+            mode=get_int_arg(args, "-m", 0),
+            forw=get_int_arg(args, "--forw", 1),
+            back=get_int_arg(args, "--back", 0),
+        )
+
+    @property
+    def is_3d(self) -> bool:
+        return self.D > 0
+
+    @property
+    def is_spatial(self) -> bool:
+        return self.mode == 1
+
+    @property
+    def direction(self) -> str:
+        if self.back == 1:
+            return "backward"
+        if self.forw == 2:
+            return "inference"
+        return "fwd_training"
+
+    def scale_dims_and_strides(self) -> tuple[List[int], List[int]]:
+        """Return (dims, strides) for scale/bias/mean/variance tensors.
+
+        mode=0 (per-activation): dims match input spatial shape with N=1.
+        mode=1 (spatial): dims are [1, C, 1, ...].
+        """
+        if self.is_3d:
+            if self.is_spatial:
+                return [1, self.C, 1, 1, 1], [self.C, 1, 1, 1, 1]
+            return (
+                [1, self.C, self.D, self.H, self.W],
+                ncdhw_strides(1, self.C, self.D, self.H, self.W),
+            )
+        if self.is_spatial:
+            return [1, self.C, 1, 1], [self.C, 1, 1, 1]
+        return (
+            [1, self.C, self.H, self.W],
+            nchw_strides(1, self.C, self.H, self.W),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Batchnorm conversion
 # ---------------------------------------------------------------------------
 
@@ -37,51 +149,32 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
       --forw 2           → forward inference
       --back 1           → backward (requires --forw 0)
     """
-    args = normalize_args(args, BNORM_FLAG_ALIASES)
-    N = _int(args, "-n", 1)
-    C = _int(args, "-c", 1)
-    H = _int(args, "-H", 1)
-    W = _int(args, "-W", 1)
-    layout = args.get("--layout", args.get("-L", "NCHW"))
-    forw = _int(args, "--forw", 1)
-    back = _int(args, "--back", 0)
-
+    p = BnormParams.from_args(args)
     io_type = _bnorm_io_type(operation)
 
-    is_3d = _int(args, "-D", 0) > 0
-
-    if is_3d and D is not None:
-        x_dims = [N, C, D, H, W]
-        x_strides = _input_strides(layout, N, C, H, W, D)
-        scale_dims = [1, C, 1, 1, 1]
-        scale_strides = [C, 1, 1, 1, 1]
+    if p.is_3d:
+        x_dims = [p.N, p.C, p.D, p.H, p.W]
+        x_strides = _input_strides(p.layout, p.N, p.C, p.H, p.W, p.D)
     else:
-        x_dims = [N, C, H, W]
-        x_strides = _input_strides(layout, N, C, H, W)
-        scale_dims = [1, C, 1, 1]
-        scale_strides = [C, 1, 1, 1]
+        x_dims = [p.N, p.C, p.H, p.W]
+        x_strides = _input_strides(p.layout, p.N, p.C, p.H, p.W)
 
-    # Determine direction.  When both forw and back are 0, MIOpen defaults to
-    # forw=1 (training).  back=1 takes priority over forw for backward.
-    if back == 1:
-        direction = "backward"
-    elif forw == 2:
-        direction = "inference"
-    else:
-        # forw == 1 (or default 0 which MIOpen remaps to 1)
-        direction = "fwd_training"
+    scale_dims, scale_strides = p.scale_dims_and_strides()
+
+    def _stat(uid: int, name: str) -> Dict[str, Any]:
+        return _make_tensor(uid, name, scale_dims, scale_strides, data_type="float")
+
+    direction = p.direction
 
     if direction == "inference":
         # Inference: x, mean, inv_variance, scale, bias → y
         node_type = "BatchnormInferenceAttributes"
         tensors = [
             _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
-            _make_tensor(2, "mean", scale_dims, scale_strides, data_type="float"),
-            _make_tensor(
-                3, "inv_variance", scale_dims, scale_strides, data_type="float"
-            ),
-            _make_tensor(4, "scale", scale_dims, scale_strides, data_type="float"),
-            _make_tensor(5, "bias", scale_dims, scale_strides, data_type="float"),
+            _stat(2, "mean"),
+            _stat(3, "inv_variance"),
+            _stat(4, "scale"),
+            _stat(5, "bias"),
             _make_tensor(6, "output_y", x_dims, x_strides, data_type=io_type),
         ]
         nodes = [
@@ -106,14 +199,12 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
         node_type = "BatchnormAttributes"
         tensors = [
             _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
-            _make_tensor(2, "scale", scale_dims, scale_strides, data_type="float"),
-            _make_tensor(3, "bias", scale_dims, scale_strides, data_type="float"),
+            _stat(2, "scale"),
+            _stat(3, "bias"),
             _make_scalar_tensor(4, "epsilon", 1e-5, data_type="float"),
             _make_tensor(5, "output_y", x_dims, x_strides, data_type=io_type),
-            _make_tensor(6, "saved_mean", scale_dims, scale_strides, data_type="float"),
-            _make_tensor(
-                7, "saved_inv_variance", scale_dims, scale_strides, data_type="float"
-            ),
+            _stat(6, "saved_mean"),
+            _stat(7, "saved_inv_variance"),
         ]
         nodes = [
             {
@@ -148,19 +239,12 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
         tensors = [
             _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
             _make_tensor(2, "input_dy", x_dims, x_strides, data_type=io_type),
-            _make_tensor(3, "mean", scale_dims, scale_strides, data_type="float"),
-            _make_tensor(
-                4, "inv_variance", scale_dims, scale_strides, data_type="float"
-            ),
-            _make_tensor(5, "scale", scale_dims, scale_strides, data_type="float"),
+            _stat(3, "mean"),
+            _stat(4, "inv_variance"),
+            _stat(5, "scale"),
             _make_tensor(6, "output_dx", x_dims, x_strides, data_type=io_type),
-            # dscale and dbias accumulate in TAcc (float) regardless of TScaleBias
-            _make_tensor(
-                7, "output_dscale", scale_dims, scale_strides, data_type="float"
-            ),
-            _make_tensor(
-                8, "output_dbias", scale_dims, scale_strides, data_type="float"
-            ),
+            _stat(7, "output_dscale"),
+            _stat(8, "output_dbias"),
         ]
         nodes = [
             {
@@ -193,23 +277,14 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
 
 
 def _bnorm_filename(prefix: str, operation: str, args: Dict[str, str]) -> str:
-    args = normalize_args(args, BNORM_FLAG_ALIASES)
-    N = _int(args, "-n", 1)
-    C = _int(args, "-c", 1)
-    H = _int(args, "-H", 1)
-    W = _int(args, "-W", 1)
-    forw = _int(args, "--forw", 1)
-    back = _int(args, "--back", 0)
+    p = BnormParams.from_args(args)
 
-    if back == 1:
-        direction = "backward"
-    elif forw == 2:
-        direction = "inference"
-    else:
-        direction = "fwd"
+    direction = {"backward": "backward", "inference": "inference"}.get(
+        p.direction, "fwd"
+    )
 
-    is_3d = "-D" in args
-    if is_3d:
-        D = _int(args, "-D", 1)
-        return _join_prefix(prefix, f"bnorm_{direction}_n{N}c{C}D{D}H{H}W{W}")
-    return _join_prefix(prefix, f"bnorm_{direction}_n{N}c{C}H{H}W{W}")
+    if p.is_3d:
+        return _join_prefix(
+            prefix, f"bnorm_{direction}_n{p.N}c{p.C}D{p.D}H{p.H}W{p.W}"
+        )
+    return _join_prefix(prefix, f"bnorm_{direction}_n{p.N}c{p.C}H{p.H}W{p.W}")

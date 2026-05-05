@@ -4,7 +4,7 @@
 """Stride computation helpers and convolution output-dimension formula."""
 
 import math
-from typing import List, Optional
+from typing import List
 
 
 def nchw_strides(N: int, C: int, H: int, W: int) -> List[int]:
@@ -25,35 +25,52 @@ def ndhwc_strides(N: int, C: int, D: int, H: int, W: int) -> List[int]:
     return [D * H * W * C, 1, H * W * C, W * C, C]
 
 
+_VALID_2D_LAYOUTS = {"NCHW", "NHWC"}
+_VALID_3D_LAYOUTS = {"NCDHW", "NDHWC"}
+
+
 def _input_strides(
-    layout: str, N: int, C: int, H: int, W: int, D: Optional[int] = None
+    layout: str, N: int, C: int, H: int, W: int, D: int = 0
 ) -> List[int]:
     """Return strides for an input tensor given its memory layout."""
-    if D is not None:
+    if D > 0:
+        if layout not in _VALID_3D_LAYOUTS:
+            raise ValueError(
+                f"Unsupported 3D layout {layout!r}, expected one of {sorted(_VALID_3D_LAYOUTS)}"
+            )
         if layout == "NDHWC":
             return ndhwc_strides(N, C, D, H, W)
         return ncdhw_strides(N, C, D, H, W)
+    if layout not in _VALID_2D_LAYOUTS:
+        raise ValueError(
+            f"Unsupported 2D layout {layout!r}, expected one of {sorted(_VALID_2D_LAYOUTS)}"
+        )
     if layout == "NHWC":
         return nhwc_strides(N, C, H, W)
     return nchw_strides(N, C, H, W)
 
 
 def _weight_strides(
-    K: int, Cg: int, R: int, S: int, D: Optional[int] = None, layout: str = "NCHW"
+    K: int, Cg: int, R: int, S: int, D: int = 0, layout: str = "NCHW"
 ) -> List[int]:
     """Weight strides for dims [K, Cg, R, S] (or [K, Cg, D, R, S] for 3D).
 
     NCHW/NCDHW → row-major KCRS / KCDRS (Cg innermost after spatial).
     NHWC/NDHWC → KRSC / KDRSC (Cg is the fastest-moving dimension).
     """
-    if D is not None:
-        if layout in ("NHWC", "NDHWC"):
-            # KDRSC: stride[K]=D*R*S*Cg, stride[Cg]=1, stride[D]=R*S*Cg,
-            #        stride[R]=S*Cg, stride[S]=Cg
+    if D > 0:
+        if layout not in _VALID_3D_LAYOUTS:
+            raise ValueError(
+                f"Unsupported 3D weight layout {layout!r}, expected one of {sorted(_VALID_3D_LAYOUTS)}"
+            )
+        if layout == "NDHWC":
             return [D * R * S * Cg, 1, R * S * Cg, S * Cg, Cg]
         return [Cg * D * R * S, D * R * S, R * S, S, 1]
-    if layout in ("NHWC",):
-        # KRSC: stride[K]=R*S*Cg, stride[Cg]=1, stride[R]=S*Cg, stride[S]=Cg
+    if layout not in _VALID_2D_LAYOUTS:
+        raise ValueError(
+            f"Unsupported 2D weight layout {layout!r}, expected one of {sorted(_VALID_2D_LAYOUTS)}"
+        )
+    if layout == "NHWC":
         return [R * S * Cg, 1, S * Cg, Cg]
     return [Cg * R * S, R * S, S, 1]
 

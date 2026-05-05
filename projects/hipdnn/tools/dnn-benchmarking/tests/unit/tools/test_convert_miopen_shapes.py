@@ -28,23 +28,63 @@ from dnn_benchmarking.tools.convert_miopen_shapes import (
 class TestStrideHelpers:
     """Tests for stride computation helpers."""
 
-    def testnchw_strides_known_values(self) -> None:
+    def test_nchw_strides_known_values(self) -> None:
         """NCHW strides: innermost dim is 1, outermost is product of inner dims."""
         # N=2, C=3, H=4, W=5 → [C*H*W, H*W, W, 1] = [60, 20, 5, 1]
         assert nchw_strides(2, 3, 4, 5) == [60, 20, 5, 1]
 
-    def testnhwc_strides_known_values(self) -> None:
+    def test_nhwc_strides_known_values(self) -> None:
         """NHWC strides: C is innermost (stride 1), then W*C, H*W*C, etc."""
         # N=2, C=3, H=4, W=5 → [H*W*C, 1, W*C, C] = [60, 1, 15, 3]
         assert nhwc_strides(2, 3, 4, 5) == [60, 1, 15, 3]
 
-    def testncdhw_strides_known_values(self) -> None:
+    def test_ncdhw_strides_known_values(self) -> None:
         # N=1, C=2, D=3, H=4, W=5 → [C*D*H*W, D*H*W, H*W, W, 1] = [120, 60, 20, 5, 1]
         assert ncdhw_strides(1, 2, 3, 4, 5) == [120, 60, 20, 5, 1]
 
-    def testndhwc_strides_known_values(self) -> None:
+    def test_ndhwc_strides_known_values(self) -> None:
         # N=1, C=2, D=3, H=4, W=5 → [D*H*W*C, 1, H*W*C, W*C, C] = [120, 1, 40, 10, 2]
         assert ndhwc_strides(1, 2, 3, 4, 5) == [120, 1, 40, 10, 2]
+
+
+class TestLayoutValidation:
+    """Tests for layout validation in stride helpers."""
+
+    def test_invalid_2d_input_layout_raises(self) -> None:
+        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
+
+        with pytest.raises(ValueError, match="Unsupported 2D layout"):
+            _input_strides("HWCN", 2, 3, 4, 5)
+
+    def test_invalid_3d_input_layout_raises(self) -> None:
+        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
+
+        with pytest.raises(ValueError, match="Unsupported 3D layout"):
+            _input_strides("HWCN", 2, 3, 4, 5, D=4)
+
+    def test_invalid_2d_weight_layout_raises(self) -> None:
+        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _weight_strides
+
+        with pytest.raises(ValueError, match="Unsupported 2D weight layout"):
+            _weight_strides(8, 4, 3, 3, layout="HWCN")
+
+    def test_invalid_3d_weight_layout_raises(self) -> None:
+        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _weight_strides
+
+        with pytest.raises(ValueError, match="Unsupported 3D weight layout"):
+            _weight_strides(8, 4, 3, 3, D=4, layout="HWCN")
+
+    def test_valid_2d_layouts_accepted(self) -> None:
+        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
+
+        _input_strides("NCHW", 2, 3, 4, 5)
+        _input_strides("NHWC", 2, 3, 4, 5)
+
+    def test_valid_3d_layouts_accepted(self) -> None:
+        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
+
+        _input_strides("NCDHW", 2, 3, 4, 5, D=4)
+        _input_strides("NDHWC", 2, 3, 4, 5, D=4)
 
 
 class TestConvOutDim:
@@ -196,6 +236,149 @@ class TestBuildConvJson:
         strides_nhwc = next(t["strides"] for t in g_nhwc["tensors"] if t["uid"] == 1)
         assert strides_nchw != strides_nhwc
 
+    def test_3d_conv_defaults_to_ncdhw_layout(self) -> None:
+        args = {
+            "-n": "1",
+            "-c": "4",
+            "-H": "4",
+            "-W": "4",
+            "-k": "8",
+            "-y": "3",
+            "-x": "3",
+            "-F": "1",
+            "--spatial_dim": "3",
+            "--in_d": "4",
+            "--fil_d": "3",
+        }
+        p = ConvParams.from_args(args)
+        assert p.in_layout == "NCDHW"
+        assert p.fil_layout == "NCDHW"
+        assert p.out_layout == "NCDHW"
+
+    def test_2d_conv_defaults_to_nchw_layout(self) -> None:
+        args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1"}
+        p = ConvParams.from_args(args)
+        assert p.in_layout == "NCHW"
+        assert p.fil_layout == "NCHW"
+        assert p.out_layout == "NCHW"
+
+    def test_conv_mode_defaults_to_cross_correlation(self) -> None:
+        p = self._make_params()
+        graph = build_conv_json(p)
+        assert graph["nodes"][0]["parameters"]["conv_mode"] == "CROSS_CORRELATION"
+
+    def test_conv_mode_trans_produces_convolution(self) -> None:
+        p = self._make_params(conv_mode="CONVOLUTION")
+        graph = build_conv_json(p)
+        assert graph["nodes"][0]["parameters"]["conv_mode"] == "CONVOLUTION"
+
+    def test_conv_mode_parsed_from_args(self) -> None:
+        args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1", "-m": "trans"}
+        p = ConvParams.from_args(args)
+        assert p.conv_mode == "CONVOLUTION"
+
+    def test_conv_mode_default_is_conv(self) -> None:
+        args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1"}
+        p = ConvParams.from_args(args)
+        assert p.conv_mode == "CROSS_CORRELATION"
+
+    def test_conv_mode_long_flag(self) -> None:
+        args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1", "--mode": "trans"}
+        p = ConvParams.from_args(args)
+        assert p.conv_mode == "CONVOLUTION"
+
+    def test_conv_mode_invalid_raises(self) -> None:
+        args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1", "-m": "invalid"}
+        with pytest.raises(ValueError, match="Unknown conv mode"):
+            ConvParams.from_args(args)
+
+    def test_pad_mode_same_computes_padding(self) -> None:
+        args = {
+            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
+            "-k": "16", "-y": "3", "-x": "3", "-F": "1", "-z": "same",
+        }
+        p = ConvParams.from_args(args)
+        assert p.pad_h == 1
+        assert p.pad_w == 1
+
+    def test_pad_mode_same_ignores_explicit_padding(self) -> None:
+        args = {
+            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
+            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
+            "-p": "99", "-q": "99", "-z": "same",
+        }
+        p = ConvParams.from_args(args)
+        assert p.pad_h == 1
+        assert p.pad_w == 1
+
+    def test_pad_mode_valid_zeroes_padding(self) -> None:
+        args = {
+            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
+            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
+            "-p": "5", "-q": "5", "-z": "valid",
+        }
+        p = ConvParams.from_args(args)
+        assert p.pad_h == 0
+        assert p.pad_w == 0
+
+    def test_pad_mode_default_uses_explicit_padding(self) -> None:
+        args = {
+            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
+            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
+            "-p": "2", "-q": "3",
+        }
+        p = ConvParams.from_args(args)
+        assert p.pad_h == 2
+        assert p.pad_w == 3
+
+    def test_pad_mode_same_with_dilation(self) -> None:
+        args = {
+            "-n": "1", "-c": "3", "-H": "16", "-W": "16",
+            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
+            "-l": "2", "-j": "2", "-z": "same",
+        }
+        p = ConvParams.from_args(args)
+        assert p.pad_h == 2
+        assert p.pad_w == 2
+
+    def test_pad_mode_same_with_kernel_5(self) -> None:
+        args = {
+            "-n": "1", "-c": "3", "-H": "16", "-W": "16",
+            "-k": "16", "-y": "5", "-x": "5", "-F": "1", "-z": "same",
+        }
+        p = ConvParams.from_args(args)
+        assert p.pad_h == 2
+        assert p.pad_w == 2
+
+    def test_pad_mode_long_flag(self) -> None:
+        args = {
+            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
+            "-k": "16", "-y": "3", "-x": "3", "-F": "1", "--pad_mode": "valid",
+        }
+        p = ConvParams.from_args(args)
+        assert p.pad_h == 0
+        assert p.pad_w == 0
+
+    def test_pad_mode_invalid_raises(self) -> None:
+        args = {
+            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
+            "-k": "16", "-y": "3", "-x": "3", "-F": "1", "-z": "bad",
+        }
+        with pytest.raises(ValueError, match="Unknown pad_mode"):
+            ConvParams.from_args(args)
+
+    def test_pad_mode_same_3d(self) -> None:
+        args = {
+            "-n": "1", "-c": "3", "-H": "8", "-W": "8",
+            "-k": "16", "-y": "3", "-x": "3", "-F": "1",
+            "--spatial_dim": "3", "--in_d": "8", "--fil_d": "3",
+            "-z": "same",
+        }
+        p = ConvParams.from_args(args)
+        assert p.pad_h == 1
+        assert p.pad_w == 1
+        assert p.pad_d == 1
+
     def test_3d_conv_produces_5d_dims(self) -> None:
         p = ConvParams(
             N=1,
@@ -278,6 +461,38 @@ class TestBuildBnormJson:
         assert "mean_tensor_uid" in node["inputs"]
         assert "inv_variance_tensor_uid" in node["inputs"]
 
+    def test_per_activation_mode_scale_dims_match_input(self) -> None:
+        args = self._base_args(**{"--forw": "2", "-m": "0"})
+        graph = build_bnorm_json("bnorm", args)
+        scale = next(t for t in graph["tensors"] if t["name"] == "scale")
+        assert scale["dims"] == [1, 64, 14, 14]
+
+    def test_spatial_mode_scale_dims_collapsed(self) -> None:
+        args = self._base_args(**{"--forw": "2", "-m": "1"})
+        graph = build_bnorm_json("bnorm", args)
+        scale = next(t for t in graph["tensors"] if t["name"] == "scale")
+        assert scale["dims"] == [1, 64, 1, 1]
+
+    def test_per_activation_mode_is_default(self) -> None:
+        args = self._base_args(**{"--forw": "2"})
+        graph = build_bnorm_json("bnorm", args)
+        scale = next(t for t in graph["tensors"] if t["name"] == "scale")
+        assert scale["dims"] == [1, 64, 14, 14]
+
+    def test_3d_default_layout_is_ncdhw(self) -> None:
+        from dnn_benchmarking.tools.convert_miopen_shapes.bnorm import BnormParams
+
+        args = {"-n": "2", "-c": "16", "-H": "8", "-W": "8", "-D": "4"}
+        p = BnormParams.from_args(args)
+        assert p.layout == "NCDHW"
+
+    def test_2d_default_layout_is_nchw(self) -> None:
+        from dnn_benchmarking.tools.convert_miopen_shapes.bnorm import BnormParams
+
+        args = {"-n": "2", "-c": "16", "-H": "8", "-W": "8"}
+        p = BnormParams.from_args(args)
+        assert p.layout == "NCHW"
+
 
 class TestParseLine:
     """Tests for parse_line."""
@@ -329,15 +544,83 @@ class TestConvertLine:
             "-x": "1",
             "-F": "1",
         }
-        name_stem, graph = convert_line("convbfp16", args, "test")
+        results = convert_line("convbfp16", args, "test")
+        assert len(results) == 1
+        name_stem, graph = results[0]
         assert "conv" in name_stem
         assert graph["nodes"][0]["type"] == "ConvolutionFwdAttributes"
 
     def test_bnorm_operation_succeeds(self) -> None:
         args = {"-n": "1", "-c": "32", "-H": "8", "-W": "8", "--forw": "2"}
-        name_stem, graph = convert_line("bnormbfp16", args, "test")
+        results = convert_line("bnormbfp16", args, "test")
+        assert len(results) == 1
+        name_stem, graph = results[0]
         assert "bnorm" in name_stem
         assert graph["nodes"][0]["type"] == "BatchnormInferenceAttributes"
+
+    _MULTI_DIR_ARGS = {
+        "-n": "1",
+        "-c": "8",
+        "-H": "4",
+        "-W": "4",
+        "-k": "16",
+        "-y": "1",
+        "-x": "1",
+    }
+
+    def test_conv_f0_produces_three_graphs(self) -> None:
+        args = {**self._MULTI_DIR_ARGS, "-F": "0"}
+        results = convert_line("convbfp16", args, "test")
+        assert len(results) == 3
+        node_types = {graph["nodes"][0]["type"] for _, graph in results}
+        assert node_types == {
+            "ConvolutionFwdAttributes",
+            "ConvolutionBwdAttributes",
+            "ConvolutionWrwAttributes",
+        }
+        stems = [stem for stem, _ in results]
+        assert len(set(stems)) == 3
+
+    def test_conv_f3_produces_fwd_and_dgrad(self) -> None:
+        args = {**self._MULTI_DIR_ARGS, "-F": "3"}
+        results = convert_line("convbfp16", args, "test")
+        assert len(results) == 2
+        node_types = {graph["nodes"][0]["type"] for _, graph in results}
+        assert node_types == {
+            "ConvolutionFwdAttributes",
+            "ConvolutionBwdAttributes",
+        }
+
+    def test_conv_f5_produces_fwd_and_wgrad(self) -> None:
+        args = {**self._MULTI_DIR_ARGS, "-F": "5"}
+        results = convert_line("convbfp16", args, "test")
+        assert len(results) == 2
+        node_types = {graph["nodes"][0]["type"] for _, graph in results}
+        assert node_types == {
+            "ConvolutionFwdAttributes",
+            "ConvolutionWrwAttributes",
+        }
+
+    def test_conv_f6_produces_dgrad_and_wgrad(self) -> None:
+        args = {**self._MULTI_DIR_ARGS, "-F": "6"}
+        results = convert_line("convbfp16", args, "test")
+        assert len(results) == 2
+        node_types = {graph["nodes"][0]["type"] for _, graph in results}
+        assert node_types == {
+            "ConvolutionBwdAttributes",
+            "ConvolutionWrwAttributes",
+        }
+
+    def test_conv_f7_produces_all_three(self) -> None:
+        args = {**self._MULTI_DIR_ARGS, "-F": "7"}
+        results = convert_line("convbfp16", args, "test")
+        assert len(results) == 3
+        node_types = {graph["nodes"][0]["type"] for _, graph in results}
+        assert node_types == {
+            "ConvolutionFwdAttributes",
+            "ConvolutionBwdAttributes",
+            "ConvolutionWrwAttributes",
+        }
 
 
 class TestNormalizeArgs:
@@ -414,8 +697,8 @@ class TestConvFlagAliases:
         long_p = ConvParams.from_args(self._LONG_ARGS)
         assert build_conv_json(short_p) == build_conv_json(long_p)
 
-    def testconvert_line_with_long_flags(self) -> None:
-        _, graph = convert_line("convbfp16", dict(self._LONG_ARGS), "test")
+    def test_convert_line_with_long_flags(self) -> None:
+        [(_, graph)] = convert_line("convbfp16", dict(self._LONG_ARGS), "test")
         assert graph["nodes"][0]["type"] == "ConvolutionFwdAttributes"
 
     def test_3d_short_flags(self) -> None:
@@ -585,7 +868,7 @@ class TestConvDataTypes:
             ("convbfp16", "bfloat16"),
         ],
     )
-    def testconv_io_type_mapping(self, operation: str, expected_io_type: str) -> None:
+    def test_conv_io_type_mapping(self, operation: str, expected_io_type: str) -> None:
         assert conv_io_type(operation) == expected_io_type
 
     @pytest.mark.parametrize(
@@ -596,10 +879,10 @@ class TestConvDataTypes:
             ("convbfp16", "bfloat16"),
         ],
     )
-    def testconvert_line_sets_correct_io_type(
+    def test_convert_line_sets_correct_io_type(
         self, operation: str, expected_io_type: str
     ) -> None:
-        _, graph = convert_line(operation, dict(self._BASIC_ARGS), "test")
+        [(_, graph)] = convert_line(operation, dict(self._BASIC_ARGS), "test")
         assert graph["io_data_type"] == expected_io_type
 
     @pytest.mark.parametrize(
@@ -613,7 +896,7 @@ class TestConvDataTypes:
     def test_conv_tensor_data_types(
         self, operation: str, expected_io_type: str
     ) -> None:
-        _, graph = convert_line(operation, dict(self._BASIC_ARGS), "test")
+        [(_, graph)] = convert_line(operation, dict(self._BASIC_ARGS), "test")
         for tensor in graph["tensors"]:
             assert tensor["data_type"] == expected_io_type
 
@@ -644,3 +927,124 @@ class TestBnormDataTypes:
         # stat tensors should be float
         mean_tensor = next(t for t in graph["tensors"] if t["name"] == "mean")
         assert mean_tensor["data_type"] == expected_stat_type
+
+
+class TestConvUnsupportedWarnings:
+    """Verify warnings for MIOpen features not representable in hipDNN graphs."""
+
+    _BASE = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1"}
+
+    def test_bias_flag_warns(self) -> None:
+        args = {**self._BASE, "-b": "1"}
+        with pytest.warns(UserWarning, match="Conv bias"):
+            ConvParams.from_args(args)
+
+    def test_tensor_vect_warns(self) -> None:
+        args = {**self._BASE, "-Z": "1"}
+        with pytest.warns(UserWarning, match="Tensor vectorization"):
+            ConvParams.from_args(args)
+
+    def test_trans_output_pad_warns(self) -> None:
+        args = {**self._BASE, "-Y": "1"}
+        with pytest.warns(UserWarning, match="Transpose output padding"):
+            ConvParams.from_args(args)
+
+    def test_vector_length_warns(self) -> None:
+        args = {**self._BASE, "-L": "4"}
+        with pytest.warns(UserWarning, match="vector_length"):
+            ConvParams.from_args(args)
+
+    def test_pad_val_warns(self) -> None:
+        args = {**self._BASE, "-r": "1"}
+        with pytest.warns(UserWarning, match="pad_val"):
+            ConvParams.from_args(args)
+
+    def test_cast_type_warns(self) -> None:
+        args = {**self._BASE, "-R": "1"}
+        with pytest.warns(UserWarning, match="Cast type.*wei_cast_type"):
+            ConvParams.from_args(args)
+
+    def test_cast_type_out_warns(self) -> None:
+        args = {**self._BASE, "-T": "1"}
+        with pytest.warns(UserWarning, match="Cast type.*out_cast_type"):
+            ConvParams.from_args(args)
+
+    def test_cast_type_in_warns(self) -> None:
+        args = {**self._BASE, "-U": "1"}
+        with pytest.warns(UserWarning, match="Cast type.*in_cast_type"):
+            ConvParams.from_args(args)
+
+    def test_vector_length_long_flag_warns(self) -> None:
+        args = {**self._BASE, "--vector_length": "4"}
+        with pytest.warns(UserWarning, match="vector_length"):
+            ConvParams.from_args(args)
+
+    def test_pad_val_long_flag_warns(self) -> None:
+        args = {**self._BASE, "--pad_val": "1"}
+        with pytest.warns(UserWarning, match="pad_val"):
+            ConvParams.from_args(args)
+
+    def test_no_warning_on_defaults(self) -> None:
+        import warnings as w
+
+        with w.catch_warnings():
+            w.simplefilter("error")
+            ConvParams.from_args(dict(self._BASE))
+
+
+class TestBnormUnsupportedWarnings:
+    """Verify warnings for MIOpen bnorm features not representable in hipDNN."""
+
+    _BASE = {"-n": "2", "-c": "32", "-H": "8", "-W": "8"}
+
+    def test_fused_activation_warns(self) -> None:
+        args = {**self._BASE, "-f": "1"}
+        with pytest.warns(UserWarning, match="Fused activation"):
+            build_bnorm_json("bnorm", args)
+
+    def test_non_default_alpha_warns(self) -> None:
+        args = {**self._BASE, "-A": "0.5"}
+        with pytest.warns(UserWarning, match="alpha.*beta"):
+            build_bnorm_json("bnorm", args)
+
+    def test_non_default_beta_warns(self) -> None:
+        args = {**self._BASE, "-B": "1.0"}
+        with pytest.warns(UserWarning, match="alpha.*beta"):
+            build_bnorm_json("bnorm", args)
+
+    def test_save_mode_warns(self) -> None:
+        args = {**self._BASE, "-s": "1"}
+        with pytest.warns(UserWarning, match="Save mode"):
+            build_bnorm_json("bnorm", args)
+
+    def test_run_mode_warns(self) -> None:
+        args = {**self._BASE, "-r": "1"}
+        with pytest.warns(UserWarning, match="Run mode"):
+            build_bnorm_json("bnorm", args)
+
+    def test_inverse_variance_flag_warns(self) -> None:
+        args = {**self._BASE, "-I": "1"}
+        with pytest.warns(UserWarning, match="Inverse variance"):
+            build_bnorm_json("bnorm", args)
+
+    def test_save_mode_long_flag_warns(self) -> None:
+        args = {**self._BASE, "--save": "1"}
+        with pytest.warns(UserWarning, match="Save mode"):
+            build_bnorm_json("bnorm", args)
+
+    def test_run_mode_long_flag_warns(self) -> None:
+        args = {**self._BASE, "--run": "1"}
+        with pytest.warns(UserWarning, match="Run mode"):
+            build_bnorm_json("bnorm", args)
+
+    def test_inverse_variance_long_flag_warns(self) -> None:
+        args = {**self._BASE, "--inverse_variance": "1"}
+        with pytest.warns(UserWarning, match="Inverse variance"):
+            build_bnorm_json("bnorm", args)
+
+    def test_no_warning_on_defaults(self) -> None:
+        import warnings as w
+
+        with w.catch_warnings():
+            w.simplefilter("error")
+            build_bnorm_json("bnorm", dict(self._BASE))
