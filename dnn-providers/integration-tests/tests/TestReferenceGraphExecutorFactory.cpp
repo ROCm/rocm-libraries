@@ -113,12 +113,10 @@ TEST(TestReferenceGraphExecutorFactory, GpuAndCpuExecutorsAgreeOnConvFwd)
     const hipdnn_data_sdk::utilities::Workspace dW(wCount * sizeof(float));
     const hipdnn_data_sdk::utilities::Workspace dY(yCount * sizeof(float));
 
-    ASSERT_EQ(
-        hipMemcpy(dX.get(), xData.data(), xCount * sizeof(float), hipMemcpyHostToDevice),
-        hipSuccess);
-    ASSERT_EQ(
-        hipMemcpy(dW.get(), wData.data(), wCount * sizeof(float), hipMemcpyHostToDevice),
-        hipSuccess);
+    ASSERT_EQ(hipMemcpy(dX.get(), xData.data(), xCount * sizeof(float), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dW.get(), wData.data(), wCount * sizeof(float), hipMemcpyHostToDevice),
+              hipSuccess);
     ASSERT_EQ(hipMemset(dY.get(), 0, yCount * sizeof(float)), hipSuccess);
 
     std::unordered_map<int64_t, void*> gpuPack;
@@ -129,9 +127,8 @@ TEST(TestReferenceGraphExecutorFactory, GpuAndCpuExecutorsAgreeOnConvFwd)
     gpuExecutor->execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), gpuPack);
 
     std::vector<float> gpuY(yCount);
-    ASSERT_EQ(
-        hipMemcpy(gpuY.data(), dY.get(), yCount * sizeof(float), hipMemcpyDeviceToHost),
-        hipSuccess);
+    ASSERT_EQ(hipMemcpy(gpuY.data(), dY.get(), yCount * sizeof(float), hipMemcpyDeviceToHost),
+              hipSuccess);
 
     // --- Compare: both executors should produce the same result ---
     for(size_t i = 0; i < yCount; ++i)
