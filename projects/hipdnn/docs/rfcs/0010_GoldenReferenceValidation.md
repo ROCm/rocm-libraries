@@ -34,44 +34,32 @@ This RFC introduces golden reference validation as a third verification mode for
 ### Key Benefits
 - **Deterministic baselines**: Reference data is fixed; test outcomes depend only on the engine under test
 - **No C++ reference kernel needed**: Generate golden data from PyTorch once, validate directly against real MIOpen kernels -- no need to write or maintain C++ reference implementations
-- **Regression detection**: Catches regressions that dynamic references might mask when both sides drift
+- **Regression detection**: Computed mode compares two live results -- if both change together, the test still passes. Golden mode compares against a frozen known-good output, so any change in the engine is caught
 - **Faster execution**: Eliminates runtime reference computation for large tensors
 
 ### How It Works
 
-The entire golden reference feature reduces to **7 steps** and **3 core verbs** -- serialize, deserialize, validate:
+The entire golden reference feature reduces to **7 steps** split across two pipelines:
 
-| Step | Tag | What happens | When does it run? |
-|------|-----|-------------|-------------------|
-| 1 | `construct` | Build the graph (same as today) | Generation + CI |
-| 2 | `execute-reference` | Run a trusted reference (CPU ref, GPU ref, or external) to produce truth | Generation only |
-| 3 | `serialize` | Save inputs + outputs to disk | Generation only |
-| 4 | `deserialize` | Load saved inputs back | **Every CI run** |
-| 5 | `execute-engine` | Run MIOpen GPU (the thing being tested) | **Every CI run** |
-| 6 | `deserialize` | Load saved reference outputs | **Every CI run** |
-| 7 | `validate` | Compare engine output to saved output | **Every CI run** |
+**Generation** (run once by a developer to produce golden data):
 
-**What CI sees every day** (steps 1, 4, 5, 6, 7):
-- Step 1: Build the graph
-- Step 4: Load known inputs from disk
-- Step 5: Run the engine under test (MIOpen GPU)
-- Step 6: Load expected outputs from disk
-- Step 7: Compare engine output to expected output
+| Step | Tag | What happens |
+|------|-----|-------------|
+| 1 | `construct` | Build the graph (same as today) |
+| 2 | `execute-reference` | Run a trusted reference (CPU ref, GPU ref, or external) to produce truth |
+| 3 | `serialize` | Save inputs + outputs to disk |
 
-No reference executor runs in CI. The truth was computed once and frozen to disk.
+**Validation** (run every CI to check the engine under test):
 
-**What happens once** when a developer generates golden data (steps 1, 2, 3):
-- Step 1: Build the graph
-- Step 2: Run a trusted reference -- CPU ref, GPU ref, or an external source like PyTorch
-- Step 3: Save inputs + outputs to disk
+| Step | Tag | What happens |
+|------|-----|-------------|
+| 1 | `construct` | Build the graph (same as today -- shared with generation) |
+| 4 | `deserialize` | Load saved inputs from disk |
+| 5 | `execute-engine` | Run MIOpen GPU (the thing being tested) |
+| 6 | `deserialize` | Load saved reference outputs from disk |
+| 7 | `validate` | Compare engine output to saved output |
 
-The rest of this RFC details what each step needs:
-
-- **serialize** (step 3) drives the manifest format, binary blob layout, and SHA-256 integrity checks
-- **deserialize** (steps 4, 6) drives tensor identity by name and dim validation at load time
-- **execute-engine** (step 5) drives the architecture guard
-- **validate** (step 7) drives the tolerance design (harness-owned, never stored in golden data)
-- **DVC and CI** handle how golden data gets from the developer who generates it to the CI machine that validates against it
+No reference executor runs in CI. The truth was computed once and frozen to disk. The diagrams in [The 7 Steps](#the-7-steps) show both pipelines visually.
 
 ---
 
@@ -82,19 +70,15 @@ The integration test suite currently validates engine outputs by computing refer
 1. **Circular dependency risk**: If the reference executor has a bug, both sides produce the same wrong answer and the test passes
 2. **Coverage gap**: Operations not yet implemented in the reference executor cannot be tested (e.g., instead of writing a C++ SDPA reference kernel, golden data lets us use PyTorch's output as truth via `--external-reference`)
 3. **Non-determinism**: GPU reference results can vary across runs, making failure investigation harder
-4. **Slowness**: CPU reference execution for large convolutions is the bottleneck in full-tier tests
+4. **Slowness**: CPU reference execution for large tensors is the bottleneck in full-tier tests
 
-A prior effort established a golden reference pattern in the MIOpen plugin's test suite ([`GoldenReferenceGpu.hpp`](../../../miopen-provider/tests/common/GoldenReferenceGpu.hpp)) using serialized graph+tensor JSON files loaded from `hipdnn_reference_data/`. This RFC adopts that pattern, addresses its known limitations, and integrates it into the plugin-agnostic test suite.
+A prior effort established a golden reference pattern in the MIOpen plugin's test suite ([`GoldenReferenceGpu.hpp`](../../../miopen-provider/tests/common/GoldenReferenceGpu.hpp)) using serialized graph+tensor JSON files loaded from `hipdnn_reference_data/`. This RFC builds on that pattern, extends it for broader use, and integrates it into the shared integration test harness so it works across all plugins (MIOpen, Fusilli, and future ones) without plugin-specific code.
 
-### Customer Personas
+### Who This Serves
 
-Every design decision is evaluated against three customers:
-
-| Persona | What they need | What breaks their day |
-|---------|---------------|-----------------------|
-| **Test Author** | Add golden data for a new op in < 30 min, clear errors when something is wrong | Silent data corruption, confusing mismatches, "works on my machine" |
-| **CI Pipeline** | Deterministic pass/fail, no flaky skips, fast feedback | Credential failures, stale data causing false positives, storage bloat |
-| **Developer** | Trust test results, understand failures at a glance, run locally without DVC | Ambiguous error messages, tolerance disagreements between modes, UID churn |
+- **Test author**: Can add golden data for a new op without writing a reference kernel. Clear error messages when something goes wrong.
+- **CI pipeline**: Deterministic pass/fail with no flaky skips. No runtime reference computation slowing down feedback.
+- **Developer**: Can trust test results, understand failures at a glance, and run locally without needing remote storage credentials.
 
 ---
 
@@ -876,6 +860,8 @@ integration-tests/
     batchnorm/
       ...
 ```
+
+The directory names (`smoke/`, `full/`, etc.) follow the test naming convention already used in the codebase. Golden data doesn't require any particular naming -- it simply mirrors whatever the tests are called.
 
 The **top-level `manifest.json`** maps GTest names to golden data directories. This enables:
 - Detection of orphaned golden data (files on disk not in manifest)
