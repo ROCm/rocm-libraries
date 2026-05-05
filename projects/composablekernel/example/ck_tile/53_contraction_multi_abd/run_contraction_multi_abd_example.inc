@@ -8,6 +8,7 @@
 #include <cmath>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include "contraction_multi_abd_utils.hpp"
 #include "ck_tile/host/reference/reference_batched_contraction.hpp"
 

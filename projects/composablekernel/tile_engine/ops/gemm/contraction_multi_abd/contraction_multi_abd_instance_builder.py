@@ -218,6 +218,7 @@ class ContractionMultiABDKernelBuilder(GemmKernelBuilder):
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/batched_contraction.hpp"
+#include "ck_tile/ops/batched_contraction_multi_abd.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/epilogue/default_2d_epilogue.hpp"
