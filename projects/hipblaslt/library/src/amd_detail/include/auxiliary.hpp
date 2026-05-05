@@ -143,7 +143,10 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "bf6_r";
     case HIP_R_4F_E2M1:
         return "f4_r";
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
     case static_cast<hipDataType>(HIP_R_8F_E5M3_EXT):
+#pragma GCC diagnostic pop
         return "e5m3_r";
     default:
         return "non-supported type";
