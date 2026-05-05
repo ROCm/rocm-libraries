@@ -35,7 +35,7 @@ protected:
         //
         // ONE-OFF transitional shim for the 0.x -> 1.0.0 bump: also accept
         // major == 0 so plugins built against the pre-1.0.0 SDK still load.
-        // REMOVE this legacy clause (and the `|| pluginMajor == 0` below)
+        // REMOVE this legacy clause (and the `&& pluginMajor != 0` below)
         // at the next major bump (1.x -> 2.0.0). The static_assert is a
         // tautology by design — the literal-equality check exists only to
         // break the build when the macro changes, forcing this file to be

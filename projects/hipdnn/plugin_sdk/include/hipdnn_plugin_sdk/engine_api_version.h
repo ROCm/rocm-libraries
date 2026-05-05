@@ -47,4 +47,9 @@
 /**
  * @brief Full version string in semantic versioning format
  */
-#define HIPDNN_ENGINE_API_VERSION "1.0.0"
+#define HIPDNN_STRINGIFY_(x) #x
+#define HIPDNN_STRINGIFY(x) HIPDNN_STRINGIFY_(x)
+#define HIPDNN_ENGINE_API_VERSION                                               \
+    HIPDNN_STRINGIFY(HIPDNN_ENGINE_API_VERSION_MAJOR)                           \
+    "." HIPDNN_STRINGIFY(HIPDNN_ENGINE_API_VERSION_MINOR) "." HIPDNN_STRINGIFY( \
+        HIPDNN_ENGINE_API_VERSION_PATCH)
