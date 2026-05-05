@@ -1798,6 +1798,81 @@ class TestMFMAQuadCycleGap:
             f"Mirrors the deleted structural test which pinned actual=3."
         )
 
+    def test_mfma_pack_to_cvt1_one_short_pins_actual_4(self):
+        """Off-by-one boundary pin for QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1=5.
+        Sibling of `test_mfma_pack_to_cvt1_three_short_pins_actual_3` —
+        same fixture shape, but with FOUR intervening cost-1 LRs (not
+        three) so the cycle-exact gap is exactly one short of threshold.
+
+        4x4 PackMFMA producer at slot=2 sequence=0; CVTPack (CVT1)
+        consumer at slot=7 sequence=0 with FOUR intervening cost-1 LR
+        instructions. cumulative_issue_cycles walk:
+          PackMFMA issue=0, mfma_free=2; current_issue +=1 → 1.
+          4 LRs each cost 1 → current_issue = 5.
+          CVT (issue cost 1, gap = c_issue_start - p_issue - 1) →
+            c_issue_start=5; gap=5-0-1=4.
+        expected=5, actual=4 → off by EXACTLY 1.
+
+        Closes the off-by-one gap left by existing siblings:
+          - actual=0  (zero-gap test)            ✓
+          - actual=3  (off-by-2, three_short)    ✓
+          - actual=4  (off-by-1)                 ← THIS test
+          - actual=5  (just-pass, meets_5_cycle) ✓
+        Mutating QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 from 5 to 4 makes the
+        threshold equal `actual` here so the failure stops firing — a
+        change that the just-pass test (actual=5 ≥ 4) cannot detect,
+        leaving this test as the SOLE off-by-one sentinel."""
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(0, 1), src1=vgpr(1, 1))
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            self._make_real_pack_mfma(
+                acc_start=0, acc_count=4, a_start=8, a_count=2,
+                b_start=32, b_count=2, slot=2, sequence=0,
+                category="PackA0"),
+            # 4 intervening cost-1 LRs to inflate the gap from 0 to 4
+            # (one short of the 5-cycle threshold).
+            make_lr(80, 1, 128, slot=3, category="LRA1"),
+            make_lr(81, 1, 132, slot=4, category="LRA1"),
+            make_lr(82, 1, 136, slot=5, category="LRA1"),
+            make_lr(83, 1, 140, slot=6, category="LRA1"),
+            _tag(cvt, category="PackA1", mfma_index=7, sequence=0),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        failures = validate_edge_wait_coverage(g)
+        pack_to_cvt_timing = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", "").startswith("Pack")
+            and getattr(f.consumer, "category", "").startswith("Pack")
+            and f.expected_quad_cycles == 5
+        ]
+        assert pack_to_cvt_timing, (
+            f"Expected TimingTooCloseFailure on PackMFMA->CVTPack edge "
+            f"with 4 intervening LRs (actual=4 < expected=5). Got: "
+            f"{[type(f).__name__ for f in failures]}. If this fixture "
+            f"stops firing, QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 was likely "
+            f"lowered (e.g. 5→4) — the off-by-one sentinel."
+        )
+        f = pack_to_cvt_timing[0]
+        assert f.expected_quad_cycles == 5, (
+            f"PackMFMA->CVTPack expected=5 "
+            f"(QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1), got "
+            f"expected={f.expected_quad_cycles}. A change here means the "
+            f"constant itself was mutated."
+        )
+        # Decisive off-by-one assertion: actual MUST be exactly 4 — one
+        # short of the 5-cycle threshold. A ±1 miscount in
+        # cumulative_issue_cycles or the helper's gap arithmetic would
+        # shift `actual` to 3 or 5 and be caught here.
+        assert f.actual_quad_cycles == 4, (
+            f"PackMFMA producer + 4 intervening cost-1 LRs → "
+            f"cumulative_issue_cycles gap = 4. Got "
+            f"actual={f.actual_quad_cycles}. This is the off-by-one "
+            f"boundary case (expected-1) that no other sibling pins."
+        )
+
     def test_cvt_pack_to_pack_alu_consumer_takes_alu_exemption(self):
         """Consumer-awareness regression-pin for `_cvt_to_mfma_gap_ok`. The
         carve-out targets CVT→MFMA edges ONLY: a CVT producer feeding a
