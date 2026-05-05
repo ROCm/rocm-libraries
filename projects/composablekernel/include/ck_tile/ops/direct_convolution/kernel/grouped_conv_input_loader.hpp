@@ -151,47 +151,36 @@ struct InputLoader
             row_stride_bytes = static_cast<ck_tile::index_t>(wi * bc.C * sizeof(_Float16));
         };
 
-        // Check at compile time whether this variant supports padded input loading.
-        constexpr bool has_padded_descriptor =
-            requires { TC::Input::template MakeDramReadDescriptorPadded<1>(int{}, int{}, int{}, int{}, int{}); };
-
-        if constexpr(has_padded_descriptor)
+        if(padded_)
         {
-            if(padded_)
-            {
-                // ---- Padded path: c_per_group < GROUP_SIZE ----
-                // Store scalar state for creating temporary tile_windows per row.
-                hi_               = hi;
-                wi_               = wi;
-                C_in_             = bc.C_in;
-                c_per_group_      = c_per_group;
-                px_               = px;
-                current_row_      = 0;
-                block_q_          = bc.block_q;
-                input_base_padded_ = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C_in + bc.block_k_in;
+            // ---- Padded path: c_per_group < GROUP_SIZE ----
+            // Store scalar state for creating temporary tile_windows per row.
+            hi_               = hi;
+            wi_               = wi;
+            C_in_             = bc.C_in;
+            c_per_group_      = c_per_group;
+            px_               = px;
+            current_row_      = 0;
+            block_q_          = bc.block_q;
+            input_base_padded_ = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C_in + bc.block_k_in;
 
-                // Extract load_active using the padded DRAM descriptor (correct strides).
-                {
-                    const auto padded_desc =
-                        TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
-                            hi, wi, bc.C_in, c_per_group, px);
-                    auto padded_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
-                        input_base_padded_, padded_desc);
-                    auto tmp_window = ck_tile::make_tile_window(
-                        padded_view, tile_lengths, {0, bc.block_q, 0, 0}, input_dram_dist);
-                    load_active = compute_load_active(tmp_window);
-                }
-
-                // Mark async path members as unused.
-                input_voffset = 0;
-                store_input_lds = nullptr;
-                row_stride_bytes = 0;
-                is_valid = 0;
-            }
-            else
+            // Extract load_active using the padded DRAM descriptor (correct strides).
             {
-                init_unpadded();
+                const auto padded_desc =
+                    TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
+                        hi, wi, bc.C_in, c_per_group, px);
+                auto padded_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+                    input_base_padded_, padded_desc);
+                auto tmp_window = ck_tile::make_tile_window(
+                    padded_view, tile_lengths, {0, bc.block_q, 0, 0}, input_dram_dist);
+                load_active = compute_load_active(tmp_window);
             }
+
+            // Mark async path members as unused.
+            input_voffset = 0;
+            store_input_lds = nullptr;
+            row_stride_bytes = 0;
+            is_valid = 0;
         }
         else
         {
@@ -268,50 +257,43 @@ struct InputLoader
     // Padded path: create temporary tile_windows per row, use load_tile + store_tile.
     // This correctly zero-pads channels beyond c_per_group via the pad transform's
     // per-element OOB checking.
-    //
-    // Only compiled when TC::Input provides MakeDramReadDescriptorPadded.
-    // Variants that don't support padded input loading (e.g. 8c) will never
-    // enter this path (padded_ is always false for them).
     __device__ __forceinline__ void prefetch_tile_to_lds_padded(int lds_buffer_index)
     {
-        if constexpr(requires { TC::Input::template MakeDramReadDescriptorPadded<1>(int{}, int{}, int{}, int{}, int{}); })
-        {
-            constexpr auto input_dram_dist = TC::Input::MakeDramReadTileDistribution();
+        constexpr auto input_dram_dist = TC::Input::MakeDramReadTileDistribution();
 
-            // Create padded DRAM descriptor and view.
-            const auto padded_dram_desc =
-                TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
-                    hi_, wi_, C_in_, c_per_group_, px_);
+        // Create padded DRAM descriptor and view.
+        const auto padded_dram_desc =
+            TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
+                hi_, wi_, C_in_, c_per_group_, px_);
 
-            auto padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
-                input_base_padded_, padded_dram_desc);
+        auto padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+            input_base_padded_, padded_dram_desc);
 
-            auto padded_dram_window = ck_tile::make_tile_window(
-                padded_dram_view,
-                ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
-                                    ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
-                {current_row_, block_q_, 0, 0},
-                input_dram_dist);
+        auto padded_dram_window = ck_tile::make_tile_window(
+            padded_dram_view,
+            ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
+                                ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
+            {current_row_, block_q_, 0, 0},
+            input_dram_dist);
 
-            // Load from DRAM with per-element OOB checking (pad transform zeros padded channels).
-            auto input_reg = ck_tile::load_tile(padded_dram_window);
+        // Load from DRAM with per-element OOB checking (pad transform zeros padded channels).
+        auto input_reg = ck_tile::load_tile(padded_dram_window);
 
-            // Create LDS write window
-            constexpr auto lds_write_desc = TC::Input::MakeLdsWriteDescriptor();
-            _Float16* lds_base = reinterpret_cast<_Float16*>(input_lds_ptr)
-                                 + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
-            auto lds_write_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-                lds_base, lds_write_desc);
+        // Create LDS write window
+        constexpr auto lds_write_desc = TC::Input::MakeLdsWriteDescriptor();
+        _Float16* lds_base = reinterpret_cast<_Float16*>(input_lds_ptr)
+                             + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
+        auto lds_write_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+            lds_base, lds_write_desc);
 
-            auto lds_write_window = ck_tile::make_tile_window(
-                lds_write_view,
-                ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
-                                    ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
-                {0, 0, 0, 0},
-                input_dram_dist);
+        auto lds_write_window = ck_tile::make_tile_window(
+            lds_write_view,
+            ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
+                                ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
+            {0, 0, 0, 0},
+            input_dram_dist);
 
-            ck_tile::store_tile(lds_write_window, input_reg);
-        }
+        ck_tile::store_tile(lds_write_window, input_reg);
     }
 
     // Read a given kw slice for this thread from LDS into registers.

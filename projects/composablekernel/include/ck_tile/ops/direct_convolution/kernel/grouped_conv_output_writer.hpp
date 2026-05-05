@@ -85,28 +85,18 @@ struct OutputWriter
                                                             [ck_tile::number<1>{}]);
             };
 
-            if constexpr(requires { TC::Output::MakeDramWriteDescriptorNarrowPadded(int{}, int{}, int{}, int{}); })
+            if(k_per_group < TC::GROUP_SIZE)
             {
-                if(k_per_group < TC::GROUP_SIZE)
-                {
-                    // Padded path: use padded descriptor for correct group-strided offsets.
-                    extract_offset_and_validity(
-                        TC::Output::MakeDramWriteDescriptorNarrowPadded(ho, wo, bc.K, k_per_group));
-                    // Compute how many of this thread's 4 output channels are valid.
-                    // output_elem_offset % k_per_group gives the channel position within the group.
-                    int c_in_group = static_cast<int>(output_elem_offset % k_per_group);
-                    k_valid_count_ = ck_tile::min(4, k_per_group - c_in_group);
-                }
-                else
-                {
-                    extract_offset_and_validity(
-                        TC::Output::MakeDramWriteDescriptorNarrow(ho, wo, bc.K));
-                    k_valid_count_ = 4;
-                }
+                // Padded path: use padded descriptor for correct group-strided offsets.
+                extract_offset_and_validity(
+                    TC::Output::MakeDramWriteDescriptorNarrowPadded(ho, wo, bc.K, k_per_group));
+                // Compute how many of this thread's 4 output channels are valid.
+                // output_elem_offset % k_per_group gives the channel position within the group.
+                int c_in_group = static_cast<int>(output_elem_offset % k_per_group);
+                k_valid_count_ = ck_tile::min(4, k_per_group - c_in_group);
             }
             else
             {
-                // Variant without padded descriptor support: always use unpadded path.
                 extract_offset_and_validity(
                     TC::Output::MakeDramWriteDescriptorNarrow(ho, wo, bc.K));
                 k_valid_count_ = 4;
@@ -299,23 +289,14 @@ struct OutputWriterLds
                                                                   [ck_tile::number<1>{}]);
             };
 
-            if constexpr(requires { TC::Output::MakeDramWriteDescriptorWidePadded(int{}, int{}, int{}); })
+            if(k_per_group < TC::GROUP_SIZE)
             {
-                if(k_per_group < TC::GROUP_SIZE)
-                {
-                    extract_store_offset(
-                        TC::Output::MakeDramWriteDescriptorWidePadded(wo, bc.K, k_per_group));
-                    // Compute how many of this thread's 8 output channels are valid.
-                    // output_elem_offset % k_per_group gives the channel position within the group.
-                    int c_in_group = static_cast<int>(output_elem_offset % k_per_group);
-                    k_valid_in_vec_ = ck_tile::min(8, k_per_group - c_in_group);
-                }
-                else
-                {
-                    extract_store_offset(
-                        TC::Output::MakeDramWriteDescriptorWide(wo, bc.K));
-                    k_valid_in_vec_ = 8;
-                }
+                extract_store_offset(
+                    TC::Output::MakeDramWriteDescriptorWidePadded(wo, bc.K, k_per_group));
+                // Compute how many of this thread's 8 output channels are valid.
+                // output_elem_offset % k_per_group gives the channel position within the group.
+                int c_in_group = static_cast<int>(output_elem_offset % k_per_group);
+                k_valid_in_vec_ = ck_tile::min(8, k_per_group - c_in_group);
             }
             else
             {
