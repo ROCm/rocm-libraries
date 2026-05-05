@@ -6,7 +6,7 @@
 ## Table of Contents
 1. [Executive Summary](#executive-summary)
 2. [Problem Statement](#problem-statement)
-3. [The 7 Steps](#the-7-steps)
+3. [Pipeline Overview](#pipeline-overview)
 4. [Step 1: construct -- Build the Graph](#step-1-construct----build-the-graph)
 5. [Step 2: execute-reference -- Run the Reference Executor](#step-2-execute-reference----run-the-reference-executor)
 6. [Step 3: serialize -- Save Inputs and Outputs to Disk](#step-3-serialize----save-inputs-and-outputs-to-disk)
@@ -39,7 +39,7 @@ This RFC introduces golden reference validation as a third verification mode for
 
 ### How It Works
 
-The entire golden reference feature reduces to **7 steps** split across two pipelines -- generation (run once) and validation (run every CI):
+At its core, the golden reference feature follows these steps across two pipelines -- generation (run once) and validation (run every CI):
 
 | Step | Tag | What happens | Generation | Validation |
 |------|-----|-------------|:---:|:---:|
@@ -51,7 +51,7 @@ The entire golden reference feature reduces to **7 steps** split across two pipe
 | 6 | `deserialize` | Load saved reference outputs from disk | -- | Y |
 | 7 | `validate` | Compare engine output to saved output | -- | Y |
 
-No reference executor runs in CI. The truth was computed once and frozen to disk. The diagrams in [The 7 Steps](#the-7-steps) show both pipelines visually.
+No reference executor runs in CI. The truth was computed once and frozen to disk. The diagrams in [Pipeline Overview](#pipeline-overview) show both pipelines visually.
 
 ---
 
@@ -74,9 +74,9 @@ A prior effort established a golden reference pattern in the MIOpen plugin's tes
 
 ---
 
-## The 7 Steps
+## Pipeline Overview
 
-This is the spine of the entire feature. Two pipelines share the same 7 steps:
+Two pipelines share the same set of steps:
 
 ### Generation Pipeline (runs once, produces golden data)
 
