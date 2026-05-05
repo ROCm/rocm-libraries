@@ -3629,6 +3629,18 @@ def cumulative_issue_cycles(graph, producer, consumer) -> int:
     (the convention previously used by the deleted
     `estimate_quad_cycles_precomputed`).
 
+    Cross-body (bead 2bu.5): when producer and consumer live in different
+    captured bodies, the simulator continues across body boundaries in
+    `_BODY_BUILD_ORDER` (ML-1 → ML → NGL → NLL — hardware execution
+    order). Simulator state (current_issue, mfma_free_at, last_mfma_class,
+    last_mfma_issue) persists across boundaries because the bodies issue
+    back-to-back; no extra "body boundary" stall is injected. The
+    cross-body gap is therefore the cumulative sum of intervening
+    instruction issue costs, exactly the same arithmetic the same-body
+    walk uses. This is the unified single source of truth — the
+    cross-iteration distinction is a red herring; the graph lays out
+    instructions in execution order regardless of body membership.
+
     Falls back to `0` if the body or the producer/consumer cannot be
     located in the captured stream (defensive — should not happen in
     well-formed graphs but keeps unit-test scaffolding resilient).
@@ -3636,93 +3648,130 @@ def cumulative_issue_cycles(graph, producer, consumer) -> int:
     captures = getattr(graph, "captures", None)
     if not captures:
         return 0
-    body = captures.get(producer.body_label)
-    if body is None:
-        return 0
-    instructions = getattr(body, "instructions", None)
-    if not instructions:
+
+    # Producer must always be strictly before consumer in stream order. The
+    # SchedulePosition `__lt__` compares (loop_index, vmfma_index, sub_index)
+    # so this single check covers same-body and cross-body cases uniformly.
+    if not (producer.position < consumer.position):
         return 0
 
-    # Locate producer and consumer within the body's instruction stream by
-    # (mfma_index, sequence). The TaggedInstruction.slot tuple lex-orders
-    # the same way SchedulePosition does (vmfma_index, sub_index).
-    p_key = (producer.position.vmfma_index, producer.position.sub_index)
-    c_key = (consumer.position.vmfma_index, consumer.position.sub_index)
-    if p_key >= c_key:
-        # Producer at-or-after consumer: no forward issue gap to compute.
+    # Build the list of bodies to traverse, starting from the producer's
+    # body and continuing forward through `_BODY_BUILD_ORDER` until (and
+    # including) the consumer's body. Cross-body unification (bead 2bu.5):
+    # the simulator state — `current_issue`, `mfma_free_at`,
+    # `last_mfma_class`, `last_mfma_issue` — is preserved across body
+    # boundaries because the captured bodies issue back-to-back in
+    # hardware execution order. There is no extra "body boundary" stall
+    # injected; every per-instruction cost is already accounted for as we
+    # walk each body's instructions, so the cross-body gap is just the
+    # sum of intervening instruction issue costs.
+    p_body_idx = None
+    c_body_idx = None
+    for i, label in enumerate(_BODY_BUILD_ORDER):
+        if label == producer.body_label:
+            p_body_idx = i
+        if label == consumer.body_label:
+            c_body_idx = i
+    if p_body_idx is None or c_body_idx is None or p_body_idx > c_body_idx:
         return 0
 
-    # Locate by tagged_inst identity first (exact match — robust against
-    # fixtures where multiple instructions share the same slot key, e.g.
-    # an LR and an MFMA both at mfma_index=0,sequence=0). Fall back to
-    # slot-key match if the back-reference isn't pinned (defensive — every
-    # GraphNode build path sets `tagged_inst`, so the fallback only fires
-    # in degenerate test paths).
     p_ti = getattr(producer, "tagged_inst", None)
     c_ti = getattr(consumer, "tagged_inst", None)
-    p_idx = None
-    c_idx = None
-    for i, ti in enumerate(instructions):
-        if p_idx is None and (ti is p_ti or (
-                p_ti is None
-                and getattr(ti, "slot", None) is not None
-                and (getattr(ti.slot, "mfma_index", None),
-                     getattr(ti.slot, "sequence", None)) == p_key)):
-            p_idx = i
-        if ti is c_ti or (
-                c_ti is None
-                and getattr(ti, "slot", None) is not None
-                and (getattr(ti.slot, "mfma_index", None),
-                     getattr(ti.slot, "sequence", None)) == c_key):
-            c_idx = i
-            break
-    if p_idx is None or c_idx is None or p_idx >= c_idx:
-        return 0
+    p_key = (producer.position.vmfma_index, producer.position.sub_index)
+    c_key = (consumer.position.vmfma_index, consumer.position.sub_index)
 
-    # Walk producer..consumer with the canonical issue-time simulator
-    # (post-`8nz` this is the single source of truth — the structural-side
-    # `precompute_issue_times` is deleted). We start the simulator at the
-    # producer (current_issue = 0 baseline), then accumulate; the returned
-    # gap is `c_issue - p_issue - 1`.
+    # Walk bodies in execution order. Simulator state persists across
+    # boundaries (single source of truth for cycle gaps regardless of
+    # body membership — bead 2bu.5).
     mfma_free_at = 0
     current_issue = 0
     last_mfma_class = None
     last_mfma_issue = -1
     p_issue_start = None
     c_issue_start = None
+    found_producer = False
 
-    for i in range(p_idx, c_idx + 1):
-        ti = instructions[i]
-        inst = getattr(ti, "inst", None)
-        is_mfma = inst is not None and _is_mfma(inst)
-        if is_mfma:
-            current_issue = max(current_issue, mfma_free_at)
-            current_mfma_class = _mfma_finish_cycles_for(inst)
-            if last_mfma_class is not None and current_mfma_class != last_mfma_class:
-                gap = current_issue - last_mfma_issue
-                # Threshold is producer-class-keyed: from a 4x4 producer use
-                # FROM_4X4=3, otherwise FROM_STANDARD=5. We discriminate by
-                # the previous MFMA's finish cycles (1 → 4x4 family).
-                threshold = (_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4
-                             if last_mfma_class == _QUAD_CYCLES_MFMA_4X4_FINISH
-                             else _MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD)
-                if gap < threshold:
-                    current_issue += 1
-            mfma_free_at = current_issue + 1 + current_mfma_class
-            last_mfma_issue = current_issue
-            last_mfma_class = current_mfma_class
+    for body_i in range(p_body_idx, c_body_idx + 1):
+        label = _BODY_BUILD_ORDER[body_i]
+        body = captures.get(label)
+        if body is None:
+            continue
+        instructions = getattr(body, "instructions", None)
+        if not instructions:
+            continue
 
-        if i == p_idx:
-            p_issue_start = current_issue
-        if i == c_idx:
-            c_issue_start = current_issue
+        # In producer's body: locate producer and start the walk at it.
+        # In subsequent bodies: walk from the start. Consumer may live in
+        # any body from producer's onward.
+        start_idx = 0
+        if not found_producer:
+            for i, ti in enumerate(instructions):
+                if ti is p_ti or (
+                        p_ti is None
+                        and getattr(ti, "slot", None) is not None
+                        and (getattr(ti.slot, "mfma_index", None),
+                             getattr(ti.slot, "sequence", None)) == p_key):
+                    start_idx = i
+                    found_producer = True
+                    break
+            if not found_producer:
+                # Producer not in this body — defensive; should not happen.
+                return 0
+
+        # End_idx: where (if at all) the consumer lives in this body.
+        end_idx = len(instructions) - 1
+        consumer_idx_in_body = None
+        if label == consumer.body_label:
+            for i in range(start_idx, len(instructions)):
+                ti = instructions[i]
+                if ti is c_ti or (
+                        c_ti is None
+                        and getattr(ti, "slot", None) is not None
+                        and (getattr(ti.slot, "mfma_index", None),
+                             getattr(ti.slot, "sequence", None)) == c_key):
+                    consumer_idx_in_body = i
+                    end_idx = i
+                    break
+            if consumer_idx_in_body is None:
+                # Consumer expected in this body but not found.
+                return 0
+
+        # Walk start_idx..end_idx with the canonical issue-time simulator.
+        for i in range(start_idx, end_idx + 1):
+            ti = instructions[i]
+            inst = getattr(ti, "inst", None)
+            is_mfma = inst is not None and _is_mfma(inst)
+            if is_mfma:
+                current_issue = max(current_issue, mfma_free_at)
+                current_mfma_class = _mfma_finish_cycles_for(inst)
+                if last_mfma_class is not None and current_mfma_class != last_mfma_class:
+                    gap = current_issue - last_mfma_issue
+                    # Threshold is producer-class-keyed: from a 4x4 producer use
+                    # FROM_4X4=3, otherwise FROM_STANDARD=5. We discriminate by
+                    # the previous MFMA's finish cycles (1 → 4x4 family).
+                    threshold = (_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4
+                                 if last_mfma_class == _QUAD_CYCLES_MFMA_4X4_FINISH
+                                 else _MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD)
+                    if gap < threshold:
+                        current_issue += 1
+                mfma_free_at = current_issue + 1 + current_mfma_class
+                last_mfma_issue = current_issue
+                last_mfma_class = current_mfma_class
+
+            if p_issue_start is None and i == start_idx and label == producer.body_label:
+                p_issue_start = current_issue
+            if consumer_idx_in_body is not None and i == consumer_idx_in_body:
+                c_issue_start = current_issue
+                break
+            # Per-instruction issue cost. Skip lookup for SWait/SBarrier/SNop
+            # whose rocisa instances are not graph nodes — read their cost
+            # directly from `_min_issue_quad_cycles_for`. For graph-tracked
+            # nodes the cost is identical (default base 1) so either path is
+            # cycle-exact.
+            current_issue += _min_issue_quad_cycles_for(inst)
+
+        if c_issue_start is not None:
             break
-        # Per-instruction issue cost. Skip lookup for SWait/SBarrier/SNop
-        # whose rocisa instances are not graph nodes — read their cost
-        # directly from `_min_issue_quad_cycles_for`. For graph-tracked
-        # nodes the cost is identical (default base 1) so either path is
-        # cycle-exact.
-        current_issue += _min_issue_quad_cycles_for(inst)
 
     if p_issue_start is None or c_issue_start is None:
         return 0
@@ -3870,26 +3919,28 @@ def _mfma_pack_to_cvt_gap_ok(producer, consumer, subj_graph):
 
     Approach: CYCLE-EXACT via `cumulative_issue_cycles` (bead `nk0`), the
     same simulator `_quad_cycle_gap_ok` uses. The helper walks the
-    captured body's instruction stream from the producer to the
-    consumer, accumulating per-instruction issue costs plus
-    MFMA-specific finish-time and type-switch stalls. Bead `8nz` deleted
-    the structural-side `precompute_issue_times` simulator that this
-    helper originally mirrored; the graph-side path is now the single
-    source of truth for the PackMFMA -> CVT settle window.
+    captured stream from the producer to the consumer, accumulating
+    per-instruction issue costs plus MFMA-specific finish-time and
+    type-switch stalls. Bead `8nz` deleted the structural-side
+    `precompute_issue_times` simulator that this helper originally
+    mirrored; the graph-side path is now the single source of truth for
+    the PackMFMA -> CVT settle window.
 
-    Cross-body edges follow the conservative `body_delta * 1000`
-    placeholder (s7k pattern, mirrors the cross-body branches in the
-    other gap helpers): a body boundary represents many issue cycles so
-    the gap is always judged OK and telemetry sees a numerically
-    meaningful value rather than the misleading `actual == expected`
-    placeholder.
+    Bead `2bu.5`: same-body and cross-body share the SAME code path. The
+    cross-iteration distinction is a red herring — the graph has all
+    instructions laid out in execution order regardless of which body
+    they belong to, so `cumulative_issue_cycles` (extended to walk
+    across body boundaries in `_BODY_BUILD_ORDER`) is THE function that
+    computes the actual cycle gap. The previous `body_delta * 1000`
+    placeholder always-true short-circuit is gone; cross-body PackMFMA
+    -> CVT1 edges are now enforced with the same 5-quad-cycle threshold
+    as same-body edges.
     """
     expected = _QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1
 
-    if producer.body_label != consumer.body_label:
-        body_delta = consumer.position.loop_index - producer.position.loop_index
-        actual = abs(body_delta) * 1000
-        return True, expected, actual
+    if subj_graph is None:
+        # Strict: no graph -> conservative fail (cannot compute gap).
+        return False, expected, 0
 
     actual = cumulative_issue_cycles(subj_graph, producer, consumer)
     return actual >= expected, expected, actual

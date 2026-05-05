@@ -84,6 +84,7 @@ from Tensile.Components.ScheduleCapture import (
     TimingTooCloseFailure,
     _quad_cycle_gap_ok,
     _cvt_to_mfma_gap_ok,
+    _mfma_pack_to_cvt_gap_ok,
 )
 
 from dataflow_fixtures import (
@@ -2151,6 +2152,250 @@ class TestMFMAQuadCycleGap:
             f"placeholder). Got actual={actual}. A mutation to "
             f"`return (False, 2, 0)` would collapse actual to 0."
         )
+
+    # -------------------------------------------------------------------------
+    # Bead `2bu.5` — cross-body unit tests for `_mfma_pack_to_cvt_gap_ok`.
+    #
+    # Replaces the old `body_delta * 1000` always-true placeholder. Same-body
+    # and cross-body now share the SAME code path: a unified call to
+    # `cumulative_issue_cycles` (extended in 2bu.5 to walk across body
+    # boundaries in `_BODY_BUILD_ORDER`). The cross-iteration distinction is
+    # a red herring — the graph has all instructions laid out in execution
+    # order regardless of which body they belong to, so one function computes
+    # the actual cycle gap for both cases.
+    #
+    # Tests below mirror the pattern of the same-body PackMFMA->CVT1
+    # boundary tests (`test_mfma_pack_to_cvt1_zero_gap_emits_timing_too_close`,
+    # `test_mfma_pack_to_cvt1_meets_5_cycle_gap_no_failure`,
+    # `test_mfma_pack_to_cvt1_one_short_pins_actual_4`) but with the
+    # producer in ML-1 and the consumer in ML.
+    # -------------------------------------------------------------------------
+
+    def _make_real_pack_mfma_cross_body(self, *, acc_start, acc_count, a_start,
+                                         a_count, b_start, b_count, slot,
+                                         sequence, category):
+        """Build a real rocisa MFMAInstruction (4x4 PackMFMA family) wrapped
+        in a TaggedInstruction. Mirrors `_make_real_pack_mfma` — duplicated
+        here so the cross-body test block is self-contained against the
+        same-body siblings."""
+        from rocisa.enum import InstType
+        from rocisa.instruction import MFMAInstruction
+        inst = MFMAInstruction(
+            InstType.INST_F32, InstType.INST_F32, [4, 4, 4, 16], False,
+            vgpr(acc_start, acc_count),
+            vgpr(a_start, a_count),
+            vgpr(b_start, b_count),
+        )
+        return _tag(inst, category=category,
+                    mfma_index=slot, sequence=sequence)
+
+    def _build_cross_body_pack_to_cvt_capture(self, *, ml_prev_pad_count):
+        """Build a FourPartCapture whose ML-1 body holds a 4x4 PackMFMA
+        producer at slot=2 followed by `ml_prev_pad_count` cost-1 LR
+        instructions, and whose ML body holds the CVT1 consumer at slot=0.
+
+        The PackMFMA writes accumulator v0..v3; the CVT reads v0 as src0
+        (RAW edge across the body boundary).
+
+        Cross-body cumulative_issue_cycles walk (bead 2bu.5):
+          ML-1 walk starting at PackMFMA (slot=2):
+            PackMFMA: current_issue=0, mfma_free=2, p_issue_start=0;
+              += 1 (issue cost) → current_issue=1.
+            ml_prev_pad_count LRs each cost 1 → current_issue = 1 + N.
+          ML walk starting at index 0:
+            CVT (consumer at idx 0) → c_issue_start = 1 + N.
+          gap = c_issue_start - p_issue_start - 1 = (1+N) - 0 - 1 = N.
+
+        So `ml_prev_pad_count == N` directly controls the reported `actual`.
+        """
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(0, 1), src1=vgpr(1, 1))
+        ml_prev_instructions = [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            self._make_real_pack_mfma_cross_body(
+                acc_start=0, acc_count=4, a_start=8, a_count=2,
+                b_start=32, b_count=2, slot=2, sequence=0,
+                category="PackA0"),
+        ]
+        # Pad with cost-1 LRs at successive slots after the PackMFMA. Each
+        # LR contributes exactly 1 quad-cycle to current_issue.
+        for i in range(ml_prev_pad_count):
+            ml_prev_instructions.append(
+                make_lr(80 + i, 1, 128 + 4 * i,
+                        slot=3 + i, category="LRA1")
+            )
+        ml_prev_cap = make_capture(BODY_LABEL_ML_PREV, ml_prev_instructions)
+        ml_cap = make_capture(BODY_LABEL_ML, [
+            _tag(cvt, category="PackA1", mfma_index=0, sequence=0),
+        ])
+        ngl_filler = make_capture(BODY_LABEL_NGL, [make_mfma(
+            c_dst_start=220, a_src_start=224, b_src_start=228, slot=0)])
+        nll_filler = make_capture(BODY_LABEL_NLL, [make_mfma(
+            c_dst_start=240, a_src_start=244, b_src_start=248, slot=0)])
+        return FourPartCapture(
+            main_loop={0: ml_cap},
+            main_loop_prev={0: ml_prev_cap},
+            n_gl={0: ngl_filler},
+            n_ll={0: nll_filler},
+            num_mfma=1, num_codepaths=1, source="cms",
+        )
+
+    def test_mfma_pack_to_cvt1_cross_body_gap_meets_5_no_failure(self):
+        """Positive cross-body case: PackMFMA producer in ML-1 (slot=2)
+        with 5 cost-1 LR instructions trailing it; CVT1 consumer in ML
+        (slot=0). Cross-body cumulative_issue_cycles walk yields
+        actual = 5 (see `_build_cross_body_pack_to_cvt_capture` arithmetic:
+        actual == ml_prev_pad_count). expected = 5; 5 >= 5 → ok=True →
+        NO TimingTooCloseFailure on the cross-body PackMFMA->CVT1 edge.
+
+        Pre-2bu.5 this passed via the always-true `body_delta * 1000`
+        placeholder. Post-2bu.5 it must STILL pass — but now via the same
+        cycle-exact arithmetic the same-body case uses, with the cross-body
+        walk in `cumulative_issue_cycles` correctly summing per-instruction
+        issue costs across the ML-1 → ML boundary."""
+        four = self._build_cross_body_pack_to_cvt_capture(ml_prev_pad_count=5)
+        g = build_dataflow_graph(four)
+
+        # Locate the cross-body PackMFMA -> CVTPack edge.
+        cross = [e for e in g.edges
+                 if getattr(e.producer, "category", "").startswith("Pack")
+                 and getattr(e.consumer, "category", "").startswith("Pack")
+                 and e.producer.body_label != e.consumer.body_label]
+        assert cross, (
+            "Expected at least one cross-body PackMFMA->CVTPack edge "
+            "(ML-1 producer -> ML consumer). Got edges: "
+            f"{[(getattr(e.producer, 'category', None), e.producer.body_label, getattr(e.consumer, 'category', None), e.consumer.body_label) for e in g.edges]}"
+        )
+        edge = cross[0]
+        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+            edge.producer, edge.consumer, g)
+        assert expected == 5, (
+            f"PackMFMA->CVT1 expected=5 (QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1); "
+            f"got expected={expected}."
+        )
+        # actual = ml_prev_pad_count = 5 (cross-body walk arithmetic).
+        assert actual == 5, (
+            f"Cross-body cumulative_issue_cycles arithmetic: PackMFMA at "
+            f"current_issue=0 + 5 LRs (cost 1 each) → CVT issues at 6; "
+            f"gap = 6-0-1 = 5. Got actual={actual}. If actual==1000, the "
+            f"old body_delta * 1000 placeholder is back."
+        )
+        assert ok, (
+            f"Cross-body PackMFMA->CVT1 with actual=5 >= expected=5 must "
+            f"pass. Got ok={ok}, actual={actual}."
+        )
+        # End-to-end: validate_edge_wait_coverage must NOT flag this edge.
+        failures = validate_edge_wait_coverage(g)
+        cross_body_pack_to_cvt = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", "").startswith("Pack")
+            and getattr(f.consumer, "category", "").startswith("Pack")
+            and f.producer.body_label != f.consumer.body_label
+            and f.expected_quad_cycles == 5
+        ]
+        assert not cross_body_pack_to_cvt, (
+            f"Cross-body PackMFMA->CVT1 with actual==expected==5 must NOT "
+            f"emit TimingTooCloseFailure. Got: {cross_body_pack_to_cvt}"
+        )
+
+    def test_mfma_pack_to_cvt1_cross_body_gap_below_5_emits_timing_too_close(self):
+        """Negative cross-body case: PackMFMA producer in ML-1 (slot=2)
+        with only 2 cost-1 LRs trailing it; CVT1 consumer in ML (slot=0).
+        Cross-body cumulative_issue_cycles arithmetic yields actual = 2 <
+        expected = 5 → TimingTooCloseFailure must be emitted.
+
+        Pre-2bu.5 this incorrectly PASSED (the placeholder always returned
+        ok=True for cross-body). Post-2bu.5 the cross-body arithmetic
+        catches the violation — proving that the PackMFMA->CVT1 5-cycle
+        settle window is now enforced uniformly across body boundaries."""
+        four = self._build_cross_body_pack_to_cvt_capture(ml_prev_pad_count=2)
+        g = build_dataflow_graph(four)
+        cross = [e for e in g.edges
+                 if getattr(e.producer, "category", "").startswith("Pack")
+                 and getattr(e.consumer, "category", "").startswith("Pack")
+                 and e.producer.body_label != e.consumer.body_label]
+        assert cross
+        edge = cross[0]
+        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+            edge.producer, edge.consumer, g)
+        assert expected == 5
+        assert actual == 2, (
+            f"Cross-body arithmetic: PackMFMA + 2 LRs → CVT issues at 3; "
+            f"gap = 3-0-1 = 2. Got actual={actual}."
+        )
+        assert not ok, (
+            f"Cross-body PackMFMA->CVT1 with actual=2 < expected=5 MUST "
+            f"fail the gap check. Got ok={ok}. If ok==True, the cross-body "
+            f"branch is still using the always-true placeholder."
+        )
+        failures = validate_edge_wait_coverage(g)
+        cross_body_pack_to_cvt = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", "").startswith("Pack")
+            and getattr(f.consumer, "category", "").startswith("Pack")
+            and f.producer.body_label != f.consumer.body_label
+            and f.expected_quad_cycles == 5
+        ]
+        assert cross_body_pack_to_cvt, (
+            f"Expected TimingTooCloseFailure on cross-body PackMFMA->CVT1 "
+            f"edge (actual=2 < expected=5). Got failures: "
+            f"{[type(f).__name__ for f in failures]}"
+        )
+        f = cross_body_pack_to_cvt[0]
+        assert f.actual_quad_cycles == 2
+
+    def test_mfma_pack_to_cvt1_cross_body_one_short_boundary_emits_failure(self):
+        """Cross-body off-by-one boundary: PackMFMA in ML-1 with 4 cost-1
+        LRs trailing it, CVT1 in ML at slot=0. Cross-body arithmetic
+        yields actual = 4 (one short of expected = 5) → TimingTooCloseFailure.
+
+        Mirror of the same-body off-by-one sentinel
+        `test_mfma_pack_to_cvt1_one_short_pins_actual_4` (zpi); a regression
+        that lowers QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 from 5 to 4 makes
+        this fixture stop firing — the off-by-one cross-body sentinel."""
+        four = self._build_cross_body_pack_to_cvt_capture(ml_prev_pad_count=4)
+        g = build_dataflow_graph(four)
+        cross = [e for e in g.edges
+                 if getattr(e.producer, "category", "").startswith("Pack")
+                 and getattr(e.consumer, "category", "").startswith("Pack")
+                 and e.producer.body_label != e.consumer.body_label]
+        assert cross
+        edge = cross[0]
+        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+            edge.producer, edge.consumer, g)
+        assert expected == 5, (
+            f"PackMFMA->CVT1 expected=5; got expected={expected}. A change "
+            f"here means QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 was mutated."
+        )
+        assert actual == 4, (
+            f"Cross-body off-by-one: PackMFMA + 4 LRs → CVT at "
+            f"current_issue=5; gap = 5-0-1 = 4. Got actual={actual}. "
+            f"A ±1 miscount in the cross-body cumulative_issue_cycles walk "
+            f"would shift this to 3 or 5 and be caught here."
+        )
+        assert not ok, (
+            f"Cross-body actual=4 < expected=5 MUST fail. Got ok={ok}."
+        )
+        failures = validate_edge_wait_coverage(g)
+        cross_body_pack_to_cvt = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", "").startswith("Pack")
+            and getattr(f.consumer, "category", "").startswith("Pack")
+            and f.producer.body_label != f.consumer.body_label
+            and f.expected_quad_cycles == 5
+        ]
+        assert cross_body_pack_to_cvt, (
+            f"Expected TimingTooCloseFailure on cross-body PackMFMA->CVT1 "
+            f"off-by-one (actual=4, expected=5). If this fixture stops "
+            f"firing, QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 was likely lowered."
+        )
+        f = cross_body_pack_to_cvt[0]
+        assert f.actual_quad_cycles == 4
+        assert f.expected_quad_cycles == 5
 
 
 # =============================================================================
