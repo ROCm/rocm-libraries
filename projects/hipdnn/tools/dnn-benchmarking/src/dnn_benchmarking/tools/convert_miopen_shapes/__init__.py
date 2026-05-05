@@ -10,7 +10,7 @@ Usage:
 
 from .bnorm import BnormParams, build_bnorm_json
 from .cli import convert_line, main, parse_line
-from .conv import ConvParams, build_conv_json, conv_io_type
+from .conv import CONV_IO_TYPE, ConvParams, build_conv_json
 from .parsing import (
     BNORM_FLAG_ALIASES,
     CONV_FLAG_ALIASES,
@@ -34,7 +34,7 @@ __all__ = [
     "ConvParams",
     "build_bnorm_json",
     "build_conv_json",
-    "conv_io_type",
+    "CONV_IO_TYPE",
     "conv_out_dim",
     "convert_line",
     "get_int_arg",

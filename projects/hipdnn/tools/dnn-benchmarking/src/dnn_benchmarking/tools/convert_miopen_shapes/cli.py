@@ -13,11 +13,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .bnorm import _bnorm_filename, build_bnorm_json
 from .conv import (
+    CONV_IO_TYPE,
     ConvDirection,
     ConvParams,
     _conv_filename,
     build_conv_json,
-    conv_io_type,
 )
 from .parsing import parse_args
 
@@ -100,7 +100,7 @@ def convert_line(
         results = []
         for f in directions:
             p_dir = dataclasses.replace(p, F=f)
-            graph = build_conv_json(p_dir, io_type=conv_io_type(operation))
+            graph = build_conv_json(p_dir, io_type=CONV_IO_TYPE[operation])
             name_stem = _conv_filename(prefix, p_dir)
             graph["name"] = name_stem
             results.append((name_stem, graph))

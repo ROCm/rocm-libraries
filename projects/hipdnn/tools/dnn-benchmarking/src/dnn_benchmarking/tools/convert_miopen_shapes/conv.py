@@ -20,32 +20,35 @@ class ConvDirection(enum.IntEnum):
 
     @property
     def label(self) -> str:
-        return _CONV_DIRECTION_LABELS[self]
+        return {
+            ConvDirection.FORWARD: "fwd",
+            ConvDirection.BACKWARD_DATA: "dgrad",
+            ConvDirection.BACKWARD_WEIGHTS: "wgrad",
+        }[self]
 
     @property
     def node_type(self) -> str:
-        return _CONV_NODE_TYPES[self]
+        return {
+            ConvDirection.FORWARD: "ConvolutionFwdAttributes",
+            ConvDirection.BACKWARD_DATA: "ConvolutionBwdAttributes",
+            ConvDirection.BACKWARD_WEIGHTS: "ConvolutionWrwAttributes",
+        }[self]
 
 
-_CONV_DIRECTION_LABELS: Dict["ConvDirection", str] = {
-    ConvDirection.FORWARD: "fwd",
-    ConvDirection.BACKWARD_DATA: "dgrad",
-    ConvDirection.BACKWARD_WEIGHTS: "wgrad",
+class ConvMode(enum.Enum):
+    CROSS_CORRELATION = "conv"
+    CONVOLUTION = "trans"
+
+CONV_IO_TYPE: Dict[str, str] = {
+    "conv": "float",
+    "convfp16": "half",
+    "convbfp16": "bfloat16",
 }
 
-_CONV_NODE_TYPES: Dict["ConvDirection", str] = {
-    ConvDirection.FORWARD: "ConvolutionFwdAttributes",
-    ConvDirection.BACKWARD_DATA: "ConvolutionBwdAttributes",
-    ConvDirection.BACKWARD_WEIGHTS: "ConvolutionWrwAttributes",
-}
-
-
-_CONV_MODE_MAP = {
-    "conv": "CROSS_CORRELATION",
-    "trans": "CONVOLUTION",
-}
-
-_VALID_PAD_MODES = {"default", "same", "valid"}
+class PadMode(enum.Enum):
+    DEFAULT = "default"
+    SAME = "same"
+    VALID = "valid"
 
 
 def _same_padding(dim_in: int, kernel: int, dilation: int) -> int:
@@ -76,7 +79,7 @@ class ConvParams:
     in_layout: str
     fil_layout: str
     out_layout: str
-    conv_mode: str = "CROSS_CORRELATION"
+    conv_mode: ConvMode = ConvMode.CROSS_CORRELATION
     D: int = 0
     D_f: int = 0
     pad_d: int = 0
@@ -108,17 +111,20 @@ class ConvParams:
             raise ValueError(
                 f"Invalid convolution: K={K} is not divisible by groups={groups}"
             )
-        mode_str = args.get("-m", "conv")
-        conv_mode = _CONV_MODE_MAP.get(mode_str)
-        if conv_mode is None:
+        try:
+            conv_mode = ConvMode(args.get("-m", "conv"))
+        except ValueError:
             raise ValueError(
-                f"Unknown conv mode {mode_str!r}, expected 'conv' or 'trans'"
+                f"Unknown conv mode {args.get('-m')!r}, "
+                f"expected one of {[m.value for m in ConvMode]}"
             )
 
-        pad_mode = args.get("-z", "default")
-        if pad_mode not in _VALID_PAD_MODES:
+        try:
+            pad_mode = PadMode(args.get("-z", "default"))
+        except ValueError:
             raise ValueError(
-                f"Unknown pad_mode {pad_mode!r}, expected one of {sorted(_VALID_PAD_MODES)}"
+                f"Unknown pad_mode {args.get('-z')!r}, "
+                f"expected one of {[m.value for m in PadMode]}"
             )
 
         R = get_int_arg(args, "-y", 3)
@@ -126,25 +132,27 @@ class ConvParams:
         dil_h = get_int_arg(args, "-l", 1)
         dil_w = get_int_arg(args, "-j", 1)
 
-        if pad_mode == "same":
-            pad_h = _same_padding(get_int_arg(args, "-H", 32), R, dil_h)
-            pad_w = _same_padding(get_int_arg(args, "-W", 32), S, dil_w)
-        elif pad_mode == "valid":
-            pad_h = 0
-            pad_w = 0
-        else:
-            pad_h = get_int_arg(args, "-p", 0)
-            pad_w = get_int_arg(args, "-q", 0)
+        match pad_mode:
+            case PadMode.SAME:
+                pad_h = _same_padding(get_int_arg(args, "-H", 32), R, dil_h)
+                pad_w = _same_padding(get_int_arg(args, "-W", 32), S, dil_w)
+            case PadMode.VALID:
+                pad_h = 0
+                pad_w = 0
+            case PadMode.DEFAULT:
+                pad_h = get_int_arg(args, "-p", 0)
+                pad_w = get_int_arg(args, "-q", 0)
 
         D_f = get_int_arg(args, "--fil_d", 3) if is_3d else 0
         dil_d = get_int_arg(args, "--dilation_d", 1) if is_3d else 1
         if is_3d:
-            if pad_mode == "same":
-                pad_d = _same_padding(get_int_arg(args, "--in_d", 32), D_f, dil_d)
-            elif pad_mode == "valid":
-                pad_d = 0
-            else:
-                pad_d = get_int_arg(args, "--pad_d", 0)
+            match pad_mode:
+                case PadMode.SAME:
+                    pad_d = _same_padding(get_int_arg(args, "--in_d", 32), D_f, dil_d)
+                case PadMode.VALID:
+                    pad_d = 0
+                case PadMode.DEFAULT:
+                    pad_d = get_int_arg(args, "--pad_d", 0)
         else:
             pad_d = 0
 
@@ -218,17 +226,6 @@ class ConvParams:
         )
 
 
-_CONV_IO_TYPE: Dict[str, str] = {
-    "conv": "float",
-    "convfp16": "half",
-    "convbfp16": "bfloat16",
-}
-
-
-def conv_io_type(operation: str) -> str:
-    return _CONV_IO_TYPE[operation]
-
-
 def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
     """Build a hipDNN JSON graph dict from a ConvParams instance."""
     Cg = p.C // p.groups  # channels per group for weight tensor
@@ -262,44 +259,42 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
         stride_list = [p.stride_h, p.stride_w]
         dil_list = [p.dil_h, p.dil_w]
 
-    direction = p.direction
-    node_type = direction.node_type
-
     # Wire up inputs/outputs differently per direction
-    if direction is ConvDirection.FORWARD:  # x, w → y
-        tensors = [
-            _make_tensor(0, "output_y", y_dims, y_strides, data_type=io_type),
-            _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
-            _make_tensor(2, "weight_w", w_dims, w_strides, data_type=io_type),
-        ]
-        node_inputs = {"x_tensor_uid": 1, "w_tensor_uid": 2}
-        node_outputs = {"y_tensor_uid": 0}
-    elif direction is ConvDirection.BACKWARD_DATA:  # dy, w → dx
-        tensors = [
-            _make_tensor(0, "output_dx", x_dims, x_strides, data_type=io_type),
-            _make_tensor(1, "input_dy", y_dims, y_strides, data_type=io_type),
-            _make_tensor(2, "weight_w", w_dims, w_strides, data_type=io_type),
-        ]
-        node_inputs = {"dy_tensor_uid": 1, "w_tensor_uid": 2}
-        node_outputs = {"dx_tensor_uid": 0}
-    else:  # dy, x → dw
-        tensors = [
-            _make_tensor(0, "output_dw", w_dims, w_strides, data_type=io_type),
-            _make_tensor(1, "input_dy", y_dims, y_strides, data_type=io_type),
-            _make_tensor(2, "input_x", x_dims, x_strides, data_type=io_type),
-        ]
-        node_inputs = {"dy_tensor_uid": 1, "x_tensor_uid": 2}
-        node_outputs = {"dw_tensor_uid": 0}
+    match p.direction:
+        case ConvDirection.FORWARD:  # x, w → y
+            tensors = [
+                _make_tensor(0, "output_y", y_dims, y_strides, data_type=io_type),
+                _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
+                _make_tensor(2, "weight_w", w_dims, w_strides, data_type=io_type),
+            ]
+            node_inputs = {"x_tensor_uid": 1, "w_tensor_uid": 2}
+            node_outputs = {"y_tensor_uid": 0}
+        case ConvDirection.BACKWARD_DATA:  # dy, w → dx
+            tensors = [
+                _make_tensor(0, "output_dx", x_dims, x_strides, data_type=io_type),
+                _make_tensor(1, "input_dy", y_dims, y_strides, data_type=io_type),
+                _make_tensor(2, "weight_w", w_dims, w_strides, data_type=io_type),
+            ]
+            node_inputs = {"dy_tensor_uid": 1, "w_tensor_uid": 2}
+            node_outputs = {"dx_tensor_uid": 0}
+        case ConvDirection.BACKWARD_WEIGHTS:  # dy, x → dw
+            tensors = [
+                _make_tensor(0, "output_dw", w_dims, w_strides, data_type=io_type),
+                _make_tensor(1, "input_dy", y_dims, y_strides, data_type=io_type),
+                _make_tensor(2, "input_x", x_dims, x_strides, data_type=io_type),
+            ]
+            node_inputs = {"dy_tensor_uid": 1, "x_tensor_uid": 2}
+            node_outputs = {"dw_tensor_uid": 0}
 
     nodes = [
         {
             "name": "conv_node",
-            "type": node_type,
+            "type": p.direction.node_type,
             "compute_data_type": "float",
             "inputs": node_inputs,
             "outputs": node_outputs,
             "parameters": {
-                "conv_mode": p.conv_mode,
+                "conv_mode": p.conv_mode.name,
                 "pre_padding": pre_pad,
                 "post_padding": post_pad,
                 "stride": stride_list,
@@ -321,7 +316,7 @@ def _conv_filename(prefix: str, p: ConvParams) -> str:
     direction = p.direction.label
 
     if p.is_3d:
-        name = _join_prefix(
+        return _join_prefix(
             prefix,
             f"conv_{direction}"
             f"_n{p.N}c{p.C}D{p.D}H{p.H}W{p.W}"
@@ -330,15 +325,13 @@ def _conv_filename(prefix: str, p: ConvParams) -> str:
             f"_sd{p.stride_d}u{p.stride_h}v{p.stride_w}"
             f"_g{p.groups}",
         )
-    else:
-        name = _join_prefix(
-            prefix,
-            f"conv_{direction}"
-            f"_n{p.N}c{p.C}H{p.H}W{p.W}"
-            f"_k{p.K}R{p.R}S{p.S}"
-            f"_p{p.pad_h}q{p.pad_w}"
-            f"_u{p.stride_h}v{p.stride_w}"
-            f"_l{p.dil_h}j{p.dil_w}"
-            f"_g{p.groups}",
-        )
-    return name
+    return _join_prefix(
+        prefix,
+        f"conv_{direction}"
+        f"_n{p.N}c{p.C}H{p.H}W{p.W}"
+        f"_k{p.K}R{p.R}S{p.S}"
+        f"_p{p.pad_h}q{p.pad_w}"
+        f"_u{p.stride_h}v{p.stride_w}"
+        f"_l{p.dil_h}j{p.dil_w}"
+        f"_g{p.groups}",
+    )

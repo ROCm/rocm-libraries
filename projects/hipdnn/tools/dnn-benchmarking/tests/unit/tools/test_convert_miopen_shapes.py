@@ -11,7 +11,7 @@ from dnn_benchmarking.tools.convert_miopen_shapes import (
     ConvParams,
     build_bnorm_json,
     build_conv_json,
-    conv_io_type,
+    CONV_IO_TYPE,
     conv_out_dim,
     convert_line,
     is_flag,
@@ -869,7 +869,7 @@ class TestConvDataTypes:
         ],
     )
     def test_conv_io_type_mapping(self, operation: str, expected_io_type: str) -> None:
-        assert conv_io_type(operation) == expected_io_type
+        assert CONV_IO_TYPE[operation] == expected_io_type
 
     @pytest.mark.parametrize(
         "operation,expected_io_type",

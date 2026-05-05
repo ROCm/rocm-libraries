@@ -22,6 +22,11 @@ class BnormDirection(enum.Enum):
     BACKWARD_TRAINING = "backward"
 
 
+class BnormMode(enum.IntEnum):
+    PER_ACTIVATION = 0
+    SPATIAL = 1
+
+
 _BNORM_IO_TYPE: Dict[str, str] = {
     "bnorm": "float",
     "bnormfp16": "half",
@@ -44,7 +49,7 @@ class BnormParams:
     W: int
     D: int
     layout: str
-    mode: int
+    mode: BnormMode
     forw: int
     back: int
 
@@ -90,6 +95,15 @@ class BnormParams:
                 stacklevel=2,
             )
 
+        mode_val = get_int_arg(args, "-m", 0)
+        try:
+            mode = BnormMode(mode_val)
+        except ValueError:
+            raise ValueError(
+                f"Unknown batchnorm mode {mode_val!r}, "
+                f"expected one of {[m.value for m in BnormMode]}"
+            )
+
         return cls(
             N=get_int_arg(args, "-n", 32),
             C=get_int_arg(args, "-c", 3),
@@ -97,7 +111,7 @@ class BnormParams:
             W=get_int_arg(args, "-W", 32),
             D=D,
             layout=args.get("-L", default_layout),
-            mode=get_int_arg(args, "-m", 0),
+            mode=mode,
             forw=get_int_arg(args, "--forw", 1),
             back=get_int_arg(args, "--back", 0),
         )
@@ -108,7 +122,7 @@ class BnormParams:
 
     @property
     def is_spatial(self) -> bool:
-        return self.mode == 1
+        return self.mode is BnormMode.SPATIAL
 
     @property
     def direction(self) -> BnormDirection:
@@ -117,6 +131,15 @@ class BnormParams:
         if self.forw == 2:
             return BnormDirection.FORWARD_INFERENCE
         return BnormDirection.FORWARD_TRAINING
+
+    def input_dims_and_strides(self) -> tuple[List[int], List[int]]:
+        if self.is_3d:
+            dims = [self.N, self.C, self.D, self.H, self.W]
+            strides = _input_strides(self.layout, self.N, self.C, self.H, self.W, self.D)
+        else:
+            dims = [self.N, self.C, self.H, self.W]
+            strides = _input_strides(self.layout, self.N, self.C, self.H, self.W)
+        return dims, strides
 
     def scale_dims_and_strides(self) -> tuple[List[int], List[int]]:
         """Return (dims, strides) for scale/bias/mean/variance tensors.
@@ -155,120 +178,111 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
     p = BnormParams.from_args(args)
     io_type = _BNORM_IO_TYPE[operation]
 
-    if p.is_3d:
-        x_dims = [p.N, p.C, p.D, p.H, p.W]
-        x_strides = _input_strides(p.layout, p.N, p.C, p.H, p.W, p.D)
-    else:
-        x_dims = [p.N, p.C, p.H, p.W]
-        x_strides = _input_strides(p.layout, p.N, p.C, p.H, p.W)
+    x_dims, x_strides = p.input_dims_and_strides()
 
     scale_dims, scale_strides = p.scale_dims_and_strides()
 
     def _stat(uid: int, name: str) -> Dict[str, Any]:
         return _make_tensor(uid, name, scale_dims, scale_strides, data_type="float")
 
-    direction = p.direction
-
-    if direction is BnormDirection.FORWARD_INFERENCE:
-        # Inference: x, mean, inv_variance, scale, bias → y
-        node_type = "BatchnormInferenceAttributes"
-        tensors = [
-            _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
-            _stat(2, "mean"),
-            _stat(3, "inv_variance"),
-            _stat(4, "scale"),
-            _stat(5, "bias"),
-            _make_tensor(6, "output_y", x_dims, x_strides, data_type=io_type),
-        ]
-        nodes = [
-            {
-                "name": "batchnorm_inference_node",
-                "type": node_type,
-                "compute_data_type": "float",
-                "inputs": {
-                    "x_tensor_uid": 1,
-                    "mean_tensor_uid": 2,
-                    "inv_variance_tensor_uid": 3,
-                    "scale_tensor_uid": 4,
-                    "bias_tensor_uid": 5,
-                },
-                "outputs": {"y_tensor_uid": 6},
-            }
-        ]
-    elif direction is BnormDirection.FORWARD_TRAINING:
-        # Forward training: x, scale, bias, epsilon → y, mean, inv_variance
-        # Optional: prev_running_mean/variance + momentum → next_running_mean/variance
-        # peer_stats_tensor_uid is required by the schema (empty list = no peers).
-        node_type = "BatchnormAttributes"
-        tensors = [
-            _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
-            _stat(2, "scale"),
-            _stat(3, "bias"),
-            _make_scalar_tensor(4, "epsilon", 1e-5, data_type="float"),
-            _make_tensor(5, "output_y", x_dims, x_strides, data_type=io_type),
-            _stat(6, "saved_mean"),
-            _stat(7, "saved_inv_variance"),
-        ]
-        nodes = [
-            {
-                "name": "batchnorm_fwd_node",
-                "type": node_type,
-                "compute_data_type": "float",
-                "inputs": {
-                    "x_tensor_uid": 1,
-                    "scale_tensor_uid": 2,
-                    "bias_tensor_uid": 3,
-                    "epsilon_tensor_uid": 4,
-                    "peer_stats_tensor_uid": [],
-                    "prev_running_mean_tensor_uid": None,
-                    "prev_running_variance_tensor_uid": None,
-                    "momentum_tensor_uid": None,
-                },
-                "outputs": {
-                    "y_tensor_uid": 5,
-                    "mean_tensor_uid": 6,
-                    "inv_variance_tensor_uid": 7,
-                    "next_running_mean_tensor_uid": None,
-                    "next_running_variance_tensor_uid": None,
-                },
-            }
-        ]
-    else:
-        # Backward: dy, x, mean, inv_variance, scale → dx, dscale, dbias
-        # mean and inv_variance are optional (null if not available).
-        # peer_stats_tensor_uid is required by the schema (empty list = no peers).
-        # scale/bias type matches TScaleBias; dscale/dbias are TAcc (always float)
-        node_type = "BatchnormBackwardAttributes"
-        tensors = [
-            _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
-            _make_tensor(2, "input_dy", x_dims, x_strides, data_type=io_type),
-            _stat(3, "mean"),
-            _stat(4, "inv_variance"),
-            _stat(5, "scale"),
-            _make_tensor(6, "output_dx", x_dims, x_strides, data_type=io_type),
-            _stat(7, "output_dscale"),
-            _stat(8, "output_dbias"),
-        ]
-        nodes = [
-            {
-                "name": "batchnorm_backward_node",
-                "type": node_type,
-                "compute_data_type": "float",
-                "inputs": {
-                    "dy_tensor_uid": 2,
-                    "x_tensor_uid": 1,
-                    "mean_tensor_uid": 3,
-                    "inv_variance_tensor_uid": 4,
-                    "scale_tensor_uid": 5,
-                    "peer_stats_tensor_uid": [],
-                },
-                "outputs": {
-                    "dx_tensor_uid": 6,
-                    "dscale_tensor_uid": 7,
-                    "dbias_tensor_uid": 8,
-                },
-            }
-        ]
+    match p.direction:
+        case BnormDirection.FORWARD_INFERENCE:
+            # Inference: x, mean, inv_variance, scale, bias → y
+            tensors = [
+                _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
+                _stat(2, "mean"),
+                _stat(3, "inv_variance"),
+                _stat(4, "scale"),
+                _stat(5, "bias"),
+                _make_tensor(6, "output_y", x_dims, x_strides, data_type=io_type),
+            ]
+            nodes = [
+                {
+                    "name": "batchnorm_inference_node",
+                    "type": "BatchnormInferenceAttributes",
+                    "compute_data_type": "float",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "mean_tensor_uid": 2,
+                        "inv_variance_tensor_uid": 3,
+                        "scale_tensor_uid": 4,
+                        "bias_tensor_uid": 5,
+                    },
+                    "outputs": {"y_tensor_uid": 6},
+                }
+            ]
+        case BnormDirection.FORWARD_TRAINING:
+            # Forward training: x, scale, bias, epsilon → y, mean, inv_variance
+            # Optional: prev_running_mean/variance + momentum → next_running_mean/variance
+            # peer_stats_tensor_uid is required by the schema (empty list = no peers).
+            tensors = [
+                _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
+                _stat(2, "scale"),
+                _stat(3, "bias"),
+                _make_scalar_tensor(4, "epsilon", 1e-5, data_type="float"),
+                _make_tensor(5, "output_y", x_dims, x_strides, data_type=io_type),
+                _stat(6, "saved_mean"),
+                _stat(7, "saved_inv_variance"),
+            ]
+            nodes = [
+                {
+                    "name": "batchnorm_fwd_node",
+                    "type": "BatchnormAttributes",
+                    "compute_data_type": "float",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "bias_tensor_uid": 3,
+                        "epsilon_tensor_uid": 4,
+                        "peer_stats_tensor_uid": [],
+                        "prev_running_mean_tensor_uid": None,
+                        "prev_running_variance_tensor_uid": None,
+                        "momentum_tensor_uid": None,
+                    },
+                    "outputs": {
+                        "y_tensor_uid": 5,
+                        "mean_tensor_uid": 6,
+                        "inv_variance_tensor_uid": 7,
+                        "next_running_mean_tensor_uid": None,
+                        "next_running_variance_tensor_uid": None,
+                    },
+                }
+            ]
+        case BnormDirection.BACKWARD_TRAINING:
+            # Backward: dy, x, mean, inv_variance, scale → dx, dscale, dbias
+            # mean and inv_variance are optional (null if not available).
+            # peer_stats_tensor_uid is required by the schema (empty list = no peers).
+            # scale/bias type matches TScaleBias; dscale/dbias are TAcc (always float)
+            tensors = [
+                _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
+                _make_tensor(2, "input_dy", x_dims, x_strides, data_type=io_type),
+                _stat(3, "mean"),
+                _stat(4, "inv_variance"),
+                _stat(5, "scale"),
+                _make_tensor(6, "output_dx", x_dims, x_strides, data_type=io_type),
+                _stat(7, "output_dscale"),
+                _stat(8, "output_dbias"),
+            ]
+            nodes = [
+                {
+                    "name": "batchnorm_backward_node",
+                    "type": "BatchnormBackwardAttributes",
+                    "compute_data_type": "float",
+                    "inputs": {
+                        "dy_tensor_uid": 2,
+                        "x_tensor_uid": 1,
+                        "mean_tensor_uid": 3,
+                        "inv_variance_tensor_uid": 4,
+                        "scale_tensor_uid": 5,
+                        "peer_stats_tensor_uid": [],
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 6,
+                        "dscale_tensor_uid": 7,
+                        "dbias_tensor_uid": 8,
+                    },
+                }
+            ]
 
     return {
         "compute_data_type": "float",
