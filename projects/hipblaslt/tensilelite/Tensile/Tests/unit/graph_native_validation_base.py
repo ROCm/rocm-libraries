@@ -378,8 +378,8 @@ class GraphNativeValidationTest:
     @staticmethod
     def assert_order_inverted(failure, *, producer_name, producer_idx,
                               consumer_name, consumer_idx):
-        """Assert OrderInvertedFailure / ConstraintViolationFailure carries
-        the expected producer/consumer identity AND vmfma_index positions.
+        """Assert OrderInvertedFailure carries the expected producer/consumer
+        identity AND vmfma_index positions.
 
         Pinning positions matters because a name-only check passes if any
         of N similarly-named instructions violate ordering — but we want

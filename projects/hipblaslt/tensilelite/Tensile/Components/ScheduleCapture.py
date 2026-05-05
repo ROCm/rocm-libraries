@@ -529,37 +529,6 @@ def _iter_note(producer, consumer) -> str:
     return ""
 
 
-def format_position(node, capture) -> str:
-    """Render a node's schedule position with cross-category list-position
-    suffix. MFMAs omit the list suffix (not user-scheduled).
-
-    Strict: non-MFMA nodes MUST carry `tagged_inst` AND it MUST appear in
-    `capture.instructions`. Used today only by ConstraintViolationFailure
-    (#13, slated for deletion in bead `pcz`); the strict contract matches
-    `_node_label`'s.
-    """
-    # Accept GraphNode (has `position`) or ValidatorInstruction (has `issued_at`).
-    pos = getattr(node, "position", None) or node.issued_at
-    base = f"@ idx={pos.vmfma_index}"
-    if node.category == "MFMA":
-        return base
-    tagged_inst = getattr(node, "tagged_inst", None)
-    if tagged_inst is None:
-        raise ValueError(
-            f"format_position: node with category={node.category!r} has no "
-            f"tagged_inst; cannot compute cross-category list position"
-        )
-    try:
-        list_pos = capture.instructions.index(tagged_inst)
-    except ValueError as exc:
-        raise ValueError(
-            f"format_position: node tagged_inst={tagged_inst!r} not found in "
-            f"capture.instructions (capture has {len(capture.instructions)} "
-            f"items)"
-        ) from exc
-    return f"{base} ({_ordinal(list_pos + 1)} entry in list)"
-
-
 @dataclass
 class Failure:
     """Common base for all reported scheduling problems.
@@ -580,15 +549,13 @@ class Failure:
 
 
 # ----------------------------------------------------------------------------
-# 1. OrderInvertedFailure — cross-graph reorder detection ONLY.
+# 1. OrderInvertedFailure — cross-graph reorder detection.
 #    Subject reverses the producer/consumer order that the default schedule
 #    established. The default schedule IS the canonical reference; if subj
 #    emits the producer at a later stream position than the consumer while
 #    default emitted them in the opposite order, the subject violates a
 #    real dataflow dependency.
-#    Emitted exclusively by diagnose_missing_edge (compare_graphs). NOT
-#    used by single-schedule constraint validators — those emit
-#    ConstraintViolationFailure (#13).
+#    Emitted exclusively by diagnose_missing_edge (compare_graphs).
 # ----------------------------------------------------------------------------
 @dataclass
 class OrderInvertedFailure(Failure):
@@ -815,35 +782,6 @@ class SCCConflictFailure(Failure):
             f"{_node_with_pos(self.consumer, capture)}'s SCC read should "
             f"resolve to producer {_node_with_pos(self.producer, capture)}, "
             f"but the CMS schedule routes it elsewhere.{inter_desc}"
-        )
-
-
-# ----------------------------------------------------------------------------
-# 13. ConstraintViolationFailure — declared producer/consumer dependency
-#     constraint violated within a single schedule. Emitted by single-schedule
-#     constraint validators (Pack.validate) where there is no default schedule
-#     reference: the producer/consumer pair and the violation are derived
-#     entirely from the schedule under test plus its declared constraints
-#     (must_start_after, needed_by).
-#     Distinct from OrderInvertedFailure (#1), which is reserved for cross-graph
-#     reorder detection against the canonical default schedule.
-#     Note: GlobalRead._validate_must_start_after was deleted in bead `ola.2`
-#     phase 2 — that path's coverage is now graph-native (lr_to_gr_lds_reuse
-#     edges + SRD sgpr RAW edges).
-# ----------------------------------------------------------------------------
-@dataclass
-class ConstraintViolationFailure(Failure):
-    producer: object  # ValidatorInstruction
-    consumer: object  # ValidatorInstruction
-
-    def _format_canonical(self, capture) -> str:
-        producer_pos = format_position(self.producer, capture)
-        consumer_pos = format_position(self.consumer, capture)
-        return (
-            f"{self.producer.category}[{getattr(self.producer, 'name', '')}] "
-            f"{producer_pos} is issued after its consumer "
-            f"{self.consumer.category}[{getattr(self.consumer, 'name', '')}] "
-            f"{consumer_pos}. The producer must complete before the consumer can use it."
         )
 
 

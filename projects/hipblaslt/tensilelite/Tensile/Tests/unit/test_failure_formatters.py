@@ -49,7 +49,6 @@ from Tensile.Components.ScheduleCapture import (
     LoopBodyCapture,
     TaggedInstruction,
     _ordinal,
-    format_position,
 )
 
 
@@ -73,7 +72,8 @@ def _capture_with(*tagged_instructions):
     """Build a LoopBodyCapture whose .instructions list is exactly the given list.
 
     The instructions need only support `==` against themselves (default object
-    identity is fine), since format_position uses list.index().
+    identity is fine), since `_node_label` uses list.index() for the
+    per-category-stream [N] lookup.
     """
     return LoopBodyCapture(instructions=list(tagged_instructions))
 
@@ -94,40 +94,6 @@ def _capture_with(*tagged_instructions):
 )
 def test_ordinal(n, expected):
     assert _ordinal(n) == expected
-
-
-# =============================================================================
-# format_position
-# =============================================================================
-
-
-def test_format_position_excludes_list_suffix_for_plain_mfma():
-    """MFMAs are fixed by the underlying instruction loop — no list suffix."""
-    other = object()
-    node = _make_node("MFMA", "MFMA", 7, tagged_inst=object())
-    capture = _capture_with(other, node.tagged_inst, other)
-    rendered = format_position(node, capture)
-    assert "(2nd entry in list)" not in rendered
-    assert rendered == "@ idx=7"
-
-
-def test_format_position_includes_list_suffix_for_lr():
-    node = _make_node("LRA0", "LRA0[0]", 7, tagged_inst=object())
-    other_a, other_b, other_c = object(), object(), object()
-    capture = _capture_with(other_a, node.tagged_inst, other_b, other_c)
-    assert format_position(node, capture) == "@ idx=7 (2nd entry in list)"
-
-
-def test_format_position_includes_list_suffix_for_mfmapack():
-    """MFMAPack inherits from both Pack and MFMA; the category-tag discriminator
-    routes it to the user-scheduled branch (list-position included). Regression
-    guard against accidentally checking isinstance(MFMAInstruction) instead of
-    the category tag."""
-    node = _make_node("PackB1", "PackB1[3]", 12, tagged_inst=object())
-    other_a, other_b = object(), object()
-    capture = _capture_with(other_a, node.tagged_inst, other_b)
-    assert "(2nd entry in list)" in format_position(node, capture)
-    assert "@ idx=12" in format_position(node, capture)
 
 
 # =============================================================================

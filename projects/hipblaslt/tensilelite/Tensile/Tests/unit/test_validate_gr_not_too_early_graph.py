@@ -145,7 +145,8 @@ class TestGRNotTooEarlyGraph(GraphNativeValidationTest):
     Maps the legacy `add_gr_not_too_early_constraints` Failure shapes onto
     graph-native equivalents:
 
-      ConstraintViolationFailure (LR not guaranteed by SWait)
+      Single-schedule constraint Failure (LR not guaranteed by SWait;
+      class deleted in `pcz`)
         -> MissingWaitFailure / WaitInsufficientFailure
       MissingBarrierFailure (legacy: SBarrier missing in window)
         -> MissingBarrierFailure (same class; either via wait-coverage
@@ -234,7 +235,8 @@ class TestGRNotTooEarlyGraph(GraphNativeValidationTest):
         self.assert_no_failures(failures)
 
     # -------------------------------------------------------------------------
-    # Negative tests — wait insufficient (legacy ConstraintViolationFailure)
+    # Negative tests — wait insufficient (legacy single-schedule constraint
+    # Failure, class deleted in `pcz`)
     # -------------------------------------------------------------------------
 
     def test_negative_wait_insufficient(self):
@@ -244,7 +246,8 @@ class TestGRNotTooEarlyGraph(GraphNativeValidationTest):
         recently-issued LR0 (LRB0) remains in flight at the wait, and
         the WaitInsufficient branch of `_classify_edge_coverage` fires.
 
-        Legacy: ConstraintViolationFailure (LR not guaranteed).
+        Legacy: single-schedule constraint Failure (LR not guaranteed;
+        class deleted in `pcz`).
         Graph: WaitInsufficientFailure (more specific diagnostic — names
         the under-drained wait by name and reports the queue depth).
         """

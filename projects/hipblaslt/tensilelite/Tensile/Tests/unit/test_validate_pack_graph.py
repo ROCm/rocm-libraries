@@ -144,11 +144,12 @@ def _pack_vperm(out_vgpr: int, lr_vgpr: int, *, slot: int, sequence: int = 0,
 # =============================================================================
 # LR -> Pack RAW edge tests (port of TestLRAfterPack family)
 # =============================================================================
-# Original tests assert ConstraintViolationFailure(producer=LR, consumer=Pack)
-# when the Pack issues before its LR is guaranteed complete. Graph-native
-# equivalent: `compare_graphs` emits OrderInvertedFailure when subj's Pack
-# is positioned BEFORE subj's LR (variant A); `validate_edge_wait_coverage`
-# emits MissingWaitFailure(counter_kind="vlcnt") when the LR's drain SWait
+# Original tests asserted on a now-deleted single-schedule constraint
+# Failure (Pack rule retired in `ola.4` phase 2; the dataclass was
+# deleted in `pcz`). Graph-native equivalent: `compare_graphs` emits
+# OrderInvertedFailure when subj's Pack is positioned BEFORE subj's LR
+# (variant A); `validate_edge_wait_coverage` emits
+# MissingWaitFailure(counter_kind="vlcnt") when the LR's drain SWait
 # sits AFTER the Pack consumer (variant B).
 #
 # Note: the legacy tests use slot indices 0..7 and a single-LR-per-slot
@@ -280,11 +281,11 @@ class TestLRAfterPack_BF16Graph(GraphNativeValidationTest):
 # =============================================================================
 # Pack -> MFMA RAW edge tests (port of TestPackAfterMFMA family)
 # =============================================================================
-# Original tests assert ConstraintViolationFailure(producer=Pack,
-# consumer=MFMA) when the Pack issues at-or-after the MFMA that consumes
-# its result. Graph-native equivalent: `compare_graphs` Phase-1 order
-# check fires when subj's Pack.position > MFMA.position. ALU producers
-# have no wait-coverage requirement, so no wait-coverage failure follows.
+# Original tests asserted on a now-deleted single-schedule constraint
+# Failure (deleted in `pcz`). Graph-native equivalent: `compare_graphs`
+# Phase-1 order check fires when subj's Pack.position > MFMA.position
+# (OrderInvertedFailure). ALU producers have no wait-coverage requirement,
+# so no wait-coverage failure follows.
 
 
 class TestPackAfterMFMAGraph(GraphNativeValidationTest):
@@ -346,11 +347,11 @@ class TestLRAfterPack_LR1Graph(GraphNativeValidationTest):
     fixtures don't care about kernel flags, only the explicit register
     chain.
 
-    Note: original LR1 test asserts the LR1 producer / Pack1 consumer
-    pairing fires "issued too early" via the legacy ConstraintViolationFailure.
-    The graph-native equivalent uses Pack VCvt with subiter index 1 in
-    its category (PackA1) and LRA1 (subiter 1), so the within-subiter
-    order check applies.
+    Note: original LR1 test asserted the LR1 producer / Pack1 consumer
+    pairing fires "issued too early" via a now-deleted single-schedule
+    constraint Failure (deleted in `pcz`). The graph-native equivalent
+    uses Pack VCvt with subiter index 1 in its category (PackA1) and
+    LRA1 (subiter 1), so the within-subiter order check applies.
     """
 
     def test_LR1_A_LR_after_Pack(self):
