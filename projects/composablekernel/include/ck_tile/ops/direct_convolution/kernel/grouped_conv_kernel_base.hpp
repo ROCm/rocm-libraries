@@ -123,6 +123,7 @@ struct TileConstantsBase
         }
         static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
         static constexpr auto MakeLdsWriteDescriptor()       { return Shared::MakeLdsWriteDescriptor(); }
+        static constexpr auto MakeLdsWriteDescriptorPadded() { return Shared::MakeLdsWriteDescriptorPadded(); }
         static constexpr auto MakeLdsReadDescriptor()        { return Shared::MakeLdsReadDescriptor(); }
 
         template <int VectorSize>

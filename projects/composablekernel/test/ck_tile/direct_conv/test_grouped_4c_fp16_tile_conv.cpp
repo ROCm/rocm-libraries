@@ -731,3 +731,19 @@ TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_Vec2_C4_K2)
     ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 4, 2, 3, 3, 1, 1)));
 }
 
+// --- Fprop: No swizzle, vector_size=1 (config 51) ---
+// These test the padded path WITHOUT CyclicShift to isolate swizzle from padding bugs.
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_NoSwizzle_C3_K3)
+{
+    ASSERT_TRUE((RunFprop<51>(1, 34, 34, 32, 3, 3, 3, 3, 1, 1)));
+}
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_NoSwizzle_C1_K1)
+{
+    ASSERT_TRUE((RunFprop<51>(1, 34, 34, 32, 1, 1, 3, 3, 1, 1)));
+}
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_NoSwizzle_C4_K4)
+{
+    // This should use the UNPADDED path (c==GROUP_SIZE) — must pass as baseline.
+    ASSERT_TRUE((RunFprop<51>(1, 34, 34, 32, 4, 4, 3, 3, 1, 1)));
+}
+

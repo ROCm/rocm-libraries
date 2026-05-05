@@ -265,8 +265,12 @@ struct InputLoader
             // Load from DRAM with per-element OOB checking (pad transform zeros padded channels).
             auto input_reg = ck_tile::load_tile(padded_dram_window);
 
-            // Create LDS write window.
-            constexpr auto lds_write_desc = TC::Input::MakeLdsWriteDescriptor();
+            // Create LDS write window with padded descriptor.
+            // The tile distribution maps threads to TOTAL_SPATIAL spatial positions,
+            // but the LDS buffer only has BLOCK_W entries.  The padded descriptor
+            // extends the spatial dim to TOTAL_SPATIAL and marks positions >= BLOCK_W
+            // as OOB so store_tile suppresses out-of-bounds writes.
+            constexpr auto lds_write_desc = TC::Input::MakeLdsWriteDescriptorPadded();
             _Float16* lds_base = reinterpret_cast<_Float16*>(input_lds_ptr)
                                  + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
             auto lds_write_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(

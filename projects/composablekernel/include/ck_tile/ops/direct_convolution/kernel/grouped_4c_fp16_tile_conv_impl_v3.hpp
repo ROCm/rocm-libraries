@@ -244,6 +244,10 @@ constexpr Config configs[] = {
      .swizzle_type = SwizzleType::CyclicShift, .vector_size = 2},
      {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Fprop,
      .swizzle_type = SwizzleType::CyclicShift, .vector_size = 1},
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad,
+     .swizzle_type = SwizzleType::None, .vector_size = 1},
+     {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Fprop,
+     .swizzle_type = SwizzleType::None, .vector_size = 1},
 };
 
 constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);

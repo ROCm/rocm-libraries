@@ -230,6 +230,44 @@ struct SharedDescriptors
                 ck_tile::number<1>{});
         }
 
+        // Padded LDS write descriptor: [1, TOTAL_SPATIAL, BLOCK_C8, 8].
+        //
+        // For the padded input loading path (load_tile + store_tile), the tile
+        // distribution maps threads to TOTAL_SPATIAL spatial positions, which
+        // exceeds BLOCK_W.  The raw LDS buffer is only BLOCK_W * BLOCK_C8 * 8
+        // elements.  This descriptor pads the spatial dimension from BLOCK_W to
+        // TOTAL_SPATIAL so that positions >= BLOCK_W are marked OOB and the
+        // store_tile call suppresses writes beyond the buffer boundary.
+        static constexpr auto MakeLdsWriteDescriptorPadded()
+        {
+            constexpr int right_pad = TC::TOTAL_SPATIAL - TC::BLOCK_W;
+            constexpr auto desc_raw = ck_tile::make_naive_tensor_descriptor(
+                ck_tile::make_tuple(ck_tile::number<1>{},
+                                    ck_tile::number<TC::BLOCK_W>{},
+                                    ck_tile::number<TC::BLOCK_C8>{},
+                                    ck_tile::number<8>{}),
+                ck_tile::make_tuple(ck_tile::number<TC::BLOCK_W * TC::BLOCK_C8 * 8>{},
+                                    ck_tile::number<TC::BLOCK_C8 * 8>{},
+                                    ck_tile::number<8>{},
+                                    ck_tile::number<1>{}),
+                ck_tile::number<8>{},
+                ck_tile::number<1>{});
+
+            return ck_tile::transform_tensor_descriptor(
+                desc_raw,
+                ck_tile::make_tuple(
+                    ck_tile::make_pass_through_transform(ck_tile::number<1>{}),
+                    ck_tile::make_pad_transform(ck_tile::number<TC::BLOCK_W>{},
+                                                ck_tile::number<0>{},
+                                                ck_tile::number<right_pad>{}),
+                    ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_C8>{}),
+                    ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
+        }
+
         // LDS read descriptor: [BLOCK_W, BLOCK_C4, 4] with optional XOR.
         static constexpr auto MakeLdsReadDescriptor()
         {
