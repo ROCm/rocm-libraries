@@ -21,11 +21,7 @@ def parse_general(loader: yaml.Loader):
     elif loader.check_event(yaml.ScalarEvent):
         return parse_scalar(loader)
     elif loader.check_event(yaml.AliasEvent):
-        return parse_alias(loader)
-
-def parse_alias(loader: yaml.Loader):
-    evt = loader.get_event()
-    return evt.anchor
+        return loader.get_event().anchor
 
 def parse_sequence(loader: yaml.Loader):
     ret = []
