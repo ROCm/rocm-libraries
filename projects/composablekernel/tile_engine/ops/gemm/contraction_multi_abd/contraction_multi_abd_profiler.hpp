@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iomanip>
 #include <functional>
+#include <tuple>
 
 #include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/ops/batched_contraction_multi_abd.hpp"
@@ -46,36 +47,53 @@ class ContractionMultiABDProfiler
         const auto n_total = problem.n_total_;
         const auto k_total = problem.k_total_;
 
-        // A dims: [G..., M..., K...]
+        // A dims: [G..., M..., K...]; strides honor ALayout
         auto a_dims    = concatenate_dims({g_dims, m_dims, k_dims});
-        auto a_strides = compute_row_major_strides(a_dims);
+        auto a_strides = compute_strides_for_layout<ALayout>(g_dims, m_dims, k_dims);
 
-        // B dims: [G..., N..., K...]
+        // B dims: [G..., N..., K...]; strides honor BLayout
         auto b_dims    = concatenate_dims({g_dims, n_dims, k_dims});
-        auto b_strides = compute_row_major_strides(b_dims);
+        auto b_strides = compute_strides_for_layout<BLayout>(g_dims, n_dims, k_dims);
 
-        // D/E dims: [G..., M..., N...]
+        // D/E dims: [G..., M..., N...]; strides honor ELayout (D layouts equal ELayout today)
         auto e_dims    = concatenate_dims({g_dims, m_dims, n_dims});
-        auto e_strides = compute_row_major_strides(e_dims);
+        auto e_strides = compute_strides_for_layout<ELayout>(g_dims, m_dims, n_dims);
 
         const auto total_a = g_total * m_total * k_total;
         const auto total_b = g_total * n_total * k_total;
         const auto total_e = g_total * m_total * n_total;
 
-        const auto a_desc = ck_tile::HostTensorDescriptor(a_dims);
-        const auto b_desc = ck_tile::HostTensorDescriptor(b_dims);
-        const auto e_desc = ck_tile::HostTensorDescriptor(e_dims);
+        const auto a_desc =
+            ck_tile::HostTensorDescriptor(std::vector<std::size_t>(a_dims.begin(), a_dims.end()),
+                                          std::vector<std::size_t>(a_strides.begin(),
+                                                                   a_strides.end()));
+        const auto b_desc =
+            ck_tile::HostTensorDescriptor(std::vector<std::size_t>(b_dims.begin(), b_dims.end()),
+                                          std::vector<std::size_t>(b_strides.begin(),
+                                                                   b_strides.end()));
+        const auto e_desc =
+            ck_tile::HostTensorDescriptor(std::vector<std::size_t>(e_dims.begin(), e_dims.end()),
+                                          std::vector<std::size_t>(e_strides.begin(),
+                                                                   e_strides.end()));
 
-        ck_tile::HostTensor<EDataType> a0_host(a_desc);
-        ck_tile::HostTensor<EDataType> a1_host(a_desc);
-        ck_tile::HostTensor<EDataType> b0_host(b_desc);
-        ck_tile::HostTensor<EDataType> d0_host(e_desc);
+        // Per-tensor element types pulled from the instance tuples; today A_i / B_i / D_i
+        // share a single type each, but we still source them through the tuples so the profiler
+        // keeps working if the generator is taught to emit divergent types in the future.
+        using A0Type = ck_tile::remove_cvref_t<std::tuple_element_t<0, AsDataType>>;
+        using A1Type = ck_tile::remove_cvref_t<std::tuple_element_t<1, AsDataType>>;
+        using B0Type = ck_tile::remove_cvref_t<std::tuple_element_t<0, BsDataType>>;
+        using D0Type = ck_tile::remove_cvref_t<std::tuple_element_t<0, DsDataType>>;
+
+        ck_tile::HostTensor<A0Type> a0_host(a_desc);
+        ck_tile::HostTensor<A1Type> a1_host(a_desc);
+        ck_tile::HostTensor<B0Type> b0_host(b_desc);
+        ck_tile::HostTensor<D0Type> d0_host(e_desc);
         ck_tile::HostTensor<EDataType> e_host_dev_result(e_desc);
 
-        ck_tile::FillUniformDistribution<EDataType>{-5.f, 5.f}(a0_host);
-        ck_tile::FillUniformDistribution<EDataType>{-5.f, 5.f}(a1_host);
-        ck_tile::FillUniformDistribution<EDataType>{-5.f, 5.f}(b0_host);
-        ck_tile::FillUniformDistribution<EDataType>{-1.f, 1.f}(d0_host);
+        ck_tile::FillUniformDistribution<A0Type>{-5.f, 5.f}(a0_host);
+        ck_tile::FillUniformDistribution<A1Type>{-5.f, 5.f}(a1_host);
+        ck_tile::FillUniformDistribution<B0Type>{-5.f, 5.f}(b0_host);
+        ck_tile::FillUniformDistribution<D0Type>{-1.f, 1.f}(d0_host);
 
         ck_tile::DeviceMem a0_dev(a0_host.get_element_space_size_in_bytes());
         ck_tile::DeviceMem a1_dev(a1_host.get_element_space_size_in_bytes());
@@ -147,8 +165,10 @@ class ContractionMultiABDProfiler
         ContractionInstance ki{std::string(KERNEL_NAME), problem, {-1.0, -1.0, -1.0}};
 
         std::size_t flop     = std::size_t(2) * g_total * m_total * n_total * k_total;
-        std::size_t num_byte = sizeof(EDataType) * (NumATensor * total_a + NumBTensor * total_b +
-                                                    NumDTensor * total_e + total_e);
+        std::size_t num_byte = sizeof(A0Type) * NumATensor * total_a +
+                               sizeof(B0Type) * NumBTensor * total_b +
+                               sizeof(D0Type) * NumDTensor * total_e +
+                               sizeof(EDataType) * total_e;
 
         ki.perf_result_.latency_   = avg_time;
         ki.perf_result_.tflops_    = static_cast<float>(flop) / 1.E9 / avg_time;

@@ -75,15 +75,41 @@ int run_contraction_multi_abd_example(int argc, char* argv[])
     print_dims("N_dims", N_dims, N_total);
     print_dims("K_dims", K_dims, K_total);
 
-    // Create host tensors for each A, B, D
-    const auto a_desc = ck_tile::HostTensorDescriptor(A_dims);
-    const auto b_desc = ck_tile::HostTensorDescriptor(B_dims);
-    const auto e_desc = ck_tile::HostTensorDescriptor(E_dims);
+    // Per-tensor layouts (must stay in sync with AsLayout / BsLayout / DsLayout / ELayout below)
+    using ALayout = Row;
+    using BLayout = Col;
+    using DLayout = Row;
+    using ELayout = Row;
+
+    // Compute strides honoring each tensor's layout so that the host buffers used for
+    // verification have the same memory layout the kernel expects.
+    const auto a_strides_v = compute_strides_for_layout<ALayout>(G_dims, M_dims, K_dims);
+    const auto b_strides_v = compute_strides_for_layout<BLayout>(G_dims, N_dims, K_dims);
+    const auto d_strides_v = compute_strides_for_layout<DLayout>(G_dims, M_dims, N_dims);
+    const auto e_strides_v = compute_strides_for_layout<ELayout>(G_dims, M_dims, N_dims);
+
+    auto to_size_t_vec = [](const std::vector<ck_tile::index_t>& v) {
+        return std::vector<std::size_t>(v.begin(), v.end());
+    };
+
+    // Create host tensors for each A, B, D, E with explicit layout-aware strides.
+    const auto a_desc =
+        ck_tile::HostTensorDescriptor(std::vector<std::size_t>(A_dims.begin(), A_dims.end()),
+                                      to_size_t_vec(a_strides_v));
+    const auto b_desc =
+        ck_tile::HostTensorDescriptor(std::vector<std::size_t>(B_dims.begin(), B_dims.end()),
+                                      to_size_t_vec(b_strides_v));
+    const auto d_desc =
+        ck_tile::HostTensorDescriptor(std::vector<std::size_t>(E_dims.begin(), E_dims.end()),
+                                      to_size_t_vec(d_strides_v));
+    const auto e_desc =
+        ck_tile::HostTensorDescriptor(std::vector<std::size_t>(E_dims.begin(), E_dims.end()),
+                                      to_size_t_vec(e_strides_v));
 
     ck_tile::HostTensor<A0DataType> a0_host(a_desc);
     ck_tile::HostTensor<A1DataType> a1_host(a_desc);
     ck_tile::HostTensor<B0DataType> b0_host(b_desc);
-    ck_tile::HostTensor<D0DataType> d0_host(e_desc);
+    ck_tile::HostTensor<D0DataType> d0_host(d_desc);
     ck_tile::HostTensor<EDataType> e_host(e_desc);
 
     ck_tile::FillUniformDistribution<A0DataType>{-5.f, 5.f, std::nullopt}(a0_host);
@@ -131,10 +157,9 @@ int run_contraction_multi_abd_example(int argc, char* argv[])
     int n_warmup = arg_parser.get_int("warmup");
     int n_repeat = arg_parser.get_int("repeat");
 
-    using AsLayout = ck_tile::tuple<Row, Row>;
-    using BsLayout = ck_tile::tuple<Col>;
-    using DsLayout = ck_tile::tuple<Row>;
-    using ELayout  = Row;
+    using AsLayout = ck_tile::tuple<ALayout, ALayout>;
+    using BsLayout = ck_tile::tuple<BLayout>;
+    using DsLayout = ck_tile::tuple<DLayout>;
 
     using AElementWise   = ck_tile::element_wise::AddScale;
     using BElementWise   = ck_tile::element_wise::PassThrough;

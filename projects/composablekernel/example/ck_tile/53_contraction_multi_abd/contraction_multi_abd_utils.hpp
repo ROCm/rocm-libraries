@@ -8,9 +8,12 @@
 #include <stdexcept>
 #include <string>
 #include <sstream>
+#include <type_traits>
+#include <vector>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/ops/common/tensor_layout.hpp"
 
 // 2 A tensors (fp16, fp16), 1 B tensor (fp16), 1 D tensor (fp16), E = fp16
 using A0DataType = ck_tile::half_t;
@@ -122,4 +125,57 @@ void print_dims(const std::string& name,
     if(total != 0)
         std::cout << " (total=" << total << ")";
     std::cout << std::endl;
+}
+
+inline std::vector<ck_tile::index_t>
+compute_row_major_strides(const std::vector<ck_tile::index_t>& dims)
+{
+    std::vector<ck_tile::index_t> strides(dims.size(), 1);
+    for(int i = static_cast<int>(dims.size()) - 2; i >= 0; --i)
+    {
+        strides[i] = strides[i + 1] * dims[i + 1];
+    }
+    return strides;
+}
+
+// Compute strides for a contraction tensor T[G..., outer..., inner...] honoring the
+// 2D matrix layout of the [outer, inner] block:
+//   RowMajor    : storage order [G..., outer..., inner...] (inner block innermost)
+//   ColumnMajor : storage order [G..., inner..., outer...] (outer block innermost)
+// For A: outer = M, inner = K. For B: outer = N, inner = K. For E: outer = M, inner = N.
+template <typename Layout>
+inline std::vector<ck_tile::index_t>
+compute_strides_for_layout(const std::vector<ck_tile::index_t>& g_dims,
+                           const std::vector<ck_tile::index_t>& outer_dims,
+                           const std::vector<ck_tile::index_t>& inner_dims)
+{
+    if constexpr(std::is_same_v<Layout, ck_tile::tensor_layout::gemm::RowMajor>)
+    {
+        std::vector<ck_tile::index_t> all_dims;
+        all_dims.insert(all_dims.end(), g_dims.begin(), g_dims.end());
+        all_dims.insert(all_dims.end(), outer_dims.begin(), outer_dims.end());
+        all_dims.insert(all_dims.end(), inner_dims.begin(), inner_dims.end());
+        return compute_row_major_strides(all_dims);
+    }
+    else
+    {
+        std::vector<ck_tile::index_t> storage_dims;
+        storage_dims.insert(storage_dims.end(), g_dims.begin(), g_dims.end());
+        storage_dims.insert(storage_dims.end(), inner_dims.begin(), inner_dims.end());
+        storage_dims.insert(storage_dims.end(), outer_dims.begin(), outer_dims.end());
+        const auto storage_strides = compute_row_major_strides(storage_dims);
+
+        const auto num_g     = g_dims.size();
+        const auto num_inner = inner_dims.size();
+        const auto num_outer = outer_dims.size();
+
+        std::vector<ck_tile::index_t> logical_strides(num_g + num_outer + num_inner);
+        for(std::size_t i = 0; i < num_g; ++i)
+            logical_strides[i] = storage_strides[i];
+        for(std::size_t i = 0; i < num_outer; ++i)
+            logical_strides[num_g + i] = storage_strides[num_g + num_inner + i];
+        for(std::size_t i = 0; i < num_inner; ++i)
+            logical_strides[num_g + num_outer + i] = storage_strides[num_g + i];
+        return logical_strides;
+    }
 }
