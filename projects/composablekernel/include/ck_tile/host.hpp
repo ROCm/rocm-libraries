@@ -44,6 +44,7 @@
 #include "ck_tile/host/reference/reference_moe_sorting.hpp"
 #include "ck_tile/host/reference/reference_permute.hpp"
 #include "ck_tile/host/reference/reference_pool.hpp"
+#include "ck_tile/host/reference/reference_pool_bwd.hpp"
 #include "ck_tile/host/reference/reference_reduce.hpp"
 #include "ck_tile/host/reference/reference_rmsnorm2d_fwd.hpp"
 #include "ck_tile/host/reference/reference_rowwise_quantization2d.hpp"

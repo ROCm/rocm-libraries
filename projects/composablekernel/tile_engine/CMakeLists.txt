@@ -15,5 +15,6 @@ add_subdirectory(ops/fmha EXCLUDE_FROM_ALL)
 add_subdirectory(ops/gemm EXCLUDE_FROM_ALL)
 add_subdirectory(ops/gemm_streamk EXCLUDE_FROM_ALL)
 add_subdirectory(ops/pooling EXCLUDE_FROM_ALL)
+add_subdirectory(ops/pooling_bwd EXCLUDE_FROM_ALL)
 add_subdirectory(ops/reduce EXCLUDE_FROM_ALL)
 

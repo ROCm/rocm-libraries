@@ -1,0 +1,13 @@
+{
+    "problem": {
+        "description": "Default max-pool backward configuration for tile_engine benchmarks"
+    },
+    "tile_config": {
+        "block_size": {"values": [256]},
+        "vector_size": {"values": [1, 2, 4]}
+    },
+    "trait_config": {
+        "pooling_dim": {"values": ["2d", "3d"]},
+        "has_overlap": {"values": [true, false]}
+    }
+}

@@ -31,6 +31,7 @@
 | Norm | norm_reduce | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 | Norm | rmsnorm2d<br>example: 10_rmsnorm2d/ | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 | Pooling | pooling<br>example: 36_pooling/ | ❌ | | | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
+| Pooling | pooling_bwd<br>engine: pooling_bwd/<br>example: 53_pooling_bwd/ | ❌ | | | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 | Quant | smoothquant<br>example: 12_smoothquant/ | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 
 **Legend:**
