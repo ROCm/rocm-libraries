@@ -434,10 +434,6 @@ namespace
             return rocisa::DataType::BFloat6;
         case HIP_R_4F_E2M1:
             return rocisa::DataType::Float4;
-        case HIP_C_32F:
-            return rocisa::DataType::ComplexFloat;
-        case HIP_C_64F:
-            return rocisa::DataType::ComplexDouble;
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -478,10 +474,6 @@ namespace
             return static_cast<hipDataType>(HIP_R_6F_E3M2);
         case rocisa::DataType::Float4:
             return static_cast<hipDataType>(HIP_R_4F_E2M1);
-        case rocisa::DataType::ComplexFloat:
-            return HIP_C_32F;
-        case rocisa::DataType::ComplexDouble:
-            return HIP_C_64F;
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -2454,10 +2446,17 @@ namespace
 
             std::visit(
                 [&inputs, &prob](auto val) {
-                    using T_compute = decltype(val);
-
-                    inputs.activationArgs.push_back(T_compute(prob.act0));
-                    inputs.activationArgs.push_back(T_compute(prob.act1));
+                    using ValType = decltype(val);
+                    if constexpr (std::is_constructible_v<ValType, float>)
+                    {
+                        inputs.activationArgs.push_back(static_cast<ValType>(prob.act0));
+                        inputs.activationArgs.push_back(static_cast<ValType>(prob.act1));
+                    }
+                    else
+                    {
+                        inputs.activationArgs.push_back(prob.act0);
+                        inputs.activationArgs.push_back(prob.act1);
+                    }
                 },
                 it->second);
         }
