@@ -20,6 +20,7 @@
 #include "fake_backend/MockHipdnnBackend.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <functional>
 
@@ -175,6 +176,182 @@ TEST_F(TestGraph, ValidateUnsetNodeComputeTypeUnsetGraphComputeType)
     auto validationResult = graph.validate();
 
     EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, SerializeCompiledPlanRejectsMissingExecutionPlan)
+{
+    const Graph graph;
+    std::vector<uint8_t> data{1, 2, 3};
+
+    auto result = graph.serialize_compiled_plan(data);
+
+    EXPECT_FALSE(result.is_good());
+}
+
+TEST_F(TestGraph, SerializeCompiledPlanPropagatesSizeQueryFailure)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    ASSERT_TRUE(graph.deserialize_compiled_plan(_handle, serializedPlan).is_good());
+
+    EXPECT_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(executionPlan, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    std::vector<uint8_t> data;
+    auto result = graph.serialize_compiled_plan(data);
+
+    EXPECT_FALSE(result.is_good());
+}
+
+TEST_F(TestGraph, SerializeCompiledPlanRejectsZeroLengthPlan)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    ASSERT_TRUE(graph.deserialize_compiled_plan(_handle, serializedPlan).is_good());
+
+    EXPECT_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(executionPlan, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t, size_t, size_t* planByteSize, uint8_t*) {
+            *planByteSize = 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<uint8_t> data;
+    auto result = graph.serialize_compiled_plan(data);
+
+    EXPECT_FALSE(result.is_good());
+}
+
+TEST_F(TestGraph, SerializeCompiledPlanPropagatesSerializationFailure)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    ASSERT_TRUE(graph.deserialize_compiled_plan(_handle, serializedPlan).is_good());
+
+    EXPECT_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(executionPlan, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t, size_t, size_t* planByteSize, uint8_t*) {
+            *planByteSize = 4;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(executionPlan, 4, _, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    std::vector<uint8_t> data;
+    auto result = graph.serialize_compiled_plan(data);
+
+    EXPECT_FALSE(result.is_good());
+}
+
+TEST_F(TestGraph, SerializeCompiledPlanReturnsBackendBytes)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    const std::vector<uint8_t> expectedPlan{9, 8, 7};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    ASSERT_TRUE(graph.deserialize_compiled_plan(_handle, serializedPlan).is_good());
+
+    EXPECT_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(executionPlan, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t, size_t, size_t* planByteSize, uint8_t*) {
+            *planByteSize = 4;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(executionPlan, 4, _, _))
+        .WillOnce([&expectedPlan](hipdnnBackendDescriptor_t,
+                                  size_t requestedByteSize,
+                                  size_t* planByteSize,
+                                  uint8_t* serializedPlanBytes) {
+            EXPECT_EQ(requestedByteSize, 4);
+            std::copy(expectedPlan.begin(), expectedPlan.end(), serializedPlanBytes);
+            *planByteSize = expectedPlan.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto [data, result] = graph.to_compiled_plan_binary();
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(data, expectedPlan);
+}
+
+TEST_F(TestGraph, DeserializeCompiledPlanPropagatesBackendFailure)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    auto result = graph.deserialize_compiled_plan(_handle, serializedPlan);
+
+    EXPECT_FALSE(result.is_good());
+}
+
+TEST_F(TestGraph, DeserializeCompiledPlanClearsFrontendGraphState)
+{
+    GraphTestUtils graph;
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+
+    createBasicBatchnormGraph(graph);
+    ASSERT_FALSE(graph.getPrivateGraphSubnodes().empty());
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    auto result = graph.from_compiled_plan_binary(_handle, serializedPlan);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(graph.getPrivateGraphSubnodes().empty());
 }
 
 TEST_F(TestGraph, ValidateUnsetNodeComputeTypeSetGraphComputeType)
