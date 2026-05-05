@@ -404,27 +404,52 @@ _DEFAULT_CDNA4_ARCH_PROFILE = ArchProfile(
 )
 
 
-# RDNA 3.5 (gfx1151) — placeholder profile. RDNA 3.5 uses WMMA, not MFMA,
-# and has a fundamentally different issue model; the constants below are
-# conservative (i.e. larger or equal to the CDNA 4 values) so the gap
-# checks over-stall rather than under-stall when the gfx1151 path is
-# exercised. Each field's true RDNA 3.5 value is tracked as a sub-bead in
-# `Tensile/Components/GFX1151_AUDIT.md` (sub-beads: l6q.1.t1..t4); replace
-# with the documented value once sourced from the RDNA 3.5 ISA reference.
+# RDNA 3.5 (gfx1151) — values sourced from the RDNA 3.5 ISA reference
+# manual (sections 2.1, 7.6, 7.9, 7.9.1). RDNA 3.5 uses WMMA via the VOP3P
+# encoding, not MFMA, and has a fundamentally different issue model. Key
+# differences captured here:
+#   * Section 7.9.1 (page 77) gives the only "required for correctness"
+#     scheduling rule: dependent WMMA ops need 1 V_NOP / unrelated VALU
+#     instruction between them when matrix-D overlaps the next WMMA's
+#     matrix A or B. The other rules in the table are documented as
+#     "Hardware may stall" with no quantified cycle window — so the
+#     finish-window value is the 1-instruction gap, not a multi-cycle
+#     window. Per-bead audit log: `GFX1151_AUDIT.md` sub-bead `l6q.1.t1`.
+#   * Section 7.9, Table 33 (page 75) lists every WMMA opcode on RDNA 3.5
+#     and they are all 16x16x16 — there is NO 4x4 WMMA family at all.
+#     Fields named `*_4x4_*` are therefore unreachable on gfx1151 and set
+#     to the natural "no constraint" sentinel (0). Same for the
+#     `from_4x4` type-switch threshold. Per-bead audit log: `l6q.1.t2`.
+#   * Section 2.1 (page 9): wave32 issues each instruction at most once,
+#     so `default_issue_quad_cycles = 1` matches the CDNA 4 value. Per-
+#     bead audit log: `l6q.1.t4`.
+# The CVT settle windows (`cvt_before_mfma_quad_cycles` and
+# `mfma_4x4_before_cvt_quad_cycles`) remain conservative placeholders
+# because TF32 F32X emulation is not enabled on gfx1151 today (sub-bead
+# `l6q.1.t3` tracks this branch).
 _GFX1151_ARCH_PROFILE = ArchProfile(
     name="GFX1151",
     isa=(11, 5, 1),
-    # WMMA finish windows (placeholders — RDNA 3.5 lacks MFMA; the WMMA
-    # equivalents are roughly 1 wave-quad each on gfx1100, but gfx1151
-    # documentation has not been confirmed). Conservative = >= CDNA 4.
-    standard_mfma_finish_cycles=4,
-    mfma_4x4_finish_cycles=2,
-    # CVT->WMMA and WMMA->CVT settle windows (placeholders).
+    # WMMA finish window: RDNA 3.5 ISA §7.9.1 (page 77) — 1 VALU-instruction
+    # gap is the only correctness requirement between dependent WMMA ops.
+    standard_mfma_finish_cycles=1,
+    # No 4x4 WMMA family on RDNA 3.5 (Table 33, page 75). 0 = unreachable /
+    # no constraint; the discriminator in `_mfma_finish_cycles_for` cannot
+    # match a 4x4 producer here because no opcode renders as `_4x4x*`.
+    mfma_4x4_finish_cycles=0,
+    # CVT->WMMA and WMMA->CVT settle windows. Unreachable on gfx1151
+    # today (UseMFMAF32XEmulation is OFF). Left as conservative placeholders
+    # pending sub-bead `l6q.1.t3`.
     cvt_before_mfma_quad_cycles=3,
-    mfma_4x4_before_cvt_quad_cycles=6,
-    # Type-switch thresholds: same shape; conservative bumps from CDNA 4.
+    mfma_4x4_before_cvt_quad_cycles=0,
+    # Type-switch thresholds. RDNA 3.5 §7.9.1 documents type-switch as a
+    # "Hardware may stall" hint with no quantified cycle window. Without a
+    # documented value, leave the conservative threshold for the standard
+    # path; the 4x4 path is unreachable on RDNA 3.5 (set to 0).
     mfma_type_switch_threshold_from_standard=6,
-    mfma_type_switch_threshold_from_4x4=4,
+    mfma_type_switch_threshold_from_4x4=0,
+    # RDNA 3.5 §2.1 (page 9): wave32 issues each VALU op once per slot;
+    # base issue cost = 1 quad-cycle, identical to the CDNA 4 wave64 base.
     default_issue_quad_cycles=1,
 )
 

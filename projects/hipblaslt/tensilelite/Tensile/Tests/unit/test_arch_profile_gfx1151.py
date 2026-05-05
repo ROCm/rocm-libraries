@@ -107,22 +107,35 @@ def test_none_isa_falls_back_to_cdna4():
     assert profile is _DEFAULT_CDNA4_ARCH_PROFILE
 
 
-def test_gfx1151_profile_values_are_conservative():
-    """Each gfx1151 placeholder is >= the CDNA 4 value so any kernel run
-    against the gfx1151 profile over-stalls (safe) rather than
-    under-stalls (unsafe). Replace with documented RDNA 3.5 values
-    once sub-beads l6q.1.t1..t4 close.
+def test_gfx1151_profile_values_match_rdna35_isa():
+    """Sub-beads l6q.1.t1, l6q.1.t2, l6q.1.t4 (alias beads xlh, j3n, b0t)
+    replaced the conservative placeholders with values sourced from the
+    RDNA 3.5 ISA reference. This test pins the new contract:
+
+      - WMMA finish window: 1 (RDNA 3.5 §7.9.1, page 77 — "1 V_NOP or
+        unrelated VALU instruction in between two WMMA instructions").
+      - 4x4 family fields: 0 (no 4x4 WMMA family on RDNA 3.5; Table 33
+        page 75 lists only 16x16x16 opcodes — fields are unreachable).
+      - Wave32 base issue cost: 1 (RDNA 3.5 §2.1, page 9).
+
+    Two fields remain conservative placeholders pending future audit:
+      - `cvt_before_mfma_quad_cycles` (TF32 emul off on gfx1151 today).
+      - `mfma_type_switch_threshold_from_standard` (ISA inconclusive;
+        §7.9.1 documents the case as "Hardware may stall" without a
+        quantified cycle window).
     """
-    cdna = _DEFAULT_CDNA4_ARCH_PROFILE
     gfx = _GFX1151_ARCH_PROFILE
-    assert gfx.standard_mfma_finish_cycles >= cdna.standard_mfma_finish_cycles
-    assert gfx.mfma_4x4_finish_cycles >= cdna.mfma_4x4_finish_cycles
-    assert gfx.cvt_before_mfma_quad_cycles >= cdna.cvt_before_mfma_quad_cycles
-    assert gfx.mfma_4x4_before_cvt_quad_cycles >= cdna.mfma_4x4_before_cvt_quad_cycles
+    # Documented values from the RDNA 3.5 ISA.
+    assert gfx.standard_mfma_finish_cycles == 1
+    assert gfx.mfma_4x4_finish_cycles == 0
+    assert gfx.mfma_4x4_before_cvt_quad_cycles == 0
+    assert gfx.mfma_type_switch_threshold_from_4x4 == 0
+    assert gfx.default_issue_quad_cycles == 1
+    # Conservative placeholders that remain (ISA inconclusive / branch
+    # unreachable on gfx1151 today).
+    assert gfx.cvt_before_mfma_quad_cycles >= _DEFAULT_CDNA4_ARCH_PROFILE.cvt_before_mfma_quad_cycles
     assert (gfx.mfma_type_switch_threshold_from_standard
-            >= cdna.mfma_type_switch_threshold_from_standard)
-    assert (gfx.mfma_type_switch_threshold_from_4x4
-            >= cdna.mfma_type_switch_threshold_from_4x4)
+            >= _DEFAULT_CDNA4_ARCH_PROFILE.mfma_type_switch_threshold_from_standard)
 
 
 def test_gfx1151_capture_builds_without_unknown_instruction_error():

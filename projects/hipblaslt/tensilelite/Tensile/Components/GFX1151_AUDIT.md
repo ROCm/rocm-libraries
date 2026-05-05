@@ -171,15 +171,92 @@ class.
 
 ## Per-arch constants table (sources)
 
-| Constant                                        | CDNA 4 (gfx950) | gfx1151 placeholder | Source / Sub-bead                  |
-|-------------------------------------------------|-----------------|---------------------|------------------------------------|
-| standard_mfma_finish_cycles                     | 3               | 4                   | CDNA 4 ISA 7.6 / sub-bead `l6q.1.t1` |
-| mfma_4x4_finish_cycles                          | 1               | 2                   | CDNA 4 ISA 7.6 / sub-bead `l6q.1.t1` (same lookup) |
-| cvt_before_mfma_quad_cycles                     | 2               | 3                   | CDNA 4 ISA 7.6 / sub-bead `l6q.1.t3` |
-| mfma_4x4_before_cvt_quad_cycles                 | 5               | 6                   | CDNA 4 ISA 7.6 / sub-bead `l6q.1.t3` |
-| mfma_type_switch_threshold_from_standard        | 5               | 6                   | CDNA 4 ISA 7.6 / sub-bead `l6q.1.t2` |
-| mfma_type_switch_threshold_from_4x4             | 3               | 4                   | CDNA 4 ISA 7.6 / sub-bead `l6q.1.t2` |
-| default_issue_quad_cycles                       | 1               | 1                   | CDNA 4 ISA 7.6 / sub-bead `l6q.1.t4` |
+| Constant                                        | CDNA 4 (gfx950) | gfx1151 (current) | Source / Sub-bead                  |
+|-------------------------------------------------|-----------------|-------------------|------------------------------------|
+| standard_mfma_finish_cycles                     | 3               | 1                 | RDNA 3.5 ISA §7.9.1 page 77 / sub-bead `l6q.1.t1` (resolved — bead `xlh`) |
+| mfma_4x4_finish_cycles                          | 1               | 0                 | RDNA 3.5 ISA §7.9 Table 33 page 75 / sub-bead `l6q.1.t1` (no 4x4 family — bead `xlh`) |
+| cvt_before_mfma_quad_cycles                     | 2               | 3                 | placeholder; TF32 emul OFF on gfx1151 / sub-bead `l6q.1.t3` |
+| mfma_4x4_before_cvt_quad_cycles                 | 5               | 0                 | RDNA 3.5 ISA §7.9 Table 33 page 75 / sub-bead `l6q.1.t3` (no 4x4 family — bead `j3n`) |
+| mfma_type_switch_threshold_from_standard        | 5               | 6                 | placeholder; ISA inconclusive / sub-bead `l6q.1.t2` (bead `j3n`) |
+| mfma_type_switch_threshold_from_4x4             | 3               | 0                 | RDNA 3.5 ISA §7.9 Table 33 page 75 / sub-bead `l6q.1.t2` (no 4x4 family — bead `j3n`) |
+| default_issue_quad_cycles                       | 1               | 1                 | RDNA 3.5 ISA §2.1 page 9 / sub-bead `l6q.1.t4` (resolved — bead `b0t`) |
+
+## Sub-bead resolutions (May 2026)
+
+### Bead `xlh` — WMMA finish-cycle timing
+
+- `standard_mfma_finish_cycles`: Old 4 → New **1**. Source: RDNA 3.5 ISA
+  §7.9.1 "WMMA Scheduling" (page 77). The only "required for correctness"
+  rule between dependent WMMA instructions is "1 V_NOP or unrelated VALU
+  instruction in between two WMMA instructions". This is an
+  instruction-gap, not a multi-cycle-window — so the validator's
+  `standard_mfma_finish_cycles` (which encodes how many extra "issue
+  slots" must elapse before the consumer reads matrix-D) drops to 1. The
+  prior placeholder (4) over-stalled by 3 slots on every dependent WMMA
+  pair.
+- `mfma_4x4_finish_cycles`: Old 2 → New **0**. Source: RDNA 3.5 ISA §7.9
+  Table 33 (page 75). The complete WMMA opcode list is 16x16x16 only:
+  `V_WMMA_F32_16X16X16_F16`, `V_WMMA_F32_16X16X16_BF16`,
+  `V_WMMA_F16_16X16X16_F16`, `V_WMMA_BF16_16X16X16_BF16`,
+  `V_WMMA_I32_16X16X16_IU8`, `V_WMMA_I32_16X16X16_IU4`. There is no 4x4
+  WMMA family at all (`grep -i "4x4" RDNA3.5.txt` returns only a
+  diagrammatic example, never an opcode). The
+  `_mfma_finish_cycles_for` discriminator looks for `_4x4x` in the
+  rendered mnemonic — no RDNA 3.5 opcode matches, so the field is
+  unreachable. Set to the natural "no constraint" sentinel of 0.
+
+### Bead `j3n` — WMMA type-switch thresholds
+
+- `mfma_type_switch_threshold_from_standard`: Old 6 → **No change (6)**.
+  Source: RDNA 3.5 ISA §7.9.1 (page 77). The type-switch case is
+  documented as "Stall if the first and second instruction are not the
+  same type of WMMA or use IMOD on SRC2 of the second instruction" — but
+  this entry sits under the "only to avoid stalls and are not required
+  for correct function" heading with no quantified cycle window or
+  threshold. A `grep -in "stall" /home/alvasile/ISAs/RDNA3.5.txt`
+  produced no quantified WMMA stall length anywhere in the manual. Per
+  the bead's hard-rule "DO NOT invent values," the conservative
+  placeholder of 6 is preserved (it over-stalls correctly).
+- `mfma_type_switch_threshold_from_4x4`: Old 4 → New **0**. Source: same
+  Table 33 reasoning as the 4x4 finish-cycle field. There is no 4x4
+  WMMA family on RDNA 3.5, so the discriminator
+  (`last_mfma_class == profile.mfma_4x4_finish_cycles`) at
+  `ScheduleCapture.py:3930` cannot fire on this arch — the field is
+  unreachable. Set to the no-constraint sentinel 0.
+- `mfma_4x4_before_cvt_quad_cycles`: Old 6 → New **0** (also part of the
+  4x4-family-doesn't-exist conclusion; bundled into bead `j3n` because
+  the validator's CVT-pack path only fires when both the 4x4 family AND
+  TF32 emulation are active).
+
+### Bead `b0t` — per-instruction issue cost
+
+- `default_issue_quad_cycles`: Old 1 → **No change (1)**. Source: RDNA
+  3.5 ISA §2.1 "Wave32 and Wave64" (page 9): "Wave32 waves issue each
+  instruction at most once. Wave64 waves typically issue each
+  instruction twice". gfx1151 kernels in the reference yamls run wave32
+  (see `WaveSize: 32` in the reference kernel parameters above). So the
+  base per-instruction issue cost is identical to the CDNA 4 wave64 base
+  in quad-cycle units (1).
+- `_min_issue_quad_cycles_for` in `ScheduleCapture.py`: **No code
+  change.** The function already returns the profile's
+  `default_issue_quad_cycles` (= 1) for non-SNop instructions and adds
+  `wait_state` for SNop. RDNA 3.5 has no documented per-instruction-class
+  cost variation that would justify a class-specific override (the
+  S_DELAY_ALU encoding at §5.7 page 46 quantifies dependency gaps in
+  units of "previous VALU N back", not in per-class cycle differences;
+  long-latency S_NOP / S_WAITCNT are already handled).
+
+### Notes
+
+- CVT settle windows (`cvt_before_mfma_quad_cycles`) remain conservative
+  placeholders. TF32 F32X emulation is OFF on every inspected gfx1151
+  reference yaml (`UseMFMAF32XEmulation: false`), so the CVTPack route
+  does not fire on this arch today. Sub-bead `l6q.1.t3` re-opens if/when
+  emulation lands.
+- The bead replaces the conservative "always over-stall" defaults with
+  documented values where the ISA gives one, and reserves the
+  conservative placeholders only where the ISA is silent (single
+  remaining placeholder: `mfma_type_switch_threshold_from_standard`).
 
 ## Sandbox limitation
 
