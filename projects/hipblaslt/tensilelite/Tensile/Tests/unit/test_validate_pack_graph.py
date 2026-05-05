@@ -22,13 +22,15 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Graph-native ports of test_ValidatePack.py — bead ola.4 (partial).
+"""Graph-native ports of test_ValidatePack.py — bead ola.4 + bead wao.
 
 Sub-task ola.4 of the CMS validation migration epic (`br show
 rocm-libraries-ola`): replace the structural rule `add_pack_constraints`
-in CMSValidator.py with graph-side equivalents.
+in CMSValidator.py with graph-side equivalents. Bead wao closes out the
+final 5 legacy classes whose tests had no obvious graph-native twin in
+the deletion commit (`afb69530da`).
 
-Scope of this file (initial migration):
+Scope of this file:
   * LR -> Pack RAW dependency tests (TestLRAfterPack / _LR1 / _LR3): the
     Pack reads a vgpr the LR writes; reordering Pack before LR is a
     cross-graph order inversion. Graph machinery: `_GenericALURule` claims
@@ -39,27 +41,105 @@ Scope of this file (initial migration):
     vgpr the Pack writes; reordering Pack to issue at-or-after the MFMA is
     detected by `compare_graphs` Phase-1 order check. ALU producers have
     no SWait coverage requirement so no wait-coverage failure follows.
-
-Out of scope (deferred to sibling beads — see `br show rocm-libraries-ola.4`
-discussion and the parent epic's "Sequencing" section):
-
   * MiddlePack pair-interleaving (`WrongInterleavingFailure`): the f32
-    pair-consumer ordering invariant in `_hook_up_packs_f32` has no
-    graph-side classifier today. Recommendation: add a sibling sub-bead
-    `ola.4.MiddlePack` for the new graph-side rule.
-  * CVT-pair quad-cycle timing (`TimingTooCloseFailure` for ALU-producer
-    Pack -> MFMA gaps): now graph-side via `_cvt_to_mfma_gap_ok` (bead
-    `35z`) and `_mfma_pack_to_cvt_gap_ok` (bead `or9`). Bead `8nz` deleted
-    the structural-side mirror (`estimate_quad_cycles`,
-    `Pack.min_quad_cycles_before_result_used`); coverage lives in
-    `test_dataflow_graph_register_gaps.py`.
-  * MFMA reorder + multi-tile + swap-pack tests: depend on Pack -> Pack
-    pair ordering and CVT-pair timing, both blocked above.
+    pair-consumer ordering invariant in `_hook_up_packs_f32` is mirrored
+    graph-side by `validate_middle_pack_pair_interleaving` (bead `dpi`).
+  * Bead `wao` additions: BF16 LR1 -> Pack1 (v_perm flavor), Pack/MFMA
+    same-slot boundary, and the VSwap-Pack class — VSwap reading LR-output
+    and Pack-before-Swap reorder. See `TestSwapPackGraph` below.
 
-Production-side deletions deferred until all 16 test classes have
-graph-native equivalents (see deletion checklist in the bead's
-"Deletion checklist" section). The legacy `test_ValidatePack.py` is
-KEPT for now to preserve coverage during the incremental migration.
+# =============================================================================
+# Migration table — test_ValidatePack.py (deleted afb69530da)
+# =============================================================================
+# Legend: PORTED (covered by a new graph-native test in this file or
+#         test_dataflow_graph_register_gaps.py),
+#         REDUNDANT (already covered by an existing graph-native test —
+#         entry names that test),
+#         OBSOLETE (the underlying scenario has no meaning in the
+#         graph-native model: the structural validator ran kernel-flag
+#         arithmetic the graph doesn't replicate).
+#
+# Bead wao: TestValidatePackBF16PLRPack (5 tests)
+#   test_passing_plr_pack
+#       -> TestLRAfterPack_BF16Graph::test_BF16_pack_after_LR_baseline_passing
+#                                                        [REDUNDANT]
+#   test_passing_plr_pack_different_number_LRs
+#       -> n/a   [OBSOLETE: LR-count variation has no graph meaning;
+#                 graph tracks register identities, not counts]
+#   test_fail_too_early_plr_pack
+#       -> TestLRAfterPack_BF16_LR1Graph::test_BF16_LR1_pack_before_LR_swait_too_late
+#                                                        [PORTED in wao]
+#   test_fail_too_early_more_lrs_plr_pack
+#       -> n/a   [OBSOLETE: LR-count variation, same reason as above]
+#   test_fail_too_early_less_lrs_plr_pack
+#       -> n/a   [OBSOLETE: LR-count variation, same reason as above]
+#
+# Bead wao: TestValidatePackTF32MFMAReorder (2 tests)
+#   test_passing
+#       -> TestLRAfterPackGraph::test_LR0_baseline_passing
+#                                                        [REDUNDANT]
+#   test_failing_too_early
+#       -> TestLRAfterPackGraph::test_LR0_A_LR_after_Pack
+#                                                        [REDUNDANT:
+#         the mfmaReorder kernel parameter only feeds the structural
+#         validator's MFMA-position math; LR -> Pack RAW edge formation
+#         is independent of MFMA reorder.]
+#
+# Bead wao: TestValidatePackTF32MFMA4x4x4MultipleTiles (4 tests)
+#   test_passing_multiple_tiles_different_timings
+#       -> TestLRAfterPackGraph::test_LR0_baseline_passing
+#                                                        [REDUNDANT]
+#   test_passing_tile1_packs_after_tile0_deadline
+#       -> n/a   [OBSOLETE: tile-offset arithmetic is structural-validator
+#                 specific; graph tracks per-register dependencies that
+#                 inherently honor tile boundaries.]
+#   test_failing_tile1_packs_actually_too_late
+#       -> TestPackAfterMFMASameSlotGraph::test_pack_same_slot_as_mfma_orderinverted
+#                                                        [PORTED in wao:
+#         the boundary case Pack@N and MFMA@N at SAME mfma_index, Pack
+#         appearing AFTER MFMA in stream order. Existing graph test only
+#         covers the strict Pack@N+1 / MFMA@N case.]
+#   test_broken_pack_schedule_with_mfma_reorder
+#       -> TestPackAfterMFMAGraph::test_LR0_Pack_after_MFMA
+#                                                        [REDUNDANT:
+#         the underlying issue (Pack issued after consumer MFMA) is
+#         already covered. The legacy test asserts on isValid()'s exact
+#         error message string, which is structural-validator-specific.]
+#
+# Bead wao: TestValidatePackTF32MFMA4x4x4SwapPacks (6 tests)
+#   test_passing_vw_combinations
+#       -> n/a   [OBSOLETE: VectorWidth kernel parameter does not affect
+#                 graph-native edge formation; per-register identity is
+#                 sufficient.]
+#   test_passing_multiple_groups_with_swaps
+#       -> n/a   [OBSOLETE: same reason — multi-group/VW configuration
+#                 has no graph-native counterpart.]
+#   test_fail_swap_before_lr_done
+#       -> TestSwapPackGraph::test_swap_lr_raw_swait_after_swap
+#                                                        [PORTED in wao]
+#   test_fail_regular_pack_before_swap_done
+#       -> TestSwapPackGraph::test_pack_before_swap_orderinverted
+#                                                        [PORTED in wao]
+#   test_swap_depends_on_specific_lrs_vw4
+#       -> n/a   [OBSOLETE: relies on production-side per-LR-index swap
+#                 mapping (`_logical_reg_to_lr_index`); graph-native
+#                 model uses real register identities, so per-LR partial
+#                 SWaitCnt coverage is exercised by the existing dscnt
+#                 wait-coverage tests in test_dataflow_graph_register_gaps
+#                 .py without needing VW=4-specific construction.]
+#   test_cvt0_depends_on_specific_swaps_vw4
+#       -> n/a   [OBSOLETE: same — per-group swap-mapping logic is
+#                 structural-validator-specific.]
+#
+# TestValidatePackTF32MFMA4x4x4::test_passing_snop
+#       -> test_dataflow_graph_register_gaps.py::TestCumulativeIssueCycles::
+#          test_snop_wait_state_dominates_4x4_mfma_finish (and siblings)
+#                                                        [REDUNDANT:
+#         restored coverage in the validator-branch yh0 commit
+#         (8c945ed8b5) — SNop wait_state propagation is graph-native.]
+#
+# Production-side `add_pack_constraints` deletion is in scope for a later
+# bead (see `br show rocm-libraries-ola.4` "Deletion checklist").
 """
 
 from rocisa.container import vgpr
@@ -68,6 +148,7 @@ from rocisa.instruction import (
     VCvtPkF32toBF16,
     VPermB32,
     VSubF32,
+    VSwapB32,
 )
 
 from Tensile.Components.ScheduleCapture import (
@@ -604,3 +685,265 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
                 f"unexpected WrongInterleavingFailure on unpaired MiddlePacks: "
                 f"{repr(f)}"
             )
+
+
+# =============================================================================
+# Bead `wao` ports — see migration table in module docstring.
+# =============================================================================
+# Each test below has a docstring naming the legacy test it ports.
+# Tests are alive (no xfail/skip) and use real `TaggedInstruction`s wrapping
+# rocisa instruction classes through the existing `dataflow_fixtures` and
+# `_pack_*` helpers above.
+
+
+class TestLRAfterPack_BF16_LR1Graph(GraphNativeValidationTest):
+    """Bead `wao`: BF16 LR1 -> Pack1 (v_perm flavor) coverage.
+
+    Existing graph-native coverage uses VCvt-style packs for the LR1 case
+    (`TestLRAfterPack_LR1Graph`) and VPerm-style packs only for LR0
+    (`TestLRAfterPack_BF16Graph`). The legacy `TestValidatePackBF16PLRPack`
+    runs UsePLRPack=True so PackA1/PackB1 are inside the loop and pinned
+    on the LR1 -> Pack1 edge. This class covers the cross-product
+    explicitly so a future regression in the v_perm-flavored Pack edge
+    formation for subiter-1 categories cannot escape the suite.
+    """
+
+    def test_BF16_LR1_pack_before_LR_swait_too_late(self):
+        """Ports test_ValidatePack.py::TestValidatePackBF16PLRPack::
+        test_fail_too_early_plr_pack.
+
+        Legacy test pinned PackA1[5] issued before SWaitCnt for LRA1[4]
+        (SWaitCnt at idx=6) using the BF16 v_perm Pack flavor. Graph-native
+        equivalent: an LRA1 -> PackA1 vlcnt edge whose drain SWait sits
+        AFTER the Pack consumer fires `MissingWaitFailure`.
+        """
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(50, 4, lds_offset=128, slot=0, category="LRA1"),
+            _pack_vperm(out_vgpr=60, lr_vgpr=50, slot=1, category="PackA1"),
+            # SWait sits AFTER Pack — doesn't cover the LRA1 -> PackA1 edge.
+            make_swait(slot=2, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=60, b_src_start=32,
+                      slot=4, a_src_count=1),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(subj_cap)))
+        self.assert_failures_contain(
+            failures, cls=MissingWaitFailure, counter_kind="dscnt",
+        )
+
+    def test_BF16_LR1_pack_after_LR_baseline_passing(self):
+        """Positive baseline for the LRA1 -> PackA1 v_perm edge: SWait sits
+        BETWEEN the LR and the Pack so the dscnt drain covers the window.
+        Mirror of `test_passing_plr_pack` for the LR1 v_perm slice
+        (the LR0/v_perm side is already covered by
+        `TestLRAfterPack_BF16Graph::test_BF16_pack_after_LR_baseline_passing`).
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(50, 4, lds_offset=128, slot=0, category="LRA1"),
+            make_swait(slot=2, dscnt=0),
+            _pack_vperm(out_vgpr=60, lr_vgpr=50, slot=3, category="PackA1"),
+            make_mfma(c_dst_start=0, a_src_start=60, b_src_start=32,
+                      slot=4, a_src_count=1),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(cap)))
+        self.assert_no_failures(failures)
+
+
+class TestPackAfterMFMASameSlotGraph(GraphNativeValidationTest):
+    """Bead `wao`: Pack/MFMA same-slot boundary coverage.
+
+    Existing graph-native test (`TestPackAfterMFMAGraph::test_LR0_Pack_after_MFMA`)
+    verifies the strictly-after case (Pack at slot 5, MFMA at slot 4).
+    The boundary case where Pack and MFMA share an mfma_index but Pack
+    appears AFTER MFMA in stream order (sequence 1 vs sequence 0) was
+    untested. The legacy
+    `TestValidatePackTF32MFMA4x4x4MultipleTiles::test_failing_tile1_packs_actually_too_late`
+    pinned exactly this — `producer_idx=9, consumer_idx=9`. Locking it
+    in here guards the sub_index/sequence-based tie-break in
+    `compare_graphs` Phase-1 against future regressions.
+    """
+
+    def test_pack_same_slot_as_mfma_orderinverted(self):
+        """Ports test_ValidatePack.py::TestValidatePackTF32MFMA4x4x4MultipleTiles::
+        test_failing_tile1_packs_actually_too_late.
+
+        Subj places PackA0 at the SAME mfma_index as the consuming MFMA
+        but with sequence=1 (after the MFMA in stream order). The graph
+        ref places Pack one slot earlier. compare_graphs Phase-1 fires
+        `OrderInvertedFailure(producer=PackA0, consumer=MFMA)` because
+        the producer's effective position now exceeds the consumer's.
+        """
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
+            make_swait(slot=2, dscnt=0),
+            _pack_vcvt(out_vgpr=40, lr_vgpr=8, slot=3, category="PackA0"),
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=4, a_src_count=1),
+        ])
+        # Subject: Pack at slot 4 sequence=1 — SAME mfma_index as MFMA but
+        # appearing AFTER it in stream order.
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
+            make_swait(slot=2, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=4, a_src_count=1),
+            _pack_vcvt(out_vgpr=40, lr_vgpr=8, slot=4, sequence=1,
+                       category="PackA0"),
+        ])
+        failures = self.compare(self.wrap_single_body(ref_cap),
+                                self.wrap_single_body(subj_cap))
+        f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
+        # Pin identity: the Pack -> MFMA RAW edge is the one that flipped.
+        assert f.producer.category == "PackA0"
+        assert f.consumer.category == "MFMA"
+
+
+# =============================================================================
+# VSwapB32 helper for SwapPack tests
+# =============================================================================
+# Real schedules introduce VSwapB32 instructions at the head of a Pack
+# group when LocalReadVectorWidth > 1 and VectorWidth > 1: the wider LR
+# loads place A and B halves in interleaved registers, and the swaps
+# transpose them before the regular VCvt packs run. The swaps belong to
+# the same PackA0 / PackB0 stream as the VCvt packs, so they share the
+# Pack category in the dataflow graph.
+#
+# `_VSwapRule` (ScheduleCapture.py:1970) publishes BOTH operands as
+# reads AND writes (symmetric R+W) so reorderings of swap pairs produce
+# distinguishable edge keys in `compare_graphs`. For the tests below we
+# only need ONE swap reading an LR-output vgpr (LR -> Swap RAW edge) and
+# one swap whose write is consumed by a later VCvt Pack (Swap -> Pack
+# RAW edge).
+
+
+def _swap_pack(dst_vgpr: int, src_vgpr: int, *, slot: int,
+               sequence: int = 0,
+               category: str = "PackA0") -> TaggedInstruction:
+    """A VSwapB32 wrapped as a Pack-category TaggedInstruction.
+
+    `v_swap_b32 dst, src` swaps the two registers — both are read AND
+    both are written. `_VSwapRule` claims it ahead of the asymmetric
+    `_GenericALURule` so the dataflow graph carries the correct
+    bidirectional edge set.
+
+    `dst_vgpr` should be the register the swap WRITES that a later Pack
+    or MFMA consumer needs to depend on; `src_vgpr` is the partner the
+    swap also touches. Tests can wire `dst_vgpr` to overlap an LR's
+    output vgpr to form an LR -> Swap RAW edge.
+    """
+    inst = VSwapB32(dst=vgpr(dst_vgpr, 1), src=vgpr(src_vgpr, 1))
+    return TaggedInstruction(
+        inst=inst,
+        category=category,
+        slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
+                     mfma_index=slot, sequence=sequence),
+    )
+
+
+class TestSwapPackGraph(GraphNativeValidationTest):
+    """Bead `wao`: VSwap-Pack coverage.
+
+    Two ports from `TestValidatePackTF32MFMA4x4x4SwapPacks`:
+
+      * Swap reads LR-output vgpr; SWaitCnt covering the LR drain sits
+        AFTER the swap (legacy `test_fail_swap_before_lr_done`).
+      * Regular VCvt Pack reads a register that an earlier swap wrote;
+        the Pack is reordered to issue BEFORE the swap (legacy
+        `test_fail_regular_pack_before_swap_done`).
+
+    Other tests in the legacy class (`test_passing_vw_combinations`,
+    `test_passing_multiple_groups_with_swaps`, `test_swap_depends_on_*_vw4`,
+    `test_cvt0_depends_on_*_vw4`) are dispositioned OBSOLETE in the
+    migration table above — they exercise structural-validator-side
+    VW/group/per-LR-index arithmetic that the graph-native model
+    short-circuits via real register identity tracking.
+    """
+
+    def test_swap_lr_raw_swait_after_swap(self):
+        """Ports test_ValidatePack.py::TestValidatePackTF32MFMA4x4x4SwapPacks::
+        test_fail_swap_before_lr_done.
+
+        Legacy test pinned `producer=LRA0@0, consumer=PackA0@0` — the
+        SwapPack at idx 0 (categorized as PackA0) reads an LRA0-output
+        vgpr but the SWaitCnt covering LRA0's dscnt drain sits after the
+        swap. Graph-native equivalent: VSwapB32's symmetric R+W publishes
+        a read of the LR-output vgpr, the LR -> Swap edge has no covering
+        SWait in its window, `validate_edge_wait_coverage` emits
+        `MissingWaitFailure(counter_kind="dscnt")`.
+        """
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
+            # Swap touches v8 — reads LR's output before the SWait drain.
+            _swap_pack(dst_vgpr=8, src_vgpr=16, slot=1, category="PackA0"),
+            make_swait(slot=2, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=4, a_src_count=2),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(subj_cap)))
+        self.assert_failures_contain(
+            failures, cls=MissingWaitFailure, counter_kind="dscnt",
+        )
+
+    def test_swap_lr_baseline_passing(self):
+        """Positive baseline: SWait sits BETWEEN the LR and the swap so the
+        dscnt drain covers the LR -> Swap edge. Mirror of
+        `test_passing_vw_combinations` shape, but identity-driven and
+        kernel-flag-free.
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            _swap_pack(dst_vgpr=8, src_vgpr=16, slot=2, category="PackA0"),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=4, a_src_count=2),
+        ])
+        failures = self.validate_waits(self.build_graph(
+            self.wrap_single_body(cap)))
+        self.assert_no_failures(failures)
+
+    def test_pack_before_swap_orderinverted(self):
+        """Ports test_ValidatePack.py::TestValidatePackTF32MFMA4x4x4SwapPacks::
+        test_fail_regular_pack_before_swap_done.
+
+        Legacy test pinned `producer=PackA0(swap)@2, consumer=PackA0(cvt)@1`
+        — the regular CVT Pack at idx 1 reads vgpr v8 but the SwapPack at
+        idx 2 (intended to write v8 first) is scheduled later, so the CVT
+        Pack reads stale data. Graph-native equivalent: in the reference
+        graph the Swap -> CVT-Pack RAW edge has Swap before Pack; in the
+        subject graph the Pack appears before the Swap, so the Phase-1
+        order check fires `OrderInvertedFailure(producer=PackA0(swap),
+        consumer=PackA0(pack))`.
+        """
+        # Reference: Swap @ slot 2 writes v8, then VCvt Pack @ slot 4 reads v8.
+        ref_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            _swap_pack(dst_vgpr=8, src_vgpr=16, slot=2, category="PackA0"),
+            _pack_vcvt(out_vgpr=40, lr_vgpr=8, slot=4, sequence=1,
+                       category="PackA0"),
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=5, a_src_count=1),
+        ])
+        # Subject: VCvt Pack @ slot 1 reads v8 BEFORE the Swap @ slot 3.
+        subj_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
+            _pack_vcvt(out_vgpr=40, lr_vgpr=8, slot=1, category="PackA0"),
+            make_swait(slot=2, dscnt=0),
+            _swap_pack(dst_vgpr=8, src_vgpr=16, slot=3, sequence=1,
+                       category="PackA0"),
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=5, a_src_count=1),
+        ])
+        failures = self.compare(self.wrap_single_body(ref_cap),
+                                self.wrap_single_body(subj_cap))
+        # The reorder destroys the Swap -> CVT-Pack edge — Phase-1 sees
+        # Pack(consumer) before Swap(producer) in subj.
+        f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
+        # Both the producer and consumer are PackA0-category nodes; the
+        # producer is the swap (writes v8) and the consumer is the VCvt
+        # (reads v8) — but the legacy test pinned the categories alone,
+        # not the rocisa class, so we mirror that.
+        assert f.producer.category == "PackA0"
+        assert f.consumer.category == "PackA0"
