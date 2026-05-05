@@ -2021,6 +2021,66 @@ class LogicalScheduler:
         self._nll_emitted = nll
         return nll
 
+    def build_tailloop_pgr0(self) -> List[List[List[EmittedModule]]]:
+        """Template for Tailloop based on PGR0 schedule.
+
+        Returns [partition][groups] where each group has at most one MFMA.
+        """
+        cfg = self.config
+        numK = cfg.numSubIterK
+
+        # We reuse vgrpTiles from MAINLOOP partitions.
+        tile_maps = [self._partitions[pi][0].mfma.vgpr_tile_maps
+                     for pi in range(cfg.numPartitions)]
+        
+        preamble = []
+        # Some GRs/LRs Inc examples for all tensors.
+        preamble.extend(self._make_depops_all_tensors(GRIncOp))
+        preamble.extend(self._make_depops_all_tensors(LRIncOp))
+
+        # GRs entire MT at once for all tensors.
+        all_tiles = {
+            'A': MFMATileRange(0, numK, 0, cfg.numMFMATilesM),
+            'B': MFMATileRange(0, numK, 0, cfg.numMFMATilesN),
+        }
+        preamble.extend(self._make_gr_all_tensors(0, all_tiles))
+        # waitcount 0 + sync
+        preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
+        preamble.append(SyncOp())
+
+        # Loop over partitions to re-use vgpr tile maps.
+        all_partitions = []
+        for pi in range(cfg.numPartitions):
+            groups = []
+            # Add GRs on 1st partition.
+            if pi == 0:
+                groups.append(self._to_emitted(preamble))
+            cur = self._partition_tile_range(pi)
+            # Loop over subIterK
+            for k in range(numK):
+                ops = []
+                for tensor, gran in self._lr_tensors():
+                    if k % gran.k != 0: # Handle granularity > 1 by skipping subIterK
+                        continue
+                    side_key = 'A' if tensor in ('A', 'SA') else 'B'
+                    tiles = gran.tile_range(k, *cur[side_key])
+                    lr = LRPlacement(tensor=tensor, mtIteration=0,
+                                     tiles=tiles,
+                                     subIterK_slot=k, partition=pi)
+                    lr.vgpr_tile_map = copy.deepcopy(tile_maps[pi].get(tensor, []))
+                    ops.append(lr)
+                ops.append(WaitLROp())
+                mfma_tileA = MFMATileRange(k, k + 1, *cur['A'])
+                mfma_tileB = MFMATileRange(k, k + 1, *cur['B'])
+                mfma = MFMAPlacement(subIterK=k, tileA=mfma_tileA, tileB=mfma_tileB)
+                mfma.vgpr_tile_maps = copy.deepcopy(tile_maps[pi])
+                ops.append(mfma)
+                groups.append(self._to_emitted(ops))
+            all_partitions.append(groups)
+
+        self._tailloop_emitted = all_partitions
+        return self._tailloop_emitted
+
     @staticmethod
     def _to_emitted(ops) -> List[EmittedModule]:
         """Wrap Emittable objects (Placements / BaseOps) into EmittedModules."""
@@ -2278,6 +2338,16 @@ class LogicalScheduler:
 
         module.add(endLabel)
 
+        # ── TailLoop ──
+        hasTailLoop = True#not kernel["NoTailLoop"]
+        tailEndLabel = Label("TailLoopEnd", "")
+        if hasTailLoop:
+            module.addComment0(f"TAILLOOP")
+            module.add(self._emitLoop(writer, kernel, f"TAILLOOP",
+                                          self._tailloop_emitted,
+                                          schedule=False))
+            module.add(tailEndLabel)
+
         return module
 
     # ── VGPR tile allocation ──────────────────────────────
@@ -2401,6 +2471,7 @@ class LogicalScheduler:
         self.build_preloop()
         self.build_ngll()
         self.build_nll()
+        self.build_tailloop_pgr0()
 
         emitter.populate(self._preloop_emitted, unroll_iter=0)
 
@@ -2419,6 +2490,8 @@ class LogicalScheduler:
             nll_copy = copy.deepcopy(self._nll_emitted)
             emitter.populate(nll_copy, unroll_iter=ui)
             self._nll_per_unroll.append(nll_copy)
+
+        emitter.populate(self._tailloop_emitted, unroll_iter=0)
 
         self._completed.add(Pass.POPULATE)
 
