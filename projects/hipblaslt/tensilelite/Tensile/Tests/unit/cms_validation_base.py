@@ -254,12 +254,18 @@ class CMSValidationTestBase:
     def assert_wrong_interleaving(failure, *, pack_name, pack_idx,
                                   expected_next_name, expected_next_idx,
                                   actual_next_name, actual_next_idx):
-        """Assert WrongInterleavingFailure carries the expected pack +
-        expected/actual successor identities and positions."""
-        assert failure.pack.name == pack_name
-        assert failure.pack.issued_at.vmfma_index == pack_idx
-        assert failure.expected_next.name == expected_next_name
-        assert failure.expected_next.issued_at.vmfma_index == expected_next_idx
-        assert failure.actual_next.name == actual_next_name
-        assert failure.actual_next.issued_at.vmfma_index == actual_next_idx
+        """Assert OverriddenInputFailure carries the expected pack +
+        expected/actual successor identities and positions.
+
+        Argument names retain the legacy pack/expected_next/actual_next
+        vocabulary (caller convenience). Internally these map to the
+        unified shape: pack -> producer, expected_next -> consumer,
+        actual_next -> intervening_writer.
+        """
+        assert failure.producer.name == pack_name
+        assert failure.producer.issued_at.vmfma_index == pack_idx
+        assert failure.consumer.name == expected_next_name
+        assert failure.consumer.issued_at.vmfma_index == expected_next_idx
+        assert failure.intervening_writer.name == actual_next_name
+        assert failure.intervening_writer.issued_at.vmfma_index == actual_next_idx
 

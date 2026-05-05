@@ -36,11 +36,11 @@ from Tensile.Components.ScheduleCapture import (
     MissingBarrierFailure,
     MissingWaitFailure,
     OrderInvertedFailure,
-    SCCConflictFailure,
+    OverriddenInputFailure,
     SchedulePosition,
     TimingTooCloseFailure,
     WaitInsufficientFailure,
-    WrongInterleavingFailure,
+    OverriddenInputFailure,
 )
 
 from dataflow_fixtures import (
@@ -145,8 +145,8 @@ class TestAssertFailure(GraphNativeValidationTest):
 
     def test_assert_failure_no_match_raises(self):
         failures = self._missing_swait_failures()
-        with pytest.raises(AssertionError, match="expected exactly 1 SCCConflictFailure"):
-            self.assert_failure(failures, cls=SCCConflictFailure)
+        with pytest.raises(AssertionError, match="expected exactly 1 OverriddenInputFailure"):
+            self.assert_failure(failures, cls=OverriddenInputFailure)
 
     def test_assert_failure_field_mismatch_raises(self):
         failures = self._missing_swait_failures()
@@ -174,8 +174,8 @@ class TestAssertFailure(GraphNativeValidationTest):
 
     def test_assert_failures_contain_no_match_raises(self):
         failures = self._missing_swait_failures()
-        with pytest.raises(AssertionError, match="no SCCConflictFailure"):
-            self.assert_failures_contain(failures, cls=SCCConflictFailure)
+        with pytest.raises(AssertionError, match="no OverriddenInputFailure"):
+            self.assert_failures_contain(failures, cls=OverriddenInputFailure)
 
     def test_assert_no_failures_passes_on_empty(self):
         self.assert_no_failures([])
@@ -367,10 +367,11 @@ class TestLiftedHelpers(GraphNativeValidationTest):
         )
 
     def test_assert_wrong_interleaving(self):
-        f = WrongInterleavingFailure(
-            pack=_FakeNode("PackA0", 0),
-            expected_next=_FakeNode("PackB0", 1),
-            actual_next=_FakeNode("PackA1", 2),
+        f = OverriddenInputFailure(
+            producer=_FakeNode("PackA0", 0),
+            consumer=_FakeNode("PackB0", 1),
+            resource="vgpr",
+            intervening_writer=_FakeNode("PackA1", 2),
         )
         self.assert_wrong_interleaving(
             f, pack_name="PackA0", pack_idx=0,

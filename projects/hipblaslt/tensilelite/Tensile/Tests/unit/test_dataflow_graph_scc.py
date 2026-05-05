@@ -48,7 +48,7 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     SLOT_KIND_MFMA,
     SlotKey,
-    SCCConflictFailure,
+    OverriddenInputFailure,
     TaggedInstruction,
     build_dataflow_graph,
     compare_graphs,
@@ -384,14 +384,14 @@ class TestSCCEdgeFormation:
 
 # =============================================================================
 # Failure-shape wiring: compare_graphs(default, subj) classifies an SCC
-# clobber as SCCConflictFailure with producer/consumer/intervening_writer.
+# clobber as OverriddenInputFailure with producer/consumer/intervening_writer.
 # =============================================================================
 
 
 class TestSCCClobberFailure:
     """Build matched default + subject graphs differing only in an
     intervening SCC writer; verify diagnose_missing_edge classifies the
-    missing producer->consumer SCC edge as SCCConflictFailure carrying
+    missing producer->consumer SCC edge as OverriddenInputFailure carrying
     the intervening clobber as `intervening_writer`.
 
     The default graph has NO clobber: producer SCmpEQU32 writes SCC,
@@ -446,16 +446,16 @@ class TestSCCClobberFailure:
     def test_clobber_yields_scc_conflict_failure(self):
         """Negative path: with an intervening SAddU32 in subj, the
         SCC edge SCmpEQU32 -> SCSelectB32 is missing, and
-        diagnose_missing_edge surfaces SCCConflictFailure with
+        diagnose_missing_edge surfaces OverriddenInputFailure with
         intervening_writer pointing at SAddU32."""
         default, subj = self._build_pair(with_clobber=True)
         failures = compare_graphs(default, subj, raise_on_unexplained=False)
-        scc_failures = [f for f in failures if isinstance(f, SCCConflictFailure)]
+        scc_failures = [f for f in failures if isinstance(f, OverriddenInputFailure)]
         assert len(scc_failures) >= 1, (
-            f"Expected at least one SCCConflictFailure; got "
+            f"Expected at least one OverriddenInputFailure; got "
             f"{[type(f).__name__ for f in failures]}"
         )
-        # All graph-shape SCCConflictFailures must carry populated nodes.
+        # All graph-shape OverriddenInputFailures must carry populated nodes.
         f = scc_failures[0]
         assert f.producer is not None
         assert f.consumer is not None
@@ -473,16 +473,16 @@ class TestSCCClobberFailure:
         # Capture for format() is the subj's main body — same body whose
         # tagged_insts the failure's GraphNodes point at.
         msg = f.format(subj.captures["ML"])
-        assert "Intervening SCC writer" in msg
+        assert "clobbering the SCC the consumer needs" in msg
 
     def test_no_clobber_yields_no_scc_conflict_failure(self):
         """Positive path: without an intervening writer, the SCC edge is
         present in both graphs — compare_graphs must NOT emit any
-        SCCConflictFailure."""
+        OverriddenInputFailure."""
         default, subj = self._build_pair(with_clobber=False)
         failures = compare_graphs(default, subj, raise_on_unexplained=False)
-        scc_failures = [f for f in failures if isinstance(f, SCCConflictFailure)]
+        scc_failures = [f for f in failures if isinstance(f, OverriddenInputFailure)]
         assert scc_failures == [], (
-            f"Expected no SCCConflictFailure on the no-clobber path; got "
+            f"Expected no OverriddenInputFailure on the no-clobber path; got "
             f"{scc_failures}"
         )

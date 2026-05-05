@@ -245,7 +245,7 @@ class StructuralRule(ABC):
 #   * LR -> Pack RAW (dscnt) and Pack -> MFMA RAW: `validate_edge_wait_coverage`
 #     + `compare_graphs` over register dataflow from `_GenericALURule`.
 #   * MiddlePack pair-interleaving: `validate_middle_pack_pair_interleaving`
-#     (emits `WrongInterleavingFailure`).
+#     (emits `OverriddenInputFailure`).
 #   * Quad-cycle visibility: `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` /
 #     `_mfma_pack_to_cvt_gap_ok` (emit `TimingTooCloseFailure`).
 # Migrated coverage: `test_validate_pack_graph.py`,
@@ -381,7 +381,7 @@ class MiddlePack(Pack):
 
     The structural-side `MiddlePack.validate`, `pair_consumer`, and
     `next_scheduled_middle_16` helpers were removed. The pair-interleaving
-    invariant (`WrongInterleavingFailure` on a non-pair-consumer between
+    invariant (`OverriddenInputFailure` on a non-pair-consumer between
     pair-leader and pair-consumer) is now enforced graph-side via
     `validate_middle_pack_pair_interleaving`; see
     `test_validate_pack_graph.py::TestMiddlePackPairInterleavingGraph`.

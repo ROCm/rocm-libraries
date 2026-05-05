@@ -843,25 +843,6 @@ class MissingBarrierFailure(Failure):
 
 
 # ----------------------------------------------------------------------------
-# 7. WrongInterleavingFailure — MiddlePack pair-consumer ordering wrong.
-# ----------------------------------------------------------------------------
-@dataclass
-class WrongInterleavingFailure(Failure):
-    pack: NodeLike  # MiddlePack — validator-side ValidatorInstruction OR graph-side GraphNode
-    expected_next: NodeLike  # MiddlePack (pair_consumer) — same shape choice
-    actual_next: NodeLike  # MiddlePack (next_scheduled_middle_16) — same shape choice
-
-    def _format_canonical(self, capture: "LoopBodyCapture") -> str:
-        return (
-            f"{_node_with_pos(self.pack, capture)} has wrong "
-            f"interleaving. Should have been followed by "
-            f"{_node_with_pos(self.expected_next, capture)} "
-            f"but was followed by "
-            f"{_node_with_pos(self.actual_next, capture)}."
-        )
-
-
-# ----------------------------------------------------------------------------
 # 8. TimingTooCloseFailure — quad-cycle gap too small (Pack timing).
 # ----------------------------------------------------------------------------
 @dataclass
@@ -904,39 +885,34 @@ class InvalidCounterValueFailure(Failure):
 
 
 # ----------------------------------------------------------------------------
-# 10. SCCConflictFailure — SCC clobber window.
-#     An SCC writer (`intervening_writer`) sits between an SCC producer and
-#     SCC consumer, displacing the producer's value before the consumer can
-#     read it.
+# 8. OverriddenInputFailure — intervening write clobbers the resource the
+#     consumer needed before the consumer reads it.
 #
-#     Graph-native shape (mrj.2): producer/consumer/intervening_writer are
-#     GraphNode references emitted by `diagnose_missing_edge` when an
-#     SCC-typed reference edge is missing from the subject graph.
+#     Unifies the bug shape that previously had two failure classes:
+#       - SCC carry-chain clobber (intervening SCC writer between two
+#         GRInc-style ops that share the SCC carry).
+#       - Pack pair-leader vgpr clobber (next pack-pair-leader scheduled
+#         between a pair-leader and its pair-consumer, overwriting the
+#         vgpr the pair-consumer needs to read).
+#     Same shape, different resource.
 #
-#     SCCConflictFailure is reserved for the CLOBBER case. Pure SCC reorder
-#     (no intervening writer, just consumer issued before producer) is
-#     surfaced by `OrderInvertedFailure` via the existing Phase-1 order
-#     check — SCC reads/writes are tracked since mrj.1 so the same machinery
-#     covers SCC operands.
+#     intervening_writer may be None when the graph-side classifier knows
+#     the resource was clobbered but cannot pinpoint the writer.
 # ----------------------------------------------------------------------------
 @dataclass
-class SCCConflictFailure(Failure):
-    producer: Optional[NodeLike] = None             # subject-side SCC writer the consumer SHOULD have read
-    consumer: Optional[NodeLike] = None             # subject-side SCC reader
-    intervening_writer: Optional[NodeLike] = None   # subject-side SCC writer that clobbered the producer
+class OverriddenInputFailure(Failure):
+    producer: NodeLike            # wrote the value the consumer needs
+    consumer: NodeLike            # needed to read producer's value
+    resource: str                 # e.g. "SCC", "vgpr"
+    intervening_writer: NodeLike  # overwrote the resource between producer and consumer
 
     def _format_canonical(self, capture: "LoopBodyCapture") -> str:
-        inter_desc = ""
-        if self.intervening_writer is not None:
-            inter_desc = (
-                f" Intervening SCC writer "
-                f"{_node_with_pos(self.intervening_writer, capture)} "
-                f"clobbered the producer's SCC value."
-            )
         return (
-            f"{_node_with_pos(self.consumer, capture)}'s SCC read should "
-            f"resolve to producer {_node_with_pos(self.producer, capture)}, "
-            f"but the CMS schedule routes it elsewhere.{inter_desc}"
+            f"{_node_with_pos(self.intervening_writer, capture)} is "
+            f"incorrectly scheduled between producer "
+            f"{_node_with_pos(self.producer, capture)} and consumer "
+            f"{_node_with_pos(self.consumer, capture)}, clobbering the "
+            f"{self.resource} the consumer needs."
         )
 
 
@@ -3354,7 +3330,7 @@ def diagnose_missing_edge(
     # consumer in the subject schedule, displacing the producer's SCC
     # value. Find that intervening writer in the subject graph (the new
     # SCC producer the consumer pairs with) and emit a typed
-    # SCCConflictFailure carrying the producer/consumer/clobber triple.
+    # OverriddenInputFailure carrying the producer/consumer/clobber triple.
     #
     # If no intervening SCC writer exists in the subject graph (e.g. the
     # consumer simply lost its SCC edge to the producer for an unrelated
@@ -3380,9 +3356,10 @@ def diagnose_missing_edge(
                 intervening_writer = e.producer
                 break
         if intervening_writer is not None:
-            return [SCCConflictFailure(
+            return [OverriddenInputFailure(
                 producer=p_node,
                 consumer=c_node,
+                resource="SCC",
                 intervening_writer=intervening_writer,
             )]
         # No intervening SCC writer found — the consumer's SCC slot is
@@ -4411,18 +4388,18 @@ def _classify_edge_coverage(
 #      CONSUMER.
 #   4. For each LEADER, scan the GLOBAL MiddlePack stream and find the
 #      first MiddlePack node positioned strictly after the leader. If it
-#      isn't the leader's CONSUMER, emit `WrongInterleavingFailure`.
+#      isn't the leader's CONSUMER, emit `OverriddenInputFailure`.
 
 
-def validate_middle_pack_pair_interleaving(graph: DataflowGraph) -> List["WrongInterleavingFailure"]:
+def validate_middle_pack_pair_interleaving(graph: DataflowGraph) -> List["OverriddenInputFailure"]:
     """Graph-side MiddlePack pair-interleaving check.
 
     Walks the unified node stream once and enforces the
     pair-leader/pair-consumer adjacency invariant for TF32 middle-16 packs.
-    Emits zero-or-more `WrongInterleavingFailure` for each violating pair
+    Emits zero-or-more `OverriddenInputFailure` for each violating pair
     (one failure per pair, never per intervening node).
 
-    Returns a list of `WrongInterleavingFailure` instances. Empty list
+    Returns a list of `OverriddenInputFailure` instances. Empty list
     means every middle-16 pair was emitted contiguously in the global
     stream order.
 
@@ -4486,10 +4463,11 @@ def validate_middle_pack_pair_interleaving(graph: DataflowGraph) -> List["WrongI
         actual_next = middle_packs_global[global_idx + 1]
         if actual_next is consumer:
             continue
-        failures.append(WrongInterleavingFailure(
-            pack=node,
-            expected_next=consumer,
-            actual_next=actual_next,
+        failures.append(OverriddenInputFailure(
+            producer=node,
+            consumer=consumer,
+            resource="vgpr",
+            intervening_writer=actual_next,
         ))
     return failures
 

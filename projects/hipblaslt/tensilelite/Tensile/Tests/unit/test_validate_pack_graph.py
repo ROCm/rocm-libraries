@@ -40,7 +40,7 @@ Scope of this file:
     vgpr the Pack writes; reordering Pack to issue at-or-after the MFMA is
     detected by `compare_graphs` Phase-1 order check. ALU producers have
     no SWait coverage requirement so no wait-coverage failure follows.
-  * MiddlePack pair-interleaving (`WrongInterleavingFailure`): the f32
+  * MiddlePack pair-interleaving (`OverriddenInputFailure`): the f32
     pair-consumer ordering invariant in `_hook_up_packs_f32` is mirrored
     graph-side by `validate_middle_pack_pair_interleaving`.
   * BF16 LR1 -> Pack1 (v_perm flavor), Pack/MFMA same-slot boundary, and
@@ -155,7 +155,7 @@ from Tensile.Components.ScheduleCapture import (
     TaggedInstruction,
     OrderInvertedFailure,
     MissingWaitFailure,
-    WrongInterleavingFailure,
+    OverriddenInputFailure,
 )
 
 from dataflow_fixtures import (
@@ -499,7 +499,7 @@ class TestLRAfterPack_LR1Graph(GraphNativeValidationTest):
 # MiddlePack in the GLOBAL stream after a pair-leader is its
 # pair_consumer (the partner sharing its temp VGPR). The graph-side
 # classifier `validate_middle_pack_pair_interleaving` (ScheduleCapture.py)
-# walks the unified node stream once and emits WrongInterleavingFailure
+# walks the unified node stream once and emits OverriddenInputFailure
 # with the same shape the structural rule produces.
 #
 # The legacy tests stay on (parallel coverage) until ola.4 phase-2 deletes
@@ -559,7 +559,7 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
     graph side: for each MiddlePack pair-leader (even-indexed within its
     category's middle-16 sub-stream), the next MiddlePack in the GLOBAL
     stream order must be the leader's pair-consumer (the next index in the
-    same category). Otherwise emit `WrongInterleavingFailure(pack,
+    same category). Otherwise emit `OverriddenInputFailure(pack,
     expected_next, actual_next)`.
 
     Negative tests use unique category labels (PackA0 / PackB0) so the
@@ -586,16 +586,16 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
         ])
         failures = self.validate_waits(self.build_graph(
             self.wrap_single_body(cap)))
-        # No WrongInterleavingFailure — pair is contiguous.
+        # No OverriddenInputFailure — pair is contiguous.
         for f in failures:
-            assert not isinstance(f, WrongInterleavingFailure), (
-                f"unexpected WrongInterleavingFailure: {repr(f)}"
+            assert not isinstance(f, OverriddenInputFailure), (
+                f"unexpected OverriddenInputFailure: {repr(f)}"
             )
 
     def test_middlepack_pair_interleaved_with_mfma_emits_wrong_interleaving(self):
         """PackA0 pair interleaved with a PackB0 MiddlePack: leader at slot 4,
         an OTHER middle-16 (PackB0) at slot 5, consumer at slot 6. The
-        classifier fires WrongInterleavingFailure with pack=PackA0[leader],
+        classifier fires OverriddenInputFailure with pack=PackA0[leader],
         expected_next=PackA0[consumer], actual_next=PackB0[interloper].
 
         Note: the legacy test name says "interleaved with MFMA" but the
@@ -628,27 +628,27 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
         failures = self.validate_waits(self.build_graph(
             self.wrap_single_body(cap)))
         wrong_interleavings = [f for f in failures
-                               if isinstance(f, WrongInterleavingFailure)]
+                               if isinstance(f, OverriddenInputFailure)]
         # Two violations: PackA0[L] and PackB0[L] both have a stranger as next.
         assert len(wrong_interleavings) == 2, (
-            f"expected 2 WrongInterleavingFailures, got {len(wrong_interleavings)}: "
+            f"expected 2 OverriddenInputFailures, got {len(wrong_interleavings)}: "
             + ", ".join(repr(f) for f in wrong_interleavings)
         )
         # Verify the PackA0 leader's failure: leader@4, expected consumer@6,
         # actual next is PackB0 leader @ 5.
-        f_a = next(f for f in wrong_interleavings if f.pack.category == "PackA0")
-        assert f_a.pack.position.vmfma_index == 4
-        assert f_a.expected_next.category == "PackA0"
-        assert f_a.expected_next.position.vmfma_index == 6
-        assert f_a.actual_next.category == "PackB0"
-        assert f_a.actual_next.position.vmfma_index == 5
+        f_a = next(f for f in wrong_interleavings if f.producer.category == "PackA0")
+        assert f_a.producer.position.vmfma_index == 4
+        assert f_a.consumer.category == "PackA0"
+        assert f_a.consumer.position.vmfma_index == 6
+        assert f_a.intervening_writer.category == "PackB0"
+        assert f_a.intervening_writer.position.vmfma_index == 5
 
     def test_middlepack_two_groups_fully_interleaved(self):
         """Two pairs interleaved across categories — mirror of
         `test_failing_two_groups_fully_interleaved` in the legacy file.
 
         Stream: A0_L, B0_L, A0_C, B0_C. Both leaders see the wrong next.
-        Two `WrongInterleavingFailure` (one per violating pair) expected.
+        Two `OverriddenInputFailure` (one per violating pair) expected.
         """
         cap = make_capture(BODY_LABEL_ML, [
             make_swait(slot=2, dscnt=0),
@@ -664,12 +664,12 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
         failures = self.validate_waits(self.build_graph(
             self.wrap_single_body(cap)))
         wrong_interleavings = [f for f in failures
-                               if isinstance(f, WrongInterleavingFailure)]
+                               if isinstance(f, OverriddenInputFailure)]
         assert len(wrong_interleavings) == 2, (
-            f"expected 2 WrongInterleavingFailures, got {len(wrong_interleavings)}"
+            f"expected 2 OverriddenInputFailures, got {len(wrong_interleavings)}"
         )
         # Both leaders should have been flagged.
-        flagged_categories = sorted(f.pack.category for f in wrong_interleavings)
+        flagged_categories = sorted(f.producer.category for f in wrong_interleavings)
         assert flagged_categories == ["PackA0", "PackB0"]
 
     def test_middlepack_non_pair_writes_no_false_positive(self):
@@ -690,8 +690,8 @@ class TestMiddlePackPairInterleavingGraph(GraphNativeValidationTest):
         failures = self.validate_waits(self.build_graph(
             self.wrap_single_body(cap)))
         for f in failures:
-            assert not isinstance(f, WrongInterleavingFailure), (
-                f"unexpected WrongInterleavingFailure on unpaired MiddlePacks: "
+            assert not isinstance(f, OverriddenInputFailure), (
+                f"unexpected OverriddenInputFailure on unpaired MiddlePacks: "
                 f"{repr(f)}"
             )
 

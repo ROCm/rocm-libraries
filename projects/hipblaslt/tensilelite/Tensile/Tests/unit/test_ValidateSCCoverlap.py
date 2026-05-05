@@ -25,15 +25,15 @@
 """SCC clobber detection — graph-native.
 
 Tests use the graph-based ``compare_graphs`` -> ``diagnose_missing_edge`` ->
-``SCCConflictFailure`` path. The prior structural SCC overlap check and
-its ``SCCConflictFailure`` structural fields have been removed.
+``OverriddenInputFailure`` path. The prior structural SCC overlap check and
+its ``OverriddenInputFailure`` structural fields have been removed.
 
 The shape under test: an SCC producer + SCC consumer chain with an
 unrelated SCC writer landing inside the producer/consumer window,
 displacing the producer's SCC value before the consumer could read it.
 Each case builds a default body (producer immediately followed by
 consumer) and a subject body (producer + clobber + consumer); calls
-``compare_graphs`` and asserts ``SCCConflictFailure`` with
+``compare_graphs`` and asserts ``OverriddenInputFailure`` with
 ``intervening_writer`` pointing at the clobber's rocisa class.
 
 Test inventory (12 conflict assertions across 6 methods):
@@ -62,7 +62,7 @@ from rocisa.instruction import (
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     SLOT_KIND_MFMA,
-    SCCConflictFailure,
+    OverriddenInputFailure,
     SlotKey,
     TaggedInstruction,
 )
@@ -195,7 +195,7 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         # the producer and consumer in (slot, sequence) order so the
         # per-byte latest-writer resolver pairs the consumer with the
         # clobber, not with the producer — that's what triggers
-        # SCCConflictFailure in diagnose_missing_edge.
+        # OverriddenInputFailure in diagnose_missing_edge.
         subj_cap = make_capture(BODY_LABEL_ML, [
             _tag(prod_make(), slot_idx=producer_slot,
                  sequence=producer_sequence,
@@ -214,7 +214,7 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         )
 
     def _assert_no_scc_clobber(self, default_cap, subject_cap):
-        """Positive path: no SCCConflictFailure expected on the failure list.
+        """Positive path: no OverriddenInputFailure expected on the failure list.
 
         Other failure kinds may still appear (the comparison may notice
         the clobber as a structural diff that doesn't qualify as an SCC
@@ -223,9 +223,9 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         failures = self.compare(default_cap, subject_cap,
                                 raise_on_unexplained=False)
         scc_failures = [f for f in failures
-                        if isinstance(f, SCCConflictFailure)]
+                        if isinstance(f, OverriddenInputFailure)]
         assert scc_failures == [], (
-            "expected no SCCConflictFailure on positive path, got "
+            "expected no OverriddenInputFailure on positive path, got "
             f"{[type(f).__name__ for f in scc_failures]}"
         )
 
@@ -240,13 +240,13 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         producer_category: Optional[str] = None,
         consumer_category: Optional[str] = None,
         intervening_category: Optional[str] = None,
-    ) -> SCCConflictFailure:
+    ) -> OverriddenInputFailure:
         """Sibling of the legacy ``assert_scc_conflict`` for the graph-native
-        ``SCCConflictFailure`` shape (producer / consumer / intervening_writer
+        ``OverriddenInputFailure`` shape (producer / consumer / intervening_writer
         as ``GraphNode`` references).
 
         Asserts:
-          - exactly one SCCConflictFailure landed in the failure list,
+          - exactly one OverriddenInputFailure landed in the failure list,
           - all three graph-shape fields are populated,
           - the wrapped rocisa class on each node matches the expected
             opcode name,
@@ -257,9 +257,9 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         failures = self.compare(default_cap, subject_cap,
                                 raise_on_unexplained=False)
         scc_failures = [f for f in failures
-                        if isinstance(f, SCCConflictFailure)]
+                        if isinstance(f, OverriddenInputFailure)]
         assert len(scc_failures) == 1, (
-            f"expected exactly one SCCConflictFailure, got {len(scc_failures)}; "
+            f"expected exactly one OverriddenInputFailure, got {len(scc_failures)}; "
             f"all failures: {[type(f).__name__ for f in failures]}"
         )
         f = scc_failures[0]
@@ -431,7 +431,7 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
           (c) clobber at the boundary (clobber_slot equals producer_slot
               with sequence interleaving).
 
-        All three must trigger SCCConflictFailure with the same shape;
+        All three must trigger OverriddenInputFailure with the same shape;
         the position field of the clobber should match what we set.
         """
         # Conflict 5/12: clobber sits in the same slot, between by sequence.
@@ -538,7 +538,7 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         legacy structural test, LWSA / LWSB writes m0 + uses SCC; in
         the graph model the LWS category is just a tag, so we exercise
         the same SCC clobber pattern but pin the categories to ``LWSA``
-        / ``LWSB`` so the resulting SCCConflictFailure carries the
+        / ``LWSB`` so the resulting OverriddenInputFailure carries the
         correct category strings on its nodes.
         """
         # Conflict 10/12: LWSA-tagged clobber inside a GRIncA chain.
@@ -610,12 +610,12 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         )
 
     # =========================================================================
-    # Positive paths — clobber-free schedules must NOT emit SCCConflictFailure.
+    # Positive paths — clobber-free schedules must NOT emit OverriddenInputFailure.
     # =========================================================================
 
     def test_no_clobber_passes(self):
         """Smoke positive test: producer + consumer adjacent, no clobber
-        anywhere in the body — no SCCConflictFailure on the failure list.
+        anywhere in the body — no OverriddenInputFailure on the failure list.
 
         Mirrors the per-method positive assertions in the legacy file
         (each test method ran a clean schedule first to confirm the

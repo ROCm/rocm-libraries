@@ -444,23 +444,29 @@ class GraphNativeValidationTest:
     def assert_wrong_interleaving(failure, *, pack_name, pack_idx,
                                   expected_next_name, expected_next_idx,
                                   actual_next_name, actual_next_idx):
-        """Assert WrongInterleavingFailure carries the expected pack +
-        expected/actual successor identities and positions."""
-        assert failure.pack.name == pack_name
+        """Assert OverriddenInputFailure carries the expected pack +
+        expected/actual successor identities and positions.
+
+        Argument names retain the legacy pack/expected_next/actual_next
+        vocabulary (caller convenience). Internally these map to the
+        unified shape: pack -> producer, expected_next -> consumer,
+        actual_next -> intervening_writer.
+        """
+        assert failure.producer.name == pack_name
         pack_pos = (
-            getattr(failure.pack, "issued_at", None)
-            or failure.pack.position
+            getattr(failure.producer, "issued_at", None)
+            or failure.producer.position
         )
         assert pack_pos.vmfma_index == pack_idx
-        assert failure.expected_next.name == expected_next_name
+        assert failure.consumer.name == expected_next_name
         exp_pos = (
-            getattr(failure.expected_next, "issued_at", None)
-            or failure.expected_next.position
+            getattr(failure.consumer, "issued_at", None)
+            or failure.consumer.position
         )
         assert exp_pos.vmfma_index == expected_next_idx
-        assert failure.actual_next.name == actual_next_name
+        assert failure.intervening_writer.name == actual_next_name
         act_pos = (
-            getattr(failure.actual_next, "issued_at", None)
-            or failure.actual_next.position
+            getattr(failure.intervening_writer, "issued_at", None)
+            or failure.intervening_writer.position
         )
         assert act_pos.vmfma_index == actual_next_idx

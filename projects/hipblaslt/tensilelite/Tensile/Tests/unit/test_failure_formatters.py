@@ -41,11 +41,10 @@ from Tensile.Components.ScheduleCapture import (
     MissingWaitFailure,
     WaitInsufficientFailure,
     MissingBarrierFailure,
-    WrongInterleavingFailure,
+    OverriddenInputFailure,
     TimingTooCloseFailure,
     InvalidCounterValueFailure,
     SchedulePosition,
-    SCCConflictFailure,
     SlotKey,
     LoopBodyCapture,
     TaggedInstruction,
@@ -360,9 +359,9 @@ def test_missing_barrier_failure_format_cross_iteration():
     assert "consumer GRA[0] @ idx=2 (of next iteration)" in msg
 
 
-def test_wrong_interleaving_failure_format_with_capture_brackets():
-    """Capture given: pack / expected_next / actual_next get per-category
-    [N] index — disambiguates the three same-category Packs."""
+def test_overridden_input_failure_format_pack_pair():
+    """Pack pair-leader's vgpr clobbered by an intervening pair-leader of
+    the same Pack category."""
     pack_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 0))
     expected_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 1))
     actual_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 2))
@@ -370,13 +369,17 @@ def test_wrong_interleaving_failure_format_with_capture_brackets():
     expected = _make_node("PackA0", "PackA0", 11, tagged_inst=expected_tagged)
     actual = _make_node("PackA0", "PackA0", 12, tagged_inst=actual_tagged)
     capture = _capture_with(pack_tagged, expected_tagged, actual_tagged)
-    failure = WrongInterleavingFailure(
-        pack=pack, expected_next=expected, actual_next=actual
+    failure = OverriddenInputFailure(
+        producer=pack, consumer=expected,
+        resource="vgpr",
+        intervening_writer=actual,
     )
     msg = failure.format(capture=capture)
-    assert "PackA0[0] @ idx=10" in msg
-    assert "PackA0[1] @ idx=11" in msg
-    assert "PackA0[2] @ idx=12" in msg
+    assert msg == (
+        "PackA0[2] @ idx=12 is incorrectly scheduled between producer "
+        "PackA0[0] @ idx=10 and consumer PackA0[1] @ idx=11, clobbering "
+        "the vgpr the consumer needs."
+    )
 
 
 def test_timing_too_close_failure_format_with_capture_brackets():
@@ -447,10 +450,9 @@ def test_invalid_counter_value_failure_format_multiple_bad():
     )
 
 
-def test_scc_conflict_failure_format_with_capture_brackets():
-    """capture=given: producer / consumer / intervening_writer get the
-    per-category-stream [N] index. The user schedules SCC instructions by
-    position, so the index is the right discriminator."""
+def test_overridden_input_failure_format_scc_clobber():
+    """SCC carry-chain clobber: GRIncA[2] writes SCC between GRIncA[1]
+    (producer) and GRIncA[3] (consumer)."""
     other_grinca = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 0))
     producer_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 1))
     intervening_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 2))
@@ -459,32 +461,16 @@ def test_scc_conflict_failure_format_with_capture_brackets():
     intervening = _make_node("GRIncA", "scc_clobber", 5, tagged_inst=intervening_tagged)
     consumer = _make_node("GRIncA", "scc_consumer", 6, tagged_inst=consumer_tagged)
     capture = _capture_with(other_grinca, producer_tagged, intervening_tagged, consumer_tagged)
-    failure = SCCConflictFailure(
-        producer=producer, consumer=consumer, intervening_writer=intervening,
+    failure = OverriddenInputFailure(
+        producer=producer, consumer=consumer, resource="SCC",
+        intervening_writer=intervening,
     )
     msg = failure.format(capture=capture)
-    assert "GRIncA[1] @ idx=4" in msg     # producer is 2nd GRIncA in stream
-    assert "GRIncA[2] @ idx=5" in msg     # intervening is 3rd
-    assert "GRIncA[3] @ idx=6" in msg     # consumer is 4th
-
-
-def test_scc_conflict_failure_format_graph_shape_no_clobber():
-    """Graph-native shape with no identifiable intervening writer — should
-    still render producer/consumer info with [N] index when a capture is
-    given, and without an Intervening clause."""
-    older_grinca = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 0))
-    producer_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 1))
-    consumer_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 2))
-    producer = _make_node("GRIncA", "scc_producer", 4, tagged_inst=producer_tagged)
-    consumer = _make_node("GRIncA", "scc_consumer", 6, tagged_inst=consumer_tagged)
-    capture = _capture_with(older_grinca, producer_tagged, consumer_tagged)
-    failure = SCCConflictFailure(
-        producer=producer, consumer=consumer, intervening_writer=None,
+    assert msg == (
+        "GRIncA[2] @ idx=5 is incorrectly scheduled between producer "
+        "GRIncA[1] @ idx=4 and consumer GRIncA[3] @ idx=6, clobbering "
+        "the SCC the consumer needs."
     )
-    msg = failure.format(capture=capture)
-    assert "Intervening SCC writer" not in msg
-    assert "GRIncA[1] @ idx=4" in msg     # producer is 2nd GRIncA
-    assert "GRIncA[2] @ idx=6" in msg     # consumer is 3rd
 
 
 
