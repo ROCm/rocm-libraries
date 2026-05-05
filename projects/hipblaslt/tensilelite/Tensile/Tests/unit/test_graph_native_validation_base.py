@@ -36,7 +36,6 @@ from Tensile.Components.ScheduleCapture import (
     MissingBarrierFailure,
     MissingWaitFailure,
     OrderInvertedFailure,
-    OutOfOrderSequenceFailure,
     SCCConflictFailure,
     SchedulePosition,
     TimingTooCloseFailure,
@@ -365,20 +364,6 @@ class TestLiftedHelpers(GraphNativeValidationTest):
             f, producer_name="PackA0", producer_idx=4,
             consumer_name="MFMA", consumer_idx=4,
             expected_quad_cycles=2, actual_quad_cycles=1,
-        )
-
-    def test_assert_out_of_order_sequence(self):
-        f = OutOfOrderSequenceFailure(
-            kind="sequence",
-            schedule_key="GRIncA",
-            sequence=[5, 4, 3, 2, 1, 0],
-            bad_value=4,
-            bad_index=1,
-            prev_value=5,
-        )
-        self.assert_out_of_order_sequence(
-            f, schedule_key="GRIncA", sequence=[5, 4, 3, 2, 1, 0],
-            bad_value=4, bad_index=1, prev_value=5,
         )
 
     def test_assert_wrong_interleaving(self):

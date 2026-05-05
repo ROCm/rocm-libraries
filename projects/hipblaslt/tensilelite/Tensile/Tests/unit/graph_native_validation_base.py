@@ -49,8 +49,7 @@ Migration path for ``ola.1``..``ola.4``:
                               counter_kind="vlcnt")
 
 The legacy ``assert_order_inverted`` / ``assert_timing_too_close`` /
-``assert_scc_conflict`` / ``assert_out_of_order_sequence`` /
-``assert_wrong_interleaving`` helpers are lifted onto this base unchanged
+``assert_scc_conflict`` / ``assert_wrong_interleaving`` helpers are lifted onto this base unchanged
 because they assert on typed Failure fields and are independent of how
 the failure was produced.
 """
@@ -439,30 +438,6 @@ class GraphNativeValidationTest:
         assert failure.actual_quad_cycles == actual_quad_cycles, (
             f"actual_quad_cycles: expected {actual_quad_cycles}, "
             f"got {failure.actual_quad_cycles}"
-        )
-
-    @staticmethod
-    def assert_out_of_order_sequence(failure, *, schedule_key, sequence,
-                                     bad_value, bad_index, prev_value):
-        """Assert OutOfOrderSequenceFailure (kind='sequence') carries the
-        expected schedule-key, full sequence, and bad-position triple."""
-        assert failure.kind == "sequence", (
-            f"kind: expected 'sequence', got {failure.kind!r}"
-        )
-        assert failure.schedule_key == schedule_key, (
-            f"schedule_key: expected {schedule_key!r}, got {failure.schedule_key!r}"
-        )
-        assert failure.sequence == sequence, (
-            f"sequence: expected {sequence!r}, got {failure.sequence!r}"
-        )
-        assert failure.bad_value == bad_value, (
-            f"bad_value: expected {bad_value}, got {failure.bad_value}"
-        )
-        assert failure.bad_index == bad_index, (
-            f"bad_index: expected {bad_index}, got {failure.bad_index}"
-        )
-        assert failure.prev_value == prev_value, (
-            f"prev_value: expected {prev_value}, got {failure.prev_value}"
         )
 
     @staticmethod

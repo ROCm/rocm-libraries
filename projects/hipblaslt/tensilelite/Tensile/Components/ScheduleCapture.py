@@ -819,38 +819,6 @@ class SCCConflictFailure(Failure):
 
 
 # ----------------------------------------------------------------------------
-# 12. OutOfOrderSequenceFailure — instruction A came after B that should follow it.
-#     Used by CVT0/CVT1 pair ordering (CMSValidator.py:1642). The historical
-#     `verify_ascending_order` emitter was retired in bead wx9.11; that
-#     coverage now comes from the dataflow graph (compare_graphs).
-# ----------------------------------------------------------------------------
-@dataclass
-class OutOfOrderSequenceFailure(Failure):
-    kind: str  # 'sequence' | 'cvt_pair'
-    schedule_key: str  # category name (e.g. 'GRIncA') or pair description
-    sequence: object  # the offending sequence (list) or pair (tuple)
-    bad_value: int
-    bad_index: int
-    prev_value: int
-
-    def _format_canonical(self, capture) -> str:
-        if self.kind == "sequence":
-            return (
-                f"Non-descending-order rule failed, schedule key "
-                f"'{self.schedule_key}', sequence {self.sequence}: value "
-                f"{self.bad_value} at index {self.bad_index} is less than "
-                f"{self.prev_value} at index {self.bad_index - 1}."
-            )
-        else:
-            # cvt_pair
-            return (
-                f"CVT pair ordering violated for {self.schedule_key}: CVT0 ends "
-                f"at issue_index {self.prev_value} but CVT1 starts at issue_index "
-                f"{self.bad_value}. CVT0 must precede CVT1 in the pack chain."
-            )
-
-
-# ----------------------------------------------------------------------------
 # 13. ConstraintViolationFailure — declared producer/consumer dependency
 #     constraint violated within a single schedule. Emitted by single-schedule
 #     constraint validators (Pack.validate) where there is no default schedule

@@ -46,7 +46,6 @@ from Tensile.Components.ScheduleCapture import (
     SchedulePosition,
     SCCConflictFailure,
     SlotKey,
-    OutOfOrderSequenceFailure,
     LoopBodyCapture,
     TaggedInstruction,
     _ordinal,
@@ -491,36 +490,6 @@ def test_scc_conflict_failure_format_graph_shape_no_clobber():
     assert "GRIncA[2] @ idx=6" in msg     # consumer is 3rd
 
 
-def test_out_of_order_sequence_failure_sequence_format():
-    failure = OutOfOrderSequenceFailure(
-        kind="sequence",
-        schedule_key="GRIncA",
-        sequence=[0, 1, 1, 0],
-        bad_value=0,
-        bad_index=3,
-        prev_value=1,
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "Non-descending-order rule failed" in msg
-    assert "schedule key 'GRIncA'" in msg
-    assert "sequence [0, 1, 1, 0]" in msg
-    assert "value 0 at index 3 is less than 1 at index 2" in msg
-
-
-def test_out_of_order_sequence_failure_cvt_pair_format():
-    failure = OutOfOrderSequenceFailure(
-        kind="cvt_pair",
-        schedule_key="PackA0 group 3",
-        sequence=("CVT0", "CVT1"),
-        bad_value=12,
-        bad_index=0,
-        prev_value=15,
-    )
-    msg = failure.format(LoopBodyCapture(instructions=[]))
-    assert "CVT pair ordering violated" in msg
-    assert "PackA0 group 3" in msg
-    assert "CVT0 ends at issue_index 15" in msg
-    assert "CVT1 starts at issue_index 12" in msg
 
 
 # =============================================================================
