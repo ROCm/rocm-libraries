@@ -754,7 +754,10 @@ void hipblaslt_init_device(ABC_dims                 abc,
         hipblaslt_init_device<hipblaslt_e8>(
             abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count);
         break;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
     case HIP_R_8F_E5M3_EXT:
+#pragma GCC diagnostic pop
         hipblaslt_init_device<hipblaslt_e5m3>(
             abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count);
         break;
