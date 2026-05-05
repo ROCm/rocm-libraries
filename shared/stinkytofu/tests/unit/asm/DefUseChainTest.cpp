@@ -29,16 +29,6 @@
 using namespace stinkytofu;
 using namespace stinkytofu::test;
 
-// Helper to create v_mov_b32 in a specific block
-static StinkyInstruction* createVMovInBlock(BasicBlock* bb, GfxArchID arch, int destReg,
-                                            int srcReg) {
-    AsmIRBuilder builder(*bb, arch);
-    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mov_b32, arch));
-    inst->addDestReg(StinkyRegister("v", destReg, 1));
-    inst->addSrcReg(StinkyRegister("v", srcReg, 1));
-    return inst;
-}
-
 // Helper to create an instruction with BARRIER (pseudo register) as dest.
 // Simulates s_waitcnt-like instructions used for dependency tracking.
 static StinkyInstruction* createBarrierDestInBlock(BasicBlock* bb, GfxArchID arch) {

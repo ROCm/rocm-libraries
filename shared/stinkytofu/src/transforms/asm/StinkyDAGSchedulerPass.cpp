@@ -40,6 +40,21 @@
 namespace {
 using namespace stinkytofu;
 
+static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGraph,
+                         const DAGNodeList& dagNodes) {
+    std::cerr << "*** DAG Graph Dump: ***\n";
+    for (unsigned i = 0; i < dagGraph.size(); ++i) {
+        std::cerr << "Node " << i << ": ";
+        dagNodes[i].inst->dump(std::cerr);
+        std::cerr << "  successors: ";
+        for (unsigned succId : dagGraph[i]) {
+            std::cerr << succId << " ";
+        }
+        std::cerr << "\n";
+    }
+    std::cerr << "\n\n";
+}
+
 // Check if instruction is a movable side effect (like s_barrier or a scheduling fence)
 static bool isMovableSideEffect(const StinkyInstruction& inst) {
     // Barriers with LDS pseudo-reg deps are movable — ordering enforced by the DAG.

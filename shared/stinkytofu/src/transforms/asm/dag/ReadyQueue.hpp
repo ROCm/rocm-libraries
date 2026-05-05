@@ -59,21 +59,6 @@ struct CompareByDAGid {
 
 using DAGNodeList = std::vector<DAGNode>;
 
-static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGraph,
-                         const DAGNodeList& dagNodes) {
-    std::cerr << "*** DAG Graph Dump: ***\n";
-    for (unsigned i = 0; i < dagGraph.size(); ++i) {
-        std::cerr << "Node " << i << ": ";
-        dagNodes[i].inst->dump(std::cerr);
-        std::cerr << "  successors: ";
-        for (unsigned succId : dagGraph[i]) {
-            std::cerr << succId << " ";
-        }
-        std::cerr << "\n";
-    }
-    std::cerr << "\n\n";
-}
-
 static void addEdgeById(DAGNode* from, DAGNode* to,
                         std::vector<std::unordered_set<unsigned>>& dagGraph) {
     // Don't add duplicate edges, or self-loops.
