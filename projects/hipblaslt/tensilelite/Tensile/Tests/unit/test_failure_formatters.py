@@ -180,27 +180,29 @@ def test_missing_wait_failure_format():
 
 
 def test_missing_wait_failure_format_cross_iteration():
-    """Cross-iteration LDS-reuse: producer LRA0 in ML-1, consumer GRB in ML.
-    Real-data fixture from test_validate_gr_not_too_early_graph.py::
-    test_negative_prev_iter_lr0_not_drained — producer LRA0 @ idx=5 in ML-1,
-    consumer GRB @ idx=6 in ML. The "(of next iteration)" suffix appends to
-    the consumer's position because ML-1 -> ML IS the cross-loop-iteration
-    transition in the captured 4-body model.
+    """Cross-iteration GR -> LR1 dataflow: producer GRA loads to LDS in ML-1,
+    consumer LRA1 reads the same LDS slot in ML. The "(of next iteration)"
+    suffix appends to the consumer's position because ML-1 -> ML IS the
+    cross-loop-iteration transition in the captured 4-body model.
+
+    Realistic shape: GR -> LR1 is the canonical cross-iteration dataflow
+    (DTL=1: BufferLoad m0-routed to LDS, then LRA1 reads from LDS); the
+    relevant counter is vlcnt (drains the global load).
 
     Both producer and consumer tagged_insts go in the capture so the strict
     [N] lookup succeeds; in production a Failure with nodes from multiple
     bodies is rendered against a unified capture or the per-body capture
     that contains every referenced node's tagged_inst."""
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="GRB", slot=SlotKey(0, "ml", 0, 0))
-    producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged, body_label="ML-1")
-    consumer = _make_node("GRB", "GRB", 6, tagged_inst=consumer_tagged, body_label="ML")
+    producer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml-1", 0, 0))
+    consumer_tagged = TaggedInstruction(inst=object(), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
+    producer = _make_node("GRA", "GRA", 2, tagged_inst=producer_tagged, body_label="ML-1")
+    consumer = _make_node("LRA1", "LRA1", 4, tagged_inst=consumer_tagged, body_label="ML")
     capture = _capture_with(producer_tagged, consumer_tagged)
     failure = MissingWaitFailure(
-        producer=producer, consumer=consumer, counter_kind="dscnt"
+        producer=producer, consumer=consumer, counter_kind="vlcnt"
     )
     msg = failure.format(capture=capture)
-    assert msg == "SWaitCnt(dscnt) missing between LRA0[0] @ idx=5 and GRB[0] @ idx=6 (of next iteration)."
+    assert msg == "SWaitCnt(vlcnt) missing between GRA[0] @ idx=2 and LRA1[0] @ idx=4 (of next iteration)."
 
 
 def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
