@@ -7,36 +7,19 @@ include(CMakeFindDependencyMacro)
 
 find_dependency(hipdnn_data_sdk @HIPDNN_FLATBUFFERS_SDK_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
 
-# Export HIPDNN_FRONTEND_SKIP_JSON_LIB setting for consumers
-set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@ CACHE BOOL
-    "Defines whether FE should not include nlohmann/json.hpp.")
+# Reflects how hipDNN was built; not consumer-overridable, since the imported
+# target's compile definitions are already baked in.
+set(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB @HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB@)
 
-# nlohmann_json is optional based on HIPDNN_FRONTEND_SKIP_JSON_LIB
-if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+# nlohmann_json is optional based on HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
     find_dependency(nlohmann_json REQUIRED)
-endif()
-
-# Local should assume flatbuffer is the primary flatbuffer version during configure and build.
-set(flatbuffers_VERSION "@HIPDNN_FLATBUFFERS_VERSION@")
-
-# Validate FlatBuffers version is supported
-set(_hipdnn_supported_flatbuffers_versions "@HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS@")
-if(flatbuffers_VERSION AND NOT flatbuffers_VERSION IN_LIST _hipdnn_supported_flatbuffers_versions)
-    message(FATAL_ERROR
-        "hipDNN Flatbuffers SDK: Unsupported FlatBuffers version: ${flatbuffers_VERSION}. "
-        "Supported versions are: ${_hipdnn_supported_flatbuffers_versions}"
-    )
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_flatbuffers_sdkTargets.cmake")
 
-# Add the correct versioned generated headers to the include path based on detected FlatBuffers version
-if(flatbuffers_VERSION)
-    string(REPLACE "." "_" _hipdnn_fb_version_tag "${flatbuffers_VERSION}")
-    cmake_path(SET _hipdnn_sdk_prefix NORMALIZE "${CMAKE_CURRENT_LIST_DIR}/../../../")
-    get_property(_existing_includes TARGET hipdnn_flatbuffers_sdk PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-    list(PREPEND _existing_includes
-        "${_hipdnn_sdk_prefix}/@HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR@/hipdnn_flatbuffers_sdk/data_objects/v${_hipdnn_fb_version_tag}")
-    set_property(TARGET hipdnn_flatbuffers_sdk PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${_existing_includes})
-    message(STATUS "hipDNN Flatbuffers SDK: Using local FlatBuffers ${flatbuffers_VERSION} headers (v${_hipdnn_fb_version_tag})")
-endif()
+# In the local build FlatBuffers headers are bundled with the install, so
+# CMake doesn't populate flatbuffers_VERSION via find_dependency. The bundled
+# headers are guaranteed to match HIPDNN_FLATBUFFERS_VERSION (enforced at
+# hipDNN configure time), so just surface that version in the status message.
+message(STATUS "hipDNN Flatbuffers SDK: Using local FlatBuffers @HIPDNN_FLATBUFFERS_VERSION@ headers")

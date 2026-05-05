@@ -1933,13 +1933,15 @@ struct verify_forward_infer_gru
         std::vector<int> wlen(1, 0);
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
+        auto hx_dev = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+
         miopenRNNForwardInference(&handle,
                                   rnnDesc,
                                   seqLength,
                                   inputDescs.data(),
                                   input_dev.get(),
                                   &hiddenDesc,
-                                  ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                  hx_dev.get(),
                                   &hiddenDesc,
                                   nullptr,
                                   &weightDesc,
@@ -2162,13 +2164,15 @@ struct verify_forward_train_gru
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
+        auto hx_dev = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+
         miopenRNNForwardTraining(&handle,
                                  rnnDesc,
                                  seqLength,
                                  inputDescs.data(),
                                  input_dev.get(),
                                  &hiddenDesc,
-                                 ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                 hx_dev.get(),
                                  &hiddenDesc,
                                  nullptr,
                                  &weightDesc,
@@ -2406,6 +2410,9 @@ struct verify_backward_data_gru
         std::vector<T> dhx(initHidden.size());
         auto dhx_dev = handle.Write(dhx);
 
+        auto dhy_dev = nodhy ? miopen::Allocator::ManageDataPtr{} : handle.Write(dhy);
+        auto hx_dev  = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+
         miopenRNNBackwardData(&handle,
                               rnnDesc,
                               seqLength,
@@ -2414,13 +2421,13 @@ struct verify_backward_data_gru
                               outputDescs.data(),
                               dyin_dev.get(),
                               &hiddenDesc,
-                              ((nodhy) ? nullptr : handle.Write(dhy).get()),
+                              dhy_dev.get(),
                               &hiddenDesc,
                               nullptr,
                               &weightDesc,
                               weights_dev.get(),
                               &hiddenDesc,
-                              ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                              hx_dev.get(),
                               &hiddenDesc,
                               nullptr,
                               inputDescs.data(),
@@ -2599,6 +2606,7 @@ struct verify_backward_weights_gru
         hlens[1] = batch_seq[0];
         hlens[2] = hiddenSize;
         miopen::TensorDescriptor hiddenDesc(miopen::deref(rnnDesc).dataType, hlens);
+        auto hx_dev    = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
         auto dy_dev    = handle.Write(dy);
         auto input_dev = handle.Write(input);
 
@@ -2608,7 +2616,7 @@ struct verify_backward_weights_gru
                                  inputDescs.data(),
                                  input_dev.get(),
                                  &hiddenDesc,
-                                 ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                 hx_dev.get(),
                                  outputDescs.data(),
                                  dy_dev.get(),
                                  &weightDesc,

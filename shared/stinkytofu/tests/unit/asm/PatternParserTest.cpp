@@ -33,6 +33,7 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -50,17 +51,17 @@ class PatternParserTest : public ::testing::Test {
      * Helper to parse pattern from string
      */
     std::vector<Pattern> parsePatternString(const std::string& input) {
-        // Create temporary file
-        const char* tmpFile = "/tmp/test_pattern.pattern";
-        std::ofstream out(tmpFile);
+        // Create temporary file in platform temp directory
+        auto tmpPath = std::filesystem::temp_directory_path() / "test_pattern.pattern";
+        std::ofstream out(tmpPath);
         out << input;
         out.close();
 
         // Parse it
-        auto patterns = parsePatternFile(tmpFile);
+        auto patterns = parsePatternFile(tmpPath.string().c_str());
 
         // Clean up
-        std::remove(tmpFile);
+        std::filesystem::remove(tmpPath);
 
         return patterns;
     }
@@ -69,17 +70,17 @@ class PatternParserTest : public ::testing::Test {
      * Helper to parse pattern from string with diagnostics
      */
     PatternParseResult parsePatternStringWithDiagnostics(const std::string& input) {
-        // Create temporary file
-        const char* tmpFile = "/tmp/test_pattern_diag.pattern";
-        std::ofstream out(tmpFile);
+        // Create temporary file in platform temp directory
+        auto tmpPath = std::filesystem::temp_directory_path() / "test_pattern_diag.pattern";
+        std::ofstream out(tmpPath);
         out << input;
         out.close();
 
         // Parse it
-        auto result = parsePatternFileWithDiagnostics(tmpFile);
+        auto result = parsePatternFileWithDiagnostics(tmpPath.string().c_str());
 
         // Clean up
-        std::remove(tmpFile);
+        std::filesystem::remove(tmpPath);
 
         return result;
     }

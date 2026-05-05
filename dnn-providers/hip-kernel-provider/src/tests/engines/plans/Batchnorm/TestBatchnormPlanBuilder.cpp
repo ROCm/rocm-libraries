@@ -68,9 +68,27 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
+TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidBwdGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidFwdTrainingGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidThreeNodeGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
 
@@ -107,6 +125,19 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeInference)
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
+TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeBwd)
+{
+    setupMockCompileChain();
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+    HipKernelContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
 TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeFwdTraining)
 {
     setupMockCompileChain();
@@ -120,9 +151,42 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeFwdTraining)
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
-// ============================================================================
-// getMaxWorkspaceSize
-// ============================================================================
+TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForFusedBackwardGraph)
+{
+    hipDeviceProp_t deviceProps = {};
+    deviceProps.multiProcessorCount = 60;
+    deviceProps.warpSize = 64;
+    std::snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", "gfx942");
+
+    EXPECT_CALL(_mockDevicePropertyProvider, getDeviceProperties())
+        .WillOnce(::testing::Return(deviceProps));
+
+    auto makeMockKernel = []() {
+        auto mockKernel = std::make_unique<MockRunnableKernel>();
+        EXPECT_CALL(*mockKernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+        EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+        return mockKernel;
+    };
+
+    auto mockProgram = std::make_unique<MockCompiledProgram>();
+    EXPECT_CALL(*mockProgram, getKernel(::testing::_))
+        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())))
+        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())))
+        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())))
+        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())))
+        .WillOnce(::testing::Return(::testing::ByMove(makeMockKernel())));
+
+    EXPECT_CALL(_mockKernelCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
+
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+    HipKernelContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
 
 TEST_F(TestBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 {

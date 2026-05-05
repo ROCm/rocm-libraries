@@ -82,7 +82,7 @@ operation:
       fbs_field: "operation"
       attr_name: "HIPDNN_ATTR_POINTWISE_MODE"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::PointwiseMode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::PointwiseMode"
       frontend_type: "PointwiseMode"
       required: true
       default_value: "PointwiseMode::NOT_SET"

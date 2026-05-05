@@ -3,8 +3,10 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <iterator>
 #include <numeric>
 #include <optional>
 #include <stdexcept>

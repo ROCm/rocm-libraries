@@ -13,7 +13,8 @@ hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based a
 |-----------|------|----------|---------|
 | **Backend** (`backend/`) | Shared library (C API) | Data SDK | Core engine, plugin loading, graph execution |
 | **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API (uses Data SDK for types/logging, not FlatBuffers) |
-| **Data SDK** (`data_sdk/`) | Header-only | Third-party deps | Shared data objects, Flatbuffer schemas, logging |
+| **Data SDK** (`data_sdk/`) | Header-only | (none) | Shared data types, logging |
+| **FlatBuffers SDK** (`flatbuffers_sdk/`) | Header-only | FlatBuffers, nlohmann_json | FlatBuffer schemas, generated headers, JSON helpers |
 | **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK | Interfaces for plugin development |
 | **Test SDK** (`test_sdk/`) | Header-only | Data SDK | Shared test utilities |
 
@@ -168,19 +169,19 @@ Rules apply to the TestSuite name (first param of `TEST` / `TEST_F` / `TEST_P`).
 
 **Composition (left → right):**
 
-1. Optional `Integration` prefix (only for integration tests, always first)
-2. Optional `Gpu` (immediately after `Integration` if both apply, otherwise first)
+1. Required `Test` (unit tests) or `Integration` (integration tests) prefix, always first
+2. Optional `Gpu` immediately after `Test`/`Integration` if the test needs GPU support
 3. Core Feature / Subject under test (PascalCase, no underscores)
 4. Optional Datatype token: `Bfp16`, `Fp16`, `Fp32`
 
-Omit any position that does not apply.
+Omit any optional position that does not apply.
 
-**Unit tests**: Mirror the class under test — `TestMyClass` or `GpuTestMyClass` if GPU is required.
+**Unit tests**: Mirror the class under test — `TestMyClass` or `TestGpuMyClass` if GPU is required.
 
 **Valid examples:**
 ```
-IntegrationGpuConvolutionPlannerNchwFp32   GpuTestActivationKernelNchwFp32
-GpuTestExecutionPlanBuilderFp32            IntegrationGraphFusion
+IntegrationGpuConvolutionPlannerNchwFp32   TestGpuActivationKernelNchwFp32
+TestGpuExecutionPlanBuilderFp32            IntegrationGraphFusion
 TestConvolutionHeuristicsFp32              TestConvolutionHeuristics
 ```
 

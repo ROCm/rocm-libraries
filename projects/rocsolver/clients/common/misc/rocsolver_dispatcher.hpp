@@ -107,6 +107,8 @@
 #include "common/lapack/testing_sygvj_hegvj.hpp"
 #include "common/lapack/testing_sygvx_hegvx.hpp"
 #include "common/lapack/testing_sytf2_sytrf.hpp"
+#include "common/lapack/testing_sytrs.hpp"
+#include "common/lapack/testing_sytrs2.hpp"
 #include "common/lapack/testing_sytxx_hetxx.hpp"
 #include "common/lapack/testing_trtri.hpp"
 
@@ -255,6 +257,20 @@ class rocsolver_dispatcher
             {"getrs_64", testing_getrs<false, false, T, int64_t>},
             {"getrs_batched_64", testing_getrs<true, true, T, int64_t>},
             {"getrs_strided_batched_64", testing_getrs<false, true, T, int64_t>},
+            // sytrs
+            {"sytrs", testing_sytrs<false, false, T, rocblas_int>},
+            {"sytrs_batched", testing_sytrs<true, true, T, rocblas_int>},
+            {"sytrs_strided_batched", testing_sytrs<false, true, T, rocblas_int>},
+            {"sytrs_64", testing_sytrs<false, false, T, int64_t>},
+            {"sytrs_batched_64", testing_sytrs<true, true, T, int64_t>},
+            {"sytrs_strided_batched_64", testing_sytrs<false, true, T, int64_t>},
+            // sytrs2
+            {"sytrs2", testing_sytrs2<false, false, T, rocblas_int>},
+            {"sytrs2_batched", testing_sytrs2<true, true, T, rocblas_int>},
+            {"sytrs2_strided_batched", testing_sytrs2<false, true, T, rocblas_int>},
+            {"sytrs2_64", testing_sytrs2<false, false, T, int64_t>},
+            {"sytrs2_batched_64", testing_sytrs2<true, true, T, int64_t>},
+            {"sytrs2_strided_batched_64", testing_sytrs2<false, true, T, int64_t>},
             // getrs_npvt
             {"getrs_npvt", testing_getrs_npvt<false, false, T, rocblas_int>},
             {"getrs_npvt_batched", testing_getrs_npvt<true, true, T, rocblas_int>},
