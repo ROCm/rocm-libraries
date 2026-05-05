@@ -4,12 +4,40 @@
 """Convolution parameter parsing and hipDNN JSON graph construction."""
 
 import dataclasses
+import enum
 import warnings
 from typing import Any, Dict, List
 
 from .parsing import CONV_FLAG_ALIASES, get_int_arg, normalize_args
 from .strides import _input_strides, _weight_strides, conv_out_dim
 from .tensors import _join_prefix, _make_tensor
+
+
+class ConvDirection(enum.IntEnum):
+    FORWARD = 1
+    BACKWARD_DATA = 2
+    BACKWARD_WEIGHTS = 4
+
+    @property
+    def label(self) -> str:
+        return _CONV_DIRECTION_LABELS[self]
+
+    @property
+    def node_type(self) -> str:
+        return _CONV_NODE_TYPES[self]
+
+
+_CONV_DIRECTION_LABELS: Dict["ConvDirection", str] = {
+    ConvDirection.FORWARD: "fwd",
+    ConvDirection.BACKWARD_DATA: "dgrad",
+    ConvDirection.BACKWARD_WEIGHTS: "wgrad",
+}
+
+_CONV_NODE_TYPES: Dict["ConvDirection", str] = {
+    ConvDirection.FORWARD: "ConvolutionFwdAttributes",
+    ConvDirection.BACKWARD_DATA: "ConvolutionBwdAttributes",
+    ConvDirection.BACKWARD_WEIGHTS: "ConvolutionWrwAttributes",
+}
 
 
 _CONV_MODE_MAP = {
@@ -58,6 +86,10 @@ class ConvParams:
     @property
     def is_3d(self) -> bool:
         return self.spatial_dim == 3
+
+    @property
+    def direction(self) -> ConvDirection:
+        return ConvDirection(self.F)
 
     @classmethod
     def from_args(cls, args: Dict[str, str]) -> "ConvParams":
@@ -186,18 +218,6 @@ class ConvParams:
         )
 
 
-def _conv_direction_label(F: int) -> str:
-    return {1: "fwd", 2: "dgrad", 4: "wgrad"}.get(F, f"F{F}")
-
-
-def _conv_node_type(F: int) -> str:
-    return {
-        1: "ConvolutionFwdAttributes",
-        2: "ConvolutionBwdAttributes",
-        4: "ConvolutionWrwAttributes",
-    }.get(F, "ConvolutionFwdAttributes")
-
-
 _CONV_IO_TYPE: Dict[str, str] = {
     "conv": "float",
     "convfp16": "half",
@@ -242,10 +262,11 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
         stride_list = [p.stride_h, p.stride_w]
         dil_list = [p.dil_h, p.dil_w]
 
-    node_type = _conv_node_type(p.F)
+    direction = p.direction
+    node_type = direction.node_type
 
     # Wire up inputs/outputs differently per direction
-    if p.F == 1:  # forward: x, w → y
+    if direction is ConvDirection.FORWARD:  # x, w → y
         tensors = [
             _make_tensor(0, "output_y", y_dims, y_strides, data_type=io_type),
             _make_tensor(1, "input_x", x_dims, x_strides, data_type=io_type),
@@ -253,7 +274,7 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
         ]
         node_inputs = {"x_tensor_uid": 1, "w_tensor_uid": 2}
         node_outputs = {"y_tensor_uid": 0}
-    elif p.F == 2:  # dgrad: dy, w → dx
+    elif direction is ConvDirection.BACKWARD_DATA:  # dy, w → dx
         tensors = [
             _make_tensor(0, "output_dx", x_dims, x_strides, data_type=io_type),
             _make_tensor(1, "input_dy", y_dims, y_strides, data_type=io_type),
@@ -261,7 +282,7 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
         ]
         node_inputs = {"dy_tensor_uid": 1, "w_tensor_uid": 2}
         node_outputs = {"dx_tensor_uid": 0}
-    else:  # wgrad (F==4): dy, x → dw
+    else:  # dy, x → dw
         tensors = [
             _make_tensor(0, "output_dw", w_dims, w_strides, data_type=io_type),
             _make_tensor(1, "input_dy", y_dims, y_strides, data_type=io_type),
@@ -297,7 +318,7 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
 
 
 def _conv_filename(prefix: str, p: ConvParams) -> str:
-    direction = _conv_direction_label(p.F)
+    direction = p.direction.label
 
     if p.is_3d:
         name = _join_prefix(

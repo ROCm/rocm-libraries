@@ -4,6 +4,7 @@
 """Batchnorm type resolution and hipDNN JSON graph construction."""
 
 import dataclasses
+import enum
 import warnings
 from typing import Any, Dict, List
 
@@ -14,6 +15,12 @@ from .tensors import _join_prefix, _make_scalar_tensor, _make_tensor
 # ---------------------------------------------------------------------------
 # Batchnorm type resolution
 # ---------------------------------------------------------------------------
+
+class BnormDirection(enum.Enum):
+    FORWARD_TRAINING = "fwd"
+    FORWARD_INFERENCE = "inference"
+    BACKWARD_TRAINING = "backward"
+
 
 _BNORM_IO_TYPE: Dict[str, str] = {
     "bnorm": "float",
@@ -108,12 +115,12 @@ class BnormParams:
         return self.mode == 1
 
     @property
-    def direction(self) -> str:
+    def direction(self) -> BnormDirection:
         if self.back == 1:
-            return "backward"
+            return BnormDirection.BACKWARD_TRAINING
         if self.forw == 2:
-            return "inference"
-        return "fwd_training"
+            return BnormDirection.FORWARD_INFERENCE
+        return BnormDirection.FORWARD_TRAINING
 
     def scale_dims_and_strides(self) -> tuple[List[int], List[int]]:
         """Return (dims, strides) for scale/bias/mean/variance tensors.
@@ -166,7 +173,7 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
 
     direction = p.direction
 
-    if direction == "inference":
+    if direction is BnormDirection.FORWARD_INFERENCE:
         # Inference: x, mean, inv_variance, scale, bias → y
         node_type = "BatchnormInferenceAttributes"
         tensors = [
@@ -192,7 +199,7 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
                 "outputs": {"y_tensor_uid": 6},
             }
         ]
-    elif direction == "fwd_training":
+    elif direction is BnormDirection.FORWARD_TRAINING:
         # Forward training: x, scale, bias, epsilon → y, mean, inv_variance
         # Optional: prev_running_mean/variance + momentum → next_running_mean/variance
         # peer_stats_tensor_uid is required by the schema (empty list = no peers).
@@ -279,9 +286,7 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
 def _bnorm_filename(prefix: str, operation: str, args: Dict[str, str]) -> str:
     p = BnormParams.from_args(args)
 
-    direction = {"backward": "backward", "inference": "inference"}.get(
-        p.direction, "fwd"
-    )
+    direction = p.direction.value
 
     if p.is_3d:
         return _join_prefix(

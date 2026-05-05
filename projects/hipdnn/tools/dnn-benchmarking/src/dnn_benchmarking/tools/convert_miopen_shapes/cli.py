@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .bnorm import _bnorm_filename, build_bnorm_json
-from .conv import ConvParams, _conv_filename, build_conv_json, conv_io_type
+from .conv import (
+    ConvDirection,
+    ConvParams,
+    _conv_filename,
+    build_conv_json,
+    conv_io_type,
+)
 from .parsing import parse_args
 
 # ---------------------------------------------------------------------------
@@ -69,18 +75,15 @@ def parse_line(line: str) -> Optional[Tuple[str, Dict[str, str]]]:
     return operation, args
 
 
-_DIRECTION_BITS = [1, 2, 4]
-
-
-def _expand_directions(F: int) -> List[int]:
+def _expand_directions(F: int) -> List[ConvDirection]:
     """Expand an MIOpen -F bitmask into individual direction values.
 
-    F=0 means all directions (1, 2, 4).  Otherwise each set bit selects
-    a direction: 1=fwd, 2=dgrad, 4=wgrad.  E.g. F=3 → [1, 2], F=5 → [1, 4].
+    F=0 means all directions.  Otherwise each set bit selects
+    a direction: 1=fwd, 2=dgrad, 4=wgrad.  E.g. F=3 → [FORWARD, BACKWARD_DATA].
     """
     if F == 0:
-        return list(_DIRECTION_BITS)
-    return [bit for bit in _DIRECTION_BITS if F & bit]
+        return list(ConvDirection)
+    return [d for d in ConvDirection if F & d]
 
 
 def convert_line(
