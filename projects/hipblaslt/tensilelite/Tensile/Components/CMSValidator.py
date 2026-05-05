@@ -241,21 +241,20 @@ class StructuralRule(ABC):
 
 
 
-# Bead `ola.4` phase-2: deleted the structural-side Pack rule machinery
-# (`add_pack_constraints` + `hook_up_packs` + `_hook_up_packs_*` family +
-# `derive_pack_must_start_after` + `set_*_needed_by_from_mfma_operands` +
-# `_set_pack_needed_by` + `find_earliest_mfma_execution` + `apply_swaits`
-# + `_get_lrs_for_pack` + `_hook_up_middle_16_pairs` + `_build_reg_to_lr_map`
-# + `invert_mfma_reorder` + `PackDataReadyRule`). All Pack-related
-# invariants moved graph-side: LR -> Pack RAW (dscnt drain) and Pack ->
-# MFMA RAW are enforced by `validate_edge_wait_coverage` +
-# `compare_graphs` over real register dataflow edges produced by
-# `_GenericALURule`; MiddlePack pair-interleaving (`WrongInterleavingFailure`)
-# is enforced by `validate_middle_pack_pair_interleaving` (bead `dpi`);
-# quad-cycle visibility (`TimingTooCloseFailure`) by `_quad_cycle_gap_ok` /
-# `_cvt_to_mfma_gap_ok` / `_mfma_pack_to_cvt_gap_ok` (beads `nk0`, `35z`,
-# `or9`). See migrated coverage in
-# `Tensile/Tests/unit/test_validate_pack_graph.py` and
+# Structural Pack rule machinery (`add_pack_constraints` + `hook_up_packs`
+# + `_hook_up_packs_*` family + `derive_pack_must_start_after` +
+# `set_*_needed_by_from_mfma_operands` + `_set_pack_needed_by` +
+# `find_earliest_mfma_execution` + `apply_swaits` + `_get_lrs_for_pack` +
+# `_hook_up_middle_16_pairs` + `_build_reg_to_lr_map` + `invert_mfma_reorder`
+# + `PackDataReadyRule`) was removed. All Pack-related invariants live
+# graph-side: LR -> Pack RAW (dscnt drain) and Pack -> MFMA RAW are
+# enforced by `validate_edge_wait_coverage` + `compare_graphs` over real
+# register dataflow edges produced by `_GenericALURule`; MiddlePack
+# pair-interleaving (`WrongInterleavingFailure`) is enforced by
+# `validate_middle_pack_pair_interleaving`; quad-cycle visibility
+# (`TimingTooCloseFailure`) by `_quad_cycle_gap_ok` /
+# `_cvt_to_mfma_gap_ok` / `_mfma_pack_to_cvt_gap_ok`. See migrated coverage
+# in `Tensile/Tests/unit/test_validate_pack_graph.py` and
 # `Tensile/Tests/unit/test_dataflow_graph_register_gaps.py`.
 
 # --- Loop Names ---
@@ -272,10 +271,10 @@ PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
 
 # --- Quad-Cycle Timing (CDNA 4 ISA section 7.6) ---
 # The structural-side `estimate_quad_cycles` orchestrator and its
-# accompanying constants were deleted by bead `8nz`. The graph-side
-# `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` / `_mfma_pack_to_cvt_gap_ok`
-# helpers in `Tensile/Components/ScheduleCapture.py` are now the single
-# source of truth for MFMA quad-cycle visibility verdicts; their constants
+# accompanying constants were removed. The graph-side `_quad_cycle_gap_ok`
+# / `_cvt_to_mfma_gap_ok` / `_mfma_pack_to_cvt_gap_ok` helpers in
+# `Tensile/Components/ScheduleCapture.py` are now the single source of
+# truth for MFMA quad-cycle visibility verdicts; their constants
 # (`_QUAD_CYCLES_*`, `_MFMA_TYPE_SWITCH_THRESHOLD_*`) live alongside them
 # in ScheduleCapture.py.
 
@@ -339,22 +338,21 @@ class LocalRead(ValidatorInstruction):
         return self.guaranteed_by
 
     def validate(self) -> Optional[str]:
-        """Bead ``ola.3`` phase-2: the LR-data-ready rule
-        (``add_local_read_constraints`` + ``set_lr_needed_by_for_VMFMA``)
-        was deleted. LR -> MFMA wait-coverage now lives graph-side via
-        ``validate_edge_wait_coverage`` (LR -> MFMA RAW edges). The
-        ``ValidatorInstruction.validate`` abstract method still requires
-        an override on every subclass; this no-op preserves the contract
-        without re-introducing the structural rule.
+        """No-op. LR-data-ready (LR -> MFMA dscnt drain) lives graph-side
+        via ``validate_edge_wait_coverage`` over LR -> MFMA RAW edges.
+        The ``ValidatorInstruction.validate`` abstract method still
+        requires an override on every subclass; this no-op preserves the
+        contract without re-introducing the deleted structural rule.
         """
         return None
 
 @dataclass
 class MFMA(ValidatorInstruction):
-    # Bead `8nz`: `mfma_finish_cycles` was the only field consumed by
-    # the deleted `estimate_quad_cycles` simulator. The graph-side
-    # `_mfma_finish_cycles_for(rocisa_inst)` (ScheduleCapture.py:3543)
-    # is now the single source of truth for per-MFMA finish-cycle costs.
+    # `mfma_finish_cycles` was removed alongside the structural-side
+    # `estimate_quad_cycles` simulator that was its only consumer. The
+    # graph-side `_mfma_finish_cycles_for(rocisa_inst)`
+    # (ScheduleCapture.py) is now the single source of truth for
+    # per-MFMA finish-cycle costs.
 
     def validate(self) -> Optional[str]:
         return None
@@ -363,10 +361,9 @@ class MFMA(ValidatorInstruction):
 class Pack(ValidatorInstruction):
     """BF16 pack instructions (v_perm). Base class for all pack types.
 
-    Bead `ola.4` phase-2: deleted the structural-side ordering rule.
-    `Pack.validate` (the must_start_after/needed_by ordering check),
+    The structural-side ordering rule (`Pack.validate`,
     `Pack.must_start_after`, `Pack.needed_by`, plus all `_hook_up_packs_*`
-    plumbing were removed. Pack-related ordering invariants (LR -> Pack
+    plumbing) was removed. Pack-related ordering invariants (LR -> Pack
     RAW dscnt drain, Pack -> MFMA RAW order, Pack -> Pack WAR ordering)
     are now enforced graph-side by `validate_edge_wait_coverage` and
     `compare_graphs` over real register dataflow edges produced by
@@ -375,7 +372,7 @@ class Pack(ValidatorInstruction):
     """
     # The index in the list of Pack instructions provided by a CMS schedule.
     # Set at construction time (the `_insert` call paths in `Timeline`). No
-    # longer consumed after ola.4 phase-2 deletion of the structural rule;
+    # longer consumed after the structural Pack-ordering rule was deleted;
     # retained as a harmless construction-time tag because the producing
     # call site assigns it unconditionally.
     issue_index: int
@@ -384,9 +381,9 @@ class Pack(ValidatorInstruction):
     group_index: Optional[int] = None
 
     def validate(self) -> Optional[str]:
-        """No-op after bead `ola.4` phase-2. The Pack-ordering rule moved
-        graph-side; the ValidatorInstruction abstract method still requires
-        an override on every subclass, so this preserves the contract.
+        """No-op. Pack-ordering invariants live graph-side; the
+        ValidatorInstruction abstract method still requires an override on
+        every subclass, so this preserves the contract.
         """
         return None
 
@@ -399,11 +396,11 @@ class CVTPack(Pack):
 class MiddlePack(Pack):
     """Middle-16 packs in TF32 groups of 24.
 
-    Bead `ola.4` phase-2: `MiddlePack.validate`, `pair_consumer`, and
-    `next_scheduled_middle_16` were deleted. The pair-interleaving
+    The structural-side `MiddlePack.validate`, `pair_consumer`, and
+    `next_scheduled_middle_16` helpers were removed. The pair-interleaving
     invariant (`WrongInterleavingFailure` on a non-pair-consumer between
     pair-leader and pair-consumer) is now enforced graph-side via
-    `validate_middle_pack_pair_interleaving` (bead `dpi`); see
+    `validate_middle_pack_pair_interleaving`; see
     `test_validate_pack_graph.py::TestMiddlePackPairInterleavingGraph`.
     """
     pass
@@ -429,8 +426,8 @@ class MFMAPack(Pack, MFMA):
     - isinstance(x, Pack) is True — works with pack gathering, filtering, type hints
     - isinstance(x, MFMA) is True — captures "this IS an MFMA" semantics
     """
-    # Bead `8nz`: deleted the `mfma_finish_cycles` ClassVar override
-    # (consumed only by the deleted `estimate_quad_cycles` simulator).
+    # The `mfma_finish_cycles` ClassVar override was removed alongside the
+    # `estimate_quad_cycles` simulator that was its only consumer.
     # Graph-side `_mfma_finish_cycles_for(rocisa_inst)` distinguishes
     # 4x4 PackMFMAs from standard MFMAs by rocisa class name.
 
@@ -441,14 +438,14 @@ class GlobalRead(ValidatorInstruction):
     needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(name="MFMA", issued_at=POSITION_INF))
     guaranteed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
     barriered_at: list[SchedulePosition] = field(default_factory=list)
-    # Bead `ola.2` phase 2: deleted `must_start_after` and
-    # `must_start_after_barriered_at` fields. The LR0 -> SWait -> SBarrier ->
-    # GR (LDS-reuse) ordering invariant is now enforced graph-side via
-    # `lr_to_gr_lds_reuse` edges in ScheduleCapture.py
-    # (`_collect_barrier_edges` + `validate_edge_wait_coverage`); the GRInc
-    # -> GR (SRD ordering) invariant is enforced graph-side via the SRD
-    # sgpr RAW edge formed by `_GenericALURule` and surfaced as
-    # `OrderInvertedFailure` by `compare_graphs`. See migrated tests at
+    # The `must_start_after` and `must_start_after_barriered_at` fields
+    # were removed. The LR0 -> SWait -> SBarrier -> GR (LDS-reuse) ordering
+    # invariant is now enforced graph-side via `lr_to_gr_lds_reuse` edges
+    # in ScheduleCapture.py (`_collect_barrier_edges` +
+    # `validate_edge_wait_coverage`); the GRInc -> GR (SRD ordering)
+    # invariant is enforced graph-side via the SRD sgpr RAW edge formed by
+    # `_GenericALURule` and surfaced as `OrderInvertedFailure` by
+    # `compare_graphs`. See migrated tests at
     # Tensile/Tests/unit/test_validate_gr_not_too_early_graph.py and
     # Tensile/Tests/unit/test_GRMustStartAfterGRInc.py.
 
@@ -1153,56 +1150,55 @@ def applies_only_once(func: Callable) -> Callable:
     return wrapper
 
 
-# `apply_barriers` was deleted as a follow-up cleanup after ola.4 phase 2.
-# Its only consumers were `add_gr_finish_before_lr_constraints` and
-# `add_pack_constraints` (both deleted in ola.1 / ola.4). The barriered_at
-# bookkeeping it produced is now derived graph-side via `_collect_barrier_edges`
-# in ScheduleCapture.py (`gr_to_lr_lds_reuse` edge_kind).
+# `apply_barriers` was removed; its only consumers were the (now-removed)
+# `add_gr_finish_before_lr_constraints` and `add_pack_constraints`. The
+# barriered_at bookkeeping it produced is now derived graph-side via
+# `_collect_barrier_edges` in ScheduleCapture.py (`gr_to_lr_lds_reuse`
+# edge_kind).
 
 
-# `apply_must_start_after_barriers` and its `_apply_must_start_after_barriers_single`
-# helper were deleted in bead `ola.2` phase 2. Their only consumer was
-# `add_gr_not_too_early_constraints` (also deleted), which encoded the
-# LR0 -> SWait(dscnt=0) -> SBarrier -> GR LDS-reuse invariant. That
-# invariant is now enforced graph-side via `lr_to_gr_lds_reuse` edges in
-# ScheduleCapture.py (`_collect_barrier_edges` + `validate_edge_wait_coverage`).
+# `apply_must_start_after_barriers` and its
+# `_apply_must_start_after_barriers_single` helper were removed; their only
+# consumer was the (now-removed) `add_gr_not_too_early_constraints`, which
+# encoded the LR0 -> SWait(dscnt=0) -> SBarrier -> GR LDS-reuse invariant.
+# That invariant is now enforced graph-side via `lr_to_gr_lds_reuse` edges
+# in ScheduleCapture.py (`_collect_barrier_edges` +
+# `validate_edge_wait_coverage`).
 
 
 
 
-# `set_lr_needed_by_for_VMFMA` was deleted in bead `ola.3` phase-2.
-# It was the consumer-MFMA wiring helper for the now-deleted
-# `add_local_read_constraints` rule. LR -> MFMA wait-coverage is
-# enforced graph-side: `_DSLoadRule` (writes vgpr) + `_MFMARule`
-# (reads vgpr) + per-byte latest-writer resolver build LR -> MFMA
-# RAW edges; `validate_edge_wait_coverage` then emits
+# `set_lr_needed_by_for_VMFMA` was removed; it was the consumer-MFMA
+# wiring helper for the (now-removed) `add_local_read_constraints` rule.
+# LR -> MFMA wait-coverage is enforced graph-side: `_DSLoadRule` (writes
+# vgpr) + `_MFMARule` (reads vgpr) + per-byte latest-writer resolver build
+# LR -> MFMA RAW edges; `validate_edge_wait_coverage` then emits
 # `MissingWaitFailure(counter_kind='dscnt')` /
-# `WaitInsufficientFailure(counter_kind='dscnt')` for any uncovered
-# edge. See `Tensile/Tests/unit/test_validate_lr_before_mfma_graph.py`
-# for the migrated coverage.
+# `WaitInsufficientFailure(counter_kind='dscnt')` for any uncovered edge.
+# See `Tensile/Tests/unit/test_validate_lr_before_mfma_graph.py` for the
+# migrated coverage.
 
 
-# `set_gr_needed_by_from_lrs` was removed in bead `ola.1`. Its only
-# caller was `add_gr_finish_before_lr_constraints`, also removed. The
-# GR -> LR1/3 LDS-reuse coverage is now graph-side; see
-# `_collect_barrier_edges` and `validate_edge_wait_coverage` in
-# ScheduleCapture.py.
+# `set_gr_needed_by_from_lrs` was removed; its only caller was the
+# (also-removed) `add_gr_finish_before_lr_constraints`. The GR -> LR1/3
+# LDS-reuse coverage is now graph-side; see `_collect_barrier_edges` and
+# `validate_edge_wait_coverage` in ScheduleCapture.py.
 
-# `set_gr_must_start_after_from_lr0s` and `set_gr_must_start_after_from_grinc`
-# were deleted in bead `ola.2` phase 2. Their only consumer was
-# `add_gr_not_too_early_constraints` (also deleted). The LR0 -> GR LDS-reuse
-# invariant is now graph-side via `lr_to_gr_lds_reuse` edges
+# `set_gr_must_start_after_from_lr0s` and
+# `set_gr_must_start_after_from_grinc` were removed; their only consumer
+# was the (also-removed) `add_gr_not_too_early_constraints`. The LR0 -> GR
+# LDS-reuse invariant is now graph-side via `lr_to_gr_lds_reuse` edges
 # (validate_edge_wait_coverage). The GRInc -> GR SRD ordering invariant is
-# graph-side via the SRD sgpr RAW edge from the GRInc's SAddU32 to the GR's
-# BufferLoad — `compare_graphs` flips a reversed-order subject into
+# graph-side via the SRD sgpr RAW edge from the GRInc's SAddU32 to the
+# GR's BufferLoad — `compare_graphs` flips a reversed-order subject into
 # OrderInvertedFailure (proven by test_GRMustStartAfterGRInc.py).
 
 
 
 
-# Bead `8nz`: `_handle_min_pack_quad_cycles` was deleted. It only set
-# `Pack.min_quad_cycles_before_result_used`, which itself was only read
-# by the deleted `estimate_quad_cycles` simulator and the deleted
+# `_handle_min_pack_quad_cycles` was removed. It only set
+# `Pack.min_quad_cycles_before_result_used`, which itself was only read by
+# the (removed) `estimate_quad_cycles` simulator and the (removed)
 # timing-check block in `Pack.validate`. Quad-cycle visibility is now
 # enforced by the graph-side helpers in ScheduleCapture.py.
 
@@ -1264,15 +1260,16 @@ def _compute_swap_register_pairs(vw: int, total_regs: int) -> list[tuple[int, in
 
 
 
-# Bead `8nz`: `estimate_quad_cycles` (the structural-side issue-time
-# simulator) was deleted. Quad-cycle visibility (CDNA 4 ISA section 7.6)
-# is now enforced exclusively by the graph-side helpers in
+# `estimate_quad_cycles` (the structural-side issue-time simulator) was
+# removed. Quad-cycle visibility (CDNA 4 ISA section 7.6) is now enforced
+# exclusively by the graph-side helpers in
 # Tensile/Components/ScheduleCapture.py:
 #   * `cumulative_issue_cycles(graph, producer, consumer)` — cycle-exact
-#     equivalent of the deleted simulator (bead `nk0`).
+#     equivalent of the deleted simulator.
 #   * `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` /
 #     `_mfma_pack_to_cvt_gap_ok` — pair-specific dispatch, all routed
-#     through `_classify_edge_coverage`, all emitting `TimingTooCloseFailure`.
+#     through `_classify_edge_coverage`, all emitting
+#     `TimingTooCloseFailure`.
 # See `Tensile/Tests/unit/test_dataflow_graph_register_gaps.py` for the
 # graph-native coverage of the rules previously pinned by the (now
 # removed) `TimingTooClose*` tests in `test_ValidatePack.py`.
@@ -1352,13 +1349,13 @@ def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> li
 
 
 # `_transform_index_with_force_unroll_sub_iter`,
-# `_transform_index_standard`, and `lr_needed_by_mfma` were deleted in
-# bead `ola.3` phase-2 alongside `set_lr_needed_by_for_VMFMA` /
-# `add_local_read_constraints` / `index_for_force_unroll_sub_iter`.
-# These were the positional tile-index -> MFMA-index helpers used by
-# the old structural rule. Graph-side LR -> MFMA edges are derived
-# from real register dataflow (`_DSLoadRule` writes vgpr; `_MFMARule`
-# reads vgpr), so no positional heuristic is needed.
+# `_transform_index_standard`, and `lr_needed_by_mfma` were removed
+# alongside `set_lr_needed_by_for_VMFMA` / `add_local_read_constraints` /
+# `index_for_force_unroll_sub_iter`. These were the positional tile-index
+# -> MFMA-index helpers used by the old structural rule. Graph-side
+# LR -> MFMA edges are derived from real register dataflow (`_DSLoadRule`
+# writes vgpr; `_MFMARule` reads vgpr), so no positional heuristic is
+# needed.
 
 
 @dataclass
@@ -1430,54 +1427,52 @@ class ValidationContext:
 ValidatorPassContext = ValidationContext
 
 
-# `add_local_read_constraints` was deleted in bead `ola.3` phase-2.
-# It was the structural rule that wired LR.needed_by from a positional
-# tile-index heuristic (`set_lr_needed_by_for_VMFMA`) and then drove
-# `LocalRead.validate` through the now-deleted `apply_swaits` + `apply_barriers`.
-# The graph-side replacement is `validate_edge_wait_coverage` over
-# LR -> MFMA RAW edges (`_DSLoadRule` writes vgpr; `_MFMARule` reads
-# vgpr). Migrated coverage lives in
+# `add_local_read_constraints` was removed. It was the structural rule
+# that wired LR.needed_by from a positional tile-index heuristic
+# (`set_lr_needed_by_for_VMFMA`) and then drove `LocalRead.validate`
+# through the (also-removed) `apply_swaits` + `apply_barriers`. The
+# graph-side replacement is `validate_edge_wait_coverage` over LR -> MFMA
+# RAW edges (`_DSLoadRule` writes vgpr; `_MFMARule` reads vgpr). Migrated
+# coverage lives in
 # `Tensile/Tests/unit/test_validate_lr_before_mfma_graph.py`.
 
 
 
 
-# `add_gr_not_too_early_constraints` was deleted in bead `ola.2` phase 2.
-# It encoded two invariants:
+# `add_gr_not_too_early_constraints` was removed. It encoded two
+# invariants:
 #   * LR0 -> SWait(dscnt=0) -> SBarrier -> GR (LDS-reuse) — now graph-side
-#     via `lr_to_gr_lds_reuse` edges (validate_edge_wait_coverage). Phase 1
-#     of ola.2 migrated parallel coverage in test_validate_gr_not_too_early_graph.py.
-#   * last GRInc<X> -> first GR<X> (intra-wave SRD ordering) — now graph-side
-#     via the SRD sgpr RAW edge published by `_GenericALURule`; reversed
-#     subjects surface as `OrderInvertedFailure` in `compare_graphs`. See
-#     Tensile/Tests/unit/test_GRMustStartAfterGRInc.py for the migrated
-#     coverage.
+#     via `lr_to_gr_lds_reuse` edges (validate_edge_wait_coverage). The
+#     parallel graph-side coverage lives in
+#     test_validate_gr_not_too_early_graph.py.
+#   * last GRInc<X> -> first GR<X> (intra-wave SRD ordering) — now
+#     graph-side via the SRD sgpr RAW edge published by `_GenericALURule`;
+#     reversed subjects surface as `OrderInvertedFailure` in
+#     `compare_graphs`. See Tensile/Tests/unit/test_GRMustStartAfterGRInc.py
+#     for the migrated coverage.
 
 
-# `add_gr_finish_before_lr_constraints` was removed in bead `ola.1`.
-# The legacy rule encoded GR -> SWait(vlcnt) -> SBarrier -> LR1/3
-# LDS-reuse coverage; this is now graph-side (`gr_to_lr_lds_reuse`
-# edges in ScheduleCapture._collect_barrier_edges +
-# validate_edge_wait_coverage). See migrated tests at
+# `add_gr_finish_before_lr_constraints` was removed. The legacy rule
+# encoded GR -> SWait(vlcnt) -> SBarrier -> LR1/3 LDS-reuse coverage; this
+# is now graph-side (`gr_to_lr_lds_reuse` edges in
+# ScheduleCapture._collect_barrier_edges + validate_edge_wait_coverage).
+# See migrated tests at
 # Tensile/Tests/unit/test_ValidateGRsCompleteBeforeLr{1,3}s.py.
 
 
-# `index_for_force_unroll_sub_iter` was deleted in bead `ola.3` phase-2.
-# It mapped column-major tile indices into the ForceUnrollSubIter
-# block-permuted scheme used by the deleted `lr_needed_by_mfma`
-# helper. Graph-side LR -> MFMA edges read from real register dataflow
-# and are invariant under MFMA-slot permutations (whether by
-# ForceUnrollSubIter or mfma_reorder), so no positional remapping is
-# needed.
+# `index_for_force_unroll_sub_iter` was removed. It mapped column-major
+# tile indices into the ForceUnrollSubIter block-permuted scheme used by
+# the (also-removed) `lr_needed_by_mfma` helper. Graph-side LR -> MFMA
+# edges read from real register dataflow and are invariant under
+# MFMA-slot permutations (whether by ForceUnrollSubIter or mfma_reorder),
+# so no positional remapping is needed.
 
 
 # `verify_correct_number_of_instructions` + `InstructionCountRule` were
-# deleted in bead `4tw`. The rule guarded against
-# `len(optSchedule[K]) != len(id_map[K])` drift, which would have caused
-# the (now-empty) TIMELINE_RULES path to silently truncate instructions
-# via `min(len_a, len_b)`. With ola.1-4 closing out every Timeline
-# consumer, the drift modes the rule guarded are now caught upstream
-# and downstream of `isValid()`:
+# removed. The rule guarded against `len(optSchedule[K]) != len(id_map[K])`
+# drift, which would have caused the (now-empty) TIMELINE_RULES path to
+# silently truncate instructions via `min(len_a, len_b)`. The drift modes
+# the rule guarded are now caught upstream and downstream of `isValid()`:
 #   * `optSchedule[K]` references too-large index → `IndexError` at
 #     `CustomSchedule.scheduleInst()` (CustomSchedule.py:410) with a
 #     clear "stream X[i] references instruction index N but only M
@@ -1486,52 +1481,49 @@ ValidatorPassContext = ValidationContext
 #     instructions emitted into the CMS macro → `compare_graphs` Phase 0
 #     in `KernelWriter.py:5225` raises `CaptureConsistencyError` on the
 #     resulting data-flow node identity mismatch between default and CMS.
-# See `Tensile/Tests/unit/test_ValidateInstructionCount.py` (deleted in
-# the same bead) for the full coverage matrix the old rule pinned.
 
 
-# `LRDataReadyRule` was deleted in bead `ola.3` phase-2. The
-# LR-data-ready concern (LR -> MFMA dscnt drain) is enforced graph-side
-# by `validate_edge_wait_coverage` over LR -> MFMA RAW edges. The
-# `ValidationConcern.LR_DATA_READY` enum value is preserved for
-# downstream compatibility but no rule currently dispatches on it.
+# `LRDataReadyRule` was removed. The LR-data-ready concern (LR -> MFMA
+# dscnt drain) is enforced graph-side by `validate_edge_wait_coverage`
+# over LR -> MFMA RAW edges. The `ValidationConcern.LR_DATA_READY` enum
+# value is preserved for downstream compatibility but no rule currently
+# dispatches on it.
 
 
 
 
 # `GRAfterLRRule` and its underlying `add_gr_not_too_early_constraints`
-# were deleted in bead `ola.2` phase 2. The rule's two invariants
-# (LR0 -> SWait -> SBarrier -> GR LDS-reuse coverage AND last GRInc<X>
-# before first GR<X> SRD ordering) are now both enforced graph-side; see
-# the comment block above `add_gr_not_too_early_constraints`'s former
-# location and the migrated tests at
-# Tensile/Tests/unit/test_validate_gr_not_too_early_graph.py and
+# were removed. The rule's two invariants (LR0 -> SWait -> SBarrier -> GR
+# LDS-reuse coverage AND last GRInc<X> before first GR<X> SRD ordering)
+# are now both enforced graph-side; see the comment block above
+# `add_gr_not_too_early_constraints`'s former location and the migrated
+# tests at Tensile/Tests/unit/test_validate_gr_not_too_early_graph.py and
 # Tensile/Tests/unit/test_GRMustStartAfterGRInc.py.
 
 
-# `GRBeforeLRRule` and its underlying `add_gr_finish_before_lr_constraints` /
-# `set_gr_needed_by_from_lrs` were removed in bead `ola.1`. The rule's
-# semantics (GR -> SWait(vlcnt) -> SBarrier -> LR1/3 LDS-reuse coverage)
-# are now enforced graph-side by `_collect_barrier_edges` (edge_kind
+# `GRBeforeLRRule` and its underlying `add_gr_finish_before_lr_constraints`
+# / `set_gr_needed_by_from_lrs` were removed. The rule's semantics
+# (GR -> SWait(vlcnt) -> SBarrier -> LR1/3 LDS-reuse coverage) are now
+# enforced graph-side by `_collect_barrier_edges` (edge_kind
 # `gr_to_lr_lds_reuse`) + `validate_edge_wait_coverage` /
-# `diagnose_missing_edge` in ScheduleCapture.py. See test_ValidateGRsComplete
-# BeforeLr1s.py / Lr3s.py / test_ValidateNglAndNll.py for the migrated
-# coverage.
+# `diagnose_missing_edge` in ScheduleCapture.py. See
+# test_ValidateGRsCompleteBeforeLr1s.py / Lr3s.py /
+# test_ValidateNglAndNll.py for the migrated coverage.
 
 
 TIMELINE_RULES: list[ValidationRule] = [
-    # `LRDataReadyRule()` removed in bead `ola.3` phase-2 — see comment above.
-    # `PackDataReadyRule()` removed in bead `ola.4` phase-2; the Pack ordering
-    # invariants moved graph-side. The list is now empty; isValid still
-    # iterates it as a no-op so the dispatch contract stays stable.
-    # `GRAfterLRRule()` deleted in bead `ola.2` phase 2 — see comment block above.
+    # `LRDataReadyRule()` and `PackDataReadyRule()` were removed; the Pack
+    # and LR ordering invariants moved graph-side. The list is now empty;
+    # isValid still iterates it as a no-op so the dispatch contract stays
+    # stable.
+    # `GRAfterLRRule()` removed — see comment block above.
 ]
 
 STRUCTURAL_RULES: list[StructuralRule] = [
-    # `InstructionCountRule()` deleted in bead `4tw` — see comment block
-    # above the former `verify_correct_number_of_instructions` location.
-    # The list is now empty; isValid still iterates it as a no-op so the
-    # dispatch contract stays stable.
+    # `InstructionCountRule()` was removed — see comment block above the
+    # former `verify_correct_number_of_instructions` location. The list is
+    # now empty; isValid still iterates it as a no-op so the dispatch
+    # contract stays stable.
 ]
 
 

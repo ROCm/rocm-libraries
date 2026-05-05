@@ -293,7 +293,7 @@ class FourPartCapture:
     tail loops in _emitNoLoadLoopBodyCMSMacro (intentional — code-paths
     differ only in main-loop scheduling order, all SIMDs converge to
     identical architectural state at the loop boundary; see that method's
-    docstring and bead rocm-libraries-9sh).
+    docstring for the audit trail).
 
     num_mfma is a kernel-level invariant (all four bodies share the same MFMA
     sequence; only non-MFMA categories are stripped/added between them) and is
@@ -387,16 +387,16 @@ class GraphNode:
     position lives in graph-builder space (loop_index spans bodies); the
     underlying TaggedInstruction.slot is preserved on tagged_inst.
 
-    issue_cycles is the per-instruction quad-cycle issue cost (bead `nk0`):
-    mirrors `ValidatorInstruction.min_issue_quad_cycles()` (CMSValidator.py:327
-    + 645). Default 1; SNop-shaped instructions return `1 + wait_state`.
+    issue_cycles is the per-instruction quad-cycle issue cost: mirrors
+    `ValidatorInstruction.min_issue_quad_cycles()` (CMSValidator.py:327 +
+    645). Default 1; SNop-shaped instructions return `1 + wait_state`.
     Populated by `_make_node` from a class-dispatch table so the graph-side
     `cumulative_issue_cycles` helper can simulate per-instruction issue costs
     cycle-exactly without re-importing CMSValidator (which would create an
-    import cycle — CMSValidator imports from this module). After bead `8nz`
-    the structural-side simulators (`precompute_issue_times`,
-    `estimate_quad_cycles_precomputed`, `estimate_quad_cycles`) are deleted
-    and `cumulative_issue_cycles` is the single source of truth.
+    import cycle — CMSValidator imports from this module). The structural-side
+    simulators (`precompute_issue_times`, `estimate_quad_cycles_precomputed`,
+    `estimate_quad_cycles`) have been removed; `cumulative_issue_cycles` is
+    the single source of truth.
     """
     identity: tuple                     # (rocisa_class_name, loop_index, signature_tuple)
     position: SchedulePosition
@@ -405,7 +405,7 @@ class GraphNode:
     tagged_inst: TaggedInstruction      # back-reference for stream-position lookup
     body_label: str                     # 'ML-1' | 'ML' | 'NGL' | 'NLL'
     name: str = ""                      # human-readable label (e.g. 'LRA0[2]')
-    issue_cycles: int = 1               # bead `nk0`: per-instruction quad-cycle cost
+    issue_cycles: int = 1               # per-instruction quad-cycle cost
 
 
 @dataclass
@@ -1341,12 +1341,12 @@ _SNOP_CLASS_NAMES = {
     "SNop",
 }
 # CVT-pack rocisa classes (TF32 emulation: v_cvt_pk_bf16_f32 and friends).
-# Used by `_is_cvt_pack` (Sub-B of bead `35z`) to identify CVTPack producers
-# whose results feed downstream MFMAs and need the 2-quad-cycle settle window
-# (`_QUAD_CYCLES_CVT_BEFORE_MFMA` in this file). Mirrors the
-# class-name-set lookup pattern used for MFMA / LR / LW / GR; the production
-# rocisa class is `VCvtPkF32toBF16` (CMSValidator.py:676 PACK_TYPE_MAP entry
-# binds it to the `CVTPack` validator dataclass). Test fixtures use plain
+# Used by `_is_cvt_pack` to identify CVTPack producers whose results feed
+# downstream MFMAs and need the 2-quad-cycle settle window
+# (`_QUAD_CYCLES_CVT_BEFORE_MFMA` in this file). Mirrors the class-name-set
+# lookup pattern used for MFMA / LR / LW / GR; the production rocisa class
+# is `VCvtPkF32toBF16` (CMSValidator.py:676 PACK_TYPE_MAP entry binds it to
+# the `CVTPack` validator dataclass). Test fixtures use plain
 # `_FakeCVTPack` if and when they need to exercise this branch with a
 # non-rocisa stub; today the production class is the only entry.
 _CVT_PACK_CLASS_NAMES = {
@@ -1356,14 +1356,14 @@ _CVT_PACK_CLASS_NAMES = {
 # MiddlePack rocisa classes (TF32 emulation: the 16 instructions in the middle
 # of each 24-pack group that compute the bf16 error terms via paired
 # v_cvt_f32_bf16 + v_sub_f32 instructions). Used by `_is_middle_pack` and
-# `validate_middle_pack_pair_interleaving` (bead `dpi`) to identify the
-# pair-leader / pair-consumer relationships independently of the structural
-# `MiddlePack` validator-dataclass binding (CMSValidator.py:627-630
-# PACK_TYPE_MAP entries). The pairing semantics: middle-16 packs in each
-# category (e.g. PackA0) are paired adjacently in stream order — pair (0,1),
-# pair (2,3), etc. — and each pair's two halves share a temporary VGPR, so no
-# OTHER middle-16 pack (from any category, even another one in this category)
-# may appear between them in the global stream.
+# `validate_middle_pack_pair_interleaving` to identify the pair-leader /
+# pair-consumer relationships independently of the structural `MiddlePack`
+# validator-dataclass binding (CMSValidator.py:627-630 PACK_TYPE_MAP entries).
+# The pairing semantics: middle-16 packs in each category (e.g. PackA0) are
+# paired adjacently in stream order — pair (0,1), pair (2,3), etc. — and each
+# pair's two halves share a temporary VGPR, so no OTHER middle-16 pack (from
+# any category, even another one in this category) may appear between them in
+# the global stream.
 _MIDDLE_PACK_CLASS_NAMES = {
     "PVCvtBF16toFP32",
     "VCvtBF16toFP32",
@@ -1396,12 +1396,12 @@ def _is_middle_pack(inst):
     bf16 error terms. Per CMSValidator.py PACK_TYPE_MAP, all of them bind
     to the `MiddlePack` validator dataclass which carries the pair-consumer
     interleaving invariant. The graph-side classifier in
-    `validate_middle_pack_pair_interleaving` (bead `dpi`) uses this
-    discriminator to identify pair leaders / consumers from the GraphNode
-    stream without re-importing the validator dataclass (which would create
-    an import cycle). Test fixtures may use any of the four production
-    rocisa classes, or a stub class whose `type(...).__name__` matches one
-    of the names in `_MIDDLE_PACK_CLASS_NAMES`.
+    `validate_middle_pack_pair_interleaving` uses this discriminator to
+    identify pair leaders / consumers from the GraphNode stream without
+    re-importing the validator dataclass (which would create an import
+    cycle). Test fixtures may use any of the four production rocisa
+    classes, or a stub class whose `type(...).__name__` matches one of
+    the names in `_MIDDLE_PACK_CLASS_NAMES`.
     """
     return type(inst).__name__ in _MIDDLE_PACK_CLASS_NAMES
 
@@ -1414,8 +1414,8 @@ def _is_cvt_pack(inst):
     an instruction writes a vgpr that a downstream MFMA reads, the CDNA 4
     ISA (section 7.6) requires 2 quad-cycles between them
     (`_QUAD_CYCLES_CVT_BEFORE_MFMA` in this file). The graph-side
-    enforcement of this rule (Sub-B of bead `35z`) routes CVTPack producers
-    through `_cvt_to_mfma_gap_ok` instead of the ALU-immediate exemption.
+    enforcement of this rule routes CVTPack producers through
+    `_cvt_to_mfma_gap_ok` instead of the ALU-immediate exemption.
     """
     return type(inst).__name__ in _CVT_PACK_CLASS_NAMES
 
@@ -1864,11 +1864,11 @@ def _is_vcc(x) -> bool:
     """True if x is a rocisa VCC sentinel (the carry-out / carry-in / cmp-out
     operand class).
 
-    VCC instances have no regType/regIdx (verified empirically in bead wx9.9
-    inspection — only `__class__` distinguishes them), so `_is_register`
-    rejects them. The dedicated `_VCCRule` recognizes them via this helper
-    and substitutes the synthetic `_VCC_RESOURCE` singleton so per-byte
-    tracking can flow through the standard resolver.
+    VCC instances have no regType/regIdx (only `__class__` distinguishes
+    them), so `_is_register` rejects them. The dedicated `_VCCRule`
+    recognizes them via this helper and substitutes the synthetic
+    `_VCC_RESOURCE` singleton so per-byte tracking can flow through the
+    standard resolver.
     """
     return type(x).__name__ == "VCC"
 
@@ -2022,8 +2022,6 @@ class _VSwapRule:
 
     Order: MUST come before `_GenericALURule` so VSwap is claimed by this
     rule and not the asymmetric fallback.
-
-    Bead: rocm-libraries-wx9.8.
     """
     def applies(self, inst, category=None):
         # Match rocisa VSwapB32 today and any future v_swap_* width
@@ -2071,18 +2069,18 @@ class _VCCRule:
     slot 0 is a read) and drops the VCC carry-in read at slot 4. This rule
     claims VCC-bearing instructions and emits the correct shape.
 
-    Coverage (bead wx9.9):
+    Coverage:
       - VAddCOU32 / VAddCCOU32 — 64-bit add carry chain (globalReadIncrement
         non-buffer path, KernelWriterAssembly.py:9120-9146)
       - VSubCoU32 — 64-bit sub borrow chain
       - VCmpEQU32 and other VCmp* — VCC-as-comparison-output
       - SOrSaveExecBX with dst=VCC() — VCC-as-saved-EXEC
 
-    NOT addressed here (out of bead scope):
+    NOT addressed here:
       - sgpr-pair-as-VCC: real CMS sometimes uses an sgpr pair as the
         carry destination (e.g. `dst1=sgpr("VCC", 2)`) instead of the
-        VCC sentinel. Those flow through `_GenericALURule` already; the
-        wx9.9 fix only addresses the VCC-sentinel form.
+        VCC sentinel. Those flow through `_GenericALURule` already; this
+        rule only addresses the VCC-sentinel form.
     """
     def applies(self, inst, category=None):
         if not hasattr(inst, "getParams"):
@@ -2124,7 +2122,7 @@ class _VCCRule:
 
 
 # =============================================================================
-# SCC sentinel resource (bead mrj.1)
+# SCC sentinel resource
 # =============================================================================
 # SCC is a single-bit hardware status register, written implicitly by most
 # scalar ALU and compare ops and read by SCSelect/SCMov/SCBranchSCC*. To
@@ -2171,8 +2169,8 @@ def _get_scc_sentinel():
 #
 # Hand-curated from KernelWriterAssembly.py emissions and the rocisa
 # rocisa/include/instruction/{cmp,common,branch}.hpp class definitions.
-# The companion epic doc (`br show rocm-libraries-mrj`) traces these
-# back to the gfxIsa.inc IF_ImplicitReadSCC/IF_ImplicitWriteSCC flags.
+# Each entry traces back to the gfxIsa.inc IF_ImplicitReadSCC /
+# IF_ImplicitWriteSCC flags.
 #
 # Three shape categories:
 #   - "no_dst": SCmp* / SCBranchSCC* — no sgpr dst, all register params
@@ -2207,7 +2205,7 @@ _SCC_OPCODE_FLAGS = {
     # captured CMS body (KernelWriterAssembly.py:8813 in openSumAtLeastUnroll;
     # 16979/17009/17061 in TDM setup), but claimed here for defense-in-depth
     # so a future move into the captured region cannot silently corrupt the
-    # graph. Audit trail: bead rocm-libraries-ckj.
+    # graph.
     "SBitcmp1B32": ("no_dst",        False, True),
     # SOP2 with sgpr dst, implicit write SCC.
     "SAddU32":             ("dst_then_srcs", False, True),
@@ -2246,7 +2244,7 @@ _SCC_OPCODE_FLAGS = {
 
 
 class _SCCRule:
-    """Per-opcode SCC read/write publisher (bead mrj.1).
+    """Per-opcode SCC read/write publisher.
 
     Placed BEFORE `_GenericALURule` in `_OPERAND_RULES`: claims every
     SCC-touching scalar opcode (per `_SCC_OPCODE_FLAGS`) and emits its
@@ -2270,11 +2268,8 @@ class _SCCRule:
     (Phase 2 of build_dataflow_graph) then naturally emits SCC RAW edges
     between producers and consumers, and an intervening SCC clobber
     becomes the new latest writer that breaks the producer's edge to the
-    later consumer.
-
-    This sub-task (mrj.1) ONLY publishes the edges. Failure-shape
-    wiring (turning the missing SCC edge into a typed Failure via
-    `diagnose_missing_edge`) is sub-task mrj.2.
+    later consumer. Failure-shape wiring (turning the missing SCC edge
+    into a typed Failure) lives in `diagnose_missing_edge`.
     """
 
     def applies(self, inst, category=None):
@@ -2337,23 +2332,22 @@ class _GenericALURule:
     eliminates that, so the rule is now safe to publish reads/writes for
     every Pack-shaped instruction.
 
-    Scalar-ALU coverage (bead wx9.10): SCSelectB32, SAddU32, SAddCU32,
-    SSubU32, SSubBU32, SCmpEQU32 and similar SOP1/SOP2 instructions land
-    here. Their sgpr dst (params[0]) and sgpr srcs are tracked, so a
-    reversed GRInc-style chain forms RAW edges that `compare_graphs`
-    flips into `OrderInvertedFailure`. This is what allowed
-    `verify_ascending_order` (CMSValidator.py) to be retired in bead
-    wx9.11. Coverage proven by
+    Scalar-ALU coverage: SCSelectB32, SAddU32, SAddCU32, SSubU32,
+    SSubBU32, SCmpEQU32 and similar SOP1/SOP2 instructions land here.
+    Their sgpr dst (params[0]) and sgpr srcs are tracked, so a reversed
+    GRInc-style chain forms RAW edges that `compare_graphs` flips into
+    `OrderInvertedFailure`. This is what allowed `verify_ascending_order`
+    (CMSValidator.py) to be retired. Coverage proven by
     `test_dataflow_graph_comparison.py::TestGRIncReorderDetection` and
     `::TestVgprChainReorderDetection`.
 
-    NOT covered here (deliberate scope cut, see downstream beads):
-      - VCC carry-out / carry-in (regType=None) — handled by `_VCCRule`
-        (bead wx9.9), which precedes this rule in `_OPERAND_RULES`.
+    NOT covered here (deliberate scope cut):
+      - VCC carry-out / carry-in (regType=None) — handled by `_VCCRule`,
+        which precedes this rule in `_OPERAND_RULES`.
       - VSwap symmetric R+W (both operands read AND written) — handled by
-        `_VSwapRule` (bead wx9.8), which precedes this rule.
+        `_VSwapRule`, which precedes this rule.
 
-    Cleaned up by `_SCCRule` (mrj.1), which also precedes this rule:
+    Cleaned up by `_SCCRule`, which also precedes this rule:
       - SCC implicit read/write for SOPC/SOP1/SOP2/SOPK/branch ops. The
         SCC sentinel resource is published in reads/writes per opcode.
       - SCmp* false-write quirk: SCmp* has no sgpr dst (`dst=nullptr` in
@@ -2361,11 +2355,11 @@ class _GenericALURule:
         `[src0, src1]`, so the generic rule would misclassify `src0` as a
         write at params[0]. `_SCCRule` claims SCmp* opcodes BEFORE the
         generic rule and treats every register-shaped param as a read.
-      - SBitcmp1B32 (bead ckj): same `dst=nullptr` shape; claimed by
-        `_SCCRule` with shape="no_dst" so `params[0]=ssrc0` is correctly
-        treated as a read. Currently dormant in CMS captures (emitted in
-        TDM setup + openSumAtLeastUnroll, both outside the captured body)
-        but claimed for defense-in-depth.
+      - SBitcmp1B32: same `dst=nullptr` shape; claimed by `_SCCRule` with
+        shape="no_dst" so `params[0]=ssrc0` is correctly treated as a
+        read. Currently dormant in CMS captures (emitted in TDM setup +
+        openSumAtLeastUnroll, both outside the captured body) but claimed
+        for defense-in-depth.
 
     DANGER ZONE for new rocisa classes (audit checklist for future PRs):
       Any new CommonInstruction subclass whose constructor passes
@@ -2379,9 +2373,7 @@ class _GenericALURule:
       Mitigation: add the class to `_SCC_OPCODE_FLAGS` with shape="no_dst"
       and the appropriate `(reads_scc, writes_scc)` flags. The SCmp*,
       SCmpK*, SCBranchSCC*, and SBitcmp1B32 entries are the existing
-      precedents. Audit was bead rocm-libraries-ckj — see commit msg for
-      the full grep methodology and the `dst=nullptr` survey of
-      `rocisa/rocisa/include/instruction/`.
+      precedents.
     """
     def applies(self, inst, category=None):
         # Only real rocisa CommonInstruction-shaped objects expose
@@ -2405,7 +2397,7 @@ class _GenericALURule:
 
 # Order matters: more specific rules first; _GenericALURule is the
 # catch-all and MUST come last so earlier rules claim their classes.
-# `_SCCRule` (mrj.1) sits BEFORE `_GenericALURule` so it claims SCC-touching
+# `_SCCRule` sits BEFORE `_GenericALURule` so it claims SCC-touching
 # scalar opcodes and attaches the SCC sentinel to their reads/writes — also
 # fixes the SCmp* false-write quirk noted in `_GenericALURule`'s docstring.
 _OPERAND_RULES = (
@@ -2415,9 +2407,9 @@ _OPERAND_RULES = (
     _BufferLoadRule(),
     _MFMARule(),
     _NoDataflowRule(),
-    _VSwapRule(),       # bead wx9.8 — symmetric R+W on the two operands
-    _VCCRule(),         # bead wx9.9 — claims VCC-bearing classes before generic
-    _SCCRule(),         # bead mrj.1 — claims SCC-touching scalar opcodes
+    _VSwapRule(),       # symmetric R+W on the two operands
+    _VCCRule(),         # claims VCC-bearing classes before generic
+    _SCCRule(),         # claims SCC-touching scalar opcodes
     _GenericALURule(),
 )
 
@@ -2523,13 +2515,13 @@ def _ensure_numeric_factories():
         "acc": accvgpr,
         # mgpr's count is fixed at 1 in practice (m0). Wrap for uniform call shape.
         "m": lambda idx, count=1: mgpr(idx),
-        # VCC factory (bead wx9.9): synthetic RegisterContainer for the VCC
-        # 64-bit register pair. The _VCCRule emits resources of regType="vcc"
-        # so the byte-key resolver and _reg_intersection can both handle them.
+        # VCC factory: synthetic RegisterContainer for the VCC 64-bit
+        # register pair. The _VCCRule emits resources of regType="vcc" so
+        # the byte-key resolver and _reg_intersection can both handle them.
         "vcc": lambda idx, count=1: RegisterContainer("vcc", RegName("vcc", []), idx, count),
-        # SCC sentinel (bead mrj.1): single-bit hardware status register,
-        # modeled as a singleton RegisterContainer with regType="scc". The
-        # factory always returns the singleton so equality/hashing across
+        # SCC sentinel: single-bit hardware status register, modeled as a
+        # singleton RegisterContainer with regType="scc". The factory
+        # always returns the singleton so equality/hashing across
         # producer-write and consumer-read containers stays stable.
         "scc": lambda idx, count=1: _get_scc_sentinel(),
     }
@@ -2640,7 +2632,7 @@ def _intersection(a, b):
 
 
 def _min_issue_quad_cycles_for(rocisa_inst) -> int:
-    """Return the per-instruction quad-cycle issue cost (bead `nk0`).
+    """Return the per-instruction quad-cycle issue cost.
 
     Mirrors `ValidatorInstruction.min_issue_quad_cycles()` from CMSValidator.py:
         - Default `min_issue_quad_cycles_base = 1` (CMSValidator.py:298, 327-328).
@@ -2650,8 +2642,8 @@ def _min_issue_quad_cycles_for(rocisa_inst) -> int:
     Why duplicated here. CMSValidator imports from ScheduleCapture for typed
     Failure formatters (search 'from Tensile.Components.ScheduleCapture' in
     CMSValidator.py); importing CMSValidator from here would close the cycle.
-    Post-`8nz` this helper is the canonical per-instruction cost table — the
-    structural-side simulators are deleted.
+    With the structural-side simulators removed, this helper is the
+    canonical per-instruction cost table.
     """
     if rocisa_inst is None:
         return 1
@@ -2704,12 +2696,11 @@ def build_dataflow_graph(four_part_capture):
     Phase 1 — node construction. Walks bodies in execution order
     (ML-1 -> ML -> NGL -> NLL). Every captured instruction becomes a
     node EXCEPT SWait/SBarrier/SNop (scheduler-choice; sidecar only).
-    LCC instructions (SSubU32 + SCmpEQI32, per LCC_AUDIT.md from
-    bead 2bu.1) ARE nodes — their per-instruction issue cycles
-    contribute to `cumulative_issue_cycles` walks. Cross-body cycle
-    counting (sibling beads 2bu.3/4/5) depends on this.
-    Per-body sidecar `_graph_nodes` is attached so wait/barrier
-    helpers can find sync ops in stream order.
+    LCC instructions (SSubU32 + SCmpEQI32, per LCC_AUDIT.md) ARE
+    nodes — their per-instruction issue cycles contribute to
+    `cumulative_issue_cycles` walks; cross-body cycle counting depends
+    on this. Per-body sidecar `_graph_nodes` is attached so
+    wait/barrier helpers can find sync ops in stream order.
 
     Phase 2 — edge formation by RESOURCE RESOLUTION. For each consumer's
     read resource R, walk producers in stream-position order
@@ -2793,7 +2784,7 @@ def build_dataflow_graph(four_part_capture):
             # LCC instructions (SSubU32 + SCmpEQI32) ARE included — their
             # per-instruction issue cycles contribute to
             # `cumulative_issue_cycles` walks; cross-body cycle counting
-            # (sibling beads 2bu.3/4/5) depends on it.
+            # depends on it.
             if not (_is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst)):
                 nodes_by_identity[node.identity] = node
 
@@ -2868,9 +2859,9 @@ def build_dataflow_graph(four_part_capture):
     # SBarrier-edge collectors (cross-wave LDS-reuse)
     # =========================================================================
     # Two patterns mirror the legacy CMSValidator structural rules
-    # `apply_must_start_after_barriers` and `apply_barriers` (the former was
-    # deleted in bead `ola.2` phase 2; this collector is now the sole source
-    # of LR0 -> GR LDS-reuse coverage):
+    # `apply_must_start_after_barriers` and `apply_barriers` (both removed;
+    # this collector is now the sole source of LR0 -> GR LDS-reuse
+    # coverage):
     #
     #   lr_to_gr_lds_reuse  (must_start_after):
     #     Producer LR0/LR1 -> SWaitCnt(dscnt drain) -> SBarrier -> Consumer GR
@@ -3035,7 +3026,7 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
 #                                 (carries `nearby_other_counter_waits` when
 #                                 wrong-counter SWaits sit in the window;
 #                                 the former WaitOnWrongCounterFailure was
-#                                 collapsed into this type by bead `hof`)
+#                                 collapsed into this type — see bead `hof`)
 #   WaitInsufficientFailure    — SWait counter value too lax
 #   MissingBarrierFailure      — wait covers but no barrier in window (LDS-reuse only)
 #
@@ -3204,14 +3195,13 @@ def diagnose_missing_edge(
         # judged against an artifactual default ordering. Falls through to
         # Phase 2 wait coverage if applicable.
 
-    # SCC-typed missing edge (bead mrj.2): if the reference edge's resource
-    # is the SCC sentinel and Phase-1's order check passed, the most likely
-    # cause is a CLOBBER — an unrelated SCC writer issued between the
-    # producer and consumer in the subject schedule, displacing the
-    # producer's SCC value. Find that intervening writer in the subject
-    # graph (the new SCC producer the consumer pairs with) and emit a
-    # typed SCCConflictFailure carrying the producer/consumer/clobber
-    # triple.
+    # SCC-typed missing edge: if the reference edge's resource is the SCC
+    # sentinel and Phase-1's order check passed, the most likely cause is
+    # a CLOBBER — an unrelated SCC writer issued between the producer and
+    # consumer in the subject schedule, displacing the producer's SCC
+    # value. Find that intervening writer in the subject graph (the new
+    # SCC producer the consumer pairs with) and emit a typed
+    # SCCConflictFailure carrying the producer/consumer/clobber triple.
     #
     # If no intervening SCC writer exists in the subject graph (e.g. the
     # consumer simply lost its SCC edge to the producer for an unrelated
@@ -3248,16 +3238,14 @@ def diagnose_missing_edge(
 
     # 4x4 PackMFMA-as-producer feeding CVTPack-as-consumer: 5-quad-cycle
     # settle window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`).
-    # Sub-C of bead `or9` migrated this to the graph side. Must run BEFORE
-    # the generic `_is_mfma_producer` branch below: `_is_mfma_producer`
-    # claims PackMFMA producers (post-`e7w`) and would otherwise route
-    # this pair through `_quad_cycle_gap_ok`, which uses
+    # Must run BEFORE the generic `_is_mfma_producer` branch below:
+    # `_is_mfma_producer` claims PackMFMA producers and would otherwise
+    # route this pair through `_quad_cycle_gap_ok`, which uses
     # `_mfma_finish_cycles_for(producer) == 1` for 4x4 PackMFMAs — too
     # weak by 4 quad-cycles versus the 5-cycle CVT1 visibility window.
-    # Bead `8nz` deleted the structural-side mirror
-    # (`_handle_min_pack_quad_cycles` /
-    # `MFMAPack.min_quad_cycles_before_result_used`); this dispatch is
-    # now the only enforcement path.
+    # The structural-side mirror (`_handle_min_pack_quad_cycles` /
+    # `MFMAPack.min_quad_cycles_before_result_used`) was removed; this
+    # dispatch is now the only enforcement path.
     if (_is_mfma_pack_producer(p_node)
             and _is_cvt_pack_producer(c_node)):
         ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
@@ -3272,13 +3260,12 @@ def diagnose_missing_edge(
         return []
 
     # MFMA-as-producer: governed by quad-cycle issue-timing constraints,
-    # not by the dscnt/vlcnt FIFO. Sub-C (wx9.4.3) replaces the prior
-    # blanket exemption with an explicit gap check; an MFMA producer whose
-    # consumer fires too soon after it is a TimingTooClose violation. Sub-A
-    # of bead `e7w` widens the dispatch from `category == "MFMA"` to
-    # `_is_mfma_producer` so 4x4 PackMFMAs (categorized Pack* but
-    # syntactically MFMAInstruction) are routed here BEFORE the ALU
-    # exemption claims them.
+    # not by the dscnt/vlcnt FIFO. An explicit gap check fires; an MFMA
+    # producer whose consumer fires too soon after it is a TimingTooClose
+    # violation. Dispatch is via `_is_mfma_producer` (rather than `category
+    # == "MFMA"`) so 4x4 PackMFMAs (categorized Pack* but syntactically
+    # MFMAInstruction) are routed here BEFORE the ALU exemption claims
+    # them.
     if _is_mfma_producer(p_node):
         nmps = subj_graph.num_mfma_per_subiter
         ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
@@ -3292,13 +3279,12 @@ def diagnose_missing_edge(
         return []
 
     # CVTPack-as-producer feeding MFMA-as-consumer: 2-quad-cycle settle
-    # window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_CVT_BEFORE_MFMA`). Sub-B of
-    # bead `35z` migrated this to the graph side; bead `8nz` deleted the
-    # structural-side mirror so this dispatch is now the only enforcement
-    # path. Must precede the ALU-immediate exemption below (same
-    # dispatch-order constraint as the MFMA branch above) so CVTPacks
-    # don't get silently waved through. Non-MFMA consumers fall through
-    # to the ALU exemption — only the CVT->MFMA edge carries the
+    # window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_CVT_BEFORE_MFMA`). The
+    # structural-side mirror was removed; this dispatch is now the only
+    # enforcement path. Must precede the ALU-immediate exemption below
+    # (same dispatch-order constraint as the MFMA branch above) so
+    # CVTPacks don't get silently waved through. Non-MFMA consumers fall
+    # through to the ALU exemption — only the CVT->MFMA edge carries the
     # quad-cycle constraint.
     if _is_cvt_pack_producer(p_node) and _is_mfma_producer(c_node):
         ok, expected, actual = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
@@ -3507,18 +3493,17 @@ def _any_drains(waits: List[GraphNode], producer: GraphNode, subj_graph: Dataflo
     return any(_wait_drains_producer(w, producer, subj_graph) for w in waits)
 
 
-# --- Quad-cycle constants (single source of truth, post-`8nz`) ---------------
-# CDNA 4 ISA section 7.6. These constants used to be mirrored from
-# CMSValidator.py; bead `8nz` deleted the structural-side `QUAD_CYCLES_*` /
-# `MFMA_TYPE_SWITCH_THRESHOLD_*` constants together with the simulator that
-# consumed them (`estimate_quad_cycles`). The values below are now the only
-# place these magic numbers live in the code base.
+# --- Quad-cycle constants (single source of truth) ---------------------------
+# CDNA 4 ISA section 7.6. The structural-side `QUAD_CYCLES_*` /
+# `MFMA_TYPE_SWITCH_THRESHOLD_*` constants and the `estimate_quad_cycles`
+# simulator that consumed them have been removed. The values below are now
+# the only place these magic numbers live in the code base.
 _QUAD_CYCLES_STANDARD_MFMA_FINISH = 3   # Standard MFMA: 3 quad-cycles to finish.
 _QUAD_CYCLES_MFMA_4X4_FINISH = 1        # 4x4 (Pack-flavored) MFMA: 1 quad-cycle.
 _QUAD_CYCLES_CVT_BEFORE_MFMA = 2        # CVT pack -> MFMA settle window.
 _QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = 5   # 4x4 PackMFMA -> CVT1 settle window.
 
-# --- MFMA Type-Switch Thresholds (single source of truth, post-`8nz`) --------
+# --- MFMA Type-Switch Thresholds (single source of truth) --------------------
 # When `cumulative_issue_cycles` observes consecutive MFMAs of DIFFERENT
 # classes whose issue gap is below the producer's threshold, it injects a +1
 # quad-cycle stall — the consumer is forced to issue one cycle later. The
@@ -3544,9 +3529,9 @@ def _mfma_finish_cycles_for(rocisa_inst) -> int:
     model PackMFMAs). The attribute path is checked first so fixtures don't
     have to roundtrip through `str()`.
 
-    Single source of truth for per-MFMA finish cycles (post-`8nz`): the
-    structural-side `MFMA.mfma_finish_cycles` / `MFMAPack.mfma_finish_cycles`
-    ClassVars were deleted along with the simulator that consumed them.
+    Single source of truth for per-MFMA finish cycles: the structural-side
+    `MFMA.mfma_finish_cycles` / `MFMAPack.mfma_finish_cycles` ClassVars
+    have been removed along with the simulator that consumed them.
     Returns the standard value when the instance lacks both signals
     (defensive fallback).
     """
@@ -3583,9 +3568,9 @@ def _is_mfma_pack_producer(producer: GraphNode) -> bool:
     `category.startswith("Pack")` AND `rocisa_inst` is an MFMA-shaped class.
 
     Used by `_is_mfma_producer` so PackMFMAs route to the quad-cycle gap
-    branch rather than the ALU-immediate-visibility branch — without this,
-    the original pre-e7w bug let PackMFMA producers skip timing checks
-    entirely (the ALU-producer exemption fired first).
+    branch rather than the ALU-immediate-visibility branch — without this
+    discriminator the ALU-producer exemption would fire first and PackMFMA
+    producers would skip timing checks entirely.
     """
     if not getattr(producer, "category", "").startswith("Pack"):
         return False
@@ -3602,9 +3587,9 @@ def _is_mfma_producer(producer: GraphNode) -> bool:
       - `category == "MFMA"` — the standard MFMA path (everything but the
         TF32 4x4 emulation pack chain).
       - PackMFMA — `category.startswith("Pack")` with an MFMA-shaped rocisa
-        instance. Sub-A of bead `e7w` added this branch so the dispatch in
-        `_classify_edge_coverage` and `diagnose_missing_edge` claims pack-
-        MFMA producers BEFORE the ALU-producer exemption fires.
+        instance. The dispatch in `_classify_edge_coverage` and
+        `diagnose_missing_edge` claims pack-MFMA producers BEFORE the
+        ALU-producer exemption fires.
     """
     if getattr(producer, "category", None) == "MFMA":
         return True
@@ -3618,15 +3603,17 @@ def _is_cvt_pack_producer(producer: GraphNode) -> bool:
     PackB3 depending on the surrounding LR group); discrimination here is
     `category.startswith("Pack")` AND `rocisa_inst` is the
     `VCvtPkF32toBF16` rocisa class. Used by `_classify_edge_coverage` and
-    `diagnose_missing_edge` (Sub-B of bead `35z`) so CVTPack-feeding-MFMA
-    edges are routed to `_cvt_to_mfma_gap_ok` BEFORE the ALU-immediate
-    exemption claims them — same shape as the e7w PackMFMA carve-out, but
-    with the CVT class set in place of the MFMA class set.
+    `diagnose_missing_edge` so CVTPack-feeding-MFMA edges are routed to
+    `_cvt_to_mfma_gap_ok` BEFORE the ALU-immediate exemption claims them
+    — same shape as the PackMFMA carve-out, but with the CVT class set
+    in place of the MFMA class set.
 
-    Bead `8nz` deleted the structural-side mirror (`_handle_min_pack_quad_cycles`,
-    `Pack.min_quad_cycles_before_result_used`, `Pack.estimated_quad_cycles_before_result_used`,
-    `estimate_quad_cycles`); the graph-side dispatch in `_classify_edge_coverage`
-    is now the only enforcement path for the CVT -> MFMA settle window.
+    The structural-side mirror (`_handle_min_pack_quad_cycles`,
+    `Pack.min_quad_cycles_before_result_used`,
+    `Pack.estimated_quad_cycles_before_result_used`, `estimate_quad_cycles`)
+    has been removed; the graph-side dispatch in
+    `_classify_edge_coverage` is now the only enforcement path for the
+    CVT -> MFMA settle window.
     """
     if not getattr(producer, "category", "").startswith("Pack"):
         return False
@@ -3636,13 +3623,13 @@ def _is_cvt_pack_producer(producer: GraphNode) -> bool:
     return _is_cvt_pack(inst)
 def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer: GraphNode) -> int:
     """Return the exact number of quad-cycles between producer's issue
-    completion and consumer's issue start (bead `nk0`).
+    completion and consumer's issue start.
 
     Replaces the slot-delta + subiter approximation with cycle-exact
-    arithmetic. Originally derived from the (since-deleted, beads `arv` /
-    `8nz`) structural-side `precompute_issue_times` /
-    `estimate_quad_cycles_precomputed` / `estimate_quad_cycles` simulators
-    in CMSValidator.py; this helper is now the canonical implementation.
+    arithmetic. Originally derived from the (now-removed) structural-side
+    `precompute_issue_times` / `estimate_quad_cycles_precomputed` /
+    `estimate_quad_cycles` simulators in CMSValidator.py; this helper is
+    now the canonical implementation.
     Walks the captured body's instruction stream from the producer up to
     (and excluding) the consumer, simulating per-instruction issue
     accumulation including:
@@ -3661,8 +3648,8 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
     (the convention previously used by the deleted
     `estimate_quad_cycles_precomputed`).
 
-    Cross-body (bead 2bu.5): when producer and consumer live in different
-    captured bodies, the simulator continues across body boundaries in
+    Cross-body: when producer and consumer live in different captured
+    bodies, the simulator continues across body boundaries in
     `_BODY_BUILD_ORDER` (ML-1 → ML → NGL → NLL — hardware execution
     order). Simulator state (current_issue, mfma_free_at, last_mfma_class,
     last_mfma_issue) persists across boundaries because the bodies issue
@@ -3689,14 +3676,14 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
 
     # Build the list of bodies to traverse, starting from the producer's
     # body and continuing forward through `_BODY_BUILD_ORDER` until (and
-    # including) the consumer's body. Cross-body unification (bead 2bu.5):
-    # the simulator state — `current_issue`, `mfma_free_at`,
-    # `last_mfma_class`, `last_mfma_issue` — is preserved across body
-    # boundaries because the captured bodies issue back-to-back in
-    # hardware execution order. There is no extra "body boundary" stall
-    # injected; every per-instruction cost is already accounted for as we
-    # walk each body's instructions, so the cross-body gap is just the
-    # sum of intervening instruction issue costs.
+    # including) the consumer's body. The simulator state —
+    # `current_issue`, `mfma_free_at`, `last_mfma_class`,
+    # `last_mfma_issue` — is preserved across body boundaries because the
+    # captured bodies issue back-to-back in hardware execution order.
+    # There is no extra "body boundary" stall injected; every
+    # per-instruction cost is already accounted for as we walk each body's
+    # instructions, so the cross-body gap is just the sum of intervening
+    # instruction issue costs.
     p_body_idx = None
     c_body_idx = None
     for i, label in enumerate(_BODY_BUILD_ORDER):
@@ -3714,7 +3701,7 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
 
     # Walk bodies in execution order. Simulator state persists across
     # boundaries (single source of truth for cycle gaps regardless of
-    # body membership — bead 2bu.5).
+    # body membership).
     mfma_free_at = 0
     current_issue = 0
     last_mfma_class = None
@@ -3821,15 +3808,15 @@ def _quad_cycle_gap_ok(
 
     Returns (ok, expected_quad_cycles, actual_quad_cycles).
 
-    Bead `2bu.3` unification: same-body and cross-body share ONE code
-    path that delegates to `cumulative_issue_cycles`. The hardware MFMA
-    pipeline does not reset at body boundaries — `mfma_free_at` and the
-    type-switch stall carry through — so the cross-body cycle gap is
-    just the same simulator extended over the body boundary. The previous
-    `body_delta * 1000` cross-body placeholder (which always returned
-    ok=True regardless of how tight the boundary actually was) is gone;
-    `cumulative_issue_cycles` now walks the unified instruction stream
-    across all bodies in `_BODY_BUILD_ORDER` (extended by bead `2bu.5`).
+    Same-body and cross-body share ONE code path that delegates to
+    `cumulative_issue_cycles`. The hardware MFMA pipeline does not reset
+    at body boundaries — `mfma_free_at` and the type-switch stall carry
+    through — so the cross-body cycle gap is just the same simulator
+    extended over the body boundary. (A previous `body_delta * 1000`
+    cross-body placeholder always returned ok=True regardless of how
+    tight the boundary actually was; do not reintroduce it.)
+    `cumulative_issue_cycles` walks the unified instruction stream
+    across all bodies in `_BODY_BUILD_ORDER`.
 
     `num_mfma_per_subiter` is retained as a positional parameter for
     backward compatibility with existing call sites and tests but is no
@@ -3856,23 +3843,23 @@ def _cvt_to_mfma_gap_ok(
     """Verify that enough quad-cycles separate a CVTPack producer from its
     downstream MFMA consumer for the CVT result to be visible.
 
-    Sub-B of bead `35z`. The threshold is fixed at
-    `_QUAD_CYCLES_CVT_BEFORE_MFMA == 2` (CDNA 4 ISA 7.6).
+    The threshold is fixed at `_QUAD_CYCLES_CVT_BEFORE_MFMA == 2`
+    (CDNA 4 ISA 7.6).
 
     Returns `(ok, expected, actual)` — same triple shape as
     `_quad_cycle_gap_ok` so callers can wrap a single
     `TimingTooCloseFailure(expected, actual)` regardless of the gap kind.
 
-    Bead `2bu.4` unification: same-body and cross-body share ONE code
-    path that delegates to `cumulative_issue_cycles`. The previous
+    Same-body and cross-body share ONE code path that delegates to
+    `cumulative_issue_cycles`. WARNING for future reverts: the previous
     slot-delta formula (`slot_delta * (1 + finish) - 1 + intervening`)
     was DOUBLE-COUNTING — it charged 1 cycle per slot-INDEX gap AND
     +intervening for actual instructions in those slots. The cycle-exact
     walk only counts actual instructions, producing a smaller (more
-    conservative) `actual` for densely-populated streams. The previous
+    conservative) `actual` for densely-populated streams. A previous
     `body_delta * 1000` cross-body placeholder is also gone;
     `cumulative_issue_cycles` walks the unified instruction stream
-    across all bodies in `_BODY_BUILD_ORDER` (extended by bead `2bu.5`).
+    across all bodies in `_BODY_BUILD_ORDER`.
     """
     expected = _QUAD_CYCLES_CVT_BEFORE_MFMA
 
@@ -3889,36 +3876,36 @@ def _mfma_pack_to_cvt_gap_ok(
     """Verify that enough quad-cycles separate a 4x4 PackMFMA producer from
     its downstream CVTPack (CVT1) consumer for the accumulator to settle.
 
-    Sub-C of bead `or9` (parent epic `w7f`). The threshold is fixed at
-    `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 == 5` (CDNA 4 ISA 7.6). This is
-    the LARGEST gap among the four section-7.6 quad-cycle constants; the
-    4x4 MFMA finish-cycle (1) is shorter than the 5-cycle visibility
-    window the CVT1 needs, so this helper enforces a larger min-gap on
-    PackMFMA->CVTPack edges than the bare finish would suggest.
+    The threshold is fixed at `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 == 5`
+    (CDNA 4 ISA 7.6). This is the LARGEST gap among the four
+    section-7.6 quad-cycle constants; the 4x4 MFMA finish-cycle (1) is
+    shorter than the 5-cycle visibility window the CVT1 needs, so this
+    helper enforces a larger min-gap on PackMFMA->CVTPack edges than
+    the bare finish would suggest.
 
     Returns `(ok, expected, actual)` — same triple shape as
     `_quad_cycle_gap_ok` and `_cvt_to_mfma_gap_ok` so callers can wrap a
     single `TimingTooCloseFailure(expected, actual)` regardless of the
     gap kind.
 
-    Approach: CYCLE-EXACT via `cumulative_issue_cycles` (bead `nk0`), the
-    same simulator `_quad_cycle_gap_ok` uses. The helper walks the
-    captured stream from the producer to the consumer, accumulating
+    Approach: CYCLE-EXACT via `cumulative_issue_cycles`, the same
+    simulator `_quad_cycle_gap_ok` uses. The helper walks the captured
+    stream from the producer to the consumer, accumulating
     per-instruction issue costs plus MFMA-specific finish-time and
-    type-switch stalls. Bead `8nz` deleted the structural-side
-    `precompute_issue_times` simulator that this helper originally
-    mirrored; the graph-side path is now the single source of truth for
-    the PackMFMA -> CVT settle window.
+    type-switch stalls. The structural-side `precompute_issue_times`
+    simulator that this helper originally mirrored has been removed;
+    the graph-side path is now the single source of truth for the
+    PackMFMA -> CVT settle window.
 
-    Bead `2bu.5`: same-body and cross-body share the SAME code path. The
+    Same-body and cross-body share the SAME code path. The
     cross-iteration distinction is a red herring — the graph has all
     instructions laid out in execution order regardless of which body
     they belong to, so `cumulative_issue_cycles` (extended to walk
     across body boundaries in `_BODY_BUILD_ORDER`) is THE function that
-    computes the actual cycle gap. The previous `body_delta * 1000`
-    placeholder always-true short-circuit is gone; cross-body PackMFMA
-    -> CVT1 edges are now enforced with the same 5-quad-cycle threshold
-    as same-body edges.
+    computes the actual cycle gap. (A previous `body_delta * 1000`
+    always-true placeholder is gone; do not reintroduce it.) Cross-body
+    PackMFMA -> CVT1 edges are enforced with the same 5-quad-cycle
+    threshold as same-body edges.
     """
     expected = _QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1
 
@@ -3953,15 +3940,16 @@ def _is_alu_producer(producer: GraphNode) -> bool:
     instance class for the GR-categorized m0 setter, finally fall back
     to category for cases where rocisa_inst is None (test fixtures).
 
-    Sub-A of bead `e7w` carved out a special case for the TF32 4x4 PackMFMA:
-    those are categorized `Pack*` but the rocisa class is `MFMAInstruction`,
-    so they DO need the quad-cycle finish-time gap modelled (1 quad-cycle
-    for v_mfma_f32_4x4x4_*). Without the carve-out the ALU-immediate
-    exemption fired first, the quad-cycle branch never ran for PackMFMA
-    producers, and a same-slot PackMFMA->MFMA acc chain silently slipped
-    past the timing check. PackMFMAs now route to the MFMA branch via
-    `_is_mfma_pack_producer`; the rest of the Pack* category (CVT0/CVT1/
-    middle packs / SwapPacks) stays on the ALU exemption.
+    A special case carves out the TF32 4x4 PackMFMA: those are
+    categorized `Pack*` but the rocisa class is `MFMAInstruction`, so they
+    DO need the quad-cycle finish-time gap modelled (1 quad-cycle for
+    v_mfma_f32_4x4x4_*). Without the carve-out the ALU-immediate
+    exemption would fire first, the quad-cycle branch would never run
+    for PackMFMA producers, and a same-slot PackMFMA->MFMA acc chain
+    would silently slip past the timing check. PackMFMAs route to the
+    MFMA branch via `_is_mfma_pack_producer`; the rest of the Pack*
+    category (CVT0/CVT1/middle packs / SwapPacks) stays on the ALU
+    exemption.
     """
     cat = producer.category
     if cat.startswith("Pack"):
@@ -4015,8 +4003,8 @@ def _last_drain(
 #
 # This is the lint that replaces:
 #   - LRDataReadyRule              (CMSValidator.py:3461)
-#   - GRAfterLRRule                (deleted in bead ola.2 phase 2)  [LDS-reuse barrier-edges]
-#   - GRBeforeLRRule               (deleted in bead ola.1)          [LDS-reuse barrier-edges]
+#   - GRAfterLRRule                (removed)  [LDS-reuse barrier-edges]
+#   - GRBeforeLRRule               (removed)  [LDS-reuse barrier-edges]
 #   - PackDataReadyRule (ordering) (CMSValidator.py:3464)
 #
 # Same Failure types the cross-graph diagnose_missing_edge classifier
@@ -4062,11 +4050,11 @@ def validate_edge_wait_coverage(
         edge_failures = _classify_edge_coverage(edge, graph,
                                                 raise_on_unexplained=raise_on_unexplained)
         failures.extend(edge_failures)
-    # Bead `dpi`: MiddlePack pair-interleaving is a stream-shape invariant,
-    # not an edge-shape invariant, so it's a sibling pass driven from the
-    # same entry point (rather than per-edge inside _classify_edge_coverage).
-    # Returns the same WrongInterleavingFailure shape the structural-side
-    # MiddlePack.validate emits in CMSValidator.py:420-433.
+    # MiddlePack pair-interleaving is a stream-shape invariant, not an
+    # edge-shape invariant, so it's a sibling pass driven from the same
+    # entry point (rather than per-edge inside _classify_edge_coverage).
+    # Returns the same WrongInterleavingFailure shape the (now-removed)
+    # structural-side MiddlePack.validate used to emit.
     failures.extend(validate_middle_pack_pair_interleaving(graph))
     return failures
 
@@ -4090,14 +4078,13 @@ def _classify_edge_coverage(
 
     # 4x4 PackMFMA-as-producer feeding CVTPack-as-consumer: 5-quad-cycle
     # settle window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`).
-    # Sub-C of bead `or9` migrated this rule to the graph side; bead `8nz`
-    # deleted the structural-side mirror so this dispatch is now the only
-    # enforcement path. Must run BEFORE the generic `_is_mfma_producer`
-    # branch below: PackMFMA producers are claimed by `_is_mfma_producer`
-    # (post-`e7w`) and would otherwise route through `_quad_cycle_gap_ok`,
-    # whose threshold for 4x4 PackMFMAs (`_mfma_finish_cycles_for == 1`)
-    # is too weak by 4 quad-cycles versus the 5-cycle CVT1 visibility
-    # window.
+    # The structural-side mirror was removed; this dispatch is now the
+    # only enforcement path. Must run BEFORE the generic
+    # `_is_mfma_producer` branch below: PackMFMA producers are claimed by
+    # `_is_mfma_producer` and would otherwise route through
+    # `_quad_cycle_gap_ok`, whose threshold for 4x4 PackMFMAs
+    # (`_mfma_finish_cycles_for == 1`) is too weak by 4 quad-cycles
+    # versus the 5-cycle CVT1 visibility window.
     if (_is_mfma_pack_producer(p_node)
             and _is_cvt_pack_producer(c_node)):
         ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
@@ -4112,12 +4099,11 @@ def _classify_edge_coverage(
         return []
 
     # MFMA-as-producer: gated by quad-cycle issue timing rather than
-    # SWaitCnt (see diagnose_missing_edge). Sub-C (wx9.4.3) replaces the
-    # blanket exemption with a quad-cycle gap check. Sub-A of bead `e7w`
-    # widens the dispatch from `category == "MFMA"` to `_is_mfma_producer`
+    # SWaitCnt (see diagnose_missing_edge). An explicit gap check fires.
+    # Dispatch is via `_is_mfma_producer` (rather than `category == "MFMA"`)
     # so PackMFMAs (categorized Pack* but rocisa MFMAInstruction) reach
-    # this branch instead of getting silently exempted by `_is_alu_producer`
-    # below.
+    # this branch instead of getting silently exempted by
+    # `_is_alu_producer` below.
     if _is_mfma_producer(p_node):
         nmps = subj_graph.num_mfma_per_subiter
         ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
@@ -4132,17 +4118,16 @@ def _classify_edge_coverage(
 
     # CVTPack-as-producer feeding MFMA-as-consumer: governed by the
     # `_QUAD_CYCLES_CVT_BEFORE_MFMA` (= 2) settle window from CDNA 4 ISA
-    # section 7.6. Sub-B of bead `35z` migrated this rule to the graph
-    # side; bead `8nz` deleted the structural-side mirror so this dispatch
+    # section 7.6. The structural-side mirror was removed; this dispatch
     # is now the only enforcement path. Must run BEFORE the ALU-immediate
-    # exemption
-    # below — CVTPacks are categorized `Pack*` and `_is_alu_producer`
-    # would otherwise silently absorb them and skip the gap check entirely
-    # (this is the same dispatch-order bug Sub-A fixed for PackMFMAs).
-    # Restricted to MFMA consumers: a CVTPack feeding a non-MFMA consumer
-    # (e.g. another Pack or VXor that uses the converted result for
-    # something other than an MFMA operand load) carries no quad-cycle
-    # constraint — fall through to the ALU exemption in that case.
+    # exemption below — CVTPacks are categorized `Pack*` and
+    # `_is_alu_producer` would otherwise silently absorb them and skip
+    # the gap check entirely (same dispatch-order constraint as the
+    # PackMFMA carve-out above). Restricted to MFMA consumers: a CVTPack
+    # feeding a non-MFMA consumer (e.g. another Pack or VXor that uses
+    # the converted result for something other than an MFMA operand load)
+    # carries no quad-cycle constraint — fall through to the ALU
+    # exemption in that case.
     if _is_cvt_pack_producer(p_node) and _is_mfma_producer(c_node):
         ok, expected, actual = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
         if not ok:
@@ -4222,7 +4207,7 @@ def _classify_edge_coverage(
 
 
 # =============================================================================
-# MiddlePack pair-interleaving classifier (bead `dpi`)
+# MiddlePack pair-interleaving classifier
 # =============================================================================
 #
 # TF32 emulation packs come in groups of 24, the middle 16 of which compute
@@ -4258,7 +4243,7 @@ def _classify_edge_coverage(
 
 
 def validate_middle_pack_pair_interleaving(graph: DataflowGraph) -> List["WrongInterleavingFailure"]:
-    """Bead `dpi`: graph-side MiddlePack pair-interleaving check.
+    """Graph-side MiddlePack pair-interleaving check.
 
     Walks the unified node stream once and enforces the
     pair-leader/pair-consumer adjacency invariant for TF32 middle-16 packs.
@@ -4526,7 +4511,7 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
 
     n_gl/n_ll are keyed only at {0: body} because the CMS tail-loop emission
     hard-codes \\ID=0 (see _emitNoLoadLoopBodyCMSMacro docstring for the
-    correctness rationale and bead rocm-libraries-9sh for the audit trail).
+    correctness rationale).
     """
     main_loop = {}
     main_loop_prev = {}
