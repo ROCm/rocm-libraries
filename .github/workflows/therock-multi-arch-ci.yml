@@ -12,7 +12,7 @@
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
 
-name: Multi-Arch CI
+name: TheRock Multi-Arch CI
 
 on:
   push:
