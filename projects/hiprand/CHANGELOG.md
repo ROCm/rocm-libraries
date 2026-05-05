@@ -13,6 +13,7 @@ Documentation for hipRAND is available at
 
 ### Added
 
+* gfx1150,gfx1152 and gfx1153 support
 * Added a new cmake option, `ROCRAND_FETCH_METHOD`, which allows you to specify how you would like to fetch rocRAND.
   * It may be set to one of the following:
     * `PACKAGE` - (default) searches for a preinstalled packaged version of the dependency. If it is not found, the build will fall back using option `DOWNLOAD`, below.

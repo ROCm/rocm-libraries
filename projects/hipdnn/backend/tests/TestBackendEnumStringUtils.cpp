@@ -132,6 +132,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_EXECUTION_PLAN_KERNEL_CACHE");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP),
                  "HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT),
+                 "HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID),
                  "HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID");
@@ -836,6 +838,7 @@ TEST(TestBackendEnumStringUtils, GetDataTypeString)
     EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FP6_E2M3_EXT), "HIPDNN_DATA_FP6_E2M3_EXT");
     EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FP6_E3M2_EXT), "HIPDNN_DATA_FP6_E3M2_EXT");
     EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_INT64), "HIPDNN_DATA_INT64");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_BOOLEAN), "HIPDNN_DATA_BOOLEAN");
 
     EXPECT_STREQ(hipdnnGetDataTypeString(static_cast<hipdnnDataType_t>(-1)), "HIPDNN_DATA_UNKNOWN");
 }

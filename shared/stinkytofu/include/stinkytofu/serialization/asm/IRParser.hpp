@@ -48,6 +48,10 @@ struct ParsedInstruction {
     int latencyCycles;
     ParsedModifierDict modifiers;  // mod.X = { field = value, ... }
     bool isLabel;                  // true if this represents a label
+    /// Trailing source-level comment captured from the original line
+    /// (text after "//" or ";", with the marker stripped). Empty when no
+    /// comment was present or the parser was not asked to capture them.
+    std::string comment;
 
     ParsedInstruction(const std::string& opcode, bool label = false)
         : opcodeStr(opcode), issueCycles(0), latencyCycles(0), isLabel(label) {}
@@ -70,7 +74,7 @@ struct ParsedFunction {
 };
 
 /// Result of parsing IR source, including instructions and diagnostics.
-struct ParseResult {
+struct STINKYTOFU_EXPORT ParseResult {
     std::vector<Diagnostic> diagnostics;
 
     /// Parsed function (hierarchical or flat). Flat format has a single block "entry".
