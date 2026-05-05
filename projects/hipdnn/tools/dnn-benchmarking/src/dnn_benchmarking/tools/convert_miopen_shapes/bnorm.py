@@ -29,10 +29,6 @@ _BNORM_IO_TYPE: Dict[str, str] = {
 }
 
 
-def _bnorm_io_type(operation: str) -> str:
-    return _BNORM_IO_TYPE[operation]
-
-
 # ---------------------------------------------------------------------------
 # Batchnorm parsed parameters
 # ---------------------------------------------------------------------------
@@ -157,7 +153,7 @@ def build_bnorm_json(operation: str, args: Dict[str, str]) -> Dict[str, Any]:
       --back 1           → backward (requires --forw 0)
     """
     p = BnormParams.from_args(args)
-    io_type = _bnorm_io_type(operation)
+    io_type = _BNORM_IO_TYPE[operation]
 
     if p.is_3d:
         x_dims = [p.N, p.C, p.D, p.H, p.W]
