@@ -171,6 +171,7 @@ def create_writer(cfg, mi_wave_group=None):
         a=SimpleNamespace(tileInfo=tileInfoA),
         b=SimpleNamespace(tileInfo=tileInfoB),
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
+        archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
     )
     # LDS layout: A subtiles followed by B subtiles, aligned to readSize
     readSize = 2 * tileInfoA.subtileSize
