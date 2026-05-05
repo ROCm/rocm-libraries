@@ -83,6 +83,7 @@ from Tensile.Components.ScheduleCapture import (
     OrderInvertedFailure,
     TimingTooCloseFailure,
     _quad_cycle_gap_ok,
+    _cvt_to_mfma_gap_ok,
 )
 
 from dataflow_fixtures import (
@@ -1845,6 +1846,235 @@ class TestMFMAQuadCycleGap:
             f"the QUAD_CYCLES_CVT_BEFORE_MFMA=2 carve-out — it should take "
             f"the ALU-immediate exemption like any non-MFMA consumer. "
             f"Got: {pack_to_pack_cvt_timing}"
+        )
+
+    # -------------------------------------------------------------------------
+    # Bead `x9i` — cross-body unit tests for `_cvt_to_mfma_gap_ok`.
+    #
+    # The cross-body branch (ScheduleCapture.py:3806-3809) returns
+    # `(True, expected, body_delta * 1000)` whenever the producer and consumer
+    # live in different loop bodies (e.g. CVT in ML-1 feeding MFMA in ML, or
+    # CVT in ML feeding MFMA in NGL). Until x9i this branch had no DIRECT unit
+    # coverage — mutating it to `(False, 2, 0)` only failed integration tests
+    # in TestRealKernelCapture. The tests below exercise the branch through
+    # both the end-to-end `build_dataflow_graph` + `validate_edge_wait_coverage`
+    # pipeline AND the bare helper, mirroring the style of
+    # `test_mfma_acc_chain_cross_body_actual_reflects_real_gap` for the
+    # MFMA->MFMA cross-body branch.
+    # -------------------------------------------------------------------------
+    def test_cvt_to_mfma_cross_body_actual_reflects_body_delta_sentinel(self):
+        """CVTPack producer in body=ML-1; MFMA consumer in body=ML reading
+        the CVT's destination v40. Mirrors
+        `test_mfma_acc_chain_cross_body_actual_reflects_real_gap` for the
+        MFMA->MFMA cross-body branch — only the producer class differs.
+
+        The cross-body branch in `_cvt_to_mfma_gap_ok` (ScheduleCapture.py:
+        3806-3809) returns `(True, 2, body_delta * 1000)` so (a) the gap
+        is always judged OK across body boundaries (a loop body's worth of
+        issue cycles is far more than the 2-quad-cycle threshold) and (b)
+        the diagnostic carries a numerically meaningful `actual` rather
+        than the misleading `actual == expected` placeholder (s7k pattern).
+
+        Pinned behavior: `ok=True`, `expected=2`, `actual >= 1000` (the
+        body_delta=1 sentinel for adjacent bodies). Mutating the branch to
+        `(False, 2, 0)` will flip `ok` to False AND collapse `actual` to 0,
+        catching either regression flavor."""
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(50, 1), src1=vgpr(51, 1))
+        # Producer body: ML-1 (loop_index=0). CVT writes v40.
+        ml_prev_cap = make_capture(BODY_LABEL_ML_PREV, [
+            make_lr(50, 2, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
+        ])
+        # Consumer body: ML (loop_index=1). MFMA reads v40..v41 — RAW on the
+        # ML-1 CVT's write.
+        ml_cap = make_capture(BODY_LABEL_ML, [
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=0, sequence=0, a_src_count=2),
+        ])
+        # Fillers for NGL and NLL — ML_PREV and ML are user-provided.
+        ngl_filler = make_capture(BODY_LABEL_NGL, [make_mfma(
+            c_dst_start=220, a_src_start=224, b_src_start=228, slot=0)])
+        nll_filler = make_capture(BODY_LABEL_NLL, [make_mfma(
+            c_dst_start=240, a_src_start=244, b_src_start=248, slot=0)])
+        four = FourPartCapture(
+            main_loop={0: ml_cap},
+            main_loop_prev={0: ml_prev_cap},
+            n_gl={0: ngl_filler},
+            n_ll={0: nll_filler},
+            num_mfma=1, num_codepaths=1, source="cms",
+        )
+        g = build_dataflow_graph(four)
+
+        # Find the cross-body CVT (Pack*) -> MFMA edge.
+        cross = [e for e in g.edges
+                 if getattr(e.producer, "category", "").startswith("Pack")
+                 and getattr(e.consumer, "category", None) == "MFMA"
+                 and e.producer.body_label != e.consumer.body_label]
+        edge_summary = [
+            (getattr(e.producer, "category", None), e.producer.body_label,
+             getattr(e.consumer, "category", None), e.consumer.body_label)
+            for e in g.edges
+        ]
+        assert cross, (
+            "Expected a cross-body CVTPack->MFMA edge "
+            f"(ML-1 producer -> ML consumer). Got edges: {edge_summary}"
+        )
+        edge = cross[0]
+        ok, expected, actual = _cvt_to_mfma_gap_ok(
+            edge.producer, edge.consumer, g)
+
+        # x9i contract: cross-body branch returns the s7k sentinel.
+        assert ok, (
+            f"Cross-body CVT->MFMA edge should always pass the gap check "
+            f"(body boundary >> 2-quad-cycle threshold). Got ok={ok}, "
+            f"expected={expected}, actual={actual}. If ok=False, the "
+            f"cross-body branch was likely mutated to (False, 2, 0)."
+        )
+        assert expected == 2, (
+            f"_QUAD_CYCLES_CVT_BEFORE_MFMA == 2; cross-body branch must "
+            f"still report expected=2. Got expected={expected}."
+        )
+        assert actual >= 1000, (
+            f"Cross-body CVT->MFMA must report actual = body_delta * 1000 "
+            f"(s7k sentinel — a body boundary represents many issue "
+            f"cycles, not the misleading actual==expected placeholder). "
+            f"Got actual={actual}. If actual==0, the cross-body branch "
+            f"was likely mutated to (False, 2, 0)."
+        )
+        # No TimingTooCloseFailure should be emitted on the cross-body edge.
+        failures = validate_edge_wait_coverage(g)
+        cross_body_failures = [
+            f for f in failures
+            if isinstance(f, TimingTooCloseFailure)
+            and getattr(f.producer, "category", "").startswith("Pack")
+            and getattr(f.consumer, "category", None) == "MFMA"
+            and f.producer.body_label != f.consumer.body_label
+        ]
+        assert not cross_body_failures, (
+            f"Cross-body CVT->MFMA edge must NOT emit "
+            f"TimingTooCloseFailure (the body-delta sentinel ensures the "
+            f"gap is always judged OK). Got: {cross_body_failures}"
+        )
+
+    def test_cvt_to_mfma_cross_body_ml_to_ngl_also_uses_sentinel(self):
+        """Mirror of the ML-1 -> ML test but for ML -> NGL (the other
+        adjacent-body crossing in production captures). Pins that the
+        cross-body branch fires uniformly for ANY producer/consumer body
+        mismatch, not just for ML-1 -> ML — the branch's predicate is a
+        bare `producer.body_label != consumer.body_label`, not a
+        body-pair allowlist.
+
+        Mutating the cross-body branch to `(False, 2, 0)` will also fail
+        this test, providing a second mutation-detection signal in case
+        the ML-1 -> ML fixture is destabilized by an unrelated change."""
+        cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
+                              src0=vgpr(50, 1), src1=vgpr(51, 1))
+        # Producer body: ML (loop_index=1). CVT writes v40.
+        ml_cap = make_capture(BODY_LABEL_ML, [
+            make_lr(50, 2, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            _tag(cvt, category="PackA0", mfma_index=2, sequence=0),
+        ])
+        # Consumer body: NGL (loop_index=2). MFMA reads v40..v41.
+        ngl_cap = make_capture(BODY_LABEL_NGL, [
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=0, sequence=0, a_src_count=2),
+        ])
+        ml_prev_filler = make_capture(BODY_LABEL_ML_PREV, [make_mfma(
+            c_dst_start=200, a_src_start=204, b_src_start=208, slot=0)])
+        nll_filler = make_capture(BODY_LABEL_NLL, [make_mfma(
+            c_dst_start=240, a_src_start=244, b_src_start=248, slot=0)])
+        four = FourPartCapture(
+            main_loop={0: ml_cap},
+            main_loop_prev={0: ml_prev_filler},
+            n_gl={0: ngl_cap},
+            n_ll={0: nll_filler},
+            num_mfma=1, num_codepaths=1, source="cms",
+        )
+        g = build_dataflow_graph(four)
+        cross = [e for e in g.edges
+                 if getattr(e.producer, "category", "").startswith("Pack")
+                 and getattr(e.consumer, "category", None) == "MFMA"
+                 and e.producer.body_label == BODY_LABEL_ML
+                 and e.consumer.body_label == BODY_LABEL_NGL]
+        edge_summary = [
+            (e.producer.body_label, e.consumer.body_label,
+             getattr(e.producer, "category", None))
+            for e in g.edges
+        ]
+        assert cross, (
+            "Expected a cross-body CVTPack->MFMA edge from ML to NGL. "
+            f"Got: {edge_summary}"
+        )
+        edge = cross[0]
+        ok, expected, actual = _cvt_to_mfma_gap_ok(
+            edge.producer, edge.consumer, g)
+        assert ok and expected == 2 and actual >= 1000, (
+            f"ML -> NGL cross-body CVT->MFMA must follow the same "
+            f"body_delta * 1000 sentinel as ML-1 -> ML. Got "
+            f"ok={ok}, expected={expected}, actual={actual}. "
+            f"If actual==0 / ok==False, the cross-body branch was "
+            f"likely mutated."
+        )
+
+    def test_cvt_to_mfma_cross_body_helper_directly(self):
+        """Direct call to `_cvt_to_mfma_gap_ok` with a hand-built
+        producer/consumer pair whose `position.loop_index` values differ.
+        Bypasses `build_dataflow_graph` / `validate_edge_wait_coverage` so
+        the test is hermetic to upstream graph-building changes — the only
+        moving piece is the cross-body branch itself.
+
+        Mutation target: replacing the cross-body branch with
+        `return (False, 2, 0)` collapses actual to 0 (caught by the
+        `actual >= 1000` assertion) and flips ok to False (caught by the
+        `ok is True` assertion)."""
+        from Tensile.Components.ScheduleCapture import GraphNode, SchedulePosition
+
+        # Build a producer in ML-1 (loop_index=0) and a consumer in ML
+        # (loop_index=1). The helper only reads `.position` and
+        # `.body_label`; we don't need a real graph.
+        producer_pos = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=0)
+        consumer_pos = SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0)
+
+        producer = GraphNode(
+            identity=("VCvtPkF32toBF16", 0, ()),
+            position=producer_pos,
+            category="PackA0",
+            rocisa_inst=None,
+            tagged_inst=None,
+            body_label=BODY_LABEL_ML_PREV,
+        )
+        consumer = GraphNode(
+            identity=("MFMAInstruction", 1, ()),
+            position=consumer_pos,
+            category="MFMA",
+            rocisa_inst=None,
+            tagged_inst=None,
+            body_label=BODY_LABEL_ML,
+        )
+
+        # subj_graph is unused on the cross-body branch — pass None.
+        ok, expected, actual = _cvt_to_mfma_gap_ok(producer, consumer, None)
+
+        assert ok is True, (
+            f"_cvt_to_mfma_gap_ok cross-body branch must return ok=True "
+            f"(body boundary represents many issue cycles, far more than "
+            f"the 2-quad-cycle threshold). Got ok={ok}. A mutation to "
+            f"`return (False, 2, 0)` would flip this assertion."
+        )
+        assert expected == 2, (
+            f"Cross-body branch must still report expected=2 "
+            f"(_QUAD_CYCLES_CVT_BEFORE_MFMA). Got expected={expected}."
+        )
+        # body_delta = 1 - 0 = 1; abs(1) * 1000 = 1000 (the s7k sentinel).
+        assert actual == 1000, (
+            f"Cross-body branch must return actual = abs(body_delta) * "
+            f"1000 = 1 * 1000 = 1000 (s7k sentinel: a numerically "
+            f"meaningful value rather than `actual == expected` "
+            f"placeholder). Got actual={actual}. A mutation to "
+            f"`return (False, 2, 0)` would collapse actual to 0."
         )
 
 
