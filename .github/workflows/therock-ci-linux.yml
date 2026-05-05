@@ -131,19 +131,13 @@ jobs:
             --build-dir TheRock/build \
             --upload
 
-      - name: Build webhook URLs JSON
-        if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
-        id: webhook-urls
-        run: |
-          echo 'json={"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' >> $GITHUB_OUTPUT
-
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
         run: |
           python3 .github/scripts/notify_teams.py \
             --failure-stage build \
             --log-path TheRock/build/logs \
-            --webhook-urls '${{ steps.webhook-urls.outputs.json }}' \
+            --webhook-urls '{"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' \
             --pr-number "${{ github.event.pull_request.number }}" \
             --pr-title "${{ github.event.pull_request.title }}" \
             --component-name "${{ inputs.projects_to_test }}"
