@@ -341,6 +341,62 @@ class TestWaitCoverage:
         assert miss[0].counter_kind == "dscnt"
         assert len(miss[0].nearby_other_counter_waits) >= 1
 
+    def test_swait_dscnt_minus_one_does_not_drain_lr_producer(self):
+        """SWaitCnt with dscnt=-1 means 'no constraint' (counter ignored) —
+        it does NOT drain any LDS-load producer. Pins the semantic that
+        `_swait_drains` returns None for v < 0, so the LRA0 in the queue
+        is NOT considered guaranteed at the consumer. validate_edge_wait_coverage
+        must emit MissingWaitFailure on the LRA0 -> MFMA edge.
+
+        Regression guard: if a future refactor flips -1 to mean 'drain
+        everything', this test fails and the misread is caught. See
+        WaitInsufficientFailure._format_canonical for the matching
+        comment ('Counter value of -1 means "no constraint" ... -1 does
+        NOT satisfy')."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=-1, vlcnt=-1, vscnt=-1),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=2, a_src_count=4),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        # Edge IS formed by register resolution.
+        assert _has_edge(g, "LRA0", "MFMA", reg_start=8)
+        # The dscnt=-1 SWait does NOT drain the LR producer, so the
+        # validator must report MissingWaitFailure (no SWait in the
+        # window constrains dscnt for this edge).
+        failures = validate_edge_wait_coverage(g)
+        assert any(isinstance(f, MissingWaitFailure)
+                   and f.producer.category == "LRA0"
+                   and f.consumer.category == "MFMA"
+                   for f in failures), \
+            (f"Expected MissingWaitFailure for LRA0->MFMA edge — dscnt=-1 "
+             f"must not drain the producer. Got: "
+             f"{[type(f).__name__ for f in failures]}")
+
+    def test_swait_vlcnt_minus_one_does_not_drain_gr_producer(self):
+        """Symmetric to the dscnt case: vlcnt=-1 means 'no constraint',
+        so a GR (vector-load) producer is NOT drained. Validator must
+        emit MissingWaitFailure on the GRA -> MFMA edge."""
+        cap = make_capture(BODY_LABEL_ML, [
+            make_gr(40, 4, srd_sgpr_start=12, immediate_offset=0,
+                    slot=0, category="GRA"),
+            make_swait(slot=1, dscnt=-1, vlcnt=-1, vscnt=-1),
+            make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
+                      slot=2, a_src_count=4),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        # Edge IS formed by register resolution.
+        assert _has_edge(g, "GRA", "MFMA", reg_start=40)
+        failures = validate_edge_wait_coverage(g)
+        assert any(isinstance(f, MissingWaitFailure)
+                   and f.producer.category == "GRA"
+                   and f.consumer.category == "MFMA"
+                   for f in failures), \
+            (f"Expected MissingWaitFailure for GRA->MFMA edge — vlcnt=-1 "
+             f"must not drain the producer. Got: "
+             f"{[type(f).__name__ for f in failures]}")
+
     def test_consumer_without_producer_no_edge(self):
         """SWait + MFMA with no producer in the body: register resolution
         finds no writer for MFMA's reads, so no edge forms in this body."""
