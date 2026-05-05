@@ -1,17 +1,49 @@
+################################################################################
+#
 # Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+################################################################################
 """Shim for ``rocisa.enum``.
 
-Source of truth: ``projects/hipblaslt/tensilelite/rocisa/rocisa/src/enum.cpp``
-(``init_enum``). Every enum here matches the nanobind binding 1:1 including
-the member values so that ``from rocisa.enum import DWORD`` etc. keep
-working exactly as before (nanobind's ``export_values()`` surfaces each
-member as a top-level attribute of the submodule).
+What this file is:
+    Mirrors ``rocisa/rocisa/src/enum.cpp`` (``init_enum``). Every enum
+    matches the nanobind binding 1:1 (member name + value), so
+    ``from rocisa.enum import DWORD`` etc. keep working.
 
-logicalIR correspondence: none of these enums has a 1:1 counterpart in
-``shared/stinkytofu/src/ir/logical/`` at the time of writing - logicalIR
-uses a different type system (see ``StinkyRegister::Type`` / ``RegType`` in
-``python_module/src/python_bindings.cpp``). Left as pure dummies.
+What it does (real):
+    - All enums are real ``IntEnum`` (built via ``make_dummy_enum``,
+      which despite its name returns a real ``IntEnum``; see
+      ``_dummy.py``).
+    - Members exposed at module scope to mimic nanobind's
+      ``export_values()`` (e.g. ``rocisa.enum.DWORD`` is accessible).
+    - Coverage: ``RegisterType``, ``DataTypeEnum``,
+      ``SignatureValueKind``, ``InstType``, ``SelectBit``, ``UnusedBit``,
+      ``CacheScope``, ``CvtType``, ``ArgType``, ``HighBitSel``,
+      ``RoundType``, ``SaturateCastType``.
+
+Not yet done:
+    - None. Every enum is real.
+
+logicalIR correspondence:
+    None. logicalIR uses ``StinkyRegister::Type`` / ``RegType`` and a
+    different type system; the rocisa-style enums live here only to
+    keep Tensile's import surface intact.
 """
 
 from __future__ import annotations

@@ -1,20 +1,42 @@
+################################################################################
+#
 # Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-# SPDX-License-Identifier: MIT
-"""Shared helpers for the logicalIR adaptor shim.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+################################################################################
+"""Factory helpers for building rocisa-shaped dummies in ir_adaptor.
 
-This module provides factories used by every rocisa.* shim submodule to
-produce "dummy" symbols whose only side-effect is printing their fully
-qualified rocisa path when the symbol is used.
+What this file is:
+    Factories used by every ``ir_adaptor.*`` shim to produce class /
+    function / enum stand-ins matching the nanobind binding surface.
 
-Design:
-  - class shim : prints when instantiated (``__init__``)
-  - function shim: prints when called (``__call__``)
-  - enum shim  : a plain class with class-level attributes that mimics the
-                 original nanobind ``nb::enum_`` + ``export_values()`` pair.
+What it does (real):
+    - ``make_dummy_class`` — class shim; metaclass handles class-level
+      attribute access (e.g. ``nb::def_static`` methods).
+    - ``make_dummy_func`` — function shim; prints when called.
+    - ``make_dummy_enum`` — real ``IntEnum`` matching nanobind's
+      ``nb::enum_`` + ``export_values()`` semantics; member ``.value`` /
+      ``.name`` and ``cls(0)`` round-trip.
+    - ``export_enum_values`` — replicates ``nb::export_values()`` at
+      module scope.
 
-The intent at this stage is ONLY structural: every name the upstream
-KernelWriter code imports must exist and must do *something* observable
-when touched. Real dispatch into logicalIR is deferred to a later pass.
+Not yet done:
+    - None. Every helper here is real.
 """
 
 from __future__ import annotations

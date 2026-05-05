@@ -1,28 +1,64 @@
+################################################################################
+#
 # Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-# SPDX-License-Identifier: MIT
-"""Shim for ``rocisa.register``.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+################################################################################
+"""Shim for ``rocisa.register`` — stateful first-fit register allocator.
 
-Source of truth: ``projects/hipblaslt/tensilelite/rocisa/rocisa/include/register.hpp``
-and ``rocisa/rocisa/src/register.cpp`` (nanobind bindings).
+What this file is:
+    1:1 Python port of ``rocisa/rocisa/include/register.hpp`` and
+    ``rocisa/src/register.cpp``. Tensile's KernelWriter relies on the
+    *exact* allocation behavior (e.g. AMDGPU ABI requires
+    ``KernArgAddress == SGPR0``); an off-by-one would silently produce
+    wrong asm. Includes the tail-grow overflow path and the rocisa
+    quirk where ``checkOutAligned``'s tail-walk skips index 0.
 
-This is a stateful first-fit register allocator. Tensile's KernelWriter relies
-on the *exact* allocation behavior (e.g. AMDGPU ABI requires
-``KernArgAddress == SGPR0``); an off-by-one would produce silently wrong asm.
-The implementation mirrors the C++ algorithm 1:1, including the tail-grow
-overflow path and the ``i += j`` skip-ahead trick in ``checkOutAligned``.
+    The pool is index-based — it knows nothing about register names.
+    The ``name -> idx`` mapping is the KernelWriter's concern
+    (``self.sgprs[name] = idx``).
 
-The pool is *index-based* — it knows nothing about register names. The
-``name -> index`` mapping is a separate concern that lives in the
-KernelWriter (``self.sgprs[name] = idx``).
+What it does (real):
+    - ``RegisterPool`` with the full method surface: ``checkOutAligned``
+      / ``checkOut`` / ``checkOutMulti``, ``checkIn``,
+      ``addFromCheckOut`` / ``removeFromCheckOut``, ``add`` /
+      ``addRange`` / ``remove``, ``growPool`` / ``appendPool``,
+      ``setOccupancyLimit`` / ``resetOccupancyLimit``,
+      ``available*`` / ``getPool`` / ``size`` / ``state`` /
+      ``checkFinalState``, ``__deepcopy__``.
+    - ``RegisterPool.Status`` — ``IntEnum`` (``Unavailable=0``,
+      ``Available=1``, ``InUse=2``); KernelWriterAssembly reads
+      ``spool[i].status == RegisterPool.Status.InUse`` directly.
+    - ``RegisterPool.Register`` — ``(status, tag)`` value object;
+      ``tag`` is a debug hint, not a unique key.
+    - 33-test suite at
+      ``shared/stinkytofu/tests/unit/ir_adaptor/test_ir_adaptor_register.py``.
 
-Notes:
-- ``Status`` is an ``IntEnum`` with values matching the C++ enum class
-  (``Unavailable=0``, ``Available=1``, ``InUse=2``); KernelWriterAssembly
-  reads ``spool[i].status == RegisterPool.Status.InUse`` directly.
-- ``Register`` is the ``(status, tag)`` value object; ``tag`` is purely a
-  debug hint (used by warnings / ``state()``), never a unique key.
-- ``initTmps`` returns ``None`` for now; once ``Module``/``SMovB32``/
-  ``VMovB32`` are implemented we can swap in a real Module tree.
+Not yet done:
+    - ``initTmps`` returns ``None``; the C++ implementation builds a
+      ``Module`` of ``SMovB32`` / ``VMovB32`` per Available slot.
+      Restore once those classes are real (Phase 3-4).
+
+logicalIR correspondence:
+    None. ``StinkyRegister`` (``shared/stinkytofu/include/stinkytofu/
+    ir/asm/StinkyRegister.hpp``) is a value object only — it has no
+    allocator. The rocisa-compat surface needs first-fit allocation,
+    so the pool lives here in the adaptor.
 """
 
 from __future__ import annotations

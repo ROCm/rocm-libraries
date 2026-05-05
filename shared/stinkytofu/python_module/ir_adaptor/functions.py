@@ -1,25 +1,50 @@
+################################################################################
+#
 # Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+################################################################################
 """Shim for ``rocisa.functions``.
 
-Source of truth: ``projects/hipblaslt/tensilelite/rocisa/rocisa/src/functions/``
-- ``argument.cpp``   : ``ArgumentLoader``
-- ``f_branch.cpp``   : ``BranchIfZero``, ``BranchIfNotZero``
-- ``f_cast.cpp``     : ``VSaturateCastInt``
-- ``f_math.cpp``     : static-divide / remainder / multiply helpers + ``sMagicDiv``
-- ``functions.cpp``  : ``DSInit``
+What this file is:
+    Mirrors ``rocisa/rocisa/src/functions/`` — composite KernelWriter
+    helpers that emit IR sequences (vector divide / multiply, branch
+    helpers, magic-number division, argument loader, DS init).
 
-logicalIR correspondence: none - these are KernelWriter-level helper
-function builders (they emit composite IR sequences), not individual
-opcodes. They are always composites that eventually reduce to several
-primitive instructions which DO have logicalIR mappings, but the helpers
-themselves have no opcode-level counterpart. Dummies only.
+What it does (real):
+    - None.
 
-Note on overloads: ``m.def("vgpr", ...)`` called multiple times in
-nanobind produces a single Python name bound to overload-resolved
-dispatch. From the Python caller's point of view there is only one
-``vectorStaticDivide``, ``scalarStaticDivideAndRemainder``, ``sMagicDiv``
-etc. - we therefore expose one dummy per *name*, not per overload.
+Not yet done (dummy):
+    - ``ArgumentLoader``
+    - Branch helpers: ``BranchIfZero``, ``BranchIfNotZero``
+    - Cast helper: ``VSaturateCastInt``
+    - Math helpers: vector / scalar divide-and-remainder /
+      ceil-divide / multiply / multiply-add / Bpe family,
+      ``sMagicDiv`` / ``sMagicDiv2``
+    - ``DSInit``
+
+Note on overloads:
+    nanobind exposes overload-resolved dispatch under one Python name,
+    so the shim exports one symbol per *name*, not per overload.
+
+logicalIR correspondence:
+    None. These reduce to several primitive instructions which DO have
+    logicalIR mappings, but the helpers themselves do not.
 """
 
 from __future__ import annotations

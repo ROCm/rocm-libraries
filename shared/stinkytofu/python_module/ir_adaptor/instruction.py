@@ -1,29 +1,49 @@
+################################################################################
+#
 # Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+################################################################################
 """Shim for ``rocisa.instruction``.
 
-Source of truth: ``projects/hipblaslt/tensilelite/rocisa/rocisa/src/instruction/``
-(``init_inst`` + per-category files: ``branch.cpp``, ``cmp.cpp``,
-``common.cpp``, ``cvt.cpp``, ``mem.cpp``, ``mfma.cpp``,
-``instruction.cpp``, ``extension.cpp``).
+What this file is:
+    Mirrors ``rocisa/rocisa/src/instruction/`` (``init_inst`` plus the
+    per-category files: ``branch.cpp``, ``cmp.cpp``, ``common.cpp``,
+    ``cvt.cpp``, ``mem.cpp``, ``mfma.cpp``, ``instruction.cpp``,
+    ``extension.cpp``).
 
-logicalIR correspondence rule (Q4 "strict name match"):
-  A class here carries a ``# logicalIR: <OpName>`` comment iff
-  ``shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc`` contains
-  an entry with exactly the same class name (opcode + bit-width). No
-  approximate "same family" matches.
+What it does (real):
+    - None.
 
-Usage of a matched op once the adaptor is real will roughly be:
-    <cpp-side>  return an ``IRInstDef`` with the same ``className``, emitted
-                through ``StinkyAsmModule`` after ``runOptimizationPipeline``
-    <py-side>   either (a) build the ``StinkyAsmModule`` directly (see
-                ``shared/stinkytofu/python_module/src/python_bindings.cpp``)
-                or (b) go through ``stinkytofu.Intrinsic("<OpName>", ...)``
-                when that op is registered as an intrinsic.
+Not yet done (dummy):
+    - All instruction classes (``Buffer*``, ``DS*``, ``Flat*``,
+      ``S*``, ``V*``, ``MFMA*`` / ``SMFMA*``, ...).
+    - ``getMFMAIssueLatency`` / ``getSMFMAIssueLatency`` — currently
+      return ``None``; Tensile's ``_initKernel`` unpacks them as
+      ``(int, int)``, so they must return a 2-tuple soon.
+    - Extension functions: ``SLongBranch*``, ``SCLongBranch*``,
+      ``SGetPositivePCOffset``, ``SMulInt64to32``, ``VCvtBF16toFP32``.
 
-At this stage every symbol is a dummy: calling e.g.
-``BufferLoadB128(dst=..., vaddr=..., ...)`` just prints
-``rocisa.instruction.BufferLoadB128``.
+logicalIR correspondence (strict name match):
+    A class carries a ``# logicalIR: <OpName>`` comment iff
+    ``shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc``
+    contains an entry with exactly the same name. No approximate
+    "same family" matches.
 """
 
 from __future__ import annotations

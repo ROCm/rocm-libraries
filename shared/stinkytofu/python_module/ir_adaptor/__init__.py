@@ -1,40 +1,57 @@
+################################################################################
+#
 # Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-# SPDX-License-Identifier: MIT
-"""logicalIR adaptor package (Tensilelite ``rocisa`` shim).
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+################################################################################
+"""logicalIR adaptor package — the Tensilelite ``rocisa`` shim.
 
-This package mimics the public shape of
-``projects/hipblaslt/tensilelite/rocisa/rocisa`` (the nanobind-based C++
-bindings) so that legacy Python consumers - primarily
-``KernelWriter.py`` / ``KernelWriterAssembly.py`` / ``KernelWriterModules.py``
-in ``tensilelite/Tensile/`` - can continue using ``from rocisa import ...``
-and ``from rocisa.<submodule> import ...`` unchanged while we are porting
-them onto the higher-level logicalIR in ``shared/stinkytofu``.
+What this file is:
+    Top-level package that mimics ``projects/hipblaslt/tensilelite/
+    rocisa/rocisa`` (the nanobind C++ bindings) so KernelWriter callers
+    can keep using ``from rocisa import ...`` unchanged. Activated only
+    when ``ROCISA_BACKEND=logical`` (see
+    ``projects/hipblaslt/tensilelite/rocisa/rocisa/__init__.py``);
+    reserved for ``gfx1250`` today.
 
-Activation:
-    The rewire happens only when ``ROCISA_BACKEND=logical`` (see
-    ``projects/hipblaslt/tensilelite/rocisa/rocisa/__init__.py``).  For
-    any other value (or when unset) the original nanobind ``rocisa``
-    remains untouched; logicalIR is reserved for ISA gfx1250 right now
-    but the env-var keeps the switch explicit and easy to flip by hand.
+What it does (real):
+    - ``IsaInfo`` — asm/arch/reg/bug caps holder; picklable.
+    - ``rocIsa`` — singleton mirror of the C++ class. Supports
+      ``init`` / ``isInit``, ``getIsaInfo``,
+      ``getAsmCaps`` / ``getArchCaps`` / ``getRegCaps`` / ``getAsmBugs``,
+      ``setKernel`` / ``getKernel``,
+      ``getOutputOptions`` / ``setOutputOptions``,
+      ``getData`` / ``setData``. Backed by ``caps.py`` snapshots.
+    - Submodules with real implementations: ``register`` (pool),
+      ``enum`` (real ``IntEnum``s), ``base`` (``KernelInfo`` /
+      ``OutputOptions``), ``caps`` (gfx1250 snapshot).
+    - Submodule registration as ``rocisa.<submodule>`` for ``base``,
+      ``enum``, ``container``, ``code``, ``label``, ``instruction``,
+      ``functions``, ``asmpass``, ``macro``, ``register``.
 
-Phase (current):
-    Pure structural dummies. Every class shim prints its fully qualified
-    rocisa name when instantiated; every function shim prints when
-    called. Real delegation to ``stinkytofu`` is a separate pass.
-
-Top-level ``rocisa`` module surface (reproduced here):
-    - Class ``rocIsa``, ``IsaInfo``
-    - Functions ``isaToGfx``, ``getGlcBitName``, ``getSlcBitName``
-    - Functions ``countType``, ``countInstruction``, ``countGlobalRead``,
-      ``countSMemLoad``, ``countLocalRead``, ``countLocalWrite``,
-      ``countWeightedLocalRead``, ``countWeightedLocalWrite``,
-      ``countDSStoreB128``, ``countDSStoreB192``, ``countDSStoreB256``,
-      ``countVMovB32``, ``getMFMAs``, ``findInstCount``
-    - Interop helpers ``isSupportedByStinkyTofu``, ``StinkyAsmModule``,
-      ``toStinkyTofuModule`` (contributed by ``init_stinkytofu`` in
-      ``shared/stinkytofu/src/conversion/rocisa/ToStinkyTofuUtils.cpp``)
-    - Submodules: base, enum, container, code, label, instruction,
-      functions, asmpass, macro, register
+Not yet done (dummy):
+    - Free functions: ``isaToGfx``, ``getGlcBitName``, ``getSlcBitName``.
+    - Counters: ``count*``, ``find*``, ``getMFMAs``.
+    - Interop hooks: ``isSupportedByStinkyTofu``, ``StinkyAsmModule``,
+      ``toStinkyTofuModule`` — should delegate into compiled stinkytofu
+      bindings once the dummy phase ends.
+    - Submodules still all-dummy: ``container``, ``code``, ``label``,
+      ``instruction``, ``functions``, ``asmpass``, ``macro``.
 """
 
 from __future__ import annotations

@@ -1,26 +1,52 @@
+################################################################################
+#
 # Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+################################################################################
 """Static ISA capability snapshots for the logicalIR ``rocisa`` adaptor.
 
-The C++ ``rocisa::rocIsa`` populates its ``IsaInfo`` table by shelling out
-to ``llvm-mc``/``hipcc`` at ``init(arch, ...)`` time (see
-``rocisa/src/init_caps.cpp``). The logicalIR adaptor doesn't have that
-machinery yet, so we ship pre-captured dictionaries here and let
-``ir_adaptor/__init__.py`` hand them back via the same getter shape Tensile
-expects (``ti.getIsaInfo(v).asmCaps`` etc.).
+What this file is:
+    Pre-captured ``asmCaps`` / ``archCaps`` / ``regCaps`` / ``asmBugs``
+    dictionaries returned by ``rocIsa.getIsaInfo(v)``. The C++
+    ``rocisa::rocIsa::init`` populates these by shelling out to
+    ``llvm-mc`` / ``hipcc``; the logicalIR adaptor doesn't have that
+    machinery yet, so we ship pre-captured data here.
+
+What it does (real):
+    - ``_GFX1250_ASM_CAPS`` / ``_ARCH_CAPS`` / ``_REG_CAPS`` /
+      ``_ASM_BUGS`` — the four cap dictionaries.
+    - ``normalize_isa_key`` — coerces strings / tuples / IsaVersion-like
+      objects into ``(major, minor, patch)``.
+    - ``getCaps`` — returns shallow copies (registry stays immutable).
+    - ``supportedIsas`` — registry introspection.
+
+Not yet done:
+    - Only ``gfx1250`` captured. Add more ISAs by running a real probe
+      with the nanobind backend (see "Refreshing a snapshot" below).
+    - No real ``llvm-mc`` / ``hipcc`` probing — that lives in C++.
 
 Refreshing a snapshot:
-    Run a normal Tensile build with the nanobind backend (i.e. without
-    ``ROCISA_BACKEND=logical``) plus the temporary ``print(...)`` calls in
-    ``Tensile/Common/Capabilities.makeIsaInfoMap`` and copy the four dicts
-    into the matching ``_GFX*`` block below. Each ISA must declare all four
-    of ``asmCaps``, ``archCaps``, ``regCaps``, ``asmBugs``.
-
-Scope:
-    Only ``gfx1250`` is captured today because that is the single ISA the
-    logicalIR backend is wired up for. Any other ISA hitting ``getCaps``
-    raises ``KeyError`` instead of silently falling through, so missing
-    entries are loud rather than producing wrong codegen.
+    Run a normal Tensile build with the nanobind backend (no
+    ``ROCISA_BACKEND=logical``) plus temporary ``print(...)`` calls in
+    ``Tensile/Common/Capabilities.makeIsaInfoMap``. Copy the four dicts
+    into a matching ``_GFX*`` block below. Each ISA must declare all
+    four of ``asmCaps``, ``archCaps``, ``regCaps``, ``asmBugs``.
 """
 
 from __future__ import annotations

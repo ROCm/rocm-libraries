@@ -81,23 +81,9 @@ def _import_rocisa():
 # ---------------------------------------------------------------------------
 # Backend dispatch
 # ---------------------------------------------------------------------------
-# ``ROCISA_BACKEND`` selects which implementation answers ``import rocisa``:
-#   - unset / anything else -> legacy nanobind bindings in ``_rocisa`` (default)
-#   - "logical"              -> logicalIR adaptor shim under
-#                               shared/stinkytofu/python_module/ir_adaptor
-#
-# The adapter path is computed relative to this file (by walking up to the
-# monorepo root) so the common in-tree layout "Just Works".  When loading
-# succeeds we rewire ``sys.modules["rocisa"]`` (and every
-# ``rocisa.<submodule>``) to point at the adapter, so existing
-# ``from rocisa.instruction import BufferLoadB128`` etc. transparently pick
-# up the shim.
-#
-# Design note: the switch is decided once at import time.  The eventual
-# runtime trigger (per-ISA dispatch based on ``[12, 5, 0]``) will flip the
-# env var before any KernelWriter is imported; doing it after-the-fact is
-# undefined because many KernelWriter callsites do ``from rocisa import X``
-# which binds the specific symbol at their import time.
+# ``ROCISA_BACKEND=logical`` redirects ``import rocisa`` to the ir_adaptor
+# shim. Anything else (or unset) keeps the original nanobind bindings in
+# ``_rocisa``.
 
 _BACKEND = os.environ.get("ROCISA_BACKEND", "").strip().lower()
 
@@ -109,16 +95,8 @@ def _load_logical_adapter() -> bool:
     whether that is acceptable).
     """
 
-    # Walk upward from this file until we find an ancestor named
-    # ``projects``. Its parent is (by repo convention) the monorepo
-    # root, which must also contain the sibling layout:
-    #
-    #     <repo_root>/
-    #     ├── projects/   ← we live somewhere under here
-    #     └── shared/stinkytofu/   ← adapter lives here
-    #
-    # Works regardless of repo directory name (e.g. clones renamed to
-    # ``my-rocm-fork``) and regardless of extra build-tree nesting.
+    # Locate ``<repo_root>/shared/stinkytofu/python_module`` by walking up
+    # from this file until we hit an ancestor containing ``shared/stinkytofu``.
     repo_root = None
     cur = os.path.dirname(os.path.abspath(__file__))
     while True:
@@ -148,10 +126,8 @@ def _load_logical_adapter() -> bool:
     except Exception:
         return False
 
-    # Install the adapter as the ``rocisa`` package itself, and each of
-    # its submodules as ``rocisa.<name>``. Note: we replace the *current*
-    # partially-initialised rocisa entry so that any `from rocisa import X`
-    # executed after this call sees the adapter's X, not ``_rocisa``'s.
+    # Install the adapter as ``rocisa`` and re-export each ``ir_adaptor.*``
+    # submodule under ``rocisa.*`` in ``sys.modules``.
     sys.modules["rocisa"] = _adapter
     for _name, _obj in vars(_adapter).items():
         if isinstance(_obj, types.ModuleType) and _obj.__name__.startswith("ir_adaptor."):
@@ -181,9 +157,7 @@ def _find_stale_sources(so_path, source_roots, build_dir):
 
 
 if _BACKEND == "logical" and _load_logical_adapter():
-    # Adapter is now installed as ``rocisa``. Nothing more to do in this
-    # file - every subsequent ``from rocisa... import ...`` resolves
-    # through sys.modules["rocisa"] (= the adapter package).
+    # Logical adapter active; wiring done inside _load_logical_adapter.
     pass
 else:
     # Default path: original nanobind bindings (Windows-safe import).

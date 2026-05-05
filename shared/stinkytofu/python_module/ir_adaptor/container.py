@@ -1,17 +1,55 @@
+################################################################################
+#
 # Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+################################################################################
 """Shim for ``rocisa.container``.
 
-Source of truth: ``projects/hipblaslt/tensilelite/rocisa/rocisa/src/container.cpp``
-(``init_containers``). Contains modifier descriptors (DS/FLAT/SMEM/...) and
-register wrappers (``RegisterContainer``, ``VCC``, ``EXEC``, ...).
+What this file is:
+    Mirrors ``rocisa/rocisa/src/container.cpp`` — register references
+    (``RegisterContainer``, ``RegName``, ``Holder*``), factory helpers
+    (``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``, ``replaceHolder``),
+    asm modifier descriptors (``DS/FLAT/SMEM/...Modifiers``), hardware
+    aliases (``VCC``, ``EXEC``, ``HWRegContainer``), and small value
+    objects (``ContinuousRegister``, ``MemTokenData``).
 
-logicalIR correspondence: partial. Logical-side has ``StinkyRegister`` +
-``RegType`` (python_bindings.cpp) which subsumes what ``RegisterContainer``
-carries at the instance level, but the modifier classes (DSModifiers etc.)
-are asm-level concerns; logicalIR encodes those as intrinsic attributes on
-each operation rather than as stand-alone container objects. Pure dummies
-this pass.
+What it does (real):
+    - None.
+
+Not yet done (dummy):
+    - ``RegName``, ``RegisterContainer``                      (Step 2)
+    - ``sgpr``, ``vgpr``                                      (Step 3)
+    - ``accvgpr``, ``mgpr``                                   (Step 4)
+    - ``ContinuousRegister``                                  (Step 5)
+    - ``VCC``, ``EXEC``                                       (Step 6)
+    - ``HWRegContainer``                                      (Step 7)
+    - ``Holder``, ``HolderContainer``, ``replaceHolder``      (Step 8)
+    - ``MemTokenData``                                        (Step 10)
+    - Modifier classes (``DS/FLAT/GLOBAL/MUBUF/SMEM/SDWA/DPP/
+      VOP3P/True16Modifiers``) — deferred to instruction-emit phase.
+    - ``Container`` base class.
+
+logicalIR correspondence:
+    ``StinkyRegister`` (``shared/stinkytofu/python_module/src/
+    python_bindings.cpp``) covers the instance-level data carried by
+    ``RegisterContainer``; modifier classes are encoded as intrinsic
+    attributes on each operation, not as stand-alone objects.
 """
 
 from __future__ import annotations
