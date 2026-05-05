@@ -239,3 +239,35 @@ if(NOT WIN32)
         endforeach()
     endforeach()
 endif()
+
+#################################################
+# Mixed-input-type FP8 tests (fast & slow path).#
+# Reproduces production failure where A and B   #
+# have different storage types but share a      #
+# narrower MAC compute-input type (the kernel   #
+# quantizes the wider operand for F8 MFMA).     #
+# See: sk_f8ngemm_quick.yaml F8NH_F8NSS NN.     #
+#################################################
+if(NOT WIN32)
+    foreach(PATH fast slow)
+        if("${PATH}" STREQUAL "fast")
+            set(PATH_FLAGS --tryFastPath)
+        else()
+            set(PATH_FLAGS "")
+        endif()
+
+        # A=F8N, B=Half, both quantized to F8N at the MAC. This is the exact
+        # shape that failed in sk_f8ngemm_quick.yaml's F8NH_F8NSS NN test.
+        # Pre-fix, the fast path skipped the B->F8N quantization while the slow
+        # path applied it, and the two diverged.
+        add_cpu_gemm_test(${PATH}_f8fnuz_x_h_macF8N
+            ARGS ${F16_SIZES} --typeA f8fnuz --typeB f16 --computeInputB f8fnuz --validate ${PATH_FLAGS}
+        )
+        # OCP F8 counterpart (same shape, non-fnuz storage).
+        # NB: BFloat8_fnuz x Half is intentionally absent - the slow path
+        # has no TypedGemm dispatch for that combination.
+        add_cpu_gemm_test(${PATH}_f8_x_h_macF8
+            ARGS ${F16_SIZES} --typeA f8 --typeB f16 --computeInputB f8 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+endif()
