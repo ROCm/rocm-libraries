@@ -471,7 +471,8 @@ class TestSCCClobberFailure:
         # position not by opcode); the rocisa_inst class identity is
         # still on the Failure object for callers that want it (asserted
         # above on lines 465-467).
-        msg = f.format(capture=None)
+        from Tensile.Components.ScheduleCapture import LoopBodyCapture
+        msg = f.format(LoopBodyCapture(instructions=[]))
         assert "Intervening SCC writer" in msg
 
     def test_no_clobber_yields_no_scc_conflict_failure(self):

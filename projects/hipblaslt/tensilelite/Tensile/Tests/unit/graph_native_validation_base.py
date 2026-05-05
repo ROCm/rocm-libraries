@@ -296,7 +296,9 @@ class GraphNativeValidationTest:
     def assert_no_failures(failures: list) -> None:
         """Assert the failure list is empty (positive-test path)."""
         if failures:
-            descriptions = [f"{type(f).__name__}: {f.format()}" for f in failures]
+            from Tensile.Components.ScheduleCapture import LoopBodyCapture
+            empty_cap = LoopBodyCapture(instructions=[])
+            descriptions = [f"{type(f).__name__}: {f.format(empty_cap)}" for f in failures]
             raise AssertionError(
                 f"assert_no_failures: expected empty failure list, got "
                 f"{len(failures)} failures:\n  " + "\n  ".join(descriptions)

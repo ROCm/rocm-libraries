@@ -103,9 +103,13 @@ def test_ordinal(n, expected):
 # =============================================================================
 
 
-def test_format_position_no_capture_returns_idx_only():
+def test_format_position_empty_capture_returns_idx_only():
+    """tagged_inst not in (empty) capture.instructions -> bare '@ idx=N'.
+    Same fallback path that legacy callers triggered with capture=None;
+    the fallback now routes through the tagged_inst-not-found branch
+    instead of a removed top-level short-circuit."""
     node = _make_node("LRA0", "LRA0[0]", 7)
-    assert format_position(node, capture=None) == "@ idx=7"
+    assert format_position(node, LoopBodyCapture(instructions=[])) == "@ idx=7"
 
 
 def test_format_position_excludes_list_suffix_for_plain_mfma():
@@ -177,9 +181,11 @@ def test_order_inverted_failure_format():
     assert "must complete before" not in msg    # generic prose dropped earlier
 
 
-def test_order_inverted_failure_format_no_capture_falls_back():
-    """capture=None path: per-category [N] omitted, just the bare category."""
-    from Tensile.Components.ScheduleCapture import SchedulePosition
+def test_order_inverted_failure_format_empty_capture_falls_back():
+    """tagged_inst not in (empty) capture.instructions: per-category [N]
+    omitted, just the bare category. Same fallback that legacy
+    `capture=None` callers triggered; the short-circuit is gone, but the
+    tagged_inst-not-found branch produces identical output."""
     producer = _make_node("GRB", "GRB", 3)
     consumer = _make_node("LRA1", "LRA1", 2)
     failure = OrderInvertedFailure(
@@ -188,10 +194,10 @@ def test_order_inverted_failure_format_no_capture_falls_back():
         default_producer_position=SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0),
         default_consumer_position=SchedulePosition(loop_index=1, vmfma_index=5, sub_index=0),
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "GRB @ idx=3" in msg
     assert "LRA1 @ idx=2" in msg
-    assert "GRB[" not in msg     # no per-category index without a capture
+    assert "GRB[" not in msg     # no per-category index without a real capture
     assert "LRA1[" not in msg
 
 
@@ -253,15 +259,16 @@ def test_missing_wait_failure_format_cross_iteration():
     assert msg == "SWaitCnt(dscnt) missing between LRA0 @ idx=5 and GRB[0] @ idx=6 (of next iteration)."
 
 
-def test_missing_wait_failure_format_no_capture():
-    """capture=None: per-category [N] omitted; iteration note still works
-    when body_labels are populated on the nodes."""
+def test_missing_wait_failure_format_empty_capture():
+    """Empty capture: per-category [N] omitted via the
+    tagged_inst-not-found fallback; iteration note still works because
+    the loop_index check is independent of capture."""
     producer = _make_node("LRA0", "LRA0", 0)
     consumer = _make_node("MFMA", "MFMA", 2)
     failure = MissingWaitFailure(
         producer=producer, consumer=consumer, counter_kind="vlcnt"
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert msg == "SWaitCnt(vlcnt) missing between LRA0 @ idx=0 and MFMA @ idx=2."
 
 
@@ -278,7 +285,7 @@ def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
         counter_kind="dscnt",
         nearby_other_counter_waits=[wrong_wait],
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert msg == (
         "SWaitCnt(dscnt) missing between LRA0 @ idx=5 and MFMA @ idx=10 "
         "(existing SWaitCnts at idx=7 drain other counters)."
@@ -291,7 +298,7 @@ def test_wait_too_late_failure_format():
     failure = WaitTooLateFailure(
         producer=producer, consumer=consumer, wait_position=SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0)
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "fires at or after the consumer" in msg
     assert "@ idx=12" in msg
     assert "Move the wait earlier" in msg
@@ -322,7 +329,7 @@ def test_wait_too_late_failure_format_cross_iteration():
         producer=producer, consumer=consumer,
         wait_position=SchedulePosition(loop_index=1, vmfma_index=12, sub_index=0),
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "@ idx=10 (of next iteration) is guaranteed" in msg
 
 
@@ -337,7 +344,7 @@ def test_wait_insufficient_failure_format():
         queue_depth_at_wait=5,
         counter_value=2,
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "queue depth at wait = 5" in msg
     assert "counter value (2)" in msg
     assert "Tighten the wait" in msg
@@ -374,7 +381,7 @@ def test_wait_insufficient_failure_format_cross_iteration():
         producer=producer, consumer=consumer, wait=wait,
         queue_depth_at_wait=5, counter_value=2,
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "@ idx=10 (of next iteration)'s producer" in msg
 
 
@@ -384,7 +391,7 @@ def test_missing_barrier_failure_must_start_after_format():
     failure = MissingBarrierFailure(
         producer=producer, consumer=consumer, role="must_start_after"
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "LRA0 -> SWaitCnt(dscnt=0) -> SBarrier -> GRA" in msg
     assert "GRA overwrites the LDS slot read by LRA0" in msg
     assert "(of next iteration)" not in msg
@@ -396,7 +403,7 @@ def test_missing_barrier_failure_needed_by_format():
     failure = MissingBarrierFailure(
         producer=producer, consumer=consumer, role="needed_by"
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "GRA -> SWaitCnt(vlcnt=0) -> SBarrier -> LRA1" in msg
     assert "LRA1 reads the LDS slot written by GRA" in msg
     assert "(of next iteration)" not in msg
@@ -426,7 +433,7 @@ def test_missing_barrier_failure_format_cross_iteration():
     failure = MissingBarrierFailure(
         producer=producer, consumer=consumer, role="must_start_after"
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert msg.endswith("GRA @ idx=2 (of next iteration)."), msg
 
 
@@ -440,7 +447,7 @@ def test_wrong_interleaving_failure_format():
     failure = WrongInterleavingFailure(
         pack=pack, expected_next=expected, actual_next=actual
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "wrong interleaving" in msg
     assert "MiddlePack_a" in msg
     assert "MiddlePack_b" in msg
@@ -458,7 +465,7 @@ def test_timing_too_close_failure_format():
         expected_quad_cycles=2,
         actual_quad_cycles=1,
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "too little gap" in msg
     assert "Expected at least 2 quad-cycles" in msg
     assert "only 1 passed" in msg
@@ -470,7 +477,7 @@ def test_invalid_counter_value_failure_format():
     failure = InvalidCounterValueFailure(
         swait=swait, dscnt=-2, vlcnt=0, vscnt=-1
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "SWaitCnt @ idx=4 is invalid" in msg
     assert "dscnt=-2" in msg
     assert "vlcnt=0" in msg
@@ -480,15 +487,16 @@ def test_invalid_counter_value_failure_format():
 def test_scc_conflict_failure_format_graph_shape():
     """Graph-native shape (mrj.2) — populated by diagnose_missing_edge
     when an SCC reference edge is missing from the subject graph due to
-    an intervening SCC writer. capture=None: bare 'category @ idx=N' for
-    every node; brackets only appear with a capture."""
+    an intervening SCC writer. Empty capture: bare 'category @ idx=N' for
+    every node; brackets only appear when the capture contains the
+    relevant tagged_inst."""
     producer = _make_node("GRIncA", "scc_producer", 4)
     intervening = _make_node("GRIncA", "scc_clobber", 5)
     consumer = _make_node("GRIncA", "scc_consumer", 6)
     failure = SCCConflictFailure(
         producer=producer, consumer=consumer, intervening_writer=intervening,
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "GRIncA @ idx=6's SCC read should resolve" in msg
     assert "producer GRIncA @ idx=4" in msg
     assert "Intervening SCC writer GRIncA @ idx=5" in msg
@@ -540,7 +548,7 @@ def test_swait_count_exceeds_outstanding_failure_format_dscnt():
     failure = SWaitCountExceedsOutstandingFailure(
         swait=swait, counter_kind="dscnt", counter_value=3, outstanding=1
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "SWaitCnt @ idx=8" in msg
     assert "dscnt=3" in msg
     assert "1 DS loads" in msg
@@ -552,7 +560,7 @@ def test_swait_count_exceeds_outstanding_failure_format_vlcnt():
     failure = SWaitCountExceedsOutstandingFailure(
         swait=swait, counter_kind="vlcnt", counter_value=4, outstanding=2
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "vlcnt=4" in msg
     assert "2 VM loads" in msg
 
@@ -566,7 +574,7 @@ def test_out_of_order_sequence_failure_sequence_format():
         bad_index=3,
         prev_value=1,
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "Non-descending-order rule failed" in msg
     assert "schedule key 'GRIncA'" in msg
     assert "sequence [0, 1, 1, 0]" in msg
@@ -582,7 +590,7 @@ def test_out_of_order_sequence_failure_cvt_pair_format():
         bad_index=0,
         prev_value=15,
     )
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert "CVT pair ordering violated" in msg
     assert "PackA0 group 3" in msg
     assert "CVT0 ends at issue_index 15" in msg
@@ -598,7 +606,7 @@ def test_failure_base_format_raises():
     """Subclasses must override format(); the base raises NotImplementedError."""
     f = Failure()
     with pytest.raises(NotImplementedError):
-        f.format(capture=None)
+        f.format(LoopBodyCapture(instructions=[]))
 
 
 def test_format_works_without_reference_in_scope():
@@ -619,5 +627,5 @@ def test_format_works_without_reference_in_scope():
     failure = _build()
     # In this scope, the function's locals are gone — the format must work
     # purely from data on the Failure.
-    msg = failure.format(capture=None)
+    msg = failure.format(LoopBodyCapture(instructions=[]))
     assert isinstance(msg, str) and msg

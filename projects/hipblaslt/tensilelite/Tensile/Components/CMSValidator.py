@@ -1296,7 +1296,13 @@ def verify_swaitcnt_counters(timeline: 'Timeline') -> Optional[str]:
             if isinstance(inst.rocisa_inst, GlobalReadInstruction):
                 outstanding_vm += 1
         elif isinstance(inst, SWait):
-            from Tensile.Components.ScheduleCapture import SWaitCountExceedsOutstandingFailure
+            from Tensile.Components.ScheduleCapture import SWaitCountExceedsOutstandingFailure, LoopBodyCapture
+            # SWaitCountExceedsOutstandingFailure._format_canonical doesn't
+            # consume capture (it just renders swait.issued_at.vmfma_index),
+            # but Failure.format makes capture mandatory at the boundary —
+            # pass an explicit empty capture rather than threading the
+            # timeline through the structural-rule machinery just for this.
+            empty_cap = LoopBodyCapture(instructions=[])
             if inst.dscnt >= 0:
                 if inst.dscnt > outstanding_ds:
                     return SWaitCountExceedsOutstandingFailure(
@@ -1304,7 +1310,7 @@ def verify_swaitcnt_counters(timeline: 'Timeline') -> Optional[str]:
                         counter_kind="dscnt",
                         counter_value=inst.dscnt,
                         outstanding=outstanding_ds,
-                    ).format(capture=None)
+                    ).format(empty_cap)
                 outstanding_ds = inst.dscnt
             if inst.vlcnt >= 0:
                 if inst.vlcnt > outstanding_vm:
@@ -1313,7 +1319,7 @@ def verify_swaitcnt_counters(timeline: 'Timeline') -> Optional[str]:
                         counter_kind="vlcnt",
                         counter_value=inst.vlcnt,
                         outstanding=outstanding_vm,
-                    ).format(capture=None)
+                    ).format(empty_cap)
                 outstanding_vm = inst.vlcnt
 
     return None
@@ -1340,13 +1346,20 @@ def _failure_to_string(result) -> Optional[str]:
     Stack 1 of plans/then-let-s-work-on-jaunty-reddy.md migrates rules
     one at a time. Until every rule emits Failures, this helper supports
     both shapes so the boundary stays stable.
+
+    Failure.format requires a capture; structural rules don't have one
+    in scope, so pass an empty LoopBodyCapture. Formatters that read
+    capture for [N] index lookup will fall through to bare category for
+    these legacy rule paths — an honest acknowledgement that the
+    structural-rule emitter has no per-body context.
     """
     if result is None:
         return None
     if isinstance(result, str):
         return result
     # Typed Failure (from Tensile.Components.ScheduleCapture).
-    return result.format(capture=None)
+    from Tensile.Components.ScheduleCapture import LoopBodyCapture
+    return result.format(LoopBodyCapture(instructions=[]))
 
 
 def validate_timeline(timeline: Timeline) -> Optional[str]:

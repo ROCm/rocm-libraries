@@ -461,22 +461,23 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
-def _node_label(node, capture=None) -> str:
+def _node_label(node, capture) -> str:
     """Render a node as 'category[N]' where N is its 0-based position within
     its category's emit stream in `capture`. Plain MFMAs (category=='MFMA')
     omit the [N] because vmfma_index already serves as their identity. Pack
     categories ('PackA0', 'PackB1', ...) keep [N] because CMS reschedules
     them.
 
+    `capture` is mandatory — formatters always have access to one (the
+    body the Failure was detected in). Pass `LoopBodyCapture(instructions=[])`
+    explicitly if the calling context genuinely lacks a capture.
+
     Falls back to bare `category` when:
-      * capture is None (no per-category counter possible);
       * tagged_inst isn't in capture.instructions (cross-body node);
       * capture.instructions items lack a `category` attribute.
     """
     cat = node.category
     if cat == "MFMA":
-        return cat
-    if capture is None:
         return cat
     tagged = getattr(node, "tagged_inst", None)
     if tagged is None:
@@ -492,7 +493,7 @@ def _node_label(node, capture=None) -> str:
     return f"{cat}[{idx}]"
 
 
-def _node_with_pos(node, capture=None) -> str:
+def _node_with_pos(node, capture) -> str:
     """Render a node as 'category[N] @ idx=M' — the canonical per-Failure
     node reference. Combines `_node_label` (per-category-stream index, MFMA
     omits brackets) with the bare vmfma_index. Used by every Failure
@@ -520,7 +521,7 @@ def _iter_note(producer, consumer) -> str:
     return ""
 
 
-def format_position(node, capture=None) -> str:
+def format_position(node, capture) -> str:
     """Render a node's schedule position with optional list-position suffix.
 
     MFMAs are excluded from the list-position suffix because they aren't
@@ -531,14 +532,14 @@ def format_position(node, capture=None) -> str:
     The discriminator is the category tag, NOT isinstance — MFMAPack's
     multiple inheritance from both Pack and MFMA would confuse isinstance.
 
-    If the node's tagged_inst isn't in the given capture (e.g. when the
-    node is from a different body in the unified 4-body graph), the
-    list-position suffix is silently omitted.
+    `capture` is mandatory. If the node's tagged_inst isn't in the given
+    capture (e.g. when the node is from a different body in the unified
+    4-body graph), the list-position suffix is silently omitted.
     """
     # Accept GraphNode (has `position`) or ValidatorInstruction (has `issued_at`).
     pos = getattr(node, "position", None) or node.issued_at
     base = f"@ idx={pos.vmfma_index}"
-    if capture is None or node.category == "MFMA":
+    if node.category == "MFMA":
         return base
     tagged_inst = getattr(node, "tagged_inst", None)
     if tagged_inst is None:
@@ -559,12 +560,13 @@ class Failure:
     GraphNode.body_label is the source of truth.
     """
 
-    def format(self, capture=None) -> str:
+    def format(self, capture) -> str:
         """Stable boundary method. Delegates to the subclass canonical
-        formatter."""
+        formatter. `capture` is mandatory — pass an explicit
+        `LoopBodyCapture(instructions=[])` if the calling context lacks one."""
         return self._format_canonical(capture)
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         raise NotImplementedError("subclasses must implement _format_canonical()")
 
 
@@ -586,7 +588,7 @@ class OrderInvertedFailure(Failure):
     default_producer_position: object  # SchedulePosition (default-side, for diagnostics)
     default_consumer_position: object  # SchedulePosition (default-side, for diagnostics)
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         return (
             f"{_node_with_pos(self.producer, capture)} is issued after its consumer "
             f"{_node_with_pos(self.consumer, capture)}."
@@ -611,7 +613,7 @@ class MissingWaitFailure(Failure):
     # ^ list[GraphNode] — SWaitCnts present in the window but draining other
     # counters. Empty when no SWaitCnts are in the window at all.
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         # Optional hint when other-counter SWaitCnts exist in the window:
         # the user could extend one of them rather than insert a new SWaitCnt.
         hint = ""
@@ -638,7 +640,7 @@ class WaitTooLateFailure(Failure):
     consumer: object
     wait_position: SchedulePosition
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         return (
             f"{_node_with_pos(self.consumer, capture)}"
             f"{_iter_note(self.producer, self.consumer)} is guaranteed by an "
@@ -658,7 +660,7 @@ class WaitInsufficientFailure(Failure):
     queue_depth_at_wait: int
     counter_value: int
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         wait_pos = getattr(self.wait, 'position', None) or self.wait.issued_at
         return (
             f"{_node_with_pos(self.consumer, capture)}"
@@ -681,7 +683,7 @@ class MissingBarrierFailure(Failure):
     consumer: object
     role: str  # 'must_start_after' | 'needed_by'
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         if self.role == "must_start_after":
             order = (
                 f"{self.producer.category} -> SWaitCnt(dscnt=0) -> SBarrier "
@@ -719,7 +721,7 @@ class WrongInterleavingFailure(Failure):
     expected_next: object  # MiddlePack (pair_consumer) — same shape choice
     actual_next: object  # MiddlePack (next_scheduled_middle_16) — same shape choice
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         # The structural-side `MiddlePack.validate` (CMSValidator.py:420)
         # emits with ValidatorInstructions (carry `issued_at:
         # SchedulePosition`); the graph-side
@@ -752,7 +754,7 @@ class TimingTooCloseFailure(Failure):
     expected_quad_cycles: int
     actual_quad_cycles: int
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         # Producer/consumer may be either a validator-side ValidatorInstruction
         # (carries `issued_at: SchedulePosition`) or a graph-side GraphNode
         # (carries `position: SchedulePosition`). The structural Pack.validate
@@ -786,7 +788,7 @@ class InvalidCounterValueFailure(Failure):
     vlcnt: int
     vscnt: int
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         return (
             f"SWaitCnt @ idx={self.swait.issued_at.vmfma_index} is invalid: "
             f"dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}. "
@@ -816,7 +818,7 @@ class SCCConflictFailure(Failure):
     consumer: object = None             # GraphNode (subject-side SCC reader)
     intervening_writer: object = None   # GraphNode (subject-side SCC writer that clobbered the producer)
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         inter_desc = ""
         if self.intervening_writer is not None:
             inter_desc = (
@@ -841,7 +843,7 @@ class SWaitCountExceedsOutstandingFailure(Failure):
     counter_value: int
     outstanding: int
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         load_kind = "DS loads" if self.counter_kind == "dscnt" else "VM loads"
         return (
             f"SWaitCnt @ idx={self.swait.issued_at.vmfma_index} has "
@@ -865,7 +867,7 @@ class OutOfOrderSequenceFailure(Failure):
     bad_index: int
     prev_value: int
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         if self.kind == "sequence":
             return (
                 f"Non-descending-order rule failed, schedule key "
@@ -900,7 +902,7 @@ class ConstraintViolationFailure(Failure):
     producer: object  # ValidatorInstruction
     consumer: object  # ValidatorInstruction
 
-    def _format_canonical(self, capture=None) -> str:
+    def _format_canonical(self, capture) -> str:
         producer_pos = format_position(self.producer, capture)
         consumer_pos = format_position(self.consumer, capture)
         return (
