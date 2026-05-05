@@ -161,13 +161,24 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const unsigned int zgridsize = 1;
 
     // Determine input/output data type configuration
-    auto ioDataType = _params.x()->data_type();
-    std::string ioTypeString = getKernelParamTypeString(ioDataType);
+    const auto inputDataType = _params.x()->data_type();
+    const auto outputDataType = _params.y()->data_type();
+    const auto scaleDataType = _params.scale()->data_type(); // applies to both scale and bias
+    const auto computeDataType = (_params.invRMS() == nullptr)
+                                     ? hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+                                     : _params.invRMS()->data_type();
+    const std::string inputTypeString = getKernelParamTypeString(inputDataType);
+    const std::string outputTypeString = getKernelParamTypeString(outputDataType);
+    const std::string scaleTypeString = getKernelParamTypeString(scaleDataType);
+    const std::string computeTypeString = getKernelParamTypeString(computeDataType);
 
     // Prepare compilation options
     HipKernelCompileOptions options(_params.x(), deviceProperties);
     options.add("HIP_PLUGIN_RMSNORM_INNER_SIZE", innerSize);
-    options.add("HIP_PLUGIN_RMSNORM_IO_TYPE", ioTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_INPUT_TYPE", inputTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_OUTPUT_TYPE", outputTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_SCALE_TYPE", scaleTypeString);
+    options.add("HIP_PLUGIN_RMSNORM_COMPUTE_TYPE", computeTypeString);
     options.add("HIP_PLUGIN_RMSNORM_LOCAL_SIZE", xlocalsize);
 
     // Compile kernel and configure launch dimensions

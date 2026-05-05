@@ -404,6 +404,42 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
                                             char* serializedJsonGraph);
 
 /*!
+ * @brief Retrieves the serialized backend execution plan from a finalized execution plan.
+ *
+ * Uses the standard two-call pattern: call first with @p serializedPlan set to @c nullptr to query
+ * the required buffer size, then call again with a caller-allocated buffer to receive the data.
+ * The descriptor must be a finalized HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR. The returned bytes
+ * contain a hipDNN FlatBuffer envelope with routing metadata, plan tensor UIDs, and opaque
+ * plugin-specific execution context bytes.
+ *
+ * @param [in]  descriptor        A finalized execution plan descriptor.
+ * @param [in]  requestedByteSize Size of the caller-allocated buffer in bytes.
+ *                                Ignored when @p serializedPlan is @c nullptr.
+ * @param [out] planByteSize      Pointer to receive the size of the serialized plan in bytes.
+ * @param [out] serializedPlan    Caller-allocated buffer to receive the serialized plan data,
+ *                                or @c nullptr to query the required size only.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedExecutionPlan_ext(hipdnnBackendDescriptor_t descriptor,
+                                                size_t requestedByteSize,
+                                                size_t* planByteSize,
+                                                uint8_t* serializedPlan);
+
+/*!
+ * @brief Creates and deserializes a backend execution plan descriptor.
+ *
+ * @param [in]  handle         A hipDNN handle used to access loaded engine plugins.
+ * @param [out] descriptor     Pointer to the created execution plan descriptor.
+ * @param [in]  serializedPlan Pointer to bytes produced by hipdnnBackendGetSerializedExecutionPlan_ext().
+ * @param [in]  planByteSize   Size of @p serializedPlan in bytes.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendCreateAndDeserializeExecutionPlan_ext(hipdnnHandle_t handle,
+                                                       hipdnnBackendDescriptor_t* descriptor,
+                                                       const uint8_t* serializedPlan,
+                                                       size_t planByteSize);
+
+/*!
  * @brief Creates and deserializes a graph from a JSON string into a backend descriptor.
  *
  * This function creates a backend descriptor and deserializes a graph from a JSON string
