@@ -29,6 +29,7 @@
 #include <optional>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
@@ -44,12 +45,13 @@ namespace stinkytofu {
 #include "hardware/gfxIsa.inc"
 
 // Represents a single assembly instruction.
-struct StinkyInstruction : public IRBase {
+struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     friend class IRBase;
     friend class AsmIRBuilder;
     friend class DefUseChainUpdater;
     friend class DefUseChainBuilder;
 
+    const HwInstDesc* hwInstDesc;
     int issueCycles;
     int latencyCycles;
 
@@ -62,8 +64,6 @@ struct StinkyInstruction : public IRBase {
     // instructions that DEFINE the values USED by this instruction
     // (producers of this instruction's operands).
     std::vector<StinkyInstruction*> sources;
-
-    const HwInstDesc* hwInstDesc;
 
     // Modifiers are extra bits/fields in the instruction encoding that
     // tweak how the operation is performed, without needing a completely
@@ -258,7 +258,7 @@ struct StinkyInstruction : public IRBase {
 
 /// Builder for assembly-level IR.
 /// In passes, create StinkyInstruction only through this builder.
-class AsmIRBuilder : public IRBuilder {
+class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
    public:
     const GfxArchID arch;
 
@@ -309,9 +309,9 @@ class AsmIRBuilder : public IRBuilder {
     AsmIRBuilder(BasicBlock& bb, GfxArchID arch) : IRBuilder(bb), arch(arch) {}
 };
 
-const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
-const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
-uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
 
 // Processing StinkyTofu IR.
 class StinkyInstPass : public Pass {};

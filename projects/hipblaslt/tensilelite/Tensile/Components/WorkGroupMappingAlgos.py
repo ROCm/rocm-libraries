@@ -109,7 +109,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
         Use chiplet_transform_chunk, skip classic wgmxcc remapping
         """        
         SgprIndex = "WorkGroup0"
-        SgprChunkSize = writer.sgprPool.checkOut(1)
+        SgprChunkSize = writer.sgprPool.checkOut(1, preventOverflow=False)
         module.add(SLShiftRightB32(dst=sgpr(SgprChunkSize), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get WGMCHUNK"))
         module.add(SAndB32(dst=sgpr(SgprChunkSize), src0=sgpr(SgprChunkSize), src1=hex(1023), comment="Get WGMCHUNK"))
         module.addComment0("remap WGs if WGMCHUNK > 1")

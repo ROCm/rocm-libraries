@@ -35,6 +35,7 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Macros.hpp>
 
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     template <typename T>
@@ -500,3 +501,4 @@ namespace TensileLite
         size_t counter = 0;
     };
 } // namespace TensileLite
+TENSILE_HIDDEN_END
