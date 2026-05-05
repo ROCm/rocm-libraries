@@ -145,6 +145,8 @@ namespace TensileLite
 
         void loadLibrary(const int index) const
         {
+            // TODO(#7080): point-key + upper_bound misses on above-largest and
+            // gap-between-keys; switch to range-encoded mapping.
             auto it = libraryMapping.upper_bound(index);
             if(it == libraryMapping.begin())
             {
