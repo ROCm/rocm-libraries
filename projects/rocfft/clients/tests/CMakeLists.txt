@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.24 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -271,16 +271,14 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
   )
 endif()
 
-find_package( GTest QUIET )
-
-if( GTest_FOUND )
-    target_link_libraries( rocfft-test PRIVATE GTest::gtest )
-else()
-  include( ../cmake/build-gtest.cmake )
-  add_dependencies( rocfft-test gtest )
-  list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
-  list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
-endif()
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+  URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
+  FIND_PACKAGE_ARGS 1.17 NAMES GTest
+)
+FetchContent_MakeAvailable( googletest )
 
 target_compile_options( rocfft-test PRIVATE ${WARNING_FLAGS} -Wno-cpp )
 
@@ -302,6 +300,7 @@ target_link_libraries( rocfft-test
   PRIVATE
   hip::device
   roc::rocfft
+  GTest::gtest_main
   ${ROCFFT_SQLITE_LIB}
   ${rocfft-test_link_libs}
   )

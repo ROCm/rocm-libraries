@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.24 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -283,20 +283,17 @@ foreach( target ${TEST_TARGETS} )
   rocm_install(TARGETS ${target} COMPONENT tests)
 endforeach()
 
-find_package( GTest 1.17.0 )
-
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+  URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
+  FIND_PACKAGE_ARGS 1.17 NAMES GTest
+)
+FetchContent_MakeAvailable( googletest )
 
 set( hipfft-test_include_dirs )
 set( hipfft-test_link_libs )
-
-if( GTest_FOUND AND GTest_VERSION VERSION_GREATER_EQUAL "1.17" )
-    target_link_libraries( hipfft-test PRIVATE GTest::gtest )
-else()
-  # gtest build by the hipFFT
-  include( ../cmake/build-gtest.cmake )
-  target_include_directories( hipfft-test PRIVATE ${GTEST_INCLUDE_DIRS} )
-  target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
-endif()
 
 # tests have callback functions, which need to be built as relocatable device code
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
@@ -316,6 +313,7 @@ endif( )
 target_link_libraries( hipfft-test
   PRIVATE
   Threads::Threads
+  GTest::gtest_main
   ${CMAKE_DL_LIBS}
   )
 

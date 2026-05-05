@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.24 )
 
 # We use C++20 features, this will add compile option: -std=c++20
 set( CMAKE_CXX_STANDARD 20 )
