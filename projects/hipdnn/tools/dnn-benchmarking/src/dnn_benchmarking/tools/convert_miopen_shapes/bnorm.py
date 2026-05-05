@@ -111,7 +111,7 @@ class BnormParams:
             H=get_int_arg(args, "-H", 32),
             W=get_int_arg(args, "-W", 32),
             D=D,
-            layout=Layout(args["-L"]) if "-L" in args else default_layout,
+            layout=Layout.parse(args.get("-L"), default_layout),
             mode=mode,
             forw=get_int_arg(args, "--forw", 1),
             back=get_int_arg(args, "--back", 0),

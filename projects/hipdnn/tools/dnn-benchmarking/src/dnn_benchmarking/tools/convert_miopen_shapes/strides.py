@@ -14,6 +14,18 @@ class Layout(enum.Enum):
     NCDHW = "NCDHW"
     NDHWC = "NDHWC"
 
+    @classmethod
+    def parse(cls, value: str | None, default: "Layout") -> "Layout":
+        if value is None:
+            return default
+        try:
+            return cls(value)
+        except ValueError:
+            raise ValueError(
+                f"Unknown layout {value!r}, "
+                f"expected one of {[l.value for l in cls]}"
+            )
+
 
 def nchw_strides(N: int, C: int, H: int, W: int) -> List[int]:
     return [C * H * W, H * W, W, 1]

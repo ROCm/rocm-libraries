@@ -8,6 +8,7 @@ import pytest
 from dnn_benchmarking.tools.convert_miopen_shapes import (
     BNORM_FLAG_ALIASES,
     CONV_FLAG_ALIASES,
+    ConvMode,
     ConvParams,
     build_bnorm_json,
     build_conv_json,
@@ -249,7 +250,7 @@ class TestBuildConvJson:
         assert graph["nodes"][0]["parameters"]["conv_mode"] == "CROSS_CORRELATION"
 
     def test_conv_mode_trans_produces_convolution(self) -> None:
-        p = self._make_params(conv_mode="CONVOLUTION")
+        p = self._make_params(conv_mode=ConvMode.CONVOLUTION)
         graph = build_conv_json(p)
         assert graph["nodes"][0]["parameters"]["conv_mode"] == "CONVOLUTION"
 
@@ -264,12 +265,12 @@ class TestBuildConvJson:
             "-m": "trans",
         }
         p = ConvParams.from_args(args)
-        assert p.conv_mode == "CONVOLUTION"
+        assert p.conv_mode is ConvMode.CONVOLUTION
 
     def test_conv_mode_default_is_conv(self) -> None:
         args = {"-n": "1", "-c": "4", "-H": "4", "-W": "4", "-k": "8", "-F": "1"}
         p = ConvParams.from_args(args)
-        assert p.conv_mode == "CROSS_CORRELATION"
+        assert p.conv_mode is ConvMode.CROSS_CORRELATION
 
     def test_conv_mode_long_flag(self) -> None:
         args = {
@@ -282,7 +283,7 @@ class TestBuildConvJson:
             "--mode": "trans",
         }
         p = ConvParams.from_args(args)
-        assert p.conv_mode == "CONVOLUTION"
+        assert p.conv_mode is ConvMode.CONVOLUTION
 
     def test_conv_mode_invalid_raises(self) -> None:
         args = {

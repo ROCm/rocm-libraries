@@ -199,6 +199,8 @@ class ConvParams:
                     stacklevel=2,
                 )
 
+        default_layout = Layout.NCDHW if is_3d else Layout.NCHW
+
         return cls(
             N=get_int_arg(args, "-n", 100),
             C=C,
@@ -216,9 +218,9 @@ class ConvParams:
             groups=groups,
             F=get_int_arg(args, "-F", 0),
             spatial_dim=spatial_dim,
-            in_layout=Layout(args.get("--in_layout", "NCDHW" if is_3d else "NCHW")),
-            fil_layout=Layout(args.get("--fil_layout", "NCDHW" if is_3d else "NCHW")),
-            out_layout=Layout(args.get("--out_layout", "NCDHW" if is_3d else "NCHW")),
+            in_layout=Layout.parse(args.get("--in_layout"), default_layout),
+            fil_layout=Layout.parse(args.get("--fil_layout"), default_layout),
+            out_layout=Layout.parse(args.get("--out_layout"), default_layout),
             conv_mode=conv_mode,
             D=get_int_arg(args, "--in_d", 32) if is_3d else 0,
             D_f=D_f,
@@ -254,7 +256,7 @@ def build_conv_json(p: ConvParams, io_type: str = "bfloat16") -> Dict[str, Any]:
         w_dims = [p.K, Cg, p.R, p.S]
         y_dims = [p.N, p.K, H_out, W_out]
         x_strides = _input_strides(p.in_layout, p.N, p.C, p.H, p.W)
-        w_strides = _weight_strides(p.K, Cg, p.R, p.S)
+        w_strides = _weight_strides(p.K, Cg, p.R, p.S, layout=p.fil_layout)
         y_strides = _input_strides(p.out_layout, p.N, p.K, H_out, W_out)
         pre_pad = [p.pad_h, p.pad_w]
         post_pad = [p.pad_h, p.pad_w]
