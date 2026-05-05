@@ -184,3 +184,37 @@ TEST(FmhaBwdOGradDotO, GridSizeExact)
     EXPECT_EQ(g.y, 1u);
     EXPECT_EQ(g.z, 1u);
 }
+
+// ============================================================================
+// Grid size: multi-tile coverage
+// ============================================================================
+
+TEST(FmhaBwdOGradDotO, GridSizeMultiTileExact)
+{
+    // Exact divide: no partial-last-tile path.
+    const auto g =
+        ograd_dot_o_grid_size(/*batch=*/2, /*nhead=*/8, /*seqlen_q=*/512, /*tile_m0=*/64);
+    EXPECT_EQ(g.x, 8u);
+    EXPECT_EQ(g.y, 8u);
+    EXPECT_EQ(g.z, 2u);
+}
+
+TEST(FmhaBwdOGradDotO, GridSizeMultiTilePartialLastMin)
+{
+    // Ceil at N*tile + 1 edge: partial last tile covers 1 element.
+    const auto g =
+        ograd_dot_o_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/257, /*tile_m0=*/64);
+    EXPECT_EQ(g.x, 5u);
+    EXPECT_EQ(g.y, 1u);
+    EXPECT_EQ(g.z, 1u);
+}
+
+TEST(FmhaBwdOGradDotO, GridSizeMultiTilePartialLastMax)
+{
+    // Ceil at (N+1)*tile - 1 edge: partial last tile covers tile-1 elements.
+    const auto g =
+        ograd_dot_o_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/319, /*tile_m0=*/64);
+    EXPECT_EQ(g.x, 5u);
+    EXPECT_EQ(g.y, 1u);
+    EXPECT_EQ(g.z, 1u);
+}

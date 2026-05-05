@@ -458,7 +458,7 @@ TEST(FmhaBwdDqDkDv, RequiredTensorsGroupIncludesSeqSlots)
 
 TEST(FmhaBwdDqDkDv, GridSizeBasic)
 {
-    const auto g = dqdkdv_grid_size(/*batch=*/2, /*nhead=*/8, /*seqlen_q=*/256, /*block_n0=*/128);
+    const auto g = dqdkdv_grid_size(/*batch=*/2, /*nhead=*/8, /*seqlen_k=*/256, /*block_n0=*/128);
     EXPECT_EQ(g.x, 2u);
     EXPECT_EQ(g.y, 8u);
     EXPECT_EQ(g.z, 2u);
@@ -466,8 +466,39 @@ TEST(FmhaBwdDqDkDv, GridSizeBasic)
 
 TEST(FmhaBwdDqDkDv, GridSizeCeil)
 {
-    const auto g = dqdkdv_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_q=*/129, /*block_n0=*/128);
+    const auto g = dqdkdv_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_k=*/129, /*block_n0=*/128);
     EXPECT_EQ(g.x, 2u);
+    EXPECT_EQ(g.y, 1u);
+    EXPECT_EQ(g.z, 1u);
+}
+
+// ============================================================================
+// Grid size: multi-tile coverage
+// ============================================================================
+
+TEST(FmhaBwdDqDkDv, GridSizeMultiTileExact)
+{
+    // Exact divide: no partial-last-tile path.
+    const auto g = dqdkdv_grid_size(/*batch=*/2, /*nhead=*/8, /*seqlen_k=*/512, /*block_n0=*/128);
+    EXPECT_EQ(g.x, 4u);
+    EXPECT_EQ(g.y, 8u);
+    EXPECT_EQ(g.z, 2u);
+}
+
+TEST(FmhaBwdDqDkDv, GridSizeMultiTilePartialLastMin)
+{
+    // Ceil at N*tile + 1 edge: partial last tile covers 1 element.
+    const auto g = dqdkdv_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_k=*/257, /*block_n0=*/128);
+    EXPECT_EQ(g.x, 3u);
+    EXPECT_EQ(g.y, 1u);
+    EXPECT_EQ(g.z, 1u);
+}
+
+TEST(FmhaBwdDqDkDv, GridSizeMultiTilePartialLastMax)
+{
+    // Ceil at (N+1)*tile - 1 edge: partial last tile covers tile-1 elements.
+    const auto g = dqdkdv_grid_size(/*batch=*/1, /*nhead=*/1, /*seqlen_k=*/383, /*block_n0=*/128);
+    EXPECT_EQ(g.x, 3u);
     EXPECT_EQ(g.y, 1u);
     EXPECT_EQ(g.z, 1u);
 }
