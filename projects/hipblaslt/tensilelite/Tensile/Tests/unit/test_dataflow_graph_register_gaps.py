@@ -840,17 +840,24 @@ class TestMFMAQuadCycleGap:
     # discriminating dispatch condition rather than only pinning zero-gap
     # behavior — see bead "What's still missing" for the 5 scenarios.
     #
-    # Note on cmw formula: post-cmw, `_quad_cycle_gap_ok` returns
-    # `actual = slot_delta * (1 + finish) - 1 + subiter_delta` (sound
-    # under-estimate). For finish=3 (standard MFMA) this gives:
-    #     slot_delta=0 → actual=0   (FAIL: 0 < 3)
-    #     slot_delta=1 → actual=3   (PASS: meets threshold)
-    #     slot_delta=2 → actual=7   (PASS) +1 if subiter boundary crossed
-    # Therefore, the only failure-producing slot configuration in the
-    # current formula is slot_delta == 0 (or negative). Tests below
-    # discriminate via the `actual` field's exact value at the boundary,
-    # via cross-graph routing through diagnose_missing_edge, and via
-    # subiter-aware variations that change `actual` without changing pass.
+    # Note on `_quad_cycle_gap_ok` arithmetic: bead `nk0` replaced the
+    # earlier slot-delta approximation with `cumulative_issue_cycles`, a
+    # cycle-exact walk over the captured stream that mirrors
+    # `CMSValidator.precompute_issue_times`. `actual` is now the real
+    # delivered gap between the producer's issue cycle and the consumer's
+    # issue cycle (minus 1), accounting for per-instruction issue costs,
+    # the producer's `mfma_free_at` gate, and MFMA type-switch stalls.
+    # For two standard MFMAs (finish=3) with no intervening instructions
+    # this yields:
+    #     same vmfma_index   → actual=3 (consumer waits on mfma_free=4;
+    #                                    gap = 4-0-1 = 3, PASS)
+    #     consecutive slots  → actual=3 (PASS at the threshold)
+    # The previous `slot_delta * (1 + finish) - 1 + subiter_delta`
+    # formula is gone — it under-estimated densely-populated streams
+    # and over-estimated sparse ones. Tests below discriminate via the
+    # `actual` field's exact value at the boundary, via cross-graph
+    # routing through diagnose_missing_edge, and via stream variations
+    # that change `actual` without changing pass.
     # -------------------------------------------------------------------------
 
     def test_mfma_acc_chain_diagnose_missing_edge_dispatch_no_failure(self):
@@ -1196,18 +1203,20 @@ class TestMFMAQuadCycleGap:
         )
 
     def test_mfma_pack_acc_chain_meets_finish_1_no_failure(self):
-        """4x4 PackMFMA producer (finish=1) with a consumer at slot_delta=1
-        gives an actual gap of `slot_delta * (1 + finish) - 1 == 1` quad-cycle —
-        EXACTLY meets the 1-quad-cycle threshold, so no TimingTooCloseFailure
-        is emitted. Pre-e7w with the wrong finish=3 default this would have
-        been mis-flagged as too close."""
+        """4x4 PackMFMA producer (finish=1) with a consumer at consecutive
+        vmfma_index. Bead `nk0` cycle-exact walk: producer issues at 0,
+        mfma_free_at=2 (4x4 finish=1 → +1+finish=2). Consumer issues at
+        max(1, 2)=2; gap = 2-0-1 = 1 quad-cycle — EXACTLY meets the
+        1-quad-cycle threshold, so no TimingTooCloseFailure is emitted.
+        Pre-e7w with the wrong finish=3 default this would have been
+        mis-flagged as too close."""
         cap = make_capture(BODY_LABEL_ML, [
             make_lr(8, 4, 64, slot=0, category="LRA0"),
             make_swait(slot=1, dscnt=0),
             make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
                       slot=2, a_src_count=2,
                       variant=[4, 4, 4, 16]),
-            # Consumer at next vmfma_index — slot_delta=1, finish=1 → actual=1.
+            # Consumer at next vmfma_index — cycle-exact walk yields actual=1.
             make_mfma(c_dst_start=4, a_src_start=0, b_src_start=32,
                       slot=3, a_src_count=2),
         ])
@@ -1219,8 +1228,8 @@ class TestMFMAQuadCycleGap:
             and f.consumer.category == "MFMA"
             for f in failures
         ), (
-            f"slot_delta=1 with 4x4 PackMFMA finish=1 gives actual=1 == "
-            f"expected=1 — should NOT emit TimingTooCloseFailure. Got: "
+            f"Consecutive vmfma with 4x4 PackMFMA finish=1 gives actual=1 "
+            f"== expected=1 — should NOT emit TimingTooCloseFailure. Got: "
             f"{failures}"
         )
 
@@ -1390,8 +1399,9 @@ class TestMFMAQuadCycleGap:
             and getattr(f.producer, "category", "").startswith("Pack")
         ]
         assert not cvt_timing, (
-            f"slot_delta=2 with CVT finish=0 should meet the 2-quad-cycle "
-            f"threshold (no TimingTooCloseFailure). Got: {failures}"
+            f"Cycle-exact walk over CVT + 2 intervening LRs gives "
+            f"actual=2, meeting the 2-quad-cycle threshold "
+            f"(no TimingTooCloseFailure). Got: {failures}"
         )
 
     def test_cvt_pack_routed_to_quadcycle_not_alu(self):
@@ -1901,7 +1911,7 @@ class TestMFMAQuadCycleGap:
         ]
         assert cvt_timing, (
             f"Expected TimingTooCloseFailure on CVTPack->MFMA edge with "
-            f"slot_delta=2 and no intervening (actual=1). Got: "
+            f"one intervening LR (cycle-exact actual=1). Got: "
             f"{[type(f).__name__ for f in failures]}"
         )
         f = cvt_timing[0]
@@ -1912,8 +1922,8 @@ class TestMFMAQuadCycleGap:
         # Decisive parity assertion vs deleted structural test: actual must
         # be EXACTLY 1 (off-by-one boundary), not 0 and not 2.
         assert f.actual_quad_cycles == 1, (
-            f"slot_delta=2 with finish_cvt=0 and 0 intervening → "
-            f"actual = 2*1 - 1 + 0 = 1. Got actual="
+            f"cumulative_issue_cycles walk: CVT(1) + 1*LR(1) before MFMA → "
+            f"c_issue=2; gap = 2-0-1 = 1. Got actual="
             f"{f.actual_quad_cycles}. Mirrors deleted "
             f"TestValidatePackTF32::test_failing_not_enough_time_CVT1_MFMA "
             f"which pinned actual=1 on the structural side."
