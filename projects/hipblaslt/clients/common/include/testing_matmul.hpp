@@ -3984,25 +3984,113 @@ void testing_matmul_with_bias(const Arguments& arg,
         };
 
         auto verifyMixedValidityContract = [&]() {
-            std::vector<int> mixedIndices = validIndices;
-            mixedIndices.push_back(std::numeric_limits<int>::max());
-            std::vector<hipblasLtMatmulHeuristicResult_t> mixedOut;
-            EXPECT_HIPBLAS_STATUS(
-                hipblaslt_ext::getAlgosFromIndex(handle, mixedIndices, mixedOut),
-                HIPBLAS_STATUS_INVALID_VALUE);
+            auto verifyShape = [&](const char*             shapeName,
+                                   const std::vector<int>& indices,
+                                   hipblasStatus_t         expectedStatus,
+                                   size_t                  expectedValidCount) {
+                std::vector<hipblasLtMatmulHeuristicResult_t> mixedOut;
+                std::vector<int>                              indicesCopy = indices;
+                const auto                                    status
+                    = hipblaslt_ext::getAlgosFromIndex(handle, indicesCopy, mixedOut);
+                if(status != expectedStatus || mixedOut.size() != expectedValidCount)
+                {
+                    hipblaslt_cerr
+                        << "verifyMixedValidityContract[" << shapeName
+                        << "]: status=" << hipblas_status_to_string(status) << " (expected "
+                        << hipblas_status_to_string(expectedStatus)
+                        << "), mixedOut.size()=" << mixedOut.size() << " (expected "
+                        << expectedValidCount << ")" << std::endl;
+                }
+                EXPECT_HIPBLAS_STATUS(status, expectedStatus);
 #ifdef GOOGLE_TEST
-            EXPECT_EQ(mixedOut.size(), validIndices.size());
+                EXPECT_EQ(mixedOut.size(), expectedValidCount) << "shape: " << shapeName;
 #endif
+            };
+
+            const size_t numValid = validIndices.size();
+
+            {
+                std::vector<int> shape = validIndices;
+                shape.push_back(std::numeric_limits<int>::max());
+                verifyShape("trailing-invalid", shape, HIPBLAS_STATUS_INVALID_VALUE, numValid);
+            }
+            {
+                std::vector<int> shape = validIndices;
+                shape.insert(shape.begin() + (numValid / 2),
+                             std::numeric_limits<int>::max());
+                verifyShape("middle-invalid", shape, HIPBLAS_STATUS_INVALID_VALUE, numValid);
+            }
+            {
+                std::vector<int> shape = validIndices;
+                std::reverse(shape.begin(), shape.end());
+                verifyShape("reversed", shape, HIPBLAS_STATUS_SUCCESS, numValid);
+            }
+            {
+                std::vector<int> shape;
+                shape.reserve(2 * numValid);
+                for(int idx : validIndices)
+                {
+                    shape.push_back(idx);
+                    shape.push_back(idx);
+                }
+                verifyShape("duplicated", shape, HIPBLAS_STATUS_SUCCESS, 2 * numValid);
+            }
+            {
+                verifyShape("empty", {}, HIPBLAS_STATUS_SUCCESS, 0);
+            }
+            {
+                // INT_MIN is avoided here because under HIPBLASLT_USE_ROCROLLER negative
+                // indices route to a different (rocroller) code path; two large positive
+                // out-of-range values pin the all-miss return in both build configs.
+                const std::vector<int> shape{std::numeric_limits<int>::max(),
+                                             std::numeric_limits<int>::max() - 1};
+                verifyShape("all-invalid", shape, HIPBLAS_STATUS_INVALID_VALUE, 0);
+            }
         };
 
         searchForSupportedAlgoViaIndexAPI();
 
-        if(!indicesAreDiscovered && selectionWasAttempted)
+        if(!indicesAreDiscovered)
         {
-            CHECK_SOLUTION_FOUND(heuristicResult.size());
+            if(!selectionWasAttempted)
+            {
+                hipblaslt_cerr
+                    << "MatmulAlgoIndex: explicit solution_index=" << arg.solution_index
+                    << " returned no candidates from getAlgosFromIndex() (M=" << M[0]
+                    << " N=" << N[0] << " K=" << K[0] << " batch=" << num_batches[0]
+                    << " transA=" << arg.transA << " transB=" << arg.transB
+                    << " a=" << hip_datatype_to_string(arg.a_type)
+                    << " b=" << hip_datatype_to_string(arg.b_type)
+                    << " c=" << hip_datatype_to_string(arg.c_type)
+                    << " d=" << hip_datatype_to_string(arg.d_type)
+                    << " compute=" << hipblas_computetype_to_string(arg.compute_type) << ")"
+                    << std::endl;
+                CHECK_SOLUTION_FOUND(0);
+            }
+            else
+            {
+                CHECK_SOLUTION_FOUND(heuristicResult.size());
+            }
         }
-        else if(indicesAreDiscovered && !validIndices.empty())
+        else if(!validIndices.empty())
         {
+            if(heuristicResult.empty())
+            {
+                hipblaslt_cerr
+                    << "MatmulAlgoIndex: " << validIndices.size()
+                    << " algo indices discovered via getAllAlgos() but none produced a "
+                       "viable algo+tuning under the workspace budget (M="
+                    << M[0] << " N=" << N[0] << " K=" << K[0]
+                    << " batch=" << num_batches[0] << " transA=" << arg.transA
+                    << " transB=" << arg.transB
+                    << " a=" << hip_datatype_to_string(arg.a_type)
+                    << " b=" << hip_datatype_to_string(arg.b_type)
+                    << " c=" << hip_datatype_to_string(arg.c_type)
+                    << " d=" << hip_datatype_to_string(arg.d_type)
+                    << " compute=" << hipblas_computetype_to_string(arg.compute_type) << ")"
+                    << std::endl;
+                CHECK_SOLUTION_FOUND(0);
+            }
             verifyMixedValidityContract();
         }
     }
