@@ -2597,3 +2597,73 @@ class TestBuildLoopVariants_PGR0:
         sched.emit()
         nll = sched.build_nll()
         assert nll == [[[]]]
+
+
+class TestBuildTailloopPGR0:
+
+    def test_assembly_fp4_256x256(self):
+        """Full pipeline: display generated assembly for FP4 tailloop."""
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+
+            print("FP4 256x256 tailloop assembly:")
+            module = sched._emitLoop(writer, kernel, "TAILLOOP",
+                                      sched._tailloop_emitted,
+                                      schedule=False)
+            for inst in module.flatitems():
+                print(f"  {str(inst).rstrip()}")
+
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_assembly_bf16_320x320_1x5(self):
+        """Full pipeline: BF16 320x320 tailloop with 1x5 partitions."""
+        kernel = create_kernel(320, 320, fp4=False)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=False)
+
+        cfg = SchedulerConfig(
+            numMFMATilesM=tiA.localMMATileGrid[0],
+            numMFMATilesN=tiB.localMMATileGrid[0],
+            numSubIterK=tiA.localMMATileGrid[1],
+            lrA=ReadGranularity(mn=1, k=1),
+            lrB=ReadGranularity(mn=1, k=1),
+            grA=ReadGranularity(mn=1, k=2),
+            grB=ReadGranularity(mn=1, k=2),
+            numPartitionsM=1,
+            numPartitionsN=5,
+            pgr=2,
+        )
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB)
+
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+            )
+
+            print("BF16 320x320 1x5 tailloop assembly:")
+            module = sched._emitLoop(writer, kernel, "TAILLOOP",
+                                      sched._tailloop_emitted,
+                                      schedule=False)
+            for inst in module.flatitems():
+                print(f"  {str(inst).rstrip()}")
+
+        finally:
+            sched.deallocVgprTiles(writer)
