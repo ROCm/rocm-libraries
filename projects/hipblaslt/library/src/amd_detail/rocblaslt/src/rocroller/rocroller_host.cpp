@@ -303,15 +303,15 @@ rocRoller::DataType hipDataType_to_rocRoller_type(hipDataType type)
 {
     // Older versions of ROCm do not have these types defined,
     // so they need to be handled specially.
-    if(static_cast<int>(type) == HIP_R_6F_E2M3_EXT)
+    if(static_cast<int>(type) == HIP_R_6F_E2M3)
     {
         return rocRoller::DataType::FP6;
     }
-    if(static_cast<int>(type) == HIP_R_6F_E3M2_EXT)
+    if(static_cast<int>(type) == HIP_R_6F_E3M2)
     {
         return rocRoller::DataType::BF6;
     }
-    if(static_cast<int>(type) == HIP_R_4F_E2M1_EXT)
+    if(static_cast<int>(type) == HIP_R_4F_E2M1)
     {
         return rocRoller::DataType::FP4;
     }

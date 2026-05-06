@@ -157,6 +157,7 @@ def _rmtree(path: Path):
         "build_type": "CMake build type: Release, Debug, RelWithDebInfo (default: Release).",
         "tests": "Build unit tests (default: ON when building standalone).",
         "python": "Build Python bindings.",
+        "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
@@ -168,6 +169,7 @@ def build(
     build_type="Release",
     tests=True,
     python=False,
+    static=False,
     jobs=None,
     clean=False,
     rocm_path=None,
@@ -186,6 +188,7 @@ def build(
 
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
+        f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
     ]
@@ -194,6 +197,20 @@ def build(
 
     if sys.platform == "win32":
         _setup_msvc_env()
+
+        _vcpkg_toolchain_path = None
+        _vcpkg = shutil.which("vcpkg")
+        if _vcpkg:
+            _vcpkg_root = Path(_vcpkg).resolve().parent
+            _vcpkg_tc = _vcpkg_root / "scripts/buildsystems/vcpkg.cmake"
+            if _vcpkg_tc.exists():
+                _vcpkg_toolchain_path = _vcpkg_tc.as_posix()
+
+        sep = os.pathsep
+        rocm_bin_dirs = [f"{rocm_s}/bin", f"{rocm_s}/lib/llvm/bin"]
+        os.environ["PATH"] = sep.join(rocm_bin_dirs) + sep + os.environ.get("PATH", "")
+        os.environ["ROCM_PATH"] = rocm_s
+        os.environ["HIP_PATH"] = rocm_s
 
         _cxx = shutil.which("amdclang++") or shutil.which("amdclang++.exe")
         _cc = shutil.which("amdclang") or shutil.which("amdclang.exe")
@@ -218,12 +235,6 @@ def build(
         if rc:
             compiler_opts.append(f'"-DCMAKE_RC_COMPILER={_normalized(rc)}"')
 
-        sep = os.pathsep
-        rocm_bin_dirs = [f"{rocm_s}/bin", f"{rocm_s}/lib/llvm/bin"]
-        os.environ["PATH"] = sep.join(rocm_bin_dirs) + sep + os.environ.get("PATH", "")
-        os.environ["ROCM_PATH"] = rocm_s
-        os.environ["HIP_PATH"] = rocm_s
-
         # CMake's default ar-style archiver syntax (qc flags) is incompatible
         # with lib.exe. Generate a toolchain file that overrides the archive
         # command to use lib.exe's /OUT: syntax.
@@ -231,12 +242,18 @@ def build(
         if lib_exe:
             lib_posix = Path(lib_exe).as_posix()
             toolchain_file = bld / "windows_toolchain.cmake"
-            toolchain_file.write_text(
+            tc_content = ""
+            if _vcpkg_toolchain_path:
+                tc_content += f'include("{_vcpkg_toolchain_path}")\n'
+            tc_content += (
                 f'set(CMAKE_AR "{lib_posix}" CACHE FILEPATH "" FORCE)\n'
                 'set(CMAKE_CXX_CREATE_STATIC_LIBRARY "<CMAKE_AR> /OUT:<TARGET> <LINK_FLAGS> <OBJECTS>")\n'
                 'set(CMAKE_C_CREATE_STATIC_LIBRARY   "<CMAKE_AR> /OUT:<TARGET> <LINK_FLAGS> <OBJECTS>")\n'
             )
+            toolchain_file.write_text(tc_content)
             cmake_opts.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain_file.as_posix()}")
+        elif _vcpkg_toolchain_path:
+            cmake_opts.append(f"-DCMAKE_TOOLCHAIN_FILE={_vcpkg_toolchain_path}")
         else:
             print("Warning: lib.exe not found. Static library archiving will fail.")
 

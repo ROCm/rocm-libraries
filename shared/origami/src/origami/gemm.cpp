@@ -1705,12 +1705,14 @@ double compute_tile_latency(const problem_t& problem,
 
   // 4) Single-tile main-loop latency (pipelined: compute overlaps memory)
   double L_cvt = 0;
-  if ((problem.mi_dtype == data_type_t::XFloat32) &&
-      (hardware.arch == hardware_t::architecture_t::gfx950)) {
-    L_cvt = compute_cvt_overhead(problem, hardware, config);
-  } else if ((a_bits == 32) && (b_bits == 32) && (problem.mi_dtype == data_type_t::BFloat16) &&
-             (hardware.arch == hardware_t::architecture_t::gfx950)) {
-    L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
+  // TODO: gfx90a also lacks native TF32 and should get CVT overhead,
+  // but enabling it changes rankings — address in a separate PR.
+  if (!hardware.has_native_TF32() && hardware.arch != hardware_t::architecture_t::gfx90a) {
+    if (problem.mi_dtype == data_type_t::XFloat32) {
+      L_cvt = compute_cvt_overhead(problem, hardware, config);
+    } else if ((a_bits == 32) && (b_bits == 32) && (problem.mi_dtype == data_type_t::BFloat16)) {
+      L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
+    }
   }
   double L_tile_single =
       std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory);
