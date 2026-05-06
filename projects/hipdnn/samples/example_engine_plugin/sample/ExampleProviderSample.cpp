@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -861,7 +862,6 @@ int main(int argc, char* argv[])
     }
     catch(const std::exception& e)
     {
-        // Use fprintf instead of std::cerr to avoid potential exceptions in the catch block
         std::fprintf(stderr, "Fatal error: %s\n", e.what());
         return 1;
     }
