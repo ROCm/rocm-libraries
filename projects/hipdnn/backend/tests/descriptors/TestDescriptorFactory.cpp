@@ -135,7 +135,6 @@ TEST(TestDescriptorFactory, CreateGraphExtInvalidGraphData)
 
 TEST(TestDescriptorFactory, HandleFactory)
 {
-    SKIP_IF_NO_DEVICES();
     hipdnnHandle_t handleT = nullptr;
 
     ASSERT_NO_THROW(HandleFactory::createHandle(&handleT));
