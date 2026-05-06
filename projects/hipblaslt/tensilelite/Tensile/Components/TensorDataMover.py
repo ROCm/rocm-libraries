@@ -72,7 +72,7 @@ class TensorDataMoverLoad(TensorDataMover):
             #TODO: support stagger U
         return mod
 
-    def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str, dstGroup0: str = None) -> Module:
+    def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, dstGroup0: str) -> Module:
         #TODO here we assume TN
         mod = Module()
         tc: str = tp["tensorChar"]
@@ -80,6 +80,7 @@ class TensorDataMoverLoad(TensorDataMover):
         bpe: float = tp["bpeGR"]
         tlu: int = tp["tlu"]
         assert bpe > 0, "bpe must > 0"
+        sgprBaseAddr: str = f"Address{tc}"
         tileStride: str | RegisterContainer = writer.strideRef(tc, tIdx)
         tdmSeparateStride: str | RegisterContainer = writer.strideRef(tc, 3) if tlu else writer.strideRef(tc, tIdx)
         sgprWorkgroupName: str = f"WorkGroup{tIdx}"
@@ -127,23 +128,24 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
-            if dstGroup0 is not None:
-                mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(f"{dstGroup0}+2"), sgpr(tmpSgprIdx), "+= tileOffset(lo)"))
-                mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{dstGroup0}+3"), sgpr(tmpSgprIdx+1), "+= tileOffset(hi)"))
-            else:
-                mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
-                mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
-            
+
             if kernel["ProblemType"]["Batched"]:
                 if kernel["ProblemType"]["StridedBatched"]:
                     batchStrideName = f"Stride{tc}{writer.states.indexChars[tp['ia'][2]]}"
+                    mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(sgprBaseAddr), sgpr(tmpSgprIdx), f"= {sgprBaseAddr} + offset(lo)"))
+                    mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{sgprBaseAddr}+1"), sgpr(tmpSgprIdx+1), f"= {sgprBaseAddr} + offset(hi)"))
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(batchStrideName), sgpr("WorkGroup2"), comment="Batch: Stride*WG"))
                     mod.add(SLShiftLeftB64(dst=sgpr(tmpSgprIdx, 2), src=sgpr(tmpSgprIdx, 2), shiftHex=int(log2(bpe)), comment="scale by bpe"))
-                    mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
-                    mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
+                    mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(f"{dstGroup0}+2"), sgpr(tmpSgprIdx), "+= batchOffset(lo)"))
+                    mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{dstGroup0}+3"), sgpr(tmpSgprIdx+1), "+= batchOffset(hi)"))
                 else:
                     #TODO: support general batch
                     assert False, "Currently, TDM does not support general batch"
+            else:
+                mod.add(SAddU32(sgpr(f"{dstGroup0}+2"), sgpr(sgprBaseAddr), sgpr(tmpSgprIdx), f"= {sgprBaseAddr} + offset(lo)"))
+                mod.add(SAddCU32(sgpr(f"{dstGroup0}+3"), sgpr(f"{sgprBaseAddr}+1"), sgpr(tmpSgprIdx+1), f"= {sgprBaseAddr} + offset(hi)"))
+
+            mod.add(SOrB32(sgpr(f"{dstGroup0}+3"), sgpr(f"{dstGroup0}+3"), hex(2 << 30), "set type field to 2(image)"))
             #TODO: support GSU
             #TODO: support stagger U
         return mod
