@@ -4222,9 +4222,9 @@ class Solution(collections.abc.Mapping):
 
     # Sparse problem
     if state["ProblemType"]["Sparse"]:
-      # if state["PrefetchGlobalRead"] and not state["ExpandPointerSwap"]:
-      #   reject(state, printRejectionReason, "Sparse A kernel only support PGR with EPS=1.")
-      #   return
+      if state["PrefetchGlobalRead"] and not state["ExpandPointerSwap"]:
+        reject(state, printRejectionReason, "Sparse A kernel only support PGR with EPS=1.")
+        return
       if not isaInfoMap[isa].asmCaps["HasSWMMAC"] and state["EnableMatrixInstruction"] and state["MIArchVgpr"]:
         reject(state, printRejectionReason, "Current ISA does not support MIArchVgpr in Sparse kernels.")
         return
@@ -4542,32 +4542,22 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "TransposeLds requires TLUA=0 or TLUB=0")
     if state["EnableMatrixInstruction"]:
       # enable widerLocalRead
-      if not state["ProblemType"]["Sparse"]:
-        if state["LocalReadVectorWidthA"] > state["MIInputPerThreadA"]:
-          # wider localRead support 2 types
-          # 1. prefetch all lds to register
-          # 2. using larger InnerUnroll
-          if not (state["PrefetchLocalRead"] >= state["LoopIters"] and state["InnerUnroll"] == 1) and \
-              not state["ClusterLocalRead"] and \
-              not state["InnerUnroll"] >= state["LocalReadVectorWidthA"] // state["MIInputPerThreadA"]:
-            reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
-        if state["LocalReadVectorWidthB"] > state["MIInputPerThreadB"]:
-          # wider localRead support 2 types
-          # 1. prefetch all lds to register
-          # 2. using larger InnerUnroll
-          if not (state["PrefetchLocalRead"] >= state["LoopIters"] and state["InnerUnroll"] == 1) and \
-              not state["ClusterLocalRead"] and \
-              not state["InnerUnroll"] >= state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"]:
-            reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
-      else:
-        if state["LocalReadVectorWidth"] > state["MIInputPerThread"]:
-          # wider localRead support 2 types
-          # 1. prefetch all lds to register
-          # 2. using larger InnerUnroll
-          if not (state["PrefetchLocalRead"] >= state["LoopIters"] and state["InnerUnroll"] == 1) and \
-              not state["ClusterLocalRead"] and \
-              not state["InnerUnroll"] >= state["LocalReadVectorWidth"] // state["MIInputPerThread"]:
-            reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
+      if state["LocalReadVectorWidthA"] > state["MIInputPerThreadA"]:
+        # wider localRead support 2 types
+        # 1. prefetch all lds to register
+        # 2. using larger InnerUnroll
+        if not (state["PrefetchLocalRead"] >= state["LoopIters"] and state["InnerUnroll"] == 1) and \
+            not state["ClusterLocalRead"] and \
+            not state["InnerUnroll"] >= state["LocalReadVectorWidthA"] // state["MIInputPerThreadA"]:
+          reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
+      if state["LocalReadVectorWidthB"] > state["MIInputPerThreadB"]:
+        # wider localRead support 2 types
+        # 1. prefetch all lds to register
+        # 2. using larger InnerUnroll
+        if not (state["PrefetchLocalRead"] >= state["LoopIters"] and state["InnerUnroll"] == 1) and \
+            not state["ClusterLocalRead"] and \
+            not state["InnerUnroll"] >= state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"]:
+          reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
 
     if state["GlobalReadPerMfma"] > 1 and state["PrefetchGlobalRead"] >= 2:
       reject(state, printRejectionReason, "GlobalReadPerMfma need to be 1 if PGR>=2")
