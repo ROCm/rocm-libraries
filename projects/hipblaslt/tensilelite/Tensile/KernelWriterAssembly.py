@@ -2248,9 +2248,10 @@ class KernelWriterAssembly(KernelWriter):
         # add common kern entry label
         if self.states.archCaps["SgprPreloadPad"]:
           moduleRegInit.add(common_kern_entry)
-        for i in range(kernel["ProblemType"]["NumIndicesC"]):
-          moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0+%u"%i), src=sgpr(preloadSgprStartIdx+self.states.numSgprPreload+i), \
-                      comment="restore workgroup id"))
+        if not self.states.archCaps["WorkGroupIdFromTTM"]:
+          for i in range(kernel["ProblemType"]["NumIndicesC"]):
+            moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0+%u"%i), src=sgpr(preloadSgprStartIdx+self.states.numSgprPreload+i), \
+                        comment="restore workgroup id"))
 
       moduleRegInit.add(SAndB32(dst=sgpr("StaggerU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF0000), comment="Restore StaggerU related vars"))
       moduleRegInit.add(SLShiftRightB32(dst=sgpr("StaggerU"), shiftHex=hex(16), src=sgpr("StaggerU")))
@@ -2298,10 +2299,10 @@ class KernelWriterAssembly(KernelWriter):
 
       # init workgroup id from ttmp
       if self.states.archCaps["WorkGroupIdFromTTM"]:
-        module.addComment1("Init workgroup id from ttmp")
-        module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9"))
-        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
-        module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
+        moduleRegInit.addComment1("Init workgroup id from ttmp")
+        moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9"))
+        moduleRegInit.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
+        moduleRegInit.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
 
       # set m0
       moduleRegInit.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]),
