@@ -27,11 +27,13 @@ from gpu_test_helpers import (
     generate_load_params,
 )
 
-from Tensile.Components.SubtileBasedKernel import (
+from Tensile.Components.Subtile.SubtileGREmit import (
     graTileAssignment,
-    lraTileAssignment,
     globalReadDTLInitCommonSgpr,
     globalReadDoSubtile,
+)
+from Tensile.Components.Subtile.SubtileLREmit import (
+    lraTileAssignment,
     localReadDoSubtile,
 )
 from rocisa.code import Module
@@ -127,8 +129,8 @@ def generate_export_asm(wave_id, tileInfoA, tileInfoB):
     all_tiles = list(tileInfoA.vgprTiles) + list(tileInfoB.vgprTiles)
 
     for tile in all_tiles:
-        vgpr_start = tile.regList.regValues[0]
-        num_regs = len(tile.regList.regValues)
+        vgpr_start = tile.regList.indices[0]
+        num_regs = len(tile.regList.indices)
         assert num_regs == 4, f"Expected 4 regs per tile, got {num_regs}"
 
         # Output offset = tile_index * WAVESIZE * 16 + laneId * 16
