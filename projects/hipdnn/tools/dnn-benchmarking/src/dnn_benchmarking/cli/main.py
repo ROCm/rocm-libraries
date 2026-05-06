@@ -21,13 +21,12 @@ for _var, _default in _LOCAL_CACHE_DEFAULTS.items():
 from pathlib import Path
 
 from ..common.exceptions import GraphLoadError
-from ..config.benchmark_config import SuiteConfig
 from ..reporting.reporter import Reporter
 from .ab_runner_cli import run_ab_cli
 from .parser import create_parser
 from .pytorch_runner import run_pytorch_cli
 from .suite_runner_cli import run_suite_cli
-from ._gpu_check import gpu_is_available
+from .gpu_check import gpu_is_available
 
 
 def _resolve_graphs(args, reporter: Reporter):
@@ -80,7 +79,7 @@ def main() -> int:
                     "A/B testing requires a single graph file, not a glob pattern"
                 )
                 return 1
-            return run_ab_cli(args, Path(resolved_files[0]))
+            return run_ab_cli(args, Path(resolved_files[0]), reporter)
 
         elif args.backend == "pytorch":
             if len(resolved_files) > 1:
@@ -88,30 +87,13 @@ def main() -> int:
                     "Suite mode is not supported with --backend pytorch"
                 )
                 return 1
-            return run_pytorch_cli(args, Path(resolved_files[0]))
+            return run_pytorch_cli(args, Path(resolved_files[0]), reporter)
 
         else:
-            try:
-                config = SuiteConfig(
-                    warmup_iters=args.warmup,
-                    benchmark_iters=args.iters,
-                    seed=args.seed,
-                    engine_filter=args.engine,
-                    rtol=args.rtol,
-                    atol=args.atol,
-                    gpu_backend="auto",
-                    reference_provider=args.validate,
-                    verbose=args.verbose,
-                )
-            except ValueError as e:
-                reporter.print_error(f"Suite configuration error: {e}")
-                return 1
-
             return run_suite_cli(
+                args,
                 graph_paths=[Path(p) for p in resolved_files],
-                config=config,
-                output_path=args.output,
-                plugin_path=args.plugin_path,
+                reporter=reporter,
                 tarball_source=tarball_source,
             )
     finally:

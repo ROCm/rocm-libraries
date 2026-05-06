@@ -3,6 +3,7 @@
 
 """Suite benchmark CLI runner."""
 
+import argparse
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -56,15 +57,27 @@ def _run_one_graph(
         return _error_graph_result(graph_path, str(e))
 
 
-def run_suite_cli(
+def run_suite_benchmark(
     graph_paths: List[Path],
     config: SuiteConfig,
     output_path: Optional[Path],
     plugin_path: Optional[Path],
+    reporter: Reporter,
     tarball_source: Optional[str] = None,
 ) -> int:
-    """Run the benchmark suite, handle all side effects, and return an exit code."""
-    reporter = Reporter()
+    """Run the benchmark suite and return an exit code.
+
+    Args:
+        graph_paths: List of resolved graph file paths to benchmark.
+        config: Suite configuration.
+        output_path: Optional path to export results as JSON.
+        plugin_path: Optional path to plugin .so directory.
+        reporter: Reporter instance for console output.
+        tarball_source: Optional tarball source path for display.
+
+    Returns:
+        Exit code (0 for success, 1 for error, 2 for correctness failure).
+    """
     total = len(graph_paths)
 
     if config.reference_provider != "none":
@@ -125,3 +138,36 @@ def run_suite_cli(
     if suite_result.metadata.error_combinations > 0:
         return 1
     return 0
+
+
+def run_suite_cli(
+    args: argparse.Namespace,
+    graph_paths: List[Path],
+    reporter: Reporter,
+    tarball_source: Optional[str] = None,
+) -> int:
+    """Validate suite CLI args, build config, and delegate to run_suite_benchmark."""
+    try:
+        config = SuiteConfig(
+            warmup_iters=args.warmup,
+            benchmark_iters=args.iters,
+            seed=args.seed,
+            engine_filter=args.engine,
+            rtol=args.rtol,
+            atol=args.atol,
+            gpu_backend="auto",
+            reference_provider=args.validate,
+            verbose=args.verbose,
+        )
+    except ValueError as e:
+        reporter.print_error(f"Suite configuration error: {e}")
+        return 1
+
+    return run_suite_benchmark(
+        graph_paths=graph_paths,
+        config=config,
+        output_path=args.output,
+        plugin_path=args.plugin_path,
+        reporter=reporter,
+        tarball_source=tarball_source,
+    )

@@ -16,6 +16,7 @@ from ..reporting.statistics import CombinedBenchmarkStats
 
 def run_pytorch_benchmark(
     config: BenchmarkConfig,
+    reporter: Reporter,
     seed: Optional[int] = None,
     output_path: Optional[Path] = None,
     device: str = "cuda:0",
@@ -24,6 +25,7 @@ def run_pytorch_benchmark(
 
     Args:
         config: Benchmark configuration.
+        reporter: Reporter instance for console output.
         seed: Optional random seed for reproducibility.
         output_path: Optional path to export benchmark results as JSON.
         device: CUDA device to use.
@@ -33,8 +35,6 @@ def run_pytorch_benchmark(
     """
     from ..execution.pytorch_buffer_manager import PyTorchCudaBufferManager
     from ..execution.pytorch_executor import PyTorchCudaExecutor, PyTorchExecutionError
-
-    reporter = Reporter()
 
     try:
         loader = GraphLoader()
@@ -99,9 +99,10 @@ def run_pytorch_benchmark(
         return 1
 
 
-def run_pytorch_cli(args: argparse.Namespace, graph_path: Path) -> int:
+def run_pytorch_cli(
+    args: argparse.Namespace, graph_path: Path, reporter: Reporter
+) -> int:
     """Validate PyTorch CLI args, build config, and delegate to run_pytorch_benchmark."""
-    reporter = Reporter()
 
     if args.engine and len(args.engine) > 1:
         reporter.print_error(
@@ -123,6 +124,7 @@ def run_pytorch_cli(args: argparse.Namespace, graph_path: Path) -> int:
 
     return run_pytorch_benchmark(
         config,
+        reporter,
         seed=args.seed,
         output_path=args.output,
     )

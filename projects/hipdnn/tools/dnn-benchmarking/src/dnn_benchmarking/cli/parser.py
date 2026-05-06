@@ -76,7 +76,7 @@ A/B Testing:
   dnn-benchmark -g ./graph.json --APath /path/pluginA --AId 1 --BPath /path/pluginB --BId 2
 
 Suite Mode (multiple graphs):
-  dnn-benchmark -g graphs/                           # all .json files in directory
+  dnn-benchmark -g graphs/                           # all .json/.tar.gz files in directory
   dnn-benchmark --graph 'graphs/*.json' --warmup 10 --iters 100
   dnn-benchmark --graph 'graphs/*.json' -o results.json
   dnn-benchmark --graph 'graphs/*.json' -v           # rich block per (graph, engine)

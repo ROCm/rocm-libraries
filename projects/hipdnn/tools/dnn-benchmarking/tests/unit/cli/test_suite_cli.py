@@ -14,7 +14,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dnn_benchmarking.cli.parser import create_parser
+from dnn_benchmarking.cli.suite_runner_cli import run_suite_benchmark
 from dnn_benchmarking.config.benchmark_config import SuiteConfig
+from dnn_benchmarking.reporting.reporter import Reporter
 from dnn_benchmarking.reporting.suite_results import (
     CorrectnessResult,
     GraphResult,
@@ -136,8 +138,13 @@ class TestMainRouting:
                 result = main()
 
             mock_orchestrate.assert_called_once()
-            kwargs = mock_orchestrate.call_args.kwargs
-            assert len(kwargs["graph_paths"]) == 3
+            call_args = mock_orchestrate.call_args
+            graph_paths = (
+                call_args.args[1]
+                if len(call_args.args) > 1
+                else call_args.kwargs["graph_paths"]
+            )
+            assert len(graph_paths) == 3
             assert result == 0
 
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
@@ -157,17 +164,22 @@ class TestMainRouting:
                 result = main()
 
             mock_orchestrate.assert_called_once()
-            kwargs = mock_orchestrate.call_args.kwargs
-            assert len(kwargs["graph_paths"]) == 1
+            call_args = mock_orchestrate.call_args
+            graph_paths = (
+                call_args.args[1]
+                if len(call_args.args) > 1
+                else call_args.kwargs["graph_paths"]
+            )
+            assert len(graph_paths) == 1
             assert result == 0
 
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    @patch("dnn_benchmarking.cli.main.run_suite_cli")
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_verbose_flag_propagates_to_suite_config(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
     ) -> None:
         """-v sets SuiteConfig.verbose=True when routing through the orchestrator."""
-        mock_orchestrate.return_value = 0
+        mock_benchmark.return_value = 0
 
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._create_graph_files(Path(tmpdir), 1)
@@ -177,16 +189,16 @@ class TestMainRouting:
             with patch("sys.argv", ["dnn-benchmark", "--graph", paths[0], "-v"]):
                 main()
 
-        suite_config = mock_orchestrate.call_args.kwargs["config"]
+        suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.verbose is True
 
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    @patch("dnn_benchmarking.cli.main.run_suite_cli")
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_engine_list_propagates_to_suite_config(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
     ) -> None:
         """--engine 1,2 lands in SuiteConfig.engine_filter as [1, 2]."""
-        mock_orchestrate.return_value = 0
+        mock_benchmark.return_value = 0
 
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._create_graph_files(Path(tmpdir), 1)
@@ -199,7 +211,7 @@ class TestMainRouting:
             ):
                 main()
 
-        suite_config = mock_orchestrate.call_args.kwargs["config"]
+        suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.engine_filter == [1, 2]
 
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
@@ -273,9 +285,13 @@ class TestMainRouting:
                 main()
 
             mock_orchestrate.assert_called_once()
-            kwargs = mock_orchestrate.call_args.kwargs
-            # Both nested files should have been resolved
-            assert len(kwargs["graph_paths"]) == 2
+            call_args = mock_orchestrate.call_args
+            graph_paths = (
+                call_args.args[1]
+                if len(call_args.args) > 1
+                else call_args.kwargs["graph_paths"]
+            )
+            assert len(graph_paths) == 2
 
     def test_zero_files_glob_returns_error(self) -> None:
         """When glob resolves to zero files, main() returns 1."""
@@ -291,7 +307,7 @@ class TestMainRouting:
 
 
 class TestRunSuiteWorkflow:
-    """Tests for run_suite_cli() workflow — graph iteration, exit codes, JSON output."""
+    """Tests for run_suite_benchmark() workflow — graph iteration, exit codes, JSON output."""
 
     def _make_graph_result(self, name: str, status: str = "success") -> GraphResult:
         """Helper to create a GraphResult with one ProviderEngineResult."""
@@ -391,16 +407,15 @@ class TestRunSuiteWorkflow:
             self._make_graph_result("g1"),
         ]
 
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
-
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._make_graph_files(Path(tmpdir), 2)
             config = SuiteConfig()
-            result = run_suite_cli(
+            result = run_suite_benchmark(
                 graph_paths=paths,
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
         assert result == 0
@@ -423,16 +438,15 @@ class TestRunSuiteWorkflow:
             self._make_graph_result("g1"),
         ]
 
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
-
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._make_graph_files(Path(tmpdir), 2)
             config = SuiteConfig()
-            result = run_suite_cli(
+            result = run_suite_benchmark(
                 graph_paths=paths,
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
         assert mock_run.call_count == 2
@@ -470,16 +484,15 @@ class TestRunSuiteWorkflow:
         )
         mock_run.return_value = fail_result
 
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
-
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._make_graph_files(Path(tmpdir), 1)
             config = SuiteConfig()
-            result = run_suite_cli(
+            result = run_suite_benchmark(
                 graph_paths=paths,
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
         assert result == 2
@@ -490,7 +503,7 @@ class TestRunSuiteWorkflow:
     def test_json_output_written_when_output_specified(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:
-        """run_suite_cli writes JSON to --output path when specified."""
+        """run_suite_benchmark writes JSON to --output path when specified."""
         mock_env.return_value = {
             "rocm_version": None,
             "gpu_model": None,
@@ -499,17 +512,16 @@ class TestRunSuiteWorkflow:
         }
         mock_run.return_value = self._make_graph_result("g0")
 
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
-
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._make_graph_files(Path(tmpdir), 1)
             output_file = Path(tmpdir) / "results.json"
             config = SuiteConfig()
-            run_suite_cli(
+            run_suite_benchmark(
                 graph_paths=paths,
                 config=config,
                 output_path=output_file,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
             assert output_file.exists()
@@ -523,7 +535,7 @@ class TestRunSuiteWorkflow:
     def test_no_json_output_when_output_not_specified(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:
-        """run_suite_cli does not write JSON when --output is not specified."""
+        """run_suite_benchmark does not write JSON when --output is not specified."""
         mock_env.return_value = {
             "rocm_version": None,
             "gpu_model": None,
@@ -532,19 +544,18 @@ class TestRunSuiteWorkflow:
         }
         mock_run.return_value = self._make_graph_result("g0")
 
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
-
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             paths = self._make_graph_files(tmp_path, 1)
             inputs_before = {p.resolve() for p in tmp_path.rglob("*.json")}
 
             config = SuiteConfig()
-            run_suite_cli(
+            run_suite_benchmark(
                 graph_paths=paths,
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
             inputs_after = {p.resolve() for p in tmp_path.rglob("*.json")}
@@ -566,16 +577,15 @@ class TestRunSuiteWorkflow:
         }
         mock_run.return_value = self._make_graph_result("g0")
 
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
-
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._make_graph_files(Path(tmpdir), 2)
             config = SuiteConfig(warmup_iters=20, benchmark_iters=200)
-            run_suite_cli(
+            run_suite_benchmark(
                 graph_paths=paths,
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
         assert mock_run.call_count == 2
@@ -600,8 +610,6 @@ class TestRunSuiteWorkflow:
         }
         mock_run.return_value = self._make_graph_result("g_good")
 
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
-
         with tempfile.TemporaryDirectory() as tmpdir:
             empty_file = Path(tmpdir) / "empty_graph.json"
             empty_file.write_text(
@@ -611,11 +619,12 @@ class TestRunSuiteWorkflow:
             good_paths = self._make_graph_files(Path(tmpdir), 1)
             paths = [empty_file] + good_paths
             config = SuiteConfig()
-            result = run_suite_cli(
+            result = run_suite_benchmark(
                 graph_paths=paths,
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
         assert mock_run.call_count == 1
@@ -627,7 +636,7 @@ class TestRunSuiteWorkflow:
     def test_graph_load_error_continues_to_next(
         self, mock_env: MagicMock, mock_run: MagicMock
     ) -> None:
-        """run_suite_cli catches GraphLoadError per graph and continues."""
+        """run_suite_benchmark catches GraphLoadError per graph and continues."""
         mock_env.return_value = {
             "rocm_version": None,
             "gpu_model": None,
@@ -636,8 +645,6 @@ class TestRunSuiteWorkflow:
         }
         mock_run.return_value = self._make_graph_result("g1")
 
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
-
         with tempfile.TemporaryDirectory() as tmpdir:
             bad_file = Path(tmpdir) / "bad_graph.json"
             bad_file.write_text("{invalid json")
@@ -645,11 +652,12 @@ class TestRunSuiteWorkflow:
             good_paths = self._make_graph_files(Path(tmpdir), 1)
             paths = [bad_file] + good_paths
             config = SuiteConfig()
-            result = run_suite_cli(
+            result = run_suite_benchmark(
                 graph_paths=paths,
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
         assert mock_run.call_count == 1
@@ -774,7 +782,6 @@ class TestValidationStartupGate:
     def test_unregistered_reference_provider_fails_at_startup(
         self, mock_run: MagicMock
     ) -> None:
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
 
         config = SuiteConfig.__new__(SuiteConfig)
         # Bypass the SuiteConfig validator (which restricts reference_provider
@@ -792,11 +799,12 @@ class TestValidationStartupGate:
         with tempfile.TemporaryDirectory() as tmpdir:
             graph = Path(tmpdir) / "g.json"
             graph.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
-            result = run_suite_cli(
+            result = run_suite_benchmark(
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
         assert result == 1
@@ -808,7 +816,6 @@ class TestValidationStartupGate:
     def test_unavailable_reference_provider_fails_at_startup(
         self, mock_run: MagicMock, mock_registry: MagicMock
     ) -> None:
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
 
         provider_mock = MagicMock()
         provider_mock.is_available.return_value = False
@@ -819,11 +826,12 @@ class TestValidationStartupGate:
         with tempfile.TemporaryDirectory() as tmpdir:
             graph = Path(tmpdir) / "g.json"
             graph.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
-            result = run_suite_cli(
+            result = run_suite_benchmark(
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
         assert result == 1
@@ -839,7 +847,6 @@ class TestValidationStartupGate:
         mock_run: MagicMock,
         mock_registry: MagicMock,
     ) -> None:
-        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
 
         mock_env.return_value = {
             "rocm_version": None,
@@ -920,11 +927,12 @@ class TestValidationStartupGate:
                     }
                 )
             )
-            result = run_suite_cli(
+            result = run_suite_benchmark(
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
                 plugin_path=None,
+                reporter=Reporter(),
             )
 
         assert result == 0

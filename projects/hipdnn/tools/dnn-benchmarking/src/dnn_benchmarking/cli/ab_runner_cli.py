@@ -15,9 +15,10 @@ from ..reporting.reporter import Reporter
 from ..reporting.statistics import CombinedBenchmarkStats
 
 
-def run_ab_test(
+def run_ab_benchmark(
     config: BenchmarkConfig,
     ab_config: ABTestConfig,
+    reporter: Reporter,
     seed: Optional[int] = None,
     gpu_backend: Literal["torch", "auto", "none"] = "auto",
     validation_config: Optional[ValidationConfig] = None,
@@ -27,6 +28,7 @@ def run_ab_test(
     Args:
         config: Benchmark configuration.
         ab_config: A/B test configuration.
+        reporter: Reporter instance for console output.
         seed: Optional random seed for reproducibility.
         gpu_backend: GPU timer backend to use (torch, auto, none).
         validation_config: Optional validation configuration for reference checking.
@@ -34,7 +36,6 @@ def run_ab_test(
     Returns:
         Exit code (0 for success, 1 for error, 2 for comparison failure).
     """
-    reporter = Reporter()
 
     try:
         ab_config.validate_paths()
@@ -109,9 +110,8 @@ def run_ab_test(
         return 1
 
 
-def run_ab_cli(args: argparse.Namespace, graph_path: Path) -> int:
-    """Validate A/B CLI args, build configs, and delegate to run_ab_test."""
-    reporter = Reporter()
+def run_ab_cli(args: argparse.Namespace, graph_path: Path, reporter: Reporter) -> int:
+    """Validate A/B CLI args, build configs, and delegate to run_ab_benchmark."""
 
     if args.AId is None or args.BId is None:
         reporter.print_error(
@@ -162,9 +162,10 @@ def run_ab_cli(args: argparse.Namespace, graph_path: Path) -> int:
             reporter.print_error(f"Validation configuration error: {e}")
             return 1
 
-    return run_ab_test(
+    return run_ab_benchmark(
         config,
         ab_config,
+        reporter,
         seed=args.seed,
         gpu_backend="auto",
         validation_config=validation_config,
