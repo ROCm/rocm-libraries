@@ -192,7 +192,7 @@ namespace test_plugin_internal
 /// caller still observes the original `dlopen` failure mode.
 inline std::filesystem::path resolvePluginPathRelativeToBackend(const std::string& pluginPath)
 {
-    const std::filesystem::path requestedPath{pluginPath};
+    std::filesystem::path requestedPath{pluginPath};
     if(requestedPath.is_absolute())
     {
         return requestedPath;
