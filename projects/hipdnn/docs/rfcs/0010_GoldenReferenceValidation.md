@@ -379,14 +379,12 @@ NCHW_1x16x16x16_1x16x3x3/
     "X": {
       "file": "tensor_X.bin",
       "dims": [1, 16, 16, 16],
-      "strides": [4096, 256, 16, 1],
       "data_type": "FLOAT",
       "sha256": "a1b2c3d4e5f6..."
     },
     "W": {
       "file": "tensor_W.bin",
       "dims": [16, 16, 3, 3],
-      "strides": [144, 9, 3, 1],
       "data_type": "FLOAT",
       "sha256": "f6e5d4c3b2a1..."
     }
@@ -395,7 +393,6 @@ NCHW_1x16x16x16_1x16x3x3/
     "Y": {
       "file": "tensor_Y.bin",
       "dims": [1, 16, 16, 16],
-      "strides": [4096, 256, 16, 1],
       "data_type": "FLOAT",
       "sha256": "1a2b3c4d5e6f..."
     }
@@ -472,7 +469,7 @@ The manifest stores `format_version`, `generator_version`, and `reference_execut
 
 #### Stride Safety
 
-Strides are stored in the manifest for documentation and belt-and-suspenders validation, but the primary safety mechanism is **dim validation at load time**: if golden dims match the graph's dims, and the graph produces strides from dims deterministically (via `buildGraph()`), stride mismatch is structurally impossible. If dims don't match, the load fails hard before any comparison.
+Strides are **not stored** in the manifest. `buildGraph()` produces strides from dims deterministically, so if golden dims match the graph's dims at load time, strides are guaranteed to match. Storing strides would create a second source of truth to maintain with no safety benefit. The primary safety mechanism is **dim validation at load time**: dims mismatch → hard FAIL before any comparison.
 
 **Acceptance criteria** (for serialize):
 - [ ] Tensor data stored as raw binary `.bin` files (no encoding overhead)
