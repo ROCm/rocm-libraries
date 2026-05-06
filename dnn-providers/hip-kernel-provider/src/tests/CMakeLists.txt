@@ -46,7 +46,9 @@ if(ENABLE_ASM_SDPA_ENGINE)
     endif()
 endif()
 
-add_subdirectory(engines/hip_kernel_engine)
+if(ENABLE_HIP_KERNEL_ENGINE)
+    add_subdirectory(engines/hip_kernel_engine)
+endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
 

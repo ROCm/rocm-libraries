@@ -14,7 +14,10 @@ add_library(
 if(ENABLE_ASM_SDPA_ENGINE)
     add_subdirectory(engines/asm_sdpa_engine)
 endif()
-add_subdirectory(engines/hip_kernel_engine)
+
+if(ENABLE_HIP_KERNEL_ENGINE)
+    add_subdirectory(engines/hip_kernel_engine)
+endif()
 
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -42,6 +45,10 @@ target_include_directories(hip_kernel_provider_private PUBLIC
 target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip_kernel_provider_impl)
 if(ENABLE_ASM_SDPA_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
+endif()
+
+if(ENABLE_HIP_KERNEL_ENGINE)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_KERNEL=1)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)

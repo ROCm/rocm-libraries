@@ -3,13 +3,16 @@
 
 #include "HipKernelContainer.hpp"
 #include "CurrentDevicePropertyProvider.hpp"
+#include "hip/HipKernelCompiler.hpp"
+
+#ifdef HIPDNN_ENGINE_HIP_KERNEL
 #include "engines/hip_kernel_engine/HipKernelEngine.hpp"
 #include "engines/hip_kernel_engine/plans/RMSnorm/RMSnormBwdPlanBuilder.hpp"
 #include "engines/hip_kernel_engine/plans/RMSnorm/RMSnormPlanBuilder.hpp"
 #include "engines/hip_kernel_engine/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/hip_kernel_engine/plans/batchnorm/BatchnormPlanBuilder.hpp"
 #include "engines/hip_kernel_engine/plans/layernorm/LayernormPlanBuilder.hpp"
-#include "hip/HipKernelCompiler.hpp"
+#endif
 
 #ifdef HIPDNN_ENGINE_ASM_SDPA
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
@@ -29,7 +32,8 @@ using namespace hipdnn_data_sdk::utilities;
 const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::getEngineDefinitions()
 {
     static const std::vector<EngineDefinition> s_engineDefinitions = {
-        // HIP_KERNEL_ENGINE
+    // HIP_KERNEL_ENGINE
+#ifdef HIPDNN_ENGINE_HIP_KERNEL
         {HIP_KERNEL_ENGINE_ID,
          [](const IKernelCompiler& kernelCompiler,
             const IDevicePropertyProvider& devicePropertyProvider)
@@ -48,6 +52,7 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
                  kernelCompiler, devicePropertyProvider));
              return engine;
          }},
+#endif
 #ifdef HIPDNN_ENGINE_ASM_SDPA
         // ASM_SDPA_ENGINE
         {ASM_SDPA_ENGINE_ID,

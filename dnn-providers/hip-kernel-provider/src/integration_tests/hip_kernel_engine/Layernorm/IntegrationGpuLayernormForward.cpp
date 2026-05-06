@@ -8,7 +8,7 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "../IntegrationGraphVerificationHarness.hpp"
+#include "../../IntegrationGraphVerificationHarness.hpp"
 #include "LayernormCommon.hpp"
 #include "hipdnn_data_sdk/utilities/Tensor.hpp"
 #include "hipdnn_frontend/Types.hpp"
