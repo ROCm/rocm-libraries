@@ -41,13 +41,13 @@
 //------------------------------------------------------------------------------
 // todo: why not put CPU, GPU as regular arguments, rather than template
 // arguments? Reduces object size and compile time.
-template <bool CPU, bool GPU, typename T, typename Ud, typename Uh>
+template <bool CPU, bool GPU, typename T, typename I, typename Ud, typename Uh>
 void sb2st_hb2st_initData(const rocblas_handle handle,
                           const rocblas_fill uplo,
-                          const rocblas_int n,
-                          const rocblas_int kd,
+                          const I n,
+                          const I kd,
                           Ud& dAband,
-                          const rocblas_int ldab,
+                          const I ldab,
                           Uh& hAband)
 {
 //printf( "%s:%d\n", __func__, __LINE__ );
@@ -67,16 +67,16 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
 }
 
 //------------------------------------------------------------------------------
-template <typename T>
+template <typename T, typename I>
 void sb2st_hb2st_checkBadArgs(const rocblas_handle handle,
-                               const rocblas_int n,
-                               const rocblas_int kd,
+                               const I n,
+                               const I kd,
                                T* dAband,
-                               const rocblas_int ldab,
+                               const I ldab,
                                decltype(std::real(T{}))* dD,
                                decltype(std::real(T{}))* dE,
                                T* dV,
-                               const rocblas_int ldv,
+                               const I ldv,
                                T* dTau)
 {
     using S = decltype(std::real(T{}));
@@ -141,20 +141,20 @@ void sb2st_hb2st_checkBadArgs(const rocblas_handle handle,
         rocblas_status_success);
 }
 
-template <typename T>
+template <typename T, typename I>
 void testing_sb2st_hb2st_bad_arg()
 {
     using S = decltype(std::real(T{}));
 
     // safe arguments
     rocblas_local_handle handle;
-    rocblas_int n   = 2;
-    rocblas_int kd  = 1;
-    rocblas_int ldab = 3*kd - 1;  // == 2
-    rocblas_int ldv  = 2*kd;      // == 2
+    I n   = 2;
+    I kd  = 1;
+    I ldab = 3*kd - 1;  // == 2
+    I ldv  = 2*kd;      // == 2
 
     // nv = nv_blocks * kd = 1 * 1 = 1
-    rocblas_int nv = 1;
+    I nv = 1;
 
     // memory allocations
     device_strided_batch_vector<T> dAband(ldab * n, 1, ldab * n, 1);
@@ -177,17 +177,17 @@ void testing_sb2st_hb2st_bad_arg()
 }
 
 //------------------------------------------------------------------------------
-template <typename T, typename Ud, typename Td, typename Uh, typename Th>
+template <typename T, typename I, typename Ud, typename Td, typename Uh, typename Th>
 void sb2st_hb2st_getError(const rocblas_handle handle,
                           const rocblas_fill uplo,
-                          const rocblas_int n,
-                          const rocblas_int kd,
+                          const I n,
+                          const I kd,
                           Ud& dAband,
-                          const rocblas_int ldab,
+                          const I ldab,
                           Td& dD,
                           Td& dE,
                           Ud& dV,
-                          const rocblas_int ldv,
+                          const I ldv,
                           Ud& dTau,
                           Uh& hAband,
                           Uh& hAbandRes,
@@ -203,10 +203,10 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     CHECK_ROCBLAS_ERROR(
         rocblas_get_stream( handle, &stream ) );
 
-    rocblas_int idiag = kd - 1;
+    I idiag = kd - 1;
 
     // input data initialization
-    sb2st_hb2st_initData<true, true, T>(
+    sb2st_hb2st_initData<true, true, T, I>(
         handle, uplo, n, kd, dAband, ldab, hAband );
 
     // execute computations
@@ -230,7 +230,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     if constexpr (rocblas_is_complex<T>)
     {
         // Check that diag is real.
-        for (rocblas_int j = 0; j < n; ++j)
+        for (I j = 0; j < n; ++j)
         {
             err = max( err, abs( imag( hAbandRes[0][idiag + j*ldab] ) ) );
         }
@@ -239,7 +239,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
 
         // Check that subdiag is real.
         err = 0;
-        for (rocblas_int j = 0; j < n-1; ++j)
+        for (I j = 0; j < n-1; ++j)
         {
             err = max( err, abs( imag( hAbandRes[0][idiag + 1 + j*ldab] ) ) );
         }
@@ -248,7 +248,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
 
     // Check that diag( A ) == D.
     err = 0;
-    for (rocblas_int j = 0; j < n; ++j)
+    for (I j = 0; j < n; ++j)
     {
         err += hDRes[0][j] != real( hAbandRes[0][idiag + j*ldab] );
     }
@@ -256,7 +256,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
 
     // Check that diag( A, -1 ) == E.
     err = 0;
-    for (rocblas_int j = 0; j < n-1; ++j)
+    for (I j = 0; j < n-1; ++j)
     {
         err += hERes[0][j] != real( hAbandRes[0][idiag + 1 + j*ldab] );
     }
@@ -268,15 +268,15 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
         start = get_time_us_sync(stream);
         cpu_sterf( n, hDRes.data(), hERes.data() );
         time = get_time_us_sync(stream) - start;
-        printf( "n %d, CPU sterf time %.4f\n", n, time );
+        printf( "n %d, CPU sterf time %.4f\n", int(n), time );
 
         printf( "eig_rocsol = [" );
-        for (int i = 0; i < std::min( 5, n ); ++i)
+        for (I i = 0; i < std::min<I>( 5, n ); ++i)
         {
             printf( "  %11.5g", hDRes[0][i] );
         }
         printf( "  ..." );
-        for (int i = std::max( n-5, 5 ); i < n; ++i)
+        for (I i = std::max<I>( n-5, 5 ); i < n; ++i)
         {
             printf( "  %11.5g", hDRes[0][i] );
         }
@@ -287,26 +287,26 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
         // CPU lapack
         // Compute eigenvalues of banded matrix
         int info;
-        int worksize = rocblas_is_complex<T> ? n : std::max( 1, 3*n - 2 );
+        int worksize = rocblas_is_complex<T> ? int(n) : std::max( 1, 3*int(n) - 2 );
         std::vector<T> work( worksize, T( 0 ) );
-        int worksize_real = rocblas_is_complex<T> ? std::max( 1, 3*n - 2 ) : 0;
+        int worksize_real = rocblas_is_complex<T> ? std::max( 1, 3*int(n) - 2 ) : 0;
         std::vector<S> work_real( worksize_real, S( 0 ) );
         T dummy;  // for Z
         // todo: assuming lower
         start = get_time_us_sync(stream);
-        cpu_sbev_hbev( rocblas_evect_none, uplo, n, kd, &hAband[0][idiag], ldab,
+        cpu_sbev_hbev( rocblas_evect_none, uplo, int(n), int(kd), &hAband[0][idiag], int(ldab),
                        hW.data(), &dummy, 1,
                        work.data(), work_real.data(), &info );
         time = get_time_us_sync(stream) - start;
-        printf( "n %d, kd %d, CPU hbev time %.4f\n", n, kd, time );
+        printf( "n %d, kd %d, CPU hbev time %.4f\n", int(n), int(kd), time );
 
         printf( "eig_lapack = [" );
-        for (int i = 0; i < std::min( 5, n ); ++i)
+        for (I i = 0; i < std::min<I>( 5, n ); ++i)
         {
             printf( "  %11.5g", hW[0][i] );
         }
         printf( "  ..." );
-        for (int i = std::max( n-5, 5 ); i < n; ++i)
+        for (I i = std::max<I>( n-5, 5 ); i < n; ++i)
         {
             printf( "  %11.5g", hW[0][i] );
         }
@@ -326,17 +326,17 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     // cf. LAWN 41.
 }
 
-template <typename T, typename Td, typename Ud, typename Uh>
+template <typename T, typename I, typename Td, typename Ud, typename Uh>
 void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                              const rocblas_fill uplo,
-                             const rocblas_int n,
-                             const rocblas_int kd,
+                             const I n,
+                             const I kd,
                              Ud& dAband,
-                             const rocblas_int ldab,
+                             const I ldab,
                              Td& dD,
                              Td& dE,
                              Ud& dV,
-                             const rocblas_int ldv,
+                             const I ldv,
                              Ud& dTau,
                              Uh& hAband,
                              double* gpu_time_used,
@@ -367,14 +367,14 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    sb2st_hb2st_initData<true, false, T>(
+    sb2st_hb2st_initData<true, false, T, I>(
         handle, uplo, n, kd, dAband, ldab, hAband);
 
     // cold calls
     double start, time;
     for (int iter = 0; iter < 2; iter++)
     {
-        sb2st_hb2st_initData<false, true, T>(
+        sb2st_hb2st_initData<false, true, T, I>(
             handle, uplo, n, kd, dAband, ldab, hAband );
 
         start = get_time_us_sync(stream);
@@ -404,7 +404,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
 
     for (rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        sb2st_hb2st_initData<false, true, T>(
+        sb2st_hb2st_initData<false, true, T, I>(
             handle, uplo, n, kd, dAband, ldab, hAband);
 
         timer.start(stream);
@@ -421,7 +421,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
     *gpu_time_used = timer.get_combined();
 }
 
-template <typename T>
+template <typename T, typename I>
 void testing_sb2st_hb2st( Arguments& argus )
 {
     using S = decltype( std::real( T{} ) );
@@ -429,15 +429,15 @@ void testing_sb2st_hb2st( Arguments& argus )
     // get arguments
     rocblas_local_handle handle;
     char uploC = argus.get<char>("uplo");
-    rocblas_int n = argus.get<rocblas_int>("n");
-    rocblas_int kd = argus.get<rocblas_int>("kd");
-    rocblas_int ldab = argus.get<rocblas_int>("ldab", 3*kd - 1);
-    rocblas_int ldv = argus.get<rocblas_int>("ldv", 2*kd);
+    I n = argus.get<I>("n");
+    I kd = argus.get<I>("kd");
+    I ldab = argus.get<I>("ldab", 3*kd - 1);
+    I ldv = argus.get<I>("ldv", 2*kd);
 
     // V is ldv x nv
-    rocblas_int nt = ceildiv( n-1, kd );
-    rocblas_int nv_blocks = nt*(nt + 1)/2;
-    rocblas_int nv = nv_blocks*kd;
+    I nt = ceildiv( n-1, kd );
+    I nv_blocks = nt*(nt + 1)/2;
+    I nv = nv_blocks*kd;
 
     rocblas_fill uplo = char2rocblas_fill( uploC );
     rocblas_int hot_calls = argus.iters;
@@ -540,7 +540,7 @@ void testing_sb2st_hb2st( Arguments& argus )
     // check computations
     if (argus.unit_check || argus.norm_check)
     {
-        sb2st_hb2st_getError<T>(
+        sb2st_hb2st_getError<T, I>(
             handle, uplo, n, kd,
             dAband, ldab,
             dD, dE,
@@ -553,7 +553,7 @@ void testing_sb2st_hb2st( Arguments& argus )
     // collect performance data
     if (argus.timing && hot_calls > 0)
     {
-        sb2st_hb2st_getPerfData<T>(
+        sb2st_hb2st_getPerfData<T, I>(
             handle, uplo, n, kd,
             dAband, ldab,
             dD, dE,
@@ -605,4 +605,4 @@ void testing_sb2st_hb2st( Arguments& argus )
 #define EXTERN_TESTING_SB2ST_HB2ST( ... ) \
     extern template void testing_sb2st_hb2st<__VA_ARGS__>( Arguments& );
 
-INSTANTIATE( EXTERN_TESTING_SB2ST_HB2ST, FOREACH_SCALAR_TYPE, APPLY_STAMP )
+INSTANTIATE( EXTERN_TESTING_SB2ST_HB2ST, FOREACH_SCALAR_TYPE, FOREACH_INT_TYPE, APPLY_STAMP )

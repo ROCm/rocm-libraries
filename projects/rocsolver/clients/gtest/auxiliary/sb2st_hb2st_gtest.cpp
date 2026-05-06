@@ -33,7 +33,8 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-typedef std::tuple<vector<int>, printable_char> sb2st_hb2st_tuple;
+template <typename I>
+using sb2st_hb2st_tuple = std::tuple<vector<I>, printable_char>;
 
 // each matrix_size_range is a {n, ldab, kd}
 // ldab = 3*kd - 1
@@ -60,6 +61,21 @@ const vector<vector<int>> matrix_size_range = {
     {128, 120, 40},  // ldab >= 119
 };
 
+const vector<vector<int64_t>> matrix_size_range_64 = {
+    // quick return
+    {0, 1, 1},
+    {1, 1, 0},
+    // invalid
+    {-1, 1, 1},
+    {1, 1, -1},
+    {20, 14, 5},
+    // normal (valid) samples
+    {10, 5, 2},
+    {20, 59, 20},
+    {128, 96, 32},   // ldab >= 95
+    {128, 120, 40},  // ldab >= 119
+};
+
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {
     {152,  192, 64},   // ldab >= 191
@@ -68,16 +84,24 @@ const vector<vector<int>> large_matrix_size_range = {
     {512,  960, 312},  // ldab >= 935
 };
 
-Arguments sb2st_hb2st_setup_arguments( sb2st_hb2st_tuple tup )
+const vector<vector<int64_t>> large_matrix_size_range_64 = {
+    {152,  192, 64},   // ldab >= 191
+    {640,  192, 64},   // ldab >= 191
+    {1000, 384, 128},  // ldab >= 383
+    {512,  960, 312},  // ldab >= 935
+};
+
+template <typename I>
+Arguments sb2st_hb2st_setup_arguments( sb2st_hb2st_tuple<I> tup )
 {
-    vector<int> matrix_size = std::get<0>(tup);
+    vector<I> matrix_size = std::get<0>(tup);
     char uplo = std::get<1>(tup);
 
     Arguments arg;
 
-    arg.set<rocblas_int>("n", matrix_size[0]);
-    arg.set<rocblas_int>("ldab", matrix_size[1]);
-    arg.set<rocblas_int>("kd", matrix_size[2]);
+    arg.set<I>("n", matrix_size[0]);
+    arg.set<I>("ldab", matrix_size[1]);
+    arg.set<I>("kd", matrix_size[2]);
     arg.set<char>("uplo", uplo);
 
     arg.timing = 0;
@@ -85,7 +109,8 @@ Arguments sb2st_hb2st_setup_arguments( sb2st_hb2st_tuple tup )
     return arg;
 }
 
-class SB2ST_HB2ST : public ::TestWithParam<sb2st_hb2st_tuple>
+template <typename I>
+class SB2ST_HB2ST_BASE : public ::TestWithParam<sb2st_hb2st_tuple<I>>
 {
 protected:
     void TearDown() override
@@ -96,13 +121,21 @@ protected:
     template <typename T>
     void run_tests()
     {
-        Arguments arg = sb2st_hb2st_setup_arguments( GetParam() );
+        Arguments arg = sb2st_hb2st_setup_arguments( this->GetParam() );
 
-        if (arg.peek<rocblas_int>("n") == 0 && arg.peek<rocblas_int>("kd") == 0)
-            testing_sb2st_hb2st_bad_arg<T>();
+        if (arg.peek<I>("n") == 0 && arg.peek<I>("kd") == 0)
+            testing_sb2st_hb2st_bad_arg<T, I>();
 
-        testing_sb2st_hb2st<T>(arg);
+        testing_sb2st_hb2st<T, I>(arg);
     }
+};
+
+class SB2ST_HB2ST : public SB2ST_HB2ST_BASE<rocblas_int>
+{
+};
+
+class SB2ST_HB2ST_64 : public SB2ST_HB2ST_BASE<int64_t>
+{
 };
 
 // non-batch tests
@@ -127,6 +160,26 @@ TEST_P( SB2ST_HB2ST, __double_complex )
     run_tests<rocblas_double_complex>();
 }
 
+TEST_P( SB2ST_HB2ST_64, __float )
+{
+    run_tests<float>();
+}
+
+TEST_P( SB2ST_HB2ST_64, __double )
+{
+    run_tests<double>();
+}
+
+TEST_P( SB2ST_HB2ST_64, __float_complex )
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P( SB2ST_HB2ST_64, __double_complex )
+{
+    run_tests<rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P( daily_lapack,
                           SB2ST_HB2ST,
                           Combine( ValuesIn( large_matrix_size_range ), ValuesIn( uplo_range ) ) );
@@ -134,3 +187,11 @@ INSTANTIATE_TEST_SUITE_P( daily_lapack,
 INSTANTIATE_TEST_SUITE_P( checkin_lapack,
                           SB2ST_HB2ST,
                           Combine( ValuesIn( matrix_size_range ), ValuesIn( uplo_range ) ) );
+
+INSTANTIATE_TEST_SUITE_P( daily_lapack,
+                          SB2ST_HB2ST_64,
+                          Combine( ValuesIn( large_matrix_size_range_64 ), ValuesIn( uplo_range ) ) );
+
+INSTANTIATE_TEST_SUITE_P( checkin_lapack,
+                          SB2ST_HB2ST_64,
+                          Combine( ValuesIn( matrix_size_range_64 ), ValuesIn( uplo_range ) ) );
