@@ -2119,6 +2119,7 @@ pipeline {
                             // Report the parent stage build ck and run tests status
                             setGithubStatus("${env.STAGE_NAME}", 'success', "Stage ${env.STAGE_NAME} passed")
                             echo "Reporting success status for build ck and run tests"
+                        }
                     }
                 }
             }
