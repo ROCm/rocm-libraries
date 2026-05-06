@@ -89,6 +89,7 @@ protected:
 
     void SetUp() override
     {
+        SKIP_IF_NO_DEVICES();
         _engineConfigWrapper = createDescriptor<EngineConfigDescriptor>();
         _mockEngineWrapper = createDescriptor<MockEngineDescriptor>();
         _mockEngineBadTypeWrapper = createDescriptor<MockEngineDescriptor>();
