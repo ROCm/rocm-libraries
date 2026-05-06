@@ -880,7 +880,7 @@ using OutputWriterLds8c = direct_conv::OutputWriterLds<TileConstants<cfg>>;
 //   - mfma_f32_16x16x32_f16 (not Mfma16x16x16)
 // ===================================================================
 template <Config cfg>
-__device__ void conv2d_grouped_8c_fp16_cdna4_nhwc_impl_v2(const _Float16* __restrict__ in,
+__device__ void ck_tile_conv2d_grouped_8c_fp16_nhwc_impl(const _Float16* __restrict__ in,
                                                             const _Float16* __restrict__ wei,
                                                             _Float16* __restrict__ out,
                                                             int N,
@@ -1059,7 +1059,7 @@ __device__ void conv2d_grouped_8c_fp16_cdna4_nhwc_impl_v2(const _Float16* __rest
 // ============================================================================
 
 template <Config cfg>
-__global__ void conv2d_grouped_8c_fp16_nhwc_cdna4_v2(const _Float16* __restrict__ in,
+__global__ void ck_tile_conv2d_grouped_8c_fp16_nhwc(const _Float16* __restrict__ in,
                                                        const _Float16* __restrict__ wei,
                                                        double alpha,
                                                        double beta,
@@ -1081,7 +1081,7 @@ __global__ void conv2d_grouped_8c_fp16_nhwc_cdna4_v2(const _Float16* __restrict_
                                                        int py,
                                                        int px)
 {
-    conv2d_grouped_8c_fp16_cdna4_nhwc_impl_v2<cfg>(in, wei, out,
+    ck_tile_conv2d_grouped_8c_fp16_nhwc_impl<cfg>(in, wei, out,
                                                      N, groups, c_per_group, k_per_group,
                                                      hi, wi, ho, wo, py, px);
 }
@@ -1103,7 +1103,7 @@ void launch_dispatch(int config_idx,
     auto kernel_launch = [&]<size_t I>()
     {
         auto view = SizeView<configs[I].direction>(par);
-        conv2d_grouped_8c_fp16_nhwc_cdna4_v2<configs[I]>
+        ck_tile_conv2d_grouped_8c_fp16_nhwc<configs[I]>
             <<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
                 static_cast<const _Float16*>(in),
                 static_cast<const _Float16*>(wei),
