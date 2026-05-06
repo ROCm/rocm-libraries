@@ -414,7 +414,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // Zj = Xj - 0.5 Vj D
             //    = Xj - 0.5 Vj Wj^H A Wj
             //    = A V T - 0.5 V T^H V^H A V T
-            // Zj is really jm rows tall, but we need only qm rows for her2k/gemms to update the next panel (above) or trailing matrix (below).
+            // Zj is really jm rows tall, but we need only qm rows for her2k/gemms
+            // to update the next panel (above) or trailing matrix (below).
             // Too bad there isn't a 4 matrix gemm: C = alpha AB + beta D.
             cpy_mblks = ceildiv( qm, 32 );
             cpy_nblks = ceildiv( i-j+qn, 32 );
