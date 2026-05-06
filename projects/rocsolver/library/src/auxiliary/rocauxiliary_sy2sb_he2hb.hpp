@@ -237,7 +237,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         ROCSOLVER_LAUNCH_KERNEL(
             copy_mat<T>,
             dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32), 0, stream,
-            n-j, jb_rnd,
+            n-j, jb_rnd, // opts
             A, idx2D( j, j, lda ) + shiftA, lda, strideA,  // Aj
             V, idx2D( j, 0, ldv ), ldv, strideA );         // Vj
 
@@ -264,7 +264,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 // Ai -= Vj Zj^H (where Ai in V)
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                    n-i, kd, i-j,
+                    n-i, kd, i-j, // opts
                     &negone, V, idx2D( i, 0,   ldv ), ldv, strideV,  // Vj
                              Z, idx2D( i, 0,   ldz ), ldz, strideZ,  // Zj^H, kd cols
                     &one,    V, idx2D( i, i-j, ldv ), ldv, strideV,  // Vi
@@ -273,7 +273,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 // Ai -= Zj Vj^H
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                    n-i, kd, i-j,
+                    n-i, kd, i-j, // opts
                     &negone, Z, idx2D( i, 0,   ldz ), ldz, strideZ,  // Zj
                              V, idx2D( i, 0,   ldv ), ldv, strideV,  // Vj^H, kd cols
                     &one,    V, idx2D( i, i-j, ldv ), ldv, strideV,  // Vi
@@ -283,7 +283,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // Factor current sub-panel, Ai, stored in Vi.
             // Includes all kd cols, not just qn cols; geqrf updates all cols.
             rocsolver_geqrf_template<BATCHED, STRIDED>(
-                handle, qm, kd,
+                handle, qm, kd, // opts
                 V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
                 &tau[ i ], strideTau,                      // tau_i
                 batch_count, scalars, work, D, Z, workArr );
@@ -314,7 +314,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             T const diag    = one;
             laset(
                 handle, 'u',
-                qn, qn, offdiag, diag,
+                qn, qn, offdiag, diag, // opts
                 V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
                 batch_count );
 
@@ -327,7 +327,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // Form corresponding matrix Ti = larft( Vi, tau_i ), stored above Vi.
             rocsolver_larft_template<T>(
                 handle, rocblas_forward_direction, rocblas_column_wise,
-                qm, qn,
+                qm, qn, // opts
                 V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
                 &tau[ i ], strideTau,                      // tau_i
                 V + idx2D( i, i-j, ldv ), ldv, strideV,    // Ti
@@ -336,7 +336,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // Compute Wi = Vi Ti
             rocsolver_gemm(
                 handle, rocblas_operation_none, rocblas_operation_none,
-                qm, qn, qn,
+                qm, qn, qn, // opts
                 &one,  V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
                        V, idx2D( i,    i-j, ldv ), ldv, strideV,  // Ti
                 &zero, W, idx2D( i+kd, i-j, ldw ), ldw, strideW,  // Wi
@@ -354,14 +354,14 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 // Zero out block above Wi*.
                 laset(
                     handle, 'g',
-                    i-j, qn, zero, zero,
+                    i-j, qn, zero, zero, // opts
                     W, idx2D( j+kd, i-j, ldw ), ldw, strideW,  // Wi
                     batch_count );
 
                 // Cji = Vj^H Wi, Cji stored in V above [ Ti; Vi ].
                 rocsolver_gemm(
                     handle, rocblas_operation_conjugate_transpose, rocblas_operation_none,
-                    i-j, qn, qm,
+                    i-j, qn, qm, // opts
                     &one,  V, idx2D( i+kd, 0,   ldv ), ldv, strideV,  // Vj^H
                            W, idx2D( i+kd, i-j, ldw ), ldw, strideW,  // Wi
                     &zero, V, idx2D( j,    i-j, ldv ), ldv, strideV,  // Cji
@@ -370,7 +370,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 // Wi = Wi* - Wj Cji
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_none,
-                    jm, qn, i-j,
+                    jm, qn, i-j, // opts
                     &negone, W, idx2D( j+kd, 0,   ldw ), ldw, strideW,  // Wj
                              V, idx2D( j,    i-j, ldv ), ldv, strideV,  // Cji
                     &one,    W, idx2D( j+kd, i-j, ldw ), ldw, strideW,  // Wi, jm rows
@@ -384,7 +384,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             {
                 rocsolver_hemm(
                     handle, rocblas_side_left, rocblas_fill_lower,
-                    jm, qn,
+                    jm, qn, // opts
                     &one,  A, idx2D( j+kd, j+kd, lda ) + shiftA, lda, strideA,  // A
                            W, idx2D( j+kd, i-j,  ldw ), ldw, strideW,  // Wi, jm rows
                     &zero, X, idx2D( j+kd, i-j,  ldx ), ldx, strideX,  // Xi
@@ -394,7 +394,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             {
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_none,
-                    jm, qn, jm,
+                    jm, qn, jm, // opts
                     &one,  A, idx2D( j+kd, j+kd, lda ) + shiftA, lda, strideA,  // A
                            W, idx2D( j+kd, i-j,  ldw ), ldw, strideW,  // Wi, jm rows
                     &zero, X, idx2D( j+kd, i-j,  ldx ), ldx, strideX,  // Xi
@@ -405,7 +405,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // D is Hermitian, so this could be herkx/gemmtr, with a hemm below for Z.
             rocsolver_gemm(
                 handle, rocblas_operation_conjugate_transpose, rocblas_operation_none,
-                i-j+qn, i-j+qn, jm,
+                i-j+qn, i-j+qn, jm, // opts
                 &one,  W, idx2D( j+kd, 0, ldw ), ldw, strideW,  // Wj^H
                        X, idx2D( j+kd, 0, ldx ), ldx, strideX,  // Xj
                 &zero, D, idx2D( 0,    0, ldd ), ldd, strideD,  // D
@@ -422,12 +422,12 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             ROCSOLVER_LAUNCH_KERNEL(
                 copy_mat<T>,
                 dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32), 0, stream,
-                qm, i-j+qn,
+                qm, i-j+qn, // opts
                 X, idx2D( i+kd, 0, ldx ), ldx, strideX,    // Xj
                 Z, idx2D( i+kd, 0, ldz ), ldz, strideZ );  // Zj
             rocsolver_gemm(
                 handle, rocblas_operation_none, rocblas_operation_none,
-                qm, i-j+qn, i-j+qn,
+                qm, i-j+qn, i-j+qn, // opts
                 &neghalf, V, idx2D( i+kd, 0, ldv ), ldv, strideV,  // Vj
                           D, idx2D( 0,    0, ldd ), ldd, strideD,  // D
                 &one,     Z, idx2D( i+kd, 0, ldz ), ldz, strideZ,  // Zj
@@ -456,7 +456,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // A -= ZV^H + VZ^H
             rocsolver_her2k(
                 handle, rocblas_fill_lower, rocblas_operation_none,
-                n-i, jb,
+                n-i, jb, // opts
                 &negone, Z, idx2D( i, 0, ldz ), ldz,  // Zj, n-i rows
                          V, idx2D( i, 0, ldv ), ldv,  // Vj, n-i rows
                 &one,    A, idx2D( i, i, lda ), lda,  // Ai
@@ -467,7 +467,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // A -= VZ^H
             rocsolver_gemm(
                 handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                n-i, n-i, jb,
+                n-i, n-i, jb, // opts
                 &negone, V, idx2D( i, 0, ldv ), ldv, strideV,  // Vj,   n-i rows
                          Z, idx2D( i, 0, ldz ), ldz, strideZ,  // Zj^H, n-i cols
                 &one,    A, idx2D( i, i, lda ) + shiftA, lda, strideA,  // Ai
@@ -476,7 +476,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // A -= ZV^H
             rocsolver_gemm(
                 handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                n-i, n-i, jb,
+                n-i, n-i, jb, // opts
                 &negone, Z, idx2D( i, 0, ldz ), ldz, strideZ,  // Zj,   n-i rows
                          V, idx2D( i, 0, ldv ), ldv, strideV,  // Vj^H, n-i cols
                 &one,    A, idx2D( i, i, lda ) + shiftA, lda, strideA,  // Ai
@@ -491,7 +491,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         ROCSOLVER_LAUNCH_KERNEL(
             copy_mat<T>,
             dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32), 0, stream,
-            n-j, jb_rnd,
+            n-j, jb_rnd, // opts
             V, idx2D( j, 0, ldv ), ldv, strideV,    // Vj
             A, idx2D( j, j, lda ), lda, strideA );  // Aj
     }
@@ -502,7 +502,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     ROCSOLVER_LAUNCH_KERNEL(
         copy_mat<T>,
         dim3(cpy_mblks, cpy_mblks, batch_count), dim3(32, 32), 0, stream,
-        n-i, n-i,
+        n-i, n-i, // opts
         A,     idx2D( i, i, lda  ) + shiftA, lda,    strideA,   // Aii
         Aband, idx2D( idiag, i, ldab ),      ldab-1, strideAb,  // Aband_ii
         no_mask{}, rocblas_fill_lower );

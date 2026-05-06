@@ -193,7 +193,10 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n", __func__, llong(n), llong(kd), llong
     timer.start(stream);
     CHECK_ROCBLAS_ERROR(
         rocsolver_sy2sb_he2hb(
-            handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data()));
+            handle, n, kd, nb, // opts
+            dA.data(), lda, // A
+            dAband.data(), ldab, // Aband
+            dTau.data())); // tau
     time = timer.end(stream);
     printf( "n %lld, kd %lld, nb %lld, getError time %.4f\n",
             llong(n), llong(kd), llong(nb), time );
@@ -320,10 +323,10 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n",
         timer.start(stream);
         CHECK_ROCBLAS_ERROR(
             rocsolver_sy2sb_he2hb(
-                handle, n, kd, nb,
-                dA.data(), lda,
-                dAband.data(), ldab,
-                dTau.data()));
+                handle, n, kd, nb, // opts
+                dA.data(), lda, // A
+                dAband.data(), ldab, // Aband
+                dTau.data())); // tau
         time = timer.end(stream);
         printf( "n %lld, kd %lld, nb %lld, cold iter %lld, time %.4f\n",
                 llong(n), llong(kd), llong(nb), llong(iter), time );
@@ -347,10 +350,10 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n",
 
         timer.start(stream);
         rocsolver_sy2sb_he2hb(
-            handle, n, kd, nb,
-            dA.data(), lda,
-            dAband.data(), ldab,
-            dTau.data());
+            handle, n, kd, nb, // opts
+            dA.data(), lda, // A
+            dAband.data(), ldab, // Aband
+            dTau.data()); // tau
         time = timer.end(stream);
         printf( "n %lld, kd %lld, nb %lld, hot  iter %lld, time %.4f\n",
                 llong(n), llong(kd), llong(nb), llong(iter), time );
@@ -396,10 +399,10 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n",
     {
         EXPECT_ROCBLAS_STATUS(
             rocsolver_sy2sb_he2hb(
-                handle, n, kd, nb,
-                (T*)nullptr, lda,
-                (T*)nullptr, ldab,
-                (T*)nullptr),
+                handle, n, kd, nb, // opts
+                (T*)nullptr, lda, // A
+                (T*)nullptr, ldab, // Aband
+                (T*)nullptr), // tau
             rocblas_status_invalid_size);
 
         if(argus.timing)
@@ -414,10 +417,10 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n",
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
         CHECK_ALLOC_QUERY(
             rocsolver_sy2sb_he2hb(
-                handle, n, kd, nb,
-                (T*)nullptr, lda,
-                (T*)nullptr, ldab,
-                (T*)nullptr));
+                handle, n, kd, nb, // opts
+                (T*)nullptr, lda, // A
+                (T*)nullptr, ldab, // Aband
+                (T*)nullptr)); // tau
 
         size_t size;
         CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
@@ -450,10 +453,10 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n",
     {
         EXPECT_ROCBLAS_STATUS(
             rocsolver_sy2sb_he2hb(
-                handle, n, kd, nb,
-                dA.data(), lda,
-                dAband.data(), ldab,
-                dTau.data()),
+                handle, n, kd, nb, // opts
+                dA.data(), lda, // A
+                dAband.data(), ldab, // Aband
+                dTau.data()), // tau
             rocblas_status_success);
         if(argus.timing)
             rocsolver_bench_inform(inform_quick_return);
