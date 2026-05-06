@@ -35,7 +35,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 88ee24b7fe23e26b3c2199efaf06565e24672399 # 2026-04-28
+          ref: 70a6335b27d48f3781ba07eab89269f75a00f527 # 2026-05-03 commit
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

@@ -3,6 +3,9 @@
 
 #include <string>
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+
 #include "BatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/batchnorm/BatchnormApplicabilityChecks.hpp"
 #include "engines/plans/batchnorm/BatchnormFwdTrainingPlan.hpp"

@@ -33,7 +33,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         # scikit-build-core pre-installs nanobind (from build-system.requires)
         # and injects its CMake path, so find_package works without FetchContent.
         # nanobind requires Python to be found first.
-        find_package(Python 3.10 COMPONENTS Interpreter Development REQUIRED)
+        find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
         find_package(nanobind REQUIRED CONFIG)
     else()
         include(FetchContent)
@@ -99,13 +99,15 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
 
-    # Optional inclusion of external shared/stinkytofu CMake project
-    set(STINKYTOFU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-    if(EXISTS "${STINKYTOFU_DIR}/CMakeLists.txt")
-        # Add the external directory; build output goes into a local binary dir 'stinkytofu'
-        add_subdirectory("${STINKYTOFU_DIR}" stinkytofu EXCLUDE_FROM_ALL)
-    else()
-        message(FATAL_ERROR "External directory not found: ${STINKYTOFU_DIR} (skipping)")
+    # Locate stinkytofu: prefer the monorepo sibling, fall back to installed package.
+    if(NOT TARGET stinkytofu)
+        set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+        if(IS_DIRECTORY "${_stinkytofu_sibling}")
+            set(STINKYTOFU_ENABLE_WERROR ON)
+            add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
+        else()
+            find_package(stinkytofu REQUIRED)
+        endif()
     endif()
 
     target_link_libraries(_rocisa PUBLIC roc::origami)
@@ -123,6 +125,15 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         # the binary dir, not co-located with _rocisa.so.
         BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
     )
+    # On Windows there is no RPATH; copy stinkytofu.dll next to _rocisa.pyd
+    # so the dynamic linker can find it at runtime.
+    if(WIN32)
+        add_custom_command(TARGET _rocisa POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:stinkytofu>
+                $<TARGET_FILE_DIR:_rocisa>
+        )
+    endif()
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
         "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
@@ -140,9 +151,9 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         # Install rules for scikit-build-core: place _rocisa.so, libstinkytofu.so,
         # and __init__.py into the rocisa/ package directory in the wheel.
         install(TARGETS _rocisa DESTINATION rocisa)
-        # Co-install libstinkytofu.so next to _rocisa.so so the dynamic linker
-        # can find it at runtime (wheel layout: both files sit in rocisa/).
+        # Co-install libstinkytofu.so and its SONAME symlink next to _rocisa.so.
         install(FILES $<TARGET_FILE:stinkytofu> DESTINATION rocisa)
+        install(FILES $<TARGET_SONAME_FILE:stinkytofu> DESTINATION rocisa)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
     endif()
 endif()

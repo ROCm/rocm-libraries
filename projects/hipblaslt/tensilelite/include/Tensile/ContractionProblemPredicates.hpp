@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -1428,6 +1429,56 @@ namespace TensileLite
                     return "TypesEqual";
                 }
 
+                // This function checks if the computeInputType of a problem matches the computeInputType of a
+                // solution. Because for Float8{_fnuz}/BFloat8{_fnuz}, the computeInputTypeA and computeInputTypeB
+                // might be concatenated like this: computeInputTypeAcomputeInputTypeB{_fnuz}, this function
+                // includes special logic to inspect types at the concatenation position.
+                //
+                bool validateComputeType(rocisa::DataType const& problemComputeInputType, bool const isComputeInputTypeA) const
+                {
+                    using ArrType = std::array<std::pair<rocisa::DataType, rocisa::DataType>, 4>;
+
+                    // computeInputTypeA corresponds to the first type in the concatenated type
+                    ArrType const computeInputTypeAMapping =
+                    {{
+                        {rocisa::DataType::BFloat8_fnuz, rocisa::DataType::BFloat8Float8_fnuz},
+                        {rocisa::DataType::Float8_fnuz,  rocisa::DataType::Float8BFloat8_fnuz},
+                        {rocisa::DataType::BFloat8, rocisa::DataType::BFloat8Float8},
+                        {rocisa::DataType::Float8,  rocisa::DataType::Float8BFloat8}
+                    }};
+
+                    // computeInputTypeB corresponds to the second type in the concatenated type
+                    ArrType const computeInputTypeBMapping =
+                    {{
+                        {rocisa::DataType::Float8_fnuz,  rocisa::DataType::BFloat8Float8_fnuz},
+                        {rocisa::DataType::BFloat8_fnuz, rocisa::DataType::Float8BFloat8_fnuz},
+                        {rocisa::DataType::Float8,  rocisa::DataType::BFloat8Float8},
+                        {rocisa::DataType::BFloat8, rocisa::DataType::Float8BFloat8}
+                    }};
+
+                    auto validate = [](ArrType const& arr,
+                            rocisa::DataType const& t1, rocisa::DataType const& t2){
+                          if(t1 == t2)
+                              return true;
+                          return std::any_of(arr.begin(), arr.end(), [&](const auto& p){
+                                  return (p == std::make_pair(t1, t2)) or (p == std::make_pair(t2, t1));
+                        });
+                    };
+
+                    if(isComputeInputTypeA)
+                    {
+                        // value[4] is computeInputTypeA
+                        return
+                            validate(computeInputTypeAMapping, problemComputeInputType, value[4]);
+                    }
+                    else
+                    {
+                        // value[5] is computeInputTypeB
+                        return
+                            validate(computeInputTypeBMapping, problemComputeInputType, value[5]);
+                    }
+                }
+
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     return problem.a().dataType() == value[0] && problem.b().dataType() == value[1]
@@ -1547,10 +1598,10 @@ namespace TensileLite
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return multiplyElementSize((problem.a().strides()[1] * min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA),
+                    return multiplyElementSize((problem.a().strides()[1] * std::min(value.depthUorMT0, problem.a().sizes()[1]) + value.shiftPtrElemA),
                                    problem.a().elementBytes())
                                < TWO_POW_32
-                           && multiplyElementSize((problem.b().strides()[1] * min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
+                           && multiplyElementSize((problem.b().strides()[1] * std::min(value.depthUorMT1, problem.b().sizes()[1]) + value.shiftPtrElemB)
                                       ,problem.b().elementBytes())
                                   < TWO_POW_32;
                 }
@@ -1615,7 +1666,7 @@ namespace TensileLite
                     else
                     {
                         const uint64_t TWO_POW_32 = 4294967296;
-                        return multiplyElementSize(problem.c().strides()[1] * min(value, problem.c().sizes()[1]), problem.c().elementBytes())
+                        return multiplyElementSize(problem.c().strides()[1] * std::min(value, problem.c().sizes()[1]), problem.c().elementBytes())
                                < TWO_POW_32;
                     }
                 }
@@ -1662,7 +1713,7 @@ namespace TensileLite
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     const uint64_t TWO_POW_32 = 4294967296;
-                    return multiplyElementSize(problem.d().strides()[1] * min(value, problem.d().sizes()[1]), problem.d().elementBytes())
+                    return multiplyElementSize(problem.d().strides()[1] * std::min(value, problem.d().sizes()[1]), problem.d().elementBytes())
                            < TWO_POW_32;
                 }
 
@@ -2972,6 +3023,14 @@ namespace TensileLite
                     Hardware const& hardware = *pHardware;
                     AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
                     cuCount                  = pAMDGPU->computeUnitCount;
+                }
+
+                /// Constructor for testing: inject cuCount so selection logic can be
+                /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
+                WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
+                    : value(value)
+                    , cuCount(cuCountForTest)
+                {
                 }
 
                 static std::string Type()
