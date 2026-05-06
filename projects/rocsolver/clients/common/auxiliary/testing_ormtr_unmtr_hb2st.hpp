@@ -74,18 +74,18 @@ inline rocblas_status rocblas_copy(
 }
 
 //------------------------------------------------------------------------------
-template <typename T>
+template <typename T, typename I = rocblas_int>
 void ormtr_unmtr_hb2st_checkBadArgs(const rocblas_handle handle,
                                     const rocblas_side side,
                                     const rocblas_operation trans,
-                                    const rocblas_int m,
-                                    const rocblas_int n,
-                                    const rocblas_int kd,
+                                    const I m,
+                                    const I n,
+                                    const I kd,
                                     T dV,
-                                    const rocblas_int ldv,
+                                    const I ldv,
                                     T dTau,
                                     T dC,
-                                    const rocblas_int ldc)
+                                    const I ldc)
 {
     // handle
     EXPECT_ROCBLAS_STATUS(
@@ -137,18 +137,18 @@ void ormtr_unmtr_hb2st_checkBadArgs(const rocblas_handle handle,
 
 //------------------------------------------------------------------------------
 // todo: why not merge this with ormtr_unmtr_hb2st_checkBadArgs?
-template <typename T>
+template <typename T, typename I = rocblas_int>
 void testing_ormtr_unmtr_hb2st_bad_arg()
 {
     // safe arguments
     rocblas_local_handle handle;
     rocblas_side side = rocblas_side_left;
     rocblas_operation trans = rocblas_operation_conjugate_transpose;
-    rocblas_int m = 2;
-    rocblas_int n = 2;
-    rocblas_int kd = 1;
-    rocblas_int ldv = 2;
-    rocblas_int ldc = 2;
+    I m = 2;
+    I n = 2;
+    I kd = 1;
+    I ldv = 2;
+    I ldc = 2;
 
     // memory allocation
     device_strided_batch_vector<T> dV(1, 1, 1, 1);
@@ -159,29 +159,29 @@ void testing_ormtr_unmtr_hb2st_bad_arg()
     CHECK_HIP_ERROR(dC.memcheck());
 
     // check bad arguments
-    ormtr_unmtr_hb2st_checkBadArgs(
+    ormtr_unmtr_hb2st_checkBadArgs<decltype(dV.data()), I>(
         handle, side, trans, m, n, kd,
         dV.data(), ldv, dTau.data(), dC.data(), ldc);
 }
 
 //------------------------------------------------------------------------------
-template <bool CPU, bool GPU, typename T, typename Td, typename Th, typename Sd, typename Sh>
+template <bool CPU, bool GPU, typename T, typename I, typename Td, typename Th, typename Sd, typename Sh>
 void ormtr_unmtr_hb2st_initData(
     const rocblas_handle handle,
     const rocblas_side side,
     const rocblas_operation trans,
-    const rocblas_int m,
-    const rocblas_int n,
-    const rocblas_int kd,
+    const I m,
+    const I n,
+    const I kd,
 
     // todo: dAband is not actually used, but hAband with ldab is used.
     Td& dAband,
-    const rocblas_int ldab,
+    const I ldab,
     Td& dV,
-    const rocblas_int ldv,
+    const I ldv,
     Td& dTau,
     Td& dC,
-    const rocblas_int ldc,
+    const I ldc,
     Sd& dD,
     Sd& dE,
 
@@ -197,7 +197,7 @@ void ormtr_unmtr_hb2st_initData(
     if(CPU)
     {
         // Matrix Aband and Q are m-by-m on left, or n-by-n on right.
-        rocblas_int nq = (side == rocblas_side_left ? m : n);
+        I nq = (side == rocblas_side_left ? m : n);
 
         gerand( m, n, hC[0], ldc );
         hbrand( nq, kd, hAband[0], ldab );
@@ -216,9 +216,9 @@ void ormtr_unmtr_hb2st_initData(
         CHECK_HIP_ERROR(hD.transfer_from(dD));
         CHECK_HIP_ERROR(hE.transfer_from(dE));
 
-        rocblas_int nt = ceildiv( nq - 1, kd );
-        rocblas_int nv_blocks = nt*(nt + 1)/2;
-        rocblas_int nv = nv_blocks*kd;
+        I nt = ceildiv( nq - 1, kd );
+        I nv_blocks = nt*(nt + 1)/2;
+        I nv = nv_blocks*kd;
 
         // todo: remove Tau from V in hb2st
         CHECK_ROCBLAS_ERROR(
@@ -256,28 +256,28 @@ void ormtr_unmtr_hb2st_initData(
 //
 // Allocate R as max( m, nq )-by-max( n, nq ) for use in all 3 tests.
 //
-template <typename T, typename Td, typename Th, typename Sd, typename Sh>
+template <typename T, typename I, typename Td, typename Th, typename Sd, typename Sh>
 void ormtr_unmtr_hb2st_getError(
     const rocblas_handle handle,
     const rocblas_side side,
     const rocblas_operation trans,
-    const rocblas_int m,
-    const rocblas_int n,
-    const rocblas_int kd,
+    const I m,
+    const I n,
+    const I kd,
 
     Td& dAband,
-    const rocblas_int ldab,
+    const I ldab,
     Td& dV,
-    const rocblas_int ldv,
+    const I ldv,
     Td& dTau,  // unused
     Td& dC,
-    const rocblas_int ldc,
+    const I ldc,
     Sd& dD,
     Sd& dE,
     Td& dQ,
-    const rocblas_int ldq,
+    const I ldq,
     Td& dR,
-    const rocblas_int ldr,
+    const I ldr,
     Sd& dnorm,
 
     Th& hAband,
@@ -303,9 +303,9 @@ void ormtr_unmtr_hb2st_getError(
     rocsolver_timer timer;
     timer.start( stream );
 
-    rocblas_int idiag = kd - 1;
+    I idiag = kd - 1;
 
-    rocblas_int nq = (side == rocblas_side_left ? m : n);
+    I nq = (side == rocblas_side_left ? m : n);
     rocblas_stride shift = 0;
     rocblas_stride stride = 0;
 
@@ -317,11 +317,11 @@ void ormtr_unmtr_hb2st_getError(
 
     // cpu_gemm needs hW size nq*nq.
     // todo: Should this be passed in?
-    rocblas_int ldw = nq;
+    I ldw = nq;
     std::vector<T> hW( ldw * nq );
 
     // initialize data
-    ormtr_unmtr_hb2st_initData<true, true, T>(
+    ormtr_unmtr_hb2st_initData<true, true, T, I>(
         handle, side, trans, m, n, kd,
         dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
         hAband, hV, hTau, hC, hD, hE);
@@ -470,22 +470,22 @@ void ormtr_unmtr_hb2st_getError(
 }
 
 //------------------------------------------------------------------------------
-template <typename T, typename Td, typename Th, typename Sd, typename Sh>
+template <typename T, typename I, typename Td, typename Th, typename Sd, typename Sh>
 void ormtr_unmtr_hb2st_getPerfData(
     const rocblas_handle handle,
     const rocblas_side side,
     const rocblas_operation trans,
-    const rocblas_int m,
-    const rocblas_int n,
-    const rocblas_int kd,
+    const I m,
+    const I n,
+    const I kd,
 
     Td& dAband,
-    const rocblas_int ldab,
+    const I ldab,
     Td& dV,
-    const rocblas_int ldv,
+    const I ldv,
     Td& dTau,
     Td& dC,
-    const rocblas_int ldc,
+    const I ldc,
     Sd& dD,
     Sd& dE,
 
@@ -513,7 +513,7 @@ void ormtr_unmtr_hb2st_getPerfData(
     // unmtr_hb2st is in PLASMA but not LAPACK.
 
     // Initialize CPU data.
-    ormtr_unmtr_hb2st_initData<true, false, T>(
+    ormtr_unmtr_hb2st_initData<true, false, T, I>(
         handle, side, trans, m, n, kd,
         dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
         hAband, hV, hTau, hC, hD, hE);
@@ -522,7 +522,7 @@ void ormtr_unmtr_hb2st_getPerfData(
     double start, time;
     for(int iter = 0; iter < 2; iter++)
     {
-        ormtr_unmtr_hb2st_initData<false, true, T>(
+        ormtr_unmtr_hb2st_initData<false, true, T, I>(
             handle, side, trans, m, n, kd,
             dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
             hAband, hV, hTau, hC, hD, hE);
@@ -549,7 +549,7 @@ void ormtr_unmtr_hb2st_getPerfData(
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
-        ormtr_unmtr_hb2st_initData<false, true, T>(
+        ormtr_unmtr_hb2st_initData<false, true, T, I>(
             handle, side, trans, m, n, kd,
             dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
             hAband, hV, hTau, hC, hD, hE);
@@ -568,7 +568,7 @@ void ormtr_unmtr_hb2st_getPerfData(
 }
 
 //------------------------------------------------------------------------------
-template <typename T>
+template <typename T, typename I = rocblas_int>
 void testing_ormtr_unmtr_hb2st(Arguments& argus)
 {
     using S = decltype( std::real( T{} ) );
@@ -577,15 +577,15 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     rocblas_local_handle handle;
     char sideC = argus.get<char>("side");
     char transC = argus.get<char>("trans");
-    rocblas_int m = argus.get<rocblas_int>("m");
-    rocblas_int n = argus.get<rocblas_int>("n", m);
-    rocblas_int nq = (sideC == 'L' ? m : n);
-    rocblas_int kd = argus.get<rocblas_int>("kd", 1);
-    rocblas_int ldv = argus.get<rocblas_int>("ldv", 3*kd);
-    rocblas_int ldc = argus.get<rocblas_int>("ldc", m);
-    rocblas_int ldq = nq;
-    rocblas_int ldr = std::max( m, nq );
-    rocblas_int ldab = 3*kd - 1;
+    I m = argus.get<I>("m");
+    I n = argus.get<I>("n", m);
+    I nq = (sideC == 'L' ? m : n);
+    I kd = argus.get<I>("kd", 1);
+    I ldv = argus.get<I>("ldv", 3*kd);
+    I ldc = argus.get<I>("ldc", m);
+    I ldq = nq;
+    I ldr = std::max( m, nq );
+    I ldab = 3*kd - 1;
 
     rocblas_side side = char2rocblas_side(sideC);
     rocblas_operation trans = char2rocblas_operation(transC);
@@ -609,9 +609,9 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     }
 
     // V is ldv x nv
-    rocblas_int nt = ceildiv( nq-1, kd );
-    rocblas_int nv_blocks = nt*(nt + 1)/2;
-    rocblas_int nv = nv_blocks*kd;
+    I nt = ceildiv( nq-1, kd );
+    I nv_blocks = nt*(nt + 1)/2;
+    I nv = nv_blocks*kd;
 
     // determine sizes
     size_t size_Aband = size_t(ldab) * nq;
@@ -715,7 +715,7 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     // check computations
     if(argus.unit_check || argus.norm_check)
     {
-        ormtr_unmtr_hb2st_getError<T>(
+        ormtr_unmtr_hb2st_getError<T, I>(
             handle, side, trans, m, n, kd,
             dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE, dQ, ldq, dR, ldr, dnorm,
             hAband, hV, hTau, hC, hD, hE, hQ, hR, hnorm, errors);
@@ -724,7 +724,7 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     // collect performance data
     if(argus.timing && hot_calls > 0)
     {
-        ormtr_unmtr_hb2st_getPerfData<T>(
+        ormtr_unmtr_hb2st_getPerfData<T, I>(
             handle, side, trans, m, n, kd,
             dAband, ldab, dV, ldv, dTau, dC, ldc, dD, dE,
             hAband, hV, hTau, hC, hD, hE,
@@ -780,4 +780,4 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
 #define EXTERN_TESTING_ORMTR_UNMTR_HB2ST(...) \
     extern template void testing_ormtr_unmtr_hb2st<__VA_ARGS__>(Arguments&);
 
-INSTANTIATE(EXTERN_TESTING_ORMTR_UNMTR_HB2ST, FOREACH_SCALAR_TYPE, APPLY_STAMP)
+INSTANTIATE(EXTERN_TESTING_ORMTR_UNMTR_HB2ST, FOREACH_SCALAR_TYPE, FOREACH_INT_TYPE, APPLY_STAMP)

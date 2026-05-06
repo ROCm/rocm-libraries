@@ -29,19 +29,19 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, bool COMPLEX = rocblas_is_complex<T>>
+template <typename T, typename I = rocblas_int, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(
     rocblas_handle handle,
     const rocblas_side side,
     const rocblas_operation trans,
-    const rocblas_int m,
-    const rocblas_int n,
-    const rocblas_int kd,
+    const I m,
+    const I n,
+    const I kd,
     T* V,
-    const rocblas_int ldv,
+    const I ldv,
     T* tau,
     T* C,
-    const rocblas_int ldc)
+    const I ldc)
 {
     const char* name = (!rocblas_is_complex<T> ? "ormtr_hb2st" : "unmtr_hb2st");
     ROCSOLVER_ENTER_TOP(name, "--side", side, "--trans", trans,
@@ -52,27 +52,27 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_ormtr_hb2st_argCheck<COMPLEX>(
+    rocblas_status st = rocsolver_ormtr_hb2st_argCheck<COMPLEX, T*, T*, I>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
     if(st != rocblas_status_continue)
         return st;
 
     // working with unshifted arrays
-    rocblas_int shiftV = 0;
-    rocblas_int shiftC = 0;
+    I shiftV = 0;
+    I shiftC = 0;
 
     // normal (non-batched non-strided) execution
-    rocblas_int strideV = 0;
-    rocblas_int strideT = 0;
-    rocblas_int strideC = 0;
-    rocblas_int batch_count = 1;
-    rocblas_int max_parallel = 1;
+    rocblas_stride strideV = 0;
+    rocblas_stride strideT = 0;
+    rocblas_stride strideC = 0;
+    I batch_count = 1;
+    I max_parallel = 1;
 
     // memory workspace sizes:
     size_t size_scalars;
     size_t size_Tr, size_W, size_Z;
     size_t size_work, size_workArr;
-    rocsolver_ormtr_unmtr_hb2st_getMemorySize<false, T>(
+    rocsolver_ormtr_unmtr_hb2st_getMemorySize<false, T, I>(
         side, trans, m, n, kd, batch_count, &max_parallel,
         &size_scalars, &size_Tr, &size_W, &size_Z,
         &size_work, &size_workArr);
@@ -101,10 +101,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(
 
     // execution
     // todo: these ld should come from getMemorySize.
-    rocblas_int ldt = kd;
-    rocblas_int ldw = 2*kd;
-    rocblas_int ldz = kd;
-    return rocsolver_ormtr_unmtr_hb2st_template<false, false, T>(
+    I ldt = kd;
+    I ldw = 2*kd;
+    I ldz = kd;
+    return rocsolver_ormtr_unmtr_hb2st_template<false, false, T, T*, I>(
         handle, side, trans, m, n, kd,
         V, shiftV, ldv, strideV,
         tau, strideT,
@@ -136,7 +136,7 @@ rocblas_status rocsolver_sormtr_hb2st(
     float* C,
     const rocblas_int ldc)
 {
-    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<float>(
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<float, rocblas_int>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
@@ -153,7 +153,7 @@ rocblas_status rocsolver_dormtr_hb2st(
     double* C,
     const rocblas_int ldc)
 {
-    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<double>(
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<double, rocblas_int>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
@@ -170,7 +170,7 @@ rocblas_status rocsolver_cunmtr_hb2st(
     rocblas_float_complex* C,
     const rocblas_int ldc)
 {
-    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_float_complex>(
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_float_complex, rocblas_int>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 }
 
@@ -187,8 +187,92 @@ rocblas_status rocsolver_zunmtr_hb2st(
     rocblas_double_complex* C,
     const rocblas_int ldc)
 {
-    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_double_complex>(
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_double_complex, rocblas_int>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+}
+
+rocblas_status rocsolver_sormtr_hb2st_64(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const int64_t m,
+    const int64_t n,
+    const int64_t kd,
+    float* V,
+    const int64_t ldv,
+    float* tau,
+    float* C,
+    const int64_t ldc)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<float, int64_t>(
+        handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_dormtr_hb2st_64(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const int64_t m,
+    const int64_t n,
+    const int64_t kd,
+    double* V,
+    const int64_t ldv,
+    double* tau,
+    double* C,
+    const int64_t ldc)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<double, int64_t>(
+        handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_cunmtr_hb2st_64(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const int64_t m,
+    const int64_t n,
+    const int64_t kd,
+    rocblas_float_complex* V,
+    const int64_t ldv,
+    rocblas_float_complex* tau,
+    rocblas_float_complex* C,
+    const int64_t ldc)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_float_complex, int64_t>(
+        handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_zunmtr_hb2st_64(
+    rocblas_handle handle,
+    const rocblas_side side,
+    const rocblas_operation trans,
+    const int64_t m,
+    const int64_t n,
+    const int64_t kd,
+    rocblas_double_complex* V,
+    const int64_t ldv,
+    rocblas_double_complex* tau,
+    rocblas_double_complex* C,
+    const int64_t ldc)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_double_complex, int64_t>(
+        handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 } // extern C

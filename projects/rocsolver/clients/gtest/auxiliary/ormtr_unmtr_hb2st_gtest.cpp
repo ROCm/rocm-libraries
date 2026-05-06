@@ -33,7 +33,8 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-typedef std::tuple<vector<int>, vector<int>> ormtr_hb2st_tuple;
+template <typename I>
+using ormtr_hb2st_tuple = std::tuple<vector<I>, vector<int>>;
 
 // each size_range vector is a {M, N, KD}
 
@@ -87,28 +88,49 @@ const vector<vector<int>> size_range = {
     {70, 40, 8},
 };
 
+const vector<vector<int64_t>> size_range_64 = {
+    // quick return
+    {0, 1, 0},  // also bad args
+    {1, 0, 0},
+    // invalid
+    {-1, 1, 0},
+    {1, -1, 0},
+    {1, 1, -1},
+    // normal (valid) samples
+    {10, 30, 4},
+    {20, 5, 2},
+    {20, 20, 5},
+    {50, 50, 10},
+    {70, 40, 8},
+};
+
 // for daily_lapack tests
 const vector<vector<int>> large_size_range = {
     {200, 150, 20}, {270, 270, 30}, {400, 400, 40}, {800, 500, 50}, {1500, 1000, 100},
 };
 
-Arguments ormtr_hb2st_setup_arguments(ormtr_hb2st_tuple tup)
+const vector<vector<int64_t>> large_size_range_64 = {
+    {200, 150, 20}, {270, 270, 30}, {400, 400, 40}, {800, 500, 50}, {1500, 1000, 100},
+};
+
+template <typename I>
+Arguments ormtr_hb2st_setup_arguments(ormtr_hb2st_tuple<I> tup)
 {
-    vector<int> size = std::get<0>(tup);
+    vector<I> size = std::get<0>(tup);
     vector<int> store = std::get<1>(tup);
 
     Arguments arg;
 
-    rocblas_int m = size[0];
-    rocblas_int n = size[1];
-    rocblas_int kd = size[2];
-    arg.set<rocblas_int>("m", m);
-    arg.set<rocblas_int>("n", n);
-    arg.set<rocblas_int>("kd", kd);
+    I m = size[0];
+    I n = size[1];
+    I kd = size[2];
+    arg.set<I>("m", m);
+    arg.set<I>("n", n);
+    arg.set<I>("kd", kd);
 
     // todo: set ldv based on kd.
-    arg.set<rocblas_int>("ldv", m + store[0] * 10);
-    arg.set<rocblas_int>("ldc", m + store[1] * 10);
+    arg.set<I>("ldv", m + store[0] * 10);
+    arg.set<I>("ldc", m + store[1] * 10);
     arg.set<char>("side", store[2] == 0 ? 'L' : 'R');
     arg.set<char>("trans", store[3] == 0 ? 'N' : 'C');
 
@@ -117,7 +139,8 @@ Arguments ormtr_hb2st_setup_arguments(ormtr_hb2st_tuple tup)
     return arg;
 }
 
-class ORMTR_UNMTR_HB2ST : public ::TestWithParam<ormtr_hb2st_tuple>
+template <typename I>
+class ORMTR_UNMTR_HB2ST_BASE : public ::TestWithParam<ormtr_hb2st_tuple<I>>
 {
 protected:
     void TearDown() override
@@ -128,27 +151,34 @@ protected:
     template <typename T>
     void run_tests()
     {
-        Arguments arg = ormtr_hb2st_setup_arguments(GetParam());
+        Arguments arg = ormtr_hb2st_setup_arguments(this->GetParam());
 
-        // todo: is bad_arg getting called 2x?
-        if(arg.peek<rocblas_int>("m") == 0
-           && arg.peek<rocblas_int>("n") == 1
-           && arg.peek<rocblas_int>("kd") == 0
+        if(arg.peek<I>("m") == 0
+           && arg.peek<I>("n") == 1
+           && arg.peek<I>("kd") == 0
            && arg.peek<char>("side") == 'L'
            && arg.peek<char>("trans") == 'N')
         {
-            testing_ormtr_unmtr_hb2st_bad_arg<T>();
+            testing_ormtr_unmtr_hb2st_bad_arg<T, I>();
         }
 
-        testing_ormtr_unmtr_hb2st<T>(arg);
+        testing_ormtr_unmtr_hb2st<T, I>(arg);
     }
 };
 
-class ORMTR_HB2ST : public ORMTR_UNMTR_HB2ST
+class ORMTR_HB2ST : public ORMTR_UNMTR_HB2ST_BASE<rocblas_int>
 {
 };
 
-class UNMTR_HB2ST : public ORMTR_UNMTR_HB2ST
+class UNMTR_HB2ST : public ORMTR_UNMTR_HB2ST_BASE<rocblas_int>
+{
+};
+
+class ORMTR_HB2ST_64 : public ORMTR_UNMTR_HB2ST_BASE<int64_t>
+{
+};
+
+class UNMTR_HB2ST_64 : public ORMTR_UNMTR_HB2ST_BASE<int64_t>
 {
 };
 
@@ -174,6 +204,26 @@ TEST_P(UNMTR_HB2ST, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
+TEST_P(ORMTR_HB2ST_64, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(ORMTR_HB2ST_64, __double)
+{
+    run_tests<double>();
+}
+
+TEST_P(UNMTR_HB2ST_64, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P(UNMTR_HB2ST_64, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          ORMTR_HB2ST,
                          Combine(ValuesIn(large_size_range), ValuesIn(store_range)));
@@ -189,3 +239,19 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          UNMTR_HB2ST,
                          Combine(ValuesIn(size_range), ValuesIn(store_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         ORMTR_HB2ST_64,
+                         Combine(ValuesIn(large_size_range_64), ValuesIn(store_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         ORMTR_HB2ST_64,
+                         Combine(ValuesIn(size_range_64), ValuesIn(store_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         UNMTR_HB2ST_64,
+                         Combine(ValuesIn(large_size_range_64), ValuesIn(store_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         UNMTR_HB2ST_64,
+                         Combine(ValuesIn(size_range_64), ValuesIn(store_range)));

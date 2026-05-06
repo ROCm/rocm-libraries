@@ -48,15 +48,15 @@ ROCSOLVER_BEGIN_NAMESPACE
 // If batch_count = 1, max_parallel = ceildiv( nt, 2 ).
 // todo: if needed, limit max_parallel to limit workspace.
 //
-template <bool BATCHED, typename T>
+template <bool BATCHED, typename T, typename I = rocblas_int>
 void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     const rocblas_side side,
     const rocblas_operation trans,
-    const rocblas_int m,
-    const rocblas_int n,
-    const rocblas_int kd,
-    const rocblas_int batch_count,
-    rocblas_int* max_parallel,
+    const I m,
+    const I n,
+    const I kd,
+    const I batch_count,
+    I* max_parallel,
     size_t* size_scalars,
     size_t* size_T,
     size_t* size_W,
@@ -76,9 +76,9 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     if(m == 0 || n == 0 || kd == 0 || batch_count == 0)
         return;
 
-    rocblas_int nz = (side == rocblas_side_left ? n : m);  // cols in Z
-    rocblas_int nq = (side == rocblas_side_left ? m : n);  // rows in Q
-    rocblas_int nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
+    I nz = (side == rocblas_side_left ? n : m);  // cols in Z
+    I nq = (side == rocblas_side_left ? m : n);  // rows in Q
+    I nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
 
     // If batch_count = 1, set max_parallel > 1 and batch update block rows or
     // cols of a single matrix.
@@ -87,7 +87,7 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
     {
         *max_parallel = ceildiv( nt, 2 );
     }
-    rocblas_int bc = batch_count * (*max_parallel);
+    I bc = batch_count * (*max_parallel);
     bool batched = bc > 1;
     *size_Z = sizeof(T) * kd * nz * bc;
     *size_T = sizeof(T) * kd * kd * bc;
@@ -104,19 +104,19 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(
 }
 
 //------------------------------------------------------------------------------
-template <bool COMPLEX, typename T, typename U>
+template <bool COMPLEX, typename T, typename U, typename I = rocblas_int>
 rocblas_status rocsolver_ormtr_hb2st_argCheck(
     rocblas_handle handle,
     const rocblas_side side,
     const rocblas_operation trans,
-    const rocblas_int m,
-    const rocblas_int n,
-    const rocblas_int kd,
+    const I m,
+    const I n,
+    const I kd,
     T V,
-    const rocblas_int ldv,
+    const I ldv,
     U tau,  // why type U?
     T C,
-    const rocblas_int ldc)
+    const I ldc)
 {
     // order is important for unit tests:
 
@@ -166,30 +166,30 @@ rocblas_status rocsolver_ormtr_hb2st_argCheck(
 }
 
 //------------------------------------------------------------------------------
-template <bool BATCHED, bool STRIDED, typename T, typename U>
+template <bool BATCHED, bool STRIDED, typename T, typename U, typename I = rocblas_int>
 rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     rocblas_handle handle,
     const rocblas_side side,
     const rocblas_operation trans,
-    const rocblas_int m,
-    const rocblas_int n,
-    const rocblas_int kd,
+    const I m,
+    const I n,
+    const I kd,
     U V,
-    const rocblas_int shiftV,  // todo
-    const rocblas_int ldv,
+    const I shiftV,  // todo
+    const I ldv,
     rocblas_stride strideV,
     T* tau,
     rocblas_stride strideTau,
     U C,
-    const rocblas_int shiftC,  // todo
-    const rocblas_int ldc,
+    const I shiftC,  // todo
+    const I ldc,
     rocblas_stride strideC,
-    const rocblas_int batch_count,
-    rocblas_int max_parallel,
+    const I batch_count,
+    I max_parallel,
     T* scalars,
-    T* Tr, const rocblas_int ldt,
-    T* W,  const rocblas_int ldw,
-    T* Z,  const rocblas_int ldz,
+    T* Tr, const I ldt,
+    T* W,  const I ldw,
+    T* Z,  const I ldz,
     T* work,
     T** workArr)
 {
@@ -210,15 +210,15 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    rocblas_int nz = (side == rocblas_side_left ? n : m);  // cols in Z
-    rocblas_int nq = (side == rocblas_side_left ? m : n);  // rows in Q
-    rocblas_int nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
+    I nz = (side == rocblas_side_left ? n : m);  // cols in Z
+    I nq = (side == rocblas_side_left ? m : n);  // rows in Q
+    I nt = ceildiv( nq - 1, kd );  // block cols in conceptual V
 
     rocblas_stride strideT = ldt*kd;
     rocblas_stride strideW = ldw*kd;
     rocblas_stride strideZ = ldz*nz;
 
-    rocblas_int bc = batch_count;
+    I bc = batch_count;
     //max_parallel = 1;
     if (max_parallel > 1)
     {
@@ -242,7 +242,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
     // hmm... is this opposite direction in larft?
     bool left = (side == rocblas_side_left);
     bool backward = left == (trans == rocblas_operation_none);
-    rocblas_int k_begin, k_end, k_step;
+    I k_begin, k_end, k_step;
     if (backward)
     {
         // left no-trans OR right (conj-)trans
@@ -258,38 +258,38 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(
         k_step  = 1;
     }
 
-    for (rocblas_int k = k_begin; k != k_end; k += k_step)
+    for (I k = k_begin; k != k_end; k += k_step)
     {
         // i, j are block indices of the top of each conceptual V{i,j} block.
-        rocblas_int j_begin = std::max( 0, k );
-        rocblas_int j_end   = ceildiv( nt + k, 2 );
+        I j_begin = std::max( I(0), k );
+        I j_end   = ceildiv( nt + k, I(2) );
 
         // For given k, the j's are independent; we always go ascending.
-        rocblas_int j = j_begin;
+        I j = j_begin;
         while (j < j_end)
         {
             // r is storage index of V{i,j} block.
             // todo: multiply r by kd
-            rocblas_int i = 2*j - k;
-            rocblas_int r = get_v_block_index( nt, i, j );
+            I i = 2*j - k;
+            I r = get_v_block_index( nt, i, j );
 
             // For side = left,  ii is top  row of C block.
             // For side = right, ii is left col of C block.
-            rocblas_int ii = i*kd + 1;
+            I ii = i*kd + 1;
 
             // V block has dimensions mv-by-kv.
-            rocblas_int mv = std::min( 2*kd - 1, nq - ii );
-            rocblas_int kv = std::min( mv, kd );
+            I mv = std::min( 2*kd - 1, nq - ii );
+            I kv = std::min( mv, kd );
 
             // Check dimensions (mv, kv) for last j in this batch. If it is
             // different, save that j for the next batch, which will be a
             // cleanup with batch_count = 1.
-            rocblas_int j_last = std::min( j + max_parallel, j_end ) - 1;
+            I j_last = std::min( j + max_parallel, j_end ) - 1;
             {
-                rocblas_int i_last = 2*j_last - k;
-                rocblas_int ii_last = i_last*kd + 1;
-                rocblas_int mv_last = std::min( 2*kd - 1, nq - ii );
-                rocblas_int kv_last = std::min( mv, kd );
+                I i_last = 2*j_last - k;
+                I ii_last = i_last*kd + 1;
+                I mv_last = std::min( 2*kd - 1, nq - ii );
+                I kv_last = std::min( mv, kd );
                 if (mv_last != mv || kv_last != kv)
                 {
                     j_last -= 1;
