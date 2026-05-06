@@ -77,7 +77,7 @@ inline std::ostream& operator<<(std::ostream& os, const SDelayAluData& delayAluD
             case SDelayAluData::InstType::SALU:
                 return "SALU";
             case SDelayAluData::InstType::TRANS:
-                return "TRANS";
+                return "TRANS32";
             case SDelayAluData::InstType::NO_DEP:
                 return "NO_DEP";
             default:
