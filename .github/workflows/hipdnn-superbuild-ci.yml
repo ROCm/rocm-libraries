@@ -221,7 +221,8 @@ jobs:
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
             -DGPU_TARGETS="$GPU_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
-            -DENABLE_CLANG_FORMAT=OFF
+            -DENABLE_CLANG_FORMAT=OFF \
+            -DENABLE_CLANG_TIDY=OFF
 
       - name: Build
         run: cmake --build build
