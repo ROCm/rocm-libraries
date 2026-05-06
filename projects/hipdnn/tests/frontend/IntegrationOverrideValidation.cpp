@@ -529,6 +529,91 @@ TEST_F(IntegrationOverrideValidation, Rule8_StrideOrderingMatch_Accepted)
         << result.err_msg;
 }
 
+/// Rule 8 used to be guarded by `declaredStrides.size() == stride.size()`,
+/// which silently no-op'd the entire rule when the declared-stride rank
+/// differed from the override-stride rank. Rule 3 catches override-rank vs.
+/// declared-DIM mismatches, but a graph whose declared strides differ in rank
+/// from its declared dims (a graph-construction issue) used to slip through
+/// rule 8 unchecked. The size-equality guard has been removed and replaced
+/// with an explicit rank-mismatch error so the inconsistency is surfaced
+/// instead of silently accepted (RFC 0008 Phase 1 post-review fix #4).
+TEST_F(IntegrationOverrideValidation, Rule8_RankMismatch_DeclaredStridesShorter)
+{
+    // Build a graph where the input tensor's declared dims has rank 4 but
+    // declared strides has rank 3. This is constructed inline because
+    // `createOverridableGraph` ties declared dims and strides to the same
+    // vector by design.
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    // Intentionally mismatched: rank-3 declared strides on a rank-4 dim.
+    const std::vector<int64_t> declaredStridesShort = {16, 4, 1};
+    const std::vector<int64_t> packedRank4 = {48, 16, 4, 1};
+
+    auto graph = std::make_shared<Graph>();
+    graph->set_name("Rule8_RankMismatch_DeclaredStridesShorter")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_dynamic_shape_enabled(true);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim(dims)
+        .set_stride(declaredStridesShort) // rank-3 stride on rank-4 dim
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes attrs;
+    attrs.set_name("relu_node");
+    attrs.set_mode(PointwiseMode::RELU_FWD);
+
+    // The output tensor uses well-formed packed strides; only X has the
+    // rank-mismatched declared strides we want to exercise.
+    auto y = graph->pointwise(x, attrs);
+    y->set_uid(2)
+        .set_dim(dims)
+        .set_stride(packedRank4)
+        .set_data_type(DataType::FLOAT)
+        .set_output(true);
+
+    // Compile may fail at validate() because the tensor itself is malformed.
+    // If so, the malformed graph cannot reach `execute`, but the underlying
+    // bug (rule 8 silently no-op'ing on rank mismatch) is exactly what we
+    // want frontend validation to catch — at validate() OR at execute(). If
+    // validate accepts it, execute must reject it; both paths satisfy the
+    // post-review requirement.
+    const auto validateResult = graph->validate();
+    if(validateResult.code != ErrorCode::OK)
+    {
+        // Validation already rejected the malformed declared-stride rank —
+        // also acceptable. The post-review requirement is that the rank
+        // inconsistency is surfaced *somewhere* and not silently ignored.
+        SUCCEED() << "validate() rejected up-front: " << validateResult.err_msg;
+        return;
+    }
+
+    auto compileResult = graph->build_operation_graph(_handle);
+    ASSERT_EQ(compileResult.code, ErrorCode::OK) << compileResult.err_msg;
+    compileResult = graph->create_execution_plans();
+    ASSERT_EQ(compileResult.code, ErrorCode::OK) << compileResult.err_msg;
+    compileResult = graph->check_support();
+    ASSERT_EQ(compileResult.code, ErrorCode::OK) << compileResult.err_msg;
+    compileResult = graph->build_plans();
+    ASSERT_EQ(compileResult.code, ErrorCode::OK) << compileResult.err_msg;
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = nullptr;
+    variantPack[2] = nullptr;
+
+    // Override stride matches the declared DIM rank (4) so rule 3 passes,
+    // but its rank still differs from the declared STRIDE rank (3). Under
+    // the previous size-equality guard rule 8 silently no-op'd here; the
+    // fix now emits an explicit rank-mismatch error.
+    const std::vector<int64_t> uids = {1};
+    const std::vector<std::vector<int64_t>> shapes = {dims};
+    const std::vector<std::vector<int64_t>> strides = {packedRank4};
+    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
+}
+
 // ============================================================================
 // C.6 — Reject "overrides without flag" (RFC §7.1).
 // ============================================================================
