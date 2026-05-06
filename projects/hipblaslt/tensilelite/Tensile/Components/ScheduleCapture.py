@@ -1468,6 +1468,28 @@ _LR_CLASS_NAMES = {
 _LW_CLASS_NAMES = {
     "_FakeLW",
     "DSStoreB8", "DSStoreB16", "DSStoreB32", "DSStoreB64", "DSStoreB128",
+    # Wider DSStore variants from rocisa/include/instruction/mem.hpp. All
+    # are subclasses of DSStoreInstruction with the same Python ctor
+    # signature `(dstAddr, src, ds, comment)`. _DSStoreRule already
+    # handles them correctly via `getParams()` slot 0 (lds_addr) + slot 1
+    # (src_data). Listed here defensively so the type-name dispatch in
+    # `_is_lw` does not misclassify them as UNKNOWN if a CMS kernel
+    # emits them.
+    "DSStoreU16", "DSStoreB96", "DSStoreB192", "DSStoreB256",
+    # D16HI / B8HID16 partial-half-word LDS stores. These are real
+    # DSStore subclasses (rocisa/include/instruction/mem.hpp) with the
+    # same Python constructor signature (dstAddr, src, ds, comment) as
+    # DSStoreB16. The "D16HI"/"B8HID16" semantic only changes which
+    # 16/8 bits of the LDS word are written — it does NOT change
+    # register-side dataflow: the source vgpr is read in full (not as a
+    # partial read; the upper or lower bits are selected by the LDS
+    # write itself, not by the register read), and no register is
+    # written. So the existing _DSStoreRule
+    # (reads = (lds_addr, src_data); writes = ()) is correct as-is.
+    # Witnessed under gfx1151 HHS_BH_Bias MT64x32x64 (CMS=1, PGR=2,
+    # PLR=1, DTL=F/F) — see GFX1151_AUDIT/PGR_PLR_PHASE_B_REPORT.md,
+    # Run 6.
+    "DSStoreD16HIB16", "DSStoreB8HID16",
     "DSStoreInstruction",
 }
 _GR_CLASS_NAMES = {
@@ -1493,6 +1515,22 @@ _SBARRIER_CLASS_NAMES = {
 _SNOP_CLASS_NAMES = {
     "_FakeSNop",
     "SNop",
+}
+# SSetPrior (s_setprio) — sets the wave priority. Pure scheduling-control
+# scalar instruction with NO register dataflow: the only constructor param
+# is an `int prior` (rocisa/include/instruction/common.hpp::SSetPrior), and
+# `getParams()` returns `{prior}` — no RegisterContainer reads or writes.
+# Treated like SNop/SBarrier/SWaitCnt for validator purposes:
+#   - claimed by `_NoDataflowRule` (no reads/writes contributed),
+#   - excluded from the cross-graph data-flow node identity set
+#     (`build_dataflow_graph` Phase 1, around `:2949`),
+#   - issue cost is the default 1 quad-cycle (NO wait_state add — unlike
+#     SNop which encodes a wait_state in its first param).
+# Witnessed under gfx950 HSS MT256x256x64 #2 and BBS Range MT256x256x64
+# under CMS=1+PGR=2+PLR=1+DTL=T/T — see
+# GFX1151_AUDIT/PGR_PLR_PHASE_B_REPORT.md (Runs 4, 5).
+_SSETPRIO_CLASS_NAMES = {
+    "SSetPrior",
 }
 # CVT-pack rocisa classes (TF32 emulation: v_cvt_pk_bf16_f32 and friends).
 # Used by `_is_cvt_pack` to identify CVTPack producers whose results feed
@@ -1584,6 +1622,12 @@ def _is_sbarrier(inst):
 
 def _is_snop(inst):
     return type(inst).__name__ in _SNOP_CLASS_NAMES
+
+
+def _is_ssetprio(inst):
+    """SSetPrior — wave-priority scalar op, no register dataflow. See
+    `_SSETPRIO_CLASS_NAMES` for the rationale."""
+    return type(inst).__name__ in _SSETPRIO_CLASS_NAMES
 
 
 def _reg_signature(reg) -> tuple:
@@ -1747,9 +1791,20 @@ def _canonical_render(inst) -> str:
 
 
 def _class_tag(inst) -> str:
-    """Return the stable class tag (LR/LW/GR/MFMA/SWAIT/SBARRIER) for an
-    instruction. Used as the first element of the identity tuple so
-    diagnostic categorization works without parsing the render-string.
+    """Return the stable class tag
+    (LR/LW/GR/MFMA/SWAIT/SBARRIER/SNOP/SSETPRIO) for an instruction.
+    Used as the first element of the identity tuple so diagnostic
+    categorization works without parsing the render-string.
+
+    SNop and SSetPrior are recognized here so that the production capture
+    path — which may end up assigning category="UNKNOWN" (via
+    `_captureSubIterToBuilder`'s fallback) when an instruction is neither
+    in the id-map nor matched by the explicit isinstance branches — still
+    falls through `_class_tag_from_category(category="UNKNOWN", inst)` to
+    a recognized tag rather than raising
+    `CaptureUnknownInstructionError`. These tags are excluded from the
+    cross-graph data-flow identity set (`build_dataflow_graph` Phase 1)
+    just like SWait/SBarrier.
     """
     if _is_lr(inst):
         return "LR"
@@ -1763,6 +1818,10 @@ def _class_tag(inst) -> str:
         return "SWAIT"
     if _is_sbarrier(inst):
         return "SBARRIER"
+    if _is_snop(inst):
+        return "SNOP"
+    if _is_ssetprio(inst):
+        return "SSETPRIO"
     raise CaptureUnknownInstructionError(
         f"_class_tag: cannot classify instruction class "
         f"{type(inst).__name__!r}."
@@ -1813,6 +1872,8 @@ def _class_tag_from_category(category, inst) -> str:
         return _class_tag(inst)
     if category == "SNOP":
         return "SNOP"
+    if category == "SSETPRIO":
+        return "SSETPRIO"
     if category == "BARRIER":
         return "SBARRIER"
     if category == "MFMA":
@@ -2139,9 +2200,16 @@ class _MFMARule:
 
 
 class _NoDataflowRule:
-    """SWaitCnt / SBarrier / SNop — pure scheduling control; no dataflow."""
+    """SWaitCnt / SBarrier / SNop / SSetPrior — pure scheduling control;
+    no register dataflow. SSetPrior takes only an `int prior`
+    (`getParams() -> {prior}`); it has no register reads or writes."""
     def applies(self, inst, category=None):
-        return _is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst)
+        return (
+            _is_swait(inst)
+            or _is_sbarrier(inst)
+            or _is_snop(inst)
+            or _is_ssetprio(inst)
+        )
     def extract(self, inst, category=None):
         return (), ()
 
@@ -2964,12 +3032,18 @@ def build_dataflow_graph(four_part_capture):
             nodes_per_body[label].append(node)
 
             # Cross-graph identity set: only "real" instructions
-            # participate (excludes scheduler-choice SWait/SBarrier/SNop).
+            # participate (excludes scheduler-choice SWait/SBarrier/SNop/
+            # SSetPrior). SSetPrior is a wave-priority scalar op with no
+            # register dataflow (rocisa SSetPrior takes only `int prior`),
+            # mirrored by `_NoDataflowRule`.
             # LCC instructions (SSubU32 + SCmpEQI32) ARE included — their
             # per-instruction issue cycles contribute to
             # `cumulative_issue_cycles` walks; cross-body cycle counting
             # depends on it.
-            if not (_is_swait(inst) or _is_sbarrier(inst) or _is_snop(inst)):
+            if not (
+                _is_swait(inst) or _is_sbarrier(inst)
+                or _is_snop(inst) or _is_ssetprio(inst)
+            ):
                 nodes_by_identity[node.identity] = node
 
         # Stash per-body GraphNodes on the LoopBodyCapture for the helpers.

@@ -3373,3 +3373,303 @@ class TestLWSAddrChain:
             "OrderInvertedFailure on the LDS-address vgpr RAW edge."
         )
 
+
+# =============================================================================
+# rocm-libraries-u3t — instruction-coverage gaps in `_OPERAND_RULES`
+# =============================================================================
+# Three error classes were witnessed in production CMS=1 kernels but the
+# graph-native validator's `_OPERAND_RULES` dispatch raised
+# CaptureUnknownInstructionError or downstream ValueError instead of
+# producing a graph node:
+#
+#   1. DSStoreD16HIB16 — gfx1151 HHS MT64x32x64 (PGR=2, PLR=1, DTL=F/F).
+#      Real DSStoreInstruction subclass; fix shape: add to _LW_CLASS_NAMES
+#      so the existing _DSStoreRule claims it. See
+#      GFX1151_AUDIT/PGR_PLR_PHASE_B_REPORT.md (Run 6).
+#   2. SSetPrior — gfx950 HSS / BBS Range MT256x256x64 (PGR=2, PLR=1,
+#      DTL=T/T). Wave-priority scalar op; no register dataflow. Fix
+#      shape: new _SSETPRIO_CLASS_NAMES set + _is_ssetprio() helper +
+#      extension of `_NoDataflowRule.applies` to claim it. Also added
+#      a `SSETPRIO` category in _captureSubIterToBuilder so it doesn't
+#      land in `UNKNOWN`. See PGR_PLR_PHASE_B_REPORT.md (Runs 4, 5).
+#   3. _node_label ValueError — gfx950 BBS Ailk MT192x256x64 (Run 7,
+#      same report). Investigation showed this is SECONDARY to (1)/(2):
+#      previously the failure dispatch routed through Failures whose
+#      tagged_inst's category fell back to "UNKNOWN" (because the class
+#      wasn't recognized), and that category bucket disagreed across
+#      reference vs subject captures so _node_label's same-category
+#      lookup raised. Once the class is recognized, the category is
+#      stable across both captures. Pinned by
+#      test_node_label_finds_ssetprio_in_capture_after_categorization.
+
+
+class TestDSStoreD16HIB16Coverage:
+    """`DSStoreD16HIB16` is a real DSStore subclass (rocisa
+    `mem.hpp::DSStoreD16HIB16`) with the same Python ctor signature as
+    `DSStoreB16`: `(dstAddr, src, ds=None, comment="")`.
+
+    The "D16HI" semantic only changes which 16 bits of the LDS word are
+    written; on the register side the source vgpr is read in full (the
+    upper-bits selection happens at the LDS write, not at the register
+    read), and no register is written. So `_DSStoreRule.extract` —
+    `reads = (lds_addr, src_data); writes = ()` — is correct as-is.
+
+    Pin: dispatching `_populate_wrapper` over a real DSStoreD16HIB16
+    yields the SAME (reads, writes) shape as DSStoreB16 with identical
+    operands. No `_FakeLW` synthetic stand-in is used (per bead 904).
+    """
+
+    def _build_d16hi(self):
+        from rocisa.container import vgpr
+        from rocisa.instruction import DSStoreD16HIB16
+        return DSStoreD16HIB16(dstAddr=vgpr(50, 1), src=vgpr(8, 1))
+
+    def _build_b16(self):
+        from rocisa.container import vgpr
+        from rocisa.instruction import DSStoreB16
+        return DSStoreB16(dstAddr=vgpr(50, 1), src=vgpr(8, 1))
+
+    def test_d16hi_dispatches_through_dsstore_rule(self):
+        from Tensile.Components.ScheduleCapture import (
+            WrappedInstruction, _populate_wrapper, _is_lw,
+        )
+        inst = self._build_d16hi()
+        assert _is_lw(inst), (
+            "DSStoreD16HIB16 must be recognized as an LW class so the "
+            "existing _DSStoreRule claims it."
+        )
+        wrapper = WrappedInstruction(inst)
+        _populate_wrapper(wrapper)
+        # Two reads (lds_addr, src_data); no writes (data goes to LDS).
+        assert wrapper.writes == ()
+        assert len(wrapper.reads) == 2
+        # Verify the shape matches DSStoreB16 — same constructor args
+        # produce the same (reads, writes).
+        b16 = self._build_b16()
+        b16_wrapper = WrappedInstruction(b16)
+        _populate_wrapper(b16_wrapper)
+        assert wrapper.writes == b16_wrapper.writes
+        assert len(wrapper.reads) == len(b16_wrapper.reads)
+
+    def test_d16hi_does_not_claim_partial_write_on_src(self):
+        """The D16HI suffix encodes a partial write to the LDS half-word,
+        NOT a partial read of the source vgpr. Confirm `_DSStoreRule`
+        emits no writes (the register side has no dst) and reads include
+        the full source vgpr."""
+        from Tensile.Components.ScheduleCapture import (
+            WrappedInstruction, _populate_wrapper,
+        )
+        inst = self._build_d16hi()
+        wrapper = WrappedInstruction(inst)
+        _populate_wrapper(wrapper)
+        assert wrapper.writes == ()
+        # The src register (vgpr 8) must be in reads — not filtered out
+        # as a partial-write target.
+        from rocisa.container import vgpr
+        src_reg = vgpr(8, 1)
+        assert any(
+            getattr(r, "regIdx", None) == src_reg.regIdx
+            and getattr(r, "regType", None) == src_reg.regType
+            for r in wrapper.reads
+        ), f"DSStoreD16HIB16 src vgpr must appear in reads; got {wrapper.reads}"
+
+    def test_d16hi_finalize_through_capture_pipeline(self):
+        """End-to-end: appending a real DSStoreD16HIB16 through
+        LoopBodyCaptureBuilder and calling finalize() populates the
+        wrapper without raising CaptureUnknownInstructionError /
+        CaptureStoreError. Confirms that DSStoreD16HIB16 is also NOT
+        misclassified as a vector-memory store (would raise
+        CaptureStoreError)."""
+        from Tensile.Components.ScheduleCapture import LoopBodyCaptureBuilder
+        builder = LoopBodyCaptureBuilder()
+        builder.append(self._build_d16hi(), category="LWA", subiter=0)
+        capture = builder.finalize()
+        ti = capture.instructions[0]
+        assert ti.wrapped is not None
+        assert ti.wrapped.writes == ()
+        assert len(ti.wrapped.reads) >= 1
+
+
+class TestSSetPriorCoverage:
+    """`SSetPrior(prior, comment)` is `s_setprio` — a wave-priority scalar
+    op with NO register dataflow (`getParams() -> {prior}` only; no
+    RegisterContainer reads or writes).
+
+    Fix shape: add to `_SSETPRIO_CLASS_NAMES`, extend `_NoDataflowRule.
+    applies` to claim it, exclude from cross-graph data-flow identity set
+    in `build_dataflow_graph`, and add a `SSETPRIO` category in
+    `_captureSubIterToBuilder` so it routes through
+    `_class_tag_from_category` rather than falling back through
+    `_class_tag(UNKNOWN-class)` (which would still work post-fix because
+    `_class_tag` now also recognizes `_is_ssetprio`).
+    """
+
+    def _build_ssetprio(self):
+        from rocisa.instruction import SSetPrior
+        return SSetPrior(prior=3, comment="raise priority")
+
+    def test_ssetprio_recognized_by_helpers(self):
+        from Tensile.Components.ScheduleCapture import (
+            _is_ssetprio, _is_snop, _is_swait, _is_sbarrier,
+        )
+        inst = self._build_ssetprio()
+        assert _is_ssetprio(inst), (
+            "SSetPrior must be recognized by `_is_ssetprio` so "
+            "_NoDataflowRule and the build_dataflow_graph identity-set "
+            "skip both claim it."
+        )
+        # Disjoint from the other scheduling-control predicates.
+        assert not _is_snop(inst)
+        assert not _is_swait(inst)
+        assert not _is_sbarrier(inst)
+
+    def test_ssetprio_dispatches_to_no_dataflow_rule(self):
+        from Tensile.Components.ScheduleCapture import (
+            WrappedInstruction, _populate_wrapper,
+        )
+        wrapper = WrappedInstruction(self._build_ssetprio())
+        _populate_wrapper(wrapper)
+        # No register dataflow.
+        assert wrapper.reads == ()
+        assert wrapper.writes == ()
+
+    def test_ssetprio_class_tag_does_not_raise(self):
+        """Pre-fix: `_class_tag(SSetPrior(...))` raised
+        CaptureUnknownInstructionError. Post-fix: it returns 'SSETPRIO'."""
+        from Tensile.Components.ScheduleCapture import _class_tag
+        assert _class_tag(self._build_ssetprio()) == "SSETPRIO"
+
+    def test_ssetprio_class_tag_from_category_routes_explicit_category(self):
+        """`_captureSubIterToBuilder` now assigns category="SSETPRIO" to
+        bare SSetPrior leaves; `_class_tag_from_category` must route that
+        category to the same tag without falling back to `_class_tag`."""
+        from Tensile.Components.ScheduleCapture import _class_tag_from_category
+        inst = self._build_ssetprio()
+        assert _class_tag_from_category("SSETPRIO", inst) == "SSETPRIO"
+
+    def test_ssetprio_excluded_from_dataflow_identity_set(self):
+        """SSetPrior nodes go into the per-body sidecar but NOT into
+        `nodes_by_identity`, mirroring SNop/SWait/SBarrier. Build a small
+        capture containing one SSetPrior + one MFMA and assert the
+        resulting graph carries exactly one identity (the MFMA's)."""
+        from Tensile.Components.ScheduleCapture import (
+            LoopBodyCaptureBuilder, FourPartCapture, BODY_LABEL_ML,
+            BODY_LABEL_ML_PREV, BODY_LABEL_NGL, BODY_LABEL_NLL,
+            build_dataflow_graph, SLOT_KIND_MFMA,
+        )
+        # Real ML capture: SSetPrior + MFMA filler. Use the same
+        # _wrap helper convention but inline (we want SSetPrior in ML).
+        builder = LoopBodyCaptureBuilder()
+        builder.append(self._build_ssetprio(),
+                       category="SSETPRIO", subiter=0,
+                       slot_kind=SLOT_KIND_MFMA, mfma_index=0)
+        # Append an MFMA so the body has at least one data-flow node
+        # (build_dataflow_graph requires at least one identity per body).
+        ml_mfma_tag = make_mfma(c_dst_start=100, a_src_start=4, b_src_start=32,
+                                slot=1)
+        builder.append(ml_mfma_tag.inst, category=ml_mfma_tag.category,
+                       subiter=0, slot_kind=ml_mfma_tag.slot.slot_kind,
+                       mfma_index=ml_mfma_tag.slot.mfma_index)
+        ml_cap = builder.finalize()
+
+        # Filler bodies (mirror _wrap's shape).
+        _FILLER_RANGES = {
+            BODY_LABEL_ML_PREV: (200, 204, 208),
+            BODY_LABEL_NGL:     (220, 224, 228),
+            BODY_LABEL_NLL:     (240, 244, 248),
+        }
+
+        def _filler(label):
+            c, a, b = _FILLER_RANGES[label]
+            return make_capture(label, [make_mfma(
+                c_dst_start=c, a_src_start=a, b_src_start=b, slot=0,
+            )])
+
+        cap = FourPartCapture(
+            main_loop={0: ml_cap},
+            main_loop_prev={0: _filler(BODY_LABEL_ML_PREV)},
+            n_gl={0: _filler(BODY_LABEL_NGL)},
+            n_ll={0: _filler(BODY_LABEL_NLL)},
+            num_mfma=1, num_codepaths=1, source="cms",
+        )
+        graph = build_dataflow_graph(cap)
+        # SSetPrior must NOT appear as a data-flow node identity.
+        for ident in graph.nodes.keys():
+            assert ident[0] != "SSETPRIO", (
+                f"SSetPrior leaked into nodes_by_identity as {ident!r}; "
+                "build_dataflow_graph Phase 1 must skip SSetPrior in "
+                "the cross-graph identity set, mirroring SNop."
+            )
+
+    def test_ssetprio_default_issue_cycle_is_one(self):
+        """Unlike SNop (which encodes wait_state in its first param and
+        adds it to the issue cost), SSetPrior's first param is the
+        priority value — it must NOT be added to the default issue cost.
+        Pin the default cost == 1."""
+        from Tensile.Components.ScheduleCapture import (
+            _min_issue_quad_cycles_for,
+        )
+        # No arch profile -> default CDNA4 base = 1.
+        cycles = _min_issue_quad_cycles_for(self._build_ssetprio(), None)
+        assert cycles == 1, (
+            "SSetPrior must use the default issue cost (1 quad-cycle); "
+            "the SNop wait_state add path must NOT pick it up."
+        )
+
+
+class TestNodeLabelAfterCoverageFix:
+    """Pin that the `_node_label` ValueError witnessed on gfx950 BBS Ailk
+    MT192x256x64 (Run 7) was secondary to instruction-coverage gaps.
+
+    Mechanism: pre-fix, an unrecognized class (e.g. SSetPrior) landed
+    with category='UNKNOWN'. `_class_tag_from_category` then fell back
+    to `_class_tag(inst)` which raised, OR (when both reference and
+    subject captures categorized the same instruction differently
+    because of the UNKNOWN fallthrough) `_node_label`'s same-category
+    lookup in the formatter capture missed the node and raised
+    ValueError. Post-fix: the class is categorized consistently as
+    'SSETPRIO' in BOTH captures, so the same-category stream lookup
+    finds the node.
+    """
+
+    def test_node_label_finds_ssetprio_in_capture_after_categorization(self):
+        from Tensile.Components.ScheduleCapture import (
+            LoopBodyCaptureBuilder, _node_label, GraphNode, SLOT_KIND_MFMA,
+            BODY_LABEL_ML, _class_tag_from_category, _identity_for,
+            make_position,
+        )
+        from rocisa.instruction import SSetPrior
+
+        builder = LoopBodyCaptureBuilder()
+        sp = SSetPrior(prior=3, comment="raise")
+        builder.append(sp, category="SSETPRIO", subiter=0,
+                       slot_kind=SLOT_KIND_MFMA, mfma_index=0)
+        # Add an MFMA to satisfy non-empty body for downstream graph
+        # construction in case other tests share the capture.
+        ml_mfma_tag = make_mfma(c_dst_start=100, a_src_start=4,
+                                b_src_start=32, slot=1)
+        builder.append(ml_mfma_tag.inst, category=ml_mfma_tag.category,
+                       subiter=0, slot_kind=ml_mfma_tag.slot.slot_kind,
+                       mfma_index=ml_mfma_tag.slot.mfma_index)
+        capture = builder.finalize()
+
+        ssetprio_tagged = capture.instructions[0]
+        # Synthesize a GraphNode pointing at this tagged inst — same
+        # shape as `_make_node` constructs in build_dataflow_graph.
+        node = GraphNode(
+            identity=_identity_for(sp, BODY_LABEL_ML, category="SSETPRIO"),
+            position=make_position(BODY_LABEL_ML, ssetprio_tagged.slot),
+            category="SSETPRIO",
+            rocisa_inst=sp,
+            tagged_inst=ssetprio_tagged,
+            body_label=BODY_LABEL_ML,
+            name="SSETPRIO@0.0",
+            issue_cycles=1,
+        )
+        # Must NOT raise ValueError; index 0 is the only SSETPRIO in the
+        # same-category stream.
+        label = _node_label(node, capture)
+        assert label == "SSETPRIO[0]", (
+            f"_node_label should return 'SSETPRIO[0]' for the only "
+            f"SSetPrior in capture; got {label!r}"
+        )

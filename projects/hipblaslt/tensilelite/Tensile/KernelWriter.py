@@ -2676,7 +2676,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     """
     from rocisa.code import TextBlock
     from rocisa.instruction import (
-      MFMAInstruction, SMFMAInstruction, SWaitCnt, SBarrier, SNop,
+      MFMAInstruction, SMFMAInstruction, SWaitCnt, SBarrier, SNop, SSetPrior,
     )
     try:
       from rocisa.instruction import MXMFMAInstruction
@@ -2702,6 +2702,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
           category = "SYNC"
         elif isinstance(item, SNop):
           category = "SNOP"
+        elif isinstance(item, SSetPrior):
+          # Wave-priority scalar op (s_setprio) — emitted by the MAC and
+          # store paths to bracket compute regions. Pure scheduling control,
+          # no register dataflow. Mapped to its own category so
+          # `_class_tag_from_category` can route it to a recognized tag
+          # (and downstream graph construction excludes it from the
+          # cross-graph data-flow identity set, mirroring SNop).
+          category = "SSETPRIO"
         else:
           category = "UNKNOWN"
 
