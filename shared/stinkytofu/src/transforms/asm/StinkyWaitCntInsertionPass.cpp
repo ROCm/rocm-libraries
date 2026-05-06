@@ -218,8 +218,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     /// List of (anchor instruction, wait spec) pairs in emission order.
     using WaitInsertionList = std::vector<std::pair<StinkyInstruction*, WaitCountSpec>>;
 
-    StinkyWaitCntInsertionPass(bool insertTensorWaitCnt)
-        : tensorWaitsEnabled(insertTensorWaitCnt) {}
+    StinkyWaitCntInsertionPass() = default;
 
     static char ID;
 
@@ -250,9 +249,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             emitWaitInstructions(*bb, arch, waits);
         }
 
-        if (tensorWaitsEnabled) {
-            reinsertTensorWaitsHeuristic(arch, passCtx, rpo);
-        }
+        reinsertTensorWaitsHeuristic(arch, passCtx, rpo);
 
         removePHIs(passCtx, rpo);
         return preserveCFGAnalyses();
@@ -279,8 +276,6 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             opsSinceLastWait = 0;
         }
     };
-
-    bool tensorWaitsEnabled;
 
     /// Exit-state queues for each processed block (full block walk, program order).
     /// Pre-populated by buildBlockExitStates and refined per block by computeRequiredWaits.
@@ -461,7 +456,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         }
     }
 
-    /// Phase 4 (optional): tensor wait heuristic.
+    /// Phase 4: tensor wait heuristic.
     ///   1. Remove existing tensor waits in label_LoopBeginL / label_LoopEndL blocks.
     ///   2. Reinsert tensor waits before barriers using token matching against a
     ///      cross-block deque of tensor loads.
@@ -569,7 +564,7 @@ char StinkyWaitCntInsertionPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(bool insertTensorWaitCnt) {
-    return std::make_unique<StinkyWaitCntInsertionPass>(insertTensorWaitCnt);
+std::unique_ptr<Pass> createStinkyWaitCntInsertionPass() {
+    return std::make_unique<StinkyWaitCntInsertionPass>();
 }
 }  // namespace stinkytofu

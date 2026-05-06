@@ -7,9 +7,8 @@
 - **Instruction-level tracking** via def-use chains (not register-level)
 - **Three counter types**: DS (`dlcnt`), buffer/load (`vlcnt`), tensor (`tlcnt`)
 - **Cross-block analysis** using pre-scanned exit states and predecessor lookup
-- **Tensor handling** via a separate barrier-token heuristic phase
+- **Tensor handling** via a separate barrier-token heuristic phase that always runs
 - **Selective processing**: only basic blocks approved by `PassContext::shouldProcessBasicBlock` are analyzed and modified
-- **Single configuration flag**: `tensorWaitsEnabled` controls whether the tensor wait phase runs
 
 ## Pass Flow
 
@@ -41,21 +40,12 @@
             +-----------+-----------+
                         |
                         v
-                +---------------+
-                | tensorWaits   |
-                | Enabled?      |
-                +-------+-------+
-                  Yes   |   No  |
-            +-----------+       |
-            v                   |
-  +----------------------------+|
-  | insertTensorWaitsAtBarriers||  Remove + reinsert tensor
-  |                            ||  waits using token matching
-  +----------------------------+|
-            |                   |
-            +---+---------------+
-                |
-                v
+            +-----------------------+
+            | reinsertTensorWaits   |   Remove + reinsert tensor
+            | Heuristic             |   waits using token matching
+            +-----------+-----------+
+                        |
+                        v
             +-----------------------+
             |  removePHIs           |   Strip PHI pseudo-instructions
             +-----------+-----------+
@@ -150,7 +140,7 @@ Several instructions in the IR carry `MemTokenData` modifiers -- integer token I
 This pass uses `MemTokenData` in two ways:
 
 1. **DS barrier conflict** (in `computeRequiredWaits`): if a barrier's tokens overlap with the `activeDSTokens` accumulated from pending DS ops, force a `s_wait_dscnt 0`.
-2. **Tensor barrier matching** (in `insertTensorWaitsAtBarriers`): if the oldest pending tensor load's tokens overlap with a barrier's tokens, emit a `s_wait_tensorcnt`.
+2. **Tensor barrier matching** (in `reinsertTensorWaitsHeuristic`): if the oldest pending tensor load's tokens overlap with a barrier's tokens, emit a `s_wait_tensorcnt`.
 
 ## Core Algorithm: computeRequiredWaits
 
@@ -332,9 +322,9 @@ The trimmed state is stored back into `blockExitMemState[&bb]`, overwriting the 
 
 When looking up a dependency in a predecessor's exit state, the pass skips the lookup if `counterState.lastEmittedWait == 0`. A wait-0 means all outstanding ops for that counter have completed, so no predecessor ops can still be in-flight -- the lookup would be wasted work and could produce incorrect (non-zero) contributions.
 
-## Tensor Wait Insertion: insertTensorWaitsAtBarriers
+## Tensor Wait Insertion: reinsertTensorWaitsHeuristic
 
-Tensor waits are handled in a separate heuristic phase that runs after the main DS/buffer wait insertion, and only when `tensorWaitsEnabled` is true. This phase operates in two steps:
+Tensor waits are handled in a separate heuristic phase that runs after the main DS/buffer wait insertion. This phase operates in two steps:
 
 ### Phase 1: Remove existing tensor waits from loop blocks
 
@@ -438,18 +428,18 @@ anonymous namespace {
     class StinkyWaitCntInsertionPass : public StinkyInstPass {
         struct CounterWaitState    // Per-counter state during block walk
 
-        buildBlockExitStates()     // Phase 1: pre-scan all blocks
-        scanBlockMemOps()          //   helper: record DS/buffer ops in one block
-        computeWaitValueForCounter()  // Per-counter wait value computation
-        computeRequiredWaits()     // Phase 2: determine waits for one block
-        emitWaitInstructions()     // Phase 3: insert wait IR nodes
-        insertTensorWaitsAtBarriers()  // Phase 4: tensor wait heuristic (optional)
-        removePHIs()               // Phase 5: cleanup
+        buildBlockExitStates()           // Phase 1: pre-scan all blocks
+        scanBlockMemOps()                //    helper: record DS/buffer ops in one block
+        computeWaitValueForCounter()     //    Per-counter wait value computation
+        computeRequiredWaits()           // Phase 2: determine waits for one block
+        emitWaitInstructions()           // Phase 3: insert wait IR nodes
+        reinsertTensorWaitsHeuristic()   // Phase 4: tensor wait heuristic
+        removePHIs()                     // Phase 5: cleanup
     };
 }
 
 namespace stinkytofu {
-    createStinkyWaitCntInsertionPass(bool)  // Public factory
+    createStinkyWaitCntInsertionPass()  // Public factory
 }
 ```
 
