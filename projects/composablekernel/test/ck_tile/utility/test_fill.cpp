@@ -193,6 +193,8 @@ static std::pair<int, int> expected_raw_range(float min_f, float max_f)
     constexpr int mant_bits  = ck_tile::numeric_traits<ScaleType>::mant;
     const int ieee_min       = static_cast<int>(ck_tile::numeric_utils<float>::get_exponent(min_f));
     const int ieee_max       = static_cast<int>(ck_tile::numeric_utils<float>::get_exponent(max_f));
+    // raw=0 excluded: decodes to 0.0 for e4m3/e5m3 and to 2^-127 for e8m0 — same
+    // assumption as the implementation in FillUniformScaleDistribution.
     constexpr int raw_min    = 1;
     constexpr int raw_max    = static_cast<int>(ck_tile::numeric<ScaleType>::binary_max);
     const int scale          = 1 << mant_bits;
@@ -384,9 +386,12 @@ TEST(FillUniformScaleDistributionE8M0, StrictFloatBounds)
     }
 }
 
-// 12. No generated value exceeds max_scale_ in float space, for any ExMy type.
-//     max_r is set to the exact power-of-two raw byte (mant=0), so the highest
-//     possible output is exactly max_scale_.
+// 12. Unlike test 11 (e8m0 only, both bounds strict), this test covers all ExMy types and
+//     checks only the upper bound. The lower bound is not strict for types with non-zero
+//     mantissa bits (e4m3/e5m3): mantissa bits allow values between consecutive
+//     power-of-two exponents, so some generated values can fall below min_scale (test 13
+//     verifies this). The upper bound IS strict for all types because max_r is set to the
+//     exact power-of-two raw encoding (mant=0), so the highest output is exactly max_scale_.
 TYPED_TEST(FillUniformScaleDistributionTest, StrictFloatUpperBound)
 {
     using S               = TypeParam;
