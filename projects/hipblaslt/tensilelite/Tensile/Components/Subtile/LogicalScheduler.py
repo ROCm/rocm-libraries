@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple, Union
+from bisect import bisect_left
 import copy
 import io
 import math
@@ -979,13 +980,27 @@ class LogicalScheduler:
             for pos in range(t_start, t_end, mn):
                 atoms.append((tensor, mt_val, pos, pos + mn, k_start, k_end, last))
 
-        # 2b. Place atoms evenly across [0..numSlots) using a stride.
-        #     Each atom's ideal slot is i * numSlots // nAtoms, clamped to
-        #     its upper bound.  On LR conflict, scan forward.
+        # 2b. Place atoms across [0..numSlots) weighted by partition MFMA count.
+        #     Each partition's slots get a share proportional to its MFMAs,
+        #     so larger partitions receive more GR loads.
         nAtoms = len(atoms)
         buckets = [[] for _ in range(numSlots)]
+
+        mfma_per_partition = []
+        for pi in range(numP):
+            piM = pi % cfg.numPartitionsM
+            piN = pi // cfg.numPartitionsM
+            mfma_per_partition.append(cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
+
+        weight_prefix = [0]
+        for s in range(numSlots):
+            weight_prefix.append(weight_prefix[-1] + mfma_per_partition[s // numK])
+        total_weight = weight_prefix[numSlots]
+        slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
+
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
-            slot = min(i * numSlots // nAtoms, last) if nAtoms else 0
+            slot = min(bisect_left(slot_boundaries, i * total_weight + 1),
+                       last) if nAtoms else 0
             while (slot < last and
                    self._has_lr_conflict(lower, tensor, mt_val,
                                          slot // numK, slot % numK, ks, ke)):
