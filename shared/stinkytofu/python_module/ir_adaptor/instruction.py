@@ -28,16 +28,18 @@ What this file is:
     ``extension.cpp``).
 
 What it does (real):
-    - None.
+    - ``getMFMAIssueLatency`` / ``getSMFMAIssueLatency`` — workaround
+      ports returning the C++ default-branch tuple
+      ``(matrixInstM // divisor, latency)``. ISA-specific overrides in
+      ``mfma.hpp`` are not applied; correct for gfx1250.
 
 Not yet done (dummy):
     - All instruction classes (``Buffer*``, ``DS*``, ``Flat*``,
       ``S*``, ``V*``, ``MFMA*`` / ``SMFMA*``, ...).
-    - ``getMFMAIssueLatency`` / ``getSMFMAIssueLatency`` — currently
-      return ``None``; Tensile's ``_initKernel`` unpacks them as
-      ``(int, int)``, so they must return a 2-tuple soon.
     - Extension functions: ``SLongBranch*``, ``SCLongBranch*``,
-      ``SGetPositivePCOffset``, ``SMulInt64to32``, ``VCvtBF16toFP32``.
+      ``SGetPositivePCOffset``, ``SMulInt64to32``, ``ECvtF16toF32``,
+      ``ECvtF32toF16``, ``ECvtPkFP8toF32``, ``ECvtPkBF8toF32``,
+      ``VCvtBF16toFP32``.
 
 logicalIR correspondence (strict name match):
     A class carries a ``# logicalIR: <OpName>`` comment iff
@@ -495,6 +497,9 @@ VWritelaneB32 = make_dummy_class(f"{_P}.VWritelaneB32")
 VRndneF32 = make_dummy_class(f"{_P}.VRndneF32")
 # logicalIR: VPermB32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VPermB32 = make_dummy_class(f"{_P}.VPermB32")
+VPermlane16SwapB32 = make_dummy_class(f"{_P}.VPermlane16SwapB32")
+VPermlane32SwapB32 = make_dummy_class(f"{_P}.VPermlane32SwapB32")
+SSchedulingFence = make_dummy_class(f"{_P}.SSchedulingFence")
 
 
 # ==========================================================================
@@ -507,6 +512,7 @@ VCvtF16toF32 = make_dummy_class(f"{_P}.VCvtF16toF32")
 # logicalIR: VCvtF32toF16  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VCvtF32toF16 = make_dummy_class(f"{_P}.VCvtF32toF16")
 VCvtPkF32toF16 = make_dummy_class(f"{_P}.VCvtPkF32toF16")
+VCvtPkF32toFP16 = make_dummy_class(f"{_P}.VCvtPkF32toFP16")
 # logicalIR: VCvtF32toU32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
 VCvtF32toU32 = make_dummy_class(f"{_P}.VCvtF32toU32")
 # logicalIR: VCvtU32toF32  (see shared/stinkytofu/src/ir/logical/LogicalInstructionDefs.inc)
@@ -710,8 +716,30 @@ TensorLoadToLds = make_dummy_class(f"{_P}.TensorLoadToLds")
 MFMAInstruction = make_dummy_class(f"{_P}.MFMAInstruction")
 MXMFMAInstruction = make_dummy_class(f"{_P}.MXMFMAInstruction")
 SMFMAInstruction = make_dummy_class(f"{_P}.SMFMAInstruction")
-getMFMAIssueLatency = make_dummy_func(f"{_P}.getMFMAIssueLatency")
-getSMFMAIssueLatency = make_dummy_func(f"{_P}.getSMFMAIssueLatency")
+def getMFMAIssueLatency(dataType, matrixInstM, matrixInstB):
+    """Workaround port of ``rocisa::getMFMAIssueLatency<false>``.
+
+    Returns ``(matrixInstM // mi_divisor, miIssueLatency)`` matching the
+    C++ default branch (``mi_divisor=2``, ``miIssueLatency=2``). The C++
+    template has ISA-specific overrides (gfx940/941/942/950 + matrixInstB==1
+    + halve-precision → divisor=4 / latency=1; XFloat32 → divisor=4;
+    gfx950 8-bit float → divisor=2 again). None of those branches fire for
+    gfx1250, so the default values are byte-for-byte equivalent for the
+    only ISA the logicalIR backend supports today.
+
+    TODO: re-derive ``mi_divisor`` from
+    ``rocIsa.getInstance().getKernel().isa`` when extending beyond gfx1250.
+    """
+    return (matrixInstM // 2, 2)
+
+
+def getSMFMAIssueLatency(dataType, matrixInstM, matrixInstB):
+    """Workaround port of the sparse branch of
+    ``rocisa::getMFMAIssueLatency<true>`` (mfma.hpp:55-58 hard-codes
+    ``mi_divisor = 4`` when ``isSparse`` is true). Same ISA caveats as
+    ``getMFMAIssueLatency``.
+    """
+    return (matrixInstM // 4, 2)
 
 
 # ==========================================================================
@@ -726,5 +754,13 @@ SCLongBranchScc0 = make_dummy_func(f"{_P}.SCLongBranchScc0")
 SCLongBranchScc1 = make_dummy_func(f"{_P}.SCLongBranchScc1")
 SCLongBranchVccnz = make_dummy_func(f"{_P}.SCLongBranchVccnz")
 SMulInt64to32 = make_dummy_func(f"{_P}.SMulInt64to32")
+# True16 conversion helpers (extension.hpp). Each ``ECvt*`` returns either a
+# native true16 op (NoSDWA / gfx11+) or the SDWA-encoded equivalent depending
+# on the active arch cap; here we just expose the name so ``from
+# rocisa.instruction import ECvtPkFP8toF32`` resolves.
+ECvtF16toF32 = make_dummy_func(f"{_P}.ECvtF16toF32")
+ECvtF32toF16 = make_dummy_func(f"{_P}.ECvtF32toF16")
+ECvtPkFP8toF32 = make_dummy_func(f"{_P}.ECvtPkFP8toF32")
+ECvtPkBF8toF32 = make_dummy_func(f"{_P}.ECvtPkBF8toF32")
 VCvtBF16toFP32 = make_dummy_func(f"{_P}.VCvtBF16toFP32")
 
