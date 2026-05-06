@@ -49,6 +49,9 @@ namespace rocsparse
                                                   double               boost_tol,
                                                   T                    boost_val)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASH > 0 && (HASH & (HASH - 1)) == 0, "HASH must be a power of two.");
         const auto lid = hipThreadIdx_x & (WFSIZE - 1);
         const auto wid = hipThreadIdx_x / WFSIZE;
 
