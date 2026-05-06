@@ -149,7 +149,7 @@ jobs:
 
       - name: Run tests
         run: |
-          & "$env:VENV_PATH\Scripts\Activate.ps1"
+          export PATH="$ROCM_SDK_PATH/bin:$PATH"
           ctest --test-dir build --output-on-failure
 
   hipdnn-linux-superbuild:
