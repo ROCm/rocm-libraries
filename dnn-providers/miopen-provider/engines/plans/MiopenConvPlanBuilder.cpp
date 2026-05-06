@@ -152,10 +152,16 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
 // we need for the workspace-size-limit knob:
 //
 //   1. miopenConvolution*GetWorkSpaceSize
-//        Returns the maximum workspace any solver in MIOpen's full applicable
-//        set might need for the problem. This is the same value plan execution
-//        passes to MIOpen at run time, so by construction it is the correct
-//        upper bound: any solver MIOpen actually picks fits within it.
+//        Returns the workspace size MIOpen would request at execute time for
+//        this problem. Despite the name, in the default Fast/Hybrid Find mode
+//        the implementation calls GetSolutions(maxSolutionCount=1) and returns
+//        the workspace of the single fastest solver MIOpen would pick — NOT a
+//        maximum across the applicable solver set (see
+//        projects/miopen/src/convolution.cpp:387). Only when Fast/Hybrid Find
+//        fails to return a solution does it fall through to a std::max over
+//        algorithm classes. We use it here as `range.max` because plan
+//        execution sizes its workspace by calling the same API, so by
+//        construction the value matches what MIOpen will actually request.
 //
 //   2. miopenConvolution*GetSolutionCount / *GetSolution
 //        Return a subset of applicable solutions sourced from find-db (if a
@@ -173,11 +179,15 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
 // therefore accept the heuristic-subset minimum from GetSolution as our best
 // non-allocating signal:
 //
-//   * `range.max` comes from GetWorkSpaceSize. Authoritative; matches execution.
+//   * `range.max` comes from GetWorkSpaceSize. Matches what execution will
+//     request; not a true maximum across all solvers (see above).
 //   * `range.min` is the smallest `workspace_size` among solutions returned by
 //     GetSolution.
-//   * The two APIs use independent code paths; their values are NOT guaranteed
-//     to agree. If `min > max` we log a warning and clamp `min := max`.
+//   * The two APIs use independent code paths and depend on volatile find-db
+//     state; their values are NOT guaranteed to agree, and `range.min` may
+//     exceed `range.max` (e.g. GetWorkSpaceSize picks a zero-workspace fastest
+//     solver while GetSolution surfaces additional solvers with larger
+//     workspace). If `min > max` we log a warning and clamp `min := max`.
 //     Reporting an inverted range would break the IntConstraint min/max
 //     invariant in getCustomKnobs and the value-in-range check in
 //     initializeExecutionSettings.
