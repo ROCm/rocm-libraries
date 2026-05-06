@@ -63,18 +63,15 @@ class ContractionMultiABDProfiler
         const auto total_b = g_total * n_total * k_total;
         const auto total_e = g_total * m_total * n_total;
 
-        const auto a_desc =
-            ck_tile::HostTensorDescriptor(std::vector<std::size_t>(a_dims.begin(), a_dims.end()),
-                                          std::vector<std::size_t>(a_strides.begin(),
-                                                                   a_strides.end()));
-        const auto b_desc =
-            ck_tile::HostTensorDescriptor(std::vector<std::size_t>(b_dims.begin(), b_dims.end()),
-                                          std::vector<std::size_t>(b_strides.begin(),
-                                                                   b_strides.end()));
-        const auto e_desc =
-            ck_tile::HostTensorDescriptor(std::vector<std::size_t>(e_dims.begin(), e_dims.end()),
-                                          std::vector<std::size_t>(e_strides.begin(),
-                                                                   e_strides.end()));
+        const auto a_desc = ck_tile::HostTensorDescriptor(
+            std::vector<std::size_t>(a_dims.begin(), a_dims.end()),
+            std::vector<std::size_t>(a_strides.begin(), a_strides.end()));
+        const auto b_desc = ck_tile::HostTensorDescriptor(
+            std::vector<std::size_t>(b_dims.begin(), b_dims.end()),
+            std::vector<std::size_t>(b_strides.begin(), b_strides.end()));
+        const auto e_desc = ck_tile::HostTensorDescriptor(
+            std::vector<std::size_t>(e_dims.begin(), e_dims.end()),
+            std::vector<std::size_t>(e_strides.begin(), e_strides.end()));
 
         // Per-tensor element types pulled from the instance tuples; today A_i / B_i / D_i
         // share a single type each, but we still source them through the tuples so the profiler
@@ -167,8 +164,7 @@ class ContractionMultiABDProfiler
         std::size_t flop     = std::size_t(2) * g_total * m_total * n_total * k_total;
         std::size_t num_byte = sizeof(A0Type) * NumATensor * total_a +
                                sizeof(B0Type) * NumBTensor * total_b +
-                               sizeof(D0Type) * NumDTensor * total_e +
-                               sizeof(EDataType) * total_e;
+                               sizeof(D0Type) * NumDTensor * total_e + sizeof(EDataType) * total_e;
 
         ki.perf_result_.latency_   = avg_time;
         ki.perf_result_.tflops_    = static_cast<float>(flop) / 1.E9 / avg_time;
