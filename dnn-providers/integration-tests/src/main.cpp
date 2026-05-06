@@ -213,7 +213,7 @@ int main(int argc, char** argv) noexcept
             if(hipdnn_integration_tests::TestConfig::get().hasEngineName())
             {
                 allEngineNames.emplace_back(
-                    std::string(hipdnn_integration_tests::TestConfig::get().getEngineName()));
+                    hipdnn_integration_tests::TestConfig::get().getEngineName());
             }
             else
             {
