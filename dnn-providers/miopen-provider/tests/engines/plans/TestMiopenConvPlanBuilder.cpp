@@ -339,17 +339,42 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 
 TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
 {
-    // Configuration matching multiple MIOpen solvers with different workspace requirements
-    std::vector<int64_t> xDims = {2, 16, 28, 28};
+    // Configuration matching multiple MIOpen solvers with different workspace requirements.
+    // gfx90a uses a different shape because the {2,16,28,28} / 3x3 / pad1 / dil1 config
+    // resolves to zero-workspace solvers (ConvAsm3x3U, ConvMlirIgemmFwdXdlops) as the
+    // fastest pick on that arch, collapsing range.min == range.max == 0. Dilation 2
+    // excludes the asm-direct 3x3 solver and forces an ImplicitGEMM/Direct solver with
+    // workspace; verified on gfx90a: range = {0, 675840}.
+    std::vector<int64_t> xDims;
+    std::vector<int64_t> wDims;
+    std::vector<int64_t> yDims;
+    std::vector<int64_t> convPrePadding;
+    std::vector<int64_t> convPostPadding;
+    std::vector<int64_t> convStrides;
+    std::vector<int64_t> convDilation;
+    if(miopen_utils::getDeviceArch(_handle->getStream()) == "gfx90a")
+    {
+        xDims = {2, 32, 28, 28};
+        wDims = {64, 32, 3, 3};
+        yDims = {2, 64, 28, 28};
+        convPrePadding = {2, 2};
+        convPostPadding = {2, 2};
+        convStrides = {1, 1};
+        convDilation = {2, 2};
+    }
+    else
+    {
+        xDims = {2, 16, 28, 28};
+        wDims = {32, 16, 3, 3};
+        yDims = {2, 32, 28, 28};
+        convPrePadding = {1, 1};
+        convPostPadding = {1, 1};
+        convStrides = {1, 1};
+        convDilation = {1, 1};
+    }
     auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
-    std::vector<int64_t> wDims = {32, 16, 3, 3};
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
-    std::vector<int64_t> yDims = {2, 32, 28, 28};
     auto yStrides = hipdnn_data_sdk::utilities::generateStrides(yDims);
-    std::vector<int64_t> convPrePadding = {1, 1};
-    std::vector<int64_t> convPostPadding = {1, 1};
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1, 1};
 
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
                                                                        xStrides,
@@ -384,17 +409,39 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
 
 TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitBwd)
 {
-    // Configuration matching multiple MIOpen solvers with different workspace requirements
-    std::vector<int64_t> dxDims = {2, 16, 28, 28};
+    // Configuration matching multiple MIOpen solvers with different workspace requirements.
+    // gfx90a uses a different shape — see PlanExecutesWithMinWorkspaceLimitFwd above for
+    // the rationale. Verified on gfx90a: range = {0, 675840} with dilation 2.
+    std::vector<int64_t> dxDims;
+    std::vector<int64_t> wDims;
+    std::vector<int64_t> dyDims;
+    std::vector<int64_t> convPrePadding;
+    std::vector<int64_t> convPostPadding;
+    std::vector<int64_t> convStrides;
+    std::vector<int64_t> convDilation;
+    if(miopen_utils::getDeviceArch(_handle->getStream()) == "gfx90a")
+    {
+        dxDims = {2, 32, 28, 28};
+        wDims = {64, 32, 3, 3};
+        dyDims = {2, 64, 28, 28};
+        convPrePadding = {2, 2};
+        convPostPadding = {2, 2};
+        convStrides = {1, 1};
+        convDilation = {2, 2};
+    }
+    else
+    {
+        dxDims = {2, 16, 28, 28};
+        wDims = {32, 16, 3, 3};
+        dyDims = {2, 32, 28, 28};
+        convPrePadding = {1, 1};
+        convPostPadding = {1, 1};
+        convStrides = {1, 1};
+        convDilation = {1, 1};
+    }
     auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(dxDims);
-    std::vector<int64_t> wDims = {32, 16, 3, 3};
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
-    std::vector<int64_t> dyDims = {2, 32, 28, 28};
     auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
-    std::vector<int64_t> convPrePadding = {1, 1};
-    std::vector<int64_t> convPostPadding = {1, 1};
-    std::vector<int64_t> convStrides = {1, 1};
-    std::vector<int64_t> convDilation = {1, 1};
 
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(dxDims,
                                                                        dxStrides,
