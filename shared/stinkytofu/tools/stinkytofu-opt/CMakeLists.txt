@@ -5,7 +5,7 @@
 add_executable(stinkytofu-opt
     stinkytofu-opt.cpp
 )
-target_compile_options(stinkytofu-opt PRIVATE -Wall -Werror)
+target_compile_options(stinkytofu-opt PRIVATE -Wall -Werror -Wno-error=deprecated-declarations)
 
 target_include_directories(stinkytofu-opt PRIVATE
     "${TABLEGEN_OUTPUT_DIR}"

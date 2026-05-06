@@ -4,7 +4,7 @@
 add_executable(stinkytofu-check
     stinkytofu-check.cpp
 )
-target_compile_options(stinkytofu-check PRIVATE -Wall -Werror)
+target_compile_options(stinkytofu-check PRIVATE -Wall -Werror -Wno-error=deprecated-declarations)
 
 # stinkytofu-check needs exceptions for std::regex
 target_compile_options(stinkytofu-check PRIVATE -fexceptions -frtti)
