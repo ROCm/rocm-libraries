@@ -401,6 +401,151 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
 }
 
 //----------------------------------------------------------------------
+// FieldType helpers
+//----------------------------------------------------------------------
+
+/// Returns true if the given FieldType uses custom textual syntax that
+/// parseOneRegister cannot handle. These operands are dispatched to
+/// dedicated parsers in the per-field operand loop.
+bool hasCustomOperandSyntax(FieldType ft) {
+    switch (ft) {
+        case FieldType::delay:
+        case FieldType::wait_alu:
+        case FieldType::hwreg:
+            return true;
+        default:
+            return false;
+    }
+}
+
+//----------------------------------------------------------------------
+// Custom operand parsers
+//----------------------------------------------------------------------
+
+/// Parse s_delay_alu instid0/instskip/instid1 syntax into mod.delayalu fields.
+bool parseDelayAluSyntax(IRLexer& lexer, ParsedInstruction& inst) {
+    auto parseInstId = [](const std::string& s) -> std::pair<std::string, int> {
+        if (s.find("VALU_DEP_") == 0) return {"VALU", std::stoi(s.substr(9))};
+        if (s.find("TRANS32_DEP_") == 0) return {"TRANS", std::stoi(s.substr(12))};
+        if (s.find("SALU_CYCLE_") == 0) return {"SALU", std::stoi(s.substr(11))};
+        return {"NO_DEP", 0};
+    };
+    auto parseSkip = [](const std::string& s) -> int {
+        if (s == "SAME") return 0;
+        if (s == "NEXT") return 1;
+        if (s.find("SKIP_") == 0) return std::stoi(s.substr(5)) + 1;
+        return 0;
+    };
+    auto& fields = inst.modifiers["mod.delayalu"];
+    while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
+           lexer.peek().kind != TokenKind::Newline) {
+        if (lexer.peek().kind != TokenKind::Identifier) {
+            lexer.consume();
+            continue;
+        }
+        std::string key(lexer.consume().text);
+        std::string val;
+        if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::LeftParen) {
+            lexer.consume();
+            if (!lexer.isAtEnd()) val = std::string(lexer.consume().text);
+            if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::RightParen) lexer.consume();
+        }
+        if (key == "instid0") {
+            auto [type, dist] = parseInstId(val);
+            fields["instid0Type"] = type;
+            fields["instid0Distance"] = std::to_string(dist);
+        } else if (key == "instskip") {
+            fields["instSkip"] = std::to_string(parseSkip(val));
+        } else if (key == "instid1") {
+            auto [type, dist] = parseInstId(val);
+            fields["instid1Type"] = type;
+            fields["instid1Distance"] = std::to_string(dist);
+        }
+    }
+    if (fields.find("instid0Type") == fields.end()) {
+        fields["instid0Type"] = "NO_DEP";
+        fields["instid0Distance"] = "0";
+    }
+    return true;
+}
+
+/// Parse s_wait_alu depctr_*() syntax into mod.waitalu fields.
+bool parseWaitAluSyntax(IRLexer& lexer, ParsedInstruction& inst) {
+    auto& fields = inst.modifiers["mod.waitalu"];
+    while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
+           lexer.peek().kind != TokenKind::Newline) {
+        if (lexer.peek().kind != TokenKind::Identifier) {
+            lexer.consume();
+            continue;
+        }
+        std::string key(lexer.consume().text);
+        std::string val;
+        if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::LeftParen) {
+            lexer.consume();
+            if (!lexer.isAtEnd()) val = std::string(lexer.consume().text);
+            if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::RightParen) lexer.consume();
+        }
+        if (key.find("depctr_") == 0) key = key.substr(7);
+        if (!key.empty() && !val.empty()) fields[key] = val;
+    }
+    return true;
+}
+
+/// Parse hwreg(id, offset, width) syntax and store as a LiteralString
+/// register on the instruction for verbatim round-trip emission.
+void parseHwregOperand(IRLexer& lexer, ParsedInstruction& inst,
+                       const HwInstDesc::OperandFieldDesc& field) {
+    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::Identifier) return;
+    std::string text(lexer.peek().text);
+    if (text != "hwreg") return;
+    lexer.consume();
+
+    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::LeftParen) {
+        StinkyRegister reg(text);
+        if (field.isDest)
+            inst.destRegs.push_back(reg);
+        else
+            inst.srcRegs.push_back(reg);
+        return;
+    }
+    text += '(';
+    lexer.consume();
+
+    int depth = 1;
+    while (!lexer.isAtEnd() && depth > 0) {
+        const auto& tok = lexer.consume();
+        if (tok.kind == TokenKind::LeftParen) depth++;
+        if (tok.kind == TokenKind::RightParen) depth--;
+        if (depth > 0) text += std::string(tok.text);
+    }
+    text += ')';
+
+    StinkyRegister reg(text);
+    if (field.isDest)
+        inst.destRegs.push_back(reg);
+    else
+        inst.srcRegs.push_back(reg);
+}
+
+/// Dispatch a custom-syntax operand to its dedicated parser based on FieldType.
+void parseCustomOperand(IRLexer& lexer, ParsedInstruction& inst,
+                        const HwInstDesc::OperandFieldDesc& field) {
+    switch (field.fieldType) {
+        case FieldType::delay:
+            parseDelayAluSyntax(lexer, inst);
+            break;
+        case FieldType::wait_alu:
+            parseWaitAluSyntax(lexer, inst);
+            break;
+        case FieldType::hwreg:
+            parseHwregOperand(lexer, inst, field);
+            break;
+        default:
+            break;
+    }
+}
+
+//----------------------------------------------------------------------
 // Modifier parsing
 //----------------------------------------------------------------------
 
@@ -421,7 +566,6 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
 
     const std::string& mnemonic = inst.opcodeStr;
     bool isWaitcnt = (mnemonic == "s_waitcnt");
-    bool isDelayAlu = (mnemonic == "s_delay_alu");
 
     // Determine modifier namespace from microcode format
     std::string modKey;
@@ -457,15 +601,6 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
             inst.modifiers["mod.swaitcnt"]["dscnt"] = "0";
             return true;
         }
-    }
-
-    // s_delay_alu: store the entire remainder as a TEXTBLOCK (complex syntax)
-    // The instruction will still be created with correct timing; modifiers won't
-    // be decoded but that's acceptable for a round-trip parser.
-    if (isDelayAlu) {
-        // Leave modifiers empty; the passes that need delay_alu data (e.g. wait-cnt
-        // insertion) will re-insert the correct modifier after scheduling.
-        return true;
     }
 
     // Collect key→value / key(value) / boolean-flag tokens
@@ -641,38 +776,36 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
     inst->issueCycles = hwInstDesc->issue;
     inst->latencyCycles = hwInstDesc->latency;
 
-    // Count dest/src split from operandFields.
-    // When operandFields is empty the instruction has no explicit register operands
-    // (e.g. s_endpgm, s_waitcnt, s_delay_alu) so skip register parsing entirely.
-    int numDest = 0;
-    bool hasOperandFields = !hwInstDesc->operandFields.empty();
-    if (hasOperandFields) {
-        for (const auto& f : hwInstDesc->operandFields)
-            if (f.isDest) numDest++;
-    }
-
-    if (hasOperandFields) {
-        // Parse comma-separated register operands.
-        // Stop when: (a) no comma follows, or (b) next token is not a register.
-        int opIdx = 0;
+    // Per-field operand dispatch: iterate operandFields and dispatch each
+    // to the appropriate parser based on FieldType. Custom-syntax fields
+    // (delay, wait_alu) are parsed by dedicated parsers here.
+    // Register/immediate fields are parsed by parseOneRegister.
+    if (!hwInstDesc->operandFields.empty()) {
         bool firstOp = true;
+        int regOpIdx = 0;
 
-        while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
-               lexer.peek().kind != TokenKind::Newline) {
+        for (size_t fi = 0; fi < hwInstDesc->operandFields.size(); fi++) {
+            if (lexer.isAtEnd() || lexer.peek().kind == TokenKind::Eof ||
+                lexer.peek().kind == TokenKind::Newline)
+                break;
+
+            const auto& field = hwInstDesc->operandFields[fi];
+
             if (!firstOp) {
                 if (lexer.peek().kind != TokenKind::Comma) break;
                 lexer.consume();  // eat ','
             }
             firstOp = false;
 
+            // Custom-syntax operand: dispatch to dedicated parser.
+            if (hasCustomOperandSyntax(field.fieldType)) {
+                parseCustomOperand(lexer, *inst, field);
+                continue;
+            }
+
             // Snapshot the lookahead so we can recover an unrecognised
-            // identifier as a LiteralString if parseOneRegister fails on a
-            // non-first operand (see recovery block below). For first
-            // operands we still want to fall through to TEXTBLOCK pass-
-            // through so instructions with custom textual syntax (e.g.
-            // `s_delay_alu instid0(VALU_DEP_2)`, `s_wait_alu depctr_va_vdst(0)`)
-            // round-trip verbatim instead of being half-parsed and then
-            // tripping the SDelayAluData/SWaitAluData asserts in the emitter.
+            // identifier as a LiteralString if parseOneRegister fails on
+            // a non-first operand (see recovery block below).
             TokenKind preKind = lexer.isAtEnd() ? TokenKind::Eof : lexer.peek().kind;
             std::string preText =
                 preKind == TokenKind::Identifier ? std::string(lexer.peek().text) : std::string();
@@ -680,12 +813,10 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
 
             auto reg = parseOneRegister(lexer, syms, preserveSymbolicNames);
             if (!reg) {
-                if (opIdx == 0) {
-                    // First operand failed (e.g. symbolic expression like
-                    // v[sym-768:sym-765] or a custom-syntax mnemonic such as
-                    // s_delay_alu / s_wait_alu). parseOneRegister may have
-                    // consumed tokens; safest to preserve the entire line
-                    // verbatim via TEXTBLOCK pass-through.
+                if (regOpIdx == 0) {
+                    // First register operand failed (e.g. unresolvable symbolic
+                    // expression like v[sym-768:sym-765]). parseOneRegister may
+                    // have consumed tokens; preserve the line as TEXTBLOCK.
                     return nullptr;
                 }
                 // Non-first operand recovery: a `.set` symbol (or any other
@@ -707,22 +838,22 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
                     // as the IntegerLiteral path in parseOneRegister.
                     std::string text = gatherArithExprSuffix(lexer, preText);
                     StinkyRegister litReg(text);
-                    if (opIdx < numDest)
+                    if (field.isDest)
                         inst->destRegs.push_back(litReg);
                     else
                         inst->srcRegs.push_back(litReg);
-                    opIdx++;
+                    regOpIdx++;
                     continue;
                 }
                 // Later operand failed → stop operand parsing, proceed to modifiers.
                 break;
             }
 
-            if (opIdx < numDest)
+            if (field.isDest)
                 inst->destRegs.push_back(*reg);
             else
                 inst->srcRegs.push_back(*reg);
-            opIdx++;
+            regOpIdx++;
         }
     }
 
