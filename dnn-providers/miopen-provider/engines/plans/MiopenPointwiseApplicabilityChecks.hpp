@@ -7,7 +7,7 @@
 
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/IGraph.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 namespace miopen_plugin
 {

@@ -152,6 +152,9 @@ add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
+    engines/plans/MiopenPointwiseApplicabilityChecks.cpp
+    engines/plans/MiopenPointwisePlan.cpp
+    engines/plans/MiopenPointwisePlanBuilder.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
