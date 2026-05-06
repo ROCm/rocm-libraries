@@ -60,9 +60,10 @@ void gerand( rocblas_int m, rocblas_int n, T* A, rocblas_int lda )
     using S = decltype( std::real( T{} ) );
     std::uniform_real_distribution<S> dist( S(-1), S(1) );
 
-    assert( m >= 0 );
-    assert( n >= 0 );
-    assert( lda >= m );
+    if (m < 0 || n < 0 || lda < m)
+        throw rocblas_status_invalid_size;
+    if (! A)
+        throw rocblas_status_invalid_pointer;
 
     for (rocblas_int j = 0; j < n; ++j)
     {
@@ -89,8 +90,10 @@ void herand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
     using S = decltype( std::real( T{} ) );
     std::uniform_real_distribution<S> dist( S(-1), S(1) );
 
-    assert( n >= 0 );
-    assert( lda >= n );
+    if (n < 0 || lda < n)
+        throw rocblas_status_invalid_size;
+    if (! A)
+        throw rocblas_status_invalid_pointer;
 
     if (uplo == rocblas_fill_lower)
     {
@@ -144,8 +147,10 @@ void syrand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
     using S = decltype( std::real( T{} ) );
     std::uniform_real_distribution<S> dist( S(-1), S(1) );
 
-    assert( n >= 0 );
-    assert( lda >= n );
+    if (n < 0 || lda < n)
+        throw rocblas_status_invalid_size;
+    if (! A)
+        throw rocblas_status_invalid_pointer;
 
     if (uplo == rocblas_fill_lower)
     {
@@ -182,30 +187,33 @@ void syrand( rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda )
 }
 
 //------------------------------------------------------------------------------
-// Fill in Hermitian band matrix Aband with random uniform values on unit square.
-// The diagonal is real. Entries outside the band are set to nan.
-// As a special case for hb2st, this stores the full lower band and copies
-// conjugate of part of it to the upper band.
+// Fill in Hermitian band matrix Aband with random uniform values on unit
+// square, and optionally symmetrize by copying min( kl, ku ) diagonals between
+// lower and upper band. To make a fully explicitly symmetrized matrix,
+// set kl = ku. To make an implicitly Hermitian matrix, as in LAPACK,
+// set kl = 0 or ku = 0. The diagonal is real. Entries outside the matrix are
+// set to nan. Example with n = 6, ku = 2, kl = 3, set `.` entries to nan:
+//
+//      [ . . b b b b ]  }  ku = 2
+//      [ . a a a a a ]  }
+//      [ d d d d d d ]  <= main diag
+//      [ a a a a a . ]  }  kl = 3
+//      [ b b b b . . ]  }
+//      [ c c c . . . ]  }  Because ku < kl, this diagonal is not copied to upper band.
 //
 // todo: pass dist into routine, with default = uniform [-1, 1]?
 //
 template <typename T>
-void hbrand( rocblas_int n, rocblas_int kd,
+void hbrand( rocblas_int n, rocblas_int kl, rocblas_int ku,
              T* Aband, rocblas_int ldab )
 {
     using S = decltype( std::real( T{} ) );
     std::uniform_real_distribution<S> dist( S(-1), S(1) );
 
-    assert( n >= 0 );
-    assert( kd >= 0 );
-
-    // For bandwidth kd, need ku = kd-1 superdiagonals to cover the diagonal
-    // blocks. (ku superdiagonals needed if we update diag blocks using
-    // gemv/ger, but none needed if we used hemv/her2.)
-    // Need kl = 2*kd-1 subdiagonals to cover the off-diagonal blocks and bulges.
-    rocblas_int ku = kd - 1;
-    rocblas_int kl = 2*kd - 1;
-    assert( ldab >= ku + kl + 1 );
+    if (n < 0 || kl < 0 || ku < 0 || ldab < kl + ku + 1)
+        throw rocblas_status_invalid_size;
+    if (! Aband)
+        throw rocblas_status_invalid_pointer;
 
     // Index of main diagonal.
     rocblas_int idiag = ku;
@@ -214,38 +222,39 @@ void hbrand( rocblas_int n, rocblas_int kd,
     {
         // Diagonal is real.
         // Random on [-1, 1].
-        // todo: better random number generator.
         Aband[idiag + j*ldab] = rand_value<S>( dist );
 
-        // Fill in lower band and copy conjugate to upper band.
-        for (rocblas_int i = 1; i < kd + 1 && i + j < n; ++i)
+        if (kl >= ku)
         {
-            // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
-            Aband[idiag + i + j*ldab] = rand_value<T>( dist );
-
-            // Copy conj of lower band to upper band. The kd-th diagonal is
-            // not needed, as it is outside the kd x kd diagonal blocks.
-            if (i < kd)
+            // Fill in lower band and copy conjugate to upper band.
+            for (rocblas_int i = 1; i < kl + 1 && i + j < n; ++i)
             {
-                Aband[idiag - i + (j + i)*ldab]
-                    = sconj( Aband[idiag + i + j*ldab] );
+                // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
+                Aband[idiag + i + j*ldab] = rand_value<T>( dist );
+
+                // Within the requested ku bandwidth,
+                // copy conj of lower band to upper band, A{j, j+i} = conj( A{j+i, j} ).
+                if (i < kd)
+                {
+                    Aband[idiag - i + (j + i)*ldab]
+                        = sconj( Aband[idiag + i + j*ldab] );
+                }
             }
         }
-        // Zero out entries outside band where bulges will fill in.
-        for (rocblas_int i = kd+1; i < 2*kd; ++i)
+        else
         {
-            Aband[idiag + i + j*ldab] = 0;
         }
+        #if 0
+            // Zero out entries outside band where bulges will fill in.
+            for (rocblas_int i = kd+1; i < 2*kd; ++i)
+            {
+                Aband[idiag + i + j*ldab] = 0;
+            }
+        #endif
     }
 
     // Mark entries outside the band structure as nan,
     // to ensure we don't use them.
-    // Example with n = 6, ku = 2, kl = 2, set x = nan:
-    // [ x x . . . . ] }
-    // [ x . . . . . ] } ku = 2
-    // [ . . . . . . ] <= main diag
-    // [ . . . . . x ] } kl = 2
-    // [ . . . . x x ] }
     for (rocblas_int j = 0; j < ku; ++j)
     {
         for (rocblas_int i = 0; i < ku - j; ++i)
