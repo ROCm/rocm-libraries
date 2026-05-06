@@ -95,6 +95,7 @@ set(UNIT_TEST_FILES
 list(TRANSFORM UNIT_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
 add_executable(unit_tests ${TEST_MAIN} ${UNIT_TEST_FILES})
+target_link_libraries(unit_tests PRIVATE stinkytofu-warnings)
 target_link_libraries(unit_tests PUBLIC ${TEST_LINK_LIBS})
 target_include_directories(unit_tests PRIVATE ${TEST_INCLUDE_DIRS})
 add_dependencies(unit_tests tablegen_generated)
@@ -122,6 +123,7 @@ add_executable(test_gen_instructions
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tablegen/test_gen_instructions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tablegen/GenInstructions.cpp
 )
+target_link_libraries(test_gen_instructions PRIVATE stinkytofu-warnings)
 
 target_link_libraries(test_gen_instructions PRIVATE gfxisa)
 
