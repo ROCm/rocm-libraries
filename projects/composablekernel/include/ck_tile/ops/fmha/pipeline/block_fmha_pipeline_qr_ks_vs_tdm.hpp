@@ -157,6 +157,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                 std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
             "wrong!");
 
+        // Step B2 (h hybrid): V goes back to async_load + ds_load_tr (B1 path).
+        // V dram window keeps the original (kN1, kK1) transposed view shape.
+        // K stays on TDM trivial tile-major (step 1 of λ).
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -224,16 +227,46 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
         }
 
+        // ---------------------------------------------------------------------
+        // TDM configs for Q / K (Step B2)
+        // pad_enable + pad_amount + pad_interval are compile-time, sourced from
+        // the policy. workgroup_mask defaults to 0 (no cluster multicast in B2).
+        // V uses async_load_tile path (h hybrid revert), no TDM config needed.
+        // ---------------------------------------------------------------------
+        TDMConfig tdm_config_q;
+        TDMConfig tdm_config_k;
+        {
+            constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
+            tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
+            tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
+            tdm_config_q.pad_config.pad_interval = LdsPaddingConfigQ[number<2>{}];
+
+            constexpr auto LdsPaddingConfigK     = Policy::template GetLdsPaddingConfigK<Problem>();
+            tdm_config_k.pad_enable              = LdsPaddingConfigK[I0];
+            tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[I1];
+            tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
+        }
+
         // Q tile in LDS
         auto q_dram_window = make_tile_window(
             q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
 
+        // Step B2 (β')-Q-fix + Q desc cleanup — Q LDS write/read view both
+        // use plain row-major desc. Mirrors the (β) K fix journey:
+        // - Pre-fix: TDM writer (plain bytes) + Xor=true reader (XOR'd byte
+        //   access) → mismatch on every n!=0 row → systematic XOR chunk-swap
+        //   pattern. Smoking gun: B2 Q dump 0/32 thread match B1, tid 1 全
+        //   sentinel-like -23.203 (uninit LDS). reviewer trace + Q dump
+        //   confirmed K↔Q analogy 100%.
+        // - Post-fix: both Xor=false plain row-major aligned. The `Xor`
+        //   template parameter on MakeQLdsBlockDescriptor was removed entirely
+        //   (TDM can't produce XOR'd LDS, dead code).
+        // See swe-status-K-LDS-dump-disambig.md + reviewer smoking-gun finding.
         auto q_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<QDataType*>(smem_ptr), Policy::template MakeQLdsBlockDescriptor<Problem>());
 
         auto q_lds_read_view = make_tensor_view<address_space_enum::lds>(
-            static_cast<QDataType*>(smem_ptr),
-            Policy::template MakeQLdsBlockDescriptor<Problem, true>());
+            static_cast<QDataType*>(smem_ptr), Policy::template MakeQLdsBlockDescriptor<Problem>());
 
         auto q_lds_store_window =
             make_tile_window(q_lds_write_view,
@@ -246,7 +279,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeQRegTileDistribution<Problem>());
 
-        async_load_tile(q_lds_store_window, q_dram_window);
+        load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
 
         // K tile in LDS
         const index_t physical_seqlen_k_start         = logical_seqlen_k_start;
@@ -258,11 +291,15 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {physical_seqlen_k_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem>());
 
+        // Step B2 (β + Task A cleanup) — K LDS write/read view both use plain
+        // row-major desc. The `Xor` template parameter on MakeKLdsBlockDescriptor
+        // was removed (TDM box-major write can't produce XOR'd LDS layout, so
+        // the XOR'd branch was unreachable dead code). Both writer + reader
+        // align on plain row-major byte layout. See swe-status-K-LDS-dump-disambig.md.
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType*>(smem_ptr), Policy::template MakeKLdsBlockDescriptor<Problem>());
         auto k_lds_read_view = make_tensor_view<address_space_enum::lds>(
-            static_cast<KDataType*>(smem_ptr),
-            Policy::template MakeKLdsBlockDescriptor<Problem, false, true>());
+            static_cast<KDataType*>(smem_ptr), Policy::template MakeKLdsBlockDescriptor<Problem>());
 
         auto k_lds_write_window =
             make_tile_window(k_lds_write_view,
@@ -288,6 +325,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                              Policy::template MakeSRegTileDistribution<Problem>());
 
         // V tile in LDS
+        // (h hybrid) V dram window uses the original (kN1, kK1) transposed view
+        // (constructed by kernel.hpp's existing transform_tensor_view layer for
+        // async_load_tile compatibility).
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
                              {physical_seqlen_k_start, 0},
@@ -314,7 +354,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeVRegTileDistribution<Problem>());
 
-        block_sync_lds_direct_load<0>();
+        s_wait_tensorcnt_barrier<0>();
         auto q_tile = load_tile(q_lds_read_window);
 
         const index_t num_total_loop =
@@ -328,14 +368,14 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k1_loops);
 
         block_sync_lds();
-        async_load_tile(k_lds_write_window, k_dram_window);
-
-        constexpr index_t k_vmem_insts = k_dram_window.get_num_of_access();
-        constexpr index_t v_vmem_insts = v_dram_window.get_num_of_access();
+        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
         do
         {
             block_sync_lds();
+            // (h hybrid) V uses async_load_tile (B1 verified path); K uses TDM above.
+            // sync counters are independent: s_wait_tensorcnt for K (TDM),
+            // block_sync_lds_direct_load<0> for V (async).
             async_load_tile(v_lds_write_window, v_dram_window); // prefetch load v tile
 
             // move V tile windows
@@ -347,14 +387,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             if constexpr(1 < k0_loops)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
-                    if constexpr(i_k0 == 0)
-                    {
-                        block_sync_lds_direct_load<v_vmem_insts>();
-                    }
-                    else
-                    {
-                        block_sync_lds_direct_load<0>();
-                    }
+                    s_wait_tensorcnt_barrier<0>();
 
                     auto k_tile = load_tile(k_lds_read_window);
 
@@ -367,7 +400,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                     // loop over along the [K]ey head dimension
                     move_tile_window(k_dram_window, {0, kK0});
                     block_sync_lds();
-                    async_load_tile(k_lds_write_window, k_dram_window);
+                    load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
                 });
                 // move back to the origin
                 move_tile_window(k_dram_window, {0, -kK0 * (k0_loops - 1)});
@@ -375,11 +408,11 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             if constexpr(k0_loops == 1)
             {
-                block_sync_lds_direct_load<v_vmem_insts>();
+                s_wait_tensorcnt_barrier<0>();
             }
             else
             {
-                block_sync_lds_direct_load<0>();
+                s_wait_tensorcnt_barrier<0>();
             }
 
             auto k_tile = load_tile(k_lds_read_window);
@@ -432,7 +465,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             move_tile_window(k_dram_window, {kN0, 0});
 
             block_sync_lds();
-            async_load_tile(k_lds_write_window, k_dram_window);
+            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
             // Gemm1
             auto s_new = [&]() {
@@ -545,7 +578,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
-            block_sync_lds_direct_load<k_vmem_insts>();
+            // (h hybrid) wait for V async load to complete (V uses async path,
+            // not TDM, in this hybrid). K TDM is on the independent tensorcnt
+            // counter and is already drained earlier in this iteration.
+            block_sync_lds_direct_load<0>();
 
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -653,6 +689,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
             "wrong!");
 
+        // Step B2 (h hybrid): V goes back to async_load + ds_load_tr (B1 path).
+        // Group path mirrors batch path change above.
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -721,17 +759,38 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
         }
 
+        // ---------------------------------------------------------------------
+        // TDM configs for Q / K (Step B2)
+        // pad_enable + pad_amount + pad_interval are compile-time, sourced from
+        // the policy. workgroup_mask defaults to 0 (no cluster multicast in B2).
+        // V uses async_load_tile path (h hybrid revert), no TDM config needed.
+        // ---------------------------------------------------------------------
+        TDMConfig tdm_config_q;
+        TDMConfig tdm_config_k;
+        {
+            constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
+            tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
+            tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
+            tdm_config_q.pad_config.pad_interval = LdsPaddingConfigQ[number<2>{}];
+
+            constexpr auto LdsPaddingConfigK     = Policy::template GetLdsPaddingConfigK<Problem>();
+            tdm_config_k.pad_enable              = LdsPaddingConfigK[I0];
+            tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[I1];
+            tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
+        }
+
         // Q tile in LDS
         auto q_dram_window = make_tile_window(
             q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
 
+        // Step B2 (β')-Q-fix + cleanup — drop trailing Xor=true (group path).
         auto q_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<QDataType*>(smem_ptrk0),
             Policy::template MakeQLdsBlockDescriptor<Problem>());
 
         auto q_lds_read_view = make_tensor_view<address_space_enum::lds>(
             static_cast<QDataType*>(smem_ptrk0),
-            Policy::template MakeQLdsBlockDescriptor<Problem, true>());
+            Policy::template MakeQLdsBlockDescriptor<Problem>());
 
         auto q_lds_store_window =
             make_tile_window(q_lds_write_view,
@@ -744,8 +803,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeQRegTileDistribution<Problem>());
 
-        async_load_tile(q_lds_store_window, q_dram_window);
-        block_sync_lds_direct_load<0>();
+        load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
+        s_wait_tensorcnt_barrier<0>();
         auto q_tile = load_tile(q_lds_read_window);
 
         // K tile in LDS
@@ -758,13 +817,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {physical_seqlen_k_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem, true>());
 
+        // Step B2 Task A cleanup — drop trailing `Xor=true` template arg (param removed).
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType* __restrict__>(smem_ptrk0),
             Policy::template MakeKLdsBlockDescriptor<Problem, true>());
 
         auto k_lds_read_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType* __restrict__>(smem_ptrk0),
-            Policy::template MakeKLdsBlockDescriptor<Problem, true, true>());
+            Policy::template MakeKLdsBlockDescriptor<Problem, true>());
 
         auto k_lds_write_window =
             make_tile_window(k_lds_write_view,
@@ -825,21 +885,19 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
         block_sync_lds<0>();
-        async_load_tile(k_lds_write_window, k_dram_window);
+        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+        // (h hybrid) V uses async_load_tile (B1 verified path); K stays TDM.
         async_load_tile(v_lds_write_window, v_dram_window);
 
         move_tile_window(k_dram_window, {kN0, 0});
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
-        async_load_tile(k_lds_write_window, k_dram_window);
-
-        constexpr index_t k_vmem_insts = k_dram_window.get_num_of_access();
-        constexpr index_t v_vmem_insts = v_dram_window.get_num_of_access();
+        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
         constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
         constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
 
-        block_sync_lds_direct_load<k_vmem_insts + v_vmem_insts>();
+        s_wait_tensorcnt_barrier<0>();
         auto k_tile = load_tile(k_lds_read_window);
 
         __builtin_amdgcn_sched_barrier(0);
@@ -852,6 +910,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             block_sync_lds<k_lds_insts>();
             move_tile_window(v_dram_window, {kN0, 0});
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
+            // (h hybrid) V uses async_load_tile (B1 verified path); K stays TDM.
             async_load_tile(v_lds_write_window, v_dram_window);
 
             // STAGE 1, QK gemm
@@ -882,7 +941,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                   sequence<kM0, k0_loops * kK0>{}),
                    k_tile);
 
-            block_sync_lds_direct_load<k_vmem_insts + v_vmem_insts>();
+            // (h hybrid) wait for V async load to complete (V uses async path).
+            block_sync_lds_direct_load<0>();
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -1049,7 +1109,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             block_sync_lds<v_lds_insts>();
             move_tile_window(k_dram_window, {kN0, 0});
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-            async_load_tile(k_lds_write_window, k_dram_window);
+            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
             if constexpr(1 < k1_loops)
             {
@@ -1076,7 +1136,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                   sequence<kM0, k1_loops * kK1>{}),
                    v_tile);
 
-            block_sync_lds_direct_load<k_vmem_insts + v_vmem_insts>();
+            s_wait_tensorcnt_barrier<0>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
             k_tile = load_tile(k_lds_read_window);
 

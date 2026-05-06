@@ -1389,8 +1389,17 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 ["t", "f"],
                 ["t", "f"],
             ):
-                pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
-                pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
+                # Step B2: qr_vr emit disabled to force runtime dispatch to qr_tdm
+                # pipeline for d=128 fp16/bf16 single-head cases. Without this disable,
+                # dispatcher selects qr_vr first (no TDM acceleration).
+                #
+                # This is a workaround. Proper fix: dispatcher should prefer qr_tdm over
+                # qr_vr when both available + trait match. Tracked in Step C backlog.
+                #
+                # Re-enable when dispatcher logic adds proper qr_tdm priority preference.
+                # pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
+                # pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
+                pass
 
             # qr_tdm: gfx1250 dedicated pipeline. Step B1 rewires distribution to
             # use base async path; pipeline still calls async_load_tile (Step B2
