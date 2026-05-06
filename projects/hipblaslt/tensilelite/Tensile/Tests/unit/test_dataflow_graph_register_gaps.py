@@ -3383,16 +3383,14 @@ class TestLWSAddrChain:
 # CaptureUnknownInstructionError or downstream ValueError instead of
 # producing a graph node:
 #
-#   1. DSStoreD16HIB16 — gfx1151 HHS MT64x32x64 (PGR=2, PLR=1, DTL=F/F).
-#      Real DSStoreInstruction subclass; fix shape: add to _LW_CLASS_NAMES
-#      so the existing _DSStoreRule claims it. See
-#      GFX1151_AUDIT/PGR_PLR_PHASE_B_REPORT.md (Run 6).
+#   1. DSStoreD16HIB16 — Real DSStoreInstruction subclass; fix shape:
+#      add to _LW_CLASS_NAMES so the existing _DSStoreRule claims it.
 #   2. SSetPrior — gfx950 HSS / BBS Range MT256x256x64 (PGR=2, PLR=1,
 #      DTL=T/T). Wave-priority scalar op; no register dataflow. Fix
 #      shape: new _SSETPRIO_CLASS_NAMES set + _is_ssetprio() helper +
 #      extension of `_NoDataflowRule.applies` to claim it. Also added
 #      a `SSETPRIO` category in _captureSubIterToBuilder so it doesn't
-#      land in `UNKNOWN`. See PGR_PLR_PHASE_B_REPORT.md (Runs 4, 5).
+#      land in `UNKNOWN`.
 #   3. _node_label ValueError — gfx950 BBS Ailk MT192x256x64 (Run 7,
 #      same report). Investigation showed this is SECONDARY to (1)/(2):
 #      previously the failure dispatch routed through Failures whose

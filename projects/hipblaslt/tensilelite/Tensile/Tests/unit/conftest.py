@@ -31,8 +31,8 @@ def isa_infrastructure():
     assert compiler, "No C++ compiler found for ISA capability probing"
     assert assembler_bin, "No assembler binary found"
 
-    # Probe both gfx950 and gfx1151 so all CMS test classes can use real idMaps.
-    isaInfoMap = makeIsaInfoMap([IsaVersion(9, 5, 0), IsaVersion(11, 5, 1)], compiler)
+    # Probe gfx950 so CMS test classes can use real idMaps.
+    isaInfoMap = makeIsaInfoMap([IsaVersion(9, 5, 0)], compiler)
     # Note: do NOT call assignGlobalParameters here — it mutates global state
     # and breaks test_validateParameterTypes. The Solution and KernelWriter
     # work without it as long as isaInfoMap is passed explicitly.

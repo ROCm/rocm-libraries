@@ -80,20 +80,6 @@ ISA_CONCERN_CATALOG: dict[tuple, set[ValidationConcern]] = {
         ValidationConcern.SCALAR_REGISTER_SAFETY,
         ValidationConcern.QUAD_CYCLE_TIMING,
     },
-    (11, 5, 1): {   # RDNA 3.5 (gfx1151)
-        ValidationConcern.INSTRUCTION_ORDERING,
-        # Concerns below are declared but have no rules yet — they will be added in stage 12
-        # (gfx1151 rules) when LWAfterLRRule, LWBeforeLRRule, GRVgprReadyRule are implemented.
-        # Until then, only INSTRUCTION_ORDERING is actively validated for gfx1151.
-        #
-        # NOT YET ACTIVE (no rules):
-        #   SCHEDULE_COMPLETENESS — CMS counts authored for CDNA wave64, not calibrated for wave32
-        #   LR_DATA_READY — needs WMMA-specific LR→WMMA tracing
-        #   LDS_WRITE_AFTER_READ — needs DTL=0 LW-based rule
-        #   LDS_READ_AFTER_WRITE — needs DTL=0 LW-based rule
-        #   LW_ORDERING — needs new LWAfterLRRule
-        #   GR_VGPR_READY — needs new GRVgprReadyRule
-    },
 }
 
 
@@ -1352,8 +1338,8 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
 
         # === Timeline rules ===
         # Skip timeline construction entirely when no timeline rule is needed.
-        # This avoids hitting CDNA-4 layout assertions for ISAs (e.g. gfx1151)
-        # whose timeline concerns are not yet covered by any rule.
+        # This avoids hitting CDNA-4 layout assertions for ISAs whose timeline
+        # concerns are not yet covered by any rule.
         timeline_needed = any(r.concerns() & required for r in TIMELINE_RULES)
         if not timeline_needed:
             continue

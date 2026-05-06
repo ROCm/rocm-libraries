@@ -346,9 +346,8 @@ class FourPartCapture:
 # every magic number from a per-arch `ArchProfile`. The default profile keeps
 # the historical CDNA 4 values bit-identical, so kernels (and the entire
 # unit-test suite) that don't carry an ISA tag still see the original
-# behavior. RDNA 3.5 (gfx1151) gets a separate profile with conservative
-# placeholder values pending ISA-reference confirmation; see
-# `Tensile/Components/GFX1151_AUDIT.md`.
+# behavior. New archs construct a fresh `ArchProfile` and register it in
+# `_ARCH_PROFILES_BY_ISA`.
 
 @dataclass(frozen=True)
 class ArchProfile:
@@ -359,10 +358,10 @@ class ArchProfile:
     construct a fresh `ArchProfile(...)` rather than copying-and-mutating.
 
     Fields:
-      name: Human-readable architecture tag (e.g. "CDNA4", "GFX1151").
-      isa: ISA tuple identifying the arch (e.g. (9, 5, 0) for gfx950,
-           (11, 5, 1) for gfx1151). Used by `_resolve_arch_profile_for_isa`
-           to look up the profile from a `kernel["ISA"]` value.
+      name: Human-readable architecture tag (e.g. "CDNA4").
+      isa: ISA tuple identifying the arch (e.g. (9, 5, 0) for gfx950).
+           Used by `_resolve_arch_profile_for_isa` to look up the profile
+           from a `kernel["ISA"]` value.
 
       Quad-cycle finish times for matrix-mul ops:
         standard_mfma_finish_cycles   — full-tile MFMA finish window.
@@ -416,66 +415,9 @@ _DEFAULT_CDNA4_ARCH_PROFILE = ArchProfile(
 )
 
 
-# RDNA 3.5 (gfx1151) — values sourced from the RDNA 3.5 ISA reference
-# manual (sections 2.1, 7.6, 7.9, 7.9.1). RDNA 3.5 uses WMMA via the VOP3P
-# encoding, not MFMA, and has a fundamentally different issue model. Key
-# differences captured here:
-#   * Section 7.9.1 (page 77) gives the only "required for correctness"
-#     scheduling rule: dependent WMMA ops need 1 V_NOP / unrelated VALU
-#     instruction between them when matrix-D overlaps the next WMMA's
-#     matrix A or B. The other rules in the table are documented as
-#     "Hardware may stall" with no quantified cycle window — so the
-#     finish-window value is the 1-instruction gap, not a multi-cycle
-#     window. Per-bead audit log: `GFX1151_AUDIT.md` sub-bead `l6q.1.t1`.
-#   * Section 7.9, Table 33 (page 75) lists every WMMA opcode on RDNA 3.5
-#     and they are all 16x16x16 — there is NO 4x4 WMMA family at all.
-#     Fields named `*_4x4_*` are therefore unreachable on gfx1151 and set
-#     to the natural "no constraint" sentinel (0). Same for the
-#     `from_4x4` type-switch threshold. Per-bead audit log: `l6q.1.t2`.
-#   * Section 2.1 (page 9): wave32 issues each instruction at most once,
-#     so `default_issue_quad_cycles = 1` matches the CDNA 4 value. Per-
-#     bead audit log: `l6q.1.t4`.
-# The CVT settle windows (`cvt_before_mfma_quad_cycles` and
-# `mfma_4x4_before_cvt_quad_cycles`) remain conservative placeholders
-# because TF32 F32X emulation is not enabled on gfx1151 today (sub-bead
-# `l6q.1.t3` tracks this branch).
-_GFX1151_ARCH_PROFILE = ArchProfile(
-    name="GFX1151",
-    isa=(11, 5, 1),
-    # WMMA finish window: RDNA 3.5 ISA §7.9.1 (page 77) — 1 VALU-instruction
-    # gap is the only correctness requirement between dependent WMMA ops.
-    standard_mfma_finish_cycles=1,
-    # No 4x4 WMMA family on RDNA 3.5 (Table 33, page 75). 0 = unreachable /
-    # no constraint; the discriminator in `_mfma_finish_cycles_for` cannot
-    # match a 4x4 producer here because no opcode renders as `_4x4x*`.
-    mfma_4x4_finish_cycles=0,
-    # CVT->WMMA and WMMA->CVT settle windows. Unreachable on gfx1151
-    # today (UseMFMAF32XEmulation is OFF). RDNA 3.5 ISA §7.9.1 (page 77)
-    # only documents WMMA->WMMA and WMMA->VALU dependency rules; no
-    # CVT->WMMA settle window is specified, and §5.6 (page 44) states
-    # hardware resolves normal VALU data dependencies. Per the
-    # "DO NOT invent values" rule, `cvt_before_mfma_quad_cycles` is left
-    # at the conservative placeholder (bead `rocm-libraries-8ea`).
-    # `mfma_4x4_before_cvt_quad_cycles` is 0 because no 4x4 WMMA family
-    # exists on RDNA 3.5 (Table 33 page 75 — bead `j3n`).
-    cvt_before_mfma_quad_cycles=3,
-    mfma_4x4_before_cvt_quad_cycles=0,
-    # Type-switch thresholds. RDNA 3.5 §7.9.1 documents type-switch as a
-    # "Hardware may stall" hint with no quantified cycle window. Without a
-    # documented value, leave the conservative threshold for the standard
-    # path; the 4x4 path is unreachable on RDNA 3.5 (set to 0).
-    mfma_type_switch_threshold_from_standard=6,
-    mfma_type_switch_threshold_from_4x4=0,
-    # RDNA 3.5 §2.1 (page 9): wave32 issues each VALU op once per slot;
-    # base issue cost = 1 quad-cycle, identical to the CDNA 4 wave64 base.
-    default_issue_quad_cycles=1,
-)
-
-
 # Lookup table — extend with new archs as their profiles are characterized.
 _ARCH_PROFILES_BY_ISA: Dict[Tuple[int, int, int], ArchProfile] = {
     _DEFAULT_CDNA4_ARCH_PROFILE.isa: _DEFAULT_CDNA4_ARCH_PROFILE,
-    _GFX1151_ARCH_PROFILE.isa: _GFX1151_ARCH_PROFILE,
 }
 
 
@@ -1599,9 +1541,6 @@ _LW_CLASS_NAMES = {
     # write itself, not by the register read), and no register is
     # written. So the existing _DSStoreRule
     # (reads = (lds_addr, src_data); writes = ()) is correct as-is.
-    # Witnessed under gfx1151 HHS_BH_Bias MT64x32x64 (CMS=1, PGR=2,
-    # PLR=1, DTL=F/F) — see GFX1151_AUDIT/PGR_PLR_PHASE_B_REPORT.md,
-    # Run 6.
     "DSStoreD16HIB16", "DSStoreB8HID16",
     "DSStoreInstruction",
 }
@@ -1640,8 +1579,7 @@ _SNOP_CLASS_NAMES = {
 #   - issue cost is the default 1 quad-cycle (NO wait_state add — unlike
 #     SNop which encodes a wait_state in its first param).
 # Witnessed under gfx950 HSS MT256x256x64 #2 and BBS Range MT256x256x64
-# under CMS=1+PGR=2+PLR=1+DTL=T/T — see
-# GFX1151_AUDIT/PGR_PLR_PHASE_B_REPORT.md (Runs 4, 5).
+# under CMS=1+PGR=2+PLR=1+DTL=T/T.
 _SSETPRIO_CLASS_NAMES = {
     "SSetPrior",
 }

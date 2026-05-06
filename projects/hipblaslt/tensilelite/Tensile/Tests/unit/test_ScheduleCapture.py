@@ -1425,9 +1425,6 @@ class TestPgrPlrCaptureMatrixEndToEnd:
     CMS=1 and assert (a) the FourPartCapture body presence matches the
     predicates, (b) `build_dataflow_graph` succeeds, (c) the validator
     runs end-to-end without the legacy CaptureEmptyBodyError.
-
-    Replaces the gfx1151 PGR=1 PLR=0 crash documented in
-    `Tensile/Components/GFX1151_AUDIT/PGR_PLR_PHASE_B_REPORT.md` Run 1.
     """
 
     def _build_with_capture(self, isa_infrastructure, **overrides):
