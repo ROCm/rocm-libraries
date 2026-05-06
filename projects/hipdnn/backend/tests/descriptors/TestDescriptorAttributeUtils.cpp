@@ -386,6 +386,28 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeSuccess)
     ASSERT_EQ(output, HIPDNN_DATA_FLOAT);
 }
 
+TEST(TestDescriptorAttributeUtils, GetDataTypeUnsetReturnsZeroCount)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    int64_t count = -1;
+    hipdnnDataType_t output = HIPDNN_DATA_FLOAT;
+
+    ASSERT_NO_THROW(
+        getDataType(DataType::UNSET, HIPDNN_TYPE_DATA_TYPE, 1, &count, &output, "test"));
+    ASSERT_EQ(count, 0);
+    ASSERT_EQ(output, HIPDNN_DATA_FLOAT);
+}
+
+TEST(TestDescriptorAttributeUtils, GetDataTypeUnsetThrowsOnNullElementCount)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    hipdnnDataType_t output = {};
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getDataType(DataType::UNSET, HIPDNN_TYPE_DATA_TYPE, 1, nullptr, &output, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
 // --- setConvMode ---
 
 TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnNullArrayOfElements)

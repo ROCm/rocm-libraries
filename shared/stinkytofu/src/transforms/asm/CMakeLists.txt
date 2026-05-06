@@ -18,4 +18,6 @@ target_sources(stinkytofu PRIVATE
     StinkyRemoveWaitCntPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
     InsertVgprMsbPass.cpp
+    RemoveDelayAluPass.cpp
+    InsertDelayAluPass.cpp
 )

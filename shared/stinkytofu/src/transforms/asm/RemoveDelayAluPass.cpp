@@ -20,50 +20,52 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#pragma once
 
-#include <unordered_map>
-#include <unordered_set>
+#include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
+namespace {
+using namespace stinkytofu;
+
+// Strip all s_delay_alu so InsertDelayAlu can re-insert them after scheduling.
+class RemoveDelayAluPassImpl : public Pass {
+   public:
+    static char ID;
+
+    const char* getName() const override {
+        return "RemoveDelayAluPass";
+    }
+
+    Pass::ID getPassID() const override {
+        return &RemoveDelayAluPassImpl::ID;
+    }
+
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        for (BasicBlock& bb : func) {
+            if (!passCtx.shouldProcessBasicBlock(bb)) continue;
+
+            for (auto it = bb.begin(); it != bb.end();) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst && inst->getUnifiedOpcode() == GFX::s_delay_alu) {
+                    it = bb.eraseIR(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+        return preserveCFGAnalyses();
+    }
+};
+
+char RemoveDelayAluPassImpl::ID = 0;
+
+}  // namespace
+
 namespace stinkytofu {
-/// Per-DWORD register key used to track individual register components
-/// across definitions and uses.
-struct RegKey {
-    RegType type;
-    unsigned idx;
-
-    bool operator==(const RegKey& o) const noexcept {
-        return type == o.type && idx == o.idx;
-    }
-};
-
-struct RegKeyHash {
-    size_t operator()(const RegKey& k) const noexcept {
-        size_t h = std::hash<int>{}(static_cast<int>(k.type));
-        h ^= std::hash<unsigned>{}(k.idx) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
-        return h;
-    }
-};
-
-template <typename V>
-using RegKeyMap = std::unordered_map<RegKey, V, RegKeyHash>;
-
-using RegKeySet = std::unordered_set<RegKey, RegKeyHash>;
-
-inline RegKey toRegKey(const StinkyRegister& reg, unsigned offset = 0) {
-    return {reg.reg.type, reg.reg.idx + offset};
+std::unique_ptr<Pass> createRemoveDelayAluPass() {
+    return std::make_unique<RemoveDelayAluPassImpl>();
 }
-
-/// Invoke fn(RegKey) for each DWORD in a register operand.
-/// Skips non-register operands (literals, immediates).
-template <typename Fn>
-void forEachRegUnit(const StinkyRegister& reg, Fn&& fn) {
-    if (reg.dataType != StinkyRegister::Type::Register) return;
-    for (unsigned i = 0; i < reg.reg.num; ++i) {
-        fn(toRegKey(reg, i));
-    }
-}
-
 }  // namespace stinkytofu
