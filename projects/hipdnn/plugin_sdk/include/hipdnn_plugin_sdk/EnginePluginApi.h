@@ -307,10 +307,10 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * Plugins that support per-execute tensor-shape overrides export this symbol
  * in addition to `hipdnnEnginePluginExecuteOpGraph`. Plugins that do not
- * support overrides simply omit this symbol from their dynamic library; the
- * host treats absence as "not supported" and either filters the plugin out
- * during applicability (when the graph opts in to dynamic shapes) or, as a
- * dispatch-time safety net, returns `HIPDNN_STATUS_NOT_SUPPORTED`.
+ * support overrides simply omit this symbol from their dynamic library. The
+ * host MAY filter plugins lacking this symbol out during applicability when
+ * the graph opts in to dynamic shapes, and MUST treat a missing symbol as
+ * "not supported" at dispatch.
  *
  * @param[in] handle             The engine plugin handle.
  * @param[in] execution_context  Execution context produced for this engine
@@ -354,9 +354,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *       This matches the lifetime of `device_buffers` for the existing
  *       execute entry. See RFC 0008 §4.6.
  *
- * @note This symbol is OPTIONAL. The host resolves it via dlsym; missing
- *       symbols are not an error and are equivalent to the plugin opting
- *       out of override support.
+ * @note This symbol is OPTIONAL. The host resolves it through the loader's
+ *       optional-symbol mechanism; a missing symbol is not an error and is
+ *       equivalent to the plugin opting out of override support.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginExecuteOpGraphWithOverrides(
