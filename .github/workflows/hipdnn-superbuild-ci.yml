@@ -147,10 +147,11 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Add ROCm bin to PATH
+        run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
+
       - name: Run tests
-        shell: pwsh
-        run: |
-          ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
