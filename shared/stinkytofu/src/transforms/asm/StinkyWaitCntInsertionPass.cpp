@@ -387,13 +387,13 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         }
 
         if (lastDSWaitCount != WaitCntInstruction::kUnused && lastDSWaitCount != 0 &&
-            lastDSWaitCount < currentBlockState.dsQueue.size()) {
+            static_cast<size_t>(lastDSWaitCount) < currentBlockState.dsQueue.size()) {
             currentBlockState.dsQueue.erase(currentBlockState.dsQueue.begin(),
                                             currentBlockState.dsQueue.end() - lastDSWaitCount);
         }
 
         if (lastBufferWaitCount != WaitCntInstruction::kUnused && lastBufferWaitCount != 0 &&
-            lastBufferWaitCount < currentBlockState.bufferQueue.size()) {
+            static_cast<size_t>(lastBufferWaitCount) < currentBlockState.bufferQueue.size()) {
             currentBlockState.bufferQueue.erase(
                 currentBlockState.bufferQueue.begin(),
                 currentBlockState.bufferQueue.end() - lastBufferWaitCount);
