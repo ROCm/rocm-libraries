@@ -193,6 +193,7 @@ def build(
         f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
+        "-DSTINKYTOFU_ENABLE_WERROR=ON",
     ]
 
     compiler_opts = []

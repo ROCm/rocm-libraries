@@ -78,9 +78,13 @@ endif()
 ##===----------------------------------------------------------------------===##
 # Warning flags (single source of truth for all stinkytofu targets)
 ##===----------------------------------------------------------------------===##
+option(STINKYTOFU_ENABLE_WERROR "Treat warnings as errors" OFF)
 add_library(stinkytofu-warnings INTERFACE)
-target_compile_options(stinkytofu-warnings INTERFACE
-    -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=comment)
+target_compile_options(stinkytofu-warnings INTERFACE -Wall)
+if(STINKYTOFU_ENABLE_WERROR)
+    target_compile_options(stinkytofu-warnings INTERFACE
+        -Werror -Wno-error=deprecated-declarations -Wno-error=comment)
+endif()
 
 ##===----------------------------------------------------------------------===##
 # Hardware library and tablegen tools
