@@ -153,6 +153,7 @@ from Tensile.Components.ScheduleCapture import (
     SLOT_KIND_MFMA,
     SlotKey,
     TaggedInstruction,
+    WrappedInstruction,
     OrderInvertedFailure,
     MissingWaitFailure,
     OverriddenInputFailure,
@@ -189,7 +190,7 @@ def _pack_vcvt(out_vgpr: int, lr_vgpr: int, *, slot: int, sequence: int = 0,
         src1=vgpr(lr_vgpr + 1, 1),
     )
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -212,7 +213,7 @@ def _pack_vperm(out_vgpr: int, lr_vgpr: int, *, slot: int, sequence: int = 0,
         src2=vgpr(lr_vgpr + 2, 1),
     )
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -523,7 +524,7 @@ def _pack_middle_pvcvt(out_vgpr: int, src_vgpr: int, *, slot: int,
     """
     inst = PVCvtBF16toFP32(dst=vgpr(out_vgpr, 1), src=vgpr(src_vgpr, 1))
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -545,7 +546,7 @@ def _pack_middle_vsub(out_vgpr: int, src0_vgpr: int, src1_vgpr: int, *,
                    src0=vgpr(src0_vgpr, 1),
                    src1=vgpr(src1_vgpr, 1))
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -843,7 +844,7 @@ def _swap_pack(dst_vgpr: int, src_vgpr: int, *, slot: int,
     """
     inst = VSwapB32(dst=vgpr(dst_vgpr, 1), src=vgpr(src_vgpr, 1))
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),

@@ -151,7 +151,7 @@ class TestLoopBodyCaptureBuilder:
         b.append(inst="second", category="LRA0", subiter=0, mfma_index=1)
         b.append(inst="third", category="MFMA", subiter=0, mfma_index=1)
         body = b.finalize()
-        assert [ti.inst for ti in body.instructions] == ["first", "second", "third"]
+        assert [ti.wrapped.rocisa_inst for ti in body.instructions] == ["first", "second", "third"]
 
     def test_finalize_returns_independent_copy(self):
         b = LoopBodyCaptureBuilder()
@@ -191,7 +191,7 @@ def _make_capture(
         if extra_main_cats:
             builder = LoopBodyCaptureBuilder()
             for ti in main_b.instructions:
-                builder.append(inst=ti.inst, category=ti.category,
+                builder.append(inst=ti.wrapped.rocisa_inst, category=ti.category,
                                subiter=ti.slot.subiter,
                                slot_kind=ti.slot.slot_kind,
                                mfma_index=ti.slot.mfma_index)
@@ -486,7 +486,7 @@ class TestExpandCmsMacro:
             _FakeMacro(items), id_value=0, useGR=1, usePLR=1, useGRInc=1, useLoop=1,
             tag_by_origin_id=tag_map, sync_class=_FakeSWaitCnt)
         assert len(body.instructions) == 1
-        assert body.instructions[0].inst is original_swait
+        assert body.instructions[0].wrapped.rocisa_inst is original_swait
         assert body.instructions[0].category == "SYNC"
 
     def test_swaitcnt_three_way_fanout_ngl(self):
@@ -509,7 +509,7 @@ class TestExpandCmsMacro:
             _FakeMacro(items), id_value=0, useGR=0, usePLR=1, useGRInc=1, useLoop=0,
             tag_by_origin_id=tag_map, sync_class=_FakeSWaitCnt)
         assert len(body.instructions) == 1
-        assert body.instructions[0].inst is ngl_deepcopy
+        assert body.instructions[0].wrapped.rocisa_inst is ngl_deepcopy
         assert body.instructions[0].category == "SYNC"
 
     def test_id_dispatch_picks_correct_codepath(self):
@@ -527,12 +527,12 @@ class TestExpandCmsMacro:
         body0 = expand_cms_macro(
             _FakeMacro(items), id_value=0, useGR=1, usePLR=1, useGRInc=1, useLoop=1,
             tag_by_origin_id=tag_map)
-        assert [ti.inst.name for ti in body0.instructions] == ["cp0-LRA"]
+        assert [ti.wrapped.rocisa_inst.name for ti in body0.instructions] == ["cp0-LRA"]
 
         body1 = expand_cms_macro(
             _FakeMacro(items), id_value=1, useGR=1, usePLR=1, useGRInc=1, useLoop=1,
             tag_by_origin_id=tag_map)
-        assert [ti.inst.name for ti in body1.instructions] == ["cp1-LRA"]
+        assert [ti.wrapped.rocisa_inst.name for ti in body1.instructions] == ["cp1-LRA"]
 
     def test_textblock_skipped(self):
         items = [
@@ -628,12 +628,12 @@ class TestBuildCmsFourPartCapture:
         ngl_cats = [ti.category for ti in cap.n_gl[0].instructions]
         assert ngl_cats == ["MFMA", "LRA1", "SYNC"]
         # The SYNC instruction in n_gl should be the deepcopy, not the original.
-        assert cap.n_gl[0].instructions[2].inst is ngl_swait
+        assert cap.n_gl[0].instructions[2].wrapped.rocisa_inst is ngl_swait
 
         # n_ll[0]: MFMA, nll_swait only (LRA1 stripped because usePLR=0)
         nll_cats = [ti.category for ti in cap.n_ll[0].instructions]
         assert nll_cats == ["MFMA", "SYNC"]
-        assert cap.n_ll[0].instructions[1].inst is nll_swait
+        assert cap.n_ll[0].instructions[1].wrapped.rocisa_inst is nll_swait
 
     def test_multi_codepath(self):
         cp0 = _FakeInst("cp0")
@@ -650,8 +650,8 @@ class TestBuildCmsFourPartCapture:
             _FakeMacro(items), num_codepaths=2, tag_by_origin_id=tag_map,
             sync_class=_FakeSWaitCnt, snop_class=_FakeSNop, mfma_classes=(_FakeMFMA,))
         assert set(cap.main_loop.keys()) == {0, 1}
-        assert cap.main_loop[0].instructions[0].inst is cp0
-        assert cap.main_loop[1].instructions[0].inst is cp1
+        assert cap.main_loop[0].instructions[0].wrapped.rocisa_inst is cp0
+        assert cap.main_loop[1].instructions[0].wrapped.rocisa_inst is cp1
         # n_gl/n_ll always keyed at codepath 0
         assert set(cap.n_gl.keys()) == {0}
         assert set(cap.n_ll.keys()) == {0}

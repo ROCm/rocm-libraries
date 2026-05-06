@@ -49,6 +49,8 @@ from Tensile.Components.ScheduleCapture import (
     TaggedInstruction,
     LoopBodyCapture,
     BODY_LABEL_TO_LOOP_INDEX,
+    WrappedInstruction,
+    _populate_wrapper,
 )
 
 
@@ -179,7 +181,7 @@ def make_lr(dst_vgpr_start: int, dst_vgpr_count: int, lds_offset: int, slot: int
             *, category: str = "LRA0", sequence: int = 0) -> TaggedInstruction:
     inst = _FakeLR(dst=_vrange(dst_vgpr_start, dst_vgpr_count), lds_offset=lds_offset)
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -190,7 +192,7 @@ def make_lw(src_vgpr_start: int, src_vgpr_count: int, lds_offset: int, slot: int
             *, category: str = "LWA", sequence: int = 0) -> TaggedInstruction:
     inst = _FakeLW(src=_vrange(src_vgpr_start, src_vgpr_count), lds_offset=lds_offset)
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -206,7 +208,7 @@ def make_gr(dst_vgpr_start: int, dst_vgpr_count: int,
         immediate_offset=immediate_offset,
     )
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -243,7 +245,7 @@ def make_dtl_buffer_load(vaddr_vgpr_start: int, srd_sgpr_start: int,
         mubuf=mubuf,
     )
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -261,7 +263,7 @@ def make_mfma(c_dst_start: int, a_src_start: int, b_src_start: int, slot: int,
         variant=list(variant) if variant is not None else [32, 32],
     )
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -272,7 +274,7 @@ def make_swait(slot: int, *, dscnt: int = -1, vlcnt: int = -1, vscnt: int = -1,
                sequence: int = 0) -> TaggedInstruction:
     inst = _FakeSWait(dscnt=dscnt, vlcnt=vlcnt, vscnt=vscnt)
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category="SYNC",
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -282,7 +284,7 @@ def make_swait(slot: int, *, dscnt: int = -1, vlcnt: int = -1, vscnt: int = -1,
 def make_sbarrier(slot: int, *, sequence: int = 0) -> TaggedInstruction:
     inst = _FakeSBarrier()
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category="BARRIER",
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -301,7 +303,7 @@ def make_snop(slot: int, *, wait_state: int = 0,
     """
     inst = _FakeSNop(wait_state=wait_state)
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category="SNOP",
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
@@ -338,13 +340,13 @@ def make_lcc_pair(slot: int, *,
     cmp_ = SCmpEQI32(src0=counter, src1=hex(end_counter))
     return (
         TaggedInstruction(
-            inst=sub,
+            wrapped=WrappedInstruction(sub),
             category="LCC",
             slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                          mfma_index=slot, sequence=sequence_start),
         ),
         TaggedInstruction(
-            inst=cmp_,
+            wrapped=WrappedInstruction(cmp_),
             category="LCC",
             slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                          mfma_index=slot, sequence=sequence_start + 1),
@@ -369,4 +371,12 @@ def make_capture(body_label: str, instructions: Sequence[TaggedInstruction]
             f"Unknown body_label {body_label!r}. Expected one of "
             f"{sorted(BODY_LABEL_TO_LOOP_INDEX)}."
         )
-    return LoopBodyCapture(instructions=list(instructions))
+    # Populate wrapped reads/writes for each TaggedInstruction. With wrapped
+    # mandatory on TaggedInstruction the wrapper exists at construction, but
+    # fixture factories do not call _populate_wrapper. Without this step,
+    # build_dataflow_graph would see empty (reads, writes) and skip edge
+    # formation — breaking the dataflow tests that rely on these fixtures.
+    insts = list(instructions)
+    for ti in insts:
+        _populate_wrapper(ti.wrapped, category=ti.category)
+    return LoopBodyCapture(instructions=insts)

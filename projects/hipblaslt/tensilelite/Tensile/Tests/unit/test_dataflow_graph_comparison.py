@@ -172,12 +172,12 @@ class TestCleanComparison:
                 return "s_add_u32 s[sgprLoopCounterL], s[sgprLoopCounterL], 1"
 
         from Tensile.Components.ScheduleCapture import (
-            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+            TaggedInstruction, WrappedInstruction, SlotKey, SLOT_KIND_MFMA,
         )
 
         def _build_ti():
             return TaggedInstruction(
-                inst=_LccInst(),
+                wrapped=WrappedInstruction(_LccInst()),
                 category="LCC",
                 slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                              mfma_index=0, sequence=0),
@@ -417,7 +417,7 @@ class TestRenderStringIdentity:
         rendered assembly. This is what makes identity robust to
         register-naming variations."""
         from Tensile.Components.ScheduleCapture import _identity_for
-        lr = make_lr(8, 4, 64, slot=0, category="LRA0").inst
+        lr = make_lr(8, 4, 64, slot=0, category="LRA0").wrapped.rocisa_inst
         ident = _identity_for(lr, BODY_LABEL_ML)
         assert ident[0] == "LR"             # class tag
         assert isinstance(ident[1], int)    # loop_index
@@ -652,7 +652,7 @@ class TestGRIncReorderDetection:
         )
         from rocisa.container import sgpr
         from Tensile.Components.ScheduleCapture import (
-            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+            TaggedInstruction, WrappedInstruction, SlotKey, SLOT_KIND_MFMA,
         )
 
         # Producers of incLower / incUpper.
@@ -672,7 +672,7 @@ class TestGRIncReorderDetection:
         tagged = []
         for seq, inst in enumerate(chain):
             tagged.append(TaggedInstruction(
-                inst=inst,
+                wrapped=WrappedInstruction(inst),
                 category="GRIncA",
                 slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                              mfma_index=base_slot, sequence=seq),
@@ -740,7 +740,7 @@ class TestVgprChainReorderDetection:
         from rocisa.instruction import VAddU32
         from rocisa.container import vgpr
         from Tensile.Components.ScheduleCapture import (
-            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+            TaggedInstruction, WrappedInstruction, SlotKey, SLOT_KIND_MFMA,
         )
 
         i1 = VAddU32(dst=vgpr(100), src0=vgpr(50), src1=vgpr(51))
@@ -754,7 +754,7 @@ class TestVgprChainReorderDetection:
         tagged = []
         for seq, inst in enumerate(chain):
             tagged.append(TaggedInstruction(
-                inst=inst,
+                wrapped=WrappedInstruction(inst),
                 category="LRA0",
                 slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                              mfma_index=base_slot, sequence=seq),

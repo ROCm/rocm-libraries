@@ -65,6 +65,7 @@ from Tensile.Components.ScheduleCapture import (
     OverriddenInputFailure,
     SlotKey,
     TaggedInstruction,
+    WrappedInstruction,
 )
 
 from dataflow_fixtures import make_capture
@@ -86,7 +87,7 @@ def _tag(inst, *, slot_idx: int, sequence: int,
     sites.
     """
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot_idx, sequence=sequence),

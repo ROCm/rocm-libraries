@@ -76,6 +76,7 @@ from Tensile.Components.ScheduleCapture import (
     SlotKey,
     TaggedInstruction,
     WaitInsufficientFailure,
+    WrappedInstruction,
 )
 
 from dataflow_fixtures import (
@@ -630,7 +631,7 @@ def _smov_m0_set(slot, *, sequence=0, category="GRA"):
     from rocisa.instruction import SMovB32
     inst = SMovB32(dst=mgpr(0), src=sgpr("LocalWriteAddrA", 1))
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),

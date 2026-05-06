@@ -48,6 +48,7 @@ from Tensile.Components.ScheduleCapture import (
     SlotKey,
     LoopBodyCapture,
     TaggedInstruction,
+    WrappedInstruction,
     _ordinal,
 )
 
@@ -118,9 +119,9 @@ def test_order_inverted_failure_format():
     Capture has a sibling GRB earlier in the stream so the producer renders
     as GRB[1] (second GRB in its category-stream); LRA1 is the only LRA1 so
     it renders as LRA1[0]."""
-    earlier_grb = TaggedInstruction(inst=object(), category="GRB", slot=SlotKey(0, "ml", 0, 0))
-    producer_tagged = TaggedInstruction(inst=object(), category="GRB", slot=SlotKey(0, "ml", 0, 1))
-    consumer_tagged = TaggedInstruction(inst=object(), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
+    earlier_grb = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRB", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRB", slot=SlotKey(0, "ml", 0, 1))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
 
     producer = _make_node("GRB", "GRB", 3, tagged_inst=producer_tagged)
     consumer = _make_node("LRA1", "LRA1", 2, tagged_inst=consumer_tagged)
@@ -147,8 +148,8 @@ def test_order_inverted_failure_format_mfma_consumer_omits_bracket():
     """Consumer is plain MFMA (category='MFMA'): the [N] suffix is omitted
     even when a capture is provided, because vmfma_index is the canonical
     identity. PackMFMAs (category 'PackA*'/'PackB*') would still get [N]."""
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 3, tagged_inst=consumer_tagged)
     capture = _capture_with(producer_tagged, consumer_tagged)
@@ -168,8 +169,8 @@ def test_missing_wait_failure_format():
     """Plain same-iteration scenario: producer LRA0 in ML, consumer MFMA in
     ML, no SWaitCnt(dscnt) between. With a capture provided, producer renders
     as LRA0[0] (first LRA0 in stream); consumer is plain MFMA so no [N]."""
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 0, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 2, tagged_inst=consumer_tagged)
     capture = _capture_with(producer_tagged, consumer_tagged)
@@ -194,8 +195,8 @@ def test_missing_wait_failure_format_cross_iteration():
     [N] lookup succeeds; in production a Failure with nodes from multiple
     bodies is rendered against a unified capture or the per-body capture
     that contains every referenced node's tagged_inst."""
-    producer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml-1", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRA", slot=SlotKey(0, "ml-1", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("GRA", "GRA", 2, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("LRA1", "LRA1", 4, tagged_inst=consumer_tagged, body_label="ML")
     capture = _capture_with(producer_tagged, consumer_tagged)
@@ -210,7 +211,7 @@ def test_missing_wait_failure_format_with_nearby_wrong_counter_hint():
     """When the window contains a wrong-counter SWaitCnt (former
     WaitOnWrongCounterFailure case), MissingWaitFailure surfaces it via
     nearby_other_counter_waits + appends a hint to the message."""
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 10)        # MFMA exempt from [N]
     wrong_wait = _make_node("SYNC", "SWaitCnt", 7)   # SYNC not labeled, only its idx is read
@@ -232,9 +233,9 @@ def test_wait_insufficient_failure_format_dscnt_range():
     """dscnt-as-subject wording with range bound. Fixture: producer is at
     FIFO position 2 in a queue of depth 5, so max acceptable counter value
     is 5-2-1=2. Current value 4 is OUT of range [0, 2] -> failure."""
-    older_lra0 = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 1))
-    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
+    older_lra0 = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml", 0, 1))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 10, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 7)
@@ -256,8 +257,8 @@ def test_wait_insufficient_failure_format_vlcnt_range():
     """vlcnt variant: GR producer in vlcnt FIFO, LR1 consumer waits on the
     drain. Fixture: producer is at FIFO position 1 in queue depth 4,
     max acceptable = 4-1-1 = 2. Current value 3 is OUT of range [0, 2]."""
-    producer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRA", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("GRA", "GRA", 3, tagged_inst=producer_tagged)
     consumer = _make_node("LRA1", "LRA1", 8, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 6)
@@ -279,8 +280,8 @@ def test_wait_insufficient_failure_format_must_be_zero():
     """Y=0 special case: producer is the most-recent op in the queue (last
     to drain), so the only acceptable counter value is 0 (drain everything).
     Fixture: producer at position 4 in queue depth 5, max acceptable = 0."""
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0", 5, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 10, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 7)
@@ -302,7 +303,7 @@ def test_wait_insufficient_failure_format_cross_iteration():
     """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix
     on the consumer rendering. Fixture: producer at position 2 in queue depth
     5, max acceptable = 2; current value 4 fails."""
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
     producer = _make_node("LRA0", "LRA0[0]", 5, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("MFMA", "MFMA", 10, body_label="ML")
     wait = _make_node("SYNC", "SWaitCnt", 7, body_label="ML")
@@ -319,8 +320,8 @@ def test_wait_insufficient_failure_format_cross_iteration():
 
 def test_missing_barrier_failure_must_start_after_format():
     """Pins the LR0 -> GR LDS-write barrier message wording."""
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0[0]", 8, tagged_inst=producer_tagged)
     consumer = _make_node("GRA", "GRA[0]", 12, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 10)
@@ -339,8 +340,8 @@ def test_missing_barrier_failure_needed_by_format():
     """GR -> LR1 LDS-read scenario uses the same compact wording as
     the LR -> GR LDS-write scenario; producer/consumer categories make
     the direction obvious."""
-    producer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRA", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA1", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("GRA", "GRA[0]", 8, tagged_inst=producer_tagged)
     consumer = _make_node("LRA1", "LRA1[0]", 22, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 18)
@@ -357,9 +358,9 @@ def test_missing_barrier_failure_needed_by_format():
 
 def test_missing_barrier_failure_format_with_capture_brackets():
     """capture=given: consumer gets per-category [N] index."""
-    older_gra = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 1))
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+    older_gra = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRA", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRA", slot=SlotKey(0, "ml", 0, 1))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("LRA0", "LRA0[0]", 8, tagged_inst=producer_tagged)
     consumer = _make_node("GRA", "GRA[0]", 12, tagged_inst=consumer_tagged)
     wait = _make_node("SYNC", "SWaitCnt", 10)
@@ -374,8 +375,8 @@ def test_missing_barrier_failure_format_with_capture_brackets():
 def test_missing_barrier_failure_format_cross_iteration():
     """Producer in loop i, consumer in loop i+1 -> '(of next iteration)' suffix
     on the consumer rendering."""
-    consumer_tagged = TaggedInstruction(inst=object(), category="GRA", slot=SlotKey(0, "ml", 0, 0))
-    producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml-1", 0, 0))
     producer = _make_node("LRA0", "LRA0[0]", 8, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("GRA", "GRA[0]", 2, tagged_inst=consumer_tagged, body_label="ML")
     wait = _make_node("SYNC", "SWaitCnt", 0, body_label="ML")
@@ -390,9 +391,9 @@ def test_missing_barrier_failure_format_cross_iteration():
 def test_overridden_input_failure_format_pack_pair():
     """Pack pair-leader's vgpr clobbered by an intervening pair-leader of
     the same Pack category."""
-    pack_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 0))
-    expected_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 1))
-    actual_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 2))
+    pack_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="PackA0", slot=SlotKey(0, "ml", 0, 0))
+    expected_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="PackA0", slot=SlotKey(0, "ml", 0, 1))
+    actual_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="PackA0", slot=SlotKey(0, "ml", 0, 2))
     pack = _make_node("PackA0", "PackA0", 10, tagged_inst=pack_tagged)
     expected = _make_node("PackA0", "PackA0", 11, tagged_inst=expected_tagged)
     actual = _make_node("PackA0", "PackA0", 12, tagged_inst=actual_tagged)
@@ -412,8 +413,8 @@ def test_overridden_input_failure_format_pack_pair():
 
 def test_timing_too_close_failure_format_with_capture_brackets():
     """Capture given: producer Pack gets [N]; plain-MFMA consumer omits."""
-    producer_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="PackA0", slot=SlotKey(0, "ml", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("PackA0", "PackA0", 5, tagged_inst=producer_tagged)
     consumer = _make_node("MFMA", "MFMA", 6, tagged_inst=consumer_tagged)
     capture = _capture_with(producer_tagged, consumer_tagged)
@@ -435,8 +436,8 @@ def test_timing_too_close_failure_format_cross_iteration():
     the "(of next iteration)" suffix to the consumer rendering, like
     MissingWaitFailure / WaitInsufficientFailure / MissingBarrierFailure
     already do."""
-    producer_tagged = TaggedInstruction(inst=object(), category="PackA0", slot=SlotKey(0, "ml-1", 0, 0))
-    consumer_tagged = TaggedInstruction(inst=object(), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="PackA0", slot=SlotKey(0, "ml-1", 0, 0))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="MFMA", slot=SlotKey(0, "ml", 0, 0))
     producer = _make_node("PackA0", "PackA0", 7, tagged_inst=producer_tagged, body_label="ML-1")
     consumer = _make_node("MFMA", "MFMA", 0, tagged_inst=consumer_tagged, body_label="ML")
     capture = _capture_with(producer_tagged, consumer_tagged)
@@ -481,10 +482,10 @@ def test_invalid_counter_value_failure_format_multiple_bad():
 def test_overridden_input_failure_format_scc_clobber():
     """SCC carry-chain clobber: GRIncA[2] writes SCC between GRIncA[1]
     (producer) and GRIncA[3] (consumer)."""
-    other_grinca = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 0))
-    producer_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 1))
-    intervening_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 2))
-    consumer_tagged = TaggedInstruction(inst=object(), category="GRIncA", slot=SlotKey(0, "ml", 0, 3))
+    other_grinca = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRIncA", slot=SlotKey(0, "ml", 0, 0))
+    producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRIncA", slot=SlotKey(0, "ml", 0, 1))
+    intervening_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRIncA", slot=SlotKey(0, "ml", 0, 2))
+    consumer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="GRIncA", slot=SlotKey(0, "ml", 0, 3))
     producer = _make_node("GRIncA", "scc_producer", 4, tagged_inst=producer_tagged)
     intervening = _make_node("GRIncA", "scc_clobber", 5, tagged_inst=intervening_tagged)
     consumer = _make_node("GRIncA", "scc_consumer", 6, tagged_inst=consumer_tagged)
@@ -529,7 +530,7 @@ def test_format_works_without_reference_in_scope():
     any other data in the calling scope.
     """
     def _build():
-        producer_tagged = TaggedInstruction(inst=object(), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
+        producer_tagged = TaggedInstruction(wrapped=WrappedInstruction(object()), category="LRA0", slot=SlotKey(0, "ml", 0, 0))
         return (
             MissingWaitFailure(
                 producer=_make_node("LRA0", "LRA0[0]", 5, tagged_inst=producer_tagged),

@@ -531,10 +531,10 @@ class TestStructuralProperties:
             pass
 
         from Tensile.Components.ScheduleCapture import (
-            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+            TaggedInstruction, WrappedInstruction, SlotKey, SLOT_KIND_MFMA,
         )
         ti = TaggedInstruction(
-            inst=_UnknownInst(),
+            wrapped=WrappedInstruction(_UnknownInst()),
             category="WHATEVER",  # not a recognized prefix or exact match
             slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                          mfma_index=0, sequence=0),
@@ -559,12 +559,12 @@ class TestStructuralProperties:
                 return "v_perm_b32 v[0:0], v[1:1], v[2:2], s[3:3]"
 
         from Tensile.Components.ScheduleCapture import (
-            TaggedInstruction, SlotKey, SLOT_KIND_MFMA,
+            TaggedInstruction, WrappedInstruction, SlotKey, SLOT_KIND_MFMA,
         )
         # Need at least one MFMA so the body satisfies non-empty constraints
         # downstream.
         ti_pack = TaggedInstruction(
-            inst=_PackInst(),
+            wrapped=WrappedInstruction(_PackInst()),
             category="PackA0",
             slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                          mfma_index=0, sequence=0),

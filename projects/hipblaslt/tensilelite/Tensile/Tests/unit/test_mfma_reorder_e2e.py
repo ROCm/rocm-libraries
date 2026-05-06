@@ -204,12 +204,12 @@ def _apply_reorder_and_reslot(mfma_code, mfma_reorder, *, slot_offset: int = 0):
     # but reuse the existing inst handle (preserving the register
     # operands established in _build_mfma_code_for_n).
     from Tensile.Components.ScheduleCapture import (
-        SLOT_KIND_MFMA, SlotKey, TaggedInstruction,
+        SLOT_KIND_MFMA, SlotKey, TaggedInstruction, WrappedInstruction,
     )
     reslotted = []
     for k, ti in enumerate(permuted):
         reslotted.append(TaggedInstruction(
-            inst=ti.inst,
+            wrapped=WrappedInstruction(ti.wrapped.rocisa_inst),
             category=ti.category,
             slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                          mfma_index=k + slot_offset, sequence=0),

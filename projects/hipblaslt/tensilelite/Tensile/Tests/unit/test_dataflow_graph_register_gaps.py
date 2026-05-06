@@ -75,6 +75,7 @@ from Tensile.Components.ScheduleCapture import (
     SLOT_KIND_MFMA,
     SlotKey,
     TaggedInstruction,
+    WrappedInstruction,
     build_dataflow_graph,
     compare_graphs,
     cumulative_issue_cycles,
@@ -124,7 +125,7 @@ def _wrap(ml_capture):
 
 def _tag(inst, *, category: str, mfma_index: int, sequence: int) -> TaggedInstruction:
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=mfma_index, sequence=sequence),
@@ -1258,7 +1259,7 @@ class TestMFMAQuadCycleGap:
         class _StubNode:
             def __init__(self, tagged):
                 self.category = tagged.category
-                self.rocisa_inst = tagged.inst
+                self.rocisa_inst = tagged.wrapped.rocisa_inst
         node = _StubNode(pack_mfma_tagged)
         assert _is_mfma_pack_producer(node), (
             "_is_mfma_pack_producer must return True for a Pack*-categorized "
@@ -1427,7 +1428,7 @@ class TestMFMAQuadCycleGap:
         class _StubNode:
             def __init__(self, tagged):
                 self.category = tagged.category
-                self.rocisa_inst = tagged.inst
+                self.rocisa_inst = tagged.wrapped.rocisa_inst
         cvt_node = _StubNode(cvt_tagged)
 
         # Class-name-set predicate matches the production rocisa class.
@@ -3567,7 +3568,7 @@ class TestSSetPriorCoverage:
         # (build_dataflow_graph requires at least one identity per body).
         ml_mfma_tag = make_mfma(c_dst_start=100, a_src_start=4, b_src_start=32,
                                 slot=1)
-        builder.append(ml_mfma_tag.inst, category=ml_mfma_tag.category,
+        builder.append(ml_mfma_tag.wrapped.rocisa_inst, category=ml_mfma_tag.category,
                        subiter=0, slot_kind=ml_mfma_tag.slot.slot_kind,
                        mfma_index=ml_mfma_tag.slot.mfma_index)
         ml_cap = builder.finalize()
@@ -3648,7 +3649,7 @@ class TestNodeLabelAfterCoverageFix:
         # construction in case other tests share the capture.
         ml_mfma_tag = make_mfma(c_dst_start=100, a_src_start=4,
                                 b_src_start=32, slot=1)
-        builder.append(ml_mfma_tag.inst, category=ml_mfma_tag.category,
+        builder.append(ml_mfma_tag.wrapped.rocisa_inst, category=ml_mfma_tag.category,
                        subiter=0, slot_kind=ml_mfma_tag.slot.slot_kind,
                        mfma_index=ml_mfma_tag.slot.mfma_index)
         capture = builder.finalize()

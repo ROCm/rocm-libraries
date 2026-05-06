@@ -64,6 +64,7 @@ from Tensile.Components.ScheduleCapture import (
     SLOT_KIND_MFMA,
     SlotKey,
     TaggedInstruction,
+    WrappedInstruction,
 )
 
 from dataflow_fixtures import make_capture, make_gr, make_lr, make_sbarrier, make_swait
@@ -107,7 +108,7 @@ def _make_grinc(srd_sgpr: int, slot: int, *, sequence: int = 0,
     inst = SAddU32(dst=sgpr(srd_sgpr, 1), src0=sgpr(srd_sgpr, 1),
                    src1=sgpr(100, 1))
     return TaggedInstruction(
-        inst=inst, category=category,
+        wrapped=WrappedInstruction(inst), category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot, sequence=sequence),
     )

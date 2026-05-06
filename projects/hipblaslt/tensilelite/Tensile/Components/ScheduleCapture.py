@@ -234,16 +234,19 @@ class TaggedInstruction:
     The same rocisa class (e.g. VFmaMixF32) may carry different categories
     depending on which bucket emitted it.
 
-    `wrapped` is a WrappedInstruction holding pre-populated `reads`/`writes`
-    tuples for dataflow-graph edge formation. Production callers
-    (LoopBodyCaptureBuilder.append) populate it at construction; the
-    `_ensure_wrapped` helper lazily populates it for callers that build
-    TaggedInstructions directly (test fixtures).
+    `wrapped` is a mandatory WrappedInstruction holding the underlying rocisa
+    instruction and its `reads`/`writes` tuples for dataflow-graph edge
+    formation. Production callers (LoopBodyCaptureBuilder.append) construct
+    the wrapper at append time and finalize() then populates reads/writes via
+    `_populate_wrapper`. Test fixtures must construct
+    `TaggedInstruction(wrapped=WrappedInstruction(inst), ...)` directly;
+    `make_capture` in dataflow_fixtures populates reads/writes for them.
+
+    The underlying rocisa instruction is reachable via `wrapped.rocisa_inst`.
     """
-    inst: object
+    wrapped: "WrappedInstruction"
     category: str
     slot: SlotKey
-    wrapped: object = None  # WrappedInstruction; lazily populated
 
 
 @dataclass
@@ -989,7 +992,7 @@ class LoopBodyCaptureBuilder:
     so positions encode stream-emission order without collisions.
 
     finalize() runs capture-pipeline guards before returning the capture:
-      - rocisa wiring: every TaggedInstruction.inst is non-None
+      - rocisa wiring: every TaggedInstruction.wrapped.rocisa_inst is non-None
       - SMEM guard:    no SLoad*/SStore* in the body (would desync dscnt FIFO)
       - flat guard:    no Flat* in the body (decrement two counters at once)
       - store guard:   no vector-memory stores (vscnt is not modeled)
@@ -1012,11 +1015,15 @@ class LoopBodyCaptureBuilder:
             mfma_index=mfma_index,
             sequence=seq,
         )
-        self._instructions.append(TaggedInstruction(inst=inst, category=category, slot=slot))
+        # Wrap eagerly: WrappedInstruction is now mandatory on TaggedInstruction.
+        # finalize() populates reads/writes via _populate_wrapper for survivors.
+        self._instructions.append(TaggedInstruction(
+            wrapped=WrappedInstruction(inst), category=category, slot=slot,
+        ))
 
     def finalize(self):
         for ti in self._instructions:
-            inst = ti.inst
+            inst = ti.wrapped.rocisa_inst
             if inst is None:
                 raise CaptureWiringError(
                     f"LoopBodyCaptureBuilder.finalize: TaggedInstruction "
@@ -1045,12 +1052,13 @@ class LoopBodyCaptureBuilder:
                     f"{cls_name} in category {ti.category!r}. "
                     f"vscnt is not tracked; no current CMS body emits stores."
                 )
-            # Wrap and populate reads/writes so build_dataflow_graph picks
-            # up dataflow without needing per-call extraction. The wrapper
-            # is the single source of (reads, writes) — DTL m0 reads,
-            # MFMA acc writes, LDS-address vgpr reads etc. all flow
-            # through `_populate_wrapper`'s rule registry.
-            ti.wrapped = WrappedInstruction(inst)
+            # Populate reads/writes so build_dataflow_graph picks up dataflow
+            # without needing per-call extraction. The wrapper is the single
+            # source of (reads, writes) — DTL m0 reads, MFMA acc writes,
+            # LDS-address vgpr reads etc. all flow through `_populate_wrapper`'s
+            # rule registry. The WrappedInstruction itself was constructed in
+            # append(); we only need to populate it now that the instruction
+            # has cleared the SMEM/flat/store guards.
             _populate_wrapper(ti.wrapped, category=ti.category)
         return LoopBodyCapture(instructions=list(self._instructions))
 
@@ -2661,18 +2669,6 @@ def _populate_wrapper(wrapper, category=None) -> None:
     wrapper.writes = ()
 
 
-def _ensure_wrapped(tagged_inst):
-    """Return the WrappedInstruction for `tagged_inst`, populating it
-    on first access. Used by build_dataflow_graph for tagged_insts that
-    were constructed directly (test fixtures) without going through
-    LoopBodyCaptureBuilder.append.
-    """
-    if tagged_inst.wrapped is None:
-        tagged_inst.wrapped = WrappedInstruction(tagged_inst.inst)
-        _populate_wrapper(tagged_inst.wrapped, category=tagged_inst.category)
-    return tagged_inst.wrapped
-
-
 def _reg_overlaps(read_reg, written_reg) -> bool:
     """True if `read_reg` overlaps with `written_reg` (vgpr ranges intersect).
 
@@ -2901,7 +2897,7 @@ def _make_node(
     body_label: str,
     profile: Optional[ArchProfile] = None,
 ) -> GraphNode:
-    inst = tagged_inst.inst
+    inst = tagged_inst.wrapped.rocisa_inst
     identity = _identity_for(inst, body_label, category=tagged_inst.category)
     position = make_position(body_label, tagged_inst.slot)
     name = f"{tagged_inst.category}@{position.vmfma_index}.{position.sub_index}"
@@ -3014,7 +3010,7 @@ def build_dataflow_graph(four_part_capture):
         body = captures[label]
 
         for tagged_inst in body.instructions:
-            inst = tagged_inst.inst
+            inst = tagged_inst.wrapped.rocisa_inst
             try:
                 node = _make_node(tagged_inst, label, arch_profile)
             except CaptureUnknownInstructionError as e:
@@ -3083,7 +3079,7 @@ def build_dataflow_graph(four_part_capture):
         sorted_nodes = sorted(nodes_by_identity.values(), key=lambda n: n.position)
 
         for node in sorted_nodes:
-            wrapped = _ensure_wrapped(node.tagged_inst)
+            wrapped = node.tagged_inst.wrapped
 
             # Phase 2a — reads first: emit one edge per distinct
             # (writer, write_resource) that contributes any byte of any
@@ -4042,7 +4038,8 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
         # Walk start_idx..end_idx with the canonical issue-time simulator.
         for i in range(start_idx, end_idx + 1):
             ti = instructions[i]
-            inst = getattr(ti, "inst", None)
+            wrapped = getattr(ti, "wrapped", None)
+            inst = getattr(wrapped, "rocisa_inst", None) if wrapped is not None else None
             is_mfma = inst is not None and _is_mfma(inst)
             if is_mfma:
                 current_issue = max(current_issue, mfma_free_at)

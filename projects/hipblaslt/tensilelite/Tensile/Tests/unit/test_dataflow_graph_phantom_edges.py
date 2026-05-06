@@ -58,6 +58,7 @@ from Tensile.Components.ScheduleCapture import (
     SLOT_KIND_MFMA,
     SlotKey,
     TaggedInstruction,
+    WrappedInstruction,
     build_dataflow_graph,
 )
 
@@ -127,7 +128,7 @@ def using_pack_rule():
 
 def _tag_pack(inst, *, category: str, mfma_index: int, sequence: int) -> TaggedInstruction:
     return TaggedInstruction(
-        inst=inst,
+        wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=mfma_index, sequence=sequence),

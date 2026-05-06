@@ -231,7 +231,7 @@ class TestIdMapCompleteness:
     def test_snop_count_mismatch_ignored(self):
         from dataflow_fixtures import make_capture
         from Tensile.Components.ScheduleCapture import (
-            BODY_LABEL_ML, TaggedInstruction, SlotKey,
+            BODY_LABEL_ML, TaggedInstruction, SlotKey, WrappedInstruction,
         )
         from dataclasses import dataclass
 
@@ -241,7 +241,7 @@ class TestIdMapCompleteness:
 
         snops = [
             TaggedInstruction(
-                inst=_FakeSNop(), category="SNOP",
+                wrapped=WrappedInstruction(_FakeSNop()), category="SNOP",
                 slot=SlotKey(0, SLOT_KIND_MFMA, i, 0),
             )
             for i in range(5)
