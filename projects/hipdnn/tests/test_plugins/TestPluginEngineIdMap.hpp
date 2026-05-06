@@ -43,3 +43,10 @@ HIPDNN_MAP_TO_ID(OverrideImplementingPlugin, -12);
 HIPDNN_MAP_TO_ID(OverrideOmittingPlugin, -13);
 HIPDNN_MAP_TO_ID(VersionLiarPlugin, -14);
 HIPDNN_MAP_TO_ID(SecondOverridePlugin, -15);
+
+// RFC 0008 Phase 1 post-review fix #1: malformed-version plugin used to
+// exercise the load-time `parsedApiVersion()` rejection path so a bad
+// version string never reaches the dispatch hot path. The id is unused at
+// runtime (the plugin should be filtered out at load), but the engine-id
+// map requires a unique entry per plugin class.
+HIPDNN_MAP_TO_ID(MalformedVersionPlugin, -16);

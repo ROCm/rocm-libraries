@@ -1,0 +1,65 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Fake plugin for RFC 0008 Phase 1 post-review fix #1: reports a malformed
+// API version string (does not match the required "MAJOR.MINOR.PATCH"
+// format). The host-side `Version{...}` parser would normally throw
+// `std::invalid_argument` from this string; this plugin exercises the
+// load-time guard in `EnginePluginManager::validateBeforeAdding`, which
+// uses the lazily-cached `PluginBase::parsedApiVersion()` to reject the
+// plugin before it can pollute the dispatch hot path. The host must catch
+// the rejection inside the existing `tryCatch` wrapper in
+// `loadPluginFromFile` (PluginCore.hpp), log a diagnostic, and continue
+// running so that other well-formed plugins remain available.
+
+#include "TestPluginCommon.hpp"
+#include "TestPluginEngineIdMap.hpp"
+
+// NOLINTNEXTLINE
+thread_local char
+    hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
+    = "";
+
+class MalformedVersionPlugin : public TestPluginBase
+{
+public:
+    const char* getPluginName() const override
+    {
+        return "test_MalformedVersionPlugin";
+    }
+    const char* getPluginVersion() const override
+    {
+        return "1.0.0";
+    }
+
+    /// Deliberately not parseable as MAJOR.MINOR.PATCH so the host's lazy
+    /// `parsedApiVersion()` cache yields `nullopt` and `validateBeforeAdding`
+    /// throws.
+    const char* getPluginApiVersion() const override
+    {
+        return "not.a.version";
+    }
+
+    int64_t getEngineId() const override
+    {
+        return hipdnn_tests::plugin_constants::engineId<MalformedVersionPlugin>();
+    }
+    uint32_t getNumEngines() const override
+    {
+        return 1;
+    }
+    uint32_t getNumApplicableEngines() const override
+    {
+        return 1;
+    }
+};
+
+// Initialize plugin instance on load
+__attribute__((constructor)) static void initializePlugin()
+{
+    TestPluginBase::setInstance(std::make_unique<MalformedVersionPlugin>());
+}
+
+// Standard plugin API surface only — the malformed version is the failure
+// mode under test, not a missing symbol.
+REGISTER_TEST_PLUGIN_API()
