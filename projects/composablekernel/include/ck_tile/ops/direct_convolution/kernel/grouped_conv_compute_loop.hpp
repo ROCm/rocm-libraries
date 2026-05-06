@@ -101,7 +101,13 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
 
     wl.read_from_lds(lds_buf);
 
-    InputLoaderT il(bc, input_lds, in, hi, wi, px, in_cpg);
+    // Note: py is NOT passed to InputLoader's DRAM descriptor because the
+    // kernel iterates over physical input rows (0..hi-1), not padded rows.
+    // The py offset is handled by the compute loop's output flush logic
+    // (p_out = y + py - (kh-1)).  px IS needed because the tile window
+    // spans block_q..block_q+BLOCK_W-1 horizontally and needs OOB checking
+    // for positions in the padded border.
+    InputLoaderT il(bc, input_lds, in, hi, wi, px, 0, 1, 1, 1, 1, in_cpg);
     OutputWriterT ow(bc, output_lds, out, ho, wo, out_kpg);
 
     __syncthreads();

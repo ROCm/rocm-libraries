@@ -78,7 +78,7 @@ __global__ void test_input_load_kernel(const _Float16* __restrict__ in,
     __syncthreads();
 
     // Construct InputLoader and prefetch first row (row 0) into LDS buffer 0.
-    ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, c_per_group);
+    ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
     il.prefetch_tile_to_lds(0);
 
     __syncthreads();
@@ -303,7 +303,7 @@ __global__ void test_input_load_kernel_16c(const _Float16* __restrict__ in,
         lds_buf[i] = uint4{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
     __syncthreads();
 
-    ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, c_per_group);
+    ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
     il.prefetch_tile_to_lds(0);
     __syncthreads();
 
@@ -466,7 +466,7 @@ __global__ void test_input_load_kernel_8c(const _Float16* __restrict__ in,
         lds_buf[i] = uint4{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
     __syncthreads();
 
-    ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, c_per_group);
+    ck_tile::direct_conv::InputLoader<TC, cfg> il(bc, lds_buf, in, hi, wi, px, 0, 1, 1, 1, 1, c_per_group);
     il.prefetch_tile_to_lds(0);
     __syncthreads();
 

@@ -20,7 +20,7 @@ namespace direct_conv {
 //   cfg — Config value providing kw and other kernel parameters.
 //
 // TC must provide:
-//   TC::Input::MakeDramReadDescriptor(hi, wi, C_total, px)  — px = left padding
+//   TC::Input::MakeDramReadDescriptor(hi, wi, C_total, px, py, dx, dy, sx, sy)
 //   TC::Input::MakeDramReadTileDistribution()
 //   TC::Input::MakeLdsWriteDescriptor()
 //   TC::Input::MakeLdsReadDescriptor()
@@ -37,7 +37,7 @@ struct InputLoader
     using InputDramWindowType = decltype(ck_tile::make_tile_window(
         ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
             static_cast<const _Float16*>(nullptr),
-            TC::Input::MakeDramReadDescriptor(int{}, int{}, int{}, int{})),
+            TC::Input::MakeDramReadDescriptor(int{}, int{}, int{}, int{}, int{}, int{}, int{}, int{}, int{})),
         ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<TC::TOTAL_SPATIAL>{},
                             ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
         ck_tile::multi_index<4>{},
@@ -73,7 +73,12 @@ struct InputLoader
     int                               wi_;                  // input width
     int                               C_in_;                // groups * c_per_group
     int                               c_per_group_;         // channels per group (< GROUP_SIZE)
-    int                               px_;                  // left spatial padding
+    int                               px_;                  // spatial padding in width
+    int                               py_;                  // spatial padding in height
+    int                               dx_;                  // dilation in width
+    int                               dy_;                  // dilation in height
+    int                               sx_;                  // stride in width
+    int                               sy_;                  // stride in height
     int                               current_row_;         // current input row for padded fetch
     int                               block_q_;             // spatial block offset
     const _Float16*                   input_base_padded_;   // base pointer for padded DRAM reads
@@ -85,6 +90,11 @@ struct InputLoader
                            int hi,
                            int wi,
                            int px,
+                           int py,
+                           int dx,
+                           int dy,
+                           int sx,
+                           int sy,
                            int c_per_group = TC::GROUP_SIZE)
                 : input_lds_ptr(input_lds),
                   padded_(c_per_group != TC::GROUP_SIZE)
@@ -111,7 +121,7 @@ struct InputLoader
         // both the has_padded_descriptor=true (but padded_=false) case and
         // the has_padded_descriptor=false case without code duplication. ----
         auto init_unpadded = [&]() {
-            const auto input_dram_desc = TC::Input::MakeDramReadDescriptor(hi, wi, bc.C, px);
+            const auto input_dram_desc = TC::Input::MakeDramReadDescriptor(hi, wi, bc.C, px, py, dx, dy, sx, sy);
             const _Float16* input_base = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k;
             const auto input_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
                 input_base, input_dram_desc);
@@ -163,6 +173,11 @@ struct InputLoader
             C_in_             = bc.C_in;
             c_per_group_      = c_per_group;
             px_               = px;
+            py_               = py;
+            dx_               = dx;
+            dy_               = dy;
+            sx_               = sx;
+            sy_               = sy;
             current_row_      = 0;
             block_q_          = bc.block_q;
             input_base_padded_ = in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C_in + bc.block_k_in;
@@ -171,7 +186,7 @@ struct InputLoader
             {
                 const auto padded_desc =
                     TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
-                        hi, wi, bc.C_in, c_per_group, px);
+                        hi, wi, bc.C_in, c_per_group, px, py, dx, dy, sx, sy);
                 auto padded_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
                     input_base_padded_, padded_desc);
                 auto tmp_window = ck_tile::make_tile_window(
@@ -267,7 +282,7 @@ struct InputLoader
         // Create padded DRAM descriptor and view.
         const auto padded_dram_desc =
             TC::Input::template MakeDramReadDescriptorPadded<cfg.vector_size>(
-                hi_, wi_, C_in_, c_per_group_, px_);
+                hi_, wi_, C_in_, c_per_group_, px_, py_, dx_, dy_, sx_, sy_);
 
         auto padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
             input_base_padded_, padded_dram_desc);

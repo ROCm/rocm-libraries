@@ -48,9 +48,9 @@ namespace ck_tile::direct_conv::grouped_8c_tile::v2
 using namespace ck_tile::direct_conv;
 
 // Resolve ambiguity with ck_tile:: types
-using ck_tile::direct_conv::fp16x4_t;
-using ck_tile::direct_conv::fp16x8_t;
-using ck_tile::direct_conv::fp32x4_t;
+using ck_tile::fp16x4_t;
+using ck_tile::fp16x8_t;
+using ck_tile::fp32x4_t;
 using ck_tile::direct_conv::static_for;
 
 // ============================================================================
@@ -506,8 +506,13 @@ struct InputLoaderToeplitz
                                    int hi,
                                    int wi,
                                    int px,
+                                   int py,
+                                   int dx,
+                                   int dy,
+                                   int sx,
+                                   int sy,
                                    int c_per_group = TC::GROUP_SIZE)
-        : shared_loader(bc, input_lds, in, hi, wi, px, c_per_group)
+        : shared_loader(bc, input_lds, in, hi, wi, px, py, dx, dy, sx, sy, c_per_group)
     {
         // Compute the Toeplitz-specific LDS read offset.
         // Input position: input_x = 2*(lane%16) + lane/16

@@ -117,9 +117,9 @@ struct TileConstantsBase
     {
         using Shared = typename SharedDescriptors<TileConstantsBase<cfg>>::Input;
 
-        static CK_TILE_DEVICE auto MakeDramReadDescriptor(int hi, int wi, int C_total, int px)
+        static CK_TILE_DEVICE auto MakeDramReadDescriptor(int hi, int wi, int C_total, int px, int py, int dx, int dy, int sx, int sy)
         {
-            return Shared::MakeDramReadDescriptor(hi, wi, C_total, px);
+            return Shared::MakeDramReadDescriptor(hi, wi, C_total, px, py, dx, dy, sx, sy);
         }
         static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
         static constexpr auto MakeLdsWriteDescriptor()       { return Shared::MakeLdsWriteDescriptor(); }
@@ -127,10 +127,10 @@ struct TileConstantsBase
 
         template <int VectorSize>
         static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(
-            int hi, int wi, int C_in, int c_per_group, int px)
+            int hi, int wi, int C_in, int c_per_group, int px, int py, int dx, int dy, int sx, int sy)
         {
             return Shared::template MakeDramReadDescriptorPadded<VectorSize>(
-                hi, wi, C_in, c_per_group, px);
+                hi, wi, C_in, c_per_group, px, py, dx, dy, sx, sy);
         }
     };
 
@@ -289,7 +289,6 @@ inline bool is_applicable_base(const Conv2dParams& par)
     if(par.kh != 3 || par.kw != 3)       return false;
     if(par.stride_h != 1 || par.stride_w != 1)       return false;
     if(par.dilation_h != 1 || par.dilation_w != 1)   return false;
-    if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1) return false;
     return true;
 }
 

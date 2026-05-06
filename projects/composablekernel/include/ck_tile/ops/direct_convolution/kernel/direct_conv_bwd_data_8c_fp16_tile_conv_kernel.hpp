@@ -23,7 +23,7 @@ namespace ck_tile::direct_conv {
 ///   - in_ptr  = input gradient (output of backward, void*)
 ///   - wei_ptr = weights (const void*)
 ///   - out_ptr = output gradient (input to backward, const void*)
-template <int ConfigIdx, Version Ver = Version::v1>
+template <int ConfigIdx, Version Ver = Version::v2>
 struct DirectTileConvBwdData8CFp16Kernel
 {
     using V = VersionTraits8c<Ver>;
