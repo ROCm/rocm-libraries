@@ -191,12 +191,13 @@ TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA) {
     // PHI operands are ordered by A's predecessors: sources[i] = def from preds[i].
     const std::vector<BasicBlock*>& preds = A->getPredecessors();
     for (size_t i = 0; i < preds.size(); ++i) {
-        if (preds[i] == B)
+        if (preds[i] == B) {
             EXPECT_EQ(phi->getSources()[i], bAdd) << "PHI operand for B should be B's add";
-        else if (preds[i] == C)
+        } else if (preds[i] == C) {
             EXPECT_EQ(phi->getSources()[i], cAdd) << "PHI operand for C should be C's add";
-        else if (preds[i] == D)
+        } else if (preds[i] == D) {
             EXPECT_EQ(phi->getSources()[i], dAdd) << "PHI operand for D should be D's add";
+        }
     }
 
     // B, C, D each have 1 predecessor — they use the reaching def directly (no PHI).
