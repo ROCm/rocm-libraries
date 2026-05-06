@@ -196,7 +196,7 @@ void ormtr_unmtr_hb2st_initData(
 
     if(CPU)
     {
-        // Matrix A and Q are m-by-m on left, or n-by-n on right.
+        // Matrix Aband and Q are m-by-m on left, or n-by-n on right.
         rocblas_int nq = (side == rocblas_side_left ? m : n);
 
         gerand( m, n, hC[0], ldc );
@@ -245,9 +245,9 @@ void ormtr_unmtr_hb2st_initData(
 //    || I - Q^H Q ||_1 / n
 //    I, Q, R are nq-by-nq.
 //
-// 1. Backwards error, where B is tridiagonal output of hb2st:
-//    || Q B Q^H - A ||_1 / (n || A ||_1)
-//    A, B, Q, R are nq-by-nq; A is banded, B is real tridiagonal.
+// 1. Backwards error, where S is tridiagonal output of hb2st:
+//    || Q S Q^H - Aband ||_1 / (n || Aband ||_1)
+//    Aband, S, Q, R are nq-by-nq; Aband is banded, S is real symmetric tridiagonal.
 //
 // 2. Compare multiplying random C by explicitly generated Q1 and by implicit Q2:
 //    || op(Q2) C - op(Q1) C ||_1 / (m || C ||_1)  for side=left  (nq = m), or
@@ -366,18 +366,19 @@ void ormtr_unmtr_hb2st_getError(
     errors[0] = hnorm[0][0] / nq;
 
     //--------------------
-    // Check 1: || Q B Q^H - A ||_1 / (nq || A ||_1)
+    // TODO: use S instead of S?
+    // Check 1: || Q S Q^H - Aband ||_1 / (nq || Aband ||_1)
     // Transfer Q to CPU. (We don't have needed band or tridiag kernels on GPU.)
-    // Multiply C = Q B, then add C -= A.
-    // Use only the diag and lower band of A; ignore that some part of the upper
+    // Multiply C = Q S, then add C -= Aband.
+    // Use only the diag and lower band of Aband; ignore that some part of the upper
     // band is also stored for hb2st.
     CHECK_HIP_ERROR(
         hQ.transfer_from( dQ ) );
 
-    // R = Q B
+    // R = Q S
     cpu_stmm( nq, nq, hQ.data(), ldq, hD.data(), hE.data(), hR.data(), ldr );
 
-    // W = (Q B) Q^H
+    // W = (Q S) Q^H
     cpu_gemm( rocblas_operation_none, rocblas_operation_conjugate_transpose,
               nq, nq, nq,
               one, hR.data(), ldr, hQ.data(), ldq,
@@ -388,7 +389,7 @@ void ormtr_unmtr_hb2st_getError(
                negone, &hAband[0][idiag], ldab,
                one, hW.data(), ldw );
 
-    // Error = norm( W ) / (nq * norm( A ))
+    // Error = norm( W ) / (nq * norm( Aband ))
     errors[1] = cpu_lange( '1', nq, nq, hW.data(), ldw, hrwork.data() )
               / nq;
     S Anorm = cpu_lanhb( '1', 'L', nq, kd, &hAband[0][idiag], ldab, hrwork.data() );
