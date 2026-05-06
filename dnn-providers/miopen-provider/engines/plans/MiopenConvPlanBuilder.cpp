@@ -232,6 +232,18 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                                                 &returnedSolutionCount,
                                                                 solutions.data()));
 
+    if(returnedSolutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "Convolution Fwd: GetSolutionCount reported "
+                                                           + std::to_string(solutionCount)
+                                                           + " but GetSolution returned 0");
+    }
+
+    // GetSolution may write fewer entries than solutionCount (the MIOpen header documents the
+    // latter as a maximum).
+    solutions.resize(returnedSolutionCount);
+
     HIPDNN_PLUGIN_LOG_INFO("Getting workspace size range for Convolution Fwd: Found "
                            << returnedSolutionCount << " solutions");
 
@@ -305,6 +317,18 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                                                      solutionCount,
                                                                      &returnedSolutionCount,
                                                                      solutions.data()));
+
+    if(returnedSolutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "Convolution Bwd: GetSolutionCount reported "
+                                                           + std::to_string(solutionCount)
+                                                           + " but GetSolution returned 0");
+    }
+
+    // GetSolution may write fewer entries than solutionCount (the MIOpen header documents the
+    // latter as a maximum).
+    solutions.resize(returnedSolutionCount);
 
     HIPDNN_PLUGIN_LOG_INFO("Getting workspace size range for Convolution Bwd: Found "
                            << returnedSolutionCount << " solutions");
@@ -380,6 +404,18 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                                     solutionCount,
                                                     &returnedSolutionCount,
                                                     solutions.data()));
+
+    if(returnedSolutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "Convolution Wrw: GetSolutionCount reported "
+                                                           + std::to_string(solutionCount)
+                                                           + " but GetSolution returned 0");
+    }
+
+    // GetSolution may write fewer entries than solutionCount (the MIOpen header documents the
+    // latter as a maximum).
+    solutions.resize(returnedSolutionCount);
 
     HIPDNN_PLUGIN_LOG_INFO("Getting workspace size range for Convolution Wrw: Found "
                            << returnedSolutionCount << " solutions");
