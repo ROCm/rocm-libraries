@@ -7,6 +7,7 @@
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
+#include "engines/plans/MiopenPointwisePlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -47,6 +48,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(false));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(false));
+             engine->addPlanBuilder(std::make_unique<MiopenPointwisePlanBuilder>());
              return engine;
          }},
 

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <set>
-#include <unordered_set>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -23,15 +22,12 @@ using hipdnn_data_sdk::data_objects::PointwiseMode;
 
 void checkPointwiseModeSupported(const PointwiseAttributes& attrs)
 {
-    static const std::unordered_set<PointwiseMode> s_supportedModes = {PointwiseMode::RELU_FWD,
-                                                                        PointwiseMode::CLAMP_FWD};
-
-    if(s_supportedModes.count(attrs.operation()) == 0)
+    if(attrs.operation() != PointwiseMode::RELU_FWD)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Pointwise plan builder: unsupported pointwise mode. "
-            "Supported modes for standalone pointwise: RELU_FWD, CLAMP_FWD");
+            "Supported modes for standalone pointwise: RELU_FWD");
     }
 }
 
