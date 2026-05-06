@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Instruction scheduler for subtile-based mainloop.
 
 Interleaves non-MFMA instructions between MFMAs using a slot-based placer
