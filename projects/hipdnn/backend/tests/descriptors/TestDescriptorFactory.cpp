@@ -12,6 +12,7 @@
 #include "descriptors/KnobSettingDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
 #include "handle/HandleFactory.hpp"
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "gtest/gtest.h"
 
@@ -134,6 +135,7 @@ TEST(TestDescriptorFactory, CreateGraphExtInvalidGraphData)
 
 TEST(TestDescriptorFactory, HandleFactory)
 {
+    SKIP_IF_NO_DEVICES();
     hipdnnHandle_t handleT = nullptr;
 
     ASSERT_NO_THROW(HandleFactory::createHandle(&handleT));
