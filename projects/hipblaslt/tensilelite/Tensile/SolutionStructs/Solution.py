@@ -2420,6 +2420,11 @@ class Solution(collections.abc.Mapping):
       hasCMS,_ = hasCustomSchedule(state)
       if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
+      # Validator-coverage note: setting UseCustomMainLoopSchedule=0 here
+      # bypasses the CMS validator (Tensile/Components/CMSValidator.py) for
+      # this kernel. A False from hasCustomSchedule is therefore both an
+      # optimization-path decision AND a silent loss of validation coverage.
+      # See hasCustomSchedule docstring for the validator-side implication.
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
       # reject CMS + TailloopInNll
       if state["TailloopInNll"] and state["UseCustomMainLoopSchedule"] == 1:

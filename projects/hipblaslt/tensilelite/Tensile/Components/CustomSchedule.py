@@ -545,6 +545,14 @@ def hasCustomSchedule(kernel):
     """
     Trampoline function that checks if a custom schedule is available.
     Iterates through registered schedule functions and returns the first match.
+
+    Validator-coverage note: a False return here causes Solution.py to set
+    UseCustomMainLoopSchedule=0, which causes the kernel to be built via the
+    non-CMS path. The CMS validator (Tensile/Components/CMSValidator.py) is
+    only invoked on CMS=1 kernels — solutions that fall through this check
+    are NOT validated by the dataflow-graph machinery. A missing registration
+    is therefore a silent loss of validator coverage, not just a missing
+    optimization.
     """
     if not kernel["UseCustomMainLoopSchedule"]:
         return False, None
