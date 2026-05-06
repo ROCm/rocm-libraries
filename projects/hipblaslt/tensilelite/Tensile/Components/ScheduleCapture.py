@@ -26,6 +26,12 @@ Schedule capture and comparison for default-vs-CMS validation.
 Builds a uniform 4-entry tagged-instruction-stream representation for both the
 default scheduler (SIA3) and the CMS scheduler so the two can be diffed for
 discrepancies. See plans/then-let-s-work-on-jaunty-reddy.md for design context.
+
+Module dependency edge: this module is the *upstream* leaf of the validator
+stack — it never imports `CMSValidator` at runtime. `CMSValidator` imports
+from here eagerly. Only string-typed `TYPE_CHECKING` references reach back
+into `CMSValidator`, so importing this module never triggers `CMSValidator`
+load.
 """
 
 from __future__ import annotations
@@ -40,9 +46,9 @@ if TYPE_CHECKING:
     # runtime, so a hard import here would create a cycle. PEP 563
     # (from __future__ import annotations) keeps these names as strings at
     # runtime; resolution is on-demand for static analyzers only.
-    from Tensile.Components.CMSValidator import (
-        DataflowEdge, DataflowGraph, GraphNode, NodeLike, ValidatorInstruction,
-    )
+    # Only `GraphNode` survives br4.10 cleanup — it's the sole symbol still
+    # consumed by an actual annotation in this file (`_resolve_producers`).
+    from Tensile.Components.CMSValidator import GraphNode
 
 
 # =============================================================================

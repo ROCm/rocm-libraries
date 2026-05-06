@@ -20,6 +20,16 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+"""
+CMS scheduler validator: graph construction, dataflow rules, FIFO simulator,
+edge-coverage analysis, timing checks, and Failure formatting.
+
+After br4 (CMS validator consolidation epic), this module is the *downstream*
+side of a strict one-way dependency edge: CMSValidator imports from
+ScheduleCapture eagerly; ScheduleCapture references CMSValidator symbols only
+under `TYPE_CHECKING` (string-typed). No runtime cycle exists.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -159,16 +169,6 @@ def active_concerns(kernel: dict, idmap: dict) -> set[ValidationConcern]:
     return active & isa_concerns
 
 
-# Pack-related invariants live graph-side:
-#   * LR -> Pack RAW (dscnt) and Pack -> MFMA RAW: `validate_edge_wait_coverage`
-#     + `compare_graphs` over register dataflow from `_GenericALURule`.
-#   * MiddlePack pair-interleaving: `validate_middle_pack_pair_interleaving`
-#     (emits `OverriddenInputFailure`).
-#   * Quad-cycle visibility: `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` /
-#     `_mfma_pack_to_cvt_gap_ok` (emit `TimingTooCloseFailure`).
-# Migrated coverage: `test_validate_pack_graph.py`,
-# `test_dataflow_graph_register_gaps.py`.
-
 # --- Loop Names ---
 MAIN_LOOP_PREV = "ML-1"
 MAIN_LOOP = "ML"
@@ -180,14 +180,9 @@ PACK_GROUP_SIZE_TF32 = 24        # 4 CVT0 + 16 middle + 4 CVT1
 PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
 
 # --- Quad-Cycle Timing (CDNA 4 ISA section 7.6) ---
-# Quad-cycle visibility verdicts live graph-side; the legacy module-scope
-# alias constants (`_QUAD_CYCLES_*`, `_MFMA_TYPE_SWITCH_THRESHOLD_*`) live
-# in `Tensile/Components/ScheduleCapture.py` alongside the
-# `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` /
-# `_mfma_pack_to_cvt_gap_ok` helpers that consume them. The per-arch
-# `ArchProfile` dataclass and resolvers are defined below so the validator
-# can resolve a profile from `kernel["ISA"]` without a back-import into
-# ScheduleCapture.
+# Per-arch profiles (`ArchProfile`) defined below resolve from `kernel["ISA"]`.
+# The `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` / `_mfma_pack_to_cvt_gap_ok`
+# helpers that consume them are defined later in this same file.
 
 # --- VGPRs ---
 VGPRS_PER_CONVERSION_GROUP = 8   # 8 VGPRs per conversion group in TF32 emulation
@@ -457,16 +452,13 @@ class DataflowGraph:
 # Graph walkers + FIFO simulator + identity helpers (br4.6)
 # =============================================================================
 #
-# These helpers operate on `GraphNode`-shaped data and used to live in
-# ScheduleCapture.py. They were moved here so the helper bodies can reference
+# These helpers operate on `GraphNode`-shaped data. They reference
 # `GraphNode`, `DataflowGraph`, `_DEFAULT_CDNA4_ARCH_PROFILE`, and
-# `_resolve_arch_profile` directly (no lazy reverse-imports). The remaining
-# graph-builder / validator entry points in ScheduleCapture.py (notably
-# `build_dataflow_graph`, `_collect_pattern`, `diagnose_missing_edge`,
-# `_classify_edge_coverage`, `validate_middle_pack_pair_interleaving`) consume
-# these helpers via narrow lazy imports inside their function bodies; br4.7,
-# br4.8, and br4.9 will move those entry points and eliminate the lazy
-# imports.
+# `_resolve_arch_profile` directly — all defined in this file — so no lazy
+# reverse-imports are needed. The graph-builder / validator entry points
+# (`build_dataflow_graph`, `_collect_pattern`, `diagnose_missing_edge`,
+# `_classify_edge_coverage`, `validate_middle_pack_pair_interleaving`) live
+# in this file too as of br4.9.
 
 
 PRODUCER_CATEGORIES_LDS = ("LRA0", "LRA1", "LRA3", "LRB0", "LRB1", "LRB3",
