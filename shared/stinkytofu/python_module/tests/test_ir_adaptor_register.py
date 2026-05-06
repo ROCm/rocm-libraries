@@ -25,11 +25,11 @@
 
 Run from any working directory:
 
-    python3 shared/stinkytofu/tests/unit/ir_adaptor/test_ir_adaptor_register.py
+    python3 shared/stinkytofu/python_module/tests/test_ir_adaptor_register.py
 
 Or with pytest if available:
 
-    pytest shared/stinkytofu/tests/unit/ir_adaptor/test_ir_adaptor_register.py
+    pytest shared/stinkytofu/python_module/tests/test_ir_adaptor_register.py
 
 The tests assert behaviors that Tensile's KernelWriter implicitly depends on
 (AMDGPU ABI, byte-for-byte parity with rocisa's allocator, etc.). Treat any
@@ -50,11 +50,11 @@ from contextlib import redirect_stdout
 # editable-mode setup. ir_adaptor lives at:
 #     shared/stinkytofu/python_module/ir_adaptor/
 # This file lives at:
-#     shared/stinkytofu/tests/unit/ir_adaptor/test_ir_adaptor_register.py
-# So python_module is three levels up + python_module.
+#     shared/stinkytofu/python_module/tests/test_ir_adaptor_register.py
+# So python_module is one level up.
 # ---------------------------------------------------------------------------
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_PY_MODULE = os.path.normpath(os.path.join(_HERE, "..", "..", "..", "python_module"))
+_PY_MODULE = os.path.normpath(os.path.join(_HERE, ".."))
 if _PY_MODULE not in sys.path:
     sys.path.insert(0, _PY_MODULE)
 
