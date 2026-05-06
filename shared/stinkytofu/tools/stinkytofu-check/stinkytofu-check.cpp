@@ -315,14 +315,6 @@ bool verifyChecks(const std::vector<std::string>& outputLines,
             for (size_t g = 0; g < dagGroup.size(); ++g) {
                 bool found = false;
                 for (size_t j = startIdx; j < endIdx; ++j) {
-                    // Skip lines already consumed by another DAG pattern.
-                    bool alreadyUsed = false;
-                    for (size_t g2 = 0; g2 < g; ++g2) {
-                        if (matched[g2]) {
-                            // Check if this line was the one that matched g2
-                            // (simplified: we re-scan, so just check all)
-                        }
-                    }
                     if (matchPattern(outputLines[j], dagGroup[g]->pattern)) {
                         matched[g] = true;
                         found = true;

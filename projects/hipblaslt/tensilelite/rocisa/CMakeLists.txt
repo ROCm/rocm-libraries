@@ -103,6 +103,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     set(STINKYTOFU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
     if(EXISTS "${STINKYTOFU_DIR}/CMakeLists.txt")
         set(BUILD_SHARED_LIBS ON)
+        set(STINKYTOFU_ENABLE_WERROR ON)
         # Add the external directory; build output goes into a local binary dir 'stinkytofu'
         add_subdirectory("${STINKYTOFU_DIR}" stinkytofu EXCLUDE_FROM_ALL)
     else()

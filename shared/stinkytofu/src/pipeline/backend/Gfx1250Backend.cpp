@@ -36,7 +36,9 @@
 #include "stinkytofu/pipeline/OptimizationPasses.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -65,7 +67,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 
     // addPeepholeOptPasses(pm, optLevel);
 
-    // ========== Phase 3: Instruction Scheduling ==========
+    // Instruction scheduling
     pm.addPass(createStinkyBuildImplicitDependencyPass());
     // pm.addPass(createScheduleFirstLRsPass());
     pm.addPass(createStinkyDAGSchedulerPass());
@@ -86,6 +88,10 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
 
     if (optLevel != OptLevel::O0) {
+        // -- kernel --
+        // strip delay_alu before scheduling
+        pm.addPass(createRemoveDelayAluPass());
+
         PassFeatureConfig passFeatureConfig;
         passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
         passFeatureConfig.loopConfig.unrollGemm = true;
@@ -95,8 +101,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         auto snapshotCollector =
             createPassOrderSnapshotCollector(passFeatureConfig, moduleOptions, module.getName());
 
-        // Combined adapter: loopWithPrefetch + noLoadLoopBody
-        // Process both regions together so the scheduler sees the full CFG.
+        // -- region: loopWithPrefetch + noLoadLoopBody --
+        // process together for full CFG
         {
             PassManager innerPM;
             registerAllAnalyses(innerPM.getAnalysisManager());
@@ -107,15 +113,19 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
                                  debugStreams);
             addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
             if (moduleOptions.EnableWaitCntInsertion) {
-                innerPM.addPass(createStinkyWaitCntInsertionPass(true));
+                innerPM.addPass(createStinkyWaitCntInsertionPass());
             }
             pm.addPass(createKernelToRegionsPassAdaptor(
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
         }
     }
 
-    // Whole-kernel pass. Always run regardless of OptLevel.
+    // -- kernel --
     pm.addPass(createInsertVgprMsbPass());
+    if (optLevel != OptLevel::O0) {
+        pm.addPass(createCFGBuilderPass());
+        pm.addPass(createInsertDelayAluPass());
+    }
 
     return true;
 }
