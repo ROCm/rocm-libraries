@@ -157,8 +157,10 @@ def _rmtree(path: Path):
         "build_type": "CMake build type: Release, Debug, RelWithDebInfo (default: Release).",
         "tests": "Build unit tests (default: ON when building standalone).",
         "python": "Build Python bindings.",
+        "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
+        "gcc": "Use GCC instead of amdclang.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
 )
@@ -168,8 +170,10 @@ def build(
     build_type="Release",
     tests=True,
     python=False,
+    static=False,
     jobs=None,
     clean=False,
+    gcc=False,
     rocm_path=None,
 ):
     bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
@@ -186,14 +190,24 @@ def build(
 
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
+        f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
+        "-DSTINKYTOFU_ENABLE_WERROR=ON",
     ]
 
     compiler_opts = []
 
     if sys.platform == "win32":
         _setup_msvc_env()
+
+        _vcpkg_toolchain_path = None
+        _vcpkg = shutil.which("vcpkg")
+        if _vcpkg:
+            _vcpkg_root = Path(_vcpkg).resolve().parent
+            _vcpkg_tc = _vcpkg_root / "scripts/buildsystems/vcpkg.cmake"
+            if _vcpkg_tc.exists():
+                _vcpkg_toolchain_path = _vcpkg_tc.as_posix()
 
         sep = os.pathsep
         rocm_bin_dirs = [f"{rocm_s}/bin", f"{rocm_s}/lib/llvm/bin"]
@@ -231,12 +245,18 @@ def build(
         if lib_exe:
             lib_posix = Path(lib_exe).as_posix()
             toolchain_file = bld / "windows_toolchain.cmake"
-            toolchain_file.write_text(
+            tc_content = ""
+            if _vcpkg_toolchain_path:
+                tc_content += f'include("{_vcpkg_toolchain_path}")\n'
+            tc_content += (
                 f'set(CMAKE_AR "{lib_posix}" CACHE FILEPATH "" FORCE)\n'
                 'set(CMAKE_CXX_CREATE_STATIC_LIBRARY "<CMAKE_AR> /OUT:<TARGET> <LINK_FLAGS> <OBJECTS>")\n'
                 'set(CMAKE_C_CREATE_STATIC_LIBRARY   "<CMAKE_AR> /OUT:<TARGET> <LINK_FLAGS> <OBJECTS>")\n'
             )
+            toolchain_file.write_text(tc_content)
             cmake_opts.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain_file.as_posix()}")
+        elif _vcpkg_toolchain_path:
+            cmake_opts.append(f"-DCMAKE_TOOLCHAIN_FILE={_vcpkg_toolchain_path}")
         else:
             print("Warning: lib.exe not found. Static library archiving will fail.")
 
@@ -253,8 +273,12 @@ def build(
         else:
             cmake_opts.append("-G Ninja")
     else:
-        _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
-        _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
+        if gcc:
+            _cxx = shutil.which("g++") or "g++"
+            _cc = shutil.which("gcc") or "gcc"
+        else:
+            _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
+            _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
         compiler_opts += [
             f"-DCMAKE_CXX_COMPILER={_cxx}",
             f"-DCMAKE_C_COMPILER={_cc}",

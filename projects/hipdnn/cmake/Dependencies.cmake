@@ -39,8 +39,16 @@ function(hipdnn_add_dependency dep_name)
         else()
             message(
                 STATUS
-                    "Found ${dep_name}: ${${dep_name}_DIR} (found version \"${${dependency_name}_VERSION}\")"
+                    "Found ${dep_name}: ${${dep_name}_DIR} (found version \"${${dep_name}_VERSION}\")"
             )
+            set(${dep_name}_FOUND ${${dep_name}_FOUND} PARENT_SCOPE)
+            # Only export ${dep_name}_VERSION when the package config actually
+            # populated it. Some vendored or repackaged distributions skip
+            # setting it; exporting an empty string would mask the unset state
+            # in callers that branch on `if(DEFINED dep_VERSION)`.
+            if(DEFINED ${dep_name}_VERSION)
+                set(${dep_name}_VERSION "${${dep_name}_VERSION}" PARENT_SCOPE)
+            endif()
             foreach(VAR IN LISTS ${dep_name}_EXPORT_VARS)
                 set(${VAR} ${${VAR}} PARENT_SCOPE)
             endforeach()

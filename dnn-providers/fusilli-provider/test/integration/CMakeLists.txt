@@ -81,6 +81,21 @@ add_fusilli_plugin_test(
 )
 
 add_fusilli_plugin_test(
+  NAME fusilli_plugin_serialized_matmul_test
+  SRCS matmul/serialized_matmul.cpp
+  DEPS
+    GTest::gtest_main
+    hip::host
+    hipdnn_frontend
+    hipdnn_plugin_sdk
+    hipdnn_data_sdk
+    hipdnn_test_sdk
+    Threads::Threads
+  COMPILE_DEFS
+    FUSILLI_PLUGIN_PATH="../${FUSILLI_PLUGIN_RELATIVE_PATH}"
+)
+
+add_fusilli_plugin_test(
   NAME fusilli_plugin_matmul_parameterized_test
   SRCS matmul/matmul_parameterized.cpp
   DEPS

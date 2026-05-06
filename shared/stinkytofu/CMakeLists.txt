@@ -76,6 +76,17 @@ if(TARGET _rocisa)
 endif()
 
 ##===----------------------------------------------------------------------===##
+# Warning flags (single source of truth for all stinkytofu targets)
+##===----------------------------------------------------------------------===##
+option(STINKYTOFU_ENABLE_WERROR "Treat warnings as errors" OFF)
+add_library(stinkytofu-warnings INTERFACE)
+target_compile_options(stinkytofu-warnings INTERFACE -Wall)
+if(STINKYTOFU_ENABLE_WERROR)
+    target_compile_options(stinkytofu-warnings INTERFACE
+        -Werror -Wno-error=deprecated-declarations -Wno-error=comment)
+endif()
+
+##===----------------------------------------------------------------------===##
 # Hardware library and tablegen tools
 ##===----------------------------------------------------------------------===##
 # Add subdirectories first to define gfxisa, tablegen, and tablegen_generated targets
@@ -105,14 +116,11 @@ set(STINKYTOFU_GENERATED_SOURCES
 # Mark generated files so CMake knows they will be created during build
 set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED TRUE)
 
-# TODO: Windows requires explicit __declspec(dllexport) on every symbol for
-# shared libraries with lld-link. Build as static on Windows temporarily until
-# all public API is properly annotated with STINKYTOFU_EXPORT.
-if(WIN32)
-    add_library(stinkytofu STATIC ${STINKYTOFU_GENERATED_SOURCES})
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+add_library(stinkytofu ${STINKYTOFU_GENERATED_SOURCES})
+target_link_libraries(stinkytofu PRIVATE stinkytofu-warnings)
+if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
-else()
-    add_library(stinkytofu SHARED ${STINKYTOFU_GENERATED_SOURCES})
 endif()
 target_include_directories(stinkytofu
     PUBLIC
