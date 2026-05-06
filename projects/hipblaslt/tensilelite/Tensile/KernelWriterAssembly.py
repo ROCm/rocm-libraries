@@ -2111,6 +2111,15 @@ class KernelWriterAssembly(KernelWriter):
     sgprNumsOfGemm = None
 
     if self.do["PreLoop"]:
+      # Need to guard again since some defined sgprs are added into sgprPool
+      if self.states.numSgprPreload > 0:
+        while(1):
+          tmpSgpr = self.sgprPool.checkOut(1, preventOverflow=False)
+          if tmpSgpr >= self.states.archCaps["MaxSgprPreload"]:
+            self.sgprPool.checkIn(tmpSgpr)
+            break
+          self.states.preloadGuard.append(tmpSgpr)
+      
       ### temp sgpr for groupedgemm ###
       # can be start from sgpr_preload_end
       sgprNumsOfGemm = self.sgprPool.checkOut(1, preventOverflow=False)
