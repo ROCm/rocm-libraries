@@ -163,7 +163,7 @@ class FmhaKernelConfig:
 
     # -- Algorithm: pipeline --
     pipeline: str = "qr_async"
-    block_per_cu: int = 2
+    block_per_cu: int = -1
     num_wave_groups: int = 1
 
     # -- Signature: features --
