@@ -214,14 +214,16 @@ TYPED_TEST_SUITE(FillUniformScaleDistributionTest, ScaleTypes);
 TYPED_TEST(FillUniformScaleDistributionTest, NoGarbageValues)
 {
     using S = TypeParam;
-    std::vector<S> buf(10000);
+    ck_tile::HostTensor<S> buf({10000});
     ck_tile::FillUniformScaleDistribution<S>{0.0625f, 4.0f, 42}(buf.begin(), buf.end());
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i = 0;
+    for(const S& v : buf)
     {
-        float f = static_cast<float>(buf[i]);
+        float f = static_cast<float>(v);
         EXPECT_TRUE(is_valid_float(f))
             << "NaN/Inf at index " << i
-            << " raw=" << static_cast<int>(static_cast<typename S::type>(buf[i]));
+            << " raw=" << static_cast<int>(static_cast<typename S::type>(v));
+        ++i;
     }
 }
 
@@ -232,13 +234,15 @@ TYPED_TEST(FillUniformScaleDistributionTest, RawValuesInExpectedRange)
     constexpr float min_scale = 0.0625f;
     constexpr float max_scale = 4.0f;
     auto [min_r, max_r]       = expected_raw_range<S>(min_scale, max_scale);
-    std::vector<S> buf(10000);
+    ck_tile::HostTensor<S> buf({10000});
     ck_tile::FillUniformScaleDistribution<S>{min_scale, max_scale, 7}(buf.begin(), buf.end());
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i = 0;
+    for(const S& v : buf)
     {
-        int raw = static_cast<int>(static_cast<typename S::type>(buf[i]));
+        int raw = static_cast<int>(static_cast<typename S::type>(v));
         EXPECT_GE(raw, min_r) << "raw below min at index " << i;
         EXPECT_LE(raw, max_r) << "raw above max at index " << i;
+        ++i;
     }
 }
 
@@ -246,7 +250,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, RawValuesInExpectedRange)
 TYPED_TEST(FillUniformScaleDistributionTest, SameSeedSameOutput)
 {
     using S = TypeParam;
-    std::vector<S> a(1000), b(1000);
+    ck_tile::HostTensor<S> a({1000}), b({1000});
     ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, 99}(a.begin(), a.end());
     ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, 99}(b.begin(), b.end());
     EXPECT_EQ(0, std::memcmp(a.data(), b.data(), a.size() * sizeof(S)));
@@ -256,7 +260,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, SameSeedSameOutput)
 TYPED_TEST(FillUniformScaleDistributionTest, DifferentSeedsDifferentOutput)
 {
     using S = TypeParam;
-    std::vector<S> a(1000), b(1000);
+    ck_tile::HostTensor<S> a({1000}), b({1000});
     ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, 1}(a.begin(), a.end());
     ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, 2}(b.begin(), b.end());
     EXPECT_NE(0, std::memcmp(a.data(), b.data(), a.size() * sizeof(S)));
@@ -268,14 +272,16 @@ TYPED_TEST(FillUniformScaleDistributionTest, SingleValueRange)
     using S               = TypeParam;
     constexpr float pivot = 1.0f;
     auto [min_r, max_r]   = expected_raw_range<S>(pivot, pivot);
-    std::vector<S> buf(2000);
+    ck_tile::HostTensor<S> buf({2000});
     ck_tile::FillUniformScaleDistribution<S>{pivot, pivot, 5}(buf.begin(), buf.end());
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i = 0;
+    for(const S& v : buf)
     {
-        int raw = static_cast<int>(static_cast<typename S::type>(buf[i]));
+        int raw = static_cast<int>(static_cast<typename S::type>(v));
         EXPECT_GE(raw, min_r) << "index " << i;
         EXPECT_LE(raw, max_r) << "index " << i;
-        EXPECT_TRUE(is_valid_float(static_cast<float>(buf[i]))) << "index " << i;
+        EXPECT_TRUE(is_valid_float(static_cast<float>(v))) << "index " << i;
+        ++i;
     }
 }
 
@@ -286,13 +292,15 @@ TYPED_TEST(FillUniformScaleDistributionTest, NonPowerOfTwoBoundsSnap)
     using S = TypeParam;
     // 0.1 snaps to 0.0625 (2^-4); 3.5 snaps to 2.0 (2^1)
     auto [min_r, max_r] = expected_raw_range<S>(0.0625f, 2.0f); // snapped bounds
-    std::vector<S> buf(5000);
+    ck_tile::HostTensor<S> buf({5000});
     ck_tile::FillUniformScaleDistribution<S>{0.1f, 3.5f, 13}(buf.begin(), buf.end());
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i = 0;
+    for(const S& v : buf)
     {
-        int raw = static_cast<int>(static_cast<typename S::type>(buf[i]));
+        int raw = static_cast<int>(static_cast<typename S::type>(v));
         EXPECT_GE(raw, min_r) << "index " << i;
         EXPECT_LE(raw, max_r) << "index " << i;
+        ++i;
     }
 }
 
@@ -307,7 +315,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, AllRawValuesGenerated)
     const int range_size    = max_r - min_r + 1;
     const std::size_t draws = static_cast<std::size_t>(range_size) * 5000;
 
-    std::vector<S> buf(draws);
+    ck_tile::HostTensor<S> buf({draws});
     ck_tile::FillUniformScaleDistribution<S>{min_f, max_f, 77}(buf.begin(), buf.end());
 
     std::unordered_set<int> seen;
@@ -322,12 +330,14 @@ TYPED_TEST(FillUniformScaleDistributionTest, AllRawValuesGenerated)
 TEST(FillUniformScaleDistributionE8M0, AllValuesPowersOfTwo)
 {
     using S = ck_tile::e8m0_t;
-    std::vector<S> buf(10000);
+    ck_tile::HostTensor<S> buf({10000});
     ck_tile::FillUniformScaleDistribution<S>{0.0625f, 4.0f, 33}(buf.begin(), buf.end());
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i = 0;
+    for(const S& v : buf)
     {
-        float f = static_cast<float>(buf[i]);
+        float f = static_cast<float>(v);
         EXPECT_TRUE(is_power_of_two(f)) << "Non-power-of-two at index " << i << " value=" << f;
+        ++i;
     }
 }
 
@@ -335,13 +345,15 @@ TEST(FillUniformScaleDistributionE8M0, AllValuesPowersOfTwo)
 TYPED_TEST(FillUniformScaleDistributionTest, WideRangeStress)
 {
     using S = TypeParam;
-    std::vector<S> buf(50000);
+    ck_tile::HostTensor<S> buf({50000});
     ck_tile::FillUniformScaleDistribution<S>{1.f / 1024, 1024.f, 0}(buf.begin(), buf.end());
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i = 0;
+    for(const S& v : buf)
     {
-        float f = static_cast<float>(buf[i]);
+        float f = static_cast<float>(v);
         EXPECT_TRUE(is_valid_float(f)) << "Bad value at index " << i;
         EXPECT_GT(f, 0.f) << "Non-positive scale at index " << i;
+        ++i;
     }
 }
 
@@ -349,7 +361,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, WideRangeStress)
 TYPED_TEST(FillUniformScaleDistributionTest, EmptyRangeNoCrash)
 {
     using S = TypeParam;
-    std::vector<S> buf;
+    ck_tile::HostTensor<S> buf({0});
     EXPECT_NO_THROW(
         (ck_tile::FillUniformScaleDistribution<S>{1.0f, 1.0f, 0}(buf.begin(), buf.end())));
 }
@@ -360,13 +372,15 @@ TEST(FillUniformScaleDistributionE8M0, StrictFloatBounds)
 {
     using S               = ck_tile::e8m0_t;
     constexpr float min_f = 0.0625f, max_f = 4.0f;
-    std::vector<S> buf(10000);
+    ck_tile::HostTensor<S> buf({10000});
     ck_tile::FillUniformScaleDistribution<S>{min_f, max_f, 11}(buf.begin(), buf.end());
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i = 0;
+    for(const S& v : buf)
     {
-        float f = static_cast<float>(buf[i]);
+        float f = static_cast<float>(v);
         EXPECT_GE(f, min_f) << "index " << i;
         EXPECT_LE(f, max_f) << "index " << i;
+        ++i;
     }
 }
 
@@ -377,12 +391,14 @@ TYPED_TEST(FillUniformScaleDistributionTest, StrictFloatUpperBound)
 {
     using S               = TypeParam;
     constexpr float max_f = 4.0f;
-    std::vector<S> buf(10000);
+    ck_tile::HostTensor<S> buf({10000});
     ck_tile::FillUniformScaleDistribution<S>{0.0625f, max_f, 22}(buf.begin(), buf.end());
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i = 0;
+    for(const S& v : buf)
     {
-        float f = static_cast<float>(buf[i]);
+        float f = static_cast<float>(v);
         EXPECT_LE(f, max_f) << "value " << f << " exceeds max_scale at index " << i;
+        ++i;
     }
 }
 
@@ -394,7 +410,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, NonPowerOfTwoMinSnapsBelow)
     // 0.1 is not a power of two; get_exponent snaps it down to 0.0625 (2^-4).
     // Values in [0.0625, 0.1) are therefore reachable.
     constexpr float min_f = 0.1f;
-    std::vector<S> buf(10000);
+    ck_tile::HostTensor<S> buf({10000});
     ck_tile::FillUniformScaleDistribution<S>{min_f, 4.0f, 33}(buf.begin(), buf.end());
     bool found_below = false;
     for(auto& v : buf)
@@ -409,13 +425,15 @@ TYPED_TEST(FillUniformScaleDistributionTest, NonPowerOfTwoMinSnapsBelow)
 TYPED_TEST(FillUniformScaleDistributionTest, ExtremeOutOfRangeBoundsClampSafely)
 {
     using S = TypeParam;
-    std::vector<S> buf(5000);
+    ck_tile::HostTensor<S> buf({5000});
     ck_tile::FillUniformScaleDistribution<S>{1e-38f, 1e38f, 55}(buf.begin(), buf.end());
-    for(std::size_t i = 0; i < buf.size(); ++i)
+    std::size_t i = 0;
+    for(const S& v : buf)
     {
-        float f = static_cast<float>(buf[i]);
+        float f = static_cast<float>(v);
         EXPECT_TRUE(std::isfinite(f)) << "index " << i;
         EXPECT_GT(f, 0.f) << "index " << i;
+        ++i;
     }
 }
 
@@ -423,7 +441,7 @@ TYPED_TEST(FillUniformScaleDistributionTest, ExtremeOutOfRangeBoundsClampSafely)
 TYPED_TEST(FillUniformScaleDistributionTest, NulloptSeedProducesRandomOutput)
 {
     using S = TypeParam;
-    std::vector<S> a(500), b(500);
+    ck_tile::HostTensor<S> a({500}), b({500});
     ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, std::nullopt}(a.begin(), a.end());
     ck_tile::FillUniformScaleDistribution<S>{0.125f, 2.0f, std::nullopt}(b.begin(), b.end());
     EXPECT_NE(0, std::memcmp(a.data(), b.data(), a.size() * sizeof(S)));
