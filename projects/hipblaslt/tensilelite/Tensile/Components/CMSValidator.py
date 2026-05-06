@@ -27,7 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from collections import defaultdict
 from enum import Enum, auto
-from typing import TYPE_CHECKING, ClassVar, Dict, Optional, Tuple, Union
+from typing import TYPE_CHECKING, ClassVar, Dict, List, Optional, Tuple, Union
 
 from rocisa.instruction import (
     SWaitCnt, SBarrier,
@@ -37,7 +37,22 @@ from rocisa.instruction import (
     BufferLoadB128, BufferLoadB64, BufferLoadB32,
 )
 from Tensile.Common.Utilities import printWarning
-from Tensile.Components.ScheduleCapture import SchedulePosition
+# Eager imports from ScheduleCapture are safe: ScheduleCapture only imports
+# from this module under TYPE_CHECKING (no eager reverse-import), so loading
+# CMSValidator triggers a complete ScheduleCapture load, after which all of
+# ScheduleCapture's public symbols are available. The reverse direction is the
+# same — ScheduleCapture loads independently, then CMSValidator can be loaded
+# on demand. (br4.6 added the helper-related symbols below.)
+from Tensile.Components.ScheduleCapture import (
+    SchedulePosition,
+    BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL,
+    BODY_LABEL_TO_LOOP_INDEX,
+    CaptureUnknownInstructionError,
+    make_position,
+    _canonical_render,
+    _is_lr, _is_lw, _is_gr, _is_mfma, _is_swait, _is_sbarrier, _is_snop,
+    _is_ssetprio, _is_cvt_pack,
+)
 
 if TYPE_CHECKING:
     # Annotations only — kept as strings at runtime by `from __future__ import
@@ -434,7 +449,982 @@ class DataflowGraph:
 
 
 # =============================================================================
+# Graph walkers + FIFO simulator + identity helpers (br4.6)
+# =============================================================================
+#
+# These helpers operate on `GraphNode`-shaped data and used to live in
+# ScheduleCapture.py. They were moved here so the helper bodies can reference
+# `GraphNode`, `DataflowGraph`, `_DEFAULT_CDNA4_ARCH_PROFILE`, and
+# `_resolve_arch_profile` directly (no lazy reverse-imports). The remaining
+# graph-builder / validator entry points in ScheduleCapture.py (notably
+# `build_dataflow_graph`, `_collect_pattern`, `diagnose_missing_edge`,
+# `_classify_edge_coverage`, `validate_middle_pack_pair_interleaving`) consume
+# these helpers via narrow lazy imports inside their function bodies; br4.7,
+# br4.8, and br4.9 will move those entry points and eliminate the lazy
+# imports.
+
+
+PRODUCER_CATEGORIES_LDS = ("LRA0", "LRA1", "LRA3", "LRB0", "LRB1", "LRB3",
+                           "LWA", "LWB", "LW")
+PRODUCER_CATEGORIES_GLOBAL = ("GRA", "GRB", "GR")
+SWAIT_CATEGORY = "SYNC"
+SBARRIER_CATEGORY = "BARRIER"
+
+
+def counter_for(node_or_category: Union[str, GraphNode, "ValidatorInstruction"]) -> str:
+    """Return the SWaitCnt counter that gates the given producer.
+
+    'dscnt' for LR/LW (LDS ops); 'vlcnt' for GR (vector-memory loads).
+
+    Raises CaptureUnknownInstructionError if asked about a category that
+    isn't one of the recognized producer kinds — graph builder should
+    never have created a node whose category is unknown.
+    """
+    cat = node_or_category if isinstance(node_or_category, str) else node_or_category.category
+    if cat in PRODUCER_CATEGORIES_LDS:
+        return "dscnt"
+    if cat in PRODUCER_CATEGORIES_GLOBAL:
+        return "vlcnt"
+    raise CaptureUnknownInstructionError(
+        f"counter_for: category {cat!r} is not a recognized producer kind. "
+        f"Expected one of LR*/LW* (dscnt) or GR* (vlcnt)."
+    )
+
+
+def _swait_drains(swait_node: GraphNode, counter: str) -> Optional[int]:
+    """Return the counter value the SWait imposes on `counter`, or None if it
+    doesn't constrain that counter.
+
+    A SWaitCnt's field is set to -1 when the counter is unconstrained
+    ('don't care'); a value >= 0 caps outstanding ops at that count.
+    """
+    inst = swait_node.rocisa_inst
+    if inst is None:
+        return None
+    if counter == "dscnt":
+        v = getattr(inst, "dscnt", -1)
+    elif counter == "vlcnt":
+        v = getattr(inst, "vlcnt", -1)
+    elif counter == "vscnt":
+        v = getattr(inst, "vscnt", -1)
+    else:
+        return None
+    if v is None or v < 0:
+        return None
+    return v
+
+
+def _all_nodes_in_order(subj_graph: Optional[DataflowGraph]):
+    """Yield every node in execution order across all bodies.
+
+    Used by the wait/barrier helpers below to walk cross-body windows
+    (e.g. producer in body=ML-1, consumer in body=ML). Per-body
+    `_graph_nodes` is already in stream order; bodies are enumerated in
+    `_BODY_BUILD_ORDER` which matches SchedulePosition.loop_index ordering,
+    so concatenating yields a globally-correct stream.
+    """
+    for label in _BODY_BUILD_ORDER:
+        cap = subj_graph.captures.get(label) if subj_graph is not None else None
+        if cap is None or not hasattr(cap, '_graph_nodes'):
+            continue
+        for node in cap._graph_nodes:
+            yield node
+
+
+def waits_in_window(
+    subj_graph: DataflowGraph,
+    start: SchedulePosition,
+    end: SchedulePosition,
+    *,
+    counter: Optional[str] = None,
+    exclude_counter: Optional[str] = None,
+) -> List[GraphNode]:
+    """Return SWaitCnt nodes (as GraphNodes) whose position is in [start, end)
+    and whose counter field constrains the requested counter.
+
+    Walks across bodies via `subj_graph.captures` so cross-body windows
+    (producer in body=ML-1, consumer in body=ML) include SWaits from
+    every body that overlaps the window.
+
+    Either `counter` or `exclude_counter` may be passed, not both. If both
+    are None, returns all SWaits in the window regardless of counter.
+    """
+    if counter is not None and exclude_counter is not None:
+        raise ValueError("counter and exclude_counter are mutually exclusive")
+    out = []
+    for node in _all_nodes_in_order(subj_graph):
+        if node.category != SWAIT_CATEGORY:
+            continue
+        if not (start <= node.position < end):
+            continue
+        if counter is not None:
+            if _swait_drains(node, counter) is None:
+                continue
+        if exclude_counter is not None:
+            if _swait_drains(node, exclude_counter) is not None:
+                # The wait DOES constrain the excluded counter — skip.
+                continue
+        out.append(node)
+    return out
+
+
+def barriers_in_window(
+    subj_graph: DataflowGraph, start: SchedulePosition, end: SchedulePosition
+) -> List[GraphNode]:
+    """Return SBarrier nodes whose position is in (start, end) — exclusive on
+    both ends. A barrier at the producer's position doesn't cover the producer;
+    a barrier at the consumer's position doesn't precede the consumer.
+
+    Walks across bodies for the same reason as waits_in_window.
+    """
+    out = []
+    for node in _all_nodes_in_order(subj_graph):
+        if node.category != SBARRIER_CATEGORY:
+            continue
+        if start < node.position < end:
+            out.append(node)
+    return out
+
+
+def _class_tag(inst) -> str:
+    """Return the stable class tag
+    (LR/LW/GR/MFMA/SWAIT/SBARRIER/SNOP/SSETPRIO) for an instruction.
+    Used as the first element of the identity tuple so diagnostic
+    categorization works without parsing the render-string.
+
+    SNop and SSetPrior are recognized here so that the production capture
+    path — which may end up assigning category="UNKNOWN" (via
+    `_captureSubIterToBuilder`'s fallback) when an instruction is neither
+    in the id-map nor matched by the explicit isinstance branches — still
+    falls through `_class_tag_from_category(category="UNKNOWN", inst)` to
+    a recognized tag rather than raising
+    `CaptureUnknownInstructionError`. These tags are excluded from the
+    cross-graph data-flow identity set (`build_dataflow_graph` Phase 1)
+    just like SWait/SBarrier.
+    """
+    if _is_lr(inst):
+        return "LR"
+    if _is_lw(inst):
+        return "LW"
+    if _is_gr(inst):
+        return "GR"
+    if _is_mfma(inst):
+        return "MFMA"
+    if _is_swait(inst):
+        return "SWAIT"
+    if _is_sbarrier(inst):
+        return "SBARRIER"
+    if _is_snop(inst):
+        return "SNOP"
+    if _is_ssetprio(inst):
+        return "SSETPRIO"
+    raise CaptureUnknownInstructionError(
+        f"_class_tag: cannot classify instruction class "
+        f"{type(inst).__name__!r}."
+    )
+
+
+def _class_tag_from_category(category, inst) -> str:
+    """Like _class_tag(inst) but consults TaggedInstruction.category first.
+
+    The pure isinstance path is wrong for instructions whose Python class
+    doesn't reflect their scheduler role: F32X TF32 emulation MFMAs in the
+    pack path are real MFMAInstruction objects but are categorized as
+    PackA{u}/PackB{u}. Treating them as cls='MFMA' in the identity tuple
+    causes them to appear as missing main-loop MFMAs in compare_graphs
+    when the two captures see different counts of pack-MFMAs.
+
+    Maps categories to scheduler-role tags so cross-capture comparison
+    discriminates pack-MFMAs from real MFMAs.
+
+    Falls back to _class_tag(inst) when category is None or unrecognized
+    so test sites that pass bare insts (no TaggedInstruction wrapping)
+    keep working.
+    """
+    if category is None:
+        return _class_tag(inst)
+    # Per-tensor / per-iteration suffixes -> scheduler-role tag.
+    if category.startswith(("LRA", "LRB", "LRMXSA", "LRMXSB", "LRMetadata")):
+        return "LR"
+    if category.startswith("LRS"):
+        return "LRS"
+    if category.startswith("LWS"):
+        return "LWS"
+    if category.startswith("LW"):
+        return "LW"
+    if category.startswith("GRInc"):
+        return "GRINC"
+    if category.startswith("GR"):
+        return "GR"
+    if category.startswith("Pack"):
+        return "PACK"
+    if category == "LCC":
+        return "LCC"
+    if category == "SYNC":
+        # _captureSubIterToBuilder lumps SWaitCnt AND SBarrier into category
+        # "SYNC", so we must distinguish them here by class. Without this,
+        # an SBarrier would render as cls='SWAIT' and never match a real
+        # SBARRIER identity in the other graph.
+        return _class_tag(inst)
+    if category == "SNOP":
+        return "SNOP"
+    if category == "SSETPRIO":
+        return "SSETPRIO"
+    if category == "BARRIER":
+        return "SBARRIER"
+    if category == "MFMA":
+        return "MFMA"
+    # Unrecognized category (e.g. UNKNOWN) -> fall back to isinstance.
+    return _class_tag(inst)
+
+
+# =============================================================================
+# --- Stream-position ordering ---
+# =============================================================================
+# The resolver walks producers in stream-position order. SchedulePosition
+# (loop_index, vmfma_index, sub_index) lex-sorts to actual stream order by
+# construction (see SlotKey docstring + commit f06ffc4770), so node.position
+# is the canonical ordering key — no synthetic kind_rank table needed.
+#
+# Two "iter" axes exist in this codebase; do not conflate them:
+#   1. Outer iteration / body — which body the node belongs to
+#      (ml_prev, ml, ngl, nll). Encoded in SchedulePosition.loop_index
+#      and node.body_label. Cross-body comparison happens naturally via
+#      stream-position lex sort (loop_index is the first component).
+#   2. Inner-unroll subiteration ("subiter") — which inner unroll iteration
+#      within a single body. Encoded in category trailing digits (LRA0,
+#      PackB3) for non-MFMA, or in vmfma_index // num_mfma_per_subiter
+#      for MFMA. Computed by _node_subiter.
+#
+# _node_subiter is used by the within-graph same-subiter gate in
+# _classify_edge_coverage (which has no default reference). Both subiter
+# derivations are schedule-invariant per identity (categories and
+# vmfma_indices are kernel-writer-set, identical across captures).
+
+import re as _re
+_TRAILING_DIGITS_RE = _re.compile(r"^(.*?)(\d*)$")
+
+
+def _split_category_iter(category):
+    """Split 'LRA0' -> ('LRA', 0), 'PackB3' -> ('PackB', 3), 'GRA' -> ('GRA', 0).
+
+    Trailing digits become the iteration index; everything before is the
+    base category name. Categories with no trailing digits (e.g. GRA, LWA)
+    return iter=0.
+    """
+    m = _TRAILING_DIGITS_RE.match(category)
+    base, suffix = m.group(1), m.group(2)
+    return base, (int(suffix) if suffix else 0)
+
+
+def _node_subiter(node: GraphNode, num_mfma_per_subiter: int) -> int:
+    """Inner-unroll subiteration index for a graph node.
+
+    "Subiter" = which inner unroll subiteration this node belongs to within
+    its body. NOT the outer loop iteration (those are encoded in
+    SchedulePosition.loop_index and the body label ml_prev / ml / ngl / nll).
+
+    For non-MFMA categories, parsed from the category trailing digits
+    (`PackA0` ⇒ 0). For MFMA, derived from
+    `vmfma_index // num_mfma_per_subiter`. When `num_mfma_per_subiter` is 0
+    (test fixtures that don't set it), MFMA subiter collapses to 0 — the
+    OrderInverted gate then degenerates to "fire on any same-body
+    stream-position inversion".
+    """
+    if node.category == "MFMA":
+        return node.position.vmfma_index // num_mfma_per_subiter if num_mfma_per_subiter else 0
+    return _split_category_iter(node.category)[1]
+
+
+def _identity_for(inst, body_label: str, category=None) -> tuple:
+    """Build a content-based identity tuple for an instruction.
+
+    Format: (class_tag, loop_index, canonical_render).
+
+    Render-string identity (rather than a per-class structured signature
+    of register fields) makes the comparison robust to register-naming
+    variations: an MFMA emitted as
+        v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:...], v[74:75], ...
+    has a stable identity regardless of whether the schedulers happen
+    to spell its inputs symbolically, numerically, or mixed — the
+    rendered assembly is what the GPU sees, and that's what we compare
+    on.
+
+    class_tag (LR/LW/GR/MFMA/SWAIT/SBARRIER/PACK/...) is preserved as the
+    first element so the identity-mismatch diagnostic in compare_graphs can
+    still categorize differences by kind.
+
+    `category` (TaggedInstruction.category) is consulted first when
+    provided; this prevents pack-MFMAs (TF32 emulation MFMAInstruction
+    objects categorized as PackA{u}/PackB{u}) from masquerading as
+    main-loop MFMAs in the identity tuple. When omitted, falls back to
+    pure isinstance-based classification — preserves existing test sites
+    that synthesize bare insts.
+
+    Raises CaptureUnknownInstructionError when an instruction class
+    isn't one of the recognized kinds AND category is None.
+    """
+    loop_idx = BODY_LABEL_TO_LOOP_INDEX[body_label]
+    cls_tag = _class_tag_from_category(category, inst)
+    return (cls_tag, loop_idx, _canonical_render(inst))
+
+
+def _min_issue_quad_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) -> int:
+    """Return the per-instruction quad-cycle issue cost.
+
+    Mirrors `ValidatorInstruction.min_issue_quad_cycles()` from CMSValidator.py:
+        - Default `min_issue_quad_cycles_base = 1` (CMSValidator.py:298, 327-328).
+        - `SNop.min_issue_quad_cycles` adds `wait_state` (CMSValidator.py:645-647).
+    Every other validator dataclass keeps the base cost of 1.
+
+    `profile` defaults to the CDNA 4 arch profile (base = 1). Per-arch
+    overrides for the default issue cost come from
+    `profile.default_issue_quad_cycles`. The SNop wait-state add is
+    arch-independent (the wait_state is encoded in the SNop instruction
+    itself, not the arch).
+
+    With the structural-side simulators removed, this helper is the
+    canonical per-instruction cost table.
+    """
+    if profile is None:
+        p = _DEFAULT_CDNA4_ARCH_PROFILE
+    else:
+        p = profile
+    base = p.default_issue_quad_cycles
+    if rocisa_inst is None:
+        return base
+    if _is_snop(rocisa_inst):
+        # Test-fixture path: _FakeSNop exposes `wait_state` directly.
+        wait_state = getattr(rocisa_inst, "wait_state", None)
+        if wait_state is not None:
+            return base + int(wait_state)
+        # Production rocisa path: SNop stores wait_state as the first param
+        # (matches CMSValidator.py:1058-1060: `snop.getParams()[0]`).
+        get_params = getattr(rocisa_inst, "getParams", None)
+        if callable(get_params):
+            try:
+                params = get_params()
+                if params:
+                    return base + int(params[0])
+            except Exception:
+                pass
+        return base
+    return base
+
+
+def _make_node(
+    tagged_inst: "TaggedInstruction",
+    body_label: str,
+    profile: Optional[ArchProfile] = None,
+) -> GraphNode:
+    inst = tagged_inst.wrapped.rocisa_inst
+    identity = _identity_for(inst, body_label, category=tagged_inst.category)
+    position = make_position(body_label, tagged_inst.slot)
+    name = f"{tagged_inst.category}@{position.vmfma_index}.{position.sub_index}"
+    return GraphNode(
+        identity=identity,
+        position=position,
+        category=tagged_inst.category,
+        rocisa_inst=inst,
+        tagged_inst=tagged_inst,
+        body_label=body_label,
+        name=name,
+        issue_cycles=_min_issue_quad_cycles_for(inst, profile),
+    )
+
+
+# Body order for graph construction. Cross-body queue state persists in the
+# order ML-1 -> ML -> NGL -> NLL (matching hardware execution order).
+_BODY_BUILD_ORDER = (BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL)
+
+
+# -----------------------------------------------------------------------------
+# FIFO simulator + producer-classifier helpers
+# -----------------------------------------------------------------------------
+
+
+def _queue_depth_at(wait_node: GraphNode, producer: GraphNode, subj_graph: DataflowGraph) -> int:
+    """Replay the per-counter FIFO from start of the graph to wait_node.position
+    and return the queue depth at the wait's moment for the producer's counter.
+
+    Walks across all bodies in execution order so cross-body queue state
+    is preserved (matches build_dataflow_graph's persistent-queue model).
+    """
+    counter = counter_for(producer)
+    depth = 0
+    for n in _all_nodes_in_order(subj_graph):
+        if n.position >= wait_node.position:
+            break
+        if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
+            depth += 1
+        elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
+            depth += 1
+        elif n.category == SWAIT_CATEGORY:
+            cap_value = _swait_drains(n, counter)
+            if cap_value is not None and depth > cap_value:
+                # Drain to cap; same as build_dataflow_graph semantics.
+                depth = cap_value
+    return depth
+
+
+def _producer_queue_position(producer: GraphNode, subj_graph: DataflowGraph) -> int:
+    """Return the producer's position in the per-counter FIFO at the moment
+    it joined (zero-indexed from the queue head AT THAT MOMENT). Cross-body
+    aware via _all_nodes_in_order."""
+    counter = counter_for(producer)
+    queue_size = 0
+    for n in _all_nodes_in_order(subj_graph):
+        if n is producer:
+            return queue_size  # producer enters at this index
+        if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
+            queue_size += 1
+        elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
+            queue_size += 1
+        elif n.category == SWAIT_CATEGORY:
+            cap_value = _swait_drains(n, counter)
+            if cap_value is not None and queue_size > cap_value:
+                queue_size = cap_value
+    return queue_size
+
+
+def _wait_drains_producer(wait_node: GraphNode, producer: GraphNode, subj_graph: DataflowGraph) -> bool:
+    """True if `wait_node` drains `producer` — i.e. the wait's counter cap
+    is low enough that the producer's slot in the FIFO falls inside the
+    drained range at the wait's moment.
+
+    Walks the WHOLE-graph stream (cross-body) so a producer in body=ML-1
+    and a wait in body=ML correctly see each other in the simulation —
+    same persistent-queue model as build_dataflow_graph.
+    """
+    counter = counter_for(producer)
+    cap_value = _swait_drains(wait_node, counter)
+    if cap_value is None:
+        return False
+    queue = []        # list of producer GraphNodes
+    drained_ids = set()
+    target_id = id(producer)
+    for n in _all_nodes_in_order(subj_graph):
+        if n.position > wait_node.position:
+            break
+        if counter == "dscnt" and n.category in PRODUCER_CATEGORIES_LDS:
+            queue.append(n)
+        elif counter == "vlcnt" and n.category in PRODUCER_CATEGORIES_GLOBAL:
+            queue.append(n)
+        elif n.category == SWAIT_CATEGORY:
+            cv = _swait_drains(n, counter)
+            if cv is not None:
+                while len(queue) > cv:
+                    drained_ids.add(id(queue.pop(0)))
+    return target_id in drained_ids
+
+
+def _any_drains(waits: List[GraphNode], producer: GraphNode, subj_graph: DataflowGraph) -> bool:
+    return any(_wait_drains_producer(w, producer, subj_graph) for w in waits)
+
+
+def _mfma_finish_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) -> int:
+    """Classify an MFMA-shaped rocisa instruction as standard or 4x4 PackMFMA
+    and return the per-arch finish-cycle count.
+
+    The rocisa `MFMAInstruction` C++ class accepts a `variant` list at
+    construction (`[M, N, K, blk]`, e.g. `[4, 4, 4, 16]` for the 4x4 PackMFMA
+    family) but does NOT expose that field as a readable Python attribute via
+    the nanobind binding. The rendered assembly string IS canonical and
+    stable — every MFMA family renders as `..._<M>x<N>x<K>_<dtype>...`. We
+    discriminate the 4x4 family by parsing for the `_4x4x` substring.
+
+    Test fixtures (`_FakeMFMA`) expose a `variant` Python attribute directly
+    (default `[32, 32]` for standard MFMAs; tests pass `[4, 4, 4, ...]` to
+    model PackMFMAs). The attribute path is checked first so fixtures don't
+    have to roundtrip through `str()`.
+
+    `profile` defaults to the CDNA 4 arch profile so the historical call
+    sites (which pass only the rocisa instance) keep returning identical
+    values. Per-arch overrides come from `profile.standard_mfma_finish_cycles`
+    and `profile.mfma_4x4_finish_cycles`.
+    """
+    if profile is None:
+        p = _DEFAULT_CDNA4_ARCH_PROFILE
+    else:
+        p = profile
+    if rocisa_inst is None:
+        return p.standard_mfma_finish_cycles
+    # Fast path: test fixtures expose `variant` directly.
+    variant = getattr(rocisa_inst, "variant", None)
+    if variant is not None:
+        try:
+            m, n = variant[0], variant[1]
+        except (IndexError, TypeError):
+            m = n = None
+        if m == 4 and n == 4:
+            return p.mfma_4x4_finish_cycles
+        if m is not None:
+            return p.standard_mfma_finish_cycles
+    # Production rocisa MFMAInstruction does not expose `variant` as an
+    # attribute — discriminate by parsing the rendered assembly form.
+    try:
+        rendered = str(rocisa_inst)
+    except Exception:
+        return p.standard_mfma_finish_cycles
+    if "_4x4x" in rendered:
+        return p.mfma_4x4_finish_cycles
+    return p.standard_mfma_finish_cycles
+
+
+def _is_mfma_pack_producer(producer: GraphNode) -> bool:
+    """Return True for a 4x4 PackMFMA producer.
+
+    PackMFMAs (TF32 4x4 emulation) are syntactically `MFMAInstruction` rocisa
+    objects but are categorized as `PackA*` / `PackB*` because the macro
+    classifier groups them with the surrounding CVT pack chain. Discrimination:
+    `category.startswith("Pack")` AND `rocisa_inst` is an MFMA-shaped class.
+
+    Used by `_is_mfma_producer` so PackMFMAs route to the quad-cycle gap
+    branch rather than the ALU-immediate-visibility branch — without this
+    discriminator the ALU-producer exemption would fire first and PackMFMA
+    producers would skip timing checks entirely.
+    """
+    if not getattr(producer, "category", "").startswith("Pack"):
+        return False
+    inst = getattr(producer, "rocisa_inst", None)
+    if inst is None:
+        return False
+    return _is_mfma(inst)
+
+
+def _is_mfma_producer(producer: GraphNode) -> bool:
+    """True for any producer subject to MFMA quad-cycle finish-time gating.
+
+    Two shapes:
+      - `category == "MFMA"` — the standard MFMA path (everything but the
+        TF32 4x4 emulation pack chain).
+      - PackMFMA — `category.startswith("Pack")` with an MFMA-shaped rocisa
+        instance. The dispatch in `_classify_edge_coverage` and
+        `diagnose_missing_edge` claims pack-MFMA producers BEFORE the
+        ALU-producer exemption fires.
+    """
+    if getattr(producer, "category", None) == "MFMA":
+        return True
+    return _is_mfma_pack_producer(producer)
+
+
+def _is_cvt_pack_producer(producer: GraphNode) -> bool:
+    """True for a CVTPack producer (TF32 v_cvt_pk_bf16_f32 family).
+
+    CVTPacks are categorized `Pack*` (PackA0/PackA1/PackB0/PackB1/PackA3/
+    PackB3 depending on the surrounding LR group); discrimination here is
+    `category.startswith("Pack")` AND `rocisa_inst` is the
+    `VCvtPkF32toBF16` rocisa class. Used by `_classify_edge_coverage` and
+    `diagnose_missing_edge` so CVTPack-feeding-MFMA edges are routed to
+    `_cvt_to_mfma_gap_ok` BEFORE the ALU-immediate exemption claims them
+    — same shape as the PackMFMA carve-out, but with the CVT class set
+    in place of the MFMA class set.
+
+    The structural-side mirror (`_handle_min_pack_quad_cycles`,
+    `Pack.min_quad_cycles_before_result_used`,
+    `Pack.estimated_quad_cycles_before_result_used`, `estimate_quad_cycles`)
+    has been removed; the graph-side dispatch in
+    `_classify_edge_coverage` is now the only enforcement path for the
+    CVT -> MFMA settle window.
+    """
+    if not getattr(producer, "category", "").startswith("Pack"):
+        return False
+    inst = getattr(producer, "rocisa_inst", None)
+    if inst is None:
+        return False
+    return _is_cvt_pack(inst)
+
+
+def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer: GraphNode) -> int:
+    """Return the exact number of quad-cycles between producer's issue
+    completion and consumer's issue start.
+
+    Replaces the slot-delta + subiter approximation with cycle-exact
+    arithmetic. Originally derived from the (now-removed) structural-side
+    `precompute_issue_times` / `estimate_quad_cycles_precomputed` /
+    `estimate_quad_cycles` simulators in CMSValidator.py; this helper is
+    now the canonical implementation.
+    Walks the captured body's instruction stream from the producer up to
+    (and excluding) the consumer, simulating per-instruction issue
+    accumulation including:
+
+    1. Per-instruction issue cost (`node.issue_cycles`, populated by
+       `_make_node` from `_min_issue_quad_cycles_for`). Default 1; SNop adds
+       wait_state.
+    2. MFMA-only contention: each MFMA's `mfma_free_at = current_issue + 1
+       + finish_cycles` blocks the next MFMA's issue start.
+    3. MFMA type-switch +1 stall: when consecutive MFMAs differ in class
+       (standard vs 4x4 Pack-MFMA) AND the gap-since-last-MFMA is below the
+       producer-class threshold (FROM_STANDARD=5 / FROM_4X4=3), the consumer
+       is delayed by one quad-cycle.
+
+    Returns the gap as `consumer_issue_start - producer_issue_start - 1`
+    (the convention previously used by the deleted
+    `estimate_quad_cycles_precomputed`).
+
+    Cross-body: when producer and consumer live in different captured
+    bodies, the simulator continues across body boundaries in
+    `_BODY_BUILD_ORDER` (ML-1 → ML → NGL → NLL — hardware execution
+    order). Simulator state (current_issue, mfma_free_at, last_mfma_class,
+    last_mfma_issue) persists across boundaries because the bodies issue
+    back-to-back; no extra "body boundary" stall is injected. The
+    cross-body gap is therefore the cumulative sum of intervening
+    instruction issue costs, exactly the same arithmetic the same-body
+    walk uses. This is the unified single source of truth — the
+    cross-iteration distinction is a red herring; the graph lays out
+    instructions in execution order regardless of body membership.
+
+    Falls back to `0` if the body or the producer/consumer cannot be
+    located in the captured stream (defensive — should not happen in
+    well-formed graphs but keeps unit-test scaffolding resilient).
+    """
+    captures = getattr(graph, "captures", None)
+    if not captures:
+        return 0
+
+    # Resolve the per-arch profile from the graph; default = CDNA 4 so
+    # callers that haven't plumbed arch info through get the historical
+    # bit-identical numbers. The simulator below uses
+    # `profile.mfma_4x4_finish_cycles` for MFMA-class discrimination
+    # (rather than the legacy module-scope alias) so per-arch overrides
+    # to the 4x4 finish window don't decouple from the discriminator.
+    profile = _resolve_arch_profile(graph)
+
+    # Producer must always be strictly before consumer in stream order. The
+    # SchedulePosition `__lt__` compares (loop_index, vmfma_index, sub_index)
+    # so this single check covers same-body and cross-body cases uniformly.
+    if not (producer.position < consumer.position):
+        return 0
+
+    # Build the list of bodies to traverse, starting from the producer's
+    # body and continuing forward through `_BODY_BUILD_ORDER` until (and
+    # including) the consumer's body. The simulator state —
+    # `current_issue`, `mfma_free_at`, `last_mfma_class`,
+    # `last_mfma_issue` — is preserved across body boundaries because the
+    # captured bodies issue back-to-back in hardware execution order.
+    # There is no extra "body boundary" stall injected; every
+    # per-instruction cost is already accounted for as we walk each body's
+    # instructions, so the cross-body gap is just the sum of intervening
+    # instruction issue costs.
+    p_body_idx = None
+    c_body_idx = None
+    for i, label in enumerate(_BODY_BUILD_ORDER):
+        if label == producer.body_label:
+            p_body_idx = i
+        if label == consumer.body_label:
+            c_body_idx = i
+    if p_body_idx is None or c_body_idx is None or p_body_idx > c_body_idx:
+        return 0
+
+    p_ti = getattr(producer, "tagged_inst", None)
+    c_ti = getattr(consumer, "tagged_inst", None)
+    p_key = (producer.position.vmfma_index, producer.position.sub_index)
+    c_key = (consumer.position.vmfma_index, consumer.position.sub_index)
+
+    # Walk bodies in execution order. Simulator state persists across
+    # boundaries (single source of truth for cycle gaps regardless of
+    # body membership).
+    mfma_free_at = 0
+    current_issue = 0
+    last_mfma_class = None
+    last_mfma_issue = -1
+    p_issue_start = None
+    c_issue_start = None
+    found_producer = False
+
+    for body_i in range(p_body_idx, c_body_idx + 1):
+        label = _BODY_BUILD_ORDER[body_i]
+        body = captures.get(label)
+        if body is None:
+            continue
+        instructions = getattr(body, "instructions", None)
+        if not instructions:
+            continue
+
+        # In producer's body: locate producer and start the walk at it.
+        # In subsequent bodies: walk from the start. Consumer may live in
+        # any body from producer's onward.
+        start_idx = 0
+        if not found_producer:
+            for i, ti in enumerate(instructions):
+                if ti is p_ti or (
+                        p_ti is None
+                        and getattr(ti, "slot", None) is not None
+                        and (getattr(ti.slot, "mfma_index", None),
+                             getattr(ti.slot, "sequence", None)) == p_key):
+                    start_idx = i
+                    found_producer = True
+                    break
+            if not found_producer:
+                # Producer not in this body — defensive; should not happen.
+                return 0
+
+        # End_idx: where (if at all) the consumer lives in this body.
+        end_idx = len(instructions) - 1
+        consumer_idx_in_body = None
+        if label == consumer.body_label:
+            for i in range(start_idx, len(instructions)):
+                ti = instructions[i]
+                if ti is c_ti or (
+                        c_ti is None
+                        and getattr(ti, "slot", None) is not None
+                        and (getattr(ti.slot, "mfma_index", None),
+                             getattr(ti.slot, "sequence", None)) == c_key):
+                    consumer_idx_in_body = i
+                    end_idx = i
+                    break
+            if consumer_idx_in_body is None:
+                # Consumer expected in this body but not found.
+                return 0
+
+        # Walk start_idx..end_idx with the canonical issue-time simulator.
+        for i in range(start_idx, end_idx + 1):
+            ti = instructions[i]
+            wrapped = getattr(ti, "wrapped", None)
+            inst = getattr(wrapped, "rocisa_inst", None) if wrapped is not None else None
+            is_mfma = inst is not None and _is_mfma(inst)
+            if is_mfma:
+                current_issue = max(current_issue, mfma_free_at)
+                current_mfma_class = _mfma_finish_cycles_for(inst, profile)
+                if last_mfma_class is not None and current_mfma_class != last_mfma_class:
+                    gap = current_issue - last_mfma_issue
+                    # Threshold is producer-class-keyed; thresholds come from
+                    # the resolved arch profile. Discrimination uses the
+                    # profile's own 4x4 finish-cycle value so per-arch
+                    # overrides don't decouple discriminator from threshold.
+                    threshold = (
+                        profile.mfma_type_switch_threshold_from_4x4
+                        if last_mfma_class == profile.mfma_4x4_finish_cycles
+                        else profile.mfma_type_switch_threshold_from_standard
+                    )
+                    if gap < threshold:
+                        current_issue += 1
+                mfma_free_at = current_issue + 1 + current_mfma_class
+                last_mfma_issue = current_issue
+                last_mfma_class = current_mfma_class
+
+            if p_issue_start is None and i == start_idx and label == producer.body_label:
+                p_issue_start = current_issue
+            if consumer_idx_in_body is not None and i == consumer_idx_in_body:
+                c_issue_start = current_issue
+                break
+            # Per-instruction issue cost. Skip lookup for SWait/SBarrier/SNop
+            # whose rocisa instances are not graph nodes — read their cost
+            # directly from `_min_issue_quad_cycles_for`. For graph-tracked
+            # nodes the cost is identical (default base 1) so either path is
+            # cycle-exact.
+            current_issue += _min_issue_quad_cycles_for(inst, profile)
+
+        if c_issue_start is not None:
+            break
+
+    if p_issue_start is None or c_issue_start is None:
+        return 0
+    return c_issue_start - p_issue_start - 1
+
+
+def _quad_cycle_gap_ok(
+    producer: GraphNode,
+    consumer: GraphNode,
+    num_mfma_per_subiter: int = 0,
+    graph: Optional[DataflowGraph] = None,
+) -> Tuple[bool, int, int]:
+    """Verify that enough quad-cycles separate an MFMA producer from its
+    consumer for the producer's result to be visible.
+
+    Returns (ok, expected_quad_cycles, actual_quad_cycles).
+
+    Same-body and cross-body share ONE code path that delegates to
+    `cumulative_issue_cycles`. The hardware MFMA pipeline does not reset
+    at body boundaries — `mfma_free_at` and the type-switch stall carry
+    through — so the cross-body cycle gap is just the same simulator
+    extended over the body boundary. (A previous `body_delta * 1000`
+    cross-body placeholder always returned ok=True regardless of how
+    tight the boundary actually was; do not reintroduce it.)
+    `cumulative_issue_cycles` walks the unified instruction stream
+    across all bodies in `_BODY_BUILD_ORDER`.
+
+    `num_mfma_per_subiter` is retained as a positional parameter for
+    backward compatibility with existing call sites and tests but is no
+    longer consulted (the helper has the body context). `graph` is the
+    DataflowGraph the producer/consumer belong to; when omitted (or when
+    the body can't be located) we degrade gracefully by reporting an
+    `actual` of 0 — strictly conservative, will fail the gap check.
+    """
+    profile = _resolve_arch_profile(graph)
+    finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None), profile)
+    expected = finish
+
+    if graph is None:
+        # No graph passed (degenerate test path): treat as zero-gap. Strict
+        # callers always pass `graph=subj_graph`.
+        return False, expected, 0
+
+    actual = cumulative_issue_cycles(graph, producer, consumer)
+    return actual >= expected, expected, actual
+
+
+def _cvt_to_mfma_gap_ok(
+    producer: GraphNode, consumer: GraphNode, subj_graph: Optional[DataflowGraph]
+) -> Tuple[bool, int, int]:
+    """Verify that enough quad-cycles separate a CVTPack producer from its
+    downstream MFMA consumer for the CVT result to be visible.
+
+    The threshold is fixed at `_QUAD_CYCLES_CVT_BEFORE_MFMA == 2`
+    (CDNA 4 ISA 7.6).
+
+    Returns `(ok, expected, actual)` — same triple shape as
+    `_quad_cycle_gap_ok` so callers can wrap a single
+    `TimingTooCloseFailure(expected, actual)` regardless of the gap kind.
+
+    Same-body and cross-body share ONE code path that delegates to
+    `cumulative_issue_cycles`. WARNING for future reverts: the previous
+    slot-delta formula (`slot_delta * (1 + finish) - 1 + intervening`)
+    was DOUBLE-COUNTING — it charged 1 cycle per slot-INDEX gap AND
+    +intervening for actual instructions in those slots. The cycle-exact
+    walk only counts actual instructions, producing a smaller (more
+    conservative) `actual` for densely-populated streams. A previous
+    `body_delta * 1000` cross-body placeholder is also gone;
+    `cumulative_issue_cycles` walks the unified instruction stream
+    across all bodies in `_BODY_BUILD_ORDER`.
+    """
+    profile = _resolve_arch_profile(subj_graph)
+    expected = profile.cvt_before_mfma_quad_cycles
+
+    if subj_graph is None:
+        return False, expected, 0  # Strict: no graph -> conservative fail.
+
+    actual = cumulative_issue_cycles(subj_graph, producer, consumer)
+    return actual >= expected, expected, actual
+
+
+def _mfma_pack_to_cvt_gap_ok(
+    producer: GraphNode, consumer: GraphNode, subj_graph: Optional[DataflowGraph]
+) -> Tuple[bool, int, int]:
+    """Verify that enough quad-cycles separate a 4x4 PackMFMA producer from
+    its downstream CVTPack (CVT1) consumer for the accumulator to settle.
+
+    The threshold is fixed at `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 == 5`
+    (CDNA 4 ISA 7.6). This is the LARGEST gap among the four
+    section-7.6 quad-cycle constants; the 4x4 MFMA finish-cycle (1) is
+    shorter than the 5-cycle visibility window the CVT1 needs, so this
+    helper enforces a larger min-gap on PackMFMA->CVTPack edges than
+    the bare finish would suggest.
+
+    Returns `(ok, expected, actual)` — same triple shape as
+    `_quad_cycle_gap_ok` and `_cvt_to_mfma_gap_ok` so callers can wrap a
+    single `TimingTooCloseFailure(expected, actual)` regardless of the
+    gap kind.
+
+    Approach: CYCLE-EXACT via `cumulative_issue_cycles`, the same
+    simulator `_quad_cycle_gap_ok` uses. The helper walks the captured
+    stream from the producer to the consumer, accumulating
+    per-instruction issue costs plus MFMA-specific finish-time and
+    type-switch stalls. The structural-side `precompute_issue_times`
+    simulator that this helper originally mirrored has been removed;
+    the graph-side path is now the single source of truth for the
+    PackMFMA -> CVT settle window.
+
+    Same-body and cross-body share the SAME code path. The
+    cross-iteration distinction is a red herring — the graph has all
+    instructions laid out in execution order regardless of which body
+    they belong to, so `cumulative_issue_cycles` (extended to walk
+    across body boundaries in `_BODY_BUILD_ORDER`) is THE function that
+    computes the actual cycle gap. (A previous `body_delta * 1000`
+    always-true placeholder is gone; do not reintroduce it.) Cross-body
+    PackMFMA -> CVT1 edges are enforced with the same 5-quad-cycle
+    threshold as same-body edges.
+    """
+    profile = _resolve_arch_profile(subj_graph)
+    expected = profile.mfma_4x4_before_cvt_quad_cycles
+
+    if subj_graph is None:
+        # Strict: no graph -> conservative fail (cannot compute gap).
+        return False, expected, 0
+
+    actual = cumulative_issue_cycles(subj_graph, producer, consumer)
+    return actual >= expected, expected, actual
+
+
+def _is_alu_producer(producer: GraphNode) -> bool:
+    """Producers whose results are immediately visible (no SWaitCnt drain
+    required, no quad-cycle gap modeled). Includes scalar/vector ALU,
+    GRInc (SAdd-family on SRD), and m0 setters.
+
+    LR/LW (LDS) and GR (vector-memory) producers are NOT ALU — they have
+    real wait counters and live outside this set.
+
+    Two category-vs-instance mismatches exist after wx9.4.4 added the
+    `_GenericALURule` catch-all:
+      - DTL m0 setter: category "GRA"/"GRB" (lives in the GRA emission
+        group) but the rocisa class is SMov/SAddU32 — a scalar ALU op
+        with no vlcnt to drain. Promote to ALU.
+      - TF32 Pack-MFMA: category "PackA0".."PackB3" but the rocisa class
+        is MFMAInstruction. _MFMARule excludes Pack-categorized MFMAs
+        from main-loop MFMA semantics, and _GenericALURule then publishes
+        their reads/writes; the producer behaves as ALU (immediate
+        visibility), not as a 4-cycle-finish main MFMA.
+
+    So: classify by category_first (Pack* / PackMFMA → ALU), then by
+    instance class for the GR-categorized m0 setter, finally fall back
+    to category for cases where rocisa_inst is None (test fixtures).
+
+    A special case carves out the TF32 4x4 PackMFMA: those are
+    categorized `Pack*` but the rocisa class is `MFMAInstruction`, so they
+    DO need the quad-cycle finish-time gap modelled (1 quad-cycle for
+    v_mfma_f32_4x4x4_*). Without the carve-out the ALU-immediate
+    exemption would fire first, the quad-cycle branch would never run
+    for PackMFMA producers, and a same-slot PackMFMA->MFMA acc chain
+    would silently slip past the timing check. PackMFMAs route to the
+    MFMA branch via `_is_mfma_pack_producer`; the rest of the Pack*
+    category (CVT0/CVT1/middle packs / SwapPacks) stays on the ALU
+    exemption.
+    """
+    cat = producer.category
+    if cat.startswith("Pack"):
+        # PackMFMA carve-out: pack-categorized but real MFMA → quad-cycle
+        # finish gating, not ALU-immediate. Other Pack* (CVT/Middle/Swap)
+        # behave as ALU.
+        if _is_mfma_pack_producer(producer):
+            return False
+        return True
+    if cat == "MFMA":
+        return False
+    inst = getattr(producer, "rocisa_inst", None)
+    if inst is not None:
+        if _is_lr(inst) or _is_lw(inst) or _is_gr(inst) or _is_mfma(inst):
+            return False
+        # Real ALU instance regardless of category bucket.
+        return True
+    if cat in PRODUCER_CATEGORIES_LDS or cat in PRODUCER_CATEGORIES_GLOBAL:
+        return False
+    return True
+
+
+def _first_insufficient(
+    waits: List[GraphNode], producer: GraphNode, subj_graph: DataflowGraph
+) -> Optional[GraphNode]:
+    """Return the first wait (in stream order) that does NOT drain the producer
+    despite drainable counter. None if every wait drains, or no wait applies."""
+    for w in waits:
+        if not _wait_drains_producer(w, producer, subj_graph):
+            return w
+    return None
+
+
+def _last_drain(
+    waits: List[GraphNode], producer: GraphNode, subj_graph: DataflowGraph
+) -> Optional[GraphNode]:
+    """Return the latest wait that drained the producer, else None."""
+    drainers = [w for w in waits if _wait_drains_producer(w, producer, subj_graph)]
+    if not drainers:
+        return None
+    return max(drainers, key=lambda w: w.position)
+
+
+# =============================================================================
 # Failure hierarchy — typed scheduling defects with polymorphic formatters
+# =============================================================================
 # =============================================================================
 #
 # Single base class; each concrete subclass owns its formatter via format(capture).

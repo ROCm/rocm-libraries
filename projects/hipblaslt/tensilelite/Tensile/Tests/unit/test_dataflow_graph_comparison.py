@@ -418,7 +418,7 @@ class TestRenderStringIdentity:
         """The identity tuple's third element should be the canonical
         rendered assembly. This is what makes identity robust to
         register-naming variations."""
-        from Tensile.Components.ScheduleCapture import _identity_for
+        from Tensile.Components.CMSValidator import _identity_for
         lr = make_lr(8, 4, 64, slot=0, category="LRA0").wrapped.rocisa_inst
         ident = _identity_for(lr, BODY_LABEL_ML)
         assert ident[0] == "LR"             # class tag
@@ -466,7 +466,8 @@ class TestRenderStringIdentity:
         F32X TF32 emulation pattern: symbolic ValuA_T + numeric scratch +
         symbolic ValuA_X) renders consistently. If both captures emit the
         same inst with the same register identifiers, identities match."""
-        from Tensile.Components.ScheduleCapture import _identity_for, _canonical_render
+        from Tensile.Components.CMSValidator import _identity_for
+        from Tensile.Components.ScheduleCapture import _canonical_render
         from rocisa.instruction import MFMAInstruction
         from rocisa.container import vgpr
         from rocisa.enum import InstType
@@ -522,7 +523,7 @@ class TestRenderStringIdentity:
         With category provided, _identity_for must use the category as the
         discriminator: PackA{u}/PackB{u} -> 'PACK', LRA{u} -> 'LR', etc.
         """
-        from Tensile.Components.ScheduleCapture import (
+        from Tensile.Components.CMSValidator import (
             _identity_for, _class_tag_from_category,
         )
         from rocisa.instruction import MFMAInstruction

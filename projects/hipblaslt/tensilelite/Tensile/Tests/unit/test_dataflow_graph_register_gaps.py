@@ -78,16 +78,16 @@ from Tensile.Components.ScheduleCapture import (
     WrappedInstruction,
     build_dataflow_graph,
     compare_graphs,
-    cumulative_issue_cycles,
     diagnose_missing_edge,
     validate_edge_wait_coverage,
-    _quad_cycle_gap_ok,
-    _cvt_to_mfma_gap_ok,
-    _mfma_pack_to_cvt_gap_ok,
 )
 from Tensile.Components.CMSValidator import (
     OrderInvertedFailure,
     TimingTooCloseFailure,
+    cumulative_issue_cycles,
+    _quad_cycle_gap_ok,
+    _cvt_to_mfma_gap_ok,
+    _mfma_pack_to_cvt_gap_ok,
 )
 
 from dataflow_fixtures import (
@@ -1247,7 +1247,7 @@ class TestMFMAQuadCycleGap:
         Test isolates the dispatch decision: synthesize a TaggedInstruction
         whose category is "PackA0" with an underlying _FakeMFMA, then assert
         `_is_mfma_producer` claims it and `_is_alu_producer` does NOT."""
-        from Tensile.Components.ScheduleCapture import (
+        from Tensile.Components.CMSValidator import (
             _is_alu_producer, _is_mfma_producer, _is_mfma_pack_producer,
         )
         # _FakeMFMA — no getParams(), but _is_mfma() returns True for it
@@ -1418,8 +1418,10 @@ class TestMFMAQuadCycleGap:
         ALU exemption — only the MFMA-consuming edge carries the timing
         constraint."""
         from Tensile.Components.ScheduleCapture import (
-            _is_alu_producer, _is_cvt_pack, _is_cvt_pack_producer,
-            _is_mfma_producer, _classify_edge_coverage,
+            _is_cvt_pack, _classify_edge_coverage,
+        )
+        from Tensile.Components.CMSValidator import (
+            _is_alu_producer, _is_cvt_pack_producer, _is_mfma_producer,
         )
         # Producer: real VCvtPkF32toBF16 wrapped in a Pack*-categorized
         # TaggedInstruction (the production CVT0 emission shape).
@@ -1649,9 +1651,9 @@ class TestMFMAQuadCycleGap:
 
         Mirrors the e7w/35z dispatch-pin shape but for the new or9 branch.
         """
-        from Tensile.Components.ScheduleCapture import (
+        from Tensile.Components.ScheduleCapture import _classify_edge_coverage
+        from Tensile.Components.CMSValidator import (
             _is_mfma_pack_producer, _is_cvt_pack_producer,
-            _classify_edge_coverage,
         )
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))
@@ -3538,14 +3540,14 @@ class TestSSetPriorCoverage:
     def test_ssetprio_class_tag_does_not_raise(self):
         """Pre-fix: `_class_tag(SSetPrior(...))` raised
         CaptureUnknownInstructionError. Post-fix: it returns 'SSETPRIO'."""
-        from Tensile.Components.ScheduleCapture import _class_tag
+        from Tensile.Components.CMSValidator import _class_tag
         assert _class_tag(self._build_ssetprio()) == "SSETPRIO"
 
     def test_ssetprio_class_tag_from_category_routes_explicit_category(self):
         """`_captureSubIterToBuilder` now assigns category="SSETPRIO" to
         bare SSetPrior leaves; `_class_tag_from_category` must route that
         category to the same tag without falling back to `_class_tag`."""
-        from Tensile.Components.ScheduleCapture import _class_tag_from_category
+        from Tensile.Components.CMSValidator import _class_tag_from_category
         inst = self._build_ssetprio()
         assert _class_tag_from_category("SSETPRIO", inst) == "SSETPRIO"
 
@@ -3608,7 +3610,7 @@ class TestSSetPriorCoverage:
         adds it to the issue cost), SSetPrior's first param is the
         priority value — it must NOT be added to the default issue cost.
         Pin the default cost == 1."""
-        from Tensile.Components.ScheduleCapture import (
+        from Tensile.Components.CMSValidator import (
             _min_issue_quad_cycles_for,
         )
         # No arch profile -> default CDNA4 base = 1.
@@ -3639,13 +3641,13 @@ class TestNodeLabelAfterCoverageFix:
             LoopBodyCaptureBuilder,
             SLOT_KIND_MFMA,
             BODY_LABEL_ML,
-            _class_tag_from_category,
-            _identity_for,
             make_position,
         )
         from Tensile.Components.CMSValidator import GraphNode
         from Tensile.Components.CMSValidator import (
             cms_node_label,
+            _class_tag_from_category,
+            _identity_for,
         )
         from rocisa.instruction import SSetPrior
 

@@ -50,8 +50,8 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_NLL,
     FourPartCapture,
     build_dataflow_graph,
-    cumulative_issue_cycles,
 )
+from Tensile.Components.CMSValidator import cumulative_issue_cycles
 
 from dataflow_fixtures import (
     make_capture,
