@@ -76,7 +76,6 @@ from Tensile.Components.ScheduleCapture import (
     SlotKey,
     TaggedInstruction,
     WrappedInstruction,
-    validate_edge_wait_coverage,
 )
 from Tensile.Components.CMSValidator import (
     OrderInvertedFailure,
@@ -88,6 +87,7 @@ from Tensile.Components.CMSValidator import (
     build_dataflow_graph,
     compare_graphs,
     diagnose_missing_edge,
+    validate_edge_wait_coverage,
 )
 
 from dataflow_fixtures import (
@@ -1130,7 +1130,7 @@ class TestMFMAQuadCycleGap:
         )
 
         with patch(
-            "Tensile.Components.ScheduleCapture._classify_edge_coverage",
+            "Tensile.Components.CMSValidator._classify_edge_coverage",
             return_value=[],
         ):
             mutated_failures = validate_edge_wait_coverage(g)
@@ -1417,11 +1417,10 @@ class TestMFMAQuadCycleGap:
         feeding a non-MFMA consumer (e.g. another Pack) must STILL hit the
         ALU exemption — only the MFMA-consuming edge carries the timing
         constraint."""
-        from Tensile.Components.ScheduleCapture import (
-            _is_cvt_pack, _classify_edge_coverage,
-        )
+        from Tensile.Components.ScheduleCapture import _is_cvt_pack
         from Tensile.Components.CMSValidator import (
             _is_alu_producer, _is_cvt_pack_producer, _is_mfma_producer,
+            _classify_edge_coverage,
         )
         # Producer: real VCvtPkF32toBF16 wrapped in a Pack*-categorized
         # TaggedInstruction (the production CVT0 emission shape).
@@ -1651,9 +1650,9 @@ class TestMFMAQuadCycleGap:
 
         Mirrors the e7w/35z dispatch-pin shape but for the new or9 branch.
         """
-        from Tensile.Components.ScheduleCapture import _classify_edge_coverage
         from Tensile.Components.CMSValidator import (
             _is_mfma_pack_producer, _is_cvt_pack_producer,
+            _classify_edge_coverage,
         )
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))

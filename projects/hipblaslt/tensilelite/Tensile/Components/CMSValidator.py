@@ -55,7 +55,7 @@ from Tensile.Components.ScheduleCapture import (
     make_position,
     _canonical_render,
     _is_lr, _is_lw, _is_gr, _is_mfma, _is_swait, _is_sbarrier, _is_snop,
-    _is_ssetprio, _is_cvt_pack,
+    _is_ssetprio, _is_cvt_pack, _is_middle_pack,
     _byte_keys_for_resource, _resolve_producers,
 )
 
@@ -2615,6 +2615,344 @@ def diagnose_missing_edge(
     return failures
 
 
+# =============================================================================
+# Self-validation: per-edge wait coverage
+# =============================================================================
+# Edges are reorder-invariant (register-name resolution). The
+# scheduler-correctness check — does the schedule have a covering
+# s_waitcnt that drains each producer before its consumer reads? —
+# is a SEPARATE pass over the graph + the captured stream.
+#
+# Same Failure types the cross-graph diagnose_missing_edge classifier
+# emits — the wiring is just driven differently. Instead of "for each
+# missing edge, classify why subject lacks it", it's "for each edge in
+# the (single) graph, classify whether the schedule covers it".
+#
+# br4.9 moved these from ScheduleCapture.py. They sit next to
+# diagnose_missing_edge (the cross-graph counterpart) so the per-edge
+# classifier dispatch can be inspected side-by-side.
+
+
+def validate_edge_wait_coverage(
+    graph: "DataflowGraph", *, raise_on_unexplained: bool = False
+) -> List["Failure"]:
+    """Validate that every dataflow edge has a covering wait/barrier in
+    the captured stream.
+
+    For each `raw_intrawave` edge: walk the captured stream between
+    producer.position and consumer.position; require an SWaitCnt on the
+    producer's counter (`dscnt` for LR/LW, `vlcnt` for GR) that drains
+    the producer's queue slot. Emits MissingWaitFailure /
+    WaitInsufficientFailure as appropriate. (When other-counter SWaits
+    sit in the window, MissingWaitFailure carries them in
+    `nearby_other_counter_waits`.)
+
+    For each `lr_to_gr_lds_reuse` / `gr_to_lr_lds_reuse` edge: the wait
+    check above plus a barrier-coverage check (mirrors the LDS-reuse
+    barrier requirement); emits MissingBarrierFailure when the wait
+    covers but no barrier follows.
+
+    Same-body OrderInverted (producer.position > consumer.position
+    within the same body) is reported here as well — it indicates the
+    schedule placed the producer after its consumer, which the wait
+    machinery can't recover from.
+
+    `raise_on_unexplained`: if True, raise UnexplainedMissingEdgeError
+    when an edge falls through every classifier branch (defensive —
+    means the classifier missed a case). Default False (production
+    observability prefers a soft synthetic Failure).
+
+    Returns a list of Failure objects. Empty list means "every edge in
+    the graph has a covering wait/barrier in the captured stream".
+    """
+    failures = []
+    for edge in graph.edges:
+        edge_failures = _classify_edge_coverage(edge, graph,
+                                                raise_on_unexplained=raise_on_unexplained)
+        failures.extend(edge_failures)
+    # MiddlePack pair-interleaving is a stream-shape invariant, not an
+    # edge-shape invariant, so it's a sibling pass driven from the same
+    # entry point (rather than per-edge inside _classify_edge_coverage).
+    failures.extend(validate_middle_pack_pair_interleaving(graph))
+    return failures
+
+
+def _classify_edge_coverage(
+    edge: "DataflowEdge", subj_graph: "DataflowGraph", *, raise_on_unexplained: bool = False
+) -> List["Failure"]:
+    """Per-edge coverage classifier — same logic diagnose_missing_edge
+    runs in compare_graphs, but driven from a single graph rather than
+    a missing-edge diff.
+    """
+    p_node = edge.producer
+    c_node = edge.consumer
+
+    # Phase 1 — same-body order check is no longer needed here: Sub-B's
+    # per-byte latest-writer resolver only emits edges where producer is
+    # before consumer in stream order. Within-graph OrderInverted detection
+    # is therefore impossible by construction; the cross-graph classifier
+    # in diagnose_missing_edge owns OrderInverted detection (with default
+    # positions for diagnostics).
+
+    # 4x4 PackMFMA-as-producer feeding CVTPack-as-consumer: 5-quad-cycle
+    # settle window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`).
+    # The structural-side mirror was removed; this dispatch is now the
+    # only enforcement path. Must run BEFORE the generic
+    # `_is_mfma_producer` branch below: PackMFMA producers are claimed by
+    # `_is_mfma_producer` and would otherwise route through
+    # `_quad_cycle_gap_ok`, whose threshold for 4x4 PackMFMAs
+    # (`_mfma_finish_cycles_for == 1`) is too weak by 4 quad-cycles
+    # versus the 5-cycle CVT1 visibility window.
+    p_label = cms_node_label(p_node, _body_for_node(subj_graph, p_node))
+    c_label = cms_node_label(c_node, _body_for_node(subj_graph, c_node))
+    iter_delta = _cms_iter_delta(p_node, c_node)
+
+    if (_is_mfma_pack_producer(p_node)
+            and _is_cvt_pack_producer(c_node)):
+        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+            p_node, c_node, subj_graph)
+        if not ok:
+            return [TimingTooCloseFailure(
+                producer=p_label,
+                consumer=c_label,
+                iter_delta=iter_delta,
+                expected_quad_cycles=expected,
+                actual_quad_cycles=actual,
+            )]
+        return []
+
+    # MFMA-as-producer: gated by quad-cycle issue timing rather than
+    # SWaitCnt (see diagnose_missing_edge). An explicit gap check fires.
+    # Dispatch is via `_is_mfma_producer` (rather than `category == "MFMA"`)
+    # so PackMFMAs (categorized Pack* but rocisa MFMAInstruction) reach
+    # this branch instead of getting silently exempted by
+    # `_is_alu_producer` below.
+    if _is_mfma_producer(p_node):
+        nmps = subj_graph.num_mfma_per_subiter
+        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
+        if not ok:
+            return [TimingTooCloseFailure(
+                producer=p_label,
+                consumer=c_label,
+                iter_delta=iter_delta,
+                expected_quad_cycles=expected,
+                actual_quad_cycles=actual,
+            )]
+        return []
+
+    # CVTPack-as-producer feeding MFMA-as-consumer: governed by the
+    # `_QUAD_CYCLES_CVT_BEFORE_MFMA` (= 2) settle window from CDNA 4 ISA
+    # section 7.6. The structural-side mirror was removed; this dispatch
+    # is now the only enforcement path. Must run BEFORE the ALU-immediate
+    # exemption below — CVTPacks are categorized `Pack*` and
+    # `_is_alu_producer` would otherwise silently absorb them and skip
+    # the gap check entirely (same dispatch-order constraint as the
+    # PackMFMA carve-out above). Restricted to MFMA consumers: a CVTPack
+    # feeding a non-MFMA consumer (e.g. another Pack or VXor that uses
+    # the converted result for something other than an MFMA operand load)
+    # carries no quad-cycle constraint — fall through to the ALU
+    # exemption in that case.
+    if _is_cvt_pack_producer(p_node) and _is_mfma_producer(c_node):
+        ok, expected, actual = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
+        if not ok:
+            return [TimingTooCloseFailure(
+                producer=p_label,
+                consumer=c_label,
+                iter_delta=iter_delta,
+                expected_quad_cycles=expected,
+                actual_quad_cycles=actual,
+            )]
+        return []
+
+    # ALU-as-producer: results are immediately visible; no wait counter
+    # applies. Within-graph order inversions were already handled above.
+    if _is_alu_producer(p_node):
+        return []
+
+    # Phase 2 — wait coverage.
+    expected_counter = counter_for(p_node)
+    waits = waits_in_window(subj_graph, p_node.position, c_node.position,
+                            counter=expected_counter)
+    waits_other = waits_in_window(subj_graph, p_node.position, c_node.position,
+                                  exclude_counter=expected_counter)
+
+    failures = []
+    wait_failure_emitted = False
+
+    if not waits:
+        # See note in _classify_edge_coverage's MissingWaitFailure emit.
+        nearby_indices = tuple(_node_position(w).vmfma_index for w in waits_other)
+        failures.append(MissingWaitFailure(
+            producer=p_label, consumer=c_label,
+            iter_delta=iter_delta,
+            counter_kind=expected_counter,
+            nearby_wait_indices=nearby_indices,
+        ))
+        wait_failure_emitted = True
+    else:
+        if not _any_drains(waits, p_node, subj_graph):
+            insufficient = _first_insufficient(waits, p_node, subj_graph)
+            if insufficient is not None:
+                depth = _queue_depth_at(insufficient, p_node, subj_graph)
+                cv = _swait_drains(insufficient, expected_counter)
+                pos = _producer_queue_position(p_node, subj_graph)
+                failures.append(WaitInsufficientFailure(
+                    producer=p_label, consumer=c_label,
+                    iter_delta=iter_delta,
+                    wait_idx=_node_position(insufficient).vmfma_index,
+                    counter_kind=expected_counter,
+                    counter_value=cv if cv is not None else 0,
+                    queue_depth_at_wait=depth,
+                    producer_position=pos,
+                ))
+            else:
+                failures.append(MissingWaitFailure(
+                    producer=p_label, consumer=c_label,
+                    iter_delta=iter_delta,
+                    counter_kind=expected_counter,
+                ))
+            wait_failure_emitted = True
+
+    # Barrier check for LDS-reuse edges only.
+    if (edge.edge_kind in ("lr_to_gr_lds_reuse", "gr_to_lr_lds_reuse")
+            and not wait_failure_emitted):
+        last_drain = _last_drain(waits, p_node, subj_graph)
+        if last_drain is not None:
+            barriers = barriers_in_window(subj_graph,
+                                          start=last_drain.position,
+                                          end=c_node.position)
+            if not barriers:
+                role = ("must_start_after"
+                        if edge.edge_kind == "lr_to_gr_lds_reuse"
+                        else "needed_by")
+                failures.append(MissingBarrierFailure(
+                    producer=p_label, consumer=c_label,
+                    iter_delta=iter_delta,
+                    role=role,
+                    wait_idx=_node_position(last_drain).vmfma_index,
+                ))
+
+    if not failures and raise_on_unexplained:
+        raise UnexplainedMissingEdgeError(
+            f"validate_edge_wait_coverage: edge {p_node.identity} -> "
+            f"{c_node.identity} (kind={edge.edge_kind}) wasn't classified "
+            f"by any branch. Classifier bug."
+        )
+    return failures
+
+
+# =============================================================================
+# MiddlePack pair-interleaving classifier
+# =============================================================================
+#
+# TF32 emulation packs come in groups of 24, the middle 16 of which compute
+# bf16 error terms via paired (v_cvt_f32_bf16, v_sub_f32) instructions
+# bound to the `MiddlePack` validator dataclass. Each pair shares a
+# temporary VGPR, so the two halves of every pair must appear back-to-back
+# in stream order: no OTHER MiddlePack (from any category) may sit between
+# a pair's leader (even index in its category's middle-16 list) and its
+# consumer (the next, odd index). This works directly off the GraphNode
+# stream — no cross-reference to validator-side dataclasses (would form an
+# import cycle: CMSValidator imports ScheduleCapture, not the other way).
+#
+# Pair-detection algorithm:
+#   1. Walk every node in stream order.
+#   2. Filter to MiddlePack-class nodes (rocisa class in
+#      `_MIDDLE_PACK_CLASS_NAMES`). Group by `category` (PackA0, PackB0,
+#      etc.) — categories partition the pack stream.
+#   3. Within each category, pair MiddlePacks by adjacency in the
+#      category-local stream order: pair (0, 1), (2, 3), (4, 5), ...
+#      Each pair's first element is the LEADER; the second is the
+#      CONSUMER.
+#   4. For each LEADER, scan the GLOBAL MiddlePack stream and find the
+#      first MiddlePack node positioned strictly after the leader. If it
+#      isn't the leader's CONSUMER, emit `OverriddenInputFailure`.
+
+
+def validate_middle_pack_pair_interleaving(graph: "DataflowGraph") -> List["OverriddenInputFailure"]:
+    """Graph-side MiddlePack pair-interleaving check.
+
+    Walks the unified node stream once and enforces the
+    pair-leader/pair-consumer adjacency invariant for TF32 middle-16 packs.
+    Emits zero-or-more `OverriddenInputFailure` for each violating pair
+    (one failure per pair, never per intervening node).
+
+    Returns a list of `OverriddenInputFailure` instances. Empty list
+    means every middle-16 pair was emitted contiguously in the global
+    stream order.
+
+    Coverage parity with the structural rule
+    (CMSValidator.py:`MiddlePack.validate` + `_hook_up_middle_16_pairs`):
+    same pair-detection (adjacency within category-local middle-16 list),
+    same successor scan (next MiddlePack in global stream), same failure
+    shape (`pack` / `expected_next` / `actual_next`).
+    """
+    # 1. Collect MiddlePacks in global stream order.
+    middle_packs_global = []
+    for node in _all_nodes_in_order(graph):
+        inst = getattr(node, "rocisa_inst", None)
+        if inst is None:
+            continue
+        if not _is_middle_pack(inst):
+            continue
+        # Defensive: only honor nodes whose category looks like a Pack* tag
+        # (production resolves PackA0/PackB0/... via PACK_TYPE_MAP). A
+        # MiddlePack rocisa class with a non-Pack category would mean the
+        # category resolver mis-tagged the instruction; ignore rather than
+        # blow up — the resolver is exercised by test_ScheduleCapture.py.
+        if not getattr(node, "category", "").startswith("Pack"):
+            continue
+        middle_packs_global.append(node)
+
+    if not middle_packs_global:
+        return []
+
+    # 2. Bucket by category and determine pair-leader/consumer relationships
+    #    using category-local adjacency.
+    by_category: dict = {}
+    for node in middle_packs_global:
+        by_category.setdefault(node.category, []).append(node)
+
+    # leader_to_consumer[leader_node] = consumer_node
+    leader_to_consumer: dict = {}
+    for cat_nodes in by_category.values():
+        # Pair (0,1), (2,3), ... — same convention as
+        # `_hook_up_middle_16_pairs`. A trailing unpaired leader (odd-length
+        # category list) is ignored: the structural rule never sets
+        # `pair_consumer` for it (and the production middle-16 always comes
+        # in even multiples of 8 per group), so no invariant applies.
+        for i in range(0, len(cat_nodes) - 1, 2):
+            leader_to_consumer[id(cat_nodes[i])] = cat_nodes[i + 1]
+
+    # 3. For each leader, find the next MiddlePack in global stream order
+    #    and compare to expected consumer.
+    failures = []
+    for global_idx, node in enumerate(middle_packs_global):
+        consumer = leader_to_consumer.get(id(node))
+        if consumer is None:
+            continue
+        # Find the next MiddlePack (any category) strictly after this leader
+        # in the global stream.
+        if global_idx + 1 >= len(middle_packs_global):
+            # Leader at end of stream with no follower — the structural
+            # rule's `next_scheduled_middle_16` indexing would IndexError
+            # here too; treat as missing data, not a failure.
+            continue
+        actual_next = middle_packs_global[global_idx + 1]
+        if actual_next is consumer:
+            continue
+        failures.append(OverriddenInputFailure(
+            producer=cms_node_label(node, _body_for_node(graph, node)),
+            consumer=cms_node_label(consumer, _body_for_node(graph, consumer)),
+            iter_delta=_cms_iter_delta(node, consumer),
+            resource="vgpr",
+            intervening_writer=cms_node_label(
+                actual_next, _body_for_node(graph, actual_next),
+            ),
+        ))
+    return failures
+
+
 @dataclass
 class ValidatorInstruction(ABC):
     """Abstract base for all validator instructions."""
@@ -3536,11 +3874,9 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
     # this kernel was scheduled). Validates the CMS schedule against the
     # default via dataflow-graph equality + per-edge wait-coverage.
     if context.default_capture is not None and context.cms_capture is not None:
-        # br4.7 moved build_dataflow_graph; br4.8 moved compare_graphs into
-        # this module. validate_edge_wait_coverage still lives in
-        # ScheduleCapture (br4.9 territory) — pulled in lazily to avoid the
-        # remaining cycle.
-        from Tensile.Components.ScheduleCapture import validate_edge_wait_coverage
+        # br4.7 moved build_dataflow_graph; br4.8 moved compare_graphs;
+        # br4.9 moved validate_edge_wait_coverage into this module. All three
+        # are now same-file calls — no lazy import needed.
         # Attach the per-arch quad-cycle profile derived from this kernel's
         # ISA tuple so the four pair-specific gap helpers consult arch-
         # appropriate finish-cycle / settle-window values. Unknown ISAs
