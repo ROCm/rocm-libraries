@@ -337,12 +337,20 @@ inline bool isMUBUFStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_MUBUFStore);
 }
 
+inline bool isMUBUFAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_MUBUFAtomic);
+}
+
 inline bool isFLATLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATLoad);
 }
 
 inline bool isFLATStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATStore);
+}
+
+inline bool isFLATAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_FLATAtomic);
 }
 
 inline bool isGLOBALLoad(const StinkyInstruction& inst) {
@@ -379,8 +387,7 @@ inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_SMemAtomic) || inst.is(InstFlag::IF_MUBUFAtomic) ||
-           inst.is(InstFlag::IF_FLATAtomic);
+    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst);
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
@@ -397,6 +404,10 @@ inline bool isDSRead(const StinkyInstruction& inst) {
 
 inline bool isDSWrite(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_DSStore);
+}
+
+inline bool isDSAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_DSAtomic);
 }
 
 inline bool isBarrier(const StinkyInstruction& inst) {
@@ -534,6 +545,18 @@ inline bool isTranscendental(const StinkyInstruction& inst) {
 /// Excludes: control flow, memory operations, waitcnt, barrier, delay_alu
 inline bool isScalarALU(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SALU);
+}
+
+/// Check if instruction is an XDL WMMA/SWMMAC instruction.
+/// Excludes FP32-input WMMA (v_wmma_f32_16x16x4_f32).
+inline bool isXDLWMMA(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_WMMA_XDL);
+}
+
+/// Check if instruction is a 64-bit transcendental.
+/// Includes v_rcp_f64, v_rsq_f64, v_sqrt_f64.
+inline bool isTrans64(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_Trans64);
 }
 
 }  // namespace stinkytofu

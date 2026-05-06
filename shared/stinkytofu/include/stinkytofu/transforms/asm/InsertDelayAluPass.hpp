@@ -20,55 +20,18 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#pragma once
 
-MACRO(IF_MUBUFLoad)
-MACRO(IF_MUBUFStore)
-MACRO(IF_MUBUFAtomic)
-MACRO(IF_FLATLoad)
-MACRO(IF_FLATStore)
-MACRO(IF_FLATAtomic)
-MACRO(IF_GLOBALLoad)
-MACRO(IF_GLOBALStore)
-MACRO(IF_TENSORLoadToLds)
-MACRO(IF_SMemLoad)
-MACRO(IF_SMemStore)
-MACRO(IF_SMemAtomic)
-MACRO(IF_DSRead)
-MACRO(IF_DSStore)
-MACRO(IF_DSAtomic)
-MACRO(IF_Barrier)
-MACRO(IF_Branch)
-MACRO(IF_ConditionalBranch)
-MACRO(IF_WaitCnt)
-MACRO(IF_WaitTensorCnt)
+#include <memory>
 
-// ALU instruction classifications for delay_alu and scheduling
-MACRO(IF_VALU)
-MACRO(IF_SALU)
-MACRO(IF_Transcendental)
-MACRO(IF_Trans64)
-MACRO(IF_WMMA_XDL)
-MACRO(IF_VCmp)
-MACRO(IF_VCmpX)
+#include "stinkytofu/Export.hpp"
 
-// Instructions that have side effects but not belongs to any of the
-// following categories:
-// - memory stores, ds writes, branches, barriers, and waitcnts
-MACRO(IF_HasSideEffect)
-MACRO(IF_MFMA)
-MACRO(IF_SMFMA)
-MACRO(IF_WMMA)
-MACRO(IF_SWMMA)
-MACRO(IF_MXWMMA)
+namespace stinkytofu {
+class Pass;
 
-// Arithmetic properties
-MACRO(IF_Commutative)
+/// Inserts s_delay_alu instructions to avoid pipeline stalls on dependent
+/// ALU instructions.
+/// Should run after scheduling and waitcnt insertion to see final instruction order.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertDelayAluPass();
 
-// Implicit special-register access.
-// These flags record implicit reads/writes to SCC, VCC, or EXEC that are NOT
-// encoded as explicit operands.
-MACRO(IF_ImplicitReadVCC)
-MACRO(IF_ImplicitReadEXEC)
-MACRO(IF_ImplicitWriteEXEC)
-MACRO(IF_ImplicitReadSCC)
-MACRO(IF_ImplicitWriteSCC)
+}  // namespace stinkytofu
