@@ -58,6 +58,10 @@ jobs:
         working-directory: shared/stinkytofu
         run: invoke build
 
+      - name: Build (GCC)
+        working-directory: shared/stinkytofu
+        run: invoke build --gcc --build-dir build_gcc --clean
+
       - name: Debug stinkytofu-opt
         working-directory: shared/stinkytofu/build
         run: |
