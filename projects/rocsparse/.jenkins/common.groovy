@@ -54,7 +54,7 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
         testCommand = """#!/usr/bin/env bash
                     set -ex
                     cd ${project.paths.project_build_prefix}/build/release/package
-                    ${stageContext.auxiliary.installPackagesCommand(platform.jenkinsLabel, false, "")}
+                    ${auxiliary.installPackagesCommand(platform.jenkinsLabel, false, "")}
                     cd ../../..
                     testDirs=("Libraries/rocSPARSE")
                     git clone https://github.com/ROCm/rocm-examples.git
