@@ -6,6 +6,7 @@ set(GEMM_MULTI_D_LAYOUT "rcrr;rrrr;crrr;ccrr" CACHE STRING "List of layout for G
 set(GEMM_MULTI_D_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
 set(GEMM_MULTI_D_ELEMENTWISE_FUNCTION "mul"  CACHE STRING "Elementwise function")
 set(GEMM_MULTI_D_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
+set(GEMM_MULTI_D_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 
 option(ENABLE_CCACHE_GEMM_MULTI_D "Enable ccache for GEMM Multi D ops compilation" OFF)
 
@@ -199,6 +200,8 @@ function(build_individual_gemm_multi_d_targets datatype layout)
                 --elementwise_function ${GEMM_MULTI_D_ELEMENTWISE_FUNCTION}
                 --config_json ${json_blob}
                 --gpu_target ${GEMM_MULTI_D_GPU_TARGETS_INDIVIDUAL}
+                --list_kernels
+                ${extra_list_args}
                 --list_kernels
                 ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}

@@ -84,6 +84,30 @@ class GemmMultiDKernelBuilder(GemmKernelBuilder):
                     )
                 )
 
+        # Deterministic sampling when max_instances is set
+        if self.max_instances is not None and len(work_items) > self.max_instances:
+            import hashlib
+            import datetime
+            import random
+
+            if self.seed is not None:
+                effective_seed = self.seed
+            else:
+                date_str = datetime.date.today().isoformat()
+                seed_material = (
+                    f"{date_str}:{self.gpu_target}:{self.datatype}:{self.layout}"
+                )
+                effective_seed = int(
+                    hashlib.sha256(seed_material.encode()).hexdigest(), 16
+                ) % (2**32)
+            rng = random.Random(effective_seed)
+            rng.shuffle(work_items)
+            work_items = work_items[: self.max_instances]
+            print(
+                f"Sampled {len(work_items)} instances from {len(tile_configs) * len(trait_combos)} feasible set "
+                f"(max_instances={self.max_instances}, seed={effective_seed})"
+            )
+
         # Apply RFC-compliant sampling (Sobol + LHS + maximin)
         if self.max_instances is not None and len(work_items) > self.max_instances:
             kernel_dicts = [

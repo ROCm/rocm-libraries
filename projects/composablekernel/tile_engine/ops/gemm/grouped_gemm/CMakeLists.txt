@@ -5,6 +5,7 @@ set(GROUPED_GEMM_DATATYPE "fp16;fp8;bf16;bf8" CACHE STRING "List of datatypes fo
 set(GROUPED_GEMM_LAYOUT "rcr;rrr;crr;ccr" CACHE STRING "List of layout for Grouped GEMM (semicolon-separated)")
 set(GROUPED_GEMM_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
 set(GROUPED_GEMM_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
+set(GROUPED_GEMM_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 option(ENABLE_CCACHE_GROUPED_GEMM "Enable ccache for Grouped GEMM ops compilation" OFF)
 
 # Store the directory path for use in functions
@@ -195,6 +196,7 @@ function(build_individual_grouped_gemm_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target ${GROUPED_GEMM_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels
+                ${extra_list_args}
                 ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
