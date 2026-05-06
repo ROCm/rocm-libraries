@@ -210,22 +210,16 @@ class SchedulerConfig:
     def get_partition_candidates(tileInfoA, tileInfoB) -> list:
         """Return partition candidates as [(partitionSizeM, partitionSizeN), ...].
 
-        Enumerates partition sizes that evenly divide the larger dimension,
-        in descending order (fewer partitions first). Starts with (M, N) —
-        the single-partition case. Only produces Mx* or *xN partitions.
+        For the smaller dimension, uses a single partition (full size).
+        For the larger dimension, tries every size from max down to 1.
         """
         M = tileInfoA.localMMATileGrid[0]
         N = tileInfoB.localMMATileGrid[0]
-        maxDim = max(M, N)
-
-        divisor_sizes = sorted(
-            (maxDim // d for d in range(1, maxDim + 1) if maxDim % d == 0),
-            reverse=True)
 
         if N >= M:
-            candidates = [(M, s) for s in divisor_sizes]
+            candidates = [(M, s) for s in range(N, 0, -1)]
         else:
-            candidates = [(s, N) for s in divisor_sizes]
+            candidates = [(s, N) for s in range(M, 0, -1)]
 
         return candidates
 

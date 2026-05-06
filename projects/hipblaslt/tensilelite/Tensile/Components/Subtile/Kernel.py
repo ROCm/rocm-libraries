@@ -1220,7 +1220,7 @@ def mainLoop(writer, kernel):
   M = tiA.localMMATileGrid[0]
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
-  for partSizeM, partSizeN in candidates:
+    for partSizeM, partSizeN in candidates:
       cfg = MFMASchedulerConfig(
           numMFMATilesM=M,
           numMFMATilesN=N,
@@ -1233,20 +1233,21 @@ def mainLoop(writer, kernel):
           lrSB=lrSBGran,
           grSA=grSAGran,
           grSB=grSBGran,
-          # partitionSizeM=5,
-          # partitionSizeN=7,
-          partitionSizeM=[5],
-          partitionSizeN=[7,5,7],
+          partitionSizeM=partSizeM,
+          partitionSizeN=partSizeN,
           pgr=schedulerPgr,
       )
-      scheduler = LogicalScheduler(cfg)
-      scheduler.build()
+      try:
+          scheduler = LogicalScheduler(cfg)
+          scheduler.build()
 
-      numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
-      if vgprUsed + numVgpr <= vgprBudget:
-          break
-
-  print(f"  partition: M={cfg.partitionSizesM}, N={cfg.partitionSizesN} ({cfg.numPartitions} partitions, {numVgpr} vgprs)")
+          numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+          print(f"  partition: M={cfg.partitionSizesM}, N={cfg.partitionSizesN} ({cfg.numPartitions} partitions, {numVgpr} vgprs)")
+          if vgprUsed + numVgpr <= vgprBudget:
+              break
+      except Exception:
+          continue
+  
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo
