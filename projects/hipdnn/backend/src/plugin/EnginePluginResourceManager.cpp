@@ -98,15 +98,15 @@ bool readIsDynamicShapeEnabled(const GraphDescriptor& graphDesc)
 const hipdnn_data_sdk::utilities::Version&
     computeMinimumPluginApiVersion(const GraphDescriptor& graphDesc)
 {
-    static const hipdnn_data_sdk::utilities::Version sBaselineVersion{std::string_view{"1.0.0"}};
-    static const hipdnn_data_sdk::utilities::Version sPhase1OverrideMinVersion{
+    static const hipdnn_data_sdk::utilities::Version s_sBaselineVersion{std::string_view{"1.0.0"}};
+    static const hipdnn_data_sdk::utilities::Version s_sPhase1OverrideMinVersion{
         hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION};
 
     if(readIsDynamicShapeEnabled(graphDesc))
     {
-        return sPhase1OverrideMinVersion;
+        return s_sPhase1OverrideMinVersion;
     }
-    return sBaselineVersion;
+    return s_sBaselineVersion;
 }
 
 } // namespace
