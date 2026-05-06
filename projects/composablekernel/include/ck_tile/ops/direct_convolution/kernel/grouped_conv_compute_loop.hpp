@@ -14,25 +14,29 @@ namespace direct_conv {
 
 // Shared compute loop for grouped convolution kernels (Fprop and Dgrad).
 //
-// This function implements the main device-side compute loop shared by both
-// 4-channel and 16-channel kernel variants. The only variant-specific behavior
-// is the MFMA intrinsic, abstracted via the MfmaFn callable.
+// This function implements the main device-side compute loop shared by all
+// kernel variants (4c, 8c, 16c). The only variant-specific behavior is
+// the MFMA intrinsic (abstracted via MfmaFn) and the inner loop width
+// (INNER_KW: cfg.kw for standard kernels, 1 for Toeplitz 8c where S is
+// embedded in the MFMA K dimension).
 //
 // Template parameters:
 //   TC             — TileConstants type
 //   cfg            — Config value (kh, kw, direction, epilogue, etc.)
-//   MfmaFn         — callable: fp32x4_t mfma(fp16x4_t weight, fp16x4_t input, fp32x4_t acc)
+//   MfmaFn         — callable: mfma(weight, input, acc) -> fp32x4_t
 //   BlockCoordsT   — variant-specific BlockCoords type
 //   InputLoaderT   — InputLoader type (shared or alias)
 //   WeightLoaderT  — WeightLoader type (variant-specific, has read_from_lds)
 //   OutputWriterT  — OutputWriter or OutputWriterLds type (shared)
+//   INNER_KW       — inner loop width (defaults to cfg.kw; set to 1 for Toeplitz)
 template <typename TC,
           auto cfg,
           typename MfmaFn,
           typename BlockCoordsT,
           typename InputLoaderT,
           typename WeightLoaderT,
-          typename OutputWriterT>
+          typename OutputWriterT,
+          int INNER_KW = cfg.kw>
 __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                                           const _Float16* __restrict__ wei,
                                           _Float16* __restrict__ out,
@@ -140,19 +144,21 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                     il.fetch_tile_to_lds(tic);
                 }
 
-                // Loop over the filter width dimension (S) and 
+                // Loop over the filter width dimension (S) and
                 // accumulate MFMA products for this input row with the corresponding filter weights.
-                static_for<cfg.kw>(
+                // INNER_KW defaults to cfg.kw; for the 8c Toeplitz kernel it is 1
+                // (S is embedded in the MFMA K=32 dimension).
+                static_for<INNER_KW>(
                     [&]<int S>()
                     {
                         // Read one input column strip from LDS into registers.
                         // Each thread reads input[n, y, q+S, :] into input_reg, where q is the horizontal offset of the tile.
                         // All input channes are read and distributed accross the threads in the block.
-                        // Each thread handles 4 channels, so the register is fp16x4_t.
-                        ck_tile::fp16x4_t input_reg;
+                        // The register type is InputLoaderT::input_type (fp16x4_t for 4c/16c, fp16x8_t for 8c Toeplitz).
+                        typename InputLoaderT::input_type input_reg;
                         il.read_from_lds(input_reg, S, toc);
 
-                        // Accumulate the MFMA products for this input column strip 
+                        // Accumulate the MFMA products for this input column strip
                         // with the corresponding filter weights.
                         static_for<cfg.kh>(
                             [&]<int R>()
@@ -218,10 +224,10 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                     il.fetch_tile_to_lds(tic);
                 }
 
-                static_for<cfg.kw>(
+                static_for<INNER_KW>(
                     [&]<int S>()
                     {
-                        ck_tile::fp16x4_t input_reg;
+                        typename InputLoaderT::input_type input_reg;
                         il.read_from_lds(input_reg, S, toc);
 
                         static_for<cfg.kh>(

@@ -361,19 +361,8 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
     if((par.groups % cfg.waves_per_wg) != 0)
         return false;
 
-    // XOR swizzle constraint: BLOCK_Q must be a multiple of BLOCK_C8 for
-    // multi-tile spatial decomposition. BLOCK_C8 = waves_per_wg.
-    // BLOCK_Q = 32 is divisible by BLOCK_C8 only when waves_per_wg divides 32
-    // (i.e., waves_per_wg ∈ {1,2,4,8,16}).
-    if(cfg.swizzle_type == SwizzleType::XOR)
-    {
-        const int block_c8 = cfg.block_c() / 8;
-        const int out_q    = (par.direction == Direction::Dgrad) ? par.w : par.q;
-        if(BLOCK_Q % block_c8 != 0 && out_q > BLOCK_Q)
-        {
-            return false;
-        }
-    }
+    if(cfg.swizzle_type == SwizzleType::XOR && !direct_conv::xor_config_valid(cfg, par))
+        return false;
 
     const bool padding_needed = par.channels_per_group() != 8 || par.filters_per_group() != 8;
     if(padding_needed && par.channels_per_group() % cfg.vector_size != 0)
@@ -390,52 +379,23 @@ inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
 }
 
 // ===================================================================
-// Tile constants derived from the kernel configuration.
+// Tile constants — inherits shared base, adds 8c-specific distributions.
 // ===================================================================
 template <Config cfg>
-struct TileConstants
+struct TileConstants : direct_conv::TileConstantsBase<cfg>
 {
-    static constexpr int GROUP_SIZE   = cfg.group_size();   // 8
-    static constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4;     // 2
-    static constexpr int GROUP_SIZE_8 = GROUP_SIZE / 8;     // 1
+    using Base = direct_conv::TileConstantsBase<cfg>;
 
-    static constexpr int BLOCK_Q = cfg.block_q();           // 32
-
-    // Number of input columns loaded by each workgroup (output columns plus halo).
-    static constexpr int BLOCK_W = BLOCK_Q + (cfg.kw - 1);  // 34
-
-    // uint4 vectors per channel fiber (8 fp16 per uint4).
-    static constexpr int BLOCK_C8 = cfg.block_c() / 8;      // waves_per_wg
-
-    // Total channels per block in fp16 elements.
-    static constexpr int BLOCK_C = BLOCK_C8 * 8;
-
-    // fp16x4 groups per channel fiber.
-    static constexpr int BLOCK_C4 = BLOCK_C / 4;            // 2 * waves_per_wg
-
-    // Number of conv groups processed by each thread block (block_group() * group_size() = total channels).
-    static constexpr int BLOCK_GROUPS = cfg.block_groups();
-
-    // Number of uint4 vectors to store per output row (LDS epilogue path).
-    static constexpr int STORE_VECS = BLOCK_Q * BLOCK_C8;
-
-    // LDS double buffering for input loads.
-    static constexpr int NUM_INPUT_LDS_BUFFERS     = 2;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_C8  = BLOCK_C8 * BLOCK_W;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_C4  = INPUT_LDS_BUFFER_SIZE_C8 * 2;
-    static constexpr int INPUT_LDS_BUFFER_SIZE_FP16 = INPUT_LDS_BUFFER_SIZE_C8 * 8;
-
-    // Tile-level async load constants.
-    static constexpr int NUM_WAVES     = cfg.waves_per_wg;
-    static constexpr int LANES_PER_ROW = WAVE_SIZE / BLOCK_C8;
-    static constexpr int TOTAL_SPATIAL = cfg.block_size() / BLOCK_C8;
-
-    static constexpr int KH_KW = cfg.kh * cfg.kw;
-    static constexpr int KW    = cfg.kw;
-    static constexpr SwizzleType SWIZZLE_TYPE = cfg.swizzle_type;
+    // Bring base constants into scope for use in distributions below.
+    using Base::NUM_WAVES;
+    using Base::BLOCK_C8;
+    using Base::BLOCK_C4;
+    using Base::LANES_PER_ROW;
+    using Base::STORE_VECS;
+    using Base::TOTAL_SPATIAL;
 
     // -----------------------------------------------------------------------
-    // Mfma — tile distribution for MFMA 16x16x32 results.
+    // Mfma — tile distribution for MFMA 16x16x32 results (8c-specific).
     //
     // mfma_f32_16x16x32_f16 result layout:
     //   m = 4*(lane/16) + vec_idx  (0..15)
@@ -475,146 +435,10 @@ struct TileConstants
     };
 
     // -----------------------------------------------------------------------
-    // Input — descriptors and distributions for the input activation tensor.
+    // Output — inherits base; overrides narrow write distribution (8c-specific).
     // -----------------------------------------------------------------------
-    struct Input
+    struct Output : Base::Output
     {
-        using Shared = SharedDescriptors<TileConstants<cfg>>::Input;
-
-        static CK_TILE_DEVICE auto MakeDramReadDescriptor(int hi, int wi, int C_total, int px)
-        {
-            return Shared::MakeDramReadDescriptor(hi, wi, C_total, px);
-        }
-
-        static constexpr auto MakeDramReadTileDistribution()
-        {
-            return Shared::MakeDramReadTileDistribution();
-        }
-
-        static constexpr auto MakeLdsWriteDescriptor()
-        {
-            return Shared::MakeLdsWriteDescriptor();
-        }
-
-        static constexpr auto MakeLdsReadDescriptor()
-        {
-            return Shared::MakeLdsReadDescriptor();
-        }
-
-        template <int VectorSize>
-        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(
-            int hi, int wi, int C_in, int c_per_group, int px)
-        {
-            return Shared::template MakeDramReadDescriptorPadded<VectorSize>(
-                hi, wi, C_in, c_per_group, px);
-        }
-    };
-
-    // -----------------------------------------------------------------------
-    // Weight — descriptors and distributions for the filter weight tensor.
-    // -----------------------------------------------------------------------
-    struct Weight
-    {
-        using Shared = SharedDescriptors<TileConstants<cfg>>::Weight;
-
-        // Weight LDS sizing: block_groups * GROUP_SIZE * kh * kw * GROUP_SIZE_8 uint4.
-        // Each uint4 holds one (k, r, s) tap: all 8 input channels.
-        static constexpr int WEIGHT_LDS_SIZE_UINT2 =
-            cfg.kh * cfg.kw * cfg.block_groups() * GROUP_SIZE * GROUP_SIZE_4;
-        static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
-        static constexpr int NUM_WEIGHT_PASSES =
-            (WEIGHT_LDS_SIZE_UINT4 + cfg.block_size() - 1) / cfg.block_size();
-        static constexpr int WEIGHT_LDS_PADDED_UINT4 = NUM_WEIGHT_PASSES * cfg.block_size();
-        static constexpr int WEIGHT_LDS_READ_K = cfg.block_c();
-
-        static constexpr auto MakeDramReadDescriptor()
-        {
-            return Shared::MakeDramReadDescriptor();
-        }
-        static constexpr auto MakeDramReadTileDistribution()
-        {
-            return Shared::MakeDramReadTileDistribution();
-        }
-        static constexpr auto MakeLdsWriteDescriptor()
-        {
-            return Shared::MakeLdsWriteDescriptor();
-        }
-        static constexpr auto MakeLdsReadDescriptor()
-        {
-            return Shared::MakeLdsReadDescriptor();
-        }
-
-        template <int VectorSize>
-        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int k_per_group, int c_per_group)
-        {
-            return Shared::template MakeDramReadDescriptorPadded<VectorSize>(k_per_group, c_per_group);
-        }
-    };
-
-    // -----------------------------------------------------------------------
-    // Output — descriptors and distributions for the output activation tensor.
-    // -----------------------------------------------------------------------
-    struct Output
-    {
-        using Shared = SharedDescriptors<TileConstants<cfg>>::Output;
-
-        static constexpr int OUTPUT_LDS_BUFFER_SIZE = BLOCK_C8 * BLOCK_Q;
-
-        static constexpr auto MakeLdsWriteDescriptor()
-        {
-            return Shared::MakeLdsWriteDescriptor();
-        }
-
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrow(int ho, int wo, int C)
-        {
-            return Shared::MakeDramWriteDescriptorNarrow(ho, wo, C);
-        }
-
-        // Store distribution for wider LDS reads and DRAM stores.
-        // Maps all block_size threads to [STORE_Q, BLOCK_C8, 8] positions.
-        static constexpr auto MakeDramWriteTileDistributionWide()
-        {
-            return ck_tile::make_static_tile_distribution(
-                ck_tile::tile_distribution_encoding<
-                    ck_tile::sequence<>,
-                    ck_tile::tuple<ck_tile::sequence<NUM_WAVES, LANES_PER_ROW>,
-                                   ck_tile::sequence<BLOCK_C8>,
-                                   ck_tile::sequence<8>>,
-                    ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
-                    ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0>>,
-                    ck_tile::sequence<3>,
-                    ck_tile::sequence<0>,
-                    ck_tile::number<STORE_VECS>>{});
-        }
-
-        static constexpr int STORE_Q = TOTAL_SPATIAL;
-
-        static constexpr auto MakeLdsReadDescriptorWide()
-        {
-            return Shared::template MakeLdsReadDescriptorWide<STORE_Q>();
-        }
-
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorWide(int wo, int C)
-        {
-            return Shared::MakeDramWriteDescriptorWide(wo, C);
-        }
-
-        template <int VectorSize = 1>
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrowPadded(
-            int ho, int wo, int K_total, int k_per_group)
-        {
-            return Shared::template MakeDramWriteDescriptorNarrowPadded<VectorSize>(
-                ho, wo, K_total, k_per_group);
-        }
-
-        template <int VectorSize = 1>
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorWidePadded(
-            int wo, int K_total, int k_per_group)
-        {
-            return Shared::template MakeDramWriteDescriptorWidePadded<VectorSize>(
-                wo, K_total, k_per_group);
-        }
-
         // Tile distribution for DRAM output writes (Toeplitz-specific).
         //
         // 4D: [1, BLOCK_Q=32, BLOCK_C4=2*NUM_WAVES, 4]
@@ -644,44 +468,10 @@ struct TileConstants
 };
 
 // ===================================================================
-// Workgroup-level coordinates derived from blockIdx.
+// Workgroup-level coordinates — shared with all variants.
 // ===================================================================
 template <Config cfg>
-struct BlockCoords
-{
-    int block_n;
-    int block_q;
-    int block_group;
-    int block_k;
-    int block_c8;
-
-    // Separate input/output channel info for padded convolution.
-    // Declared before C/K so member initializer list sees them first.
-    int C_in;
-    int C_out;
-    int block_k_in;
-    int block_k_out;
-
-    int C;
-    int C8;
-    int K;
-
-    __device__ BlockCoords(int groups,
-                           int c_per_group = cfg.group_size(),
-                           int k_per_group = cfg.group_size())
-        : C_in(groups * c_per_group), C_out(groups * k_per_group),
-          C(C_in), C8(C_in / 8), K(C_out)
-    {
-        const int block_q_n_idx = blockIdx.x;
-        block_n     = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
-        block_q     = (block_q_n_idx / cfg.n_fold) * BLOCK_Q;
-        block_group = static_cast<int>(blockIdx.y) * cfg.block_groups();
-        block_k     = block_group * cfg.group_size();
-        block_c8    = block_k / 8;
-        block_k_in  = block_group * c_per_group;
-        block_k_out = block_group * k_per_group;
-    }
-};
+using BlockCoords = direct_conv::BlockCoords<cfg>;
 
 // ===================================================================
 // InputLoader — shared DRAM→LDS, Toeplitz-specific LDS→register read.
@@ -698,6 +488,9 @@ struct BlockCoords
 template <Config cfg>
 struct InputLoaderToeplitz
 {
+    // Register type for MFMA input operand (matches read_from_lds parameter type).
+    using input_type = fp16x8_t;
+
     using TC = TileConstants<cfg>;
 
     // Inherit the shared InputLoader for DRAM→LDS infrastructure.
@@ -770,8 +563,10 @@ struct InputLoaderToeplitz
     }
 
     // Read Toeplitz input from LDS: single fp16x8_t (no S-loop needed).
+    // The S parameter is accepted for interface compatibility with the shared
+    // compute loop but is ignored — the Toeplitz kernel uses INNER_KW=1.
     __device__ __forceinline__ void read_from_lds(
-        fp16x8_t& input_reg, int lds_buffer_index) const
+        fp16x8_t& input_reg, int /*S*/, int lds_buffer_index) const
     {
         const _Float16* base = reinterpret_cast<const _Float16*>(shared_loader.input_lds_ptr)
                                + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
@@ -781,11 +576,16 @@ struct InputLoaderToeplitz
 
 // ===================================================================
 // WeightLoader — shared DRAM→LDS, Toeplitz-specific LDS→register read.
+//
+// Instance-based: weights are stored in member array for access via
+// get<R,S>() / get_transposed<R,S>() (S is ignored — Toeplitz has no S-loop).
 // ===================================================================
 template <Config cfg>
 struct WeightLoader
 {
     using TC = TileConstants<cfg>;
+
+    fp16x8_t weights_[cfg.kh];
 
     template <typename BlockCoords_>
     __device__ static void load_to_lds(const BlockCoords_& bc,
@@ -797,10 +597,9 @@ struct WeightLoader
         direct_conv::weight_load_to_lds<TC, cfg>(bc, weight_lds, wei, c_per_group, k_per_group);
     }
 
-    // GT-specific weight read from LDS — same as v1 (unchanged).
+    // GT-specific weight read from LDS into weights_ array.
     // Each lane reads one fp16x8_t per filter row R.
-    __device__ static void read_from_lds(fp16x8_t (&weights_reg)[cfg.kh],
-                                         uint4* weight_lds)
+    __device__ void read_from_lds(uint4* weight_lds)
     {
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
         const int wave = static_cast<int>(threadIdx.x) / WAVE_SIZE;
@@ -817,7 +616,7 @@ struct WeightLoader
             if(GT::filter_is_zero(row, g * 2))
             {
                 for(int r = 0; r < cfg.kh; r++)
-                    *reinterpret_cast<uint4*>(&weights_reg[r]) = uint4{0, 0, 0, 0};
+                    *reinterpret_cast<uint4*>(&weights_[r]) = uint4{0, 0, 0, 0};
             }
             else
             {
@@ -829,7 +628,7 @@ struct WeightLoader
                     {
                         int idx = (base_k + k) * cfg.kh * cfg.kw * TC::GROUP_SIZE +
                                   r * cfg.kw * TC::GROUP_SIZE + s_dgrad * TC::GROUP_SIZE + c_out;
-                        weights_reg[r][k] = wei_half[idx];
+                        weights_[r][k] = wei_half[idx];
                     }
                 }
             }
@@ -842,7 +641,7 @@ struct WeightLoader
             if(GT::filter_is_zero(row, g * 2))
             {
                 for(int r = 0; r < cfg.kh; r++)
-                    *reinterpret_cast<uint4*>(&weights_reg[r]) = uint4{0, 0, 0, 0};
+                    *reinterpret_cast<uint4*>(&weights_[r]) = uint4{0, 0, 0, 0};
             }
             else
             {
@@ -850,11 +649,19 @@ struct WeightLoader
                 for(int r = 0; r < cfg.kh; r++)
                 {
                     int offset     = k_within_wg * cfg.kh * cfg.kw + r * cfg.kw + s_val;
-                    weights_reg[r] = *reinterpret_cast<const fp16x8_t*>(&weight_lds[offset]);
+                    weights_[r] = *reinterpret_cast<const fp16x8_t*>(&weight_lds[offset]);
                 }
             }
         }
     }
+
+    // Access weight for filter position (R, S). S is ignored (embedded in Toeplitz).
+    template <int R, int S = 0>
+    __device__ __forceinline__ fp16x8_t get() const { return weights_[R]; }
+
+    // Access transposed weight for Dgrad: reverses R index.
+    template <int R, int S = 0>
+    __device__ __forceinline__ fp16x8_t get_transposed() const { return weights_[cfg.kh - 1 - R]; }
 };
 
 // ===================================================================
@@ -870,14 +677,8 @@ template <Config cfg>
 using OutputWriterLds8c = direct_conv::OutputWriterLds<TileConstants<cfg>>;
 
 // ===================================================================
-// Main device function — self-contained Toeplitz compute loop.
-//
-// Unlike the 4c/16c kernels, this does NOT use grouped_conv_compute_loop
-// because the Toeplitz structure has:
-//   - No S-loop (S embedded in MFMA K=32 via GT)
-//   - R-loop only
-//   - fp16x8_t operands (not fp16x4_t)
-//   - mfma_f32_16x16x32_f16 (not Mfma16x16x16)
+// Main device function — delegates to the shared compute loop with
+// INNER_KW=1 (Toeplitz: S embedded in MFMA K=32, no explicit S-loop).
 // ===================================================================
 template <Config cfg>
 __device__ void ck_tile_conv2d_grouped_8c_fp16_nhwc_impl(const _Float16* __restrict__ in,
@@ -899,159 +700,11 @@ __device__ void ck_tile_conv2d_grouped_8c_fp16_nhwc_impl(const _Float16* __restr
     using OutputWriterType =
         std::conditional_t<use_lds_epilogue, OutputWriterLds8c<cfg>, OutputWriter8c<cfg>>;
 
-    // --- Unified LDS buffer ---
-    static constexpr int INPUT_TOTAL = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8;
-    static constexpr int WEIGHT_LDS  = TC::Weight::WEIGHT_LDS_SIZE_UINT4;
-    static constexpr int IO_LDS      = use_lds_epilogue
-                                            ? INPUT_TOTAL + TC::Output::OUTPUT_LDS_BUFFER_SIZE
-                                            : INPUT_TOTAL;
-    static constexpr int UNIFIED_LDS_SIZE = (WEIGHT_LDS > IO_LDS) ? WEIGHT_LDS : IO_LDS;
-    __shared__ uint4 lds_buf[UNIFIED_LDS_SIZE];
-    uint4* input_lds  = lds_buf;
-    uint4* output_lds = lds_buf + INPUT_TOTAL;
-
-    // --- Coordinate setup ---
-    // For Dgrad, the kernel wrapper swaps in/out pointers. We must also swap
-    // c_per_group/k_per_group for BlockCoords, InputLoader, and OutputWriter.
-    // Weight loader always uses original c_per_group/k_per_group.
-    constexpr bool is_dgrad = (cfg.direction == Direction::Dgrad);
-    const int in_cpg  = is_dgrad ? k_per_group : c_per_group;
-    const int out_kpg = is_dgrad ? c_per_group : k_per_group;
-
-    BlockCoords<cfg> bc(groups, in_cpg, out_kpg);
-    if(bc.block_n >= N)
-        return;
-
-    // --- Weight loading (uses start of buffer, before input phase) ---
-    fp16x8_t weights_reg[cfg.kh];
-    WeightLoader<cfg>::load_to_lds(bc, lds_buf, wei, c_per_group, k_per_group);
-    wait_vmcnt<0>();
-    __syncthreads();
-
-    WeightLoader<cfg>::read_from_lds(weights_reg, lds_buf);
-
-    // --- Setup input loader and output writer ---
-    InputLoaderToeplitz<cfg> il(bc, input_lds, in, hi, wi, px, in_cpg);
-    OutputWriterType ow(bc, output_lds, out, ho, wo, out_kpg);
-
-    __syncthreads();
-
-    // --- Prefetch first input row ---
-    il.prefetch_tile_to_lds(0);
-
-    // --- Circular accumulator buffer ---
-    constexpr auto Zero = fp32x4_t{0.f, 0.f, 0.f, 0.f};
-    fp32x4_t acc[cfg.kh];
-    for(int i = 0; i < cfg.kh; i++)
-        acc[i] = Zero;
-
-    int tic = 1;
-    int toc = 0;
-
-    // --- Main loop: iterate over input rows ---
-    for(int y_base = 0; y_base + cfg.kh <= hi; y_base += cfg.kh)
-    {
-        static_for<cfg.kh>(
-            [&]<int Y_LOCAL>()
-            {
-                wait_vmcnt<0>();
-                __syncthreads();
-
-                int y = y_base + Y_LOCAL;
-
-                // Fetch next input row into LDS.
-                if((y + 1) < hi)
-                {
-                    il.fetch_tile_to_lds(tic);
-                }
-
-                // Load input operand: ONE fp16x8_t per lane (no S-loop).
-                fp16x8_t input_reg;
-                il.read_from_lds(input_reg, toc);
-
-                // Accumulate: R-loop only (S is embedded in the Toeplitz structure).
-                static_for<cfg.kh>(
-                    [&]<int R>()
-                    {
-                        constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                        if constexpr(cfg.direction == Direction::Dgrad)
-                            acc[p_idx] = __builtin_amdgcn_mfma_f32_16x16x32_f16(
-                                weights_reg[cfg.kh - 1 - R], input_reg, acc[p_idx], 0, 0, 0);
-                        else
-                            acc[p_idx] = __builtin_amdgcn_mfma_f32_16x16x32_f16(
-                                weights_reg[R], input_reg, acc[p_idx], 0, 0, 0);
-                    });
-
-                tic ^= 1;
-                toc ^= 1;
-
-                // Flush completed output row.
-                constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
-                int p_out             = y + py - (cfg.kh - 1);
-                if(p_out >= 0 && p_out < ho)
-                    ow.flush(acc[P_FLUSH], p_out);
-                acc[P_FLUSH] = Zero;
-            });
-    }
-
-    // --- Remainder: hi % kh leftover rows ---
-    {
-        int y_rem_base = (hi / cfg.kh) * cfg.kh;
-        static_for<cfg.kh>(
-            [&]<int Y_LOCAL>()
-            {
-                if(Y_LOCAL >= hi % cfg.kh)
-                    return;
-                int y = y_rem_base + Y_LOCAL;
-
-                wait_vmcnt<0>();
-                __syncthreads();
-
-                if((y + 1) < hi)
-                {
-                    il.fetch_tile_to_lds(tic);
-                }
-
-                fp16x8_t input_reg;
-                il.read_from_lds(input_reg, toc);
-
-                static_for<cfg.kh>(
-                    [&]<int R>()
-                    {
-                        constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                        if constexpr(cfg.direction == Direction::Dgrad)
-                            acc[p_idx] = __builtin_amdgcn_mfma_f32_16x16x32_f16(
-                                weights_reg[cfg.kh - 1 - R], input_reg, acc[p_idx], 0, 0, 0);
-                        else
-                            acc[p_idx] = __builtin_amdgcn_mfma_f32_16x16x32_f16(
-                                weights_reg[R], input_reg, acc[p_idx], 0, 0, 0);
-                    });
-
-                tic ^= 1;
-                toc ^= 1;
-
-                constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
-                int p_out             = y + py - (cfg.kh - 1);
-                if(p_out >= 0 && p_out < ho)
-                    ow.flush(acc[P_FLUSH], p_out);
-                acc[P_FLUSH] = Zero;
-            });
-    }
-
-    // --- Tail flush: output rows not flushed by the main/remainder loops ---
-    for(int p_out = hi - cfg.kh + 1 + py; p_out < ho; p_out++)
-    {
-        __syncthreads();
-        int p_idx = (p_out - py + cfg.kh) % cfg.kh;
-        fp32x4_t slot;
-        dispatch<cfg.kh>(p_idx,
-                         [&]<int P>()
-                         {
-                             slot   = acc[P];
-                             acc[P] = Zero;
-                         });
-        ow.flush(slot, p_out);
-    }
+    direct_conv::grouped_conv_compute_loop<
+        TC, cfg, Mfma16x16x32,
+        BlockCoords<cfg>, InputLoaderToeplitz<cfg>, WeightLoader<cfg>, OutputWriterType,
+        /*INNER_KW=*/1>(
+        in, wei, out, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, py, px);
 }
 
 // ============================================================================

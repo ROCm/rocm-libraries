@@ -30,6 +30,9 @@ namespace direct_conv {
 template <typename TC, auto cfg>
 struct InputLoader
 {
+    // Register type for MFMA input operand (matches read_from_lds parameter type).
+    using input_type = ck_tile::fp16x4_t;
+
     // Type aliases needed for temporary tile_window construction and MFMA reads.
     using InputDramWindowType = decltype(ck_tile::make_tile_window(
         ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(

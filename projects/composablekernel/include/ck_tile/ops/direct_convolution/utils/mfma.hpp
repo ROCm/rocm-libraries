@@ -20,6 +20,7 @@ namespace ck_tile::direct_conv
 // C[4x4] += A[4xK] * B[Kx4] where K=4.
 struct Mfma4x4x4
 {
+    using input_type = fp16x4_t;
     __device__ fp32x4_t operator()(fp16x4_t weight, fp16x4_t input, fp32x4_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_4x4x4f16(weight, input, acc, 0, 0, 0);
@@ -36,6 +37,7 @@ struct Mfma4x4x4
 // receives 4 fp32 for C. C[16x16] += A[16xK] * B[Kx16] where K=16.
 struct Mfma16x16x16
 {
+    using input_type = fp16x4_t;
     __device__ fp32x4_t operator()(fp16x4_t weight, fp16x4_t input, fp32x4_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_16x16x16f16(weight, input, acc, 0, 0, 0);
@@ -55,6 +57,8 @@ struct Mfma16x16x16
 // as 4 filter taps x 8 channels, so no explicit S-loop is needed.
 struct Mfma16x16x32
 {
+    // fp16x8_t is ck_tile::direct_conv::fp16x8_t (vector_size), matching InputLoaderToeplitz.
+    using input_type = fp16x8_t;
     __device__ fp32x4_t operator()(fp16x8_t weight, fp16x8_t input, fp32x4_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_16x16x32_f16(weight, input, acc, 0, 0, 0);
