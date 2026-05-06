@@ -4,15 +4,26 @@
 #pragma once
 
 #include <string>
+#include <type_traits>
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/numeric/bfloat16.hpp"
+#include "ck_tile/core/numeric/math.hpp"
+#include "ck_tile/core/numeric/type_convert.hpp"
 #include "ck_tile/core/tensor/load_tile.hpp"
+#include "ck_tile/core/tensor/static_distributed_tensor.hpp"
+#include "ck_tile/core/tensor/tile_elementwise.hpp"
+#include "ck_tile/core/tensor/tile_window.hpp"
+#include "ck_tile/core/utility/reduce_operator.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_v3.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_base.hpp"
 #include "ck_tile/host/concat.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_abquant_pipeline_ag_bg_cr_policy.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_quant_pipeline_problem.hpp"
+#include "ck_tile/ops/reduce/block/block_reduce2d.hpp"
+#include "ck_tile/ops/reduce/block/block_reduce2d_problem.hpp"
+#include "ck_tile/ops/reduce/pipeline/reduce2d_problem.hpp"
 
 namespace ck_tile {
 
@@ -84,8 +95,10 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
         remove_cvref_t<decltype(Policy::template GetBlockGemm<QuantizedABQuantProblem>())>;
 
     // A/B DataType gets converted from PkInt4/PkFp4 during loading
-    using OverrideADataType = typename BlockGemm::OverrideADataType;
-    using OverrideBDataType = typename BlockGemm::OverrideBDataType;
+    // using OverrideADataType = typename BlockGemm::OverrideADataType;
+    // using OverrideBDataType = typename BlockGemm::OverrideBDataType;
+    using OverrideADataType = fp8_t;
+    using OverrideBDataType = fp8_t;
 
     static constexpr index_t BlockSize   = Problem::kBlockSize;
     static constexpr index_t MPerBlock   = BlockGemmShape::kM;
@@ -164,13 +177,55 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
     {
         using Base = PipelineImplBase;
 
-        template <typename ADramWindow, typename ABlockTile_, typename AQBlockTile_>
-        CK_TILE_DEVICE static void LoadAndQuantizeATile(ABlockTile_& a_block_tile,
-                                                        AQBlockTile_& aq_block_tile,
-                                                        const ADramWindow& a_dram_window)
+        template <typename ADstStaticTileDist,
+                  typename AQDstStaticTileDistribution,
+                  typename ADramWindow>
+        CK_TILE_DEVICE static auto LoadAndQuantizeATile(
+            static_distributed_tensor<fp8_t, ADstStaticTileDist>& a_block_tile,
+            static_distributed_tensor<AQDataType, AQDstStaticTileDistribution>& aq_block_tile,
+            const ADramWindow& a_dram_window)
         {
             static_assert(std::is_same_v<ADataType, ck_tile::bf16_t>);
-            a_dram_window.load_and_quantize(a_block_tile, aq_block_tile);
+            auto a_tmp = make_static_distributed_tensor<ADataType>(ADstStaticTileDist{});
+            load_tile(a_tmp, a_dram_window);
+
+            // Define the reduce problem for quantization
+            constexpr index_t MWarp = BlockGemmShape::BlockWarps::at(number<0>{});
+            constexpr index_t KWarp = BlockGemmShape::BlockWarps::at(number<2>{});
+
+            using BlockWarps = ck_tile::sequence<MWarp, KWarp>;
+            using BlockTile  = ck_tile::sequence<MPerBlock, KPerBlockAQ>;
+            using WarpTile   = ck_tile::sequence<MPerBlock / MWarp, KPerBlockAQ / KWarp>;
+            using ThreadTile =
+                ck_tile::sequence<BlockGemm::MIterPerWarp, BlockGemm::WarpGemm::kKPerThread>;
+            using ReduceShape = Reduce2dShape<BlockWarps, BlockTile, WarpTile, ThreadTile>;
+
+            // TODO: Computedatatype float?
+            using ReduceProblem = BlockReduce2dProblem<ADataType, AQDataType, ReduceShape>;
+
+            using ReducePolicy = Reduce2dDefaultPolicy;
+
+            auto blockreduce = ReducePolicy::template GetBlockReduce2d<ReduceProblem>();
+            // auto blockreduce_sync = ReducePolicy::template GetBlockReduce2dSync<ReduceProblem>();
+            //  Crosswarp sync should not be needed, as
+            // quant scales are computed for per-warp values
+
+            auto reduce_func = ReduceOp::AbsMax{};
+
+            // auto aq_tmp = blockreduce::template MakeYBlockTile<
+            //     static_distributed_tensor<AQDataType, ADstStaticTileDist>>();
+
+            set_tile(aq_block_tile, ReduceOp::AbsMax::GetIdentityValue<AQDataType>());
+
+            blockreduce(a_tmp, aq_block_tile, reduce_func);
+            // blockreduce_sync(aq_block_tile, reduce_func);
+
+            sweep_tile<decltype(a_tmp)>([&](auto... idx_) {
+                constexpr auto idx_0 = make_tuple(make_tuple(idx_[number<0>{}]...)[number<0>{}]);
+                (..., [&](auto idx) {
+                    a_block_tile(idx) = type_convert<fp8_t>(a_tmp(idx) / aq_block_tile(idx_0));
+                }(idx_));
+            });
         }
 
         template <typename BDramWindow, typename BBlockTile_>
@@ -184,37 +239,38 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
         template <bool HasHotLoop,
                   TailNumber TailNum,
                   typename ADramBlockWindowTmp,
-                  typename BDramBlockWindowTmp,
                   typename AQDramBlockWindowTmp,
+                  typename BDramBlockWindowTmp,
                   typename BQDramBlockWindowTmp,
                   typename AElementFunction,
                   typename BElementFunction>
-        CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
-                                       const AElementFunction& a_element_func,
-                                       const BDramBlockWindowTmp& b_dram_block_window_tmp,
-                                       const BElementFunction& b_element_func,
-                                       const AQDramBlockWindowTmp& aq_dram_block_window_tmp,
-                                       const BQDramBlockWindowTmp& bq_dram_block_window_tmp,
-                                       index_t m,
-                                       index_t n,
-                                       index_t num_loop,
-                                       void* p_smem) const
+        CK_TILE_DEVICE auto
+        operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
+                   const AElementFunction& a_element_func,
+                   const BDramBlockWindowTmp& b_dram_block_window_tmp,
+                   const BElementFunction& b_element_func,
+                   [[maybe_unused]] const AQDramBlockWindowTmp& aq_dram_block_window_tmp,
+                   const BQDramBlockWindowTmp& bq_dram_block_window_tmp,
+                   [[maybe_unused]] index_t m,
+                   index_t n,
+                   index_t num_loop,
+                   void* p_smem) const
         {
+            static_assert(is_null_tile_window<AQDramBlockWindowTmp>,
+                          "AQ Dram Block window is not used with FusedAQuant!");
             static_assert(
                 std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>> &&
                     std::is_same_v<BDataType,
                                    remove_cvref_t<typename BDramBlockWindowTmp::DataType>> &&
-                    std::is_same_v<AQDataType,
-                                   remove_cvref_t<typename AQDramBlockWindowTmp::DataType>> &&
                     std::is_same_v<BQDataType,
                                    remove_cvref_t<typename BQDramBlockWindowTmp::DataType>>,
-                "A/B/AQ/BQ Dram block window should have the same data type as appropriate "
-                "([A|B|AQ|BQ]DataType) defined in Problem definition!");
+                "A/B/BQ Dram block window should have the same data type as appropriate "
+                "([A|B|BQ]DataType) defined in Problem definition!");
 
             constexpr bool is_a_col_major =
                 std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
-            constexpr bool is_aq_col_major =
-                std::is_same_v<AQLayout, tensor_layout::gemm::ColumnMajor>;
+            // constexpr bool is_aq_col_major =
+            //     std::is_same_v<AQLayout, tensor_layout::gemm::ColumnMajor>;
             constexpr bool is_b_row_major = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
             constexpr bool is_bq_row_major =
                 std::is_same_v<BQLayout, tensor_layout::gemm::RowMajor>;
@@ -240,12 +296,13 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                             KPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I1{}])),
                 "Bq block window has incorrect lengths for defined BqLayout!");
 
-            using ADramTileWindowStep  = typename ADramBlockWindowTmp::BottomTensorIndex;
-            using BDramTileWindowStep  = typename BDramBlockWindowTmp::BottomTensorIndex;
-            using AQDramTileWindowStep = typename AQDramBlockWindowTmp::BottomTensorIndex;
+            using ADramTileWindowStep = typename ADramBlockWindowTmp::BottomTensorIndex;
+            using BDramTileWindowStep = typename BDramBlockWindowTmp::BottomTensorIndex;
+            // using AQDramTileWindowStep = typename AQDramBlockWindowTmp::BottomTensorIndex;
             using BQDramTileWindowStep = typename BQDramBlockWindowTmp::BottomTensorIndex;
 
-            // Note: A/B DataType PkInt4/PkFp4 gets converted during loading, before going to LDS
+            // Note: A/B DataType PkInt4/PkFp4 gets converted during loading, before going to
+            // LDS
             auto&& [a_lds_block, b_lds_block] =
                 Base::template GetABLdsTensorViews<OverrideADataType, OverrideBDataType>(p_smem);
 
@@ -258,30 +315,47 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 Base::GetAWindows(a_dram_block_window_tmp, a_lds_block, a_lds_load_tile_distr);
             auto&& [b_copy_dram_window, b_copy_lds_window, b_lds_gemm_window] =
                 Base::GetBWindows(b_dram_block_window_tmp, b_lds_block, b_lds_load_tile_distr);
-            auto aq_copy_dram_window = Base::GetAQDramLoadWindow(aq_dram_block_window_tmp);
             auto bq_copy_dram_window = Base::GetBQDramLoadWindow(bq_dram_block_window_tmp);
 
             using ABlockTileDistr  = decltype(a_copy_dram_window.get_tile_distribution());
             using BBlockTileDistr  = decltype(b_copy_dram_window.get_tile_distribution());
-            using AQBlockTileDistr = decltype(aq_copy_dram_window.get_tile_distribution());
             using BQBlockTileDistr = decltype(bq_copy_dram_window.get_tile_distribution());
 
             using ABlockTile =
                 decltype(make_static_distributed_tensor<OverrideADataType>(ABlockTileDistr{}));
             using BBlockTile =
                 decltype(make_static_distributed_tensor<OverrideBDataType>(BBlockTileDistr{}));
-            using AQBlockTile =
-                decltype(make_static_distributed_tensor<AQDataType>(AQBlockTileDistr{}));
             using BQBlockTile =
                 decltype(make_static_distributed_tensor<BQDataType>(BQBlockTileDistr{}));
 
             auto block_gemm = BlockGemm();
+            // Define the reduce problem for quantization
+            constexpr index_t MWarp = BlockGemmShape::BlockWarps::at(number<0>{});
+            constexpr index_t KWarp = BlockGemmShape::BlockWarps::at(number<2>{});
+
+            using BlockWarps = ck_tile::sequence<MWarp, KWarp>;
+            using BlockTile  = ck_tile::sequence<MPerBlock, KPerBlockAQ>;
+            using WarpTile   = ck_tile::sequence<MPerBlock / MWarp, KPerBlockAQ / KWarp>;
+            using ThreadTile =
+                ck_tile::sequence<BlockGemm::MIterPerWarp, BlockGemm::WarpGemm::kKPerThread>;
+            using ReduceShape = Reduce2dShape<BlockWarps, BlockTile, WarpTile, ThreadTile>;
+
+            // TODO: Computedatatype float?
+            using ReduceProblem = BlockReduce2dProblem<ADataType, AQDataType, ReduceShape>;
+
+            using ReducePolicy = Reduce2dDefaultPolicy;
+
+            constexpr auto blockreduce = ReducePolicy::template GetBlockReduce2d<ReduceProblem>();
+
+            using AQBlockTile = decltype(blockreduce.template MakeYBlockTile<
+                                         static_distributed_tensor<AQDataType, ABlockTileDistr>>());
 
             ABlockTile a_block_tile;
             BBlockTile b_block_tile;
-            AQBlockTile aq_block_tile[2];
+            AQBlockTile aq_block_tile[3];
             BQBlockTile bq_block_tile[2];
-            int currIdx = 0;
+            int AQIdx = 0;
+            int BQIdx = 0;
 
             auto c_block_tile = block_gemm.MakeCBlockTile();
 
@@ -289,13 +363,6 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 is_a_col_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
             constexpr BDramTileWindowStep b_dram_tile_window_step =
                 is_b_row_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
-            // only row_major for AQ
-            const AQDramTileWindowStep aq_dram_tile_window_step =
-                APreshuffleQuant
-                    ? make_array(ck_tile::integer_least_multiple(m, MPerBlock) /
-                                     BlockGemm::WarpGemm::kM,
-                                 0)
-                    : (is_aq_col_major ? make_array(KPerBlockAQ, 0) : make_array(0, KPerBlockAQ));
             const BQDramTileWindowStep bq_dram_tile_window_step =
                 (BPreshuffleQuant)
                     ? make_array(((NPerBlockBQ <= BlockGemmShape::BlockWarps::at(number<1>{}))
@@ -306,20 +373,14 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 : is_bq_row_major ? make_array(KPerBlockBQ, 0)
                                   : make_array(0, KPerBlockBQ);
 
-            // DRAM prefetch (global read 0)
-            // Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
-            // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
-
-            LoadAndQuantizeATile(a_block_tile, aq_block_tile[currIdx], a_copy_dram_window);
+            LoadAndQuantizeATile(a_block_tile, aq_block_tile[AQIdx], a_copy_dram_window);
             move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
             // B tile gets converted to A datatype during loading
             LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
             move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
 
-            // Base::GlobalPrefetch(
-            //     aq_block_tile[currIdx], aq_copy_dram_window, aq_dram_tile_window_step);
             Base::GlobalPrefetch(
-                bq_block_tile[currIdx], bq_copy_dram_window, bq_dram_tile_window_step);
+                bq_block_tile[BQIdx], bq_copy_dram_window, bq_dram_tile_window_step);
 
             tile_elementwise_inout([](auto& c) { c = 0; }, c_block_tile);
 
@@ -347,11 +408,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 Base::LocalPrefill(b_copy_lds_window, b_block_tile, b_element_func);
             }
 
-            // Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
-            // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
-
-            LoadAndQuantizeATile(
-                a_block_tile, aq_block_tile[(currIdx + 1) % 2], a_copy_dram_window);
+            LoadAndQuantizeATile(a_block_tile, aq_block_tile[AQIdx + 1], a_copy_dram_window);
             move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
 
             LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
@@ -401,26 +458,28 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                     // a_dram_tile_window_step);
                     // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window,
                     // b_dram_tile_window_step);
-                    LoadAndQuantizeATile(a_block_tile, aq_block_tile[currIdx], a_copy_dram_window);
+                    LoadAndQuantizeATile(
+                        a_block_tile, aq_block_tile[(AQIdx + 2) % 3], a_copy_dram_window);
                     move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
 
                     LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
                     move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
 
-                    Base::GlobalPrefetch(aq_block_tile[(currIdx + 1) % 2],
-                                         aq_copy_dram_window,
-                                         aq_dram_tile_window_step);
-                    Base::GlobalPrefetch(bq_block_tile[(currIdx + 1) % 2],
+                    // Base::GlobalPrefetch(aq_block_tile[(currIdx + 1) % 2],
+                    //                      aq_copy_dram_window,
+                    //                      aq_dram_tile_window_step);
+                    Base::GlobalPrefetch(bq_block_tile[(BQIdx + 1) % 2],
                                          bq_copy_dram_window,
                                          bq_dram_tile_window_step);
 
                     block_gemm(c_block_tile,
-                               aq_block_tile[currIdx],
-                               bq_block_tile[currIdx],
+                               aq_block_tile[AQIdx],
+                               bq_block_tile[BQIdx],
                                a_lds_gemm_window,
                                b_lds_gemm_window);
 
-                    currIdx = (currIdx + 1) % 2;
+                    AQIdx = (AQIdx + 1) % 3;
+                    BQIdx = (BQIdx + 1) % 2;
 
                     block_sync_lds();
 
@@ -435,27 +494,24 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             if constexpr((TailNum == TailNumber::Full) || (TailNum == TailNumber::Odd))
             {
                 block_gemm(c_block_tile,
-                           aq_block_tile[currIdx],
-                           bq_block_tile[currIdx],
+                           aq_block_tile[AQIdx],
+                           bq_block_tile[BQIdx],
                            a_lds_gemm_window,
                            b_lds_gemm_window);
             }
             else
             {
-                // Base::GlobalPrefetch(aq_block_tile[(currIdx + 1) % 2],
-                //                      aq_copy_dram_window,
-                //                      aq_dram_tile_window_step);
-                Base::GlobalPrefetch(bq_block_tile[(currIdx + 1) % 2],
-                                     bq_copy_dram_window,
-                                     bq_dram_tile_window_step);
+                Base::GlobalPrefetch(
+                    bq_block_tile[(BQIdx + 1) % 2], bq_copy_dram_window, bq_dram_tile_window_step);
                 block_gemm(c_block_tile,
-                           aq_block_tile[currIdx],
-                           bq_block_tile[currIdx],
+                           aq_block_tile[AQIdx],
+                           bq_block_tile[BQIdx],
                            a_lds_gemm_window,
                            b_lds_gemm_window);
                 block_sync_lds();
 
-                currIdx = (currIdx + 1) % 2;
+                AQIdx = (AQIdx + 1) % 3;
+                BQIdx = (BQIdx + 1) % 2;
 
                 if constexpr(is_a_col_major && !is_a_load_tr_v())
                 {
@@ -485,8 +541,8 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 block_gemm.LocalPrefetch(
                     a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
                 block_gemm(c_block_tile,
-                           aq_block_tile[currIdx],
-                           bq_block_tile[currIdx],
+                           aq_block_tile[AQIdx],
+                           bq_block_tile[BQIdx],
                            a_lds_gemm_window,
                            b_lds_gemm_window);
             }
