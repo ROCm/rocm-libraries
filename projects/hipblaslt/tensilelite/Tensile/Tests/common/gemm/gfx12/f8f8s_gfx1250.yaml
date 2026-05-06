@@ -41,6 +41,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  8, 1,  2, 2]
         - AssertFree0ElementMultiple: [2]
@@ -109,6 +111,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1,  2,  1, 1]
         - AssertFree0ElementMultiple: [2]
@@ -175,6 +179,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  2, 1 ]
         - AssertFree0ElementMultiple: [2]
@@ -241,6 +247,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  2, 2,  1, 2 ]
         - DepthU: [64]

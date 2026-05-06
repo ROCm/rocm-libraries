@@ -36,6 +36,8 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - KernelLanguage: ["Assembly"]
         - DepthU: [8, 16]
         - GlobalSplitU: [1]
@@ -75,6 +77,8 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - KernelLanguage: ["Assembly"]
         - DepthU: [8, 16]
         - GlobalSplitU: [1]
@@ -114,6 +118,8 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - KernelLanguage: ["Assembly"]
         - DepthU: [8, 16]
         - GlobalSplitU: [1]
@@ -153,6 +159,8 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - KernelLanguage: ["Assembly"]
         - DepthU: [8, 16]
         - GlobalSplitU: [1]

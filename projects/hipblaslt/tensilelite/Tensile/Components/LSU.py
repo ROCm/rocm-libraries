@@ -547,11 +547,11 @@ class LSUOn(LSU):
             if kernel["ProblemType"]["UseScaleAlphaVec"]:
                 writer.vgprs.addrScaleAlphaVec = writer.vgprPool.checkOut(2, 'addrScaleAlphaVec')
                 module.add(VMovB32( \
-                        dst=vgpr(self.vgprs.addrScaleAlphaVec+0), \
+                        dst=vgpr(writer.vgprs.addrScaleAlphaVec+0), \
                         src=sgpr("AddressScaleAlphaVec+0"), \
                         comment="sgpr -> vgpr"))
                 module.add(VMovB32( \
-                        dst=vgpr(self.vgprs.addrScaleAlphaVec+1), \
+                        dst=vgpr(writer.vgprs.addrScaleAlphaVec+1), \
                         src=sgpr("AddressScaleAlphaVec+1"), \
                         comment="sgpr -> vgpr"))
             if kernel["GlobalSplitU"] != 0:

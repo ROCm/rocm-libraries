@@ -44,6 +44,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - StreamK: [3]
         - GlobalSplitU: [0]
         - WavefrontSize: [32]
@@ -91,6 +93,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - StreamK: [3]
         - GlobalSplitU: [0]
         - WavefrontSize: [32]

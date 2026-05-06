@@ -67,14 +67,9 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
   VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
-<<<<<<< HEAD
   VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
-  GlobalLoadB32, GlobalLoadB64, GlobalLoadB128, GlobalLoadD16B16, GlobalLoadD16HIB16, \
-=======
-  VPrngB32, VReadfirstlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
   GlobalLoadB32, GlobalLoadB64, GlobalLoadB96, GlobalLoadB128, GlobalLoadD16B16, GlobalLoadD16HIB16, \
   GlobalLoadD16U8, GlobalLoadD16HIU8, \
->>>>>>> fb062b7c415 (Fixed compiling issues and added missing global instructions.)
   GlobalStoreB32, GlobalStoreB64, GlobalStoreB128, GlobalStoreD16B16, GlobalStoreD16HIB16
 
 from .Component import Component, TensorDataMover
@@ -10100,7 +10095,7 @@ class KernelWriterAssembly(KernelWriter):
         module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(maxAddrSgpr+0), sgpr(maxAddrSgpr+1),  \
                     sgpr("Sizes%s+%u"%("Sum" if sizeIdxIsSum else "Free", sizeIdx)),  \
                     sgpr("Stride%s%s"%(tc, self.states.indexChars[tP['ia'][-1]])), \
-                    "64b tensor%s size in elements"%tc))
+                    comment="64b tensor%s size in elements"%tc))
         module.add(scalarMultiply64Bpe(maxAddrSgpr, maxAddrSgpr, tP["bpeGR"], tmpSgpr, comment="<- tensor%s size in bytes"%tc))
 
         module.add(SAddU32(
@@ -15448,6 +15443,7 @@ class KernelWriterAssembly(KernelWriter):
   def refineOccupancy(self, kernel, atomic, element, actPCMaxTempSgpr, \
                       gwvw, maxVgprs, ss):
     # Get estimated numVgprAvailable
+    # Use block-aware counting to avoid overestimating with fragmented pools
     # print("Max vgprs =", maxVgprs, self.vgprPool.size(), self.vgprPool.availableBlock(ss.numVgprsPerElement, ss.align))
     numVgprAvailable = self.vgprPool.availableBlockMaxVgpr(maxVgprs, ss.numVgprsPerElement, ss.align)
 
@@ -15471,7 +15467,11 @@ class KernelWriterAssembly(KernelWriter):
       if maxVgprs != maxVgprsN:
         #print("refineOccupancy maxVgprs, new", maxVgprsN, "old", maxVgprs)
         return self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr, gwvw, maxVgprsN, ss)
+      # After growing, try block-aware count again; fall back to simple count
+      # if the pool is too fragmented for aligned blocks
       numVgprAvailable = self.vgprPool.availableBlockMaxVgpr(maxVgprs, ss.numVgprsPerElement, ss.align)
+      if numVgprAvailable == 0:
+        numVgprAvailable = self.vgprPool.available()
 
     # print("NumVgprAvailable", numVgprAvailable)
     if ss.numVgprsPerElement:

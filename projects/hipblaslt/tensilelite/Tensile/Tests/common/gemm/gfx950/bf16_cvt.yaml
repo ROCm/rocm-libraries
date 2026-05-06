@@ -41,6 +41,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
 
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         #        - AssertSummationElementMultiple: [32]
         - MatrixInstruction:
           #          - [16, 16, 16, 1, 1, 8, 8, 2, 2 ]  

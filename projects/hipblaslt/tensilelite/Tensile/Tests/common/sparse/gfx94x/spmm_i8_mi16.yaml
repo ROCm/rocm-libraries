@@ -42,6 +42,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         #- EdgeType: ["ShiftPtr"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]
           - [16, 16, 64, 1,  1,  7, 2,  1, 4 ]
@@ -112,6 +114,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         #- EdgeType: ["ShiftPtr"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]
           - [16, 16, 64, 1,  1,  7, 2,  1, 4 ]
@@ -182,6 +186,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         #- EdgeType: ["ShiftPtr"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]
           - [16, 16, 64, 1,  1,  7, 2,  1, 4 ]
@@ -253,6 +259,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         #- EdgeType: ["ShiftPtr"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]
           - [16, 16, 64, 1,  1,  7, 2,  1, 4 ]

@@ -42,6 +42,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - 1LDSBuffer: [1]
         - DepthU: [ 64 ]
         - ExpandPointerSwap: [False]
@@ -104,6 +106,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - 1LDSBuffer: [1]
         - DepthU: [ 32, 64 ]
         - ExpandPointerSwap: [False]
@@ -146,6 +150,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - 1LDSBuffer: [0, 1]
         - DepthU: [64]
         - ExpandPointerSwap: [False]
@@ -242,6 +248,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - 1LDSBuffer: [1]
         - DepthU: [ 64 ]
         - ExpandPointerSwap: [False]
@@ -504,6 +512,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - 1LDSBuffer: [1]
         - DepthU: [ 32, 64 ]
         - ExpandPointerSwap: [False]
@@ -746,6 +756,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - 1LDSBuffer: [0, 1]
         - DepthU: [64]
         - ExpandPointerSwap: [False]

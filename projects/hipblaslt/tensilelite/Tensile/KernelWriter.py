@@ -35,18 +35,11 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB96, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB192, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, GlobalLoadB128, GlobalLoadB192, GlobalLoadB32, \
-<<<<<<< HEAD
-  GlobalLoadB64, GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
+  GlobalLoadB64, GlobalLoadB96, GlobalLoadD16B16, GlobalLoadD16U8, GlobalLoadD16HIU8, \
+  GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SEndpgm, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, SLShiftRightB32, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32
-=======
-  GlobalLoadB64, GlobalLoadB96, GlobalLoadD16B16, GlobalLoadD16U8, GlobalLoadD16HIU8, \
-  GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, MXMFMAInstruction, \
-  MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
-  SMFMAInstruction, SNop, SEndpgm, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop
->>>>>>> fb062b7c415 (Fixed compiling issues and added missing global instructions.)
+  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32  
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 

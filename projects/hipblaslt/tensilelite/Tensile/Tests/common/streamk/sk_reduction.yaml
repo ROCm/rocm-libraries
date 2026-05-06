@@ -40,6 +40,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ['Assembly']
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16,16,32,1, 1, 8,8, 2,2]
         - 1LDSBuffer: [-1]
@@ -109,6 +111,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ['Assembly']
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16,16,32,1, 1, 8,8, 2,2]
         - 1LDSBuffer: [-1]
@@ -171,6 +175,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ['Assembly']
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16,16,32,1, 1, 2,1, 1,1]
         - WorkGroup:
@@ -237,6 +243,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ['Assembly']
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16,16,4,1, 1, 4,4, 2,2]
         - 1LDSBuffer: [-1]
@@ -297,6 +305,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         # - 1LDSBuffer: [1]
         - 1LDSBuffer: [0]
         - DepthU: [ 64 ]

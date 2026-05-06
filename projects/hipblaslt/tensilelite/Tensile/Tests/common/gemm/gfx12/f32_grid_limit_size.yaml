@@ -35,6 +35,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: [Assembly]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - WavefrontSize: [32]

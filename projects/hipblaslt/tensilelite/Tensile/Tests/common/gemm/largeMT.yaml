@@ -41,6 +41,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1, 5, 16, 4, 1]
           - [16, 16, 16, 1,  1, 4, 16, 4, 1]
@@ -128,6 +130,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1, 8, 8, 2, 2]
           - [16, 16, 16, 1,  1, 8, 9, 2, 2]
@@ -219,6 +223,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 16, 1,  1, 9, 8, 2, 2]
           - [16, 16, 16, 1,  1, 8, 9, 2, 2]
@@ -305,6 +311,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 8, 8, 2, 2]
           - [16, 16, 32, 1,  1, 8, 9, 2, 2]

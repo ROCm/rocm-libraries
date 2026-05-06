@@ -38,6 +38,8 @@ BenchmarkProblems:
         # - EdgeType: ["ShiftPtr"]
         - PrefetchLocalRead: [True]
       ForkParameters:
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
         - MatrixInstruction:
           # - [32, 32, 2, 1, 1, 2,2, 2,2]
           # - [32, 32, 2, 1, 1, 3,3, 2,2]
