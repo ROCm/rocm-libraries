@@ -1105,6 +1105,12 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
+            // True when the current GPU uses preswizzled MX scale layout (gfx950 subtile).
+            // False for architectures that use K-swizzle layout (e.g. gfx1250).
+            bool m_isMXPreswizzleArch = false;
+            // Set by initializeMXDataForFP4 when preswizzled scale was uploaded to gpuInput.valid.
+            bool m_mxPreswizzledA = false;
+            bool m_mxPreswizzledB = false;
         };
 
         template <>
