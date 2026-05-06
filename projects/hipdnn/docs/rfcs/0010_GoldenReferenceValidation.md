@@ -5,24 +5,25 @@
 
 ## Table of Contents
 1. [Executive Summary](#executive-summary)
-2. [Pipeline Overview](#pipeline-overview)
-3. [Step 1: construct -- Build the Graph](#step-1-construct----build-the-graph)
-4. [Step 2: execute-reference -- Run the Reference Executor](#step-2-execute-reference----run-the-reference-executor)
-5. [Step 3: serialize -- Save Inputs and Outputs to Disk](#step-3-serialize----save-inputs-and-outputs-to-disk)
-6. [Step 4: deserialize -- Load Inputs Back](#step-4-deserialize----load-inputs-back)
-7. [Step 5: execute-engine -- Run the Engine Under Test](#step-5-execute-engine----run-the-engine-under-test)
-8. [Step 6: deserialize -- Load Saved Outputs](#step-6-deserialize----load-saved-outputs)
-9. [Step 7: validate -- Compare Engine Output to Saved Output](#step-7-validate----compare-engine-output-to-saved-output)
-10. [Verification Modes](#verification-modes)
-11. [CLI and Configuration](#cli-and-configuration)
-12. [Harness Integration](#harness-integration)
-13. [Data Management with DVC](#data-management-with-dvc)
-14. [CI Integration](#ci-integration)
-15. [Adding New Golden Reference Tests](#adding-new-golden-reference-tests)
-16. [Implementation Phases](#implementation-phases)
-17. [Risk Register](#risk-register)
-18. [Quality Principles](#quality-principles)
-19. [Future Work](#future-work)
+2. [Problem Statement](#problem-statement)
+3. [Pipeline Overview](#pipeline-overview)
+4. [Step 1: construct -- Build the Graph](#step-1-construct----build-the-graph)
+5. [Step 2: execute-reference -- Run the Reference Executor](#step-2-execute-reference----run-the-reference-executor)
+6. [Step 3: serialize -- Save Inputs and Outputs to Disk](#step-3-serialize----save-inputs-and-outputs-to-disk)
+7. [Step 4: deserialize -- Load Inputs Back](#step-4-deserialize----load-inputs-back)
+8. [Step 5: execute-engine -- Run the Engine Under Test](#step-5-execute-engine----run-the-engine-under-test)
+9. [Step 6: deserialize -- Load Saved Outputs](#step-6-deserialize----load-saved-outputs)
+10. [Step 7: validate -- Compare Engine Output to Saved Output](#step-7-validate----compare-engine-output-to-saved-output)
+11. [Verification Modes](#verification-modes)
+12. [CLI and Configuration](#cli-and-configuration)
+13. [Harness Integration](#harness-integration)
+14. [Data Management with DVC](#data-management-with-dvc)
+15. [CI Integration](#ci-integration)
+16. [Adding New Golden Reference Tests](#adding-new-golden-reference-tests)
+17. [Implementation Phases](#implementation-phases)
+18. [Risk Register](#risk-register)
+19. [Quality Principles](#quality-principles)
+20. [Future Work](#future-work)
 
 ---
 
@@ -56,7 +57,9 @@ At its core, the golden reference feature follows these steps across two pipelin
 
 No reference executor runs in CI. The truth was computed once and frozen to disk. The graph is always rebuilt from `buildGraph()` in the test fixture -- the stored `graph.bin` is used only for fingerprint comparison, not for reloading the graph. The diagrams in [Pipeline Overview](#pipeline-overview) show both pipelines visually.
 
-### Why This Is Needed
+---
+
+## Problem Statement
 
 The integration test suite currently validates engine outputs by computing references at runtime via [`CpuReferenceGraphExecutor`](../../test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp) or [`GpuReferenceGraphExecutor`](../../../../dnn-providers/integration-tests/src/harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp). This creates several gaps:
 
