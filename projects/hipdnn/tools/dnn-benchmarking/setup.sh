@@ -127,6 +127,17 @@ rm -rf "$HIPDNN_ROOT/python/build"
 CMAKE_PREFIX_PATH="$INSTALL_DIR" \
     pip install -e "$HIPDNN_ROOT/python"
 
+# 6. Patch the ROCm PyTorch wheel's bundled libhipdnn_backend.so
+# The rocm_sdk wheel preloads its own copy of libhipdnn_backend.so with
+# RTLD_GLOBAL before hipdnn_frontend can load the system copy. Replace
+# the wheel's stale copy with the freshly built one so both torch and
+# hipdnn_frontend use the same library.
+WHEEL_BACKEND=$(find "$VENV_DIR" -path '*/_rocm_sdk_libraries_*/lib/libhipdnn_backend.so' 2>/dev/null | head -1)
+if [ -n "$WHEEL_BACKEND" ] && [ -f "$INSTALL_DIR/lib/libhipdnn_backend.so" ]; then
+    echo "Patching PyTorch wheel's bundled libhipdnn_backend.so..."
+    cp "$INSTALL_DIR/lib/libhipdnn_backend.so" "$WHEEL_BACKEND"
+fi
+
 echo ""
 echo "Setup complete. Activate the virtual environment with:"
 echo "  source $VENV_DIR/bin/activate"
