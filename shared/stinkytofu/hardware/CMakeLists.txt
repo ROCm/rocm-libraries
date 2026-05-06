@@ -27,6 +27,7 @@ set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/generated/GfxArchDefine
 set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/generated/GfxLogicalMaps.cpp" PROPERTIES GENERATED TRUE)
 
 add_library(gfxisa STATIC ${GFX_SOURCES})
+target_compile_options(gfxisa PRIVATE -Wall -Werror)
 
 target_include_directories(gfxisa PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

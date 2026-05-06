@@ -11,6 +11,7 @@ set(SOURCES
 )
 
 add_executable(intrinsic-compiler "${SOURCES}")
+target_compile_options(intrinsic-compiler PRIVATE -Wall -Werror)
 
 # Link against the main stinkytofu library (for CodeGenerator, passes, etc.)
 target_link_libraries(intrinsic-compiler PRIVATE stinkytofu)
@@ -61,6 +62,7 @@ set(TEST_LOADER_SOURCES
 )
 
 add_executable(test_loader "${TEST_LOADER_SOURCES}")
+target_compile_options(test_loader PRIVATE -Wall -Werror)
 
 # Link against the main stinkytofu library
 target_link_libraries(test_loader PRIVATE stinkytofu)
@@ -81,6 +83,7 @@ set(DEMO_AUTO_LOAD_SOURCES
 )
 
 add_executable(demo_auto_load "${DEMO_AUTO_LOAD_SOURCES}")
+target_compile_options(demo_auto_load PRIVATE -Wall -Werror)
 
 # Link against the main stinkytofu library
 target_link_libraries(demo_auto_load PRIVATE stinkytofu)
