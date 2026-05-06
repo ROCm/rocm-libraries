@@ -143,6 +143,50 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
     return solutionCount != 0;
 }
 
+// =============================================================================
+// Workspace size range computation — hybrid query strategy
+// =============================================================================
+//
+// MIOpen exposes two non-allocating, query-only APIs that both report something
+// about workspace requirements, but neither alone gives us the {min, max} range
+// we need for the workspace-size-limit knob:
+//
+//   1. miopenConvolution*GetWorkSpaceSize
+//        Returns the maximum workspace any solver in MIOpen's full applicable
+//        set might need for the problem. This is the same value plan execution
+//        passes to MIOpen at run time, so by construction it is the correct
+//        upper bound: any solver MIOpen actually picks fits within it.
+//
+//   2. miopenConvolution*GetSolutionCount / *GetSolution
+//        Return a subset of applicable solutions sourced from find-db (if a
+//        record exists for this problem) or from a heuristic / TunaNet fallback
+//        otherwise. The header explicitly notes the result "might be based on
+//        heuristics" and recommends Find for consistent performance results.
+//        Each returned miopenConvSolution_t carries a per-solver workspace_size
+//        field, which is reliable for the entries that ARE returned but only
+//        covers the heuristic / find-db subset, NOT the full solver set.
+//
+// There is no miopenConvolution*GetMinWorkSpaceSize. The only way to obtain a
+// true minimum across the full solver set would be to run miopenFind*Algorithm,
+// which requires real device buffers (input, output, workspace) — and the
+// plugin policy is to allocate no device memory for sizing queries. We
+// therefore accept the heuristic-subset minimum from GetSolution as our best
+// non-allocating signal:
+//
+//   * `range.max` comes from GetWorkSpaceSize. Authoritative; matches execution.
+//   * `range.min` is the smallest `workspace_size` among solutions returned by
+//     GetSolution.
+//   * The two APIs use independent code paths; their values are NOT guaranteed
+//     to agree. If `min > max` we log a warning and clamp `min := max`.
+//     Reporting an inverted range would break the IntConstraint min/max
+//     invariant in getCustomKnobs and the value-in-range check in
+//     initializeExecutionSettings.
+//
+// If MIOpen ever exposes a direct minimum-workspace API for the full applicable
+// solver set, this whole helper collapses into a single call alongside
+// GetWorkSpaceSize.
+// =============================================================================
+
 MiopenConvPlanBuilder::WorkspaceSizeRange
     getWorkspaceSizeRangeFwd(const HipdnnMiopenHandle& handle,
                              const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
@@ -153,6 +197,16 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
+    // max: authoritative upper bound from GetWorkSpaceSize — matches execution path.
+    size_t maxWorkspace = 0;
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
+                                                                     params.w().tensorDescriptor(),
+                                                                     params.x().tensorDescriptor(),
+                                                                     params.conv().convDescriptor(),
+                                                                     params.y().tensorDescriptor(),
+                                                                     &maxWorkspace));
+
+    // min: smallest workspace among heuristic/find-db solutions from GetSolution.
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
                                                                      params.w().tensorDescriptor(),
@@ -182,7 +236,6 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                            << returnedSolutionCount << " solutions");
 
     size_t minWorkspace = std::numeric_limits<size_t>::max();
-    size_t maxWorkspace = 0;
     for(const auto& solution : solutions)
     {
         HIPDNN_PLUGIN_LOG_INFO("Convolution Fwd: solution_id="
@@ -190,7 +243,14 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                << static_cast<int>(solution.algorithm) << ", time=" << solution.time
                                << ", workspace_size=" << solution.workspace_size);
         minWorkspace = std::min(minWorkspace, solution.workspace_size);
-        maxWorkspace = std::max(maxWorkspace, solution.workspace_size);
+    }
+
+    if(minWorkspace > maxWorkspace)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("Convolution Fwd: min workspace from GetSolution ("
+                               << minWorkspace << ") > max workspace from GetWorkSpaceSize ("
+                               << maxWorkspace << "); clamping min := max");
+        minWorkspace = maxWorkspace;
     }
 
     HIPDNN_PLUGIN_LOG_INFO("Convolution Fwd: Workspace range: min=" << minWorkspace
@@ -209,6 +269,17 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
+    // max: authoritative upper bound from GetWorkSpaceSize — matches execution path.
+    size_t maxWorkspace = 0;
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
+                                                      params.dy().tensorDescriptor(),
+                                                      params.w().tensorDescriptor(),
+                                                      params.conv().convDescriptor(),
+                                                      params.dx().tensorDescriptor(),
+                                                      &maxWorkspace));
+
+    // min: smallest workspace among heuristic/find-db solutions from GetSolution.
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(
         miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
@@ -239,7 +310,6 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                            << returnedSolutionCount << " solutions");
 
     size_t minWorkspace = std::numeric_limits<size_t>::max();
-    size_t maxWorkspace = 0;
     for(const auto& solution : solutions)
     {
         HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: solution_id="
@@ -247,7 +317,14 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                << static_cast<int>(solution.algorithm) << ", time=" << solution.time
                                << ", workspace_size=" << solution.workspace_size);
         minWorkspace = std::min(minWorkspace, solution.workspace_size);
-        maxWorkspace = std::max(maxWorkspace, solution.workspace_size);
+    }
+
+    if(minWorkspace > maxWorkspace)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("Convolution Bwd: min workspace from GetSolution ("
+                               << minWorkspace << ") > max workspace from GetWorkSpaceSize ("
+                               << maxWorkspace << "); clamping min := max");
+        minWorkspace = maxWorkspace;
     }
 
     HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: Workspace range: min=" << minWorkspace
@@ -266,6 +343,17 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
+    // max: authoritative upper bound from GetWorkSpaceSize — matches execution path.
+    size_t maxWorkspace = 0;
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
+                                                         params.dy().tensorDescriptor(),
+                                                         params.x().tensorDescriptor(),
+                                                         params.conv().convDescriptor(),
+                                                         params.dw().tensorDescriptor(),
+                                                         &maxWorkspace));
+
+    // min: smallest workspace among heuristic/find-db solutions from GetSolution.
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(
         miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
@@ -297,7 +385,6 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                            << returnedSolutionCount << " solutions");
 
     size_t minWorkspace = std::numeric_limits<size_t>::max();
-    size_t maxWorkspace = 0;
     for(const auto& solution : solutions)
     {
         HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: solution_id="
@@ -305,7 +392,14 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                << static_cast<int>(solution.algorithm) << ", time=" << solution.time
                                << ", workspace_size=" << solution.workspace_size);
         minWorkspace = std::min(minWorkspace, solution.workspace_size);
-        maxWorkspace = std::max(maxWorkspace, solution.workspace_size);
+    }
+
+    if(minWorkspace > maxWorkspace)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("Convolution Wrw: min workspace from GetSolution ("
+                               << minWorkspace << ") > max workspace from GetWorkSpaceSize ("
+                               << maxWorkspace << "); clamping min := max");
+        minWorkspace = maxWorkspace;
     }
 
     HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: Workspace range: min=" << minWorkspace
