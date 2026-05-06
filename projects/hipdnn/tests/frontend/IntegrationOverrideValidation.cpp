@@ -214,7 +214,7 @@ class IntegrationOverrideValidation : public IntegrationOverrideValidationBase
 /// RFC §4.2.1 r1: `override_uids`, `override_shapes`, `override_strides`
 /// must all have equal length. The parallel-array overload exposes this rule;
 /// the map overload cannot violate it (the values are constructed in lockstep).
-TEST_F(IntegrationOverrideValidation, Rule1_LengthInconsistency_ArrayForm)
+TEST_F(IntegrationOverrideValidation, Rule1LengthInconsistencyArrayForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule1_LengthInconsistency", dims, packedStrides(dims));
@@ -233,7 +233,7 @@ TEST_F(IntegrationOverrideValidation, Rule1_LengthInconsistency_ArrayForm)
 
 // ----------------------- Rule 2 — Unknown UID -----------------------
 
-TEST_F(IntegrationOverrideValidation, Rule2_UnknownUid_ArrayForm)
+TEST_F(IntegrationOverrideValidation, Rule2UnknownUidArrayForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule2_UnknownUid", dims, packedStrides(dims));
@@ -250,7 +250,7 @@ TEST_F(IntegrationOverrideValidation, Rule2_UnknownUid_ArrayForm)
     expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
 }
 
-TEST_F(IntegrationOverrideValidation, Rule2_UnknownUid_MapForm)
+TEST_F(IntegrationOverrideValidation, Rule2UnknownUidMapForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule2_UnknownUid_Map", dims, packedStrides(dims));
@@ -267,7 +267,7 @@ TEST_F(IntegrationOverrideValidation, Rule2_UnknownUid_MapForm)
 
 // ----------------------- Rule 3 — Rank mismatch -----------------------
 
-TEST_F(IntegrationOverrideValidation, Rule3_RankMismatch_ArrayForm)
+TEST_F(IntegrationOverrideValidation, Rule3RankMismatchArrayForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule3_RankMismatch", dims, packedStrides(dims));
@@ -284,7 +284,7 @@ TEST_F(IntegrationOverrideValidation, Rule3_RankMismatch_ArrayForm)
     expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
 }
 
-TEST_F(IntegrationOverrideValidation, Rule3_RankMismatch_MapForm)
+TEST_F(IntegrationOverrideValidation, Rule3RankMismatchMapForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule3_RankMismatch_Map", dims, packedStrides(dims));
@@ -302,7 +302,7 @@ TEST_F(IntegrationOverrideValidation, Rule3_RankMismatch_MapForm)
 // ----------------------- Rule 4 — Max-shape exceeded -----------------------
 
 /// Plain rule-4 test (parallel-array): override dim larger than declared.
-TEST_F(IntegrationOverrideValidation, Rule4_MaxShapeExceeded_ArrayForm)
+TEST_F(IntegrationOverrideValidation, Rule4MaxShapeExceededArrayForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule4_MaxShapeExceeded", dims, packedStrides(dims));
@@ -319,7 +319,7 @@ TEST_F(IntegrationOverrideValidation, Rule4_MaxShapeExceeded_ArrayForm)
     expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
 }
 
-TEST_F(IntegrationOverrideValidation, Rule4_MaxShapeExceeded_MapForm)
+TEST_F(IntegrationOverrideValidation, Rule4MaxShapeExceededMapForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule4_MaxShapeExceeded_Map", dims, packedStrides(dims));
@@ -341,7 +341,7 @@ TEST_F(IntegrationOverrideValidation, Rule4_MaxShapeExceeded_MapForm)
 /// signal the test author to add wildcard-specific coverage. Until then, the
 /// test asserts every-dim comparison via two equivalent cases: one where the
 /// first axis exceeds and one where the last axis exceeds. Both must reject.
-TEST_F(IntegrationOverrideValidation, Rule4_AllDimsCompared_FirstAxis)
+TEST_F(IntegrationOverrideValidation, Rule4AllDimsComparedFirstAxis)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph
@@ -359,7 +359,7 @@ TEST_F(IntegrationOverrideValidation, Rule4_AllDimsCompared_FirstAxis)
     expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
 }
 
-TEST_F(IntegrationOverrideValidation, Rule4_AllDimsCompared_LastAxis)
+TEST_F(IntegrationOverrideValidation, Rule4AllDimsComparedLastAxis)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph
@@ -380,7 +380,7 @@ TEST_F(IntegrationOverrideValidation, Rule4_AllDimsCompared_LastAxis)
 // ----------------------- Rule 5 — Duplicate UIDs -----------------------
 
 /// Rule 5 is parallel-array specific (the map de-duplicates by construction).
-TEST_F(IntegrationOverrideValidation, Rule5_DuplicateUids_ArrayForm)
+TEST_F(IntegrationOverrideValidation, Rule5DuplicateUidsArrayForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule5_DuplicateUids", dims, packedStrides(dims));
@@ -398,7 +398,7 @@ TEST_F(IntegrationOverrideValidation, Rule5_DuplicateUids_ArrayForm)
 
 // ----------------------- Rule 6 — Positive dim values -----------------------
 
-TEST_F(IntegrationOverrideValidation, Rule6_NonPositiveDim_ArrayForm)
+TEST_F(IntegrationOverrideValidation, Rule6NonPositiveDimArrayForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule6_NonPositiveDim", dims, packedStrides(dims));
@@ -414,7 +414,7 @@ TEST_F(IntegrationOverrideValidation, Rule6_NonPositiveDim_ArrayForm)
     expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
 }
 
-TEST_F(IntegrationOverrideValidation, Rule6_NonPositiveDim_MapForm)
+TEST_F(IntegrationOverrideValidation, Rule6NonPositiveDimMapForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule6_NonPositiveDim_Map", dims, packedStrides(dims));
@@ -431,7 +431,7 @@ TEST_F(IntegrationOverrideValidation, Rule6_NonPositiveDim_MapForm)
 
 // ----------------------- Rule 7 — Positive stride values -----------------------
 
-TEST_F(IntegrationOverrideValidation, Rule7_NonPositiveStride_ArrayForm)
+TEST_F(IntegrationOverrideValidation, Rule7NonPositiveStrideArrayForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule7_NonPositiveStride", dims, packedStrides(dims));
@@ -447,7 +447,7 @@ TEST_F(IntegrationOverrideValidation, Rule7_NonPositiveStride_ArrayForm)
     expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
 }
 
-TEST_F(IntegrationOverrideValidation, Rule7_NonPositiveStride_MapForm)
+TEST_F(IntegrationOverrideValidation, Rule7NonPositiveStrideMapForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule7_NonPositiveStride_Map", dims, packedStrides(dims));
@@ -471,7 +471,7 @@ TEST_F(IntegrationOverrideValidation, Rule7_NonPositiveStride_MapForm)
 ///
 /// Negative case: declared {48, 16, 4, 1} (NCHW, descending) vs. override
 /// {1, 4, 16, 48} (NHWC-like ascending) — strict reverse order.
-TEST_F(IntegrationOverrideValidation, Rule8_StrideOrderingMismatch_ArrayForm)
+TEST_F(IntegrationOverrideValidation, Rule8StrideOrderingMismatchArrayForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule8_StrideOrdering", dims, packedStrides(dims));
@@ -489,7 +489,7 @@ TEST_F(IntegrationOverrideValidation, Rule8_StrideOrderingMismatch_ArrayForm)
     expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
 }
 
-TEST_F(IntegrationOverrideValidation, Rule8_StrideOrderingMismatch_MapForm)
+TEST_F(IntegrationOverrideValidation, Rule8StrideOrderingMismatchMapForm)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule8_StrideOrdering_Map", dims, packedStrides(dims));
@@ -507,7 +507,7 @@ TEST_F(IntegrationOverrideValidation, Rule8_StrideOrderingMismatch_MapForm)
 /// Positive control: same argsort_descending as declared → must NOT reject
 /// for rule-8 reasons. Uses the same numerical strides as declared so all
 /// rules pass and the call reaches the override entry.
-TEST_F(IntegrationOverrideValidation, Rule8_StrideOrderingMatch_Accepted)
+TEST_F(IntegrationOverrideValidation, Rule8StrideOrderingMatchAccepted)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = createOverridableGraph("Rule8_StrideOrdering_Accepted", dims, packedStrides(dims));
@@ -537,7 +537,7 @@ TEST_F(IntegrationOverrideValidation, Rule8_StrideOrderingMatch_Accepted)
 /// rule 8 unchecked. The size-equality guard has been removed and replaced
 /// with an explicit rank-mismatch error so the inconsistency is surfaced
 /// instead of silently accepted (RFC 0008 Phase 1 post-review fix #4).
-TEST_F(IntegrationOverrideValidation, Rule8_RankMismatch_DeclaredStridesShorter)
+TEST_F(IntegrationOverrideValidation, Rule8RankMismatchDeclaredStridesShorter)
 {
     // Build a graph where the input tensor's declared dims has rank 4 but
     // declared strides has rank 3. This is constructed inline because
