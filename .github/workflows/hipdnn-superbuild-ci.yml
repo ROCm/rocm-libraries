@@ -195,7 +195,11 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build ccache
+          sudo apt-get install -y ninja-build ccache lsb-release wget software-properties-common gnupg
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          sudo apt-get install -y clang-tidy-20 clang-tools-20
 
       - name: Install ROCm wheels
         run: |
@@ -222,7 +226,8 @@ jobs:
             -DGPU_TARGETS="$GPU_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
-            -DENABLE_CLANG_TIDY=OFF
+            -DENABLE_CLANG_TIDY=ON \
+            -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20
 
       - name: Build
         run: cmake --build build
