@@ -23,7 +23,8 @@
 17. [Implementation Phases](#implementation-phases)
 18. [Risk Register](#risk-register)
 19. [Quality Principles](#quality-principles)
-20. [Future Work](#future-work)
+20. [Known Limitations](#known-limitations)
+21. [Future Work](#future-work)
 
 ---
 
@@ -467,7 +468,7 @@ void verifyGoldenIntegrity(const GoldenManifest& manifest,
 
 #### Versioning
 
-The manifest stores `generator_version` and `reference_executor_hash`. No comparison logic is built on these fields -- they exist for diagnostics and forensics. When the reference executor changes, regenerate golden data. "Truth should be truth."
+The manifest stores `format_version`, `generator_version`, and `reference_executor_hash`. The loader refuses to read manifests with an unrecognized `format_version` -- this prevents silently misinterpreting a future format as the current one. `generator_version` and `reference_executor_hash` are for diagnostics and forensics only; no comparison logic is built on them. When the reference executor changes, regenerate golden data. "Truth should be truth."
 
 #### Stride Safety
 
@@ -481,6 +482,7 @@ Strides are stored in the manifest for documentation and belt-and-suspenders val
 - [ ] Memory usage for loading a 64 MB tensor: < 128 MB (raw + GPU copy)
 - [ ] Reader/writer behind abstract interfaces for future format extensibility
 - [ ] Dims stored in manifest; dim mismatch at load time is hard FAIL
+- [ ] Unrecognized `format_version` in manifest: hard FAIL (never silently misinterpret a future format)
 
 **Acceptance criteria** (for integrity):
 - [ ] Every `.bin` file has a `sha256` field in the manifest
@@ -637,12 +639,21 @@ if(!valid)
 }
 ```
 
+### Floating-Point Edge Cases
+
+The comparison function must handle two edge cases that are mathematically correct but fail naive checks:
+
+- **NaN == NaN**: If both golden and engine output NaN at the same position, treat them as matching (IEEE `NaN != NaN` would otherwise reject two equally-correct outputs). If only one side is NaN, that is a hard FAIL.
+- **-0.0 vs +0.0**: Mathematically equal, bitwise different. The comparator uses value comparison, not bitwise comparison. Note that SHA-256 integrity checks use bitwise comparison on the raw file -- this is correct because integrity checks verify "same bytes on disk," not "same mathematical value."
+
 **Acceptance criteria**:
 - [ ] Golden manifest contains no tolerance fields
 - [ ] `verifyGraphGolden()` uses `_tensorIdToValidatorMap` (same as computed path)
 - [ ] `registerValidator()` is called before golden validation, same as computed path
 - [ ] Changing `toleranceForNodeTyped()` takes effect immediately for both modes
 - [ ] Failure message includes: tensor name, max errors, mismatch count, golden metadata
+- [ ] Both golden and engine NaN at same position: treated as match
+- [ ] One side NaN, other side finite: hard FAIL
 
 ---
 
@@ -700,6 +711,7 @@ New CLI flags added to `main.cpp`:
 | `--gd, --golden-data-dir` | path | `<exe_dir>/../lib/hipdnn_golden_data` | Root directory for golden data |
 | `--generate-golden` | flag | off | Generate golden data instead of running tests |
 | `--golden-seed` | integer | 42 | Seed for golden data input generation |
+| `--force-regenerate` | flag | off | Overwrite existing golden data (without this, generator refuses to clobber) |
 | `--external-reference` | path | none | Directory with external reference outputs |
 
 Environment variable fallbacks:
@@ -809,7 +821,18 @@ private:
 void generateGoldenData(graph::Graph& graph, unsigned int seed)
 {
     auto goldenDir = resolveGoldenPath();
-    std::filesystem::create_directories(goldenDir);
+
+    // Overwrite protection: refuse to clobber existing golden data
+    if(std::filesystem::exists(goldenDir / "manifest.json")
+       && !TestConfig::get().forceRegenerate())
+    {
+        FAIL() << "Golden data already exists at: " << goldenDir
+               << "\nUse --force-regenerate to overwrite.";
+    }
+
+    // Atomic write: generate into a temporary directory, then rename
+    auto tmpDir = goldenDir.parent_path() / (goldenDir.filename().string() + ".tmp");
+    std::filesystem::create_directories(tmpDir);
 
     GraphTensorBundle refBundle;
     std::vector<int64_t> outputTensorIds;
@@ -818,9 +841,12 @@ void generateGoldenData(graph::Graph& graph, unsigned int seed)
 
     executeCpuGraph(graph, refBundle);  // Step 2: execute-reference
 
-    GoldenDataWriter writer(goldenDir);
+    GoldenDataWriter writer(tmpDir);
     writer.writeManifest(graph, refBundle, outputTensorIds, buildMetadata());
     writer.writeTensorBlobs(refBundle);  // Step 3: serialize
+
+    // Atomic swap: rename only after all files are written
+    std::filesystem::rename(tmpDir, goldenDir);
 
     std::cout << "Golden data written to: " << goldenDir << std::endl;
 }
@@ -832,6 +858,8 @@ void generateGoldenData(graph::Graph& graph, unsigned int seed)
 - [ ] `--generate-golden` calls `generateGoldenData()` which uses same `buildGraph()`, `generateBundles()`, `initializeBundle()`
 - [ ] Engine support check shared between computed and golden paths (not duplicated, not missing from golden)
 - [ ] Output directory structure matches manifest layout
+- [ ] Generator refuses to overwrite existing golden data without `--force-regenerate`
+- [ ] Generator writes to a temp directory and renames atomically (no partial golden data on disk if process crashes)
 - [ ] Clang-tidy clean
 
 ---
@@ -1096,6 +1124,10 @@ Both computed and golden validation must pass. This confirms the golden data is 
 | Shape/stride mismatch between golden data and runtime | Wrong comparison, subtle bugs | Medium | Dim validation at load time; hard FAIL on any mismatch |
 | NaN/Inf in golden data goes undetected | All comparisons pass vacuously | Low | Generator validates outputs contain no NaN/Inf before writing |
 | Partial DVC pull leaves truncated files | Integrity check catches it | Low | SHA-256 verification before any comparison |
+| Reference executor bug frozen into golden data | Wrong truth accepted permanently | Medium | Cross-validation (Layer 3) catches disagreements; future invariant checks provide code-independent anchors |
+| Generator crash leaves partial golden data | Orphaned files, missing manifest | Low | Atomic write protocol: generate into `.tmp` dir, rename on success |
+| CRLF line endings change SHA-256 on Windows | Integrity check fires on valid data | Low | `.gitattributes` forces LF for all golden data files; binary blobs are unaffected |
+| Generator silently overwrites existing golden data | Good data clobbered without notice | Medium | `--force-regenerate` required to overwrite; default is hard FAIL |
 
 ---
 
@@ -1107,6 +1139,20 @@ Both computed and golden validation must pass. This confirms the golden data is 
 4. **CI should work with zero golden data**: Compute-mode is always available. Golden mode is an overlay, not a dependency.
 5. **Every golden file is integrity-checked**: SHA-256 before comparison, always. No exceptions.
 6. **Three verbs, seven steps**: If a design decision doesn't serve serialize, deserialize, or validate, question whether it belongs.
+
+---
+
+## Known Limitations
+
+This system adds a **comparison-based** verification layer. All comparison-based systems share a structural limitation: they can tell you that two things agree, not that either is correct. Three failure modes are irreducible within this RFC's scope:
+
+1. **Correlated spec misunderstanding**: If both the reference executor and the engine under test implement the same wrong interpretation of an operation (e.g., both apply SDPA masking incorrectly in the same way), they agree, and the test passes. No amount of comparison infrastructure catches this — it requires an independent anchor derived from the mathematical definition, not from any code. Future work on invariant checks and hand-verified micro cases (computed from the spec by a human, not by any executor) addresses this.
+
+2. **Spec ambiguity**: When the operation specification admits multiple valid interpretations (e.g., SDPA masking with `-inf` vs. a large negative number), the golden data captures one interpretation. A correct engine implementing the other interpretation will either fail (if tolerance is tight) or silently pass (if tolerance masks the difference). This requires a canonical spec document, not more verification code.
+
+3. **Small-size coverage gap**: Hand-verified cases and smoke tests exercise small tensor sizes. Bugs that only appear at larger sizes (tile boundary conditions, padding edges, memory layout transitions) are not caught by small cases. Mitigated by ensuring test suites include boundary-straddling sizes, but never fully eliminated.
+
+These are not flaws in the design — they are the boundary of what comparison testing can do. The RFC is designed so that future layers (invariant checking, hand-verified micro cases, cross-validation with structurally independent implementations) can plug these gaps without changing the golden data format or pipeline.
 
 ---
 
@@ -1127,3 +1173,9 @@ Both computed and golden validation must pass. This confirms the golden data is 
 7. **GPU non-determinism**: Some GPU operations (e.g., atomics in backward passes) are non-deterministic across runs. Golden validation for these operations may need a wider tolerance band or a deterministic execution mode flag.
 
 8. **Binary manifest format**: If JSON parsing of manifests becomes a bottleneck at scale, swap the `IGoldenDataReader` implementation to a binary format (flatbuffer or protobuf) behind the same interface.
+
+9. **Mathematical invariant checks**: Per-operation invariants (layernorm output mean ~0 / variance ~1, softmax rows sum to 1, batchnorm output statistics) that require no reference executor and catch bugs that comparison testing structurally cannot. These run in both pipelines — at generation time to guard what gets frozen, at validation time to gate before comparison. Separate RFC.
+
+10. **Hand-verified micro cases**: At least one test case per operation family with expected outputs computed by hand from the mathematical definition, not by any executor. These serve as the external anchor for the entire chain — the only check that catches correlated spec misunderstandings between the reference executor and the engine. Separate RFC.
+
+11. **Statistical masking detection**: In addition to per-element max error, check the percentage of elements outside a tighter inner tolerance. A tensor where 0.3% of elements are wrong by a small amount passes per-element max-error checks but accumulates errors in downstream fused operations.
