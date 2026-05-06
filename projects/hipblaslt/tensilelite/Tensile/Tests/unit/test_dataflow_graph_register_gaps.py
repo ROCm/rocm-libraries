@@ -2361,7 +2361,8 @@ class TestMFMAQuadCycleGap:
 
         Production callers always pass `subj_graph=graph`; this branch
         exists purely as a defensive guard for unit-test scaffolding."""
-        from Tensile.Components.ScheduleCapture import GraphNode, SchedulePosition
+        from Tensile.Components.ScheduleCapture import SchedulePosition
+        from Tensile.Components.CMSValidator import GraphNode
 
         producer_pos = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=0)
         consumer_pos = SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0)
@@ -3636,13 +3637,13 @@ class TestNodeLabelAfterCoverageFix:
     def test_node_label_finds_ssetprio_in_capture_after_categorization(self):
         from Tensile.Components.ScheduleCapture import (
             LoopBodyCaptureBuilder,
-            GraphNode,
             SLOT_KIND_MFMA,
             BODY_LABEL_ML,
             _class_tag_from_category,
             _identity_for,
             make_position,
         )
+        from Tensile.Components.CMSValidator import GraphNode
         from Tensile.Components.CMSValidator import (
             cms_node_label,
         )

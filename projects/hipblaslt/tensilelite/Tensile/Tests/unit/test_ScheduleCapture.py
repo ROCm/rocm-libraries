@@ -45,8 +45,6 @@ from Tensile.Components.ScheduleCapture import (
     LoopBodyCapture,
     LoopBodyCaptureBuilder,
     FourPartCapture,
-    DataflowEdge,
-    DataflowGraph,
     build_dataflow_graph,
     clone_loop_body,
     evaluate_guard,
@@ -57,6 +55,10 @@ from Tensile.Components.ScheduleCapture import (
     assert_capture_body_consistency,
     CaptureConsistencyError,
     CaptureEmptyBodyError,
+)
+from Tensile.Components.CMSValidator import (
+    DataflowEdge,
+    DataflowGraph,
 )
 
 
@@ -302,8 +304,9 @@ class TestDataflowGraphShape:
 class TestDataflowDataclasses:
     def test_edge_construction(self):
         from Tensile.Components.ScheduleCapture import (
-            GraphNode, SchedulePosition, BODY_LABEL_ML,
+            SchedulePosition, BODY_LABEL_ML,
         )
+        from Tensile.Components.CMSValidator import GraphNode
         producer = GraphNode(
             identity=("LRA0", 1, ()), position=SchedulePosition(1, 0, 0),
             category="LRA0", rocisa_inst=None, tagged_inst=None,

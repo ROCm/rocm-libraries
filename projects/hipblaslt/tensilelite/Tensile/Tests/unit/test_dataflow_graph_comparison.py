@@ -574,8 +574,9 @@ class TestDiagnoseMissingEdgeDefenses:
         """Bypass the entry assertion (test-only) and call diagnose with a
         node missing from the subject graph -> raises CaptureConsistencyError
         (NOT assert; survives python -O)."""
-        from Tensile.Components.ScheduleCapture import (
-            DataflowGraph, DataflowEdge, GraphNode, SchedulePosition,
+        from Tensile.Components.ScheduleCapture import SchedulePosition
+        from Tensile.Components.CMSValidator import (
+            DataflowEdge, DataflowGraph, GraphNode,
         )
         # A reference edge that references identities the subject doesn't have.
         # Use the canonical short-form regType "v" (matches real rocisa).

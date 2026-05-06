@@ -40,14 +40,9 @@ if TYPE_CHECKING:
     # runtime, so a hard import here would create a cycle. PEP 563
     # (from __future__ import annotations) keeps these names as strings at
     # runtime; resolution is on-demand for static analyzers only.
-    from Tensile.Components.CMSValidator import ValidatorInstruction
-
-# Type alias: every Failure-formatter parameter accepts either a graph-side
-# GraphNode (carries `position`, `category`, `tagged_inst`) or a structural-side
-# ValidatorInstruction (carries `issued_at` and exposes `category` via property).
-# Both shapes are exercised across the test suite; `_node_label` /
-# `_node_with_pos` discriminate via getattr probes.
-NodeLike = Union["GraphNode", "ValidatorInstruction"]
+    from Tensile.Components.CMSValidator import (
+        DataflowEdge, DataflowGraph, GraphNode, NodeLike, ValidatorInstruction,
+    )
 
 
 # =============================================================================
@@ -391,90 +386,6 @@ def make_position(body_label: str, slot: SlotKey) -> SchedulePosition:
         vmfma_index=slot.mfma_index,
         sub_index=slot.sequence,
     )
-
-
-@dataclass
-class GraphNode:
-    """A node in the unified 4-body dataflow graph.
-
-    identity is the canonical key for cross-graph comparison: position-independent
-    (survives CMS reordering) and content-based (same producer in default and CMS
-    captures gets the same identity even if its stream position differs).
-
-    position lives in graph-builder space (loop_index spans bodies); the
-    underlying TaggedInstruction.slot is preserved on tagged_inst.
-
-    issue_cycles is the per-instruction quad-cycle issue cost: mirrors
-    `ValidatorInstruction.min_issue_quad_cycles()` (CMSValidator.py:327 +
-    645). Default 1; SNop-shaped instructions return `1 + wait_state`.
-    Populated by `_make_node` from a class-dispatch table so the graph-side
-    `cumulative_issue_cycles` helper can simulate per-instruction issue costs
-    cycle-exactly without re-importing CMSValidator (which would create an
-    import cycle — CMSValidator imports from this module). The structural-side
-    simulators (`precompute_issue_times`, `estimate_quad_cycles_precomputed`,
-    `estimate_quad_cycles`) have been removed; `cumulative_issue_cycles` is
-    the single source of truth.
-    """
-    identity: tuple                     # (rocisa_class_name, loop_index, signature_tuple)
-    position: SchedulePosition
-    category: str                       # propagated from TaggedInstruction
-    rocisa_inst: object                 # back-reference to the rocisa instruction
-    tagged_inst: TaggedInstruction      # back-reference for stream-position lookup
-    body_label: str                     # 'ML-1' | 'ML' | 'NGL' | 'NLL'
-    name: str = ""                      # human-readable label (e.g. 'LRA0[2]')
-    issue_cycles: int = 1               # per-instruction quad-cycle cost
-
-
-@dataclass
-class DataflowEdge:
-    """A dataflow edge — register or memory-region flow.
-
-    `resource` (formerly `register`) holds either a RegisterContainer or a
-    MemoryRegion: the unified `_intersection` is type-dispatched so both
-    can flow through the same edge-formation pipeline.
-
-    edge_kind discriminates the three kinds of dataflow this graph models:
-      raw_intrawave        — producer SWait drains the in-wave counter
-      lr_to_gr_lds_reuse   — LR0 -> SWait -> SBarrier -> GR (write reuses LDS slot)
-      gr_to_lr_lds_reuse   — GR -> SWait -> SBarrier -> LR1 (read of just-written LDS)
-    """
-    producer: GraphNode
-    consumer: GraphNode
-    resource: object                    # RegisterContainer | MemoryRegion (opaque)
-    edge_kind: str                      # 'raw_intrawave' | 'lr_to_gr_lds_reuse' | 'gr_to_lr_lds_reuse'
-
-
-@dataclass
-class DataflowGraph:
-    """Unified graph spanning all 4 captured bodies.
-
-    Single graph (not one per body) so cross-body edges (e.g. DTL+LdsBuf
-    previous-iteration LR0 -> current GR) are represented natively as edges
-    between nodes whose body_labels differ.
-
-    nodes is keyed by identity; the comparison rule iterates the top-level
-    edges list. Per-node adjacency is intentionally NOT stored — the
-    diagnostic classifier walks captures[body_label].instructions instead.
-
-    `num_mfma_per_subiter` is copied from FourPartCapture so the
-    OrderInverted classifier can derive an MFMA node's inner-unroll
-    subiteration (`vmfma_index // n`) without re-plumbing it through every
-    classifier call. Non-MFMA nodes get subiter from their category trailing
-    digits (`PackA0` → 0).
-    """
-    nodes: dict                            # identity -> GraphNode
-    edges: list                            # list[DataflowEdge]
-    captures: dict                         # body_label -> LoopBodyCapture
-    num_mfma_per_subiter: int = 0          # copied from FourPartCapture; 0 ⇒ all-subiter-0
-    # Per-architecture timing profile. None = default CDNA 4. Copied from
-    # FourPartCapture by `build_dataflow_graph` so the four pair-specific
-    # quad-cycle helpers can resolve arch-specific constants from the graph.
-    arch_profile: Optional[ArchProfile] = None
-
-    def edge_keys(self):
-        """Edge-equality keys for cross-graph diff: (p_id, c_id, resource, kind)."""
-        return {(e.producer.identity, e.consumer.identity, e.resource, e.edge_kind)
-                for e in self.edges}
 
 
 # Failure hierarchy + FailureNodeLabel + CMS-side label/iter-delta helpers
@@ -2425,6 +2336,11 @@ def _make_node(
     body_label: str,
     profile: Optional[ArchProfile] = None,
 ) -> GraphNode:
+    # Lazy reverse-import: GraphNode lives in CMSValidator (br4.5). Importing
+    # at module top would form a cycle — CMSValidator imports SchedulePosition
+    # from this module at runtime. br4.7 will move this function to
+    # CMSValidator, eliminating the lazy import.
+    from Tensile.Components.CMSValidator import GraphNode
     inst = tagged_inst.wrapped.rocisa_inst
     identity = _identity_for(inst, body_label, category=tagged_inst.category)
     position = make_position(body_label, tagged_inst.slot)
@@ -2498,6 +2414,10 @@ def build_dataflow_graph(four_part_capture):
     "fix" the absence path by synthesizing a `LoopBodyCapture(instructions=[])`
     — that conflates the two error modes; use dict-omission instead.
     """
+    # Lazy reverse-import: DataflowGraph / DataflowEdge live in CMSValidator
+    # (br4.5). Importing at module top would form a cycle. br4.7 will move this
+    # function to CMSValidator, eliminating the lazy import.
+    from Tensile.Components.CMSValidator import DataflowEdge, DataflowGraph
     captures = {}
     if four_part_capture is None:
         return DataflowGraph(nodes={}, edges=[], captures=captures)
@@ -2727,6 +2647,10 @@ def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories
              (its own pending edges will be collected on the next iteration),
            - or stream ends.
     """
+    # Lazy reverse-import: DataflowEdge lives in CMSValidator (br4.5).
+    # Importing at module top would form a cycle. br4.7 will move this function
+    # to CMSValidator, eliminating the lazy import.
+    from Tensile.Components.CMSValidator import DataflowEdge
     edges = []
 
     # We do an O(N^2) sweep — for each producer, scan forward. Body sizes are
