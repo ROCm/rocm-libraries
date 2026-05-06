@@ -81,8 +81,6 @@ class STINKYTOFU_EXPORT LogicalToFunctionConverter {
                                bool autoSplitBlocks = true);
 
    private:
-    GfxArchID arch;
-
     /**
      * @brief Identify label instructions in the instruction stream
      *

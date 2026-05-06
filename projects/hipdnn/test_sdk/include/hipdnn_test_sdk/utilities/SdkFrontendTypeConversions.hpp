@@ -51,6 +51,8 @@ inline hipdnn_flatbuffers_sdk::data_objects::DataType
         return hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2;
     case hipdnn_frontend::DataType::INT64:
         return hipdnn_flatbuffers_sdk::data_objects::DataType::INT64;
+    case hipdnn_frontend::DataType::BOOLEAN:
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN;
     default:
         return hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
     }
@@ -92,6 +94,8 @@ inline hipdnn_frontend::DataType
         return hipdnn_frontend::DataType::FP6_E3M2;
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT64:
         return hipdnn_frontend::DataType::INT64;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
+        return hipdnn_frontend::DataType::BOOLEAN;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -351,6 +355,8 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
         return std::make_unique<Tensor<fp6_e2m3>>(dims, strides);
     case hipdnn_frontend::DataType::FP6_E3M2:
         return std::make_unique<Tensor<fp6_e3m2>>(dims, strides);
+    case hipdnn_frontend::DataType::BOOLEAN:
+        return std::make_unique<Tensor<bool>>(dims, strides);
     default:
         throw std::runtime_error("Unsupported data type for tensor");
     }

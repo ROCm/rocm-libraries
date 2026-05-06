@@ -735,10 +735,12 @@ def writeClientConfig(
       gfxName: str,
       configBase = "ClientParameters",
       libraryFile = None,
-      probSolMap = {}
+      probSolMap = {},
+      sourceDir = None
     ):
 
-    sourceDir = os.path.join(stepBaseDir, "source")
+    if sourceDir is None:
+        sourceDir = os.path.join(stepBaseDir, "source")
 
     if tileAwareSelection:
       filename = os.path.join(sourceDir, "%s_Granularity.ini"%configBase)

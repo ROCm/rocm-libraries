@@ -30,7 +30,7 @@ message(STATUS "Configuring StinkyTofu Python Module")
 # ============================================================================
 
 # nanobind requires find_package(Python ...) not Python3
-find_package(Python COMPONENTS Interpreter Development REQUIRED)
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -79,7 +79,18 @@ target_link_libraries(stinkytofu_python PRIVATE
 set_target_properties(stinkytofu_python PROPERTIES
     OUTPUT_NAME _stinkytofu
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/stinkytofu
+    INSTALL_RPATH "$ORIGIN"
+    BUILD_RPATH "${CMAKE_BINARY_DIR}"
 )
+# On Windows there is no RPATH; copy stinkytofu.dll next to _stinkytofu.pyd
+# so the dynamic linker can find it at runtime.
+if(WIN32)
+    add_custom_command(TARGET stinkytofu_python POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:stinkytofu>
+            $<TARGET_FILE_DIR:stinkytofu_python>
+        COMMENT "Copying stinkytofu.dll next to _stinkytofu.pyd")
+endif()
 
 # Copy __init__.py and generate _build_info.py at configure time (not post-build)
 # so the package is importable immediately from the build tree after cmake configure.
@@ -129,6 +140,13 @@ install(TARGETS stinkytofu_python
     COMPONENT python_bindings
 )
 
+# Co-install libstinkytofu.so / stinkytofu.dll next to _stinkytofu so the
+# dynamic linker can find it at runtime.
+install(FILES $<TARGET_FILE:stinkytofu>
+    DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu
+    COMPONENT python_bindings
+)
+
 # Install Python wrapper (__init__.py)
 install(FILES stinkytofu/__init__.py
     DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu
@@ -140,6 +158,7 @@ install(FILES stinkytofu/__init__.py
 # _build_info.py is intentionally excluded so wheels behave as pre-built packages.
 if(DEFINED SKBUILD)
     install(TARGETS stinkytofu_python DESTINATION stinkytofu)
+    install(FILES $<TARGET_FILE:stinkytofu> DESTINATION stinkytofu)
     install(FILES stinkytofu/__init__.py DESTINATION stinkytofu)
 endif()
 

@@ -156,10 +156,11 @@ def _rmtree(path: Path):
         "build_dir": "Override the build directory (default: build/).",
         "build_type": "CMake build type: Release, Debug, RelWithDebInfo (default: Release).",
         "tests": "Build unit tests (default: ON when building standalone).",
-        "python": "Build Python bindings.",
+        "no-python": "Disable Python bindings (enabled by default).",
         "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
+        "gcc": "Use GCC instead of amdclang.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
 )
@@ -168,10 +169,11 @@ def build(
     build_dir=None,
     build_type="Release",
     tests=True,
-    python=False,
+    no_python=False,
     static=False,
     jobs=None,
     clean=False,
+    gcc=False,
     rocm_path=None,
 ):
     bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
@@ -190,8 +192,32 @@ def build(
         f"-DCMAKE_BUILD_TYPE={build_type}",
         f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
-        f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
+        "-DSTINKYTOFU_ENABLE_WERROR=ON",
     ]
+
+    if not no_python:
+        cmake_opts.append(f"-DPython_EXECUTABLE={sys.executable}")
+
+    # Locate ROCmCMakeBuildTools for version TWEAK (git hash) support.
+    _rocm_sdk = shutil.which("rocm-sdk")
+    if _rocm_sdk:
+        try:
+            _sdk_root = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--root"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_root:
+                _rocm_cmake_dir = Path(_sdk_root) / "share/rocmcmakebuildtools/cmake"
+                if _rocm_cmake_dir.is_dir():
+                    cmake_opts.append(
+                        f"-DROCmCMakeBuildTools_DIR={_rocm_cmake_dir.as_posix()}"
+                    )
+        except subprocess.CalledProcessError:
+            pass
 
     compiler_opts = []
 
@@ -270,8 +296,12 @@ def build(
         else:
             cmake_opts.append("-G Ninja")
     else:
-        _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
-        _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
+        if gcc:
+            _cxx = shutil.which("g++") or "g++"
+            _cc = shutil.which("gcc") or "gcc"
+        else:
+            _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
+            _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
         compiler_opts += [
             f"-DCMAKE_CXX_COMPILER={_cxx}",
             f"-DCMAKE_C_COMPILER={_cc}",
