@@ -59,7 +59,7 @@ class GraphLoader:
         Raises:
             GraphLoadError: If graph contains unsupported operations.
         """
-        self._validator.validate_conv_fwd_only(graph_json)
+        self._validator.validate(graph_json)
 
     def extract_tensor_info(self, graph_json: Dict[str, Any]) -> List[TensorInfo]:
         """Extract tensor information from graph JSON.

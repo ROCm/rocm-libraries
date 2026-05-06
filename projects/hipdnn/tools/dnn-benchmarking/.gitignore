@@ -46,4 +46,3 @@ dmypy.json
 # Project-specific
 results.json
 *.log
-.planning/

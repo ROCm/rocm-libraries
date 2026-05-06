@@ -19,43 +19,62 @@ class TestGraphValidator:
         validator = GraphValidator()
 
         # Should not raise
-        validator.validate_conv_fwd_only(sample_conv_fwd_json)
+        validator.validate(sample_conv_fwd_json)
 
     def test_accepts_matmul(self, sample_matmul_json: Dict[str, Any]) -> None:
         """Test that Matmul graph is accepted."""
         validator = GraphValidator()
 
-        # Should not raise - we accept all operations now
-        validator.validate_conv_fwd_only(sample_matmul_json)
+        # Should not raise
+        validator.validate(sample_matmul_json)
 
     def test_rejects_empty_nodes(self) -> None:
         """Test that graph with no nodes is rejected."""
         validator = GraphValidator()
-        graph_json = {"nodes": []}
+        graph_json = {"tensors": [], "nodes": []}
 
         with pytest.raises(GraphLoadError, match="no operation nodes"):
-            validator.validate_conv_fwd_only(graph_json)
+            validator.validate(graph_json)
 
-    def test_rejects_missing_nodes(self) -> None:
-        """Test that graph with missing nodes key is rejected."""
+    def test_rejects_missing_nodes_key(self) -> None:
+        """Test that graph missing the nodes key is rejected."""
+        validator = GraphValidator()
+        graph_json = {"tensors": []}
+
+        with pytest.raises(GraphLoadError, match="required top-level keys"):
+            validator.validate(graph_json)
+
+    def test_rejects_missing_tensors_key(self) -> None:
+        """Test that graph missing the tensors key is rejected."""
+        validator = GraphValidator()
+        graph_json = {"nodes": [{"type": "ConvolutionFwdAttributes"}]}
+
+        with pytest.raises(GraphLoadError, match="required top-level keys"):
+            validator.validate(graph_json)
+
+    def test_rejects_missing_both_top_level_keys(self) -> None:
+        """Test that graph missing both tensors and nodes is rejected."""
         validator = GraphValidator()
         graph_json = {}
 
-        with pytest.raises(GraphLoadError, match="no operation nodes"):
-            validator.validate_conv_fwd_only(graph_json)
+        with pytest.raises(GraphLoadError, match="required top-level keys"):
+            validator.validate(graph_json)
 
-    def test_accepts_mixed_operations(self) -> None:
+    def test_accepts_mixed_operations(
+        self, sample_conv_fwd_json: Dict[str, Any]
+    ) -> None:
         """Test that graph with mixed operations is accepted."""
         validator = GraphValidator()
+        # PointwiseAttributes has no entry in _REQUIRED_NODE_FIELDS, so field
+        # validation is skipped for it and deferred to the hipDNN backend.
         graph_json = {
-            "nodes": [
-                {"type": "ConvolutionFwdAttributes", "name": "conv"},
-                {"type": "PointwiseAttributes", "name": "relu"},
-            ]
+            "tensors": sample_conv_fwd_json["tensors"],
+            "nodes": sample_conv_fwd_json["nodes"]
+            + [{"type": "PointwiseAttributes", "name": "relu"}],
         }
 
-        # Should not raise - we accept all operations now
-        validator.validate_conv_fwd_only(graph_json)
+        # Should not raise
+        validator.validate(graph_json)
 
     def test_get_supported_types(self) -> None:
         """Test get_supported_types returns copy of supported types."""
@@ -72,7 +91,9 @@ class TestGraphValidator:
         types.add("NewType")
         assert "NewType" not in validator.get_supported_types()
 
-    def test_custom_supported_types(self) -> None:
+    def test_custom_supported_types(
+        self, sample_conv_fwd_json: Dict[str, Any], sample_matmul_json: Dict[str, Any]
+    ) -> None:
         """Test validator with custom supported types."""
         custom_types = {"MatmulAttributes", "ConvolutionFwdAttributes"}
         validator = GraphValidator(supported_types=custom_types)
@@ -81,10 +102,109 @@ class TestGraphValidator:
         types = validator.get_supported_types()
         assert types == custom_types
 
-        # Both operations should be valid with validate_conv_fwd_only
-        # (since it accepts any operation now)
-        matmul_json = {"nodes": [{"type": "MatmulAttributes", "name": "matmul"}]}
-        validator.validate_conv_fwd_only(matmul_json)  # Should not raise
+        validator.validate(sample_matmul_json)  # Should not raise
+        validator.validate(sample_conv_fwd_json)  # Should not raise
 
-        conv_json = {"nodes": [{"type": "ConvolutionFwdAttributes", "name": "conv"}]}
-        validator.validate_conv_fwd_only(conv_json)  # Should not raise
+    def test_rejects_missing_required_fields(self) -> None:
+        """Test that nodes missing required fields are rejected."""
+        validator = GraphValidator()
+
+        # BatchnormBackwardAttributes without dx_tensor_uid output
+        graph_json = {
+            "tensors": [],
+            "nodes": [
+                {
+                    "type": "BatchnormBackwardAttributes",
+                    "name": "bnorm_bwd",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "dy_tensor_uid": 2,
+                        "mean_tensor_uid": 3,
+                        "inv_variance_tensor_uid": 4,
+                        "scale_tensor_uid": 5,
+                    },
+                    "outputs": {
+                        # dx_tensor_uid intentionally omitted
+                        "dscale_tensor_uid": 7,
+                        "dbias_tensor_uid": 8,
+                    },
+                }
+            ],
+        }
+
+        with pytest.raises(GraphLoadError, match="dx_tensor_uid"):
+            validator.validate(graph_json)
+
+    def test_rejects_missing_field_conv_fwd(self) -> None:
+        """Test that ConvolutionFwdAttributes missing w_tensor_uid is rejected."""
+        validator = GraphValidator()
+        graph_json = {
+            "tensors": [],
+            "nodes": [
+                {
+                    "type": "ConvolutionFwdAttributes",
+                    "name": "conv",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        # w_tensor_uid intentionally omitted
+                    },
+                    "outputs": {"y_tensor_uid": 0},
+                    "parameters": {
+                        "conv_mode": "CROSS_CORRELATION",
+                        "pre_padding": [0, 0],
+                        "post_padding": [0, 0],
+                        "stride": [1, 1],
+                        "dilation": [1, 1],
+                    },
+                }
+            ],
+        }
+
+        with pytest.raises(GraphLoadError, match="w_tensor_uid"):
+            validator.validate(graph_json)
+
+    def test_rejects_missing_field_matmul(self) -> None:
+        """Test that MatmulAttributes missing b_tensor_uid is rejected."""
+        validator = GraphValidator()
+        graph_json = {
+            "tensors": [],
+            "nodes": [
+                {
+                    "type": "MatmulAttributes",
+                    "name": "matmul",
+                    "inputs": {
+                        "a_tensor_uid": 1,
+                        # b_tensor_uid intentionally omitted
+                    },
+                    "outputs": {"c_tensor_uid": 2},
+                }
+            ],
+        }
+
+        with pytest.raises(GraphLoadError, match="b_tensor_uid"):
+            validator.validate(graph_json)
+
+    def test_rejects_node_missing_entire_section(self) -> None:
+        """Test that a node with no 'inputs' section is rejected for types with required inputs."""
+        validator = GraphValidator()
+        graph_json = {
+            "tensors": [],
+            "nodes": [
+                {
+                    "type": "ConvolutionFwdAttributes",
+                    "name": "conv",
+                    # no "inputs" key at all
+                    "outputs": {"y_tensor_uid": 0},
+                    "parameters": {
+                        "conv_mode": "CROSS_CORRELATION",
+                        "pre_padding": [0, 0],
+                        "post_padding": [0, 0],
+                        "stride": [1, 1],
+                        "dilation": [1, 1],
+                    },
+                }
+            ],
+        }
+
+        with pytest.raises(GraphLoadError, match="x_tensor_uid"):
+            validator.validate(graph_json)
