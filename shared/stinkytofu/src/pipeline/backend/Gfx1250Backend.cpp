@@ -113,7 +113,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
                                  debugStreams);
             addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
             if (moduleOptions.EnableWaitCntInsertion) {
-                innerPM.addPass(createStinkyWaitCntInsertionPass(true));
+                innerPM.addPass(createStinkyWaitCntInsertionPass());
             }
             pm.addPass(createKernelToRegionsPassAdaptor(
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
