@@ -4,8 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HIPDNN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$HIPDNN_ROOT/../.." && pwd)"
+
+BUILD_DIR="$HIPDNN_ROOT/build"
 INSTALL_DIR="/opt/rocm"
 VENV_DIR="/workspace/.venv"
+MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
+MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
 
 FORCE_BUILD=0
 usage() {
@@ -88,23 +92,39 @@ echo "Detected GPU: $GPU_ARCH → installing PyTorch from $INDEX_URL"
 pip install --pre torch --index-url "$INDEX_URL"
 pip install -e "$SCRIPT_DIR"
 
-# 3. Build and install hipDNN + providers
+# 3. Build and install hipDNN + MIOpen
 # The installed cmake configs use install-tree paths; pointing CMAKE_PREFIX_PATH at
 # the raw build dir causes "non-existent path" errors in hipdnn_data_sdkConfig.cmake.
 HIPDNN_CONFIG="$INSTALL_DIR/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
 if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
-    echo "Building and installing hipDNN and providers..."
-    cd "$WORKSPACE_ROOT"
-    cmake --preset hipdnn-providers
-    cmake --install build
-    cd "$SCRIPT_DIR"
+    echo "Building and installing hipDNN..."
+    cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+        -DHIPDNN_SKIP_TESTS=ON
+    cmake --build "$BUILD_DIR"
+    cmake --install "$BUILD_DIR"
+
+    if [ ! -d "$MIOPEN_PROVIDER_DIR" ]; then
+        echo "Error: miopen-provider not found at $MIOPEN_PROVIDER_DIR"
+        exit 1
+    fi
+    echo "Building and installing MIOpen provider..."
+    rm -rf "$MIOPEN_BUILD_DIR"
+    cmake -S "$MIOPEN_PROVIDER_DIR" -B "$MIOPEN_BUILD_DIR" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+        -DCMAKE_PREFIX_PATH="$INSTALL_DIR"
+    cmake --build "$MIOPEN_BUILD_DIR"
+    cmake --install "$MIOPEN_BUILD_DIR"
+    echo ""
+    echo "MIOpen plugin installed to: $INSTALL_DIR/lib/hipdnn_plugins/engines/"
 fi
 
 # 5. Install hipdnn Python bindings
-# Build in a container-local directory so concurrent containers don't race on
-# the shared-mount build/ directory (CMakeCache, object files, .so).
+# Wipe any stale cmake build cache (can reference deleted pip temp envs).
+rm -rf "$HIPDNN_ROOT/python/build"
 CMAKE_PREFIX_PATH="$INSTALL_DIR" \
-    SKBUILD_BUILD_DIR="/workspace/hipdnn-python-build" \
     pip install -e "$HIPDNN_ROOT/python"
 
 echo ""
@@ -112,7 +132,6 @@ echo "Setup complete. Activate the virtual environment with:"
 echo "  source $VENV_DIR/bin/activate"
 if [ "$FORCE_BUILD" -eq 1 ]; then
     echo ""
-    echo "Plugins installed to: $INSTALL_DIR/lib/hipdnn_plugins/engines/"
     echo "Run benchmarks with:"
     echo "  python -m dnn_benchmarking --graph <graph.json> \\"
     echo "    --plugin-path $INSTALL_DIR/lib/hipdnn_plugins/engines"
