@@ -527,6 +527,14 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         # (Upstream Tensile naming uses "Iter" but this is the inner unroll
         # subiteration count.)
         num_mfma_per_subiter=getattr(writer.states, 'numMfmaPerIter', 0),
+        # Mirror the production NGLL/NLL emission gates (KernelWriter.py:5118
+        # and :5141-5142) so the CMS-side capture leaves n_gl/n_ll empty
+        # when the default-side scheduler will not emit them. Without this,
+        # PGR=1 / SuppressNoLoadLoop kernels build a phantom CMS-side body
+        # the default side cannot match, and either compare_graphs reports
+        # bogus failures or assert_capture_body_consistency raises.
+        emit_n_gl=scap.kernel_emits_n_gl(kernel),
+        emit_n_ll=scap.kernel_emits_n_ll(kernel),
     )
     writer._last_opt1_for_capture = opt1_for_capture
 

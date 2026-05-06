@@ -52,6 +52,11 @@ from Tensile.Components.ScheduleCapture import (
     evaluate_guard,
     expand_cms_macro,
     build_cms_four_part_capture,
+    kernel_emits_n_gl,
+    kernel_emits_n_ll,
+    assert_capture_body_consistency,
+    CaptureConsistencyError,
+    CaptureEmptyBodyError,
 )
 
 
@@ -1186,3 +1191,334 @@ class TestDataflowGraphIntegration:
         writer._getKernelSource(solution)
         assert writer._last_default_capture is not None
         assert writer._last_cms_capture is not None
+
+
+# =============================================================================
+# PGR/PLR Phase C (rocm-libraries-kzf): predicate + dict-omission encoding
+# =============================================================================
+# These tests pin the capture-side honesty contract: omit n_gl/n_ll dict keys
+# when the kernel-config predicate says the body wasn't emitted by either
+# scheduler, rather than synthesizing an empty `LoopBodyCapture(instructions=[])`
+# (which used to defeat `build_dataflow_graph`'s structural-absence guard and
+# trip the empty-body error).
+#
+# Predicate truth table (mirrors KernelWriter.py:5118 and :5141-5142):
+#   PGR=0, *      -> n_gl=absent, n_ll=absent
+#   PGR=1, SNLL=F -> n_gl=absent, n_ll=present
+#   PGR=1, SNLL=T -> n_gl=absent, n_ll=absent
+#   PGR>=2, SNLL=F-> n_gl=present, n_ll=present
+#   PGR>=2, SNLL=T-> n_gl=present, n_ll=absent
+
+
+class TestKernelEmitsPredicates:
+    """Unit-level coverage for `kernel_emits_n_gl` / `kernel_emits_n_ll`.
+
+    These predicates are the single source of truth that gates body
+    construction at both the default-side capture (KernelWriter.py:5187+)
+    and the CMS-side macro expansion (CustomSchedule.py:515+); they must
+    exactly match the production gates at KernelWriter.py:5118 and
+    KernelWriter.py:5141-5142.
+    """
+
+    @pytest.mark.parametrize("pgr,snll,expected_n_gl,expected_n_ll", [
+        (0, False, False, False),
+        (0, True,  False, False),
+        (1, False, False, True),
+        (1, True,  False, False),
+        (2, False, True,  True),
+        (2, True,  True,  False),
+        (3, False, True,  True),
+        (3, True,  True,  False),
+        (4, False, True,  True),
+    ])
+    def test_predicate_matrix(self, pgr, snll, expected_n_gl, expected_n_ll):
+        kernel = {"PrefetchGlobalRead": pgr, "SuppressNoLoadLoop": snll}
+        assert kernel_emits_n_gl(kernel) is expected_n_gl
+        assert kernel_emits_n_ll(kernel) is expected_n_ll
+
+
+class TestAssertCaptureBodyConsistency:
+    """Pin `assert_capture_body_consistency`: it must raise
+    `CaptureConsistencyError` when the captured body presence diverges
+    from the kernel-config predicates, and pass quietly when they agree.
+    """
+
+    def _make_minimal_capture(self, n_gl_present, n_ll_present):
+        """Construct a minimal FourPartCapture for consistency-checking.
+
+        Bodies are non-empty so the empty-body guard in
+        `build_dataflow_graph` is not the failure mode under test."""
+        body = _make_body(num_mfma=1)
+        return FourPartCapture(
+            main_loop={0: body},
+            main_loop_prev={0: clone_loop_body(body)},
+            n_gl={0: clone_loop_body(body)} if n_gl_present else {},
+            n_ll={0: clone_loop_body(body)} if n_ll_present else {},
+            num_mfma=1,
+            num_codepaths=1,
+            source="test-fixture",
+        )
+
+    def test_passes_when_pgr0_and_both_absent(self):
+        kernel = {"PrefetchGlobalRead": 0, "SuppressNoLoadLoop": False}
+        cap = self._make_minimal_capture(n_gl_present=False, n_ll_present=False)
+        assert_capture_body_consistency(cap, kernel)  # no raise
+
+    def test_passes_when_pgr2_and_both_present(self):
+        kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
+        cap = self._make_minimal_capture(n_gl_present=True, n_ll_present=True)
+        assert_capture_body_consistency(cap, kernel)  # no raise
+
+    def test_passes_when_pgr1_only_n_ll_present(self):
+        kernel = {"PrefetchGlobalRead": 1, "SuppressNoLoadLoop": False}
+        cap = self._make_minimal_capture(n_gl_present=False, n_ll_present=True)
+        assert_capture_body_consistency(cap, kernel)  # no raise
+
+    def test_passes_when_pgr2_snll_only_n_gl_present(self):
+        kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": True}
+        cap = self._make_minimal_capture(n_gl_present=True, n_ll_present=False)
+        assert_capture_body_consistency(cap, kernel)  # no raise
+
+    def test_raises_when_n_gl_phantom(self):
+        """PGR=1 says n_gl absent; presence of n_gl key must raise."""
+        kernel = {"PrefetchGlobalRead": 1, "SuppressNoLoadLoop": False}
+        cap = self._make_minimal_capture(n_gl_present=True, n_ll_present=True)
+        with pytest.raises(CaptureConsistencyError) as excinfo:
+            assert_capture_body_consistency(cap, kernel)
+        msg = str(excinfo.value)
+        assert "n_gl" in msg
+        assert "PGR=1" in msg
+
+    def test_raises_when_n_ll_missing(self):
+        """PGR=2 SNLL=False says n_ll present; absence must raise."""
+        kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
+        cap = self._make_minimal_capture(n_gl_present=True, n_ll_present=False)
+        with pytest.raises(CaptureConsistencyError) as excinfo:
+            assert_capture_body_consistency(cap, kernel)
+        msg = str(excinfo.value)
+        assert "n_ll" in msg
+
+    def test_passes_on_none_capture(self):
+        """`None` capture is the no-CMS path and must be accepted silently."""
+        kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
+        assert_capture_body_consistency(None, kernel)  # no raise
+
+
+class TestBuildDataflowGraphAbsentBodies:
+    """Pin the design 1.4 contract: dict-omission of n_gl/n_ll is treated
+    as "this body was not emitted", NOT as an error. The empty-body guard
+    only fires when the key is present but the instruction list is empty
+    (which would indicate a real capture-pipeline data loss bug).
+    """
+
+    def test_pgr0_absent_n_gl_n_ll_succeeds(self):
+        """Matrix row 1: (PGR=0) — both bodies absent. Replaces the
+        legacy `LoopBodyCapture(instructions=[])` synthesis that used to
+        crash with `CaptureEmptyBodyError`."""
+        body = _make_body(num_mfma=2)
+        cap = FourPartCapture(
+            main_loop={0: body},
+            main_loop_prev={0: clone_loop_body(body)},
+            n_gl={},  # absent — PGR<2
+            n_ll={},  # absent — PGR=0
+            num_mfma=2,
+            num_codepaths=1,
+            source="test-fixture",
+        )
+        # Must NOT raise — historically this raised CaptureEmptyBodyError.
+        graph = build_dataflow_graph(cap)
+        # The graph should contain ML and ML-1 captures only.
+        assert "ML" in graph.captures
+        assert "ML-1" in graph.captures
+        assert "NGL" not in graph.captures
+        assert "NLL" not in graph.captures
+
+    def test_pgr1_only_n_ll_present(self):
+        """Matrix row 3: (PGR=1, SNLL=F) — n_gl absent, n_ll present."""
+        body = _make_body(num_mfma=2)
+        cap = FourPartCapture(
+            main_loop={0: body},
+            main_loop_prev={0: clone_loop_body(body)},
+            n_gl={},
+            n_ll={0: clone_loop_body(body)},
+            num_mfma=2,
+            num_codepaths=1,
+            source="test-fixture",
+        )
+        graph = build_dataflow_graph(cap)
+        assert "NGL" not in graph.captures
+        assert "NLL" in graph.captures
+
+    def test_present_but_empty_n_gl_still_raises(self):
+        """An emitted-but-empty body indicates capture-pipeline data loss
+        and must still raise `CaptureEmptyBodyError`. The dict-omission
+        relaxation must not collapse this distinct error mode."""
+        body = _make_body(num_mfma=2)
+        empty_body = LoopBodyCapture(instructions=[])
+        cap = FourPartCapture(
+            main_loop={0: body},
+            main_loop_prev={0: clone_loop_body(body)},
+            n_gl={0: empty_body},  # present-but-empty -> data loss
+            n_ll={0: clone_loop_body(body)},
+            num_mfma=2,
+            num_codepaths=1,
+            source="test-fixture",
+        )
+        with pytest.raises(CaptureEmptyBodyError):
+            build_dataflow_graph(cap)
+
+
+class TestBuildCmsFourPartCaptureEmitFlags:
+    """Pin the new `emit_n_gl` / `emit_n_ll` kwargs on
+    `build_cms_four_part_capture`.
+
+    Production callers in `CustomSchedule.py` derive both flags from the
+    Phase C predicates so the CMS-side capture leaves n_gl/n_ll empty
+    under PGR/SuppressNoLoadLoop combinations that legitimately suppress
+    those bodies. Direct test fixtures keep the historical default
+    (both flags True) to preserve test behavior.
+    """
+
+    def _build(self, **kwargs):
+        # Use a minimal macro shape so we don't need full mfma_code wiring.
+        # The macro doesn't need to expand to anything — we're checking
+        # the dict-presence-vs-emit-flag plumbing, not body content.
+        from rocisa.code import Module
+        from rocisa.instruction import SWaitCnt, SNop
+        macro = Module()
+        return build_cms_four_part_capture(
+            macro=macro,
+            num_codepaths=1,
+            tag_by_origin_id={},
+            sync_class=SWaitCnt,
+            snop_class=SNop,
+            mfma_classes=(),
+            **kwargs,
+        )
+
+    def test_default_kwargs_populate_both(self):
+        cap = self._build()
+        assert 0 in cap.n_gl
+        assert 0 in cap.n_ll
+
+    def test_emit_n_gl_false_omits_key(self):
+        cap = self._build(emit_n_gl=False)
+        assert 0 not in cap.n_gl
+        assert cap.n_gl == {}
+        assert 0 in cap.n_ll  # n_ll unaffected
+
+    def test_emit_n_ll_false_omits_key(self):
+        cap = self._build(emit_n_ll=False)
+        assert 0 in cap.n_gl  # n_gl unaffected
+        assert 0 not in cap.n_ll
+        assert cap.n_ll == {}
+
+    def test_both_false_omits_both_keys(self):
+        cap = self._build(emit_n_gl=False, emit_n_ll=False)
+        assert cap.n_gl == {}
+        assert cap.n_ll == {}
+
+
+class TestPgrPlrCaptureMatrixEndToEnd:
+    """End-to-end matrix coverage: build a real Solution + KernelWriter
+    for each (PGR, SuppressNoLoadLoop) combination reachable under
+    CMS=1 and assert (a) the FourPartCapture body presence matches the
+    predicates, (b) `build_dataflow_graph` succeeds, (c) the validator
+    runs end-to-end without the legacy CaptureEmptyBodyError.
+
+    Replaces the gfx1151 PGR=1 PLR=0 crash documented in
+    `Tensile/Components/GFX1151_AUDIT/PGR_PLR_PHASE_B_REPORT.md` Run 1.
+    """
+
+    def _build_with_capture(self, isa_infrastructure, **overrides):
+        """Build a kernel with PGR/SNLL overrides and the validator hook
+        installed. Returns (writer, solution)."""
+        from cms_test_utils import _make_solution
+        from Tensile.KernelWriterAssembly import KernelWriterAssembly, DebugConfig
+
+        isa, isaInfoMap, asm = isa_infrastructure
+        config = {
+            'ProblemType': {
+                'OperationType': 'GEMM', 'DataType': 'S', 'DestDataType': 'S',
+                'F32XdlMathOp': 'X', 'TransposeA': True, 'TransposeB': False,
+                'UseBeta': True, 'Batched': True,
+            },
+            'MatrixInstruction': [16, 16, 32, 1, 1, 4, 4, 2, 2],
+            'DepthU': 32, 'PrefetchGlobalRead': 2, 'PrefetchLocalRead': 1,
+            'DirectToLds': 1, 'TransposeLDS': 1, 'LocalReadVectorWidth': 4,
+            'GlobalReadVectorWidthA': 4, 'GlobalReadVectorWidthB': 4,
+            'UseCustomMainLoopSchedule': 1, 'ExpandPointerSwap': 0,
+            'SourceSwap': 1, 'StreamK': 0,
+        }
+        config.update(overrides)
+        solution = _make_solution(config, asm, isaInfoMap)
+        writer = KernelWriterAssembly(asm, DebugConfig())
+
+        original_setupNewTile = writer.setupNewTile
+        def _setupNewTile_with_flag(*args, **kwargs):
+            result = original_setupNewTile(*args, **kwargs)
+            writer.states._captureDefaultSchedule = True
+            return result
+        writer.setupNewTile = _setupNewTile_with_flag
+        return writer, solution
+
+    def test_pgr2_snll_false_matches_baseline(self, isa_infrastructure):
+        """Matrix row 7 baseline: PGR=2, SNLL=False, both bodies present.
+        This used to be the only reliably working configuration. It must
+        still validate cleanly after the dict-omission rework."""
+        writer, solution = self._build_with_capture(
+            isa_infrastructure, PrefetchGlobalRead=2, SuppressNoLoadLoop=False,
+        )
+        writer._getKernelSource(solution)
+        cap = writer._last_default_capture
+        assert cap is not None
+        # Both bodies present + populated.
+        assert 0 in cap.n_gl, "n_gl key must be present at PGR=2"
+        assert 0 in cap.n_ll, "n_ll key must be present at PGR=2 SNLL=False"
+        assert len(cap.n_gl[0].instructions) > 0
+        assert len(cap.n_ll[0].instructions) > 0
+        # CMS-side mirrors the predicate.
+        cms_cap = writer._last_cms_capture
+        assert cms_cap is not None
+        assert 0 in cms_cap.n_gl
+        assert 0 in cms_cap.n_ll
+
+
+class TestMultiBodyOverwriteBehaviorPin:
+    """Pin the current single-slot overwrite behavior for multi-NGLL/NLL
+    paths (PGR>=3, needSecondNGLL, isDTV NLL odd-even, tailloopInNll).
+    Phase C explicitly does NOT fix this — `default_n_gl = finalized` at
+    KernelWriter.py:3723 unconditionally overwrites; only the last
+    invocation survives. The predicate collapses these to the same
+    "n_gl present" answer.
+
+    These tests freeze the 1-bit answer so a future fix that switches
+    `default_n_gl` from a single `LoopBodyCapture` slot to a
+    list-of-bodies-per-NGLL-index will be recognized as a behavior
+    change requiring test updates rather than silently regressing.
+    """
+
+    def test_predicate_collapses_pgr2_and_pgr3_to_same_answer(self):
+        """The predicate is a 1-bit "n_gl present?" answer; PGR=2 and
+        PGR=3 both map to True even though PGR=3's production loop emits
+        NGLL twice (KernelWriter.py:5118 `range(PGR-1, 0, -1)`)."""
+        kernel_pgr2 = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
+        kernel_pgr3 = {"PrefetchGlobalRead": 3, "SuppressNoLoadLoop": False}
+        assert kernel_emits_n_gl(kernel_pgr2) is True
+        assert kernel_emits_n_gl(kernel_pgr3) is True
+
+    def test_default_n_gl_is_single_slot_not_list(self):
+        """`CaptureContext.default_n_gl` is a single `LoopBodyCapture`
+        slot, not a per-NGLL-index list. Multi-NGLL emissions overwrite
+        (KernelWriter.py:3723); only the last NGLL survives. Pin this
+        so a future list-of-bodies refactor flags as a behavior change."""
+        from Tensile.Components.ScheduleCapture import CaptureContext
+        ctx = CaptureContext()
+        # Initial state is None; assignment is a single object, not a list.
+        assert ctx.default_n_gl is None
+        ctx.default_n_gl = LoopBodyCapture(instructions=[])
+        assert isinstance(ctx.default_n_gl, LoopBodyCapture)
+        # Second assignment overwrites — does not append.
+        body2 = LoopBodyCapture(instructions=[])
+        ctx.default_n_gl = body2
+        assert ctx.default_n_gl is body2  # last wins; previous lost

@@ -5995,9 +5995,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # per-edge wait-coverage (validate_edge_wait_coverage).
     if getattr(self.states, "_captureDefaultSchedule", False):
       from Tensile.Components.ScheduleCapture import (
-        FourPartCapture, LoopBodyCapture, clone_loop_body,
+        FourPartCapture, clone_loop_body,
         build_dataflow_graph, compare_graphs, validate_edge_wait_coverage,
         _resolve_arch_profile_for_isa,
+        kernel_emits_n_gl, kernel_emits_n_ll, assert_capture_body_consistency,
       )
       assert loopCopies == 1, (
         f"Phase 5 capture relocation requires loopCopies==1 under CMS; "
@@ -6007,8 +6008,38 @@ class KernelWriter(metaclass=abc.ABCMeta):
       try:
         ctx = self._capture_context
         main = ctx.default_main
-        n_gl = ctx.default_n_gl if ctx.default_n_gl is not None else LoopBodyCapture(instructions=[])
-        n_ll = ctx.default_n_ll if ctx.default_n_ll is not None else LoopBodyCapture(instructions=[])
+        # PGR/PLR Phase C (rocm-libraries-kzf): omit n_gl/n_ll dict keys
+        # when the corresponding body wasn't emitted by the production
+        # path (PGR<2 -> no NGLL; PGR=0 or SuppressNoLoadLoop -> no NLL).
+        # `build_dataflow_graph` handles the absent-key path by skipping
+        # that body. Synthesizing `LoopBodyCapture(instructions=[])` here
+        # would defeat that absence-detection and trip the empty-body
+        # guard at ScheduleCapture.py:2901-2905, producing the
+        # CaptureEmptyBodyError false positive on PGR=0 / SNLL kernels.
+        emit_n_gl = kernel_emits_n_gl(kernel)
+        emit_n_ll = kernel_emits_n_ll(kernel)
+        # Capture-vs-predicate consistency check: the shadow capture
+        # driver in noLoadLoop (KernelWriter.py:3703-3725) must populate
+        # exactly the bodies the predicate says will be emitted. A
+        # mismatch indicates either a production-gate change that wasn't
+        # mirrored in the predicates, or a capture-pipeline bug.
+        assert (ctx.default_n_gl is not None) == emit_n_gl, (
+          f"default_n_gl populated={ctx.default_n_gl is not None} but "
+          f"kernel_emits_n_gl(kernel)={emit_n_gl} "
+          f"(PGR={kernel['PrefetchGlobalRead']!r}). "
+          f"Predicate at ScheduleCapture.py:kernel_emits_n_gl is out of "
+          f"sync with the production gate at KernelWriter.py:5118."
+        )
+        assert (ctx.default_n_ll is not None) == emit_n_ll, (
+          f"default_n_ll populated={ctx.default_n_ll is not None} but "
+          f"kernel_emits_n_ll(kernel)={emit_n_ll} "
+          f"(PGR={kernel['PrefetchGlobalRead']!r}, "
+          f"SuppressNoLoadLoop={kernel.get('SuppressNoLoadLoop')!r}). "
+          f"Predicate at ScheduleCapture.py:kernel_emits_n_ll is out of "
+          f"sync with the production gate at KernelWriter.py:5141-5142."
+        )
+        n_gl_dict = {0: ctx.default_n_gl} if emit_n_gl else {}
+        n_ll_dict = {0: ctx.default_n_ll} if emit_n_ll else {}
         if main is not None:
           num_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
           # Resolve the per-arch quad-cycle profile from the kernel's ISA
@@ -6021,19 +6052,29 @@ class KernelWriter(metaclass=abc.ABCMeta):
           ctx.default = FourPartCapture(
             main_loop={0: main},
             main_loop_prev={0: clone_loop_body(main)},
-            n_gl={0: n_gl},
-            n_ll={0: n_ll},
+            n_gl=n_gl_dict,
+            n_ll=n_ll_dict,
             num_mfma=num_mfma,
             num_codepaths=1,
             source="default-sia3",
             num_mfma_per_subiter=self.states.numMfmaPerIter,
             arch_profile=arch_profile,
           )
+          # Sanity-check default-side capture matches the predicates.
+          # This also fires if the dict-omission encoding above ever
+          # diverges from the predicates (defense-in-depth).
+          assert_capture_body_consistency(ctx.default, kernel)
           # CMS-side capture must use the same profile so both graphs
           # compare apples-to-apples through the per-arch helpers.
           if ctx.cms is not None:
             ctx.cms.arch_profile = arch_profile
           if ctx.cms is not None:
+            # CMS-side body presence must also match the predicates.
+            # CustomSchedule.py passes emit_n_gl / emit_n_ll derived
+            # from the same predicates, so this is a tight loop check;
+            # if the CMS-side caller is ever updated and forgets to
+            # forward the kwargs, this raises immediately.
+            assert_capture_body_consistency(ctx.cms, kernel)
             kernel_label = (
               f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}"
             )

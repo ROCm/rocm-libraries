@@ -77,7 +77,16 @@ class CaptureMfmaCodeShapeError(Exception):
 
 
 class CaptureConsistencyError(Exception):
-    """Default and CMS captures disagree on which instructions exist."""
+    """Default and CMS captures disagree on which instructions exist.
+
+    Also raised by `assert_capture_body_consistency` when a captured
+    `FourPartCapture`'s body presence (key 0 in `n_gl` / `n_ll`) does not
+    match the kernel-config-derived predicates `kernel_emits_n_gl` /
+    `kernel_emits_n_ll`. That signals either a production-gate change in
+    `KernelWriter.kernelBody` (KernelWriter.py:5118 and :5141-5142) that
+    was not mirrored in the predicates, or a capture-pipeline bug that
+    populated/omitted a body when the predicates said otherwise.
+    """
 
 
 class CaptureIdmapMismatchError(Exception):
@@ -2882,6 +2891,20 @@ def build_dataflow_graph(four_part_capture):
 
     Always raises CaptureEmptyBodyError if any body has zero
     instructions.
+
+    An entirely-omitted body (key 0 absent from the body's dict) is
+    treated as "this body was not emitted by either scheduler", NOT as
+    an error. PGR/SuppressNoLoadLoop combinations that legitimately do
+    not emit NGL or NLL (see `kernel_emits_n_gl` / `kernel_emits_n_ll`)
+    leave the corresponding dict empty; the loop below skips that body
+    cleanly and the validator runs against the remaining bodies.
+
+    The empty-instruction-list guard above (`{0: empty_body}`) is
+    deliberately distinct from the absent-key path: a present-but-empty
+    body indicates the capture pipeline lost data for a body that
+    *should* have content, which is a real bug worth raising on. Do not
+    "fix" the absence path by synthesizing a `LoopBodyCapture(instructions=[])`
+    — that conflates the two error modes; use dict-omission instead.
     """
     captures = {}
     if four_part_capture is None:
@@ -4676,15 +4699,98 @@ def expand_cms_macro(macro, id_value, useGR, usePLR, useGRInc, useLoop,
     return builder.finalize()
 
 
+# =============================================================================
+# Body-emission predicates and consistency helper (PGR/PLR Phase C)
+# =============================================================================
+# Mirror the production NGLL/NLL emission gates in `KernelWriter.kernelBody`:
+#   - NGLL is emitted iff `for remainPgr in range(PGR-1, 0, -1)` runs at
+#     least once, i.e. PGR >= 2 (KernelWriter.py:5118).
+#   - NLL is emitted iff `if kernel["PrefetchGlobalRead"] and not
+#     kernel["SuppressNoLoadLoop"]:` is true, i.e. PGR >= 1 and the
+#     suppress-flag is off (KernelWriter.py:5141-5142).
+#
+# Validator-side and CMS-side constructors of FourPartCapture both consult
+# these predicates to decide whether to populate `n_gl[0]` / `n_ll[0]` or
+# leave the dict empty. Single source of truth — if the production gates
+# ever shift, update these helpers and `assert_capture_body_consistency`
+# will surface any caller that still synthesizes a phantom body.
+
+def kernel_emits_n_gl(kernel) -> bool:
+    """True iff `KernelWriter.kernelBody` will emit at least one NGLL.
+
+    Mirrors the gate at `KernelWriter.py:5118`:
+        for remainPgr in range(kernel["PrefetchGlobalRead"]-1, 0, -1):
+    The loop body runs iff PGR >= 2.
+    """
+    return kernel["PrefetchGlobalRead"] >= 2
+
+
+def kernel_emits_n_ll(kernel) -> bool:
+    """True iff `KernelWriter.kernelBody` will emit a (non-Opt) NLL.
+
+    Mirrors the gate at `KernelWriter.py:5141-5142`:
+        if kernel["PrefetchGlobalRead"]:
+          if not kernel["SuppressNoLoadLoop"]:
+    NLL emission requires PGR >= 1 and SuppressNoLoadLoop=False.
+
+    Note: this predicate does NOT model OptNLL (see ot2.C design 5.3).
+    `_noLoadLoopBodyDefault` is guarded by `not isOptNLL`
+    (KernelWriter.py:3703); OptNLL kernels currently leave default_n_ll
+    None even when the predicate says yes. The consistency check will
+    fire loudly on the first such kernel, at which point this predicate
+    needs an `OptNoLoadLoop` clause.
+    """
+    return bool(kernel["PrefetchGlobalRead"]) and not kernel["SuppressNoLoadLoop"]
+
+
+def assert_capture_body_consistency(four_part_capture, kernel) -> None:
+    """Cross-check a FourPartCapture's body presence against the
+    kernel-config-derived predicates `kernel_emits_n_gl` / `kernel_emits_n_ll`.
+
+    Raises `CaptureConsistencyError` on mismatch. Catches:
+      - A future production-side gate change that quietly stops emitting
+        a body the predicate still says should exist (silent under-validation).
+      - A capture-pipeline bug that synthesizes a phantom body the
+        production side cannot match (silent over-validation).
+      - Either side accidentally diverging from the agreed predicate so
+        compare_graphs would walk asymmetric body label sets.
+
+    Called in `KernelWriter.kernelBody` immediately after constructing
+    `ctx.default` and `ctx.cms`, before `build_dataflow_graph`.
+    """
+    if four_part_capture is None:
+        return
+    expected_n_gl = kernel_emits_n_gl(kernel)
+    expected_n_ll = kernel_emits_n_ll(kernel)
+    actual_n_gl = 0 in four_part_capture.n_gl
+    actual_n_ll = 0 in four_part_capture.n_ll
+    if actual_n_gl != expected_n_gl or actual_n_ll != expected_n_ll:
+        raise CaptureConsistencyError(
+            f"FourPartCapture body presence does not match kernel-config "
+            f"predicates (source={four_part_capture.source!r}). "
+            f"PGR={kernel['PrefetchGlobalRead']!r}, "
+            f"SuppressNoLoadLoop={kernel.get('SuppressNoLoadLoop')!r}. "
+            f"Expected n_gl present={expected_n_gl}, got {actual_n_gl}. "
+            f"Expected n_ll present={expected_n_ll}, got {actual_n_ll}. "
+            f"Either the production gates at KernelWriter.py:5118/:5141-5142 "
+            f"changed without updating kernel_emits_n_gl/n_ll, or a "
+            f"FourPartCapture constructor synthesized a body the predicate "
+            f"says should not exist."
+        )
+
+
 def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
                                   sync_class, snop_class, mfma_classes,
-                                  num_mfma_per_subiter=0):
+                                  num_mfma_per_subiter=0,
+                                  emit_n_gl=True, emit_n_ll=True):
     """Expand a CMS MAINLOOP macro four ways and assemble a FourPartCapture.
 
     main_loop[cp] expands with all flags=1 and \\ID=cp for each cp.
     main_loop_prev[cp] is a verbatim clone of main_loop[cp].
-    n_gl[0] expands with useGR=0, usePLR=1, useGRInc=1, useLoop=0, \\ID=0.
-    n_ll[0] expands with useGR=0, usePLR=0, useGRInc=0, useLoop=0, \\ID=0.
+    n_gl[0] expands with useGR=0, usePLR=1, useGRInc=1, useLoop=0, \\ID=0
+        — only when ``emit_n_gl`` is true.
+    n_ll[0] expands with useGR=0, usePLR=0, useGRInc=0, useLoop=0, \\ID=0
+        — only when ``emit_n_ll`` is true.
 
     These flag assignments mirror the CMS dispatch sites at:
       - simdSpecDispatch (KernelWriterAssembly.py, simdSpecDispatch) for main_loop
@@ -4693,6 +4799,14 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
     n_gl/n_ll are keyed only at {0: body} because the CMS tail-loop emission
     hard-codes \\ID=0 (see _emitNoLoadLoopBodyCMSMacro docstring for the
     correctness rationale).
+
+    ``emit_n_gl`` / ``emit_n_ll`` (default True for backwards compat with
+    direct test fixtures) gate whether each macro is expanded at all; when
+    false the corresponding dict is left empty so the CMS-side capture
+    matches the default-side capture's structural absence under
+    PGR/SuppressNoLoadLoop combinations that legitimately suppress those
+    bodies. Production callers in `CustomSchedule.py` derive the flags
+    from `kernel_emits_n_gl(kernel)` / `kernel_emits_n_ll(kernel)`.
     """
     main_loop = {}
     main_loop_prev = {}
@@ -4707,28 +4821,37 @@ def build_cms_four_part_capture(macro, num_codepaths, tag_by_origin_id,
         main_loop[cp] = body
         main_loop_prev[cp] = clone_loop_body(body)
 
-    n_gl_body = expand_cms_macro(
-        macro, id_value=0,
-        useGR=0, usePLR=1, useGRInc=1, useLoop=0,
-        tag_by_origin_id=tag_by_origin_id,
-        sync_class=sync_class, snop_class=snop_class,
-        mfma_classes=mfma_classes,
-    )
-    n_ll_body = expand_cms_macro(
-        macro, id_value=0,
-        useGR=0, usePLR=0, useGRInc=0, useLoop=0,
-        tag_by_origin_id=tag_by_origin_id,
-        sync_class=sync_class, snop_class=snop_class,
-        mfma_classes=mfma_classes,
-    )
+    if emit_n_gl:
+        n_gl_body = expand_cms_macro(
+            macro, id_value=0,
+            useGR=0, usePLR=1, useGRInc=1, useLoop=0,
+            tag_by_origin_id=tag_by_origin_id,
+            sync_class=sync_class, snop_class=snop_class,
+            mfma_classes=mfma_classes,
+        )
+        n_gl_dict = {0: n_gl_body}
+    else:
+        n_gl_dict = {}
+
+    if emit_n_ll:
+        n_ll_body = expand_cms_macro(
+            macro, id_value=0,
+            useGR=0, usePLR=0, useGRInc=0, useLoop=0,
+            tag_by_origin_id=tag_by_origin_id,
+            sync_class=sync_class, snop_class=snop_class,
+            mfma_classes=mfma_classes,
+        )
+        n_ll_dict = {0: n_ll_body}
+    else:
+        n_ll_dict = {}
 
     num_mfma = sum(1 for ti in main_loop[0].instructions if ti.category == "MFMA")
 
     return FourPartCapture(
         main_loop=main_loop,
         main_loop_prev=main_loop_prev,
-        n_gl={0: n_gl_body},
-        n_ll={0: n_ll_body},
+        n_gl=n_gl_dict,
+        n_ll=n_ll_dict,
         num_mfma=num_mfma,
         num_codepaths=num_codepaths,
         source="cms",
