@@ -64,10 +64,14 @@ using WarpGemmMfmaTf32Tf32F32M32N32K16 = WarpGemmImpl<WarpGemmAttributeMfma<
     WarpGemmAttributeMfmaImplF32F32F32M32N32K16Tf32Gfx950<WGAttrCtlEnum::Default_>,
     AttrNumAccess>>;
 
-template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
+          bool PackNumAccess                 = AttrNumAccessA != AttrNumAccessB>
 using WarpGemmMfmaTf32Tf32F32M16N16K32 = WarpGemmImpl<WarpGemmAttributeMfma<
     WarpGemmAttributeMfmaImplF32F32F32M16N16K32Tf32Gfx950<WGAttrCtlEnum::Default_>,
-    AttrNumAccess>>;
+    AttrNumAccessA,
+    AttrNumAccessB,
+    PackNumAccess>>;
 #endif
 
 // fp16
@@ -230,34 +234,43 @@ using WarpGemmMfmaBf16Bf16F32M32N32K16 = WarpGemmImpl<WarpGemmAttributeMfmaItera
 
 #if defined(__gfx950__)
 template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
-          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
+          bool PackNumAccess                 = AttrNumAccessA != AttrNumAccessB>
 using WarpGemmMfmaBf16Bf16F32M16N16K32 = WarpGemmImpl<
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K32<WGAttrCtlEnum::Default_>,
                           AttrNumAccessA,
-                          AttrNumAccessB>>;
+                          AttrNumAccessB,
+                          PackNumAccess>>;
 
 template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
-          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
+          bool PackNumAccess                 = AttrNumAccessA != AttrNumAccessB>
 using WarpGemmMfmaBf16Bf16F32M16N16K64 = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
     WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K32<WGAttrCtlEnum::Default_>,
     2,
     AttrNumAccessA,
-    AttrNumAccessB>>;
+    AttrNumAccessB,
+    PackNumAccess>>;
 #else
 template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
-          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
+          bool PackNumAccess                 = AttrNumAccessA != AttrNumAccessB>
 using WarpGemmMfmaBf16Bf16F32M16N16K32 = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
     WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K16<WGAttrCtlEnum::Default_>,
     2,
-    AttrNumAccessA>>;
+    AttrNumAccessA,
+    AttrNumAccessB,
+    PackNumAccess>>;
 
 template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
-          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
+          bool PackNumAccess                 = AttrNumAccessA != AttrNumAccessB>
 using WarpGemmMfmaBf16Bf16F32M16N16K64 = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
     WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K16<WGAttrCtlEnum::Default_>,
     4,
     AttrNumAccessA,
-    AttrNumAccessB>>;
+    AttrNumAccessB,
+    PackNumAccess>>;
 #endif
 
 using WarpGemmMfmaBf16Bf16F32M32N32K8SwizzleA = WarpGemmImpl<WarpGemmAttributeMfmaIterateK_SwizzleA<
