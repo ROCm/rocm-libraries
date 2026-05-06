@@ -339,7 +339,7 @@ class TestWaitCoverage:
         miss = [f for f in failures if isinstance(f, MissingWaitFailure)]
         assert miss, f"Expected MissingWaitFailure, got: {[type(f).__name__ for f in failures]}"
         assert miss[0].counter_kind == "dscnt"
-        assert len(miss[0].nearby_other_counter_waits) >= 1
+        assert len(miss[0].nearby_wait_indices) >= 1
 
     def test_swait_dscnt_minus_one_does_not_drain_lr_producer(self):
         """SWaitCnt with dscnt=-1 means 'no constraint' (counter ignored) —

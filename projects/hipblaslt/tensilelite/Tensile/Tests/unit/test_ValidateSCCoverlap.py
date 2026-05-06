@@ -270,27 +270,14 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
             "intervening_writer field must be populated"
         )
 
-        actual_producer_cls = type(
-            getattr(f.producer, "rocisa_inst", None)
-        ).__name__
-        actual_consumer_cls = type(
-            getattr(f.consumer, "rocisa_inst", None)
-        ).__name__
-        actual_intervening_cls = type(
-            getattr(f.intervening_writer, "rocisa_inst", None)
-        ).__name__
-        assert actual_producer_cls == producer_cls, (
-            f"producer rocisa class: expected {producer_cls!r}, "
-            f"got {actual_producer_cls!r}"
-        )
-        assert actual_consumer_cls == consumer_cls, (
-            f"consumer rocisa class: expected {consumer_cls!r}, "
-            f"got {actual_consumer_cls!r}"
-        )
-        assert actual_intervening_cls == intervening_cls, (
-            f"intervening_writer rocisa class: expected {intervening_cls!r}, "
-            f"got {actual_intervening_cls!r}"
-        )
+        # Post-g4w: producer/consumer/intervening_writer are FailureNodeLabel
+        # instances (no GraphNode back-reference, no rocisa_inst). The wrapped
+        # rocisa class identity is no longer carried on the Failure by design
+        # — the rendering layer is decoupled from CMS-specific metadata.
+        # producer_cls / consumer_cls / intervening_cls remain on the
+        # signature for caller convenience and for documenting the legacy
+        # opcode at each slot, but are not asserted here.
+        del producer_cls, consumer_cls, intervening_cls
         if producer_category is not None:
             assert f.producer.category == producer_category, (
                 f"producer.category: expected {producer_category!r}, "

@@ -299,25 +299,25 @@ class TestCompareGraphs(GraphNativeValidationTest):
 # field assertions are exercised end-to-end.
 
 
-class _FakeNode:
-    """Minimal stand-in for GraphNode / ValidatorInstruction with .name and
-    .issued_at.vmfma_index — the only attributes the lifted helpers read."""
-    def __init__(self, name, vmfma_index, *, use_position=False):
-        self.name = name
-        if use_position:
-            # GraphNode-style: only .position
-            self.position = SchedulePosition(loop_index=1, vmfma_index=vmfma_index, sub_index=0)
-        else:
-            # ValidatorInstruction-style: .issued_at
-            self.issued_at = SchedulePosition(loop_index=1, vmfma_index=vmfma_index, sub_index=0)
+def _label(category: str, vmfma_index: int) -> "FailureNodeLabel":
+    """Build a FailureNodeLabel matching the CMS-side provider's wording —
+    bare 'category' for plain MFMA, 'category[0]' otherwise."""
+    from Tensile.Components.ScheduleCapture import FailureNodeLabel
+    primary = category if category == "MFMA" else f"{category}[0]"
+    return FailureNodeLabel(
+        primary=primary,
+        position=f"@ idx={vmfma_index}",
+        category=category,
+    )
 
 
 class TestLiftedHelpers(GraphNativeValidationTest):
     def test_assert_order_inverted_with_issued_at(self):
-        """ValidatorInstruction-style nodes (.issued_at)."""
+        """Post-g4w: Failures consume FailureNodeLabel; the helpers parse
+        category + vmfma_index from the label's primary/position strings."""
         f = OrderInvertedFailure(
-            producer=_FakeNode("LRA0", -1),
-            consumer=_FakeNode("PackA0", 2),
+            producer=_label("LRA0", -1),
+            consumer=_label("PackA0", 2),
             default_producer_position=SchedulePosition(1, -1, 0),
             default_consumer_position=SchedulePosition(1, 2, 0),
         )
@@ -327,11 +327,12 @@ class TestLiftedHelpers(GraphNativeValidationTest):
         )
 
     def test_assert_order_inverted_with_position_attribute(self):
-        """GraphNode-style nodes (.position only) — used by graph-native
-        Failures emitted by validate_edge_wait_coverage."""
+        """Same shape as above; pre-g4w this distinguished GraphNode (.position)
+        from ValidatorInstruction (.issued_at) — post-g4w both sides go through
+        FailureNodeLabel so the test is now identical to the issued_at variant."""
         f = OrderInvertedFailure(
-            producer=_FakeNode("GRA", 0, use_position=True),
-            consumer=_FakeNode("LRA1", 6, use_position=True),
+            producer=_label("GRA", 0),
+            consumer=_label("LRA1", 6),
             default_producer_position=SchedulePosition(1, 0, 0),
             default_consumer_position=SchedulePosition(1, 6, 0),
         )
@@ -342,12 +343,12 @@ class TestLiftedHelpers(GraphNativeValidationTest):
 
     def test_assert_order_inverted_name_mismatch_raises(self):
         f = OrderInvertedFailure(
-            producer=_FakeNode("LRA0", 0),
-            consumer=_FakeNode("MFMA", 4),
+            producer=_label("LRA0", 0),
+            consumer=_label("MFMA", 4),
             default_producer_position=SchedulePosition(1, 0, 0),
             default_consumer_position=SchedulePosition(1, 4, 0),
         )
-        with pytest.raises(AssertionError, match="producer.name"):
+        with pytest.raises(AssertionError, match="producer category"):
             self.assert_order_inverted(
                 f, producer_name="WRONG", producer_idx=0,
                 consumer_name="MFMA", consumer_idx=4,
@@ -355,8 +356,8 @@ class TestLiftedHelpers(GraphNativeValidationTest):
 
     def test_assert_timing_too_close(self):
         f = TimingTooCloseFailure(
-            producer=_FakeNode("PackA0", 4),
-            consumer=_FakeNode("MFMA", 4),
+            producer=_label("PackA0", 4),
+            consumer=_label("MFMA", 4),
             expected_quad_cycles=2,
             actual_quad_cycles=1,
         )
@@ -368,10 +369,10 @@ class TestLiftedHelpers(GraphNativeValidationTest):
 
     def test_assert_wrong_interleaving(self):
         f = OverriddenInputFailure(
-            producer=_FakeNode("PackA0", 0),
-            consumer=_FakeNode("PackB0", 1),
+            producer=_label("PackA0", 0),
+            consumer=_label("PackB0", 1),
             resource="vgpr",
-            intervening_writer=_FakeNode("PackA1", 2),
+            intervening_writer=_label("PackA1", 2),
         )
         self.assert_wrong_interleaving(
             f, pack_name="PackA0", pack_idx=0,

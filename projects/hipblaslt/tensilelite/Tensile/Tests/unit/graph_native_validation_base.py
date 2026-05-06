@@ -376,7 +376,29 @@ class GraphNativeValidationTest:
     # =========================================================================
 
     @staticmethod
-    def assert_order_inverted(failure, *, producer_name, producer_idx,
+    def _label_category(label) -> str:
+        """Extract bare category from a FailureNodeLabel.primary string.
+
+        Primary is either 'Category' (plain MFMA) or 'Category[N]'. Strip
+        the [N] suffix so the helper can compare against the bare-category
+        names callers pass via `producer_name=` / `consumer_name=`.
+        """
+        primary = label.primary
+        bracket = primary.find("[")
+        return primary[:bracket] if bracket != -1 else primary
+
+    @staticmethod
+    def _label_idx(label) -> int:
+        """Extract vmfma_index from a FailureNodeLabel.position string.
+
+        Position is '@ idx=N' under the CMS-side provider; parse the
+        integer suffix so position checks survive the string-only label API.
+        """
+        pos = label.position
+        eq = pos.rfind("=")
+        return int(pos[eq + 1:])
+
+    def assert_order_inverted(self, failure, *, producer_name, producer_idx,
                               consumer_name, consumer_idx):
         """Assert OrderInvertedFailure carries the expected producer/consumer
         identity AND vmfma_index positions.
@@ -390,47 +412,32 @@ class GraphNativeValidationTest:
         nodes that expose ``.name`` and ``.issued_at.vmfma_index`` /
         ``.position.vmfma_index``.
         """
-        assert failure.producer.name == producer_name, (
-            f"producer.name: expected {producer_name!r}, got {failure.producer.name!r}"
+        prod_cat = self._label_category(failure.producer)
+        prod_idx = self._label_idx(failure.producer)
+        cons_cat = self._label_category(failure.consumer)
+        cons_idx = self._label_idx(failure.consumer)
+        assert prod_cat == producer_name, (
+            f"producer category: expected {producer_name!r}, got {prod_cat!r}"
         )
-        prod_pos = (
-            getattr(failure.producer, "issued_at", None)
-            or failure.producer.position
+        assert prod_idx == producer_idx, (
+            f"producer vmfma_index: expected {producer_idx}, got {prod_idx}"
         )
-        assert prod_pos.vmfma_index == producer_idx, (
-            f"producer position.vmfma_index: expected {producer_idx}, "
-            f"got {prod_pos.vmfma_index}"
+        assert cons_cat == consumer_name, (
+            f"consumer category: expected {consumer_name!r}, got {cons_cat!r}"
         )
-        assert failure.consumer.name == consumer_name, (
-            f"consumer.name: expected {consumer_name!r}, got {failure.consumer.name!r}"
-        )
-        cons_pos = (
-            getattr(failure.consumer, "issued_at", None)
-            or failure.consumer.position
-        )
-        assert cons_pos.vmfma_index == consumer_idx, (
-            f"consumer position.vmfma_index: expected {consumer_idx}, "
-            f"got {cons_pos.vmfma_index}"
+        assert cons_idx == consumer_idx, (
+            f"consumer vmfma_index: expected {consumer_idx}, got {cons_idx}"
         )
 
-    @staticmethod
-    def assert_timing_too_close(failure, *, producer_name, producer_idx,
+    def assert_timing_too_close(self, failure, *, producer_name, producer_idx,
                                 consumer_name, consumer_idx,
                                 expected_quad_cycles, actual_quad_cycles):
         """Assert TimingTooCloseFailure carries the expected producer/consumer
         positions AND quad-cycle counts."""
-        assert failure.producer.name == producer_name
-        prod_pos = (
-            getattr(failure.producer, "issued_at", None)
-            or failure.producer.position
-        )
-        assert prod_pos.vmfma_index == producer_idx
-        assert failure.consumer.name == consumer_name
-        cons_pos = (
-            getattr(failure.consumer, "issued_at", None)
-            or failure.consumer.position
-        )
-        assert cons_pos.vmfma_index == consumer_idx
+        assert self._label_category(failure.producer) == producer_name
+        assert self._label_idx(failure.producer) == producer_idx
+        assert self._label_category(failure.consumer) == consumer_name
+        assert self._label_idx(failure.consumer) == consumer_idx
         assert failure.expected_quad_cycles == expected_quad_cycles, (
             f"expected_quad_cycles: expected {expected_quad_cycles}, "
             f"got {failure.expected_quad_cycles}"
@@ -440,8 +447,7 @@ class GraphNativeValidationTest:
             f"got {failure.actual_quad_cycles}"
         )
 
-    @staticmethod
-    def assert_wrong_interleaving(failure, *, pack_name, pack_idx,
+    def assert_wrong_interleaving(self, failure, *, pack_name, pack_idx,
                                   expected_next_name, expected_next_idx,
                                   actual_next_name, actual_next_idx):
         """Assert OverriddenInputFailure carries the expected pack +
@@ -452,21 +458,9 @@ class GraphNativeValidationTest:
         unified shape: pack -> producer, expected_next -> consumer,
         actual_next -> intervening_writer.
         """
-        assert failure.producer.name == pack_name
-        pack_pos = (
-            getattr(failure.producer, "issued_at", None)
-            or failure.producer.position
-        )
-        assert pack_pos.vmfma_index == pack_idx
-        assert failure.consumer.name == expected_next_name
-        exp_pos = (
-            getattr(failure.consumer, "issued_at", None)
-            or failure.consumer.position
-        )
-        assert exp_pos.vmfma_index == expected_next_idx
-        assert failure.intervening_writer.name == actual_next_name
-        act_pos = (
-            getattr(failure.intervening_writer, "issued_at", None)
-            or failure.intervening_writer.position
-        )
-        assert act_pos.vmfma_index == actual_next_idx
+        assert self._label_category(failure.producer) == pack_name
+        assert self._label_idx(failure.producer) == pack_idx
+        assert self._label_category(failure.consumer) == expected_next_name
+        assert self._label_idx(failure.consumer) == expected_next_idx
+        assert self._label_category(failure.intervening_writer) == actual_next_name
+        assert self._label_idx(failure.intervening_writer) == actual_next_idx

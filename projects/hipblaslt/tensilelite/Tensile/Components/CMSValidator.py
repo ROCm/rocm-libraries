@@ -435,6 +435,7 @@ class GlobalRead(ValidatorInstruction):
         """Validate: GR -> SWait -> SBarrier -> LR1. Returns Failure or None."""
         from Tensile.Components.ScheduleCapture import (
             MissingWaitFailure, MissingBarrierFailure,
+            cms_node_label, _cms_iter_delta,
         )
 
         # If needed_by is at inf, the constraint is not active (e.g. no LR1s).
@@ -450,10 +451,19 @@ class GlobalRead(ValidatorInstruction):
 
         name = self._name()
 
+        # Eager source-aware labels. ValidatorInstruction has no body capture
+        # context (no tagged_inst, no body_label), so cms_node_label falls
+        # through to bare-category primary — matches the pre-g4w wording for
+        # this path (which previously raised under strict mode anyway).
+        producer_label = cms_node_label(self, None)
+        consumer_label = cms_node_label(self.needed_by, None)
+        iter_delta = _cms_iter_delta(self, self.needed_by)
+
         # 1. No SWait
         if self.guaranteed_by == POSITION_INF:
             return MissingWaitFailure(
-                producer=self, consumer=self.needed_by, counter_kind="vlcnt",
+                producer=producer_label, consumer=consumer_label,
+                iter_delta=iter_delta, counter_kind="vlcnt",
             )
 
         # NOTE: Must do it after the check above to guard against infinity.
@@ -462,20 +472,23 @@ class GlobalRead(ValidatorInstruction):
         # 2. No Barrier
         if len(self.barriered_at) == 0:
             return MissingBarrierFailure(
-                producer=self, consumer=self.needed_by, role="needed_by",
+                producer=producer_label, consumer=consumer_label,
+                iter_delta=iter_delta, role="needed_by",
             )
 
         # 3. Guaranteed after needed — semantically equivalent to no wait from the
         # consumer's perspective, so surface as MissingWaitFailure.
         if self.guaranteed_by > self.needed_by.issued_at:
             return MissingWaitFailure(
-                producer=self, consumer=self.needed_by, counter_kind="vlcnt",
+                producer=producer_label, consumer=consumer_label,
+                iter_delta=iter_delta, counter_kind="vlcnt",
             )
 
         # 4. No Barrier between SWait and LR1
         if not any(self.guaranteed_by < barriered_at < self.needed_by.issued_at for barriered_at in self.barriered_at):
             return MissingBarrierFailure(
-                producer=self, consumer=self.needed_by, role="needed_by",
+                producer=producer_label, consumer=consumer_label,
+                iter_delta=iter_delta, role="needed_by",
             )
 
         # Defensive fallback — string return; should not fire on valid logic.
@@ -512,7 +525,7 @@ class SWait(ValidatorInstruction):
             return None
         from Tensile.Components.ScheduleCapture import InvalidCounterValueFailure
         return InvalidCounterValueFailure(
-            swait=self,
+            swait_idx=self.issued_at.vmfma_index,
             dscnt=self.dscnt,
             vlcnt=self.vlcnt,
             vscnt=self.vscnt,
@@ -1387,7 +1400,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
         )
         if graph_failures:
             summary = "\n  ".join(
-                f.format(context.cms_capture.main_loop.get(0))
+                f.format()
                 for f in graph_failures
             )
             return False, (
@@ -1399,7 +1412,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
         )
         if wait_failures:
             summary = "\n  ".join(
-                f.format(context.cms_capture.main_loop.get(0))
+                f.format()
                 for f in wait_failures
             )
             return False, (

@@ -209,38 +209,63 @@ class CMSValidationTestBase:
         assert status, f"Schedule should have passed validation but did not. {message}"
 
     @staticmethod
-    def assert_order_inverted(failure, *, producer_name, producer_idx,
+    def _label_category(label) -> str:
+        """Extract bare category from a FailureNodeLabel.primary string.
+
+        Primary is either 'Category' (plain MFMA) or 'Category[N]'. Strip
+        the [N] suffix so the helper can compare against the bare-category
+        names callers pass via `producer_name=` / `consumer_name=`.
+        """
+        primary = label.primary
+        bracket = primary.find("[")
+        return primary[:bracket] if bracket != -1 else primary
+
+    @staticmethod
+    def _label_idx(label) -> int:
+        """Extract vmfma_index from a FailureNodeLabel.position string.
+
+        Position is '@ idx=N' under the CMS-side provider; parse the integer
+        suffix so position checks survive the string-only label API.
+        """
+        pos = label.position
+        eq = pos.rfind("=")
+        return int(pos[eq + 1:])
+
+    @classmethod
+    def assert_order_inverted(cls, failure, *, producer_name, producer_idx,
                               consumer_name, consumer_idx):
         """Assert OrderInvertedFailure carries the expected producer/consumer
         identity AND vmfma_index positions. Pinning positions matters because
         a name-only check passes if any of N similarly-named instructions
         violate ordering — but we want to verify the *specific* schedule slot
         the test set up is the one being flagged."""
-        assert failure.producer.name == producer_name, (
-            f"producer.name: expected {producer_name!r}, got {failure.producer.name!r}"
+        prod_cat = cls._label_category(failure.producer)
+        prod_idx = cls._label_idx(failure.producer)
+        cons_cat = cls._label_category(failure.consumer)
+        cons_idx = cls._label_idx(failure.consumer)
+        assert prod_cat == producer_name, (
+            f"producer category: expected {producer_name!r}, got {prod_cat!r}"
         )
-        assert failure.producer.issued_at.vmfma_index == producer_idx, (
-            f"producer.issued_at.vmfma_index: expected {producer_idx}, "
-            f"got {failure.producer.issued_at.vmfma_index}"
+        assert prod_idx == producer_idx, (
+            f"producer vmfma_index: expected {producer_idx}, got {prod_idx}"
         )
-        assert failure.consumer.name == consumer_name, (
-            f"consumer.name: expected {consumer_name!r}, got {failure.consumer.name!r}"
+        assert cons_cat == consumer_name, (
+            f"consumer category: expected {consumer_name!r}, got {cons_cat!r}"
         )
-        assert failure.consumer.issued_at.vmfma_index == consumer_idx, (
-            f"consumer.issued_at.vmfma_index: expected {consumer_idx}, "
-            f"got {failure.consumer.issued_at.vmfma_index}"
+        assert cons_idx == consumer_idx, (
+            f"consumer vmfma_index: expected {consumer_idx}, got {cons_idx}"
         )
 
-    @staticmethod
-    def assert_timing_too_close(failure, *, producer_name, producer_idx,
+    @classmethod
+    def assert_timing_too_close(cls, failure, *, producer_name, producer_idx,
                                 consumer_name, consumer_idx,
                                 expected_quad_cycles, actual_quad_cycles):
         """Assert TimingTooCloseFailure carries the expected producer/consumer
         positions AND quad-cycle counts."""
-        assert failure.producer.name == producer_name
-        assert failure.producer.issued_at.vmfma_index == producer_idx
-        assert failure.consumer.name == consumer_name
-        assert failure.consumer.issued_at.vmfma_index == consumer_idx
+        assert cls._label_category(failure.producer) == producer_name
+        assert cls._label_idx(failure.producer) == producer_idx
+        assert cls._label_category(failure.consumer) == consumer_name
+        assert cls._label_idx(failure.consumer) == consumer_idx
         assert failure.expected_quad_cycles == expected_quad_cycles, (
             f"expected_quad_cycles: expected {expected_quad_cycles}, "
             f"got {failure.expected_quad_cycles}"
@@ -250,8 +275,8 @@ class CMSValidationTestBase:
             f"got {failure.actual_quad_cycles}"
         )
 
-    @staticmethod
-    def assert_wrong_interleaving(failure, *, pack_name, pack_idx,
+    @classmethod
+    def assert_wrong_interleaving(cls, failure, *, pack_name, pack_idx,
                                   expected_next_name, expected_next_idx,
                                   actual_next_name, actual_next_idx):
         """Assert OverriddenInputFailure carries the expected pack +
@@ -262,10 +287,10 @@ class CMSValidationTestBase:
         unified shape: pack -> producer, expected_next -> consumer,
         actual_next -> intervening_writer.
         """
-        assert failure.producer.name == pack_name
-        assert failure.producer.issued_at.vmfma_index == pack_idx
-        assert failure.consumer.name == expected_next_name
-        assert failure.consumer.issued_at.vmfma_index == expected_next_idx
-        assert failure.intervening_writer.name == actual_next_name
-        assert failure.intervening_writer.issued_at.vmfma_index == actual_next_idx
+        assert cls._label_category(failure.producer) == pack_name
+        assert cls._label_idx(failure.producer) == pack_idx
+        assert cls._label_category(failure.consumer) == expected_next_name
+        assert cls._label_idx(failure.consumer) == expected_next_idx
+        assert cls._label_category(failure.intervening_writer) == actual_next_name
+        assert cls._label_idx(failure.intervening_writer) == actual_next_idx
 

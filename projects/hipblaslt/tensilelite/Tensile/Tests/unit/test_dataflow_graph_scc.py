@@ -455,24 +455,23 @@ class TestSCCClobberFailure:
             f"Expected at least one OverriddenInputFailure; got "
             f"{[type(f).__name__ for f in failures]}"
         )
-        # All graph-shape OverriddenInputFailures must carry populated nodes.
+        # All graph-shape OverriddenInputFailures must carry populated labels.
         f = scc_failures[0]
         assert f.producer is not None
         assert f.consumer is not None
         assert f.intervening_writer is not None
-        # Class identities of the wrapped rocisa instructions.
-        assert type(f.producer.rocisa_inst).__name__ == "SCmpEQU32"
-        assert type(f.consumer.rocisa_inst).__name__ == "SCSelectB32"
-        assert type(f.intervening_writer.rocisa_inst).__name__ == "SAddU32"
-        # Format must mention the intervening writer. The clsname is no
-        # longer in the message — SCC failures use the per-category-stream
-        # [N] index, since the user schedules by position not by opcode
-        # (see bead `hof`); the rocisa_inst class identity is still on
-        # the Failure object for callers that want it (asserted above on
-        # lines 465-467).
-        # Capture for format() is the subj's main body — same body whose
-        # tagged_insts the failure's GraphNodes point at.
-        msg = f.format(subj.captures["ML"])
+        # Eager source-aware labels (post-g4w): producer/consumer/intervening
+        # are FailureNodeLabels carrying the CMS-side category. The rocisa
+        # class identity (SCmpEQU32 / SCSelectB32 / SAddU32) is no longer on
+        # the Failure — that information lived on the GraphNode and the
+        # rendering layer is decoupled from the graph by design. The
+        # category here is the CMS schedule-stream tag (GRIncA), which is
+        # what the user-facing Failure message names.
+        assert f.producer.category == "GRIncA"
+        assert f.consumer.category == "GRIncA"
+        assert f.intervening_writer.category == "GRIncA"
+        # Format takes no argument — labels are pre-rendered.
+        msg = f.format()
         assert "clobbering the SCC that the consumer needs" in msg
 
     def test_no_clobber_yields_no_scc_conflict_failure(self):

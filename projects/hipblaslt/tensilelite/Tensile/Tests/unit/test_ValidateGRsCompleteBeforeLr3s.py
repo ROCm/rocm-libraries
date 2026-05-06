@@ -147,7 +147,7 @@ class TestGRBeforeLR3_Negatives(GraphNativeValidationTest):
         )
         assert f.producer.category == "GRA"
         assert f.consumer.category == "LRA3"
-        assert len(f.nearby_other_counter_waits) >= 1
+        assert len(f.nearby_wait_indices) >= 1
 
     def test_LR3_grs_no_swait_at_all(self):
         """No SWait of any kind in the window -> MissingWait(vlcnt)."""

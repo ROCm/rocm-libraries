@@ -3635,7 +3635,7 @@ class TestNodeLabelAfterCoverageFix:
 
     def test_node_label_finds_ssetprio_in_capture_after_categorization(self):
         from Tensile.Components.ScheduleCapture import (
-            LoopBodyCaptureBuilder, _node_label, GraphNode, SLOT_KIND_MFMA,
+            LoopBodyCaptureBuilder, cms_node_label, GraphNode, SLOT_KIND_MFMA,
             BODY_LABEL_ML, _class_tag_from_category, _identity_for,
             make_position,
         )
@@ -3667,10 +3667,13 @@ class TestNodeLabelAfterCoverageFix:
             name="SSETPRIO@0.0",
             issue_cycles=1,
         )
-        # Must NOT raise ValueError; index 0 is the only SSETPRIO in the
-        # same-category stream.
-        label = _node_label(node, capture)
-        assert label == "SSETPRIO[0]", (
-            f"_node_label should return 'SSETPRIO[0]' for the only "
-            f"SSetPrior in capture; got {label!r}"
+        # Post-g4w: cms_node_label returns a FailureNodeLabel whose
+        # `primary` carries the per-category-stream [N] index resolved
+        # against the body capture. Lookup must succeed (SSETPRIO[0] is
+        # the only SSetPrior in the body) — this pins the consistent
+        # categorization fix from bead `u3t`.
+        label = cms_node_label(node, capture)
+        assert label.primary == "SSETPRIO[0]", (
+            f"cms_node_label should return primary='SSETPRIO[0]' for the only "
+            f"SSetPrior in capture; got {label.primary!r}"
         )
