@@ -70,10 +70,6 @@ void sy2sb_he2hb_checkBadArgs(const rocblas_handle handle,
     EXPECT_ROCBLAS_STATUS(
         rocsolver_sy2sb_he2hb(handle, I(0), kd, nb, (T) nullptr, lda, (T) nullptr, ldab, (T) nullptr),
         rocblas_status_success);
-
-    EXPECT_ROCBLAS_STATUS(
-        rocsolver_sy2sb_he2hb(handle, n, I(0), nb, (T) nullptr, lda, (T) nullptr, ldab, (T) nullptr),
-        rocblas_status_success);
 }
 
 template <typename T, typename I>
@@ -140,7 +136,7 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
 // nb       -- outer blocksize to use
 //
 // dA       -- matrix on GPU, lda-by-n, lda >= n
-// dAband   -- output band matrix on GPU, ldab-by-n, ldab >= 3 kd (size needed for 2nd stage)
+// dAband   -- output band matrix on GPU, ldab-by-n, ldab >= 3 kd - 1 (size needed for 2nd stage)
 // dTau     -- output vector on GPU, length n-kd
 //
 // hARes    -- output matrix on CPU to copy GPU result, lda-by-n, lda >= n
@@ -249,6 +245,7 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n", __func__, llong(n), llong(kd), llong
     *max_err = 0;
     err = norm_error('F', kd+1, n, ldab, hAband[0], hAbandRes[0] + kd - 1);
     *max_err = std::max<I>( err, *max_err );
+
     err = norm_error('F', 1, n-kd, 1, hTau[0], hTauRes[0]);
     *max_err = std::max<I>( err, *max_err );
 
@@ -260,7 +257,7 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n", __func__, llong(n), llong(kd), llong
 // kd       -- desired bandwidth
 // nb       -- outer blocksize to use
 // dA       -- matrix on GPU, lda-by-n, lda >= n
-// dAband   -- output band matrix on GPU, ldab-by-n, ldab >= 3 kd (size needed for 2nd stage)
+// dAband   -- output band matrix on GPU, ldab-by-n, ldab >= 3 kd - 1 (size needed for 2nd stage)
 // hA       -- matrix on CPU, lda-by-n, lda >= n
 template <typename T, typename I, typename Td, typename Th>
 void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
@@ -371,9 +368,8 @@ void testing_sy2sb_he2hb(Arguments& argus)
     I kd = argus.get<I>("kd", 1);
     I nb = argus.get<I>("nb", kd);
     I lda = argus.get<I>("lda", n);
-    // rocSolver 2nd stage needs 3*kd. LAPACK needs kd+1.
-    // todo: get ldab from argus?
-    I ldab = 3*kd;  //kd + 1;
+    // rocSolver 2nd stage hb2st needs 3*kd - 1. LAPACK needs kd+1.
+    I ldab = 3*kd - 1;
 using llong = long long;
 printf( "%s( n %lld, kd %lld, nb %lld )\n",
         __func__, llong(n), llong(kd), llong(nb) );
@@ -394,7 +390,7 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n",
     size_t size_tauRes   = (argus.unit_check || argus.norm_check) ? size_tau   : 0;
 
     // check invalid sizes
-    bool invalid_size = (n < 0 || nb < kd || lda < n || ldab < 3*kd || (n > 0 && kd < 1));
+    bool invalid_size = (n < 0 || kd < 1 || nb < 1 || nb < kd || nb % kd != 0 || lda < n || ldab < 3*kd - 1);
     if(invalid_size)
     {
         EXPECT_ROCBLAS_STATUS(
@@ -449,7 +445,7 @@ printf( "%s( n %lld, kd %lld, nb %lld )\n",
         CHECK_HIP_ERROR(dTau.memcheck());
 
     // check quick return
-    if(nb == 0 || n == 0 || kd == 0)
+    if(n == 0)
     {
         EXPECT_ROCBLAS_STATUS(
             rocsolver_sy2sb_he2hb(

@@ -67,9 +67,8 @@ const vector<vector<int64_t>> size_range_64 = {
      {20, 20}};
 
 const vector<vector<int>> blk_range = {
-    // quick return
-    {0, 1},
     // invalid
+    {0, 1},
     {4, 2},
     // normal (valid) samples
     {1, 10},
@@ -81,9 +80,8 @@ const vector<vector<int>> blk_range = {
     {3, 9}};
 
 const vector<vector<int64_t>> blk_range_64 = {
-    // quick return
-    {0, 1},
     // invalid
+    {0, 1},
     {4, 2},
     // normal (valid) samples
     {1, 10},
