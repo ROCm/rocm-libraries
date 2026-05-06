@@ -1233,6 +1233,7 @@ Tests:
   unit_check: 0
   iters: 1
   cold_iters: 1
+  initialization: hpl
   gpu_arch: '950'
 
 - name: matmul_swizzleA
@@ -1713,6 +1714,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
+  initialization: hpl
   gpu_arch: '942'
 
 - name: matmul_groupedgemm_zero_n
@@ -2316,6 +2318,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
+  initialization: hpl
   gpu_arch: '(9(42|50)|1250)'
 
 - name: matmul_gemm_f32_fast_bf16
