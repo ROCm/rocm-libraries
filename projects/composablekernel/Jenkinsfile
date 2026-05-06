@@ -1483,7 +1483,7 @@ pipeline {
         dbsshpassword = "${dbsshpassword}"
         gerrit_cred="${gerrit_cred}"
         DOCKER_BUILDKIT = "1"
-        BUILD_GFX103 = "${env.BRANCH_NAME == 'develop' ? true : false'}"
+        BUILD_GFX103 = "${env.BRANCH_NAME == 'develop' ? true : false}"
     }
     stages{
         stage("Determine CI Execution") {
