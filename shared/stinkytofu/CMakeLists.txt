@@ -209,7 +209,7 @@ add_subdirectory(tools)
 ##===----------------------------------------------------------------------===##
 
 # Install the stinkytofu library and export targets for find_package().
-install(TARGETS stinkytofu
+install(TARGETS stinkytofu stinkytofu-warnings
     EXPORT stinkytofu-targets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
@@ -238,7 +238,7 @@ install(FILES
     DESTINATION lib/cmake/stinkytofu
 )
 # Build-tree export so find_package() works without installing.
-export(TARGETS stinkytofu NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
+export(TARGETS stinkytofu stinkytofu-warnings NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
 
 # Install public header files with stinkytofu/ namespace
 # Exclude ir/python/ (Python-specific, internal headers)
