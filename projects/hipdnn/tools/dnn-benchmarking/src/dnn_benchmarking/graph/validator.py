@@ -121,7 +121,8 @@ class GraphValidator:
                            Defaults to SUPPORTED_NODE_TYPES.
         """
         self._supported_types = (
-            supported_types if supported_types is not None
+            supported_types
+            if supported_types is not None
             else SUPPORTED_NODE_TYPES.copy()
         )
 

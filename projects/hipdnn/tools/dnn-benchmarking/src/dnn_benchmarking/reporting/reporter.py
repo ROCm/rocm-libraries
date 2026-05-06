@@ -493,10 +493,17 @@ class Reporter:
     def _pe_outcome(pe: ProviderEngineResult) -> str:
         """Derive a short outcome label for a ProviderEngineResult."""
         if pe.status == "success":
-            label = "failed" if (
-                pe.correctness is not None and pe.correctness.tolerance_match is False
-            ) else "passed"
-            timing = pe.gpu_kernel_stats if pe.gpu_kernel_stats is not None else pe.e2e_stats
+            label = (
+                "failed"
+                if (
+                    pe.correctness is not None
+                    and pe.correctness.tolerance_match is False
+                )
+                else "passed"
+            )
+            timing = (
+                pe.gpu_kernel_stats if pe.gpu_kernel_stats is not None else pe.e2e_stats
+            )
             if timing is not None:
                 exec_s = timing.total_ms / 1000
                 wall_s = (pe.elapsed_time_ms / 1000) if pe.elapsed_time_ms else 0.0

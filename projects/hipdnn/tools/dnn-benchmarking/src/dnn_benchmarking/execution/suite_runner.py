@@ -33,6 +33,7 @@ from ..validation.reference_provider import (
 )
 from ..validation.validator import Validator
 
+
 def _resolve_engine_name(engine_id: int) -> str:
     """Resolve an engine ID to its registered name.
 
@@ -251,30 +252,34 @@ def run_graph_all_providers(
         return GraphResult(
             graph_name=graph_name,
             graph_path=str(graph_path),
-            results=[ProviderEngineResult(
-                provider="unknown",
-                engine_id=0,
-                status="skipped",
-                skip_reason=str(e),
-                correctness=CorrectnessResult.failed(
-                    rtol=config.rtol, atol=config.atol, error_message=str(e)
-                ),
-            )],
+            results=[
+                ProviderEngineResult(
+                    provider="unknown",
+                    engine_id=0,
+                    status="skipped",
+                    skip_reason=str(e),
+                    correctness=CorrectnessResult.failed(
+                        rtol=config.rtol, atol=config.atol, error_message=str(e)
+                    ),
+                )
+            ],
         )
     except (ExecutionError, RuntimeError) as e:
         msg = str(e)
         return GraphResult(
             graph_name=graph_name,
             graph_path=str(graph_path),
-            results=[ProviderEngineResult(
-                provider="unknown",
-                engine_id=0,
-                status="error",
-                error_message=f"Engine discovery failed: {msg}",
-                correctness=CorrectnessResult.failed(
-                    rtol=config.rtol, atol=config.atol, error_message=msg
-                ),
-            )],
+            results=[
+                ProviderEngineResult(
+                    provider="unknown",
+                    engine_id=0,
+                    status="error",
+                    error_message=f"Engine discovery failed: {msg}",
+                    correctness=CorrectnessResult.failed(
+                        rtol=config.rtol, atol=config.atol, error_message=msg
+                    ),
+                )
+            ],
         )
 
     if config.engine_filter is not None:
