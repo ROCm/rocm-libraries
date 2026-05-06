@@ -177,56 +177,6 @@ def build_pipeline_stages(pgr: int, nglshift: int, nllshift: int) -> list[Pipeli
     return stages
 
 
-class ValidationRule(ABC):
-    """A composable validation rule that operates on a Timeline.
-
-    Each rule declares which ValidationConcern(s) it covers. isValid uses
-    active_concerns() to decide which rules to run for a given kernel.
-
-    The run() method may return either:
-      - None  (validation passed)
-      - str   (legacy: pre-migration rules emit string messages directly)
-      - Failure subclass instance (migrated rules; isValid converts via
-        Failure.format(capture=None) at the boundary)
-
-    Stack 1 of plans/then-let-s-work-on-jaunty-reddy.md migrates rules
-    one at a time; the union return type accommodates the transition.
-    """
-
-    @abstractmethod
-    def concerns(self) -> set[ValidationConcern]:
-        """Which concerns this rule covers."""
-        ...
-
-    @abstractmethod
-    def run(self, timeline: 'Timeline', ctx: 'ValidationContext'):
-        """Execute the rule. Return None if valid, str OR Failure if not."""
-        ...
-
-
-class StructuralRule(ABC):
-    """A composable validation rule that operates on raw schedule data (no Timeline).
-
-    The run() method returns a (bool, str) tuple. Migrated structural rules
-    construct typed Failures internally and call .format(capture=None) to
-    produce the str — keeping the tuple shape stable for the existing
-    isValid contract.
-    """
-
-    @abstractmethod
-    def concerns(self) -> set[ValidationConcern]:
-        """Which concerns this rule covers."""
-        ...
-
-    @abstractmethod
-    def run(self, schedule_info: 'ScheduleInfo', context: 'ValidationContext',
-            code_path: int) -> tuple[bool, str]:
-        """Execute the rule. Return (True, '') if valid, (False, message) if not."""
-        ...
-
-
-
-
 # Pack-related invariants live graph-side:
 #   * LR -> Pack RAW (dscnt) and Pack -> MFMA RAW: `validate_edge_wait_coverage`
 #     + `compare_graphs` over register dataflow from `_GenericALURule`.
@@ -1275,17 +1225,6 @@ class ValidationContext:
 ValidatorPassContext = ValidationContext
 
 
-# Empty as of the graph-side migration: every rule that used to live here
-# (LR/Pack data-ready, GR-before/after-LR LDS-reuse, instruction-count
-# drift) is now enforced via `validate_edge_wait_coverage` /
-# `compare_graphs` in ScheduleCapture.py. The lists below are intentionally
-# empty; `isValid` still iterates them so the dispatch contract is stable
-# for any future structural rule.
-TIMELINE_RULES: list[ValidationRule] = []
-
-STRUCTURAL_RULES: list[StructuralRule] = []
-
-
 def format_kernel_string(kernel: 'Solution') -> str:
     """Format a human-readable description of the kernel's tile dimensions and transpose modes."""
     mt0 = kernel.get("MacroTile0", "?")
@@ -1322,42 +1261,6 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
     # This ensures tests and kernels without ISA metadata get full validation.
     if not required:
         required = set(ValidationConcern)
-
-    for code_path in range(scheduleInfo.numCodePaths):
-        # === Structural rules (no Timeline needed) ===
-        for rule in STRUCTURAL_RULES:
-            if not (rule.concerns() & required):
-                continue
-            # Reset typed-Failure side-channel before each rule so a previous
-            # rule's stale Failure can't leak into this iteration's diagnostics.
-            context._last_failure = None
-            status, message = rule.run(scheduleInfo, context, code_path)
-            if not status:
-                scheduleInfo.pretty_print()
-                return False, f"Code path {code_path}: {message}"
-
-        # === Timeline rules ===
-        # Skip timeline construction entirely when no timeline rule is needed.
-        # This avoids hitting CDNA-4 layout assertions for ISAs whose timeline
-        # concerns are not yet covered by any rule.
-        timeline_needed = any(r.concerns() & required for r in TIMELINE_RULES)
-        if not timeline_needed:
-            continue
-
-        timeline = create_unified_timeline(
-            scheduleInfo, kernel, code_path,
-            id_map=context.id_map,
-            mfma_code=context.mfma_code,
-        )
-
-        for rule in TIMELINE_RULES:
-            if not (rule.concerns() & required):
-                continue
-            result = rule.run(timeline, context)
-            error = _failure_to_string(result)
-            if error:
-                scheduleInfo.pretty_print()
-                return False, f"Code path {code_path}: {error}"
 
     # Cross-scheduler comparison rule. Only fires when both default and CMS
     # captures are present in the context (i.e. capture was enabled when
