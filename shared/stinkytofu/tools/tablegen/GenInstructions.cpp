@@ -229,15 +229,14 @@ class DefTParser {
         return true;
     }
 
-    // Resolve a format by merging with its parent (e.g. MFMA -> VOP3P). Single level only.
+    // Resolve a format by merging with its parent chain recursively.
     FormatDef getResolvedFormat(const std::string& name) const {
         auto it = formats_.find(name);
         if (it == formats_.end()) return FormatDef{};
         FormatDef fmt = it->second;
         if (fmt.parent.empty()) return fmt;
-        auto pit = formats_.find(fmt.parent);
-        if (pit == formats_.end()) return fmt;
-        const FormatDef& p = pit->second;
+        // Recursively resolve the parent first so grandparent fields propagate.
+        FormatDef p = getResolvedFormat(fmt.parent);
         // Child overrides where non-empty
         if (fmt.microcode.empty()) fmt.microcode = p.microcode;
         if (fmt.unit.empty()) fmt.unit = p.unit;
@@ -1872,6 +1871,7 @@ bool genAllInstructions(const std::string& inputDir, const std::string& outputDi
         for (const auto& inst : p.second) allMnemonics.insert(inst.mnemonic);
     std::vector<std::string> unifiedList(allMnemonics.begin(), allMnemonics.end());
     std::sort(unifiedList.begin(), unifiedList.end());
+    unifiedList.push_back("FENCE");
     unifiedList.push_back("LABEL");
     unifiedList.push_back("PHI");
     unifiedList.push_back("INVALID");

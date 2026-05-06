@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <utility>
+
 #include <gtest/gtest.h>
 
 #include "engines/plans/RMSnorm/RMSnormBwdPlan.hpp"
@@ -119,7 +121,8 @@ TEST(TestRMSnormBwdParams, IsNotCopyConstructible)
 namespace
 {
 
-RMSnormBwdPlan createPlanFromGraph(bool hasOptionalAttributes = true)
+std::pair<flatbuffers::FlatBufferBuilder, RMSnormBwdPlan>
+    createPlanFromGraph(bool hasOptionalAttributes = true)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, hasOptionalAttributes);
@@ -130,21 +133,21 @@ RMSnormBwdPlan createPlanFromGraph(bool hasOptionalAttributes = true)
     const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
 
     RMSnormBwdParams params(attr, graph.getTensorMap());
-    return RMSnormBwdPlan{std::move(params)};
+    return {std::move(builder), RMSnormBwdPlan{std::move(params)}};
 }
 
 } // namespace
 
 TEST(TestRMSnormBwdPlan, GetWorkspaceSizeReturnsZero)
 {
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
 TEST(TestRMSnormBwdPlan, IsMoveConstructible)
 {
-    auto plan = createPlanFromGraph();
+    auto [fbb, plan] = createPlanFromGraph();
 
     RMSnormBwdPlan moved(std::move(plan));
     HipKernelHandle handle;

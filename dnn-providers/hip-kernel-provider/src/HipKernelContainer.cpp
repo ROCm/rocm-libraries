@@ -6,12 +6,14 @@
 #include "engines/HipKernelEngine.hpp"
 #include "engines/plans/RMSnorm/RMSnormBwdPlanBuilder.hpp"
 #include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
+#include "engines/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/batchnorm/BatchnormPlanBuilder.hpp"
 #include "engines/plans/layernorm/LayernormPlanBuilder.hpp"
 #include "hip/HipKernelCompiler.hpp"
 
 #ifdef HIPDNN_ENGINE_ASM_SDPA
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #endif
 
@@ -36,6 +38,8 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
              auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
              engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormPlanBuilder>(
                  kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormFwdTrainingPlanBuilder>(
+                 kernelCompiler, devicePropertyProvider));
              engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
                  kernelCompiler, devicePropertyProvider));
              engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormBwdPlanBuilder>(
@@ -53,6 +57,7 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
                  hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>> {
              auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
              return engine;
          }},
 #endif

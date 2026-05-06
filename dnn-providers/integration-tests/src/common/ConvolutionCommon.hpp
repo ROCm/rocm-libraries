@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <ostream>
+#include <string>
 #include <vector>
 
 namespace test_conv_common
@@ -22,6 +24,7 @@ struct ConvTestCase
     std::vector<int64_t> convStride;
     std::vector<int64_t> convDilation;
     unsigned seed;
+    std::string note;
 
     ConvTestCase(std::vector<int64_t>&& xDimsLocal,
                  std::vector<int64_t>&& wDimsLocal,
@@ -84,6 +87,82 @@ struct ConvTestCase
         }
 
         yDims = outputDims;
+        note = generateNote();
+    }
+
+    std::string generateNote() const
+    {
+        std::vector<std::string> tags;
+
+        bool is1x1 = std::all_of(wDims.begin() + 2, wDims.end(), [](int64_t d) { return d == 1; });
+        if(is1x1)
+        {
+            tags.push_back("1x1 Filter");
+        }
+
+        if(wDims.size() >= 2 && wDims[1] > 0 && xDims[1] / wDims[1] > 1)
+        {
+            tags.push_back("Grouped");
+        }
+
+        if(xDims[0] > 1)
+        {
+            tags.push_back("Batched");
+        }
+
+        bool nonSquare = false;
+        for(size_t i = 3; i < xDims.size(); ++i)
+        {
+            if(xDims[i] != xDims[2])
+            {
+                nonSquare = true;
+                break;
+            }
+        }
+        if(nonSquare)
+        {
+            tags.push_back("Non-square");
+        }
+
+        bool hasPadding
+            = std::any_of(
+                  convPrePadding.begin(), convPrePadding.end(), [](int64_t v) { return v != 0; })
+              || std::any_of(
+                  convPostPadding.begin(), convPostPadding.end(), [](int64_t v) { return v != 0; });
+        if(hasPadding)
+        {
+            tags.push_back("Padding");
+        }
+
+        bool hasStride
+            = std::any_of(convStride.begin(), convStride.end(), [](int64_t v) { return v != 1; });
+        if(hasStride)
+        {
+            tags.push_back("Stride");
+        }
+
+        bool hasDilation = std::any_of(
+            convDilation.begin(), convDilation.end(), [](int64_t v) { return v != 1; });
+        if(hasDilation)
+        {
+            tags.push_back("Dilation");
+        }
+
+        if(tags.empty())
+        {
+            return {};
+        }
+
+        std::string result;
+        for(size_t i = 0; i < tags.size(); ++i)
+        {
+            if(i > 0)
+            {
+                result += "+";
+            }
+            result += tags[i];
+        }
+        return result;
     }
 
     friend std::ostream& operator<<(std::ostream& ss, const ConvTestCase& tc)
@@ -105,6 +184,10 @@ struct ConvTestCase
         ss << " dilation:";
         vecToStream(ss, tc.convDilation);
         ss << " seed:" << tc.seed;
+        if(!tc.note.empty())
+        {
+            ss << " note:" << tc.note;
+        }
         ss << ")";
 
         return ss;
@@ -118,14 +201,13 @@ inline std::vector<ConvTestCase> getConvTestCases4D()
     return {
         // Filter 1x1
         {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
-        // Filter 3x3
-        // No Padding
+        // Filter 3x3, No Padding
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
-        // Padding = 1
+        // Padding
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
-        // Stride = 2
+        // Stride
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1}, seed},
-        // Dilation = 2
+        // Dilation
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {2, 2}, {2, 2}, {1, 1}, {2, 2}, seed},
         // Batched convolution
         {{8, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
@@ -145,14 +227,13 @@ inline std::vector<ConvTestCase> getConvTestCases5D()
     return {
         // Filter 1x1
         {{1, 16, 16, 16, 16}, {1, 16, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
-        // Filter 3x3
-        // No Padding
+        // Filter 3x3, No Padding
         {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
-        // Padding = 1
+        // Padding
         {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
-        // Stride = 2
+        // Stride
         {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, seed},
-        // Dilation = 2
+        // Dilation
         {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {2, 2, 2}, {2, 2, 2}, {1, 1, 1}, {2, 2, 2}, seed},
         // Batched convolution
         {{8, 16, 16, 16, 16}, {1, 16, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},

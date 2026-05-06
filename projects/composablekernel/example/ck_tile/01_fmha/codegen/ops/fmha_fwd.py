@@ -328,6 +328,8 @@ class FmhaFwdApiTrait:
         if self.bm0 == max_bm0 or self.bm0 == 64:
             return "true/*fall back to largest tile*/"
         else:
+            if self.mode == "group":
+                return f"a.max_seqlen_q <= {self.bm0}"
             return f"a.seqlen_q <= {self.bm0}"
 
     @property
@@ -1136,6 +1138,7 @@ class KernelComponentFactoryGfx950(
                 ):
                     pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "f", "f", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_async_trload", "row", "t", "t", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "t", sink))  # fmt: skip  # group mode spad
 
             # # qr_async_trload_v3 bf16/fp16 not ready
             # if (hdim, hdim_v) == (128, 128):
@@ -1183,8 +1186,6 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
     def get_rules(cls) -> List[CompatibilityRule]:
         rules = super().get_rules()
 
-        # For gfx11 fp16/bf16 d128, use dpad=dvpad=t for the 64x32 tile:
-        # the exact-hdim variant (dpad=dvpad=f) is much slower here.
         def check_d128_tile_pipeline(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
@@ -1215,6 +1216,7 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
                 ( 32,  32) : [FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint("a.max_seqlen_q < 4096")),
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                # max_seqlen_q cutoff retuned after the bf16 standard_cnan change.
                 (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint("a.max_seqlen_q < 2048")),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
                 (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
@@ -1278,7 +1280,8 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 32,  32) : [FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint("a.max_seqlen_q <= 8192")),
+                # max_seqlen_q cutoff retuned after the bf16 standard_cnan change.
+                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint("a.max_seqlen_q <= 4096")),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
                 (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],

@@ -23,6 +23,7 @@
 
 #include "stinkytofu/transforms/logical/LogicalPeepholePass.hpp"
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -47,7 +48,7 @@ class LogicalPeepholePassImpl : public Pass {
         return PassName;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         optimizationCount = 0;
 
         // Create pattern matcher registry
@@ -61,6 +62,7 @@ class LogicalPeepholePassImpl : public Pass {
 
             runOnBasicBlock(bb, patterns);
         }
+        return preserveCFGAnalyses();
     }
 
     size_t getOptimizationCount() const {

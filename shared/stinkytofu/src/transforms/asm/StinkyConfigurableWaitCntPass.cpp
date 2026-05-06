@@ -12,6 +12,8 @@
 #include <map>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
@@ -21,7 +23,6 @@ using namespace stinkytofu;
 
 constexpr int WAIT_COMPLETE = 0;
 constexpr int WAIT_IGNORE = -1;
-constexpr int MAX_WAITCNT = 255;
 
 // Note: BarrierWaitPolicy, DependencyTrackingPolicy, and WaitCntConfig
 // are now defined in StinkyConfigurableWaitCntPass.hpp
@@ -477,7 +478,9 @@ class ConfigurableWaitCntInserter {
         bool firstWaitInserted = false;
 
         for (auto it = bb_->begin(); it != bb_->end() && scanned < MAX_SCAN; ++it, ++scanned) {
-            StinkyInstruction& inst = getStinkyInst(it);
+            auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (!_instPtr) continue;
+            StinkyInstruction& inst = *_instPtr;
 
             // Skip if this is already a waitcnt
             if (isWaitCnt(inst)) continue;
@@ -583,7 +586,9 @@ class ConfigurableWaitCntInserter {
             // Find all waits inserted in this block (Phase 0, 1, 2, 3)
             std::vector<const SWaitCntData*> insertedWaits;
             for (auto it = bb_->begin(); it != bb_->end(); ++it) {
-                StinkyInstruction& inst = getStinkyInst(it);
+                auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (!_instPtr) continue;
+                StinkyInstruction& inst = *_instPtr;
                 if (isWaitCnt(inst)) {
                     const SWaitCntData* wait = inst.getModifier<SWaitCntData>();
                     if (wait) insertedWaits.push_back(wait);
@@ -596,7 +601,9 @@ class ConfigurableWaitCntInserter {
 
                 // Apply all new memory operations in this block
                 for (auto it = bb_->begin(); it != bb_->end(); ++it) {
-                    StinkyInstruction& inst = getStinkyInst(it);
+                    auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                    if (!_instPtr) continue;
+                    StinkyInstruction& inst = *_instPtr;
 
                     bool isMemOp = (isGlobalMemLoad(inst) || isGlobalMemStore(inst) ||
                                     isDSRead(inst) || isDSWrite(inst) || isTensorLoad(inst));
@@ -618,7 +625,9 @@ class ConfigurableWaitCntInserter {
 
             bool seenMemoryOp = false;
             for (auto it = bb_->begin(); it != bb_->end(); ++it) {
-                StinkyInstruction& inst = getStinkyInst(it);
+                auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (!_instPtr) continue;
+                StinkyInstruction& inst = *_instPtr;
 
                 bool isMemOp = (isGlobalMemLoad(inst) || isGlobalMemStore(inst) || isDSRead(inst) ||
                                 isDSWrite(inst) || isTensorLoad(inst));
@@ -667,7 +676,9 @@ class ConfigurableWaitCntInserter {
 
     void insertBarrierWaitCounts() {
         for (auto it = bb_->begin(); it != bb_->end(); ++it) {
-            StinkyInstruction& inst = getStinkyInst(it);
+            auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (!_instPtr) continue;
+            StinkyInstruction& inst = *_instPtr;
 
             if (!isBarrier(inst)) continue;
 
@@ -708,7 +719,9 @@ class ConfigurableWaitCntInserter {
         IRList::iterator it = barrierIt;
         do {
             --it;
-            StinkyInstruction& inst = getStinkyInst(it);
+            auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (!_instPtr) continue;
+            StinkyInstruction& inst = *_instPtr;
 
             // Categorize instruction
             if (isTensorLoad(inst))
@@ -771,7 +784,9 @@ class ConfigurableWaitCntInserter {
         dependencies_.clear();
 
         for (auto it = bb_->begin(); it != bb_->end(); ++it) {
-            StinkyInstruction& inst = getStinkyInst(it);
+            auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (!_instPtr) continue;
+            StinkyInstruction& inst = *_instPtr;
 
             if (!isMemoryOperation(inst)) continue;
 
@@ -915,7 +930,9 @@ class ConfigurableWaitCntInserter {
         //     it = properties_.loopBegin;
 
         while (it != start && it != bb_->end()) {
-            StinkyInstruction& inst = getStinkyInst(it);
+            auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (!_instPtr) continue;
+            StinkyInstruction& inst = *_instPtr;
 
             for (const StinkyRegister& srcReg : inst.getSrcRegs()) {
                 if (reg.isOverlap(srcReg)) return it;
@@ -944,7 +961,9 @@ class ConfigurableWaitCntInserter {
         //     it = properties_.loopBegin;
 
         while (it != storeIt && it != bb_->end()) {
-            StinkyInstruction& inst = getStinkyInst(it);
+            auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (!_instPtr) continue;
+            StinkyInstruction& inst = *_instPtr;
 
             bool couldConflict = false;
             if (isGlobalMemStore(storeInst))
@@ -1000,7 +1019,9 @@ class ConfigurableWaitCntInserter {
         ++it;
 
         while (it != useIt && it != bb_->end()) {
-            StinkyInstruction& inst = getStinkyInst(it);
+            auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (!_instPtr) continue;
+            StinkyInstruction& inst = *_instPtr;
             state.incrementForInst(inst);
 
             if (isWaitCnt(inst)) {
@@ -1034,7 +1055,9 @@ class ConfigurableWaitCntInserter {
         ++it;
 
         while (it != nextMemIt && it != bb_->end()) {
-            StinkyInstruction& inst = getStinkyInst(it);
+            auto* _instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (!_instPtr) continue;
+            StinkyInstruction& inst = *_instPtr;
             state.incrementForInst(inst);
 
             if (isWaitCnt(inst)) {
@@ -1087,21 +1110,23 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
         return &StinkyConfigurableWaitCntPass::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
+
+        const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
         // Map to store wait states for each basic block
         std::map<BasicBlock*, BasicBlockWaitState> blockStates;
 
         // Detect if we have any loops (blocks with back-edges)
         bool hasLoops = false;
-        traverseCFGInRPO(func, [&](BasicBlock* bb) {
+        for (auto* bb : rpo) {
             if (hasLoopBackEdge(bb)) {
                 hasLoops = true;
             }
-        });
+        }
 
         // Iterative dataflow analysis for convergence (needed for loops)
         const int MAX_ITERATIONS = 10;
@@ -1113,14 +1138,12 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
             iteration++;
 
             // Process each BasicBlock in RPO
-            traverseCFGInRPO(func, [&](BasicBlock* bb) {
-                if (bb->empty()) return;
+            for (auto* bb : rpo) {
+                if (bb->empty()) continue;
 
                 // Compute entry state from predecessors
                 MemoryOperationState entryState;
-                bool hasValidPredecessor = false;
                 bool hasNonBackEdgePred = false;
-                int validPredCount = 0;
 
                 // First, check if we have any non-back-edge predecessors
                 for (BasicBlock* pred : bb->getPredecessors()) {
@@ -1164,9 +1187,6 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
 
                     auto predStateIt = blockStates.find(pred);
                     if (predStateIt != blockStates.end() && predStateIt->second.processed) {
-                        validPredCount++;
-                        hasValidPredecessor = true;
-
                         // Collect ALL exit states from this predecessor (per-path tracking)
                         for (const auto& exitState : predStateIt->second.exitStates) {
                             predecessorStates.push_back(exitState);
@@ -1232,11 +1252,12 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
                     bbState.exitStates = newExitStates;
                     bbState.processed = true;
                 }
-            });
+            }
 
             // If no loops, one iteration is sufficient
             if (!hasLoops && iteration >= 1) break;
         }
+        return preserveCFGAnalyses();
     }
 
     // Allow configuration to be changed

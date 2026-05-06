@@ -23,7 +23,9 @@
 #include <nlohmann/json.hpp>
 #include <vector>
 
+#include "harness/GraphDescription.hpp"
 #include "harness/SharedHandle.hpp"
+#include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 
 namespace hipdnn_integration_tests
@@ -38,6 +40,8 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
 {
 protected:
     int _deviceId = 0;
+    std::string _testCaseNote;
+    std::string _testCaseLayout;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>>
         _tensorIdToValidatorMap;
@@ -50,6 +54,16 @@ protected:
         // Initialize HIP
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
+    }
+
+    void setTestCaseNote(std::string note)
+    {
+        _testCaseNote = std::move(note);
+    }
+
+    void setTestCaseLayout(std::string layout)
+    {
+        _testCaseLayout = std::move(layout);
     }
 
     virtual void runGraphTest() = 0;
@@ -100,6 +114,25 @@ protected:
         // build_operation_graph() was already called by buildGraph() in the test subclass.
         std::vector<int64_t> engineIds;
         auto status = graph.get_ranked_engine_ids(engineIds);
+
+        // Record support information for the support matrix output
+        if(SupportMatrixCollector::get().isEnabled())
+        {
+            std::string testName;
+            auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+            if(testInfo != nullptr)
+            {
+                testName = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
+            }
+            SupportMatrixCollector::get().recordGraphSupport(
+                graph.graph_attributes.get_name(),
+                describeGraph(graph),
+                testName,
+                status.is_good() ? engineIds : std::vector<int64_t>{},
+                _testCaseNote,
+                _testCaseLayout);
+        }
+
         if(TestConfig::get().hasEngineName())
         {
             int64_t targetEngineId = TestConfig::get().getEngineId();
@@ -127,6 +160,12 @@ protected:
                 }
                 GTEST_SKIP() << "No engine supports this graph";
             }
+        }
+
+        // --skip-graph-validation: graph is confirmed supported, exit early with PASS
+        if(TestConfig::get().skipGraphValidation())
+        {
+            return;
         }
 
         // Build execution plans, engine preference set above should ensure that

@@ -12,17 +12,32 @@ primbench is a single-header HIP and CUDA benchmarking library.
 - GPU cache clearing
 - Batching and stream blocking
 - Detailed JSON output
+- Linux and Windows support
 
 ## Dependencies
 
-primbench has the following dependencies:
+### Required
+
 - HIP or CUDA
-- [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) or [NVML](https://developer.nvidia.com/management-library-nvml) (for querying live GPU statistics)
 - C++17 or later
+
+### Optional (recommended)
+
+For GPU temperature monitoring:
+- [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) (HIP only, not available on Windows; typically included with ROCm)
+- [NVML](https://developer.nvidia.com/management-library-nvml) (CUDA only; ships with NVIDIA drivers)
+
+These libraries allow primbench to keep the GPU within a stable temperature range, reducing benchmark noise and improving reproducibility.
+
+> [!IMPORTANT]
+> If AMD SMI (HIP) or NVML (CUDA) is not available, for example on Windows, or if you choose not to link against these libraries, you **must** disable GPU monitoring by compiling with:
+> ```
+> -DPRIMBENCH_NO_MONITORING
+> ```
 
 ## Example
 
-[`examples/copy_benchmark.cpp`](./examples/copy_benchmark.cpp) shows how to use primbench:
+The HIP benchmark [`examples/copy_benchmark.cpp`](./examples/copy_benchmark.cpp) demonstrates how primbench is used:
 
 ```cpp
 #include "primbench.hpp"
@@ -123,13 +138,18 @@ int main(int argc, char* argv[])
 }
 ```
 
-The HIP benchmark is compiled and run like so:
+It is compiled and run like so on Linux:
 
 ```bash
 hipcc -o copy_benchmark examples/hip/copy_benchmark.cpp -I. -lamd_smi && ./copy_benchmark
 ```
 
-And its equivalent CUDA benchmark is compiled and run like so:
+And like so in PowerShell on Windows:
+```bash
+hipcc -o copy_benchmark.exe examples/hip/copy_benchmark.cpp -I. -DPRIMBENCH_NO_MONITORING -std=c++17 -g --offload-arch=$(amdgpu-arch) ; ./copy_benchmark.exe
+```
+
+Its equivalent CUDA benchmark is compiled and run like so on Linux:
 
 ```bash
 nvcc -o copy_benchmark examples/cuda/copy_benchmark.cu -I. -lnvidia-ml && ./copy_benchmark
@@ -139,7 +159,7 @@ It outputs this `results.json`:
 ```json
 {
     "context": {
-        "results_version": "3.0.0",
+        "results_version": "4.0.0",
         "general": {
             "algorithm": "copy",
             "specialization_count": 2,
@@ -157,11 +177,11 @@ It outputs this `results.json`:
                 "compiler": {
                     "name": "clang",
                     "version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
-                },
-                "monitoring": {
-                    "name": "amdsmi",
-                    "version": "25.3.0"
                 }
+            },
+            "monitoring": {
+                "name": "amdsmi",
+                "version": "25.3.0"
             },
             "temperature_type": "edge",
             "host_name": "host",

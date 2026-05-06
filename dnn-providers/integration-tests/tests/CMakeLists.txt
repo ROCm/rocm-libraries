@@ -3,10 +3,15 @@
 
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    TestGraphDescription.cpp
+    TestNodeTypeToString.cpp
     TestPlatformUtils.cpp
+    TestSupportMatrixCollector.cpp
     TestTestConfig.cpp
     TestTestSettings.cpp
     TestGpuReferenceGraphExecutor.cpp
+    TestGpuConvolutionFwdSignatureKey.cpp
+    TestGpuConvolutionFwdPlan.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
@@ -17,6 +22,7 @@ target_include_directories(hipdnn_integration_tests_unit_tests SYSTEM PRIVATE
 target_link_libraries(hipdnn_integration_tests_unit_tests
     PRIVATE
         hip::host
+        hipdnn_gpu_ref
         hipdnn_test_sdk
         hipdnn_plugin_sdk
         GTest::gtest
@@ -39,6 +45,8 @@ add_executable(hipdnn_gpu_ref_tests
     gpu_ref/TestGpuFpReferenceValidation.cpp
     gpu_ref/TestGpuRefHipError.cpp
     gpu_ref/TestGpuRefKernelCompiler.cpp
+    gpu_ref/TestShallowDeviceOnlyMigratableMemory.cpp
+    gpu_ref/TestShallowGpuTensor.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests

@@ -59,6 +59,7 @@ class hardware_t {
     gfx1151,
     gfx1152,
     gfx1153,
+    gfx1250,
     Count
   };
 
@@ -78,6 +79,7 @@ class hardware_t {
     if (str == "gfx1151") return architecture_t::gfx1151;
     if (str == "gfx1152") return architecture_t::gfx1152;
     if (str == "gfx1153") return architecture_t::gfx1153;
+    if (str == "gfx1250") return architecture_t::gfx1250;
     return architecture_t::Count;
   }
 
@@ -94,7 +96,11 @@ class hardware_t {
       case architecture_t::gfx950: return "gfx950";
       case architecture_t::gfx1201: return "gfx1201";
       case architecture_t::gfx1100: return "gfx1100";
+      case architecture_t::gfx1150: return "gfx1150";
       case architecture_t::gfx1151: return "gfx1151";
+      case architecture_t::gfx1152: return "gfx1152";
+      case architecture_t::gfx1153: return "gfx1153";
+      case architecture_t::gfx1250: return "gfx1250";
       default: return "unknown";
     }
   }
@@ -171,6 +177,13 @@ class hardware_t {
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
+      case architecture_t::gfx1250: {
+        // TODO: Update with real gfx1250 constants when available
+        auto c                       = get_arch_constants(architecture_t::gfx950);
+        c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
+        c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
+        return c;
+      }
       default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
     }
   }
@@ -448,7 +461,87 @@ class hardware_t {
              // I4
              {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
          }},
-      };
+        {architecture_t::gfx1250,
+         {
+             // F64
+             // DGEMM: V_WMMA_F64_16x16x4_F64, 16x4 F64 x 4x16 F64 = 16x16 F64
+             {matrix_instruction(16, 16, 4, data_type_t::Double), 16},
+
+             // F32
+             // SGEMM: V_WMMA_F32_16X16X4_F32, 16x4 F32 x 4x16 F32 = 16x16 F32
+             {matrix_instruction(16, 16, 4, data_type_t::Float), 16},
+
+             // F16
+             // HHS: V_WMMA_F16_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F16
+             // HSS: V_WMMA_F32_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F32
+             {matrix_instruction(16, 16, 32, data_type_t::Half), 8},
+
+             // BF16
+             // BBS:   V_WMMA_BF16_16X16X32_BF16,    16x32 BF16 x 32x16 BF16 = 16x16 BF16
+             // BSS:   V_WMMA_F32_16X16X32_BF16,     16x32 BF16 x 32x16 BF16 = 16x16 F32
+             // BBSB?: V_WMMA_BF16F32_16X16X32_BF16, 16x32 BF16 x 32x16 BF16 + 16x16 C F32 = 16x16 D BF16
+             {matrix_instruction(16, 16, 32, data_type_t::BFloat16), 8},
+
+             // F8
+             // F8SS: V_WMMA_F32_16X16X64_FP8_FP8,  16x64  FP8 x 64x16  FP8 = 16x16 F32
+             //       V_WMMA_F32_16X16X128_FP8_FP8, 16x128 FP8 x 128x16 FP8 = 16x16 F32
+             // F8HS: V_WMMA_F16_16X16X64_FP8_FP8,  16x64  FP8 x 64x16  FP8 = 16x16 F16
+             //       V_WMMA_F16_16X16X128_FP8_FP8  16x128 FP8 x 128x16 FP8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::Float8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::Float8), 8},
+
+             // BF8
+             // B8SS: V_WMMA_F32_16X16X64_BF8_BF8,  16x64  BF8 x 64x16  BF8 = 16x16 F32
+             //       V_WMMA_F32_16X16X128_BF8_BF8, 16x128 BF8 x 128x16 BF8 = 16x16 F32
+             // B8HS: V_WMMA_F16_16X16X64_BF8_BF8,  16x64  BF8 x 64x16  BF8 = 16x16 F16
+             //       V_WMMA_F16_16X16X128_BF8_BF8, 16x128 BF8 x 128x16 BF8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::BFloat8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::BFloat8), 8},
+
+             // F8B8
+             // F8B8SS: V_WMMA_F32_16X16X64_FP8_BF8,  16x64  FP8 x 64x16  BF8 = 16x16 F32
+             //         V_WMMA_F32_16X16X128_FP8_BF8, 16x128 FP8 x 128x16 BF8 = 16x16 F32
+             // F8B8HS: V_WMMA_F16_16X16X64_FP8_BF8,  16x64  FP8 x 64x16  BF8 = 16x16 F16
+             //         V_WMMA_F16_16X16X128_FP8_BF8  16x128 FP8 x 128x16 BF8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::Float8BFloat8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::Float8BFloat8), 8},
+
+             // B8F8
+             // B8F8SS: V_WMMA_F32_16X16X64_BF8_FP8, 16x64 BF8 x 64x16 FP8 = 16x16 F32
+             //         V_WMMA_F32_16X16X128_BF8_FP8, 16x128 BF8 x 128x16 FP8 = 16x16 F32
+             // B8F8HS: V_WMMA_F16_16X16X64_BF8_FP8, 16x64 BF8 x 64x16 FP8 = 16x16 F16
+             //         V_WMMA_F16_16X16X128_BF8_FP8, 16x128 BF8 x 128x16 FP8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::BFloat8Float8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::BFloat8Float8), 8},
+
+             // MXF8  TODO this is same as above?
+             // V_WMMA_F32_16x16x128_F8F6F4,  16x128 FP4/6/8 x 128x16 FP4/6/8 = 16x16 F32
+             // {matrix_instruction(16, 16, 128, data_type_t::Float8), 8},
+
+             // F6
+             // V_WMMA_F32_16x16x128_F8F6F4,  16x128 FP4/6/8 x 128x16 FP4/6/8 = 16x16 F32
+             {matrix_instruction(16, 16, 128, data_type_t::Float6), 8},
+
+             // F4
+             // V_WMMA_F32_16x16x128_F8F6F4,  16x128 FP4/6/8 x 128x16 FP4/6/8 = 16x16 F32
+             // V_WMMA_F32_32x16x128_F4
+             {matrix_instruction(16, 16, 128, data_type_t::Float4), 4},
+             {matrix_instruction(32, 16, 128, data_type_t::Float4), 8},
+
+             // I8
+             // V_WMMA_I32_16X16X64_IU8, 16x64 IU8 x 64x16 IU8 = 16x16 I32
+             {matrix_instruction(16, 16, 64, data_type_t::Int8), 8},
+
+             // XF32
+             // x3 emulation: 3 x V_WMMA_BF16_16X16X32_BF16
+             {matrix_instruction(16, 16, 32, data_type_t::XFloat32), 8 * 3},
+
+             // TODO:
+             // ComplexFloat
+             // ComplexDouble
+             // BF6
+             // DOT2
+         }}};
   // clang-format on
 
   architecture_t arch;  ///< GPU architecture type
@@ -558,6 +651,37 @@ class hardware_t {
   static hardware_t get_hardware_for_device(int deviceId);
 
   /**
+   * @brief Create hardware_t instance for a specific HIP device using
+   *        caller-provided properties.
+   *
+   * Same as @ref get_hardware_for_device(int) but uses the supplied
+   * `hipDeviceProp_t` instead of re-querying via `hipGetDeviceProperties`.
+   * Callers that have already adjusted fields on `prop` (for example,
+   * overriding `multiProcessorCount` with
+   * `hipDeviceAttributePhysicalMultiProcessorCount` on multi-XCC
+   * architectures) should use this overload so those adjustments are
+   * preserved. The runtime XCC query
+   * (`hipDeviceAttributeNumberOfXccs` on HIP 7+) is still performed
+   * against `deviceId`.
+   *
+   * @warning `prop` must describe the same physical device as `deviceId`,
+   *          aside from intentional field-level overrides the caller has
+   *          applied (e.g. swapping `multiProcessorCount` for the
+   *          physical MP count). Passing a `prop` from one device together
+   *          with a `deviceId` for a different device produces an
+   *          internally-inconsistent `hardware_t` — the XCC count will
+   *          come from `deviceId` while CU count, clocks, LDS/L2 capacity,
+   *          and architecture all come from `prop`. This is not checked.
+   *
+   * @param deviceId HIP device ID used to query the XCC count
+   * @param prop     Caller-owned device properties to model from; must
+   *                 correspond to `deviceId`
+   * @return hardware_t Configured hardware instance for the device
+   */
+  static hardware_t get_hardware_for_device(int deviceId,
+                                            hipDeviceProp_t const& prop);
+
+  /**
    * @brief Create hardware_t instance for a specific architecture with specified parameters.
    *
    * Creates a hardware instance using the specified architecture and hardware parameters.
@@ -651,6 +775,15 @@ class hardware_t {
    * @return true if the architecture has MALL, false otherwise
    */
   bool has_MALL() const;
+
+  /**
+   * @brief Check if hardware supports native TF32 matrix instructions.
+   *
+   * If TF32/XFloat32 is not natively supported, then emulation is required which has some overhead.
+   *
+   * @return true if the architecture has TF32 matrix instructions
+   */
+  bool has_native_TF32() const;
 
  private:
   /**

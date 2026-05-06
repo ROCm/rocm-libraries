@@ -70,6 +70,17 @@ class BenchmarkStats:
             p99_ms=float(np.percentile(arr, 99)),
         )
 
+    def to_dict(self) -> Dict[str, float]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "mean_ms": self.mean_ms,
+            "std_ms": self.std_ms,
+            "min_ms": self.min_ms,
+            "max_ms": self.max_ms,
+            "p95_ms": self.p95_ms,
+            "p99_ms": self.p99_ms,
+        }
+
 
 @dataclass
 class BenchmarkMetadata:
