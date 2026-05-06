@@ -195,11 +195,11 @@ static std::pair<int, int> expected_raw_range(float min_f, float max_f)
     const int ieee_max       = static_cast<int>(ck_tile::numeric_utils<float>::get_exponent(max_f));
     // raw=0 excluded: decodes to 0.0 for e4m3/e5m3 and to 2^-127 for e8m0 — same
     // assumption as the implementation in FillUniformScaleDistribution.
-    constexpr int raw_min    = 1;
-    constexpr int raw_max    = static_cast<int>(ck_tile::numeric<ScaleType>::binary_max);
-    const int scale          = 1 << mant_bits;
-    const int min_r          = std::max(((ieee_min - float_bias) + type_bias) * scale, raw_min);
-    const int max_r          = std::min(((ieee_max - float_bias) + type_bias) * scale, raw_max);
+    constexpr int raw_min = 1;
+    constexpr int raw_max = static_cast<int>(ck_tile::numeric<ScaleType>::binary_max);
+    const int scale       = 1 << mant_bits;
+    const int min_r       = std::max(((ieee_min - float_bias) + type_bias) * scale, raw_min);
+    const int max_r       = std::min(((ieee_max - float_bias) + type_bias) * scale, raw_max);
     return {min_r, max_r};
 }
 
