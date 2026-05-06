@@ -91,14 +91,22 @@ bool readIsDynamicShapeEnabled(const GraphDescriptor& graphDesc)
 /// constant is centralized in `<hipdnn_plugin_sdk/PluginVersionConstants.hpp>`
 /// so the version filter, fake plugins, and tests share a single source of
 /// truth.
-hipdnn_data_sdk::utilities::Version computeMinimumPluginApiVersion(const GraphDescriptor& graphDesc)
+///
+/// Both candidate `Version` values are parsed exactly once at first call
+/// (function-local `static const`) so the dispatch hot path does not re-parse
+/// constant strings per plugin per call.
+const hipdnn_data_sdk::utilities::Version&
+    computeMinimumPluginApiVersion(const GraphDescriptor& graphDesc)
 {
+    static const hipdnn_data_sdk::utilities::Version sBaselineVersion{std::string_view{"1.0.0"}};
+    static const hipdnn_data_sdk::utilities::Version sPhase1OverrideMinVersion{
+        hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION};
+
     if(readIsDynamicShapeEnabled(graphDesc))
     {
-        return hipdnn_data_sdk::utilities::Version{
-            hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION};
+        return sPhase1OverrideMinVersion;
     }
-    return hipdnn_data_sdk::utilities::Version{std::string_view{"1.0.0"}};
+    return sBaselineVersion;
 }
 
 } // namespace
@@ -353,18 +361,22 @@ std::vector<int64_t>
     // tensor shapes require plugins exporting at least the override-execute
     // SDK surface. Older plugins are silently skipped here so they remain
     // usable for non-override graphs.
-    const auto requiredVersion = computeMinimumPluginApiVersion(*graphDesc);
+    const auto& requiredVersion = computeMinimumPluginApiVersion(*graphDesc);
 
     std::vector<int64_t> engineIds;
 
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
-        const hipdnn_data_sdk::utilities::Version pluginVersion{plugin->apiVersion()};
+        // Safe to deref: validateBeforeAdding rejected plugins with
+        // unparseable versions at load time, and the value is parsed once
+        // and cached on the plugin instance so the dispatch hot path does
+        // not re-parse the version string per plugin per call.
+        const auto& pluginVersion = *plugin->parsedApiVersion();
         if(pluginVersion < requiredVersion)
         {
             HIPDNN_BACKEND_LOG_INFO(
                 "Skipping plugin '{}' (apiVersion={}) for graph requiring at least {}",
-                plugin->name(),
+                plugin->cachedName(),
                 pluginVersion.str(),
                 requiredVersion.str());
             continue;

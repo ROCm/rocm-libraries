@@ -52,3 +52,11 @@ set(HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET test_version_liar_plugin
 #     Test #9 to cover multiple plugins serving the same override graph.
 set(HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET test_second_override_plugin
     CACHE INTERNAL "RFC 0008 Phase 1 second override-implementing fake plugin target")
+
+# --- Malformed-version fake (RFC 0008 Phase 1 post-review fix #1): reports
+#     a non-parseable plugin API version string. The host's load-time
+#     `parsedApiVersion()` cache yields `nullopt`; `validateBeforeAdding`
+#     throws inside the existing `tryCatch` wrapper so the plugin is
+#     skipped instead of crashing every dispatch.
+set(HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET test_malformed_version_plugin
+    CACHE INTERNAL "RFC 0008 Phase 1 post-review fix malformed-version fake plugin target")

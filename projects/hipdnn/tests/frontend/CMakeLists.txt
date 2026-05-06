@@ -55,6 +55,7 @@ add_executable(
     IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
+    IntegrationMalformedVersionPlugin.cpp
     IntegrationMatmul.cpp
     IntegrationMatmulDescriptorLifting.cpp
     IntegrationMatmulDescriptorLowering.cpp
@@ -107,6 +108,7 @@ target_compile_definitions(
             TEST_OVERRIDE_OMITTING_PLUGIN_NAME="${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET}"
             TEST_VERSION_LIAR_PLUGIN_NAME="${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET}"
             TEST_SECOND_OVERRIDE_PLUGIN_NAME="${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}"
+            TEST_MALFORMED_VERSION_PLUGIN_NAME="${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}"
 )
 
 # Ensure test plugins are built before tests
@@ -127,6 +129,7 @@ add_dependencies(
     ${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET}
     ${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET}
     ${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}
+    ${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}
 )
 
 clang_tidy_check(hipdnn_public_frontend_tests)

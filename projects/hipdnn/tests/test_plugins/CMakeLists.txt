@@ -117,6 +117,11 @@ add_test_plugin(${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET} TestVersionLiarPlugin.
 # coverage for multiple plugins serving the same override graph.
 add_test_plugin(${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET} TestSecondOverridePlugin.cpp)
 
+# Malformed-version fake (RFC 0008 Phase 1 post-review fix #1): exercises
+# the load-time `parsedApiVersion()` rejection so a bad version string is
+# never re-parsed in the dispatch hot path.
+add_test_plugin(${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET} TestMalformedVersionPlugin.cpp)
+
 # Create the default plugin in test_plugins/default
 set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")
 set(test_good_default_plugin_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/default")
@@ -162,3 +167,5 @@ set(HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET
     "${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET}" PARENT_SCOPE)
 set(HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET
     "${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}" PARENT_SCOPE)
+set(HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET
+    "${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}" PARENT_SCOPE)

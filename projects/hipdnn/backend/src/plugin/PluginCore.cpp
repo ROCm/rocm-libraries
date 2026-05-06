@@ -85,6 +85,41 @@ std::string_view PluginBase::apiVersion() const
     return version;
 }
 
+const std::string& PluginBase::cachedName() const
+{
+    if(!_cachedName.has_value())
+    {
+        _cachedName = std::string(name());
+    }
+    return *_cachedName;
+}
+
+const std::optional<hipdnn_data_sdk::utilities::Version>& PluginBase::parsedApiVersion() const
+{
+    if(_cachedParsedApiVersion.has_value())
+    {
+        return *_cachedParsedApiVersion;
+    }
+
+    const auto rawVersion = apiVersion();
+    try
+    {
+        _cachedParsedApiVersion = std::optional<hipdnn_data_sdk::utilities::Version>{
+            hipdnn_data_sdk::utilities::Version{rawVersion}};
+    }
+    catch(const std::exception& e)
+    {
+        // Log once on first access. Subsequent reads return the cached
+        // `nullopt` without re-parsing or re-logging.
+        HIPDNN_BACKEND_LOG_WARN("Plugin '{}' has malformed API version string '{}': {}",
+                                cachedName(),
+                                std::string(rawVersion),
+                                e.what());
+        _cachedParsedApiVersion = std::optional<hipdnn_data_sdk::utilities::Version>{std::nullopt};
+    }
+    return *_cachedParsedApiVersion;
+}
+
 hipdnnPluginType_t PluginBase::type() const
 {
     assert(_initialized);

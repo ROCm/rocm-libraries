@@ -145,4 +145,13 @@ inline const std::string& testSecondOverridePluginPath()
         = getTestCustomFilepathForPlugin(TEST_SECOND_OVERRIDE_PLUGIN_NAME);
     return s_path;
 }
+
+// RFC 0008 Phase 1 post-review fix #1: path to the malformed-version fake
+// plugin used by the dispatch-hardening integration tests.
+inline const std::string& testMalformedVersionPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_MALFORMED_VERSION_PLUGIN_NAME);
+    return s_path;
+}
 } // namespace hipdnn_tests::plugin_constants

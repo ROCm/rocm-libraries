@@ -27,7 +27,24 @@ public:
 protected:
     void validateBeforeAdding(const EnginePlugin& plugin) override
     {
-        using hipdnn_data_sdk::utilities::Version;
+        // Force population of the lazy parsed-API-version cache and reject
+        // plugins whose `apiVersion()` string fails to parse. The cache is
+        // queried on the dispatch hot path
+        // (`EnginePluginResourceManager::getApplicableEngineIds`); rejecting
+        // unparseable versions here means the dispatch path can deref the
+        // cached optional unconditionally without a try/catch on every call.
+        // The bad-version warning has already been logged inside
+        // `parsedApiVersion()` on this first access.
+        const auto& parsedVersion = plugin.parsedApiVersion();
+        if(!parsedVersion.has_value())
+        {
+            throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                                  "Plugin " + plugin.cachedName()
+                                      + " reports an unparseable API version ('"
+                                      + std::string(plugin.apiVersion())
+                                      + "'); rejecting at load time so dispatch is not exposed "
+                                        "to the malformed string on every graph execute.");
+        }
 
         // Validate engine C ABI major version against the engine API version
         // (RFC 0008: engine plugin API has independent versioning from backend,
@@ -44,13 +61,13 @@ protected:
         static_assert(HIPDNN_ENGINE_API_VERSION_MAJOR == 1,
                       "Engine API major changed; drop the legacy major=0 "
                       "acceptance in EnginePluginManager.hpp.");
-        const auto pluginMajor = Version{plugin.apiVersion()}.major;
+        const auto pluginMajor = parsedVersion->major;
         if(pluginMajor != HIPDNN_ENGINE_API_VERSION_MAJOR && pluginMajor != 0)
         {
             throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
                                   "ERROR: ENGINE PLUGIN ABI VALIDATION FAILED\n"
                                   "Plugin "
-                                      + std::string(plugin.name()) + "'s major API version ("
+                                      + plugin.cachedName() + "'s major API version ("
                                       + std::string(plugin.apiVersion())
                                       + ") does not match expected engine API major version ("
                                       + std::to_string(HIPDNN_ENGINE_API_VERSION_MAJOR) + ")\n"
