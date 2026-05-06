@@ -298,30 +298,30 @@ __device__ void sb2st_helarf(
 }
 
 //------------------------------------------------------------------------------
-template <typename T, typename S>
+template <typename T, typename I, typename S>
 __device__ void sb2st_hb2st_task(
-    const rocblas_int xid,
-    const rocblas_int yid,
-    rocblas_int n,
-    rocblas_int kd,
-    rocblas_int sweep,
-    rocblas_int task,
+    const I xid,
+    const I yid,
+    I n,
+    I kd,
+    I sweep,
+    I task,
     T* Aband,
-    rocblas_int ldab,
+    I ldab,
     S* E,
     T* V,
-    rocblas_int ldv,
+    I ldv,
     T* tau,
     T* s_housev,
     T* s_work,
-    rocblas_int round)
+    I round)
 {
-    const rocblas_int tid = xid + yid * DIMX;
+    const I tid = xid + yid * DIMX;
 
-    rocblas_int idiag = kd - 1;
+    I idiag = kd - 1;
 
     // row, col index for current Householder vector vc within V.
-    rocblas_int vi, vj;
+    I vi, vj;
     get_v_index( n, kd, sweep, task, vi, vj );
 
     __shared__ T s_tau;
@@ -333,9 +333,9 @@ __device__ void sb2st_hb2st_task(
     // `jc` is left col of current  diagonal tile.
     // `jn` is left col of next     diagonal tile; end of update.
     //         (I.e., `jn` is right + 1 col of current diagonal tile.)
-    rocblas_int jc = sweep + 1 + task*kd;
-    rocblas_int jn = std::min( jc + kd, n );
-    rocblas_int nc = jn - jc;
+    I jc = sweep + 1 + task*kd;
+    I jn = std::min( jc + kd, n );
+    I nc = jn - jc;
 
     if (task == 0)
     {
@@ -344,7 +344,7 @@ __device__ void sb2st_hb2st_task(
         if (yid == 0)
         {
             // Copy column sweep to shared memory, A[j+1:j+1+nc, s].
-            for (rocblas_int i = xid; i < nc; i += DIMX)
+            for (I i = xid; i < nc; i += DIMX)
             {
                 s_housev[i] = Aband[(idiag + 1 + i) + sweep*ldab];
             }
@@ -366,7 +366,7 @@ __device__ void sb2st_hb2st_task(
             }
             // was: starting from 1, for (i = 1 + xid; ...
             // if V is initialized to Identity, don't need to store i=0.
-            for (rocblas_int i = xid; i < nc; i += DIMX)
+            for (I i = xid; i < nc; i += DIMX)
             {
                 V[vi + i + vj*ldv] = s_housev[i];
                 if (xid > 0)
@@ -401,14 +401,14 @@ __device__ void sb2st_hb2st_task(
         // block A{jc, jp}, creating a bulge, then creates reflector to bring
         // 1st column of bulge back to bandwidth kd, and applies reflector to
         // off-diagonal block A{jc, jp} and diagonal block A{jc, jc}.
-        rocblas_int jp = jc - kd;
+        I jp = jc - kd;
 
         if (yid == 0)
         {
             // Copy previous task's Householder vector, vp, to shared memory.
-            rocblas_int vpi, vpj;
+            I vpi, vpj;
             get_v_index( n, kd, sweep, task-1, vpi, vpj );
-            for (rocblas_int i = xid; i < kd; i += DIMX)
+            for (I i = xid; i < kd; i += DIMX)
             {
                 s_housev[i] = V[vpi + i + vpj*ldv];
             }
@@ -433,7 +433,7 @@ __device__ void sb2st_hb2st_task(
             if (yid == 0)
             {
                 // Copy 1st column of bulge to shared memory.
-                for (rocblas_int i = xid; i < nc; i += DIMX)
+                for (I i = xid; i < nc; i += DIMX)
                 {
                     s_housev[i] = Aband[idiag + kd + i + jp*ldab];
                 }
@@ -455,7 +455,7 @@ __device__ void sb2st_hb2st_task(
                 // assigned above, A[idiag+kd, jp].
                 // todo: use 2 loops?
                 // V needs to be 0'd out, so maybe set Vk = I and don't set V[vi,vj] = 1 above?
-                for (rocblas_int i = xid+1; i < nc; i += DIMX)
+                for (I i = xid+1; i < nc; i += DIMX)
                 {
                     V[vi + i + vj*ldv] = s_housev[i];
                     Aband[idiag + kd + i + jp*ldab] = T( 0 );
@@ -490,7 +490,7 @@ __device__ void sb2st_hb2st_task(
         // symmetry for next task.
         if (yid == 0)
         {
-            for (rocblas_int i = xid; i < kd-1; i += DIMX)
+            for (I i = xid; i < kd-1; i += DIMX)
             {
                 Aband[ idiag - (kd - 1) + i + jc*ldab ]
                     = conj( Aband[ idiag + (kd - 1) - i + (jp + 1 + i)*ldab ] );
@@ -513,27 +513,27 @@ __device__ void sb2st_hb2st_task(
 
    Sweep n-1 is complete after 1 round, therefore the total number of rounds is 3*(n-1)+1.
 */
-template <typename T, typename S>
+template <typename T, typename I, typename S>
 ROCSOLVER_KERNEL void sb2st_hb2st_kernel(
-    rocblas_int n,
-    rocblas_int kd,
-    rocblas_int round,
+    I n,
+    I kd,
+    I round,
     T* AAband,
     rocblas_stride shiftA,
-    rocblas_int ldab,
+    I ldab,
     rocblas_stride strideA,
     S* EE,
     rocblas_stride strideE,
     T* VV,
-    rocblas_int ldv,
+    I ldv,
     rocblas_stride strideV,
     T* TTau,
     rocblas_stride strideTau )
 {
-    const rocblas_int xid = threadIdx.x;
-    const rocblas_int yid = threadIdx.y;
-    const rocblas_int sid = blockIdx.y;
-    const rocblas_int bid = blockIdx.z;
+    const I xid = threadIdx.x;
+    const I yid = threadIdx.y;
+    const I sid = blockIdx.y;
+    const I bid = blockIdx.z;
 
     // select batch instance
     T* Aband = load_ptr_batch<T>( AAband, bid, shiftA, strideA );
@@ -548,29 +548,29 @@ ROCSOLVER_KERNEL void sb2st_hb2st_kernel(
     T* s_work   = reinterpret_cast<T*>(s_housev + kd);
 
     // get sweep parameters
-    rocblas_int last_sweep = round / 2;
-    rocblas_int sweep = last_sweep - sid;
-    rocblas_int task = round - (2 * sweep);
+    I last_sweep = round / 2;
+    I sweep = last_sweep - sid;
+    I task = round - (2 * sweep);
 
     // execute sweep task
-    sb2st_hb2st_task<T, S>(
+    sb2st_hb2st_task<T, I, S>(
         xid, yid, n, kd, sweep, task, Aband, ldab, E, V, ldv, tau,
         s_housev, s_work, round );
 }
 
 //------------------------------------------------------------------------------
-template <typename T, typename S>
+template <typename T, typename I, typename S>
 ROCSOLVER_KERNEL void sb2st_hb2st_copy_diag(
-    rocblas_int n,
+    I n,
     T* AAband,
     rocblas_stride shiftA,
-    rocblas_int ldab,
+    I ldab,
     rocblas_stride strideA,
     S* DD,
     rocblas_stride strideD)
 {
-    const rocblas_int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    const rocblas_int bid = blockIdx.z;
+    const I tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const I bid = blockIdx.z;
 
     if (tid < n)
     {
@@ -584,11 +584,11 @@ ROCSOLVER_KERNEL void sb2st_hb2st_copy_diag(
 }
 
 //------------------------------------------------------------------------------
-template <bool BATCHED, typename T, typename S>
+template <bool BATCHED, typename T, typename I, typename S>
 void rocsolver_sb2st_hb2st_getMemorySize(
-    const rocblas_int n,
-    const rocblas_int kd,
-    const rocblas_int batch_count,
+    const I n,
+    const I kd,
+    const I batch_count,
     size_t* size_work)
 {
     *size_work = 0;
@@ -596,21 +596,21 @@ void rocsolver_sb2st_hb2st_getMemorySize(
 
 //------------------------------------------------------------------------------
 // todo: why not have these in same order as rocsolver_sb2st_hb2st_template args?
-template <typename T, typename S>
+template <typename T, typename I, typename S>
 rocblas_status rocsolver_sb2st_hb2st_argCheck(
     rocblas_handle handle,
     rocblas_fill uplo,
-    const rocblas_int n,
-    const rocblas_int kd,
-    const rocblas_int ldab,
-    const rocblas_int ldv,
+    const I n,
+    const I kd,
+    const I ldab,
+    const I ldv,
     // why are these T and S instead of T* and S* ?
     T Aband,
     S D,
     S E,
     T V,
     T tau,
-    const rocblas_int batch_count = 1)
+    const I batch_count = 1)
 {
     // order is important for unit tests:
 
@@ -638,27 +638,27 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(
 }
 
 //------------------------------------------------------------------------------
-template <bool BATCHED, bool STRIDED, typename T, typename S, typename U>
+template <bool BATCHED, bool STRIDED, typename T, typename I, typename S, typename U>
 rocblas_status rocsolver_sb2st_hb2st_template(
     rocblas_handle handle,
     rocblas_fill uplo,
-    const rocblas_int n,
-    const rocblas_int kd,
+    const I n,
+    const I kd,
     // where is this U instead of T* ?
     U Aband,
     const rocblas_stride shiftA,
-    const rocblas_int ldab,
+    const I ldab,
     const rocblas_stride strideA,
     S* D,
     const rocblas_stride strideD,
     S* E,
     const rocblas_stride strideE,
     U V,
-    const rocblas_int ldv,
+    const I ldv,
     const rocblas_stride strideV,
     T* tau,
     const rocblas_stride strideTau,
-    const rocblas_int batch_count)
+    const I batch_count)
 {
     ROCSOLVER_ENTER( "sb2st_hb2st", "n:", n, "kd:", kd, "shiftA:", shiftA,
                      "ldab:", ldab, "ldv:", ldv, "bc:", batch_count );
@@ -675,9 +675,9 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     // Set V = 0.
     // Ideally, set each Vk = I, but need to iterate over Vk.
     // Strided batch laset, with stride = kd*ldv?
-    rocblas_int nt = ceildiv( n-1, kd );
-    rocblas_int nv_blocks = nt*(nt + 1)/2;
-    rocblas_int nv = nv_blocks*kd;
+    I nt = ceildiv( n-1, kd );
+    I nv_blocks = nt*(nt + 1)/2;
+    I nv = nv_blocks*kd;
     rocblas_stride shiftV = 0;
     //laset( handle, 'g', 3*kd, nv, zero, zero, V, shiftV, ldv, strideV,
     //       batch_count );
@@ -705,25 +705,25 @@ rocblas_status rocsolver_sb2st_hb2st_template(
 
     // Sweep s starts in round r/2 and has ceil( (n - s - 1) / kd ) - 1 tasks,
     // so it finishes after round 2*s + ceil( (n - s - 1) / kd ) - 1.
-    rocblas_int sweep_begin = 0;
-    rocblas_int sweep_begin_finishes
+    I sweep_begin = 0;
+    I sweep_begin_finishes
         = 2*sweep_begin + ceildiv( n - sweep_begin - 1, kd ) - 1;
-    rocblas_int num_rounds = 2*(n - 2) + 1;
+    I num_rounds = 2*(n - 2) + 1;
 
     // execute sweeps
-    for (rocblas_int round = 0; round < num_rounds; ++round)
+    for (I round = 0; round < num_rounds; ++round)
     {
         // Run sweeps in half-open interval [begin, ..., end).
         // Near the end, there are kd - 1 empty rounds, where a sweep has
         // finished but the next sweep hasn't started per these formulas;
         // skip those rounds.
-        rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
+        I sweep_end = I( round / 2 ) + 1;
 
-        rocblas_int parallel_sweeps = sweep_end - sweep_begin;
+        I parallel_sweeps = sweep_end - sweep_begin;
         if (parallel_sweeps > 0)
         {
             ROCSOLVER_LAUNCH_KERNEL(
-                sb2st_hb2st_kernel<T>,
+                (sb2st_hb2st_kernel<T, I, S>),
                 dim3( 1, parallel_sweeps, batch_count ),
                 dim3( DIMX, DIMY, 1 ), s_mem_size, stream,
                 n, kd, round,
@@ -743,10 +743,10 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     // copy diagonal
     // todo: can we call BLAS copy( Aband[idiag, 0], ldab, D, 1 )?
     // todo: should this be done in sb2st_hb2st_task when E is set?
-    rocblas_int idiag = kd - 1;
-    rocblas_int copyblocks = ceildiv( n, BS1 );
+    I idiag = kd - 1;
+    I copyblocks = ceildiv( n, BS1 );
     ROCSOLVER_LAUNCH_KERNEL(
-        (sb2st_hb2st_copy_diag<T>),
+        (sb2st_hb2st_copy_diag<T, I, S>),
         dim3( copyblocks, 1, batch_count ), dim3( BS1 ), 0, stream,
         n, Aband, shiftA + idiag, ldab, strideA,
         D, strideD );

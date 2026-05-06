@@ -33,18 +33,18 @@ ROCSOLVER_BEGIN_NAMESPACE
 // I gather that for complex, T=complex, S=real, U=complex*.
 // Why not just use T* instead of U?
 
-template <typename T, typename S, typename U>
+template <typename T, typename I, typename S, typename U>
 rocblas_status rocsolver_sb2st_hb2st_impl(
     rocblas_handle handle,
     rocblas_fill uplo,
-    const rocblas_int n,
-    const rocblas_int kd,
+    const I n,
+    const I kd,
     U Aband,
-    const rocblas_int ldab,
+    const I ldab,
     S* D,
     S* E,
     U V,
-    const rocblas_int ldv,
+    const I ldv,
     T* tau )
 {
     ROCSOLVER_ENTER_TOP( "sb2st_hb2st", "-n", n, "--kd", kd, "--ldab", ldab, "--ldv", ldv );
@@ -71,12 +71,12 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
     rocblas_stride strideE = 0;
     rocblas_stride strideV = 0;
     rocblas_stride strideTau = 0;
-    rocblas_int batch_count = 1;
+    I batch_count = 1;
 
     // memory workspace sizes:
     // size of reusable workspace
     size_t size_work;
-    rocsolver_sb2st_hb2st_getMemorySize<false, T, S>(
+    rocsolver_sb2st_hb2st_getMemorySize<false, T, I, S>(
         n, kd, batch_count, &size_work );
     assert( size_work == 0 );
 
@@ -98,7 +98,7 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
     // todo: if there is no workspace, do we still put it for consistency and
     // future compatability?
     // execution
-    return rocsolver_sb2st_hb2st_template<false, false, T>(
+    return rocsolver_sb2st_hb2st_template<false, false, T, I>(
         handle, uplo, n, kd,
         Aband, shiftA, ldab, strideA,
         D, strideD,
@@ -131,7 +131,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st(
     const rocblas_int ldv,
     float* tau )
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<float>(
+    return rocsolver::rocsolver_sb2st_hb2st_impl<float, rocblas_int>(
         handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
 }
 
@@ -148,7 +148,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(
     const rocblas_int ldv,
     double* tau )
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<double>(
+    return rocsolver::rocsolver_sb2st_hb2st_impl<double, rocblas_int>(
         handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
 }
 
@@ -165,7 +165,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(
     const rocblas_int ldv,
     rocblas_float_complex* tau )
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex>(
+    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex, rocblas_int>(
         handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
 }
 
@@ -182,8 +182,92 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(
     const rocblas_int ldv,
     rocblas_double_complex* tau )
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex>(
+    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex, rocblas_int>(
         handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st_64(
+    rocblas_handle handle,
+    rocblas_fill uplo,
+    const int64_t n,
+    const int64_t kd,
+    float* Aband,
+    const int64_t ldab,
+    float* D,
+    float* E,
+    float* V,
+    const int64_t ldv,
+    float* tau )
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_sb2st_hb2st_impl<float, int64_t>(
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st_64(
+    rocblas_handle handle,
+    rocblas_fill uplo,
+    const int64_t n,
+    const int64_t kd,
+    double* Aband,
+    const int64_t ldab,
+    double* D,
+    double* E,
+    double* V,
+    const int64_t ldv,
+    double* tau )
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_sb2st_hb2st_impl<double, int64_t>(
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st_64(
+    rocblas_handle handle,
+    rocblas_fill uplo,
+    const int64_t n,
+    const int64_t kd,
+    rocblas_float_complex* Aband,
+    const int64_t ldab,
+    float* D,
+    float* E,
+    rocblas_float_complex* V,
+    const int64_t ldv,
+    rocblas_float_complex* tau )
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex, int64_t>(
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st_64(
+    rocblas_handle handle,
+    rocblas_fill uplo,
+    const int64_t n,
+    const int64_t kd,
+    rocblas_double_complex* Aband,
+    const int64_t ldab,
+    double* D,
+    double* E,
+    rocblas_double_complex* V,
+    const int64_t ldv,
+    rocblas_double_complex* tau )
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex, int64_t>(
+        handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau );
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 } // extern C
