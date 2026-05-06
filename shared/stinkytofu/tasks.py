@@ -160,6 +160,7 @@ def _rmtree(path: Path):
         "static": "Build as a static library instead of shared.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "clean": "Remove the build directory before configuring.",
+        "gcc": "Use GCC instead of amdclang.",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
 )
@@ -172,6 +173,7 @@ def build(
     static=False,
     jobs=None,
     clean=False,
+    gcc=False,
     rocm_path=None,
 ):
     bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
@@ -270,8 +272,12 @@ def build(
         else:
             cmake_opts.append("-G Ninja")
     else:
-        _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
-        _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
+        if gcc:
+            _cxx = shutil.which("g++") or "g++"
+            _cc = shutil.which("gcc") or "gcc"
+        else:
+            _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
+            _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
         compiler_opts += [
             f"-DCMAKE_CXX_COMPILER={_cxx}",
             f"-DCMAKE_C_COMPILER={_cc}",
