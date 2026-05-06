@@ -290,23 +290,36 @@ namespace TensileLite
 
         hipError_t SolutionAdapter::getKernel(hipFunction_t& rv, std::string const& name)
         {
+            int copyIdx = m_currentRotationCopy.load();
+
             std::unique_lock<std::mutex> guard(m_access);
             hipError_t                   err = hipErrorNotFound;
 
-            auto it = m_kernels.find(name);
-            if(it != m_kernels.end())
+            // Defensive: clamp to a loaded slot. The size read happens under
+            // m_access so it cannot race with loadCodeObjectFileExtraCopies'
+            // resize/push_back. In practice the benchmark client is single-
+            // threaded and all rotation copies are loaded before any launch,
+            // but the lock keeps this correct regardless.
+            if(copyIdx <= 0 || copyIdx > (int)m_extraModuleCopies.size())
+                copyIdx = 0;
+
+            auto&       cache   = copyIdx ? m_extraKernels[copyIdx - 1] : m_kernels;
+            auto const& modules = copyIdx ? m_extraModuleCopies[copyIdx - 1] : m_modules;
+
+            auto it = cache.find(name);
+            if(it != cache.end())
             {
                 rv = it->second;
                 return hipSuccess;
             }
 
-            for(auto module : m_modules)
+            for(auto module : modules)
             {
                 err = hipModuleGetFunction(&rv, module, name.c_str());
 
                 if(err == hipSuccess)
                 {
-                    m_kernels[name] = rv;
+                    cache[name] = rv;
                     return err;
                 }
                 else if(err != hipErrorNotFound)
@@ -320,6 +333,71 @@ namespace TensileLite
             }
 
             return err;
+        }
+
+        hipError_t
+            SolutionAdapter::loadCodeObjectFileExtraCopies(std::string const& path,
+                                                           int                extraCopies)
+        {
+            if(extraCopies <= 0)
+                return hipSuccess;
+
+            // Pre-grow the parallel arrays
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                if((int)m_extraModuleCopies.size() < extraCopies)
+                    m_extraModuleCopies.resize(extraCopies);
+                if((int)m_extraKernels.size() < extraCopies)
+                    m_extraKernels.resize(extraCopies);
+            }
+
+            // Re-load the same .co N times. Each hipModuleLoad allocates its
+            // own device memory for the code object, so the N hipModule_t
+            // handles map to N distinct device PCs - the prerequisite for
+            // I-cache cold misses on rotation.
+            for(int i = 0; i < extraCopies; ++i)
+            {
+                hipModule_t module;
+                hipError_t  error = hipModuleLoad(&module, path.c_str());
+                if(error != hipSuccess)
+                {
+                    std::cerr << "loadCodeObjectFileExtraCopies hipModuleLoad failed: " << path
+                              << " (rotation copy " << (i + 1) << ")"
+                              << " error: " << hipGetErrorString(error) << std::endl;
+                    return error;
+                }
+                // Print so the user can verify HIP didn't dedup: different
+                // hipModule_t handles indicate independent module objects;
+                // identical handles would silently break rotation.
+                if(m_debug)
+                    std::cout << std::endl << "[icache-rotate] loaded rotation copy " << (i + 1) << "/"
+                            << extraCopies << " of " << path << " hipModule_t="
+                            << static_cast<void*>(module) << std::endl << std::endl;
+
+                // Record the module in the i-th rotation slot, plus a debug
+                // name (printed by operator<<).
+                std::lock_guard<std::mutex> guard(m_access);
+                m_extraModuleCopies[i].push_back(module);
+                m_loadedModuleNames.push_back(
+                    concatenate("File ", path, " (rotation copy ", i + 1, ")"));
+            }
+            return hipSuccess;
+        }
+
+        void SolutionAdapter::selectRotationCopy(int idx)
+        {
+            // Atomic store; no lock needed. Read by getKernel.
+            m_currentRotationCopy.store(idx);
+        }
+
+        int SolutionAdapter::numRotationModules() const
+        {
+            // Total module sets available = 1 (original m_modules) + extras.
+            // m_extraModuleCopies is normally guarded by m_access, but this read
+            // is safe without locking because the benchmark client is single-
+            // threaded and only calls this after all rotation copies have been
+            // loaded.
+            return 1 + (int)m_extraModuleCopies.size();
         }
 
         // We should update the constructor to set this to avoid

@@ -375,6 +375,7 @@ namespace TensileLite
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
                 ("factor-dim-args",           po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[]"), "factor dimensions args.")
                 ("icache-flush-args",         po::value<std::vector<bool>>()->default_value(std::vector<bool>(1, false), "[]"), "ICache flush args.")
+                ("icache-rotate-copies",      po::value<int>()->default_value(0), "Number of EXTRA hipModule_t copies of each --code-object file to load and rotate per launch (I-cache cold-miss test). 0 = disabled, no extra copies (default). N (>0) = load N extra copies (total = N+1 modules including the original).")
                 ("use-e",                     po::value<bool>()->default_value(false), "Use E.")
                 ("use-gradient",              po::value<bool>()->default_value(false), "Use gradient.")
                 ("use-user-args",             po::value<bool>()->default_value(false), "Use user argument structure as kernel input.")
@@ -919,6 +920,26 @@ int main(int argc, const char* argv[])
         ScopedTimer timer("code_object_loading");
         LoadCodeObjects(args, adapter);
     }
+
+    // I-cache rotation: load N extra independent hipModule_t copies of every
+    // --code-object so each launch can use a different copy (different device PC).
+    // --icache-rotate-copies=0 (default) = no extra copies, no rotation.
+    // --icache-rotate-copies=N (N>0)     = load N extras (total = N+1 modules).
+    {
+        int icacheRotateCopies = args["icache-rotate-copies"].as<int>();
+        if(icacheRotateCopies > 0)
+        {
+            ScopedTimer timer("icache_rotate_extra_copies_loading");
+            auto const& filenames = args["code-object"].as<std::vector<std::string>>();
+            for(auto const& filename : filenames)
+                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(filename,
+                                                                    icacheRotateCopies));
+            std::cout << "Loaded " << icacheRotateCopies
+                      << " extra rotation copies of each --code-object for I-cache test"
+                      << " (total = " << (icacheRotateCopies + 1) << " modules)"
+                      << std::endl;
+        }
+    }
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().stop();
 #endif
@@ -1060,6 +1081,10 @@ int main(int argc, const char* argv[])
         {
             benchmarkTimer->setIFlushTimeUs(icacheFlush ? flushTimeMs * 1000 : 0.f);
 
+            // I-cache rotation counter: rotationLaunchIdx
+            // for scope across all problem / iterations, accumulate continuously
+            // to avoid starting from copy 0 for each problem
+            size_t rotationLaunchIdx = 0;
             for(int problemIdx = firstProblemIdx; problemIdx <= lastProblemIdx; problemIdx++)
             {
                 auto problem = problems[problemIdx].get();
@@ -1153,6 +1178,15 @@ int main(int argc, const char* argv[])
                                 TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
 
+                                // I-cache rotation counter: increments per launchKernels call
+                                // and selects which hipModule_t copy services the next launch.
+                                // numRotationModules()==1 → no rotation (always copy 0).
+                                int  nRotationModules = adapter.numRotationModules();
+                                auto rotateAndSelect  = [&]() {
+                                    adapter.selectRotationCopy(
+                                        (int)(rotationLaunchIdx++ % (size_t)nRotationModules));
+                                };
+
                                 if(warmupInvocations > 0)
                                 {
                                     {
@@ -1189,6 +1223,7 @@ int main(int argc, const char* argv[])
                                 TimingEvents ProfilerStartEvents(1, warmupEventCount);
                                 TimingEvents ProfilerStopEvents(1, warmupEventCount);
                                 listeners.preProfiler();
+                                rotateAndSelect();
                                 HIP_CHECK_EXC(adapter.launchKernels(kernels[warmupInvocations % kernels.size()],
                                                                     stream,
                                                                     ProfilerStartEvents[0],
@@ -1214,6 +1249,7 @@ int main(int argc, const char* argv[])
                                             for(int j = 0; j < enq; j++)
                                             {
                                                 size_t kIdx = ((i * enq) + j) % kernels.size();
+                                                rotateAndSelect();
                                                 HIP_CHECK_EXC(adapter.launchKernels(
                                                     kernels[kIdx], stream, nullptr, nullptr));
 
