@@ -57,6 +57,18 @@ if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
     add_link_options(-fprofile-instr-generate -fcoverage-mapping)
 endif()
 
+if(ENABLE_ASM_SDPA_ENGINE)
+    message(STATUS "ASM SDPA engine enabled")
+else()
+    message(STATUS "ASM SDPA engine disabled")
+endif()
+
+if(ENABLE_HIP_KERNEL_ENGINE)
+    message(STATUS "HIP kernel engine enabled")
+else()
+    message(STATUS "HIP kernel engine disabled")
+endif()
+
 list(
     PREPEND
     HIPDNN_WARNING_COMPILE_OPTIONS
