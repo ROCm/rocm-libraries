@@ -183,9 +183,11 @@ def main():
                     "ctx_default_present": ctx_default is not None,
                     "ctx_cms_present": ctx_cms is not None,
                     "default_main_lens": body_lens(ctx_default, "main_loop"),
+                    "default_ml_prev_lens": body_lens(ctx_default, "main_loop_prev"),
                     "default_n_gl_lens": body_lens(ctx_default, "n_gl"),
                     "default_n_ll_lens": body_lens(ctx_default, "n_ll"),
                     "cms_main_lens": body_lens(ctx_cms, "main_loop"),
+                    "cms_ml_prev_lens": body_lens(ctx_cms, "main_loop_prev"),
                     "cms_n_gl_lens": body_lens(ctx_cms, "n_gl"),
                     "cms_n_ll_lens": body_lens(ctx_cms, "n_ll"),
                     "exception": exc,
@@ -193,10 +195,15 @@ def main():
                 per_kernel_records.append(rec)
                 # Compact one-line summary
                 ngl_default = rec["default_n_gl_lens"]
+                nll_default = rec["default_n_ll_lens"]
+                ml_default = rec["default_main_lens"]
+                mlp_default = rec["default_ml_prev_lens"]
                 print(f"[PROBE-KERNEL] MT={mt0}x{mt1}x{depthU} PGR={pgr} "
                       f"PLR={plr} DTL={dtla}/{dtlb} CMS={cms} SIA={sia} "
                       f"capDef={cap_default_active} ctx.cms={ctx_cms is not None} "
-                      f"default.n_gl={ngl_default} exc={exc}", flush=True)
+                      f"default.ml-1={mlp_default} default.ml={ml_default} "
+                      f"default.n_gl={ngl_default} default.n_ll={nll_default} "
+                      f"exc={exc}", flush=True)
             return result
 
         kw_mod.KernelWriter.kernelBody = wrapped_kernelBody
