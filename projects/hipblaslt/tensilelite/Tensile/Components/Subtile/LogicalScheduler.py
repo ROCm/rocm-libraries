@@ -138,18 +138,43 @@ class SchedulerConfig:
     lrSB: Optional[ReadGranularity] = None
     grSA: Optional[ReadGranularity] = None
     grSB: Optional[ReadGranularity] = None
-    partitionSizeM: int = 0   # partition size in M dimension (0 = full dim)
-    partitionSizeN: int = 0   # partition size in N dimension (0 = full dim)
+    partitionSizeM: Union[int, List[int]] = 0  # partition size(s) in M dimension (0 = full dim)
+    partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
+
+    @staticmethod
+    def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str) -> List[int]:
+        if isinstance(spec, (list, tuple)):
+            assert sum(spec) == total, \
+                f"partition sizes for {dim} must sum to {total}, got {sum(spec)}"
+            assert all(s >= 1 for s in spec), \
+                f"all partition sizes for {dim} must be >= 1"
+            return list(spec)
+        s = spec if spec != 0 else total
+        assert 1 <= s <= total, \
+            f"partition size for {dim} must be in [1, {total}], got {s}"
+        sizes = []
+        remaining = total
+        while remaining > 0:
+            sizes.append(min(s, remaining))
+            remaining -= sizes[-1]
+        return sizes
+
+    @staticmethod
+    def _build_prefix(sizes: List[int]) -> List[int]:
+        prefix = [0]
+        for s in sizes:
+            prefix.append(prefix[-1] + s)
+        return prefix
 
     def __post_init__(self):
         assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
-        if self.partitionSizeM == 0:
-            self.partitionSizeM = self.numMFMATilesM
-        if self.partitionSizeN == 0:
-            self.partitionSizeN = self.numMFMATilesN
-        assert 1 <= self.partitionSizeM <= self.numMFMATilesM
-        assert 1 <= self.partitionSizeN <= self.numMFMATilesN
+        self._partitionSizesM = self._normalize_partition_sizes(
+            self.partitionSizeM, self.numMFMATilesM, 'M')
+        self._partitionSizesN = self._normalize_partition_sizes(
+            self.partitionSizeN, self.numMFMATilesN, 'N')
+        self._prefixM = self._build_prefix(self._partitionSizesM)
+        self._prefixN = self._build_prefix(self._partitionSizesN)
         self.plr = 0 if self.pgr == 0 else 1
         # Forcing offsetPartition to 1.
         self.offsetPartition = 1 if self.pgr >= 2 else 0
@@ -157,16 +182,24 @@ class SchedulerConfig:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
 
     @property
+    def partitionSizesM(self) -> List[int]:
+        return self._partitionSizesM
+
+    @property
+    def partitionSizesN(self) -> List[int]:
+        return self._partitionSizesN
+
+    @property
     def hasScale(self) -> bool:
         return self.lrSA is not None and self.lrSB is not None
 
     @property
     def numPartitionsM(self) -> int:
-        return (self.numMFMATilesM + self.partitionSizeM - 1) // self.partitionSizeM
+        return len(self._partitionSizesM)
 
     @property
     def numPartitionsN(self) -> int:
-        return (self.numMFMATilesN + self.partitionSizeN - 1) // self.partitionSizeN
+        return len(self._partitionSizesN)
 
     @property
     def numPartitions(self) -> int:
@@ -438,15 +471,13 @@ class LogicalScheduler:
         """Return {'A': (start, end), 'B': (start, end)} for partition pi.
 
         Uses COLUMN_MAJOR ordering: M (A) varies fastest, N (B) varies slowest.
+        Tile ranges are derived from prefix sums of partition sizes.
         """
         cfg = self.config
-        # COLUMN_MAJOR: M is inner (pi % M), N is outer (pi // M)
         piM = pi % cfg.numPartitionsM
         piN = pi // cfg.numPartitionsM
-        a0 = piM * cfg.partitionSizeM
-        b0 = piN * cfg.partitionSizeN
-        return {'A': (a0, min(a0 + cfg.partitionSizeM, cfg.numMFMATilesM)),
-                'B': (b0, min(b0 + cfg.partitionSizeN, cfg.numMFMATilesN))}
+        return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
+                'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
 
     def place_LRs(self) -> List[List[SubIterKSlot]]:
         """Place MFMAs and LRs based on read granularities.

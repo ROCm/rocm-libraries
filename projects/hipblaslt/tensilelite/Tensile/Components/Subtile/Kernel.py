@@ -1235,8 +1235,8 @@ def mainLoop(writer, kernel):
           grSB=grSBGran,
           # partitionSizeM=5,
           # partitionSizeN=7,
-          partitionSizeM=11,
-          partitionSizeN=7,
+          partitionSizeM=[5],
+          partitionSizeN=[7,5,7],
           pgr=schedulerPgr,
       )
       scheduler = LogicalScheduler(cfg)
@@ -1246,7 +1246,7 @@ def mainLoop(writer, kernel):
       if vgprUsed + numVgpr <= vgprBudget:
           break
 
-  print(f"  partition: M={cfg.partitionSizeM}, N={cfg.partitionSizeN} ({cfg.numPartitions} partitions, {numVgpr} vgprs)")
+  print(f"  partition: M={cfg.partitionSizesM}, N={cfg.partitionSizesN} ({cfg.numPartitions} partitions, {numVgpr} vgprs)")
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo
