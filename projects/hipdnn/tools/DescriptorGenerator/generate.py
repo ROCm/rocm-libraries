@@ -9,14 +9,13 @@ import sys
 from pathlib import Path
 
 from codegen.config_loader import ConfigError, load_config, validate_for_mode
-from codegen.generator import DescriptorGenerator
+from codegen.generator import BACKEND_FRAGMENT_FILENAMES, DescriptorGenerator
 
 # Generation modes
 MODE_BACKEND = "backend"
 MODE_FRONTEND = "frontend"
 MODE_FULL = "full"
-MODE_LIFT_ONLY = "lift-only"
-VALID_MODES = (MODE_BACKEND, MODE_FRONTEND, MODE_FULL, MODE_LIFT_ONLY)
+VALID_MODES = (MODE_BACKEND, MODE_FRONTEND, MODE_FULL)
 
 # Modes that require frontend config fields
 FRONTEND_MODES = (MODE_FRONTEND, MODE_FULL)
@@ -43,14 +42,7 @@ def main():
         choices=VALID_MODES,
         default=MODE_BACKEND,
         help="Generation mode: 'backend' (default, current behavior), "
-        "'frontend' (frontend-only), 'full' (everything), "
-        "'lift-only' (lifting files only)",
-    )
-    parser.add_argument(
-        "--lift-only",
-        action="store_true",
-        help="(Deprecated) Alias for --mode lift-only. "
-        "Generate only lifting-related files.",
+        "'frontend' (frontend-only), or 'full' (everything).",
     )
     parser.add_argument(
         "--dry-run",
@@ -58,21 +50,6 @@ def main():
         help="Preview which files would be generated without writing them.",
     )
     args = parser.parse_args()
-
-    # Handle deprecated --lift-only flag
-    if args.lift_only:
-        if args.mode != MODE_BACKEND:
-            print(
-                "Error: --lift-only cannot be combined with --mode. "
-                "Use --mode lift-only instead.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        print(
-            "Warning: --lift-only is deprecated. Use --mode lift-only instead.",
-            file=sys.stderr,
-        )
-        args.mode = MODE_LIFT_ONLY
 
     if not args.config.exists():
         print(f"Error: Config file not found: {args.config}", file=sys.stderr)
@@ -129,7 +106,6 @@ def main():
         MODE_BACKEND: "backend",
         MODE_FRONTEND: "frontend",
         MODE_FULL: "full",
-        MODE_LIFT_ONLY: "lifting",
     }.get(args.mode, "")
     print(f"\nGenerated {len(written)} {mode_label} files:")
     for f in written:
@@ -154,18 +130,7 @@ def _preview_files(config, mode: str) -> list[str]:
         f"tests/frontend/{config.test_integration_filename}",
         f"tests/frontend/{config.test_integration_lifting_filename}",
     ]
-    backend_fragments = [
-        "fragments/attribute_enum_block.txt",
-        "fragments/descriptor_type_enum.txt",
-        "fragments/string_utils_block.txt",
-        "fragments/factory_case.txt",
-        "fragments/cmake_entries.txt",
-        "fragments/node_factory_case.txt",
-        "fragments/operation_unpacker_case.txt",
-        "fragments/operation_unpacker_test.txt",
-        "fragments/operation_type_enum.txt",
-        "fragments/node_unpack_override.txt",
-    ]
+    backend_fragments = [f"fragments/{f}" for f in BACKEND_FRAGMENT_FILENAMES]
 
     # Frontend files
     frontend_files = [
@@ -184,22 +149,6 @@ def _preview_files(config, mode: str) -> list[str]:
         "fragments/node_type_enum.txt",
     ]
 
-    # Lift-only files
-    lift_files = [
-        f"frontend/include/hipdnn_frontend/detail/{config.unpacker_filename}",
-        f"backend/tests/descriptors/{config.test_from_node_filename}",
-        f"tests/frontend/{config.test_integration_lifting_filename}",
-    ]
-    lift_fragments = [
-        "fragments/node_factory_case.txt",
-        "fragments/operation_unpacker_case.txt",
-        "fragments/operation_unpacker_test.txt",
-        "fragments/operation_type_enum.txt",
-        "fragments/node_unpack_override.txt",
-        "fragments/descriptor_lifting_additions.txt",
-        "fragments/packer_name_addition.txt",
-    ]
-
     if mode == MODE_BACKEND:
         files = backend_files + backend_fragments
     elif mode == MODE_FRONTEND:
@@ -212,8 +161,6 @@ def _preview_files(config, mode: str) -> list[str]:
             + frontend_test_files
             + frontend_fragments
         )
-    elif mode == MODE_LIFT_ONLY:
-        files = lift_files + lift_fragments
 
     # Mode enum files (dynamic based on config)
     if mode in (MODE_BACKEND, MODE_FULL):
@@ -226,7 +173,7 @@ def _preview_files(config, mode: str) -> list[str]:
     # Constants file (only when no pre-existing constants header)
     if not config.test_data.constants_include:
         constants_path = f"test_sdk/include/hipdnn_test_sdk/constants/{config.effective_constants_include}.hpp"
-        if mode in (MODE_BACKEND, MODE_FULL, MODE_LIFT_ONLY):
+        if mode in (MODE_BACKEND, MODE_FULL):
             files.append(constants_path)
 
     return files

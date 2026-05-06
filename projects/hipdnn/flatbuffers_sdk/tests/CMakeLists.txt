@@ -24,6 +24,7 @@ add_executable(
     flatbuffer_utilities/TestKnobWrapper.cpp
     flatbuffer_utilities/TestKnobSettingWrapper.cpp
     flatbuffer_utilities/TestTensorAttributesWrapper.cpp
+    utilities/TestFlatbufferUtils.cpp
     utilities/TestJson.cpp
     utilities/TestPointwiseValidation.cpp
 )
