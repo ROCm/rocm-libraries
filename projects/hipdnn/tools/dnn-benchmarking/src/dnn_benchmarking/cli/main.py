@@ -24,7 +24,7 @@ from ..common.exceptions import GraphLoadError
 from ..reporting.reporter import Reporter
 from .ab_runner_cli import run_ab_cli
 from .parser import create_parser
-from .pytorch_runner import run_pytorch_cli
+from .pytorch_runner_cli import run_pytorch_cli
 from .suite_runner_cli import run_suite_cli
 from .gpu_check import gpu_is_available
 
