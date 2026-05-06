@@ -38,6 +38,9 @@ pinnings); these tests are the canonical source of truth for that.
 import pytest
 
 from Tensile.Components.ScheduleCapture import (
+    SchedulePosition,
+)
+from Tensile.Components.CMSValidator import (
     Failure,
     FailureNodeLabel,
     OrderInvertedFailure,
@@ -47,7 +50,6 @@ from Tensile.Components.ScheduleCapture import (
     OverriddenInputFailure,
     TimingTooCloseFailure,
     InvalidCounterValueFailure,
-    SchedulePosition,
     _ordinal,
 )
 

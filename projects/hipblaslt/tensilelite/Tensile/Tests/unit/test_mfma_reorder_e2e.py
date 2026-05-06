@@ -101,6 +101,8 @@ import pytest
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     BODY_LABEL_ML_PREV,
+)
+from Tensile.Components.CMSValidator import (
     MissingWaitFailure,
 )
 from Tensile.Components.CustomSchedule import ScheduleInfo

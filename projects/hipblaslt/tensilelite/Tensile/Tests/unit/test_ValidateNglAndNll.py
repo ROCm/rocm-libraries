@@ -45,6 +45,8 @@ RAW edge classified by ``validate_edge_wait_coverage``
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     BODY_LABEL_ML_PREV,
+)
+from Tensile.Components.CMSValidator import (
     MissingWaitFailure,
     WaitInsufficientFailure,
 )

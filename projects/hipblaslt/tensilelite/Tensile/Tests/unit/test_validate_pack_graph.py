@@ -154,6 +154,8 @@ from Tensile.Components.ScheduleCapture import (
     SlotKey,
     TaggedInstruction,
     WrappedInstruction,
+)
+from Tensile.Components.CMSValidator import (
     OrderInvertedFailure,
     MissingWaitFailure,
     OverriddenInputFailure,

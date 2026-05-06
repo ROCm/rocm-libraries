@@ -477,413 +477,13 @@ class DataflowGraph:
                 for e in self.edges}
 
 
-# =============================================================================
-# Failure hierarchy — typed scheduling defects with polymorphic formatters
-# =============================================================================
-#
-# Single base class; each concrete subclass owns its formatter via format(capture).
-# Tests assert on type and field, not on string content. The only place wording
-# is asserted is in Tensile/Tests/unit/test_failure_formatters.py.
-#
-# Each Failure carries CMS-side state only — never a reference to the
-# default-side schedule. The user fixes the CMS schedule from the data on
-# the Failure.
-
-def _ordinal(n: int) -> str:
-    """Return '1st', '2nd', '3rd', '4th', ..., 'Nth' for any positive n."""
-    if 10 <= (n % 100) <= 20:
-        suffix = "th"
-    else:
-        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-    return f"{n}{suffix}"
-
-
-class _PositionStr(str):
-    """A `str` subclass for FailureNodeLabel.position that also exposes
-    `vmfma_index` (parsed from the trailing '@ idx=N' segment for CMS-side
-    labels, '@ stream_pos=N' for asm-side labels).
-
-    Subclassing `str` keeps the formatter side trivial — `f"{label.position}"`
-    yields the literal string — while letting structured callers
-    (test assertions, diagnostics tooling) recover the integer position
-    without parsing the string themselves. Returns -1 if the position
-    string carries no integer suffix.
-    """
-
-    __slots__ = ()
-
-    @property
-    def vmfma_index(self) -> int:
-        eq = self.rfind("=")
-        if eq == -1:
-            return -1
-        try:
-            return int(self[eq + 1:])
-        except ValueError:
-            return -1
-
-
-def _node_position(node: NodeLike) -> SchedulePosition:
-    """Resolve the SchedulePosition for a NodeLike (GraphNode or
-    ValidatorInstruction). GraphNode has `position`; ValidatorInstruction
-    has `issued_at`. Mirrors the getattr probe used by the old free
-    helpers."""
-    return getattr(node, "position", None) or node.issued_at
-
-
-@dataclass(frozen=True)
-class FailureNodeLabel:
-    """Pre-rendered identification of a node in a Failure message.
-
-    Computed by source-aware label providers (e.g. CMS-side `cms_node_label`)
-    at Failure-construction time so the Failure carries no back-reference to
-    captures, graphs, or rocisa instances. The rendering layer is therefore
-    source-agnostic: a non-CMS provider (e.g. raw asm) supplies the same
-    `(primary, position)` pair shape with its own naming convention.
-
-    Conventions used today:
-      - CMS-side primary:   'LRA0[3]', 'PackA0[2]', 'MFMA' (no [N] for plain MFMA)
-      - CMS-side position:  '@ idx=5'  (vmfma_index)
-      - Asm-side primary:   'ds_load_b128' (rocisa class name)
-      - Asm-side position:  '@ stream_pos=42'
-
-    Optional `category` and `body_label` carry source-side metadata that's
-    useful for non-rendering inspections (test assertions, structured
-    diagnostics). They are NOT consumed by `_format_canonical` — that
-    method reads only `primary` + `position`. Sources that don't carry
-    these concepts (raw asm) leave them unset.
-    """
-    primary: str
-    position: str
-    # Optional source-side metadata. Reading-only — formatters never touch.
-    category: Optional[str] = None
-    body_label: Optional[str] = None
-
-
-@dataclass
-class Failure:
-    """Common base for all reported scheduling problems.
-
-    `iter_delta` is the canonical loop-offset between consumer and producer
-    (consumer.loop_index - producer.loop_index). It's stored on every Failure
-    so the rendering layer can decide whether to append the "(of next
-    iteration)" suffix without re-deriving it from positions stored elsewhere.
-    InvalidCounterValueFailure carries 0 (vestigial — it has no
-    producer/consumer pair).
-    """
-
-    iter_delta: int = 0
-
-    def _iter_suffix(self) -> str:
-        """Render the cross-iteration suffix from `iter_delta`.
-
-        delta=0  ->  ''                                   (same iteration)
-        delta=1  ->  ' (of next iteration)'               (i -> i+1, dominant case)
-        else    ->  ' (consumer is N iterations after producer)'
-        """
-        if self.iter_delta == 1:
-            return " (of next iteration)"
-        if self.iter_delta == 0:
-            return ""
-        return f" (consumer is {self.iter_delta} iterations after producer)"
-
-    def format(self) -> str:
-        """Stable boundary method. Delegates to the subclass canonical
-        formatter. No argument: every Failure carries pre-rendered
-        `FailureNodeLabel`s plus scalar fields, so formatting is pure
-        string composition."""
-        return self._format_canonical()
-
-    def _format_canonical(self) -> str:
-        raise NotImplementedError("subclasses must implement _format_canonical()")
-
-
-# ----------------------------------------------------------------------------
-# 1. OrderInvertedFailure — cross-graph reorder detection.
-#    Subject reverses the producer/consumer order that the default schedule
-#    established. The default schedule IS the canonical reference; if subj
-#    emits the producer at a later stream position than the consumer while
-#    default emitted them in the opposite order, the subject violates a
-#    real dataflow dependency.
-#    Emitted exclusively by diagnose_missing_edge (compare_graphs).
-# ----------------------------------------------------------------------------
-@dataclass
-class OrderInvertedFailure(Failure):
-    producer: FailureNodeLabel = None
-    consumer: FailureNodeLabel = None
-    default_producer_position: Optional[SchedulePosition] = None  # default-side, for diagnostics
-    default_consumer_position: Optional[SchedulePosition] = None  # default-side, for diagnostics
-
-    def _format_canonical(self) -> str:
-        return (
-            f"Producer {self.producer.primary} {self.producer.position} "
-            f"is issued after consumer {self.consumer.primary} "
-            f"{self.consumer.position}{self._iter_suffix()}."
-        )
-
-
-# ----------------------------------------------------------------------------
-# 2. MissingWaitFailure — no SWaitCnt drains the expected counter in the
-#    window between producer and consumer. If other-counter SWaitCnts ARE
-#    in the window, they're surfaced via `nearby_wait_indices` so
-#    the user knows they could extend an existing SWaitCnt rather than
-#    insert a new one. (Bead `hof` collapsed the former
-#    WaitOnWrongCounterFailure into this single type — the user-facing
-#    fix is the same in both cases.)
-# ----------------------------------------------------------------------------
-@dataclass
-class MissingWaitFailure(Failure):
-    producer: FailureNodeLabel = None
-    consumer: FailureNodeLabel = None
-    counter_kind: str = ""  # 'dscnt' / 'vlcnt' / 'vscnt'
-    # Pre-extracted vmfma indices of nearby SWaitCnts that drain OTHER counters
-    # (formerly stored as full GraphNode list under
-    # `nearby_other_counter_waits`; reduced to scalars so the Failure carries
-    # no graph back-references).
-    nearby_wait_indices: Tuple[int, ...] = ()
-
-    def _format_canonical(self) -> str:
-        # Optional hint when other-counter SWaitCnts exist in the window:
-        # the user could extend one of them rather than insert a new SWaitCnt.
-        hint = ""
-        if self.nearby_wait_indices:
-            indices = ", ".join(f"idx={i}" for i in self.nearby_wait_indices)
-            hint = f" (existing SWaitCnts at {indices} drain other counters)"
-        return (
-            f"SWaitCnt({self.counter_kind}) missing between producer "
-            f"{self.producer.primary} {self.producer.position} and consumer "
-            f"{self.consumer.primary} {self.consumer.position}"
-            f"{self._iter_suffix()}{hint}."
-        )
-
-
-# ----------------------------------------------------------------------------
-# 4. WaitInsufficientFailure — wait at correct position but counter value too lax.
-# ----------------------------------------------------------------------------
-@dataclass
-class WaitInsufficientFailure(Failure):
-    producer: FailureNodeLabel = None
-    consumer: FailureNodeLabel = None
-    wait_idx: int = 0  # vmfma_index of the failing SWaitCnt
-    counter_kind: str = ""  # 'dscnt' / 'vlcnt' / 'vscnt'
-    counter_value: int = 0
-    queue_depth_at_wait: int = 0
-    producer_position: int = 0  # 0-indexed FIFO position when producer entered the queue
-
-    def _format_canonical(self) -> str:
-        # max acceptable counter value = queue_depth - producer_position - 1
-        # (drain enough ops that producer's slot falls inside the drained range).
-        # Counter value of -1 means "no constraint" (counter ignored), so the
-        # acceptable range is [0, max_acceptable] — -1 does NOT satisfy.
-        max_acceptable = self.queue_depth_at_wait - self.producer_position - 1
-        if max_acceptable <= 0:
-            bound = "must be 0"
-        else:
-            bound = f"must be in range [0, {max_acceptable}]"
-        return (
-            f"{self.counter_kind} for SWaitCnt @ idx={self.wait_idx} "
-            f"is too high to guarantee producer "
-            f"{self.producer.primary} {self.producer.position} for consumer "
-            f"{self.consumer.primary} {self.consumer.position}"
-            f"{self._iter_suffix()}. "
-            f"Current value of {self.counter_value} {bound}."
-        )
-
-
-# ----------------------------------------------------------------------------
-# 6. MissingBarrierFailure — cross-wave LDS-reuse needs barrier in the window.
-# ----------------------------------------------------------------------------
-@dataclass
-class MissingBarrierFailure(Failure):
-    producer: FailureNodeLabel = None
-    consumer: FailureNodeLabel = None
-    # role distinguishes the LDS-coherence direction:
-    #   'must_start_after' - producer is LR (read), consumer is GR (overwrite)
-    #   'needed_by'        - producer is GR (write), consumer is LR (read)
-    # Used by tests to assert which scenario triggered; not rendered in the
-    # user-facing message (producer/consumer categories make the direction obvious).
-    role: str = "must_start_after"
-    wait_idx: Optional[int] = None  # vmfma_index of the SWaitCnt that drained the producer
-
-    def _format_canonical(self) -> str:
-        if self.wait_idx is not None:
-            wait_part = f"between SWaitCnt @ idx={self.wait_idx} and consumer"
-        else:
-            wait_part = "between covering SWaitCnt and consumer"
-        return (
-            f"SBarrier missing {wait_part} "
-            f"{self.consumer.primary} {self.consumer.position}"
-            f"{self._iter_suffix()}, needed for producer "
-            f"{self.producer.primary} {self.producer.position}."
-        )
-
-
-# ----------------------------------------------------------------------------
-# 8. TimingTooCloseFailure — quad-cycle gap too small (Pack timing).
-# ----------------------------------------------------------------------------
-@dataclass
-class TimingTooCloseFailure(Failure):
-    producer: FailureNodeLabel = None  # Pack
-    consumer: FailureNodeLabel = None  # Pack/MFMA
-    expected_quad_cycles: int = 0
-    actual_quad_cycles: int = 0
-
-    def _format_canonical(self) -> str:
-        return (
-            f"Not enough quad-cycles between producer "
-            f"{self.producer.primary} {self.producer.position} and consumer "
-            f"{self.consumer.primary} {self.consumer.position}"
-            f"{self._iter_suffix()}. "
-            f"Need at least {self.expected_quad_cycles} quad-cycles "
-            f"but only {self.actual_quad_cycles} guaranteed."
-        )
-
-
-# ----------------------------------------------------------------------------
-# 9. InvalidCounterValueFailure — SWait field range check.
-# ----------------------------------------------------------------------------
-@dataclass
-class InvalidCounterValueFailure(Failure):
-    # Pre-extracted vmfma index of the offending SWaitCnt. Single-instruction
-    # structural failure — no producer/consumer pair, so iter_delta stays at
-    # the base default (0).
-    swait_idx: int = 0
-    dscnt: int = 0
-    vlcnt: int = 0
-    vscnt: int = 0
-
-    def _format_canonical(self) -> str:
-        bad = [(name, val) for name, val in
-               (("dscnt", self.dscnt), ("vlcnt", self.vlcnt), ("vscnt", self.vscnt))
-               if val < -1]
-        bad_str = ", ".join(f"{name}={val}" for name, val in bad)
-        return (
-            f"SWaitCnt @ idx={self.swait_idx} is invalid: "
-            f"{bad_str}. All counter fields must be >= -1."
-        )
-
-
-# ----------------------------------------------------------------------------
-# 8. OverriddenInputFailure — intervening write clobbers the resource the
-#     consumer needed before the consumer reads it.
-#
-#     Unifies the bug shape that previously had two failure classes:
-#       - SCC carry-chain clobber (intervening SCC writer between two
-#         GRInc-style ops that share the SCC carry).
-#       - Pack pair-leader vgpr clobber (next pack-pair-leader scheduled
-#         between a pair-leader and its pair-consumer, overwriting the
-#         vgpr the pair-consumer needs to read).
-#     Same shape, different resource.
-#
-#     intervening_writer may be None when the graph-side classifier knows
-#     the resource was clobbered but cannot pinpoint the writer.
-# ----------------------------------------------------------------------------
-@dataclass
-class OverriddenInputFailure(Failure):
-    producer: FailureNodeLabel = None            # wrote the value the consumer needs
-    consumer: FailureNodeLabel = None            # needed to read producer's value
-    resource: str = ""                           # e.g. "SCC", "vgpr"
-    intervening_writer: FailureNodeLabel = None  # overwrote the resource between producer and consumer
-
-    def _format_canonical(self) -> str:
-        return (
-            f"{self.intervening_writer.primary} {self.intervening_writer.position} is "
-            f"incorrectly scheduled between producer "
-            f"{self.producer.primary} {self.producer.position} and consumer "
-            f"{self.consumer.primary} {self.consumer.position}, clobbering the "
-            f"{self.resource} that the consumer needs."
-        )
-
-
-# =============================================================================
-# CMS-side FailureNodeLabel provider
-# =============================================================================
-#
-# Mirrors the wording previously produced by the now-removed `_node_label`
-# / `_node_with_pos` helpers. Source-aware: takes a (node, body_capture)
-# pair and renders the per-category-stream `[N]` index against THAT body's
-# instruction list. The compare/validate code that emits Failures looks
-# up `node.body_label` against the FourPartCapture's per-body captures and
-# calls this helper for each producer/consumer node in scope.
-#
-# A non-CMS source (e.g. raw asm) would supply its own label provider
-# producing `FailureNodeLabel` instances of the same shape but with the
-# source's own naming convention (see FailureNodeLabel docstring).
-
-
-def cms_node_label(
-    node: NodeLike,
-    body_capture: Optional["LoopBodyCapture"],
-) -> FailureNodeLabel:
-    """Construct a FailureNodeLabel for a CMS-side node.
-
-    Wording is identical to the old `_node_with_pos`:
-      - primary: 'category[N]' (per-category-stream 0-based index in the
-        node's body capture); plain MFMA omits '[N]'.
-      - position: '@ idx={vmfma_index}'.
-
-    `body_capture` is the LoopBodyCapture for the body that emitted this
-    node (resolved by the caller from `node.body_label`). When
-    `body_capture` is None or the node has no `tagged_inst` recorded in
-    that body, the helper falls back to a bare `category` primary —
-    important for SWaitCnt / SBarrier / SNop nodes (no tagged_inst by
-    construction) and for cross-body callsites that don't index every
-    body's tagged_inst stream.
-    """
-    cat = node.category
-    if cat == "MFMA":
-        primary = cat
-    else:
-        tagged = getattr(node, "tagged_inst", None)
-        primary = cat
-        if body_capture is not None and tagged is not None:
-            same_cat = [
-                t for t in body_capture.instructions
-                if getattr(t, "category", None) == cat
-            ]
-            try:
-                idx = same_cat.index(tagged)
-                primary = f"{cat}[{idx}]"
-            except ValueError:
-                # Lookup miss (cross-body callsite, or a body capture that
-                # genuinely doesn't contain this node) — degrade to bare
-                # category. The new label API tolerates this gracefully
-                # because labels are computed eagerly; the previous
-                # `_node_label` raised here, which is exactly the source
-                # of the body-mismatch ValueError this bead resolves.
-                pass
-    pos = _node_position(node)
-    return FailureNodeLabel(
-        primary=primary,
-        position=_PositionStr(f"@ idx={pos.vmfma_index}"),
-        category=cat,
-        body_label=getattr(node, "body_label", None),
-    )
-
-
-def _cms_iter_delta(producer: NodeLike, consumer: NodeLike) -> int:
-    """Compute the canonical loop-offset between consumer and producer.
-
-    Mirrors the old `_iter_note`'s loop_index arithmetic. Returns the raw
-    integer delta (consumer.loop_index - producer.loop_index) so the
-    Failure base's `_iter_suffix` can pick the appropriate suffix.
-    """
-    p_pos = _node_position(producer)
-    c_pos = _node_position(consumer)
-    return c_pos.loop_index - p_pos.loop_index
-
-
-def _body_for_node(graph: "DataflowGraph", node: NodeLike) -> Optional["LoopBodyCapture"]:
-    """Look up the LoopBodyCapture that emitted `node`.
-
-    Uses `node.body_label` against `graph.captures`. Returns None for
-    NodeLike values without a body_label (e.g. some test stubs) or when
-    the body isn't present in the graph (kernel didn't emit it).
-    """
-    label = getattr(node, "body_label", None)
-    if label is None or graph is None:
-        return None
-    return graph.captures.get(label)
+# Failure hierarchy + FailureNodeLabel + CMS-side label/iter-delta helpers
+# moved to Tensile.Components.CMSValidator (br4.4). Functions in this module
+# that consume them (compare_graphs, diagnose_missing_edge,
+# validate_edge_wait_coverage, _classify_edge_coverage,
+# validate_middle_pack_pair_interleaving) lazy-import them inside their
+# bodies to avoid a hard import cycle. Sub-beads 5-9 will eventually move
+# those functions into CMSValidator too, eliminating the lazy imports.
 
 
 # Class-name lists for finalize() guards. Class-name matching (not isinstance)
@@ -3322,6 +2922,17 @@ def diagnose_missing_edge(
     by production observability paths that prefer a soft Failure return
     over a hard exception.
     """
+    # Lazy reverse-import: Failure types and label helpers live in
+    # CMSValidator.py (br4.4). CMSValidator imports SchedulePosition from
+    # this module at runtime, so a top-level import here would form a
+    # cycle. Sub-beads 5-9 will move this function into CMSValidator,
+    # eliminating the lazy import.
+    from Tensile.Components.CMSValidator import (
+        MissingWaitFailure, MissingBarrierFailure, WaitInsufficientFailure,
+        OrderInvertedFailure, OverriddenInputFailure, TimingTooCloseFailure,
+        cms_node_label, _cms_iter_delta, _body_for_node, _node_position,
+    )
+
     p_id = ref_edge.producer.identity
     c_id = ref_edge.consumer.identity
     p_node = subj_graph.nodes.get(p_id)
@@ -4272,6 +3883,13 @@ def _classify_edge_coverage(
     runs in compare_graphs, but driven from a single graph rather than
     a missing-edge diff.
     """
+    # Lazy reverse-import: see diagnose_missing_edge for cycle rationale.
+    from Tensile.Components.CMSValidator import (
+        MissingWaitFailure, MissingBarrierFailure, WaitInsufficientFailure,
+        TimingTooCloseFailure,
+        cms_node_label, _cms_iter_delta, _body_for_node, _node_position,
+    )
+
     p_node = edge.producer
     c_node = edge.consumer
 
@@ -4475,6 +4093,12 @@ def validate_middle_pack_pair_interleaving(graph: DataflowGraph) -> List["Overri
     same successor scan (next MiddlePack in global stream), same failure
     shape (`pack` / `expected_next` / `actual_next`).
     """
+    # Lazy reverse-import: see diagnose_missing_edge for cycle rationale.
+    from Tensile.Components.CMSValidator import (
+        OverriddenInputFailure,
+        cms_node_label, _cms_iter_delta, _body_for_node,
+    )
+
     # 1. Collect MiddlePacks in global stream order.
     middle_packs_global = []
     for node in _all_nodes_in_order(graph):

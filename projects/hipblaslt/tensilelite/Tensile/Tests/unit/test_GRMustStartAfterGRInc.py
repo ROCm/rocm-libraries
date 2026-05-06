@@ -59,12 +59,14 @@ from rocisa.instruction import SAddU32
 
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
-    MissingBarrierFailure,
-    OrderInvertedFailure,
     SLOT_KIND_MFMA,
     SlotKey,
     TaggedInstruction,
     WrappedInstruction,
+)
+from Tensile.Components.CMSValidator import (
+    MissingBarrierFailure,
+    OrderInvertedFailure,
 )
 
 from dataflow_fixtures import make_capture, make_gr, make_lr, make_sbarrier, make_swait

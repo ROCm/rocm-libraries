@@ -59,6 +59,8 @@ the schedule cannot guarantee LDS coherence at the LR1 read.
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     BODY_LABEL_ML_PREV,
+)
+from Tensile.Components.CMSValidator import (
     MissingBarrierFailure,
     MissingWaitFailure,
     OrderInvertedFailure,

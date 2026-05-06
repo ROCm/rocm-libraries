@@ -81,11 +81,13 @@ from Tensile.Components.ScheduleCapture import (
     cumulative_issue_cycles,
     diagnose_missing_edge,
     validate_edge_wait_coverage,
-    OrderInvertedFailure,
-    TimingTooCloseFailure,
     _quad_cycle_gap_ok,
     _cvt_to_mfma_gap_ok,
     _mfma_pack_to_cvt_gap_ok,
+)
+from Tensile.Components.CMSValidator import (
+    OrderInvertedFailure,
+    TimingTooCloseFailure,
 )
 
 from dataflow_fixtures import (
@@ -3633,9 +3635,16 @@ class TestNodeLabelAfterCoverageFix:
 
     def test_node_label_finds_ssetprio_in_capture_after_categorization(self):
         from Tensile.Components.ScheduleCapture import (
-            LoopBodyCaptureBuilder, cms_node_label, GraphNode, SLOT_KIND_MFMA,
-            BODY_LABEL_ML, _class_tag_from_category, _identity_for,
+            LoopBodyCaptureBuilder,
+            GraphNode,
+            SLOT_KIND_MFMA,
+            BODY_LABEL_ML,
+            _class_tag_from_category,
+            _identity_for,
             make_position,
+        )
+        from Tensile.Components.CMSValidator import (
+            cms_node_label,
         )
         from rocisa.instruction import SSetPrior
 

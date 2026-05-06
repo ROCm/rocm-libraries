@@ -57,11 +57,13 @@ from Tensile.Components.ScheduleCapture import (
     GraphNode,
     build_dataflow_graph,
     validate_edge_wait_coverage,
+    CaptureUnknownInstructionError,
+    CaptureEmptyBodyError,
+)
+from Tensile.Components.CMSValidator import (
     MissingWaitFailure,
     WaitInsufficientFailure,
     OrderInvertedFailure,
-    CaptureUnknownInstructionError,
-    CaptureEmptyBodyError,
 )
 
 from dataflow_fixtures import (

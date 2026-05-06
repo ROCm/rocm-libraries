@@ -62,10 +62,12 @@ from rocisa.instruction import (
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     SLOT_KIND_MFMA,
-    OverriddenInputFailure,
     SlotKey,
     TaggedInstruction,
     WrappedInstruction,
+)
+from Tensile.Components.CMSValidator import (
+    OverriddenInputFailure,
 )
 
 from dataflow_fixtures import make_capture

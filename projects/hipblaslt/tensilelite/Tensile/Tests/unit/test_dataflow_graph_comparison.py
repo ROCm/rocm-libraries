@@ -41,12 +41,14 @@ from Tensile.Components.ScheduleCapture import (
     compare_graphs,
     diagnose_missing_edge,
     validate_edge_wait_coverage,
+    CaptureConsistencyError,
+    UnexplainedMissingEdgeError,
+)
+from Tensile.Components.CMSValidator import (
     OrderInvertedFailure,
     MissingWaitFailure,
     WaitInsufficientFailure,
     MissingBarrierFailure,
-    CaptureConsistencyError,
-    UnexplainedMissingEdgeError,
 )
 
 from dataflow_fixtures import (
@@ -370,7 +372,7 @@ class TestFailureTypeContract:
         failures = compare_graphs(ref, subj)
         for f in failures:
             # Must be a typed Failure subclass — duck typing on .kind is wrong.
-            from Tensile.Components.ScheduleCapture import Failure
+            from Tensile.Components.CMSValidator import Failure
             assert isinstance(f, Failure)
 
 

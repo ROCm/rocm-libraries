@@ -93,6 +93,8 @@ all sibling test files (``test_ValidatePack.py``,
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     BODY_LABEL_ML_PREV,
+)
+from Tensile.Components.CMSValidator import (
     MissingWaitFailure,
 )
 
@@ -359,7 +361,7 @@ class TestLRBeforeMFMA_MultiLR(GraphNativeValidationTest):
             self.wrap_single_body(cap)))
         # At least one failure on dscnt — either MissingWait or
         # WaitInsufficient — for the slot-0 LR's edge.
-        from Tensile.Components.ScheduleCapture import (
+        from Tensile.Components.CMSValidator import (
             WaitInsufficientFailure,
         )
         dscnt_failures = [

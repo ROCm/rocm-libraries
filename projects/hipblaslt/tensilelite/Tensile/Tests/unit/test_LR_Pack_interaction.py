@@ -46,6 +46,8 @@ ordering. The pack-side coverage of the same shape lives in
 
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
+)
+from Tensile.Components.CMSValidator import (
     MissingWaitFailure,
 )
 from dataflow_fixtures import (

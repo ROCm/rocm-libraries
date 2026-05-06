@@ -41,6 +41,8 @@ unification.
 
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
+)
+from Tensile.Components.CMSValidator import (
     MissingBarrierFailure,
     MissingWaitFailure,
     OrderInvertedFailure,

@@ -33,11 +33,13 @@ import pytest
 
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
+    SchedulePosition,
+)
+from Tensile.Components.CMSValidator import (
     MissingBarrierFailure,
     MissingWaitFailure,
     OrderInvertedFailure,
     OverriddenInputFailure,
-    SchedulePosition,
     TimingTooCloseFailure,
     WaitInsufficientFailure,
     OverriddenInputFailure,
@@ -302,7 +304,7 @@ class TestCompareGraphs(GraphNativeValidationTest):
 def _label(category: str, vmfma_index: int) -> "FailureNodeLabel":
     """Build a FailureNodeLabel matching the CMS-side provider's wording —
     bare 'category' for plain MFMA, 'category[0]' otherwise."""
-    from Tensile.Components.ScheduleCapture import FailureNodeLabel
+    from Tensile.Components.CMSValidator import FailureNodeLabel
     primary = category if category == "MFMA" else f"{category}[0]"
     return FailureNodeLabel(
         primary=primary,

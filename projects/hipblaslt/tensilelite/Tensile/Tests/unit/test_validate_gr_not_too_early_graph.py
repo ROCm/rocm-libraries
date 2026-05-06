@@ -69,14 +69,16 @@ Production-side deletions (landed):
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     BODY_LABEL_ML_PREV,
-    MissingBarrierFailure,
-    MissingWaitFailure,
-    OrderInvertedFailure,
     SLOT_KIND_MFMA,
     SlotKey,
     TaggedInstruction,
-    WaitInsufficientFailure,
     WrappedInstruction,
+)
+from Tensile.Components.CMSValidator import (
+    MissingBarrierFailure,
+    MissingWaitFailure,
+    OrderInvertedFailure,
+    WaitInsufficientFailure,
 )
 
 from dataflow_fixtures import (
