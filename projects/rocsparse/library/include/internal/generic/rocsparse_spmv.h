@@ -65,34 +65,7 @@ extern "C" {
 *  pattern of the matrix, whether or not the results need to be deterministic, and how many times the sparse-vector product will
 *  be performed.
 *
-*  <table>
-*  <caption id="spmv_csr_algorithms">CSR/CSC Algorithms</caption>
-*  <tr><th>Algorithm                            <th>Deterministic  <th>Preprocessing  <th>Notes
-*  <tr><td>rocsparse_spmv_alg_csr_rowsplit</td> <td>Yes</td>       <td>No</td>        <td>Is best suited for matrices with all rows having a similar number of non-zeros. Can outperform adaptive and LRB algorithms in certain sparsity patterns. Will perform very poorly if some rows have few non-zeros and some rows have many non-zeros.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_stream</td>   <td>Yes</td>       <td>No</td>        <td>[Deprecated] The old name for rocsparse_spmv_alg_csr_rowsplit.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_adaptive</td> <td>No</td>        <td>Yes</td>       <td>Generally the fastest algorithm across all matrix sparsity patterns. This includes matrices that have some rows with many non-zeros and some rows with few non-zeros. Requires lengthy preprocessing that needs to be amortized over many subsequent sparse vector products.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_lrb</td>      <td>No</td>        <td>Yes</td>       <td>Like the adaptive algorithm, it generally performs well across all matrix sparsity patterns. Generally not as fast as the adaptive algorithm, however, it uses a much faster pre-processing step. Good for when only a small number of sparse vector products will be performed.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_nnzsplit</td> <td>No</td>        <td>Yes</td>       <td>Like the adaptive algorithm, it generally performs well across all matrix sparsity patterns. Generally not as fast as the adaptive algorithm but faster than the LRB algorithm. It uses a much faster preprocessing step than LRB. Good when the number of sparse vector products that will be performed is less than one hundred. If more products need to be computed, the adaptive algorithm is probably faster.</td>
-*  </table>
-*
-*  <table>
-*  <caption id="spmv_coo_algorithms">COO Algorithms</caption>
-*  <tr><th>COO Algorithms                     <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmv_alg_coo</td>        <td>Yes</td>        <td>Yes</td>      <td>Generally not as fast as the atomic algorithm but is deterministic.</td>
-*  <tr><td>rocsparse_spmv_alg_coo_atomic</td> <td>No</td>         <td>No</td>       <td>Generally the fastest COO algorithm.</td>
-*  </table>
-*
-*  <table>
-*  <caption id="spmv_ell_algorithms">ELL Algorithms</caption>
-*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmv_alg_ell</td>   <td>Yes</td>        <td>No</td>       <td></td>
-*  </table>
-*
-*  <table>
-*  <caption id="spmv_bsr_algorithms">BSR Algorithms</caption>
-*  <tr><th>BSR Algorithm                 <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmv_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td></td>
-*  </table>
+*  \copydetails rocsparse_internal_doc_spmv_algorithm_tables
 *
 *  \p rocsparse_spmv supports multiple combinations of data types and compute types. The tables below indicate the currently
 *  supported different data types that can be used for the sparse matrix \f$op(A)\f$, the dense vectors \f$x\f$ and
