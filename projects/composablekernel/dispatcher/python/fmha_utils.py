@@ -163,7 +163,7 @@ class FmhaKernelConfig:
 
     # -- Algorithm: pipeline --
     pipeline: str = "qr_async"
-    block_per_cu: int = 1
+    block_per_cu: int = 2
     num_wave_groups: int = 1
 
     # -- Signature: features --
@@ -1174,20 +1174,33 @@ def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str
         "-c",
         "-fPIC",
         "-O3",
+        "-DNDEBUG",
         f"--offload-arch={arch}",
         "-std=c++17",
         f"-I{root.parent / 'include'}",
         f"-I{root / 'include'}",
         f"-I{root.parent}",
-        "-mllvm",
-        "-enable-noalias-to-md-conversion=0",
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
-        "--offload-compress",
         "-fgpu-flush-denormals-to-zero",
+        "-fno-offload-uniform-block",
+        "-mllvm",
+        "--lsr-drop-solution=1",
+        "-mllvm",
+        "-enable-post-misched=0",
+        "-mllvm",
+        "-amdgpu-early-inline-all=true",
+        "-mllvm",
+        "-amdgpu-function-calls=false",
     ]
     if arch.startswith("gfx9"):
         flags.append("-DCK_TILE_FMHA_FWD_FAST_EXP2=1")
+        flags.append("-DCK_TILE_USE_OCP_FP8")
+        flags.append("-DCK_GFX950_SUPPORT")
+        flags.append("-DCK_USE_GFX950")
+        flags.append("-DCK_USE_GFX94")
+        flags.append("-DCK_USE_XDL")
+        flags.append("-DCK_TILE_USE_WMMA=0")
     else:
         flags.append("-DCK_TILE_FMHA_FWD_FAST_EXP2=0")
 
