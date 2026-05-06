@@ -47,7 +47,7 @@ At its core, the golden reference feature follows these steps across two pipelin
 
 | Step | Tag | What happens | Generation | Validation |
 |------|-----|-------------|:---:|:---:|
-| 1 | `construct` | Build the graph (same as today) | Y | Y |
+| 1 | `construct` | Build the graph from the test fixture's `buildGraph()` | Y | Y |
 | 2 | `execute-reference` | Run a trusted reference (CPU ref, GPU ref, or external) to produce truth | Y | -- |
 | 3 | `serialize` | Save inputs + outputs to disk | Y | -- |
 | 4 | `deserialize` | Load saved inputs from disk | -- | Y |
@@ -68,7 +68,7 @@ The integration test suite currently validates engine outputs by computing refer
 3. **Non-determinism**: GPU reference results can vary across runs, making failure investigation harder
 4. **Slowness**: CPU reference execution for large tensors is the bottleneck in full-tier tests
 
-A prior effort established a golden reference pattern in the MIOpen plugin's test suite ([`GoldenReferenceGpu.hpp`](../../../miopen-provider/tests/common/GoldenReferenceGpu.hpp)) using serialized graph+tensor JSON files loaded from `hipdnn_reference_data/`. This RFC builds on that pattern, extends it for broader use, and integrates it into the shared integration test harness so it works across all plugins (MIOpen, Fusilli, and future ones) without plugin-specific code.
+A prior effort established a golden reference pattern in the MIOpen plugin's test suite ([`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp)) using serialized graph+tensor JSON files loaded from `hipdnn_reference_data/`. This RFC builds on that pattern, extends it for broader use, and integrates it into the shared integration test harness so it works across all plugins (MIOpen, Fusilli, and future ones) without plugin-specific code.
 
 ### Who This Serves
 
