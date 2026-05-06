@@ -27,6 +27,7 @@ add_executable(
     IntegrationGpuBatchnormTrainingUnhappySpatial.cpp
     IntegrationGpuBatchnormUnhappyActivation.cpp
     IntegrationGpuConvForward.cpp
+    IntegrationGpuPointwiseReluForward.cpp
     IntegrationGpuConvFwdBiasActiv.cpp
     IntegrationGpuConvBackwardData.cpp
     IntegrationGpuConvBackwardWeights.cpp
