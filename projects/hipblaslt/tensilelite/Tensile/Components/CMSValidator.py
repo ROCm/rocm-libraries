@@ -25,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from collections import defaultdict
 from enum import Enum, auto
-from typing import ClassVar, Optional
+from typing import ClassVar, Dict, Optional, Tuple
 
 from rocisa.instruction import (
     SWaitCnt, SBarrier,
@@ -150,14 +150,172 @@ PACK_GROUP_SIZE_TF32 = 24        # 4 CVT0 + 16 middle + 4 CVT1
 PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
 
 # --- Quad-Cycle Timing (CDNA 4 ISA section 7.6) ---
-# Quad-cycle visibility verdicts live graph-side; the constants
-# (`_QUAD_CYCLES_*`, `_MFMA_TYPE_SWITCH_THRESHOLD_*`) live in
-# `Tensile/Components/ScheduleCapture.py` alongside the
+# Quad-cycle visibility verdicts live graph-side; the legacy module-scope
+# alias constants (`_QUAD_CYCLES_*`, `_MFMA_TYPE_SWITCH_THRESHOLD_*`) live
+# in `Tensile/Components/ScheduleCapture.py` alongside the
 # `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` /
-# `_mfma_pack_to_cvt_gap_ok` helpers that consume them.
+# `_mfma_pack_to_cvt_gap_ok` helpers that consume them. The per-arch
+# `ArchProfile` dataclass and resolvers are defined below so the validator
+# can resolve a profile from `kernel["ISA"]` without a back-import into
+# ScheduleCapture.
 
 # --- VGPRs ---
 VGPRS_PER_CONVERSION_GROUP = 8   # 8 VGPRs per conversion group in TF32 emulation
+
+
+# =============================================================================
+# ArchProfile — per-architecture quad-cycle and issue-cycle constants
+# =============================================================================
+# Quad-cycle finish-time and settle-window magic numbers used to live as
+# module-scope literals derived from CDNA 4 (gfx950) ISA section 7.6. The
+# quad-cycle simulator (`cumulative_issue_cycles`) and the four pair-specific
+# helpers (`_quad_cycle_gap_ok`, `_cvt_to_mfma_gap_ok`,
+# `_mfma_pack_to_cvt_gap_ok`, `_mfma_finish_cycles_for`) plus the
+# per-instruction issue-cost helper (`_min_issue_quad_cycles_for`) now read
+# every magic number from a per-arch `ArchProfile`. The default profile keeps
+# the historical CDNA 4 values bit-identical, so kernels (and the entire
+# unit-test suite) that don't carry an ISA tag still see the original
+# behavior. New archs construct a fresh `ArchProfile` and register it in
+# `_ARCH_PROFILES_BY_ISA`.
+
+@dataclass(frozen=True)
+class ArchProfile:
+    """Per-architecture timing constants consumed by the quad-cycle simulator.
+
+    Frozen so the singleton `_DEFAULT_CDNA4_ARCH_PROFILE` is safe to share
+    across the entire test suite without any caller mutating it. New archs
+    construct a fresh `ArchProfile(...)` rather than copying-and-mutating.
+
+    Fields:
+      name: Human-readable architecture tag (e.g. "CDNA4").
+      isa: ISA tuple identifying the arch (e.g. (9, 5, 0) for gfx950).
+           Used by `_resolve_arch_profile_for_isa` to look up the profile
+           from a `kernel["ISA"]` value.
+
+      Quad-cycle finish times for matrix-mul ops:
+        standard_mfma_finish_cycles   — full-tile MFMA finish window.
+        mfma_4x4_finish_cycles        — 4x4 PackMFMA finish window.
+
+      Pair-specific settle windows:
+        cvt_before_mfma_quad_cycles      — CVTPack -> MFMA visibility.
+        mfma_4x4_before_cvt_quad_cycles  — 4x4 PackMFMA -> CVT1 visibility.
+
+      MFMA type-switch thresholds:
+        mfma_type_switch_threshold_from_standard
+        mfma_type_switch_threshold_from_4x4
+            When two consecutive MFMAs differ in class, the consumer takes
+            an extra +1 quad-cycle stall if the gap is below the
+            producer-class threshold.
+
+      Per-instruction issue cost:
+        default_issue_quad_cycles  — base issue cost for non-SNop
+            instructions (CDNA 4 = 1; arch-specific overrides go here).
+
+    Adding a new arch: instantiate ArchProfile and register it in
+    `_ARCH_PROFILES_BY_ISA`. Tests that exercise the new arch attach the
+    profile to the FourPartCapture / DataflowGraph via the `arch_profile`
+    field so the resolver picks it up.
+    """
+    name: str
+    isa: Tuple[int, int, int]
+    standard_mfma_finish_cycles: int
+    mfma_4x4_finish_cycles: int
+    cvt_before_mfma_quad_cycles: int
+    mfma_4x4_before_cvt_quad_cycles: int
+    mfma_type_switch_threshold_from_standard: int
+    mfma_type_switch_threshold_from_4x4: int
+    default_issue_quad_cycles: int = 1
+
+
+# CDNA 4 (gfx950) — sourced from ISA section 7.6. These are the values that
+# lived as module-scope literals in this file before the ArchProfile
+# refactor; they remain the default everywhere a profile isn't explicitly
+# attached to keep the existing unit-test suite bit-identical.
+_DEFAULT_CDNA4_ARCH_PROFILE = ArchProfile(
+    name="CDNA4",
+    isa=(9, 5, 0),
+    standard_mfma_finish_cycles=3,         # Full-tile MFMA: 3 quad-cycles to finish.
+    mfma_4x4_finish_cycles=1,              # 4x4 PackMFMA: 1 quad-cycle.
+    cvt_before_mfma_quad_cycles=2,         # CVT pack -> MFMA settle window.
+    mfma_4x4_before_cvt_quad_cycles=5,     # 4x4 PackMFMA -> CVT1 settle window.
+    mfma_type_switch_threshold_from_standard=5,
+    mfma_type_switch_threshold_from_4x4=3,
+    default_issue_quad_cycles=1,
+)
+
+
+# Lookup table — extend with new archs as their profiles are characterized.
+_ARCH_PROFILES_BY_ISA: Dict[Tuple[int, int, int], ArchProfile] = {
+    _DEFAULT_CDNA4_ARCH_PROFILE.isa: _DEFAULT_CDNA4_ARCH_PROFILE,
+}
+
+
+def _resolve_arch_profile_for_isa(isa: Optional[Tuple[int, int, int]]) -> ArchProfile:
+    """Return the ArchProfile for an ISA tuple. Default = CDNA 4.
+
+    Unknown / missing ISAs intentionally fall back to CDNA 4 rather than
+    raising — the validator's pre-existing behavior was hardcoded CDNA 4,
+    so this keeps every uncharacterized arch on the historical code path.
+    """
+    if isa is None:
+        return _DEFAULT_CDNA4_ARCH_PROFILE
+    return _ARCH_PROFILES_BY_ISA.get(tuple(isa), _DEFAULT_CDNA4_ARCH_PROFILE)
+
+
+def _resolve_arch_profile(carrier: object) -> ArchProfile:
+    """Return the ArchProfile attached to a DataflowGraph or FourPartCapture.
+
+    `carrier` may be:
+      - DataflowGraph with `.arch_profile` set,
+      - FourPartCapture with `.arch_profile` set,
+      - GraphNode (resolves via its captured graph back-ref, if any),
+      - None (degenerate test path).
+
+    Defaults to `_DEFAULT_CDNA4_ARCH_PROFILE` when no profile is attached
+    so the historical code path stays bit-identical for callers that don't
+    plumb arch info through.
+    """
+    if carrier is None:
+        return _DEFAULT_CDNA4_ARCH_PROFILE
+    profile = getattr(carrier, "arch_profile", None)
+    if isinstance(profile, ArchProfile):
+        return profile
+    return _DEFAULT_CDNA4_ARCH_PROFILE
+
+
+# --- Quad-cycle constants (default-CDNA 4 aliases) ---------------------------
+# These module-scope names are RETAINED for two reasons:
+#   1. Backward compatibility for callers (and tests) that import them as
+#      module attributes. They now resolve from `_DEFAULT_CDNA4_ARCH_PROFILE`
+#      so any future tweak to the CDNA 4 numbers happens in exactly one
+#      place — the profile constructor.
+#   2. The classification helpers `_mfma_finish_cycles_for` /
+#      `_quad_cycle_gap_ok` use the standard / 4x4 finish-cycle values as
+#      DISCRIMINATOR sentinels (e.g. "is the previous MFMA's class the
+#      4x4 family?"). Those discriminators are class identity, not
+#      arch-specific timing — so they remain pinned to the CDNA 4 default.
+#      Per-arch overrides for the actual finish window come from the
+#      resolved profile inside each helper.
+# Source: CDNA 4 ISA section 7.6.
+_QUAD_CYCLES_STANDARD_MFMA_FINISH = _DEFAULT_CDNA4_ARCH_PROFILE.standard_mfma_finish_cycles
+_QUAD_CYCLES_MFMA_4X4_FINISH = _DEFAULT_CDNA4_ARCH_PROFILE.mfma_4x4_finish_cycles
+_QUAD_CYCLES_CVT_BEFORE_MFMA = _DEFAULT_CDNA4_ARCH_PROFILE.cvt_before_mfma_quad_cycles
+_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = _DEFAULT_CDNA4_ARCH_PROFILE.mfma_4x4_before_cvt_quad_cycles
+
+# --- MFMA Type-Switch Thresholds (default-CDNA 4 aliases) --------------------
+# When `cumulative_issue_cycles` observes consecutive MFMAs of DIFFERENT
+# classes whose issue gap is below the producer's threshold, it injects a +1
+# quad-cycle stall — the consumer is forced to issue one cycle later. The
+# thresholds depend on the PRODUCER class. Resolved from the CDNA 4 profile
+# for the legacy module-scope path; the cycle simulator inside
+# `cumulative_issue_cycles` reads the actual values from the resolved
+# profile so per-arch overrides apply.
+_MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = (
+    _DEFAULT_CDNA4_ARCH_PROFILE.mfma_type_switch_threshold_from_standard
+)
+_MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = (
+    _DEFAULT_CDNA4_ARCH_PROFILE.mfma_type_switch_threshold_from_4x4
+)
 
 
 @dataclass
@@ -1089,7 +1247,6 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
     if context.default_capture is not None and context.cms_capture is not None:
         from Tensile.Components.ScheduleCapture import (
             build_dataflow_graph, compare_graphs, validate_edge_wait_coverage,
-            _resolve_arch_profile_for_isa,
         )
         # Attach the per-arch quad-cycle profile derived from this kernel's
         # ISA tuple so the four pair-specific gap helpers consult arch-

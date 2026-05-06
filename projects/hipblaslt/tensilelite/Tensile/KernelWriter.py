@@ -6005,9 +6005,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       from Tensile.Components.ScheduleCapture import (
         FourPartCapture, clone_loop_body,
         build_dataflow_graph, compare_graphs, validate_edge_wait_coverage,
-        _resolve_arch_profile_for_isa,
         kernel_emits_n_gl, kernel_emits_n_ll, assert_capture_body_consistency,
       )
+      from Tensile.Components.CMSValidator import _resolve_arch_profile_for_isa
       assert loopCopies == 1, (
         f"Phase 5 capture relocation requires loopCopies==1 under CMS; "
         f"got loopCopies={loopCopies}. needSecondLoop or DTV/ULSGRO may "
