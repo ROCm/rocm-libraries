@@ -101,10 +101,10 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
 
     // execution
     return rocsolver_sy2sb_he2hb_template<false, false, T, I>(
-            handle, n, kd, nb,
-            A, shiftA, lda, strideA,
-            Aband, ldab, strideAb,
-            tau, strideTau,
+            handle, n, kd, nb,   // opts
+            A, shiftA, lda, strideA, // A
+            Aband, ldab, strideAb, // Aband
+            tau, strideTau,  // tau
             batch_count, scalars,
             D,
             V,
