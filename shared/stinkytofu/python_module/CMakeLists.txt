@@ -30,7 +30,7 @@ message(STATUS "Configuring StinkyTofu Python Module")
 # ============================================================================
 
 # nanobind requires find_package(Python ...) not Python3
-find_package(Python COMPONENTS Interpreter Development REQUIRED)
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
 include(FetchContent)
 FetchContent_Declare(
