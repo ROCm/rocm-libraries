@@ -349,6 +349,16 @@ hiptensorContract
 
 .. doxygenfunction::  hiptensorContract
 
+hiptensorCreateContractionTrinary
+---------------------------------
+
+.. doxygenfunction::  hiptensorCreateContractionTrinary
+
+hiptensorContractTrinary
+------------------------
+
+.. doxygenfunction::  hiptensorContractTrinary
+
 
 Element-wise operations
 =======================

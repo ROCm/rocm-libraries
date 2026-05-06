@@ -21,6 +21,6 @@
  */
 typedef enum
 {
-    HIPDNN_NORM_FWD_PHASE_INFERENCE = 1, ///< Inference mode (no saved statistics)
-    HIPDNN_NORM_FWD_PHASE_TRAINING = 2 ///< Training mode (saves inv_rms for backward)
+    HIPDNN_NORM_FWD_INFERENCE = 1, ///< Inference mode (no saved statistics)
+    HIPDNN_NORM_FWD_TRAINING = 2 ///< Training mode (saves inv_rms for backward)
 } hipdnnNormFwdPhase_t;

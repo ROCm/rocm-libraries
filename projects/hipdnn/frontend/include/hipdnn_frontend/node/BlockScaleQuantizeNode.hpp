@@ -3,12 +3,12 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/BlockScaleQuantizePacker.hpp>
+#include <hipdnn_frontend/detail/BlockScaleQuantizeUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
@@ -24,6 +24,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(blockScaleQuantizeAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        BlockScaleQuantizeAttributes bsqAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackBlockScaleQuantizeOperation(opDesc, tensorMap, bsqAttr));
+        attributes = std::move(bsqAttr);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -191,17 +201,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

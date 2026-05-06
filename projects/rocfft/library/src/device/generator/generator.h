@@ -1786,7 +1786,8 @@ static Function make_outofplace(const Function&    f,
                                 const std::string& bufName         = "buf",
                                 bool               rename_function = true)
 {
-    auto visitor = MakeOutOfPlaceVisitor({bufName, "stride", "stride0", "offset"}, rename_function);
+    auto visitor = MakeOutOfPlaceVisitor({bufName, "stride", "stride0", "offset", "offset_pp"},
+                                         rename_function);
     return visitor(f);
 }
 

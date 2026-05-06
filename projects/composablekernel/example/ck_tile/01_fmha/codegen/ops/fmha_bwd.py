@@ -533,6 +533,7 @@ using fmha_bwd_dot_do_o_pipeline_problem_{F_idx} = ck_tile::BlockFmhaBwdOGradDot
     typename FmhaBwdTypeConfig<fmha_dtype_{F_idx}>::ODataType,
     typename FmhaBwdTypeConfig<fmha_dtype_{F_idx}>::OGradDataType,
     typename FmhaBwdTypeConfig<fmha_dtype_{F_idx}>::DDataType,
+    typename FmhaBwdTypeConfig<fmha_dtype_{F_idx}>::LSEDataType,
     /* BlockSize = M0 = */ {F_bm0},
     {F_hdim},
     {F_mode},
@@ -826,14 +827,20 @@ class FmhaBwdApiTrait:
     @property
     def max_seq_q_cond(self) -> str:
         if self.tile.max_seq_q != 0:
-            return f" && (t.seqlen_q <= {self.tile.max_seq_q})"
+            if self.mode == "group":
+                return f" && (t.max_seqlen_q <= {self.tile.max_seq_q})"
+            else:
+                return f" && (t.seqlen_q <= {self.tile.max_seq_q})"
         else:
             return ""
 
     @property
     def extra_cond(self) -> str:
         if self.tr_load == "t" and self.tile.max_seq_q == 0 and self.tile.F_bn0 == 128 and self.tile.F_bhdq == 128:
-            return " && (t.seqlen_k <= 256)"
+            if self.mode == "group":
+                return " && (t.max_seqlen_k <= 256)"
+            else:
+                return " && (t.seqlen_k <= 256)"
         else:
             return ""
 
@@ -1056,7 +1063,7 @@ def get_bwd_blobs(
             hdim = tile.F_bhdq
             if (mode == "group") and (spad1d == "f"):
                 continue
-            if (mode == "group" or ("no" not in mask)) and tile.max_seq_q != 0:
+            if ("no" not in mask) and tile.max_seq_q != 0:
                 continue
             if (bias == "no" or bias == "alibi") and dbias == "t":
                 continue

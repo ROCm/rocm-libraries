@@ -21,8 +21,7 @@
 #
 # ########################################################################
 
-# The ROCm platform requires at least Ubuntu 16.04 or Fedora 24, which have cmake 3.5
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
@@ -38,16 +37,16 @@ list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake)
 
+# Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-endif()
-
-# Honor per-config flags in try_compile() source-file signature. cmake v3.7 and up
-if(POLICY CMP0066)
-  cmake_policy(SET CMP0066 NEW)
 endif()
 
 # rocSPARSE project
@@ -68,10 +67,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Set CXX standard
-if (CMAKE_CXX_STANDARD EQUAL 14)
-  message( DEPRECATION "Builds using the C++14 standard will no longer be supported in the next major release" )
-elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+if(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++17 is supported")
 endif()
 
 # Build options
@@ -123,6 +120,9 @@ if(BUILD_ADDRESS_SANITIZER)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
   set(CMAKE_C_LINK_EXECUTABLE "${CMAKE_C_LINK_EXECUTABLE} -fuse-ld=lld")
 
+  # Define a macro visible to both host and device compilation
+  add_compile_definitions(ROCSPARSE_WITH_ASAN)
+
   # Fortran not supported, add_link_options below invalid for fortran linking
   set(BUILD_FORTRAN_CLIENTS OFF)
 endif()
@@ -137,16 +137,6 @@ if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_STRIP_TRAILING_WHITESPACE)
   string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
-endif()
-
-# Detect compiler support for target ID
-# This section is deprecated. Please use rocm_check_target_ids for future use.
-if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+")
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
-        OUTPUT_VARIABLE CXX_OUTPUT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_STRIP_TRAILING_WHITESPACE)
-    string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
 endif()
 
 #Set the GPU_TARGETS with backward compatibility
@@ -193,7 +183,7 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Setup version
-set(VERSION_STRING "4.5.0")
+set(VERSION_STRING "4.6.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
 set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
@@ -223,6 +213,9 @@ endif( )
 
 if( BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   set( BUILD_CLIENTS ON )
+  if( BUILD_CLIENTS_TESTS )
+    enable_testing()
+  endif()
   if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
     string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)

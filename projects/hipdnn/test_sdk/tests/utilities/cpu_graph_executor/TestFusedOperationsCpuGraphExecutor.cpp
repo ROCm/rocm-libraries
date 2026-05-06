@@ -17,7 +17,7 @@
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 
@@ -66,7 +66,9 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     // BUILD 3-STEP FUSED GRAPH MANUALLY
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionAddMultiplyFusedTest");
-    graph->set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
     int64_t uid = 1;
 
@@ -156,11 +158,11 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
     // Execute the graph using CPU graph executor
-    CpuReferenceGraphExecutor graphExecutor;
     // Serialize the frontend graph to flatbuffer format
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    // Execute with correct 3-parameter signature
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     // Compute reference result manually: (conv(X, W) + 5.0) * 2.0
     // Step 1: Perform convolution

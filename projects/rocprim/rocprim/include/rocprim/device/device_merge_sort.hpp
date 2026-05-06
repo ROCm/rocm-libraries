@@ -913,6 +913,8 @@ inline hipError_t merge_sort_impl(
 /// In this example a device-level ascending merge sort is performed on an array of
 /// \p float values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_merge_sort.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///

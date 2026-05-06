@@ -13,13 +13,14 @@ namespace miopen_plugin
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE_TRAINING = miopenBNSpatial;
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
-    , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
-    , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
-    , _bias(miopen_utils::createTensor(tensorMap, attributes.bias_tensor_uid()))
+    : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
+    , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))
+    , _scale(miopen_utils::createBatchnormTensor(tensorMap, attributes.scale_tensor_uid()))
+    , _bias(miopen_utils::createBatchnormTensor(tensorMap, attributes.bias_tensor_uid()))
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for MIOpen compatibility)
     auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
@@ -29,13 +30,13 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     auto optMeanUid = attributes.mean_tensor_uid();
     if(optMeanUid.has_value())
     {
-        _mean = miopen_utils::createTensor(tensorMap, *optMeanUid);
+        _mean = miopen_utils::createBatchnormTensor(tensorMap, *optMeanUid);
     }
 
     auto optInvVarUid = attributes.inv_variance_tensor_uid();
     if(optInvVarUid.has_value())
     {
-        _invVariance = miopen_utils::createTensor(tensorMap, *optInvVarUid);
+        _invVariance = miopen_utils::createBatchnormTensor(tensorMap, *optInvVarUid);
     }
 
     auto optPrevRunMeanUid = attributes.prev_running_mean_tensor_uid();
@@ -51,24 +52,26 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
         auto momentumTensorAttr = tensorMap.at(*optMomentumUid);
         _momentumValue = miopen_utils::extractDoubleFromTensorValue(momentumTensorAttr, "Momentum");
 
-        _prevRunningMean = miopen_utils::createTensor(tensorMap, *optPrevRunMeanUid);
-        _prevRunningVariance = miopen_utils::createTensor(tensorMap, *optPrevRunVarUid);
-        _nextRunningMean = miopen_utils::createTensor(tensorMap, *optNextRunMeanUid);
-        _nextRunningVariance = miopen_utils::createTensor(tensorMap, *optNextRunVarUid);
+        _prevRunningMean = miopen_utils::createBatchnormTensor(tensorMap, *optPrevRunMeanUid);
+        _prevRunningVariance = miopen_utils::createBatchnormTensor(tensorMap, *optPrevRunVarUid);
+        _nextRunningMean = miopen_utils::createBatchnormTensor(tensorMap, *optNextRunMeanUid);
+        _nextRunningVariance = miopen_utils::createBatchnormTensor(tensorMap, *optNextRunVarUid);
         _hasRunningStats = true;
     }
 }
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
-    , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
-    , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
-    , _bias(miopen_utils::createTensor(tensorMap, attributes.bias_tensor_uid()))
-    , _activationOut(miopen_utils::createTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
+    : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
+    , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))
+    , _scale(miopen_utils::createBatchnormTensor(tensorMap, attributes.scale_tensor_uid()))
+    , _bias(miopen_utils::createBatchnormTensor(tensorMap, attributes.bias_tensor_uid()))
+    , _activationOut(
+          miopen_utils::createBatchnormTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
 {
     using namespace miopen_utils;
 
@@ -93,13 +96,13 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     auto optMeanUid = attributes.mean_tensor_uid();
     if(optMeanUid.has_value())
     {
-        _mean = createTensor(tensorMap, *optMeanUid);
+        _mean = createBatchnormTensor(tensorMap, *optMeanUid);
     }
 
     auto optInvVarUid = attributes.inv_variance_tensor_uid();
     if(optInvVarUid.has_value())
     {
-        _invVariance = createTensor(tensorMap, *optInvVarUid);
+        _invVariance = createBatchnormTensor(tensorMap, *optInvVarUid);
     }
 
     auto optPrevRunMeanUid = attributes.prev_running_mean_tensor_uid();
@@ -115,10 +118,10 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
         auto momentumTensorAttr = tensorMap.at(*optMomentumUid);
         _momentumValue = miopen_utils::extractDoubleFromTensorValue(momentumTensorAttr, "Momentum");
 
-        _prevRunningMean = miopen_utils::createTensor(tensorMap, *optPrevRunMeanUid);
-        _prevRunningVariance = miopen_utils::createTensor(tensorMap, *optPrevRunVarUid);
-        _nextRunningMean = miopen_utils::createTensor(tensorMap, *optNextRunMeanUid);
-        _nextRunningVariance = miopen_utils::createTensor(tensorMap, *optNextRunVarUid);
+        _prevRunningMean = miopen_utils::createBatchnormTensor(tensorMap, *optPrevRunMeanUid);
+        _prevRunningVariance = miopen_utils::createBatchnormTensor(tensorMap, *optPrevRunVarUid);
+        _nextRunningMean = miopen_utils::createBatchnormTensor(tensorMap, *optNextRunMeanUid);
+        _nextRunningVariance = miopen_utils::createBatchnormTensor(tensorMap, *optNextRunVarUid);
         _hasRunningStats = true;
     }
 }

@@ -23,13 +23,15 @@
 ################################################################################
 
 from rocisa.code import RegSet, Module
-from rocisa.container import EXEC, vgpr, sgpr, SDWAModifiers, DSModifiers, ContinuousRegister
-from rocisa.enum import SelectBit
-from rocisa.instruction import DSStoreB16, DSStoreB32, DSStoreB64, SBarrier, \
-    SMovB32, SSetMask, VAddF32, VAddU32, VCmpXEqU32, VCvtPkBF8toF32, VCvtPkFP8toF32, \
-    VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, VCvtBF16toFP32
+from rocisa.container import EXEC, vgpr, sgpr, DSModifiers, ContinuousRegister
+from rocisa.enum import HighBitSel, SelectBit
+from rocisa.instruction import SBarrier, \
+    SMovB32, SSetMask, VAddF32, VAddU32, VCmpXEqU32, \
+    VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, VCvtBF16toFP32, \
+    ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorStaticMultiply
 from ..Component import SumUnroll
+from ..AsmMemoryHelpers import dsStore
 from ..Common import printExit, log2
 
 class SumUnrollMfma(SumUnroll):
@@ -71,7 +73,7 @@ class SumUnrollMfma(SumUnroll):
         m = (u) % (writer.states.numVgprBuffer) # local to use for MACs
 
         # calculate constant
-        numRegistersIn   = kernel["ProblemType"]["DataType"].numRegisters()
+        numRegistersIn   = kernel["ProblemType"]["MacDataType%s"%tc].numRegisters()
         numMIInput       = kernel["MIInputPerThread%s"%tc]
         vgprPerInput     = int(numMIInput * numRegistersIn)
 
@@ -94,7 +96,7 @@ class SumUnrollMfma(SumUnroll):
         vgprBuffer_new = (m//numIterPerCoalescedRead)*numIterPerCoalescedRead
         vgprBuffer_new_offset = m%numIterPerCoalescedRead*kernel["InnerUnroll"]*vgprPerInput
 
-        if kernel["ProblemType"]["DataType"].isBFloat16():
+        if kernel["ProblemType"]["MacDataType%s"%tc].isBFloat16():
             hiBitsMaskVgpr = writer.vgprPool.checkOut(1)
             imod.add(VMovB32(dst=vgpr(hiBitsMaskVgpr), src=hex(0xffff0000), comment="mask 0xffff0000 for pack two bfloat16 element to 32bit"))
 
@@ -108,18 +110,27 @@ class SumUnrollMfma(SumUnroll):
                 valuSumStr = "ValuSum+%u"%idx
                 # If direct ot vgpr, use "G2LA+%u+%u+%u", currently not supported
                 if kernel["ProblemType"]["DataType"].isHalf():
+                    # FP16 BiasSrcA,B
+                    tmpVgpr = writer.vgprPool.checkOut(1)
                     # First version only supports mfma with K > 1
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
                         for inputIdx in range(0, vgprPerInput):
-                            imod.add(VDot2F32F16(dst=vgpr(valuSumStr), src0=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), src1=sgpr("SumUnrollConstOne"), src2=vgpr(valuSumStr), comment="sum K"))
+                            if writer.states.asmCaps['v_dot2_f32_f16']:
+                                imod.add(VDot2F32F16(dst=vgpr(valuSumStr), src0=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), src1=sgpr("SumUnrollConstOne"), src2=vgpr(valuSumStr), comment="sum K"))
+                            else:
+                                imod.add(ECvtF16toF32(dst=vgpr(tmpVgpr), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sel=HighBitSel.LOW))
+                                imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr), src1=vgpr(valuSumStr), comment="sum K"))
+                                imod.add(ECvtF16toF32(dst=vgpr(tmpVgpr), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sel=HighBitSel.HIGH))
+                                imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr), src1=vgpr(valuSumStr), comment="sum K"))
                     else:
                         printExit("Currently unsupported vgprPerInput %u"%vgprPerInput)
+                    writer.vgprPool.checkIn(tmpVgpr)
                 elif kernel["ProblemType"]["DataType"].isSingle():
                     inputIdx = 0
                     while inputIdx < vgprPerInput:
                         imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), src1=vgpr(valuSumStr), comment="sum K"))
                         inputIdx += 1
-                elif kernel["ProblemType"]["DataType"].isBFloat16():
+                elif kernel["ProblemType"]["MacDataType%s"%tc].isBFloat16():
                     # BF16 BiasSrcA,B
                     tmpVgpr = writer.vgprPool.checkOutAligned(2,2)
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
@@ -134,16 +145,14 @@ class SumUnrollMfma(SumUnroll):
                     else:
                         printExit("Currently unsupported vgprPerInput %u"%vgprPerInput)
                     writer.vgprPool.checkIn(tmpVgpr)
-                elif (kernel["ProblemType"]["DataType"].isAnyFloat8A() and tc == "A") or \
-                     (kernel["ProblemType"]["DataType"].isAnyFloat8B() and tc == "B"):
+                elif kernel["ProblemType"]["MacDataType%s"%tc].isAnyFloat8():
                     #FP8
                     tmpVgpr = writer.vgprPool.checkOutAligned(4,2)
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
                         for inputIdx in range(0, vgprPerInput):
-                            sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_0)
-                            imod.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sdwa=sdwa, comment="convert to FP32"))
-                            sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_1)
-                            imod.add(VCvtPkFP8toF32(dst=vgpr(tmpVgpr+2,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sdwa=sdwa, comment="convert to FP32"))
+                            src = vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx))
+                            imod.add(ECvtPkFP8toF32(dst=vgpr(tmpVgpr,2), src=src, sel=HighBitSel.LOW, comment="convert to FP32"))
+                            imod.add(ECvtPkFP8toF32(dst=vgpr(tmpVgpr+2,2), src=src, sel=HighBitSel.HIGH, comment="convert to FP32"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr), src1=vgpr(valuSumStr), comment="sum K"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+1), src1=vgpr(valuSumStr), comment="sum K"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+2), src1=vgpr(valuSumStr), comment="sum K"))
@@ -151,16 +160,14 @@ class SumUnrollMfma(SumUnroll):
                     else:
                         printExit("Currently unsupported vgprPerInput %u"%vgprPerInput)
                     writer.vgprPool.checkIn(tmpVgpr)
-                elif (kernel["ProblemType"]["DataType"].isAnyBFloat8A() and tc == "A") or \
-                     (kernel["ProblemType"]["DataType"].isAnyBFloat8B() and tc == "B"):
+                elif kernel["ProblemType"]["MacDataType%s"%tc].isAnyBFloat8():
                     #BF8
                     tmpVgpr = writer.vgprPool.checkOutAligned(4,2)
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
                         for inputIdx in range(0, vgprPerInput):
-                            sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_0)
-                            imod.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sdwa=sdwa, comment="convert to FP32"))
-                            sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_1)
-                            imod.add(VCvtPkBF8toF32(dst=vgpr(tmpVgpr+2,2), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), sdwa=sdwa, comment="convert to FP32"))
+                            src = vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx))
+                            imod.add(ECvtPkBF8toF32(dst=vgpr(tmpVgpr,2), src=src, sel=HighBitSel.LOW, comment="convert to FP32"))
+                            imod.add(ECvtPkBF8toF32(dst=vgpr(tmpVgpr+2,2), src=src, sel=HighBitSel.HIGH, comment="convert to FP32"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr), src1=vgpr(valuSumStr), comment="sum K"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+1), src1=vgpr(valuSumStr), comment="sum K"))
                             imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+2), src1=vgpr(valuSumStr), comment="sum K"))
@@ -171,7 +178,7 @@ class SumUnrollMfma(SumUnroll):
                 else:
                     printExit("Currently unsupported data type")
 
-        if kernel["ProblemType"]["DataType"].isBFloat16():
+        if kernel["ProblemType"]["MacDataType%s"%tc].isBFloat16():
             writer.vgprPool.checkIn(hiBitsMaskVgpr)
 
         return imod
@@ -189,7 +196,7 @@ class SumUnrollMfma(SumUnroll):
                 writer.undefineSgpr("SumUnrollConstOne")
 
         # bias data type
-        diasBpe        = kernel["ProblemType"]["ComputeDataType"].numBytes()
+        diasBpe        = int(kernel["ProblemType"]["ComputeDataType"].numBytes())
         # get constant parameter
         tile01         = tP["tile01Idx"]
         waveWidth      = writer.states.kernel["WavefrontSize"]
@@ -302,19 +309,13 @@ class SumUnrollMfma(SumUnroll):
         for vIdx in range(0, numVectorsPerTile):
             for eIdx in range(0, numReadPerTileVector):
                 # normal case
-                offset_val = (eIdx + vIdx * MIWaveGroupShape[tile01]) * maxKId * kernel["ProblemType"]["ComputeDataType"].numBytes()
-                bps = kernel["ProblemType"]["ComputeDataType"].numBytes()
+                offset_val = int((eIdx + vIdx * MIWaveGroupShape[tile01]) * maxKId * kernel["ProblemType"]["ComputeDataType"].numBytes())
+                bps = int(kernel["ProblemType"]["ComputeDataType"].numBytes())
                 ds  = DSModifiers(offset=offset_val)
                 dst = vgpr(tReg)
                 vgprStr = "ValuSum+%u"%idx
-                if bps==2:
-                    imod.add(DSStoreB16(dstAddr=dst, src=vgpr(vgprStr), ds=ds, comment="local store bias"))
-                elif bps==4:
-                    imod.add(DSStoreB32(dstAddr=dst, src=vgpr(vgprStr), ds=ds, comment="local store bias"))
-                elif bps==8:
-                    imod.add(DSStoreB64(dstAddr=dst, src=vgpr(vgprStr, 2), ds=ds, comment="local store bias"))
-                else:
-                    assert 0
+                numRegs = max(1, bps // 4)
+                imod.add(dsStore(bps, dstAddr=dst, src=vgpr(vgprStr, numRegs), ds=ds, comment="local store bias"))
                 idx += 1
         # tReg
         writer.vgprPool.checkIn(tReg)

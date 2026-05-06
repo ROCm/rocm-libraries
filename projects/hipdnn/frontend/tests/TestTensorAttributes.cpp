@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
@@ -99,34 +97,6 @@ TEST(TestTensorAttributes, SetFromGraphAttributes)
     EXPECT_EQ(tensor.get_data_type(), DataType::HALF);
 }
 
-TEST(TestTensorAttributes, PackAttributes)
-{
-    TensorAttributes tensor;
-    tensor.set_uid(1)
-        .set_name("PackedTensor")
-        .set_data_type(DataType::FLOAT)
-        .set_stride({1, 2, 3})
-        .set_dim({4, 5, 6})
-        .set_is_virtual(true);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto packed = tensor.pack_attributes(builder);
-    builder.Finish(packed);
-
-    auto bufferPointer = builder.GetBufferPointer();
-    auto tensorAttributesFlatbuffer
-        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(bufferPointer);
-    auto unpacked = std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>(
-        tensorAttributesFlatbuffer->UnPack());
-
-    EXPECT_EQ(unpacked->uid, 1);
-    EXPECT_EQ(unpacked->name, "PackedTensor");
-    EXPECT_EQ(unpacked->data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(unpacked->strides, std::vector<int64_t>({1, 2, 3}));
-    EXPECT_EQ(unpacked->dims, std::vector<int64_t>({4, 5, 6}));
-    EXPECT_TRUE(unpacked->virtual_);
-}
-
 TEST(TestTensorAttributes, ValidateSucceedsOnValueTensor)
 {
     const TensorAttributes tensor(1.f);
@@ -209,7 +179,14 @@ TEST(TestTensorAttributes, ValidateDataType)
            {DataType::INT32, ErrorCode::OK},
            {DataType::INT8, ErrorCode::OK},
            {DataType::FP8_E4M3, ErrorCode::OK},
-           {DataType::FP8_E5M2, ErrorCode::OK}};
+           {DataType::FP8_E5M2, ErrorCode::OK},
+           {DataType::FP8_E8M0, ErrorCode::OK},
+           {DataType::FP4_E2M1, ErrorCode::OK},
+           {DataType::INT4, ErrorCode::OK},
+           {DataType::FP6_E2M3, ErrorCode::OK},
+           {DataType::FP6_E3M2, ErrorCode::OK},
+           {DataType::INT64, ErrorCode::OK},
+           {DataType::BOOLEAN, ErrorCode::OK}};
 
     for(auto [dataType, errorCode] : expectedResults)
     {

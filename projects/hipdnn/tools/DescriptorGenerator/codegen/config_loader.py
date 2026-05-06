@@ -10,6 +10,7 @@ import yaml
 
 from .models import (
     DataField,
+    DataFieldsHelper,
     DescriptorTypeConfig,
     EnumDef,
     EnumValue,
@@ -90,6 +91,10 @@ def load_config(path: Path) -> OperationConfig:
                 test_enum_value=df.get("test_enum_value", ""),
                 test_constant_name=df.get("test_constant_name", ""),
                 test_backend_value=df.get("test_backend_value", ""),
+                fbs_optional=df.get("fbs_optional", False),
+                frontend_getter_returns_optional=df.get(
+                    "frontend_getter_returns_optional", False
+                ),
                 backend_setter=df.get("backend_setter", ""),
                 backend_getter=df.get("backend_getter", ""),
                 backend_converter=df.get("backend_converter", ""),
@@ -130,6 +135,10 @@ def load_config(path: Path) -> OperationConfig:
             )
         test_data.field_values = td_raw.get("field_values", {})
         test_data.constants_include = td_raw.get("constants_include", "")
+        test_data.tensor_const_prefix = td_raw.get("tensor_const_prefix", None)
+
+    # Data fields helper (shared pack/unpack functions)
+    data_fields_helper = _parse_data_fields_helper(op.get("data_fields_helper"))
 
     # Infer properties config
     infer_properties = _parse_infer_properties(op.get("infer_properties"))
@@ -148,6 +157,7 @@ def load_config(path: Path) -> OperationConfig:
         tensor_fields=tensor_fields,
         data_fields=data_fields,
         tensor_array_fields=tensor_array_fields,
+        data_fields_helper=data_fields_helper,
         has_compute_data_type=op.get("has_compute_data_type", True),
         compute_data_type_attr=op.get("compute_data_type_attr", ""),
         compute_data_type_shared=op.get("compute_data_type_shared", False),
@@ -284,6 +294,19 @@ def _parse_enum_def(raw: dict | None) -> EnumDef | None:
     return enum_def
 
 
+def _parse_data_fields_helper(raw: dict | None) -> DataFieldsHelper | None:
+    """Parse the data_fields_helper section of the YAML config."""
+    if raw is None:
+        return None
+
+    return DataFieldsHelper(
+        pack_function=raw.get("pack_function", ""),
+        unpack_function=raw.get("unpack_function", ""),
+        include=raw.get("include", ""),
+        label=raw.get("label", ""),
+    )
+
+
 def _parse_infer_properties(raw: dict | None) -> InferPropertiesConfig | None:
     """Parse the infer_properties section of the YAML config."""
     if raw is None:
@@ -392,7 +415,7 @@ def _validate_config(config: OperationConfig) -> None:
                 raise ConfigError(
                     f"Operation '{config.name}', data field '{df.name}': "
                     f"mode fields must have 'test_backend_value' set "
-                    f"(e.g., 'HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION')."
+                    f"(e.g., 'HIPDNN_CROSS_CORRELATION')."
                 )
             if not df.backend_setter or not df.backend_getter:
                 raise ConfigError(

@@ -204,6 +204,33 @@ TEST_F(TestLogRecorder, GetRecordedLogsReturnsVector)
     EXPECT_EQ(logs[1].message, "message 2");
 }
 
+TEST_F(TestLogRecorder, SharedRecorderClearLogsEmptiesBuffer)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 1");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "log 2");
+    EXPECT_EQ(recorder.getRecordedLogCount(), 2);
+
+    recorder.clearLogs();
+
+    EXPECT_EQ(recorder.getRecordedLogCount(), 0);
+    EXPECT_FALSE(recorder.hasLogContaining("log 1"));
+    EXPECT_FALSE(recorder.hasLogContaining("log 2"));
+}
+
+TEST_F(TestLogRecorder, SharedRecorderClearLogsAllowsNewRecording)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "before clear");
+    recorder.clearLogs();
+
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "after clear");
+
+    EXPECT_EQ(recorder.getRecordedLogCount(), 1);
+    EXPECT_FALSE(recorder.hasLogContaining("before clear"));
+    EXPECT_TRUE(recorder.hasLogContaining("after clear"));
+}
+
 // === getRecordedLogsAsString() ===
 
 TEST_F(TestLogRecorder, GetRecordedLogsAsStringShowsEmptyMessage)
@@ -623,6 +650,33 @@ TEST_F(TestLogRecorder, IsolatedUserCallbackIgnoresNullMessage)
     LogRecording::instance(LogRecording::Id::ISOLATED).clearLogs();
 }
 
+TEST_F(TestLogRecorder, IsolatedRecorderClearLogsEmptiesBuffer)
+{
+    auto recorder = IsolatedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::ISOLATED).recordLog(HIPDNN_SEV_INFO, "log 1");
+    LogRecording::instance(LogRecording::Id::ISOLATED).recordLog(HIPDNN_SEV_WARN, "log 2");
+    EXPECT_EQ(recorder.getRecordedLogCount(), 2);
+
+    recorder.clearLogs();
+
+    EXPECT_EQ(recorder.getRecordedLogCount(), 0);
+    EXPECT_FALSE(recorder.hasLogContaining("log 1"));
+    EXPECT_FALSE(recorder.hasLogContaining("log 2"));
+}
+
+TEST_F(TestLogRecorder, IsolatedRecorderClearLogsAllowsNewRecording)
+{
+    auto recorder = IsolatedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::ISOLATED).recordLog(HIPDNN_SEV_INFO, "before clear");
+    recorder.clearLogs();
+
+    LogRecording::instance(LogRecording::Id::ISOLATED).recordLog(HIPDNN_SEV_WARN, "after clear");
+
+    EXPECT_EQ(recorder.getRecordedLogCount(), 1);
+    EXPECT_FALSE(recorder.hasLogContaining("before clear"));
+    EXPECT_TRUE(recorder.hasLogContaining("after clear"));
+}
+
 TEST_F(TestLogRecorder, IsolatedAndSharedInstancesAreIndependent)
 {
     // Clear both instances
@@ -731,4 +785,60 @@ TEST_F(TestLogRecorder, SharedAndIsolatedRecordersWorkTogether)
     EXPECT_EQ(sharedRecorder.getSavedLogLevel(), HIPDNN_SEV_INFO);
     // isolatedRecorder was created second when level was WARN (set by sharedRecorder)
     EXPECT_EQ(isolatedRecorder.getSavedLogLevel(), HIPDNN_SEV_WARN);
+}
+
+// === waitForLogCount ===
+
+TEST_F(TestLogRecorder, WaitForLogCountReturnsTrueWhenAlreadyMet)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 1");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 2");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "log 3");
+
+    EXPECT_TRUE(recorder.waitForLogCount(3, std::chrono::milliseconds(100)));
+}
+
+TEST_F(TestLogRecorder, WaitForLogCountReturnsFalseOnTimeout)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(recorder.waitForLogCount(1, std::chrono::milliseconds(50)));
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    EXPECT_GE(elapsedMs, 50) << "Should wait at least 50ms before timing out";
+    EXPECT_LE(elapsedMs, 20000) << "Should not wait significantly longer than the timeout";
+}
+
+TEST_F(TestLogRecorder, WaitForLogCountZeroTargetReturnsTrueImmediately)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    EXPECT_TRUE(recorder.waitForLogCount(0, std::chrono::milliseconds(100)));
+}
+
+// === waitForLogsContaining ===
+
+TEST_F(TestLogRecorder, WaitForLogsContainingReturnsTrueWhenAlreadyPresent)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "The gamma log");
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_WARN, "beta");
+
+    EXPECT_TRUE(recorder.waitForLogsContaining({"gamma", "beta"}, std::chrono::milliseconds(100)));
+}
+
+TEST_F(TestLogRecorder, WaitForLogsContainingReturnsFalseOnTimeout)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    LogRecording::instance(LogRecording::Id::SHARED).recordLog(HIPDNN_SEV_INFO, "The gamma log");
+
+    EXPECT_FALSE(recorder.waitForLogsContaining({"gamma", "beta"}, std::chrono::milliseconds(10)));
+}
+
+TEST_F(TestLogRecorder, WaitForLogsContainingEmptyListReturnsTrueImmediately)
+{
+    auto recorder = SharedLogRecorder::withCurrentLevel();
+    EXPECT_TRUE(recorder.waitForLogsContaining({}, std::chrono::milliseconds(100)));
 }

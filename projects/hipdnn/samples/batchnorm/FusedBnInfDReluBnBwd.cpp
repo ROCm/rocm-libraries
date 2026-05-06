@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -82,7 +83,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     dbias->set_data_type(intermediateType);
     dbias->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     // Create tensors for execution
@@ -158,7 +159,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         cpuVariantPack[dbias->get_uid()] = dbiasRefTensor.memory().hostData();
 
         // Execute on CPU using graph executor
-        auto serializedGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            std::cerr << "Failed to serialize graph: " << serErr.get_message() << std::endl;
+            return false;
+        }
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
@@ -173,14 +179,25 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(inputTol,
                                                                                      inputTol);
 
-        bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
-        bool dscaleValid = dscaleDbiasValidator.allClose(dscaleRefTensor, dscaleTensor);
-        bool dbiasValid = dscaleDbiasValidator.allClose(dbiasRefTensor, dbiasTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";
-        std::cout << "  dscale: " << (dscaleValid ? "successful" : "failed") << "\n";
-        std::cout << "  dbias: " << (dbiasValid ? "successful" : "failed") << "\n";
+        bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "dx", dxValidator, dxRefTensor, dxTensor, inputTol, inputTol);
+        bool dscaleValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "dscale",
+                                                                              dscaleDbiasValidator,
+                                                                              dscaleRefTensor,
+                                                                              dscaleTensor,
+                                                                              inputTol,
+                                                                              inputTol);
+        bool dbiasValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "dbias",
+                                                                              dscaleDbiasValidator,
+                                                                              dbiasRefTensor,
+                                                                              dbiasTensor,
+                                                                              inputTol,
+                                                                              inputTol);
 
         validationPassed = dxValid && dscaleValid && dbiasValid;
     }

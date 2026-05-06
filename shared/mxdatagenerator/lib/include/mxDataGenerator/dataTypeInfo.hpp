@@ -75,18 +75,124 @@ namespace DGen
         constexpr double NegInf = -std::numeric_limits<double>::infinity();
     }
 
-    struct E8M0_SCALE_INFO
+    enum class ScaleType
     {
-        static constexpr uint signBits     = 0;
-        static constexpr uint exponentBits = 8;
-        static constexpr uint mantissaBits = 0;
-        static constexpr uint bias         = 127;
-
-        static constexpr int unBiasedEMin = -127;
-        static constexpr int unBiasedEMax = 127;
-        static constexpr int biasedEMin   = 0;
-        static constexpr int biasedEMax   = 254;
+        None,
+        E8M0,
+        E5M3,
+        E4M3,
     };
+
+    template <uint SignBits, uint ExponentBits, uint MantissaBits, bool HasZero, bool HasInf, bool HasNaN>
+    struct ScaleFmt
+    {
+        static constexpr uint signBits     = SignBits;
+        static constexpr uint exponentBits = ExponentBits;
+        static constexpr uint mantissaBits = MantissaBits;
+        static constexpr int  bias         = (1 << (ExponentBits - 1)) - 1;
+        static constexpr int  biasedEMin   = HasZero ? 1 : 0;
+        static constexpr int  biasedEMax   = (1 << ExponentBits) - (HasInf or HasNaN ? 2 : 1);
+        static constexpr int  unBiasedEMin = biasedEMin - bias;
+        static constexpr int  unBiasedEMax = biasedEMax - bias;
+        static constexpr bool hasZero = HasZero;
+        static constexpr bool hasInf = HasInf;
+        static constexpr bool hasNan = HasNaN;
+    };
+
+    template <ScaleType T>
+    struct ScaleInfoFor;
+
+    template <>
+    struct ScaleInfoFor<ScaleType::E8M0>
+    {
+        using info = ScaleFmt<0, 8, 0, false, true, true>;
+    };
+
+    template <>
+    struct ScaleInfoFor<ScaleType::E5M3>
+    {
+        using info = ScaleFmt<0, 5, 3, true, false, true>;
+    };
+
+    template <>
+    struct ScaleInfoFor<ScaleType::E4M3>
+    {
+        // The scale doesn't have a sign bit, but it is needed
+        // here for size computations.
+        using info = ScaleFmt<1, 4, 3, true, false, true>;
+    };
+
+    template <ScaleType T>
+    using ScaleInfo = typename ScaleInfoFor<T>::info;
+
+    template <ScaleType T>
+    inline constexpr bool isConcreteScaleType()
+    {
+        return T != ScaleType::None;
+    };
+
+    template<ScaleType T>
+    inline constexpr uint getScaleNan();
+
+    template<>
+    inline constexpr uint getScaleNan<ScaleType::E8M0>()
+    {
+        return Constants::E8M0_NAN;
+    }
+
+    template<>
+    inline constexpr uint getScaleNan<ScaleType::E5M3>()
+    {
+        return 0b11111111;
+    }
+
+    template<>
+    inline constexpr uint getScaleNan<ScaleType::E4M3>()
+    {
+        return 0b11111111;
+    }
+
+    template<ScaleType T>
+    inline constexpr uint getScaleOne();
+
+    template<>
+    inline constexpr uint getScaleOne<ScaleType::E8M0>()
+    {
+        return Constants::E8M0_1;
+    }
+
+    template<>
+    inline constexpr uint getScaleOne<ScaleType::E5M3>()
+    {
+        return 0b01111000;
+    }
+
+    template<>
+    inline constexpr uint getScaleOne<ScaleType::E4M3>()
+    {
+        return 0b00111000;
+    }
+
+    template<ScaleType T>
+    inline constexpr uint getScaleTwo();
+
+    template<>
+    inline constexpr uint getScaleTwo<ScaleType::E8M0>()
+    {
+        return Constants::E8M0_2;
+    }
+
+    template<>
+    inline constexpr uint getScaleTwo<ScaleType::E5M3>()
+    {
+        return 0b10000000;
+    }
+
+    template<>
+    inline constexpr uint getScaleTwo<ScaleType::E4M3>()
+    {
+        return 0b01000000;
+    }
 
     union cvt
     {

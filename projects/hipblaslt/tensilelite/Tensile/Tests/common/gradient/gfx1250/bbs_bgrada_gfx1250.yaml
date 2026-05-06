@@ -1,0 +1,296 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  NewClient: 2
+  BoundsCheck: False
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 500      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeD: 0
+  DataInitTypeE: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  # Tensor printing controls:
+  # PrintTensorA: 2          # Print TensorA after initialization
+  # PrintTensorB: 1          # Print TensorB after initialization
+  # # PrintTensorC: 0x3          # Print TensorC.  0x1=after init; 0x2=after copy-back; 0x3=both
+  # PrintTensorD: 0x3          # Print TensorD.  0x1=after init; 0x2=after copy-back; 0x3=both
+  # PrintTensorE: 0x3          # Print TensorD.  0x1=after init; 0x2=after copy-back; 0x3=both
+  # PrintTensorRef: 0x3
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: False
+  MinKForGSU: 10
+  Architecture: gfx1250
+  CpuThreads: 1
+  KeepBuildTmp: True
+  PrintLevel: 2
+  MaxWorkspaceSize: 3355443200
+
+BenchmarkProblems:
+# gradient
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Gradient: True
+      # UseE: 1 # Default False
+      UseBias: 1 # Use bias in Asm, may add reduction D when BiasSrcD; Default False
+      BiasSrc: A # source of bais
+      # Activation: 1 # Disable in BiadSrcA; Default False
+      # ActivationType: hipblaslt_all; Default none
+      # ActivationNoGuard: False # False: to add exec in hip kernel to remind compiler; Default False
+      # UseScaleAlphaVec: 1; Default False
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+          # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - ActivationFuncCall: [0]
+        - StoreVectorWidth: [-1, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [129, 129, 1, 129]
+          - Exact: [128, 128, 1, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: Dgelu]
+
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Gradient: True
+      # UseE: 1 # Default False
+      UseBias: 1 # Use bias in Asm, may add reduction D when BiasSrcD; Default False
+      BiasSrc: A # source of bais
+      # Activation: 1 # Disable in BiadSrcA; Default False
+      # ActivationType: hipblaslt_all; Default none
+      # ActivationNoGuard: False # False: to add exec in hip kernel to remind compiler; Default False
+      # UseScaleAlphaVec: 1; Default False
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+          # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - ActivationFuncCall: [0]
+        - StoreVectorWidth: [-1, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [129, 129, 1, 129]
+          - Exact: [128, 128, 1, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: Dgelu]
+
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      Gradient: True
+      # UseE: 1 # Default False
+      UseBias: 1 # Use bias in Asm, may add reduction D when BiasSrcD; Default False
+      BiasSrc: A # source of bais
+      # Activation: 1 # Disable in BiadSrcA; Default False
+      # ActivationType: hipblaslt_all; Default none
+      # ActivationNoGuard: False # False: to add exec in hip kernel to remind compiler; Default False
+      # UseScaleAlphaVec: 1; Default False
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+          # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - ActivationFuncCall: [0]
+        - StoreVectorWidth: [-1, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [129, 129, 1, 129]
+          - Exact: [128, 128, 1, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: Dgelu]
+
+  ########################################
+  # TT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      Gradient: True
+      # UseE: 1 # Default False
+      UseBias: 1 # Use bias in Asm, may add reduction D when BiasSrcD; Default False
+      BiasSrc: A # source of bais
+      # Activation: 1 # Disable in BiadSrcA; Default False
+      # ActivationType: hipblaslt_all; Default none
+      # ActivationNoGuard: False # False: to add exec in hip kernel to remind compiler; Default False
+      # UseScaleAlphaVec: 1; Default False
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+          # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - ActivationFuncCall: [0]
+        - StoreVectorWidth: [-1, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [129, 129, 1, 129]
+          - Exact: [128, 128, 1, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: Dgelu]
+
+# LibraryLogic:
+  # ScheduleName: "gfx1250"
+  # # DeviceNames: [Device 0049, Device 0050]
+  # DeviceNames: ["Device 73f0"]
+  # ArchitectureName: "gfx1250"
+  # # LibraryType: "Equality"
+  # LibraryType: "GridBased"
+
+# LibraryClient:

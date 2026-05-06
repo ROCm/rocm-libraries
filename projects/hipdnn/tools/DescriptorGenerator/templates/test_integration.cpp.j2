@@ -1,25 +1,32 @@
+{% from "macros.j2" import vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
-#include <unordered_map>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/{{ op.fbs_generated_header }}>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
-#include "test_plugins/TestPluginConstants.hpp"
-
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using hipdnn_tests::lowerAndDeserialize;
+using hipdnn_tests::buildTensorMap;
+using hipdnn_tests::TestableGraphLowering;
+using hipdnn_tests::IntegrationTestFixture;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 {% for ef in op.enum_fields %}
 using {{ ef.enum_short_type }}Sdk = {{ ef.cpp_enum }};
 {% endfor %}
@@ -30,62 +37,21 @@ using {{ mf.enum_short_type }}Sdk = {{ mf.cpp_enum }};
 namespace
 {
 
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph_via_descriptors;
-    using Graph::get_raw_graph_descriptor;
-};
-
-// -- Test constants --
-{% for tf in op.tensor_fields %}
-{% set uid = op.test_data.tensor_uids.get(tf.name, loop.index) %}
-constexpr int64_t K_TEST_{{ tf.name | upper }}_UID = {{ uid }};
-{% endfor %}
 {% set first_tensor = op.tensor_fields[0] %}
 {% set first_tc = op.test_data.tensor_configs.get(first_tensor.name) %}
-{% if first_tc %}
-
-constexpr std::array<int64_t, {{ first_tc.dims | length }}> K_TEST_DIMS = {{ '{' }}{{ first_tc.dims | join(', ') }}{{ '}' }};
-constexpr std::array<int64_t, {{ first_tc.strides | length }}> K_TEST_STRIDES = {{ '{' }}{{ first_tc.strides | join(', ') }}{{ '}' }};
-{% endif %}
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class Integration{{ op.name }}DescriptorLowering : public ::testing::Test
+class Integration{{ op.name }}DescriptorLowering : public IntegrationTestFixture
 {
 protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
     /// Builds and lowers a graph, returning the deserialized GraphT.
     /// Callers set up attrs before calling; this creates tensors, calls the
     /// graph method, validates, lowers, serializes, and deserializes.
-    hipdnn_data_sdk::data_objects::GraphT buildAndDeserialize(
+    hipdnn_flatbuffers_sdk::data_objects::GraphT buildAndDeserialize(
         {{ op.frontend.attributes_class }}& attrs)
     {
-        auto graph = std::make_shared<TestableGraph>();
+        auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("{{ op.name }}IntegrationTest")
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
@@ -94,53 +60,32 @@ protected:
 {% set rmap = op.frontend_to_tensor_field_map %}
 {% for param in op.frontend.graph_method_params %}
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
+{% set tc = op.test_data.tensor_configs.get(tf_name) %}
         auto {{ param.name }} = std::make_shared<TensorAttributes>();
-        {{ param.name }}->set_uid(K_TEST_{{ tf_name | upper }}_UID)
+        {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID)
             .set_name("{{ param.tensor_name }}")
             .set_data_type(DataType::FLOAT);
-{% if first_tc %}
-        {{ param.name }}->set_dim(toVec(K_TEST_DIMS)).set_stride(toVec(K_TEST_STRIDES));
+{% if tc %}
+        {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
 {% endif %}
 
 {% endfor %}
 {% if op.frontend.graph_return_type == 'single' %}
 {% set out_name = op.frontend.graph_return_outputs[0] %}
 {% set out_tf_name = rmap.get(out_name, out_name) %}
+{% set out_tc = op.test_data.tensor_configs.get(out_tf_name) %}
         auto {{ out_name }} = graph->{{ op.frontend.graph_method_name }}(
 {% for param in op.frontend.graph_method_params %}
             {{ param.name }},
 {% endfor %}
             attrs);
-        {{ out_name }}->set_uid(K_TEST_{{ out_tf_name | upper }}_UID)
+        {{ out_name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID)
             .set_output(true)
             .set_name("{{ out_name }}");
 {% endif %}
 
-        auto result = graph->validate();
-        EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        result = graph->build_operation_graph_via_descriptors(_handle);
-        EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        auto rawDesc = graph->get_raw_graph_descriptor();
-        EXPECT_NE(rawDesc, nullptr);
-
-        size_t serializedSize = 0;
-        EXPECT_EQ(
-            hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-            HIPDNN_STATUS_SUCCESS);
-
-        std::vector<uint8_t> serializedData(serializedSize);
-        EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                      rawDesc, serializedSize, &serializedSize, serializedData.data()),
-                  HIPDNN_STATUS_SUCCESS);
-
-        hipdnn_data_sdk::data_objects::GraphT graphT;
-        hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
-        return graphT;
+        return lowerAndDeserialize(*graph, _handle);
     }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 {% set non_sentinel = [] %}
@@ -164,29 +109,27 @@ TEST_F(Integration{{ op.name }}DescriptorLowering, {{ op.name }}LoweringRoundTri
 {% endif %}
 {% for df in op.data_fields if df.is_vector and df.required %}
 {% if df.name in op.test_data.field_values %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values[df.name] | join(', ') }}{{ '}' }});
+{% set const_name = vector_const_name(df, op) %}
+    attrs.{{ df.frontend_setter_name }}(toVec({{ const_name }}));
 {% endif %}
 {% endfor %}
 
     auto graphT = buildAndDeserialize(attrs);
 
     // Verify tensors
-    ASSERT_GE(graphT.tensors.size(), {{ op.required_tensor_fields | length }}u);
+    ASSERT_EQ(graphT.tensors.size(), {{ op.required_tensor_fields | length }}u);
 
     // Verify tensor attributes
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
 {% for tf in op.required_tensor_fields %}
 {% set tf_upper = tf.name | upper %}
-    ASSERT_NE(tensorMap.count(K_TEST_{{ tf_upper }}_UID), 0u);
-{% if first_tc %}
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf_upper }}_UID]->dims, toVec(K_TEST_DIMS));
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf_upper }}_UID]->strides, toVec(K_TEST_STRIDES));
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+    ASSERT_NE(tensorMap.count({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID), 0u);
+{% if tc %}
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->dims, toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_DIMS));
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->strides, toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
-    EXPECT_EQ(tensorMap[K_TEST_{{ tf_upper }}_UID]->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->data_type, DataTypeSdk::FLOAT);
 {% endfor %}
 
     // Verify operation node
@@ -202,7 +145,7 @@ TEST_F(Integration{{ op.name }}DescriptorLowering, {{ op.name }}LoweringRoundTri
 
     // Verify required tensor UIDs
 {% for tf in op.required_tensor_fields %}
-    EXPECT_EQ(opNode->{{ tf.fbs_field }}, K_TEST_{{ tf.name | upper }}_UID);
+    EXPECT_EQ(opNode->{{ tf.fbs_field }}, {{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_UID);
 {% endfor %}
 
     // Verify operation name preserved through lowering
@@ -218,11 +161,9 @@ TEST_F(Integration{{ op.name }}DescriptorLowering, {{ op.name }}LoweringRoundTri
 
 {% for df in op.data_fields if df.is_vector and df.required %}
 {% if df.name in op.test_data.field_values %}
+{% set const_name = vector_const_name(df, op) %}
     // Verify {{ df.name }}
-    {
-        std::vector<int64_t> const expected{{ df.pascal_name }} = {{ '{' }}{{ op.test_data.field_values[df.name] | join(', ') }}{{ '}' }};
-        EXPECT_EQ(opNode->{{ df.fbs_field }}, expected{{ df.pascal_name }});
-    }
+    EXPECT_EQ(opNode->{{ df.fbs_field }}, toVec({{ const_name }}));
 {% endif %}
 {% endfor %}
 }
@@ -250,7 +191,8 @@ TEST_F(Integration{{ op.name }}DescriptorLowering, {{ df.pascal_name }}Preserved
 {% endif %}
 {% for vf in op.data_fields if vf.is_vector and vf.required %}
 {% if vf.name in op.test_data.field_values %}
-    attrs.{{ vf.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values[vf.name] | join(', ') }}{{ '}' }});
+{% set const_name = vector_const_name(vf, op) %}
+    attrs.{{ vf.frontend_setter_name }}(toVec({{ const_name }}));
 {% endif %}
 {% endfor %}
     attrs.{{ df.frontend_setter_name }}({{ test_val }});

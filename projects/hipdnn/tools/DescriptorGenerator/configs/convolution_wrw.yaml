@@ -69,6 +69,7 @@ operation:
       required: true
       frontend_getter: "get_pre_padding()"
       shared: true
+      test_constant_name: "K_WGRAD_CONV_PADDING"
 
     - name: "post_padding"
       fbs_field: "post_padding"
@@ -77,6 +78,7 @@ operation:
       required: true
       frontend_getter: "get_post_padding()"
       shared: true
+      test_constant_name: "K_WGRAD_CONV_PADDING"
 
     - name: "stride"
       fbs_field: "stride"
@@ -85,6 +87,7 @@ operation:
       required: true
       frontend_getter: "get_stride()"
       shared: true
+      test_constant_name: "K_WGRAD_CONV_STRIDE"
 
     - name: "dilation"
       fbs_field: "dilation"
@@ -93,12 +96,13 @@ operation:
       required: true
       frontend_getter: "get_dilation()"
       shared: true
+      test_constant_name: "K_WGRAD_CONV_DILATION"
 
     - name: "conv_mode"
       fbs_field: "conv_mode"
       attr_name: "HIPDNN_ATTR_CONVOLUTION_CONV_MODE"
       type: "mode"
-      cpp_enum: "hipdnn_data_sdk::data_objects::ConvMode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::ConvMode"
       required: false
       frontend_getter: "get_convolution_mode()"
       backend_setter: "setConvMode"
@@ -109,12 +113,12 @@ operation:
       shared: true
       test_enum_value: "CROSS_CORRELATION"
       test_alt_enum_value: "CONVOLUTION"
-      test_backend_value: "HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION"
+      test_backend_value: "HIPDNN_CROSS_CORRELATION"
       test_c_type: "hipdnnConvolutionMode_t"
-      test_default_value: "HIPDNN_CONVOLUTION_MODE_CONVOLUTION"
+      test_default_value: "HIPDNN_CONVOLUTION"
       enum_def:
         backend_header: "HipdnnConvolutionMode.h"
-        backend_prefix: "HIPDNN_CONVOLUTION_MODE_"
+        backend_prefix: "HIPDNN_"
         values:
           - { name: "UNSET", value: 0, sentinel: true }
           - { name: "CONVOLUTION", value: 0, frontend_value: 2, description: "Mathematical convolution (filter is flipped)" }
@@ -122,14 +126,22 @@ operation:
 
   tensor_array_fields: []
 
+  data_fields_helper:
+    pack_function: "packConvolutionParams"
+    unpack_function: "unpackConvolutionParams"
+    include: "ConvolutionPackerHelpers"
+    label: "convolution"
+
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_CONVOLUTION_COMP_TYPE"
   compute_data_type_shared: true
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT"
 
   test_data:
-    tensor_uids: { x: 20, dy: 21, dw: 22 }
+    constants_include: "ConvWgradConstants"
+    tensor_const_prefix: "K_WGRAD_"
+    tensor_uids: { x: 1200, dy: 1201, dw: 1202 }
     tensor_configs:
       x: { dims: [1, 3, 32, 32], strides: [3072, 1024, 32, 1] }
       dy: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }

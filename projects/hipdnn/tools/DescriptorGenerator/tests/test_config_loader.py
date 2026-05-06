@@ -102,7 +102,7 @@ class TestLoadConvolutionFwd:
     def test_operation_type_enum(self, convolution_fwd_config):
         assert (
             convolution_fwd_config.operation_type_enum
-            == "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD"
+            == "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT"
         )
 
     def test_infer_properties(self, convolution_fwd_config):
@@ -169,7 +169,7 @@ class TestLoadBatchnorm:
         assert len(batchnorm_config.tensor_array_fields) == 1
         taf = batchnorm_config.tensor_array_fields[0]
         assert taf.name == "peer_stats"
-        assert taf.test_uids == [100, 101]
+        assert taf.test_uids == [515, 516]
         assert taf.test_label == "PeerStats"
 
     def test_many_optional_tensors(self, batchnorm_config):
@@ -229,7 +229,7 @@ class TestDataFieldParsing:
         )
         assert mode.type == "mode"
         assert mode.is_mode is True
-        assert mode.cpp_enum == "hipdnn_data_sdk::data_objects::ConvMode"
+        assert mode.cpp_enum == "hipdnn_flatbuffers_sdk::data_objects::ConvMode"
         assert mode.frontend_type == "ConvolutionMode"
         assert mode.backend_setter == "setConvMode"
         assert mode.backend_getter == "getConvMode"
@@ -267,7 +267,7 @@ class TestDataFieldParsing:
         )
         assert padding.test_value == [2, 3]
         assert padding.test_label == "Convolution"
-        assert padding.test_constant_name == "K_CONV_PADDING"
+        assert padding.test_constant_name == "K_FPROP_CONV_PADDING"
 
 
 class TestTensorArrayFieldParsing:
@@ -287,7 +287,7 @@ class TestTensorArrayFieldParsing:
 
     def test_tensor_array_test_uids(self, batchnorm_config):
         taf = batchnorm_config.tensor_array_fields[0]
-        assert taf.test_uids == [100, 101]
+        assert taf.test_uids == [515, 516]
 
     def test_tensor_array_test_label(self, batchnorm_config):
         taf = batchnorm_config.tensor_array_fields[0]
@@ -303,7 +303,7 @@ class TestTestDataParsing:
 
     def test_tensor_uids(self, convolution_fwd_config):
         uids = convolution_fwd_config.test_data.tensor_uids
-        assert uids == {"x": 1, "w": 2, "y": 3}
+        assert uids == {"x": 1000, "w": 1001, "y": 1002}
 
     def test_tensor_configs(self, convolution_fwd_config):
         configs = convolution_fwd_config.test_data.tensor_configs
@@ -320,6 +320,9 @@ class TestTestDataParsing:
         assert (
             convolution_fwd_config.test_data.constants_include == "ConvFpropConstants"
         )
+
+    def test_tensor_const_prefix(self, convolution_fwd_config):
+        assert convolution_fwd_config.test_data.tensor_const_prefix == "K_FPROP_"
 
 
 # ---------------------------------------------------------------------------

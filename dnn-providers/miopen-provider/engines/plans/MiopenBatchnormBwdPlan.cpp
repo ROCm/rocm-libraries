@@ -30,55 +30,63 @@ int64_t getRequiredOptionalUid(const flatbuffers::Optional<int64_t>& opt,
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
 
 BatchnormBwdParams::BatchnormBwdParams(
-    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
-    , _dy(miopen_utils::createTensor(tensorMap, attributes.dy_tensor_uid()))
-    , _dx(miopen_utils::createTensor(tensorMap, attributes.dx_tensor_uid()))
-    , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
-    , _dscale(miopen_utils::createTensor(tensorMap, attributes.dscale_tensor_uid()))
-    , _dbias(miopen_utils::createTensor(tensorMap, attributes.dbias_tensor_uid()))
+    : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
+    , _dy(miopen_utils::createBatchnormTensor(tensorMap, attributes.dy_tensor_uid()))
+    , _dx(miopen_utils::createBatchnormTensor(tensorMap, attributes.dx_tensor_uid()))
+    , _scale(miopen_utils::createBatchnormTensor(tensorMap, attributes.scale_tensor_uid()))
+    , _dscale(miopen_utils::createBatchnormTensor(tensorMap, attributes.dscale_tensor_uid()))
+    , _dbias(miopen_utils::createBatchnormTensor(tensorMap, attributes.dbias_tensor_uid()))
 {
     if(attributes.mean_tensor_uid().has_value())
     {
-        _optMean = miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid().value());
+        _optMean
+            = miopen_utils::createBatchnormTensor(tensorMap, attributes.mean_tensor_uid().value());
     }
 
     if(attributes.inv_variance_tensor_uid().has_value())
     {
-        _optInvVariance
-            = miopen_utils::createTensor(tensorMap, attributes.inv_variance_tensor_uid().value());
+        _optInvVariance = miopen_utils::createBatchnormTensor(
+            tensorMap, attributes.inv_variance_tensor_uid().value());
     }
 }
 
 BatchnormBwdParams::BatchnormBwdParams(
-    const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& batchnormBackwardAttributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& batchnormInferenceAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes&
+        batchnormBackwardAttributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes&
+        batchnormInferenceAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
-    , _dy(miopen_utils::createTensor(
+    : _x(miopen_utils::createBatchnormTensor(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
+    , _dy(miopen_utils::createBatchnormTensor(
           tensorMap,
           getRequiredOptionalUid(pointwiseAttributes.in_1_tensor_uid(), "Pointwise in_1")))
-    , _dx(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dx_tensor_uid()))
-    , _scale(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.scale_tensor_uid()))
-    , _dscale(
-          miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dscale_tensor_uid()))
-    , _dbias(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dbias_tensor_uid()))
+    , _dx(miopen_utils::createBatchnormTensor(tensorMap,
+                                              batchnormBackwardAttributes.dx_tensor_uid()))
+    , _scale(miopen_utils::createBatchnormTensor(tensorMap,
+                                                 batchnormBackwardAttributes.scale_tensor_uid()))
+    , _dscale(miopen_utils::createBatchnormTensor(tensorMap,
+                                                  batchnormBackwardAttributes.dscale_tensor_uid()))
+    , _dbias(miopen_utils::createBatchnormTensor(tensorMap,
+                                                 batchnormBackwardAttributes.dbias_tensor_uid()))
     , _optActivation(pointwiseAttributes)
-    , _optBias(
-          miopen_utils::createTensor(tensorMap, batchnormInferenceAttributes.bias_tensor_uid()))
+    , _optBias(miopen_utils::createBatchnormTensor(tensorMap,
+                                                   batchnormInferenceAttributes.bias_tensor_uid()))
 {
     if(batchnormBackwardAttributes.mean_tensor_uid().has_value())
     {
-        _optMean = miopen_utils::createTensor(
+        _optMean = miopen_utils::createBatchnormTensor(
             tensorMap, batchnormBackwardAttributes.mean_tensor_uid().value());
     }
     if(batchnormBackwardAttributes.inv_variance_tensor_uid().has_value())
     {
-        _optInvVariance = miopen_utils::createTensor(
+        _optInvVariance = miopen_utils::createBatchnormTensor(
             tensorMap, batchnormBackwardAttributes.inv_variance_tensor_uid().value());
     }
 }
