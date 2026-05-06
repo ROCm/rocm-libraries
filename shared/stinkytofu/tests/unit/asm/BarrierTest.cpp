@@ -199,9 +199,9 @@ TEST_F(BarrierTest, TokenGrouped_PassesPreserveOrderWithinGroup) {
     StinkyInstruction* g1_signal = createSBarrierSignal(-1, {1});
     StinkyInstruction* g1_wait = createSBarrierWait(-1, {1});
 
-    StinkyInstruction* wmma_1 = createWMMA(/*dest=*/32, /*src0=*/0, 8);
-    StinkyInstruction* wmma_2 = createWMMA(/*dest=*/32, /*src0=*/8, 0);
-    StinkyInstruction* wmma_3 = createWMMA(/*dest=*/32, /*src0=*/0, 0);
+    (void)createWMMA(/*dest=*/32, /*src0=*/0, 8);
+    (void)createWMMA(/*dest=*/32, /*src0=*/8, 0);
+    (void)createWMMA(/*dest=*/32, /*src0=*/0, 0);
 
     StinkyInstruction* g2_dsLoad1 = createDSLoadInBlock(bb, arch, /*dest=*/12, /*addr=*/28, {2});
     StinkyInstruction* g2_tensorLoad1 =

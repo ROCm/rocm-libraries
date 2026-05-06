@@ -62,6 +62,13 @@ inline bool isValidRegType(RegType type) {
     return type != RegType::UNKNOWN;
 }
 
+/// Check if a register type is an allocatable register (VGPR, SGPR, AGPR).
+/// Excludes special registers (SCC, VCC, EXEC, M0, LDS).
+inline bool isAllocatableReg(RegType type) {
+    return type == RegType::V || type == RegType::S || type == RegType::A || type == RegType::ACC ||
+           type == RegType::AGPR;
+}
+
 /// Validate if a string represents a valid register type
 inline bool isValidRegTypeString(const std::string& str) {
     return stringToRegType(str) != RegType::UNKNOWN;

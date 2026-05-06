@@ -41,7 +41,7 @@ export HIPDNN_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/engines
 **Notes:**
 - Engine plugins must implement the Engine Plugin API (see `EnginePluginApi.h`)
 - Plugin libraries are typically named `libhipdnn_provider_*.so` (Linux) or `hipdnn_provider_*.dll` (Windows)
-- Only plugins with API version matching the hipDNN backend major version will be loaded
+- Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) will be loaded
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating engine plugins
 
 #### HIPDNN_HEURISTIC_PLUGIN_DIR

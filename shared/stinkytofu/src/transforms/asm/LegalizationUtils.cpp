@@ -35,8 +35,6 @@ namespace stinkytofu {
 Legalized legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
     assert(inst->getUnifiedOpcode() == GFX::v_nop && "Invalid v_nop instruction");
     // Check if this is a v_nop with count > 1
-    const auto& srcRegs = inst->getSrcRegs();
-
     int count = inst->getSrcReg(0).literalInt;
     if (count <= 1) {
         inst->erase();
