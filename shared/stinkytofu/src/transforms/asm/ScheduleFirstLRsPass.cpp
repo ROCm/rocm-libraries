@@ -195,7 +195,7 @@ void scheduleFirstLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
             scheduled.push_back(&inst);
             currentMFMAFreeSpaces = numLRPerMFMAAtMost;
             // inst.dump(std::cout);
-            for (auto i = 0; i < numLRPerMFMA; i++) {
+            for (uint32_t i = 0; i < numLRPerMFMA; i++) {
                 if (scheLR.empty()) continue;
                 if (!tryPopLrForMfmaSchedule(scheLR, usedBeforeIndexMap, mfmaIndex, scheduled))
                     break;
