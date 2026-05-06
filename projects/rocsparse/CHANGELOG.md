@@ -3,7 +3,7 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## Since last release ROCm 7.12
+## rocSPARSE 4.6.0 for ROCm 7.13.0
 
 ### Added
 * Added the `rocsparse_create_const_bsr_descr` routine for creating a const sparse BSR matrix descriptor.

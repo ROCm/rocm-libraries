@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -105,6 +105,10 @@ include(Sanitizers)
 
 # Setup testing dependencies
 include(Dependencies)
+if(HIPKERNELPROVIDER_ENABLE_TESTS)
+    fetch_gtest_dependency()
+endif()
+set(SKIP_TEST_NAME_VALIDATION ON)
 include(Tests)
 
 if(WIN32)
