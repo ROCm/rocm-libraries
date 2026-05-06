@@ -145,53 +145,65 @@ namespace TensileLite
 
         void loadLibrary(const int index) const
         {
+            // TODO(#7080): point-key + upper_bound misses on above-largest and
+            // gap-between-keys; switch to range-encoded mapping.
             auto it = libraryMapping.upper_bound(index);
-            if(it != libraryMapping.begin())
+            if(it == libraryMapping.begin())
             {
-                --it;
-                std::string filePrefix = it->second;
-                // load the file here directly and push the library for later use.
-                {
-                    std::lock_guard<std::mutex> lock(solutionsGuard);
-                    if(loadedFiles.find(filePrefix) != loadedFiles.end())
-                        return;
-                }
                 if(Debug::Instance().printDataInit())
-                    std::cout << "Loading library for index " << index
-                              << " from file: " << filePrefix << std::endl;
-
-                fs::path path(libraryDirectory);
-                path = path / (filePrefix + suffix);
-
-                auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
-                auto mLibrary
-                    = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
-
-                using std::begin;
-                using std::end;
-
+                {
+                    std::cout << "Index " << index << " not in this arch's mapping range"
+                              << std::endl;
+                }
+                return;
+            }
+            --it;
+            std::string filePrefix = it->second;
+            // load the file here directly and push the library for later use.
+            {
                 std::lock_guard<std::mutex> lock(solutionsGuard);
                 if(loadedFiles.find(filePrefix) != loadedFiles.end())
+                {
                     return;
-                // Push to cache
-                indexLoadedLibraries[filePrefix] = mLibrary->library;
-
-                std::transform(begin(mLibrary->solutions),
-                               end(mLibrary->solutions),
-                               std::inserter(solutions, end(solutions)),
-                               [this, filePrefix](auto& i) {
-                                   i.second->codeObjectFilename = filePrefix + ".co";
-                                   return i;
-                               });
-                loadedFiles.insert(filePrefix);
-
-                if(Debug::Instance().printCodeObjectInfo())
-                    std::cout << "load placeholder library " << path << std::endl
-                              << mLibrary->solutions.size() << " solutions loaded" << std::endl;
+                }
             }
-            else
+            if(Debug::Instance().printDataInit())
             {
-                std::cerr << "No library found for index " << index << std::endl;
+                std::cout << "Loading library for index " << index
+                          << " from file: " << filePrefix << std::endl;
+            }
+
+            fs::path path(libraryDirectory);
+            path = path / (filePrefix + suffix);
+
+            auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
+            auto mLibrary
+                = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+
+            using std::begin;
+            using std::end;
+
+            std::lock_guard<std::mutex> lock(solutionsGuard);
+            if(loadedFiles.find(filePrefix) != loadedFiles.end())
+            {
+                return;
+            }
+            // Push to cache
+            indexLoadedLibraries[filePrefix] = mLibrary->library;
+
+            std::transform(begin(mLibrary->solutions),
+                           end(mLibrary->solutions),
+                           std::inserter(solutions, end(solutions)),
+                           [this, filePrefix](auto& i) {
+                               i.second->codeObjectFilename = filePrefix + ".co";
+                               return i;
+                           });
+            loadedFiles.insert(filePrefix);
+
+            if(Debug::Instance().printCodeObjectInfo())
+            {
+                std::cout << "load placeholder library " << path << std::endl
+                          << mLibrary->solutions.size() << " solutions loaded" << std::endl;
             }
         }
 

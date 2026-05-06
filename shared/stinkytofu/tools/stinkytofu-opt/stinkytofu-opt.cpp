@@ -376,6 +376,9 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
+        if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
+        }
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
         if (std::string(argv[i]) == "--from-label" && i + 1 < argc) fromLabel = argv[++i];
         if (std::string(argv[i]) == "--to-label" && i + 1 < argc) toLabel = argv[++i];
