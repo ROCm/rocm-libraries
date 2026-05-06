@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "VariantDescriptor.hpp"
+#include "DescriptorAttributeUtils.hpp"
 #include "FlatbufferUtilities.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
@@ -53,19 +54,12 @@ void VariantDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS:
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::getAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for UNIQUE_IDS");
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "VariantDescriptor::getAttribute(): elementCount is null");
-        *elementCount
-            = std::min<int64_t>(requestedElementCount, static_cast<int64_t>(_uniqueIds.size()));
-        for(size_t i = 0; i < static_cast<size_t>(*elementCount); ++i)
-        {
-            static_cast<int64_t*>(arrayOfElements)[i] = _uniqueIds[i];
-        }
+        getInt64Vector(_uniqueIds,
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::getAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_WORKSPACE:
@@ -86,69 +80,41 @@ void VariantDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS:
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::getAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for OVERRIDE_UNIQUE_IDS");
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "VariantDescriptor::getAttribute(): elementCount is null");
-        *elementCount = std::min<int64_t>(requestedElementCount,
-                                          static_cast<int64_t>(_overrideUniqueIds.size()));
-        for(size_t i = 0; i < static_cast<size_t>(*elementCount); ++i)
-        {
-            static_cast<int64_t*>(arrayOfElements)[i] = _overrideUniqueIds[i];
-        }
+        getInt64Vector(_overrideUniqueIds,
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::getAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES:
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::getAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for OVERRIDE_SHAPES");
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "VariantDescriptor::getAttribute(): elementCount is null");
-        *elementCount = std::min<int64_t>(requestedElementCount,
-                                          static_cast<int64_t>(_overrideShapes.size()));
-        for(size_t i = 0; i < static_cast<size_t>(*elementCount); ++i)
-        {
-            static_cast<int64_t*>(arrayOfElements)[i] = _overrideShapes[i];
-        }
+        getInt64Vector(_overrideShapes,
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::getAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES:
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::getAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for OVERRIDE_STRIDES");
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "VariantDescriptor::getAttribute(): elementCount is null");
-        *elementCount = std::min<int64_t>(requestedElementCount,
-                                          static_cast<int64_t>(_overrideStrides.size()));
-        for(size_t i = 0; i < static_cast<size_t>(*elementCount); ++i)
-        {
-            static_cast<int64_t*>(arrayOfElements)[i] = _overrideStrides[i];
-        }
+        getInt64Vector(_overrideStrides,
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::getAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS:
         // D1 contract: stored as int64_t in the variant pack. The narrowing to
         // uint32_t happens at the SDK dispatch boundary in Stream B, NOT here.
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::getAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for OVERRIDE_LENGTHS");
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "VariantDescriptor::getAttribute(): elementCount is null");
-        *elementCount = std::min<int64_t>(requestedElementCount,
-                                          static_cast<int64_t>(_overrideLengths.size()));
-        for(size_t i = 0; i < static_cast<size_t>(*elementCount); ++i)
-        {
-            static_cast<int64_t*>(arrayOfElements)[i] = _overrideLengths[i];
-        }
+        getInt64Vector(_overrideLengths,
+                       attributeType,
+                       requestedElementCount,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::getAttribute()");
         break;
 
     default:
@@ -181,12 +147,11 @@ void VariantDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS:
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::setAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for UNIQUE_IDS");
-        _uniqueIds.assign(static_cast<const int64_t*>(arrayOfElements),
-                          static_cast<const int64_t*>(arrayOfElements) + elementCount);
+        setInt64Vector(_uniqueIds,
+                       attributeType,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::setAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_WORKSPACE:
@@ -202,41 +167,37 @@ void VariantDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS:
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::setAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for OVERRIDE_UNIQUE_IDS");
-        _overrideUniqueIds.assign(static_cast<const int64_t*>(arrayOfElements),
-                                  static_cast<const int64_t*>(arrayOfElements) + elementCount);
+        setInt64Vector(_overrideUniqueIds,
+                       attributeType,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::setAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES:
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::setAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for OVERRIDE_SHAPES");
-        _overrideShapes.assign(static_cast<const int64_t*>(arrayOfElements),
-                               static_cast<const int64_t*>(arrayOfElements) + elementCount);
+        setInt64Vector(_overrideShapes,
+                       attributeType,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::setAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES:
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::setAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for OVERRIDE_STRIDES");
-        _overrideStrides.assign(static_cast<const int64_t*>(arrayOfElements),
-                                static_cast<const int64_t*>(arrayOfElements) + elementCount);
+        setInt64Vector(_overrideStrides,
+                       attributeType,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::setAttribute()");
         break;
 
     case HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS:
         // D1 contract: stored as int64_t in the variant pack. The narrowing to
         // uint32_t happens at the SDK dispatch boundary in Stream B, NOT here.
-        THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "VariantDescriptor::setAttribute(): attributeType is not "
-                       "HIPDNN_TYPE_INT64 for OVERRIDE_LENGTHS");
-        _overrideLengths.assign(static_cast<const int64_t*>(arrayOfElements),
-                                static_cast<const int64_t*>(arrayOfElements) + elementCount);
+        setInt64Vector(_overrideLengths,
+                       attributeType,
+                       elementCount,
+                       arrayOfElements,
+                       "VariantDescriptor::setAttribute()");
         break;
 
     default:
