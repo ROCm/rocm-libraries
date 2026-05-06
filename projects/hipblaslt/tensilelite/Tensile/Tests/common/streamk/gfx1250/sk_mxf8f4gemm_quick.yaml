@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 
 GlobalParameters:
   NumElementsToValidate: -1
@@ -86,7 +86,7 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [1, 0]
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
@@ -162,7 +162,7 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [1, 0]
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
@@ -238,7 +238,7 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [1, 0]
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
@@ -314,7 +314,7 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [1, 0]
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]

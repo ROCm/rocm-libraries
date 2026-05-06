@@ -1,0 +1,501 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertDelayAluPass --print-output
+#
+# InsertDelayAluPass: insert s_delay_alu to avoid pipeline stalls on
+# dependent ALU instructions.
+
+#--- Basic VALU->VALU dependency: v_add writes v0, v_mul reads v0
+# CHECK-LABEL: @valu_dep_1
+# CHECK: v_add_f32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "VALU"
+# CHECK-SAME: instid0Distance = 1
+# CHECK: v_mul_f32
+
+st.func @valu_dep_1() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- VALU dep 2: one independent VALU between producer and consumer
+# CHECK-LABEL: @valu_dep_2
+# CHECK: v_add_f32
+# CHECK-NEXT: v_mov_b32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Distance = 2
+# CHECK: v_mul_f32
+
+st.func @valu_dep_2() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- VALU_DEP_3: three independent VALU between producer and consumer
+# CHECK-LABEL: @valu_dep_3
+# CHECK: v_add_f32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Distance = 4
+# CHECK: v_mul_f32
+
+st.func @valu_dep_3() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
+  v9 = "st.v_mov_b32"(v10) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- VALU_DEP_4: four independent VALU between producer and consumer
+# CHECK-LABEL: @valu_dep_4
+# CHECK: v_add_f32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_mul_f32
+
+st.func @valu_dep_4() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
+  v9 = "st.v_mov_b32"(v10) { issueCycles = 1, latencyCycles = 5 }
+  v11 = "st.v_mov_b32"(v12) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- No delay needed: 5+ VALU instructions between producer and consumer
+# CHECK-LABEL: @valu_no_delay_needed
+# CHECK: v_add_f32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_sub_f32
+
+st.func @valu_no_delay_needed() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.v_mov_b32"(v11) { issueCycles = 1, latencyCycles = 5 }
+  v12 = "st.v_mov_b32"(v13) { issueCycles = 1, latencyCycles = 5 }
+  v14 = "st.v_mov_b32"(v15) { issueCycles = 1, latencyCycles = 5 }
+  v16 = "st.v_mov_b32"(v17) { issueCycles = 1, latencyCycles = 5 }
+  v18 = "st.v_mov_b32"(v19) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_sub_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- SALU cycle delay: s_add writes s0, s_mul reads s0
+# CHECK-LABEL: @salu_cycle_1
+# CHECK: s_add_u32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "SALU"
+# CHECK-SAME: instid0Distance = 1
+# CHECK: s_mul_i32
+
+st.func @salu_cycle_1() {
+^entry:
+  s0 = "st.s_add_u32"(s1, s2) { issueCycles = 1, latencyCycles = 2 }
+  s3 = "st.s_mul_i32"(s0, s4) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- SALU multi-cycle: latency=3 (e.g. SFPU), consumer needs SALU_CYCLE_2
+#    latency=3, advance by 1 -> SALUCycles=2 -> SALU_CYCLE_2.
+# CHECK-LABEL: @salu_cycle_2
+# CHECK: s_mul_hi_u32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "SALU"
+# CHECK-SAME: instid0Distance = 2
+# CHECK: s_add_u32
+
+st.func @salu_cycle_2() {
+^entry:
+  s0 = "st.s_mul_hi_u32"(s1, s2) { issueCycles = 1, latencyCycles = 3 }
+  s3 = "st.s_add_u32"(s0, s4) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- Transcendental 32-bit: tracked as TRANS in scoreboard
+# CHECK-LABEL: @trans32_dep_1
+# CHECK: v_rcp_f32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "TRANS"
+# CHECK-SAME: instid0Distance = 1
+# CHECK: v_mul_f32
+
+st.func @trans32_dep_1() {
+^entry:
+  v0 = "st.v_rcp_f32"(v1) { issueCycles = 1, latencyCycles = 8 }
+  v3 = "st.v_mul_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- TRANS32_DEP_2: two TRANS instructions before consumer
+# CHECK-LABEL: @trans32_dep_2
+# CHECK: v_rcp_f32
+# CHECK: v_exp_f32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "TRANS"
+# CHECK-SAME: instid0Distance = 2
+# CHECK: v_mul_f32
+
+st.func @trans32_dep_2() {
+^entry:
+  v0 = "st.v_rcp_f32"(v1) { issueCycles = 1, latencyCycles = 8 }
+  v5 = "st.v_exp_f32"(v6) { issueCycles = 1, latencyCycles = 8 }
+  v3 = "st.v_mul_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- TRANS32_DEP_3: three TRANS instructions before consumer
+# CHECK-LABEL: @trans32_dep_3
+# CHECK: v_rcp_f32
+# CHECK: v_exp_f32
+# CHECK: v_log_f32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "TRANS"
+# CHECK-SAME: instid0Distance = 3
+# CHECK: v_mul_f32
+
+st.func @trans32_dep_3() {
+^entry:
+  v0 = "st.v_rcp_f32"(v1) { issueCycles = 1, latencyCycles = 8 }
+  v5 = "st.v_exp_f32"(v6) { issueCycles = 1, latencyCycles = 8 }
+  v7 = "st.v_log_f32"(v8) { issueCycles = 1, latencyCycles = 8 }
+  v3 = "st.v_mul_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- TRANS scoreboard expired: 4 TRANS instructions -> oldest evicted, no delay
+# CHECK-LABEL: @trans32_dep_expired
+# CHECK: v_rcp_f32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_mul_f32
+
+st.func @trans32_dep_expired() {
+^entry:
+  v0 = "st.v_rcp_f32"(v1) { issueCycles = 1, latencyCycles = 8 }
+  v5 = "st.v_exp_f32"(v6) { issueCycles = 1, latencyCycles = 8 }
+  v7 = "st.v_log_f32"(v8) { issueCycles = 1, latencyCycles = 8 }
+  v9 = "st.v_sqrt_f32"(v10) { issueCycles = 1, latencyCycles = 8 }
+  v3 = "st.v_mul_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Transcendental 64-bit: tracked as VALU, not TRANS
+# CHECK-LABEL: @trans64_as_valu
+# CHECK: v_rcp_f64
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "VALU"
+# CHECK-SAME: instid0Distance = 1
+# CHECK: v_mul_f32
+
+st.func @trans64_as_valu() {
+^entry:
+  v[0:1] = "st.v_rcp_f64"(v[2:3]) { issueCycles = 1, latencyCycles = 38 }
+  v4 = "st.v_mul_f32"(v0, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- No dependency: consumer reads different register than producer writes
+# CHECK-LABEL: @no_dependency
+# CHECK: v_add_f32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_mul_f32
+
+st.func @no_dependency() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Implicit registers not tracked: v_cmp writes vcc_lo, v_cndmask reads it.
+# No s_delay_alu should be emitted because implicit registers (VCC, SCC, EXEC)
+# are filtered by isAllocatableReg.
+# CHECK-LABEL: @implicit_reg_not_tracked
+# CHECK: v_cmp_eq_u32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_cndmask_b32
+
+st.func @implicit_reg_not_tracked() {
+^entry:
+  vcc_lo0 = "st.v_cmp_eq_u32"(v0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_cndmask_b32"(v4, v5, vcc_lo0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Memory instruction clears VALU state: no delay after ds_load
+# CHECK-LABEL: @mem_clears_valu_state
+# CHECK: v_add_f32
+# CHECK: ds_load_b32
+# CHECK-NOT: s_delay_alu
+# CHECK: v_mul_f32
+
+st.func @mem_clears_valu_state() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v9 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Memory op clears delay state: no s_delay_alu after ds_load
+# v_add writes v0, then ds_load clears all VALU state (waits for VA_VDST==0),
+# so v_mul reading v0 should NOT get an s_delay_alu.
+# CHECK-LABEL: @mem_clears_state
+# CHECK: v_add_f32
+# CHECK: ds_load_b128
+# CHECK-NOT: s_delay_alu
+# CHECK: v_mul_f32
+
+st.func @mem_clears_state() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v[10:13] = "st.ds_load_b128"(v20, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- XDL WMMA as TRANS: gfx1250-specific WMMA tracked in TRANS scoreboard
+# CHECK-LABEL: @xdl_wmma_as_trans
+# CHECK: v_wmma_f32_16x16x32_f16
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "TRANS"
+# CHECK-SAME: instid0Distance = 1
+# CHECK: v_add_f32
+
+st.func @xdl_wmma_as_trans() {
+^entry:
+  a[0:7] = "st.v_wmma_f32_16x16x32_f16"(v[0:7], v[8:15], a[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v20 = "st.v_add_f32"(a0, v21) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Non-XDL WMMA as VALU: FP32-input WMMA tracked in VALU scoreboard
+# CHECK-LABEL: @non_xdl_wmma_as_valu
+# CHECK: v_wmma_f32_16x16x4_f32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "VALU"
+# CHECK-SAME: instid0Distance = 1
+# CHECK: v_add_f32
+
+st.func @non_xdl_wmma_as_valu() {
+^entry:
+  a[0:7] = "st.v_wmma_f32_16x16x4_f32"(v[0:1], v[2:3], a[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v20 = "st.v_add_f32"(a0, v21) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- XDL WMMA with intervening TRANS: both tracked in TRANS scoreboard
+# CHECK-LABEL: @xdl_wmma_then_trans
+# CHECK: v_wmma_f32_16x16x32_f16
+# CHECK: v_exp_f32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "TRANS"
+# CHECK-SAME: instid0Distance = 2
+# CHECK: v_add_f32
+
+st.func @xdl_wmma_then_trans() {
+^entry:
+  a[0:7] = "st.v_wmma_f32_16x16x32_f16"(v[0:7], v[8:15], a[0:7]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v16 = "st.v_exp_f32"(v17) { issueCycles = 1, latencyCycles = 8 }
+  v18 = "st.v_add_f32"(a0, v19) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Dual dep on same inst: TRANS + VALU both needed
+# CHECK-LABEL: @dual_dep_trans_valu_same
+# CHECK: v_rcp_f32
+# CHECK: v_add_f32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "TRANS"
+# CHECK-SAME: instid0Distance = 1
+# CHECK-SAME: instid1Type = "VALU"
+# CHECK-SAME: instid1Distance = 1
+# CHECK: v_mul_f32
+
+st.func @dual_dep_trans_valu_same() {
+^entry:
+  v0 = "st.v_rcp_f32"(v1) { issueCycles = 1, latencyCycles = 8 }
+  v2 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mul_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- TRANS dep only when VALU is older (VALU too far back)
+# CHECK-LABEL: @trans_dep_only_valu_expired
+# CHECK: v_add_f32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: v_rcp_f32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "TRANS"
+# CHECK-SAME: instid0Distance = 1
+# CHECK-NOT: instid1
+# CHECK: v_mul_f32
+
+st.func @trans_dep_only_valu_expired() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.v_mov_b32"(v11) { issueCycles = 1, latencyCycles = 5 }
+  v12 = "st.v_mov_b32"(v13) { issueCycles = 1, latencyCycles = 5 }
+  v14 = "st.v_mov_b32"(v15) { issueCycles = 1, latencyCycles = 5 }
+  v16 = "st.v_mov_b32"(v17) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_rcp_f32"(v0) { issueCycles = 1, latencyCycles = 8 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Dual dep: VALU + SALU on same instruction
+# CHECK-LABEL: @dual_dep_valu_salu_same
+# CHECK: v_add_f32
+# CHECK: s_add_u32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Type = "VALU"
+# CHECK-SAME: instid1Type = "SALU"
+# CHECK: v_mul_f32
+
+st.func @dual_dep_valu_salu_same() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  s0 = "st.s_add_u32"(s1, s2) { issueCycles = 1, latencyCycles = 2 }
+  v3 = "st.v_mul_f32"(v0, s0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Packed form: two deps close enough -> single s_delay_alu with instid0+instid1
+# CHECK-LABEL: @packed_delay_alu
+# CHECK: v_add_f32
+# CHECK: v_mov_b32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Distance = 2
+# CHECK-SAME: instid1Distance = 1
+# CHECK: v_mul_f32
+# CHECK: v_sub_f32
+
+st.func @packed_delay_alu() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_sub_f32"(v3, v8) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Packed with skip=NEXT: two VALU deps packed into one s_delay_alu
+#    v0 is 2 VALU back at v_mul, v7 is 2 VALU back at v_fma.
+#    Skip between consumer1 (v_mul) and consumer2 (v_fma) = 1 -> NEXT.
+# CHECK-LABEL: @packed_skip_next_dep2
+# CHECK: v_add_f32
+# CHECK: v_sub_f32
+# CHECK-NEXT: s_delay_alu
+# CHECK-SAME: instid0Distance = 2
+# CHECK-SAME: instSkip
+# CHECK-SAME: instid1Distance = 2
+# CHECK: v_mul_f32
+# CHECK: v_fma_f32
+
+st.func @packed_skip_next_dep2() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_sub_f32"(v8, v9) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+  v12 = "st.v_fma_f32"(v7, v13, v14) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Can't pack: skip distance too far (>= 6 instructions between)
+#    First dep: v0->v_mul = VALU_DEP_1. Second dep: TRANS v_rcp->v_sub.
+#    TRANS latency=8 survives through 6 SALU fillers (SALUs don't increment
+#    TRANSNum, and 8-1-6=1 > 0 cycles remain). But skip between
+#    the first s_delay_alu and v_sub = 8 insts (>= 6), so they can't pack.
+# CHECK-LABEL: @cant_pack_skip_too_far
+# CHECK: v_add_f32
+# CHECK: s_delay_alu
+# CHECK-SAME: instid0Distance = 1
+# CHECK-NOT: instid1
+# CHECK: v_mul_f32
+# CHECK: v_rcp_f32
+# CHECK: s_add_u32
+# CHECK: s_delay_alu
+# CHECK-SAME: instid0Type = "TRANS"
+# CHECK-SAME: instid0Distance = 1
+# CHECK: v_sub_f32
+
+st.func @cant_pack_skip_too_far() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_rcp_f32"(v8) { issueCycles = 1, latencyCycles = 8 }
+  s10 = "st.s_add_u32"(s20, s21) { issueCycles = 1, latencyCycles = 2 }
+  s11 = "st.s_add_u32"(s22, s23) { issueCycles = 1, latencyCycles = 2 }
+  s12 = "st.s_add_u32"(s24, s25) { issueCycles = 1, latencyCycles = 2 }
+  s13 = "st.s_add_u32"(s26, s27) { issueCycles = 1, latencyCycles = 2 }
+  s14 = "st.s_add_u32"(s28, s29) { issueCycles = 1, latencyCycles = 2 }
+  s15 = "st.s_add_u32"(s30, s31) { issueCycles = 1, latencyCycles = 2 }
+  v5 = "st.v_sub_f32"(v7, v6) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Cross-BB: dependency spans two basic blocks
+# CHECK-LABEL: @cross_bb_propagation
+# CHECK: v_add_f32
+# CHECK: ^bb1
+# CHECK: s_delay_alu
+# CHECK-SAME: instid0Type = "VALU"
+# CHECK: v_mul_f32
+
+st.func @cross_bb_propagation() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_branch"("bb1") { issueCycles = 1, latencyCycles = 1 }
+^bb1:
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Back-edge loop: delay state propagates through loop back edge
+# CHECK-LABEL: @back_edge_loop
+# CHECK: ^loop
+# CHECK: s_delay_alu
+# CHECK: v_add_f32
+
+st.func @back_edge_loop() {
+^entry:
+  "st.s_branch"("loop") { issueCycles = 1, latencyCycles = 1 }
+^loop:
+  v0 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_cbranch_scc1"("loop") { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Diamond CFG: merge takes worst-case (smallest distance) from predecessors
+#        entry
+#       /     \
+#     bb1     bb2
+#       \     /
+#        merge
+# bb1: v0 written, 1 VALU back at merge -> VALU_DEP_1
+# bb2: v0 written, 3 VALU back at merge -> VALU_DEP_3
+# merge should use VALU_DEP_1 (worst case = closest producer)
+# CHECK-LABEL: @diamond_merge
+# CHECK: ^merge
+# CHECK: s_delay_alu
+# CHECK-SAME: instid0Type = "VALU"
+# CHECK-SAME: instid0Distance = 1
+# CHECK: v_mul_f32
+
+st.func @diamond_merge() {
+^entry:
+  "st.s_cbranch_scc1"("bb2", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^bb1, ^bb2
+^bb1:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_branch"("merge") { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^merge
+^bb2:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
+  Successors: ^merge
+^merge:
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Existing s_delay_alu treated as OTHER: doesn't affect delay state
+# CHECK-LABEL: @existing_delay_alu_is_other
+# CHECK: v_add_f32
+# CHECK: s_delay_alu
+# CHECK: v_mul_f32
+
+st.func @existing_delay_alu_is_other() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_delay_alu"() { issueCycles = 0, latencyCycles = 0, mod.delayalu = { instid0Type = "NO_DEP", instid0Distance = 0 } }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}

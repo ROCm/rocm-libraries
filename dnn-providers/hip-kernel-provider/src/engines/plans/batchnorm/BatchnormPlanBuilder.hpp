@@ -10,7 +10,8 @@
 #include "HipKernelSettings.hpp"
 #include "IDevicePropertyProvider.hpp"
 #include "hip/IKernelCompiler.hpp"
-#include "hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 namespace hip_kernel_provider::batchnorm
 {

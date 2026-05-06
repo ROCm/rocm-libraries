@@ -31,7 +31,7 @@
 # CHECK-SAME: dlcnt = 0
 # CHECK-NEXT: v_wmma_f32_16x16x32_bf16
 # Only two waitcnt inserts should exist, and no tensor waitcnt should appear
-# (StinkyWaitCntInsertionPass runs here with the default insertTensorWaitCnt=false).
+# (no tensor loads are present in this block, so the tensor-wait heuristic is a no-op).
 # CHECK-NOT: s_wait_tensorcnt
 # CHECK-NOT: s_wait_loadcnt
 

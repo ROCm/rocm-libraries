@@ -42,7 +42,7 @@ namespace
 {% endif %}
 // Lifts a frontend graph via build_operation_graph(handle), then
 // reconstructs it with fromBackendDescriptor() for verification.
-class Integration{{ op.name }}DescriptorLifting : public IntegrationTestFixture
+class Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting : public IntegrationTestFixture
 {
 protected:
     /// Builds a standard {{ op.name }} graph for round-trip testing.
@@ -115,7 +115,7 @@ protected:
 // Builds a standard {{ op.name }} graph, lowers via build_operation_graph(handle),
 // lifts back with fromBackendDescriptor(), and performs comprehensive field-by-field
 // validation of graph data types, tensor attributes, and operation parameters.
-TEST_F(Integration{{ op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
 {
     auto originalGraph = buildGraph();
 
@@ -173,7 +173,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
 
 // After lifting, verifies tensor objects in the node attributes are the same
 // shared_ptr instances as in the tensor map (pointer equality).
-TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}TensorSharingPreserved)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, {{ op.name }}TensorSharingPreserved)
 {
     auto originalGraph = buildGraph();
 
@@ -203,7 +203,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}TensorSharingPres
 // Builds a {{ op.name }} graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
 // all fields survive the backend C API serialization path.
-TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinalization)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();
 
@@ -267,7 +267,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinali
 {% set test_val = '1' %}
 {% endif %}
 // Verifies that the optional {{ df.name }} attribute survives a lifting round-trip.
-TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedInLiftingRoundTrip)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedInLiftingRoundTrip)
 {
     auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("{{ op.name }}{{ df.pascal_name }}LiftTest")
@@ -351,7 +351,7 @@ TEST_F(Integration{{ op.name }}DescriptorLifting, {{ df.pascal_name }}PreservedI
 // Builds a {{ op.name }} graph without calling set_uid() on any tensor,
 // lowers to backend, lifts, and verifies all auto-assigned UIDs are
 // distinct and survive the round-trip.
-TEST_F(Integration{{ op.name }}DescriptorLifting, AutoAssignedUidsPreservedInLiftingRoundTrip)
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, AutoAssignedUidsPreservedInLiftingRoundTrip)
 {
     auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("{{ op.name }}AutoUidLiftTest")
