@@ -70,8 +70,18 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
     static constexpr index_t NWaves   = NPerBlock / (NRepeat * NPerXDL);
     static constexpr index_t WaveSize = BlockSize / MWaves / NWaves;
 
-    static constexpr auto xdlops_gemm =
-        XdlopsGemm<ComputeTypeA, MPerXDL, NPerXDL, KPack, ComputeTypeB, false, false>{};
+    static constexpr bool is_half_acc = std::is_same_v<FloatAcc, ck::half_t>;
+    using XdlopsAccDataType           = conditional_t<is_half_acc, FloatAcc, float>;
+    using XdlopsGemmType              = XdlopsGemm<ComputeTypeA,
+                                                   MPerXDL,
+                                                   NPerXDL,
+                                                   KPack,
+                                                   ComputeTypeB,
+                                                   false,
+                                                   false,
+                                                   XdlopsAccDataType>;
+
+    static constexpr auto xdlops_gemm = XdlopsGemmType{};
 
     static constexpr index_t KPerThread = KPerBlock / xdlops_gemm.K0PerXdlops;
 

@@ -16,7 +16,12 @@ using ADataType = ck::half_t;
 using BDataType = ck::half_t;
 #endif
 
-using AccDataType      = float;
+#if defined(GEMM_ACC_HALF)
+using AccDataType = ck::half_t;
+#else
+using AccDataType = float;
+#endif
+
 using CShuffleDataType = ck::half_t;
 using CDataType        = ck::half_t;
 

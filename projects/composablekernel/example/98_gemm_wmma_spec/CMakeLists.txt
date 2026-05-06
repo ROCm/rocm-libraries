@@ -5,7 +5,8 @@ add_custom_target(example_gemm_wmma_spec)
 
 # Multiple GEMM WMMA configurations - each compiled separately
 # Naming: example_gemm_wmma_{fp8|fp16}_BlockSize_M_N_K[_default]
-# Config 1-4 use fp8 (f8_t), Config 5-9 use fp16 (half_t)
+# Config 1-4, 11 use fp8 (f8_t); Config 5-10 use fp16 (half_t). Default AccDataType is float;
+# Duplicate accumulation targets (ck::half_t accumulation): all use GEMM_ACC_HALF=1; target suffix _acc_half.
 # Each config has two versions: MNKPadding (default) and Default (with _default suffix)
 # amdgpu-enable-vopd
 
@@ -16,6 +17,8 @@ list(APPEND gpu_list ${CK_GFX13_GPU_TARGETS})
 set(target 0)
 foreach(gpu IN LISTS GPU_TARGETS)
     if(gpu IN_LIST gpu_list AND target EQUAL 0)
+        # Pure WMMA targets (example_gemm_wmma_*): disabled; set condition to TRUE to re-enable.
+
         # Configuration 1: BlockSize=512, M=256, N=256, K=128 (FP8)
         add_example_executable(example_gemm_wmma_fp8_512_256_256_128 gemm_wmma_spec_fp16fp8.cpp)
         target_compile_definitions(example_gemm_wmma_fp8_512_256_256_128 PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_1=1)
@@ -502,6 +505,458 @@ foreach(gpu IN LISTS GPU_TARGETS)
         target_compile_definitions(example_gemm_xdl_lds_directload_fp8_128_256_256_128_default PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_11=1 GEMM_SPEC_DEFAULT=1)
         target_compile_options(example_gemm_xdl_lds_directload_fp8_128_256_256_128_default PRIVATE ${GEMM_SPEC_OPTIONS})
         add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_128_256_256_128_default)
+
+        # WMMA + GEMM_ACC_HALF (ck::half_t accumulation, GEMM_CONFIG_1..11)
+        # example_gemm_wmma_*_acc_half: disabled below; change if(FALSE) to if(TRUE) to re-enable.
+        if(FALSE)
+        add_example_executable(example_gemm_wmma_fp8_512_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_1=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_512_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp8_512_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_1=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_512_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp8_256_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_2=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_256_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp8_256_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_2=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_256_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp8_128_16_192_256_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_3=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_128_16_192_256_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp8_128_16_192_256_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_3=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_128_16_192_256_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp8_256_128_192_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_4=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_256_128_192_128_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp8_256_128_192_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_4=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_256_128_192_128_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_256_256_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_5=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS} -mllvm -amdgpu-enable-vopd=0)
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_256_256_128_64_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_256_256_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_5=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_256_256_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_256_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_6=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_256_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_256_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_6=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_256_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_128_128_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_7=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_128_128_256_64_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_128_128_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_7=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_128_128_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_256_128_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_8=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_256_128_128_64_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_256_128_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_8=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_256_128_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_128_64_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_9=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_128_64_128_64_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_128_64_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_9=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_128_64_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_128_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_10=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_128_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp16_128_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_10=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp16_128_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp8_128_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_11=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_wmma_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_128_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_wmma_fp8_128_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_wmma_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_11=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_wmma_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_wmma_fp8_128_256_256_128_default_acc_half)
+
+        endif()
+
+        # XDL v1 (GEMM_CONFIG_ENABLEXDL=1) + GEMM_ACC_HALF
+
+        add_example_executable(example_gemm_xdl_v1_fp8_512_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_1=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_512_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp8_512_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_1=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_512_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp8_256_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_2=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_256_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp8_256_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_2=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_256_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp8_128_16_192_256_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_3=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_128_16_192_256_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp8_128_16_192_256_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_3=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_128_16_192_256_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp8_256_128_192_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_4=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_256_128_192_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp8_256_128_192_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_4=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_256_128_192_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_256_256_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_5=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_256_256_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_256_256_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_5=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_256_256_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_256_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_6=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_256_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_256_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_6=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_256_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_128_128_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_7=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_128_128_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_128_128_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_7=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_128_128_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_256_128_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_8=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_256_128_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_256_128_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_8=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_256_128_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_128_64_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_9=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_128_64_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_128_64_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_9=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_128_64_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_128_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_10=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_128_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp16_128_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_10=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp16_128_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp8_128_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_11=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_128_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v1_fp8_128_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v1_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=1 GEMM_CONFIG_11=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v1_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v1_fp8_128_256_256_128_default_acc_half)
+
+        # XDL v3 (GEMM_CONFIG_ENABLEXDL=3) + GEMM_ACC_HALF
+
+        add_example_executable(example_gemm_xdl_v3_fp8_512_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_1=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_512_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp8_512_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_1=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_512_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp8_256_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_2=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_256_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp8_256_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_2=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_256_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp8_128_16_192_256_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_3=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_128_16_192_256_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp8_128_16_192_256_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_3=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_128_16_192_256_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp8_256_128_192_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_4=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_256_128_192_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp8_256_128_192_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_4=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_256_128_192_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_256_256_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_5=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_256_256_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_256_256_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_5=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_256_256_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_256_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_6=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_256_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_256_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_6=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_256_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_128_128_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_7=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_128_128_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_128_128_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_7=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_128_128_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_256_128_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_8=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_256_128_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_256_128_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_8=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_256_128_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_128_64_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_9=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_128_64_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_128_64_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_9=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_128_64_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_128_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_10=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_128_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp16_128_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_10=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp16_128_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp8_128_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_11=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_128_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_v3_fp8_128_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_v3_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEXDL=3 GEMM_CONFIG_11=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_v3_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_v3_fp8_128_256_256_128_default_acc_half)
+
+        # DirectLoadToLds + GEMM_ACC_HALF
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_512_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_1=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_512_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_512_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_512_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_1=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_512_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_512_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_256_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_2=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_256_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_256_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_256_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_2=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_256_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_256_256_256_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_128_16_192_256_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_3=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_128_16_192_256_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_128_16_192_256_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_128_16_192_256_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_3=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_128_16_192_256_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_128_16_192_256_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_256_128_192_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_4=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_256_128_192_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_256_128_192_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_256_128_192_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_4=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_256_128_192_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_256_128_192_128_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_256_256_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_5=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_256_256_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_256_256_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_256_256_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_5=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_256_256_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_256_256_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_256_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_6=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_256_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_256_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_256_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_6=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_256_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_256_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_128_128_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_7=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_128_128_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_128_128_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_128_128_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_7=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_128_128_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_128_128_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_256_128_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_8=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_256_128_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_256_128_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_256_128_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_8=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_256_128_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_256_128_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_128_64_128_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_9=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_128_64_128_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_128_64_128_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_128_64_128_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_9=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_128_64_128_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_128_64_128_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_128_256_256_64_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_10=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_128_256_256_64_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_128_256_256_64_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp16_128_256_256_64_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_10=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp16_128_256_256_64_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp16_128_256_256_64_default_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_128_256_256_128_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_11=1 GEMM_ACC_HALF=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_128_256_256_128_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_128_256_256_128_acc_half)
+
+        add_example_executable(example_gemm_xdl_lds_directload_fp8_128_256_256_128_default_acc_half gemm_wmma_spec_fp16fp8.cpp)
+        target_compile_definitions(example_gemm_xdl_lds_directload_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_DEFINITIONS} GEMM_CONFIG_ENABLEDTL=1 GEMM_CONFIG_11=1 GEMM_ACC_HALF=1 GEMM_SPEC_DEFAULT=1)
+        target_compile_options(example_gemm_xdl_lds_directload_fp8_128_256_256_128_default_acc_half PRIVATE ${GEMM_SPEC_OPTIONS})
+        add_example_dependencies(example_gemm_wmma_spec example_gemm_xdl_lds_directload_fp8_128_256_256_128_default_acc_half)
+
 
         set(target 1)
     endif()
