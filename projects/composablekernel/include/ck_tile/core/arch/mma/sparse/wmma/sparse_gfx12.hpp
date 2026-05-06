@@ -43,14 +43,13 @@ struct amdgcn_mma<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 32u, CtrlFlags, Compi
     CK_TILE_DEVICE static auto
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx) -> CVecType
     {
-        return {__builtin_amdgcn_swmmac_i32_16x16x32_iu4_w32(
-            true, // A signedness
-            bit_cast<int32_t>(aVec),
-            true, // B signedness
-            bit_cast<int32x2_t>(bVec),
-            cVec,
-            idx,
-            false)}; // TODO: use CtrlFlags for clamp val.
+        return {__builtin_amdgcn_swmmac_i32_16x16x32_iu4_w32(true, // A signedness
+                                                             bit_cast<int32_t>(aVec),
+                                                             true, // B signedness
+                                                             bit_cast<int32x2_t>(bVec),
+                                                             cVec,
+                                                             idx,
+                                                             CtrlFlags::Clamp)};
     }
 };
 
@@ -66,14 +65,13 @@ struct amdgcn_mma<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 64u, CtrlFlags, Compi
     CK_TILE_DEVICE static auto
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx) -> CVecType
     {
-        return {__builtin_amdgcn_swmmac_i32_16x16x64_iu4_w32(
-            true, // A signedness
-            bit_cast<int32x2_t>(aVec),
-            true, // B signedness
-            bit_cast<int32x4_t>(bVec),
-            cVec,
-            idx,
-            false)}; // TODO: use CtrlFlags for clamp val.
+        return {__builtin_amdgcn_swmmac_i32_16x16x64_iu4_w32(true, // A signedness
+                                                             bit_cast<int32x2_t>(aVec),
+                                                             true, // B signedness
+                                                             bit_cast<int32x4_t>(bVec),
+                                                             cVec,
+                                                             idx,
+                                                             CtrlFlags::Clamp)};
     }
 };
 
