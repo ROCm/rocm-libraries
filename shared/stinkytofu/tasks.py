@@ -196,6 +196,9 @@ def build(
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
     ]
 
+    if not no_python:
+        cmake_opts.append(f"-DPython_EXECUTABLE={sys.executable}")
+
     # Locate ROCmCMakeBuildTools for version TWEAK (git hash) support.
     _rocm_sdk = shutil.which("rocm-sdk")
     if _rocm_sdk:
