@@ -131,6 +131,7 @@ DEF_FORMAT(VOP1,
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 2,  // dst + src
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
@@ -150,6 +151,7 @@ DEF_FORMAT(VOP2,
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 3,  // dst + src0 + src1
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
@@ -171,6 +173,7 @@ DEF_FORMAT(VOP3,
     .unit = VALU,
     .encoding = {64},
     .maxOperands = 4,  // dst + src0 + src1 + src2
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
@@ -205,6 +208,7 @@ DEF_FORMAT(VOPC,
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 3,  // dst(vcc/sdst) + src0 + src1
+    .cost = {1, 5},
     .flags = {VALU},
     .fields = {
         {D0, vdst, vcc, M64},
@@ -257,6 +261,7 @@ DEF_FORMAT(VOP2_COMMUTATIVE,
 // Vector 1-operand transcendental: v_rcp_f32, v_rsq_f32, v_exp_f32, etc.
 DEF_FORMAT(VOP1_TRANSCENDENTAL,
     .parent = VOP1,
+    .cost = {1, 8},
     .flags = {Transcendental},
 )
 
@@ -341,6 +346,7 @@ DEF_FORMAT(SOP1,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 2,  // dst + src
+    .cost = {1, 2},
     .flags = {SALU},
     .fields = {
         {D0, sdst, sdst, 32},
@@ -355,6 +361,7 @@ DEF_FORMAT(SOP2,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 3,  // dst + src0 + src1
+    .cost = {1, 2},
     .flags = {SALU},
     .fields = {
         {D0, sdst, sdst, 32},
@@ -370,6 +377,7 @@ DEF_FORMAT(SOPC,
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 2,  // src0 + src1 (result to SCC)
+    .cost = {1, 2},
     .flags = {SALU, ImplicitWriteSCC},
     .fields = {
         {S0, ssrc0, ssrc, 32},
@@ -414,6 +422,7 @@ DEF_FORMAT(SOPK,
     .microcode = MC_SOPK,
     .unit = SALU,
     .encoding = {32},
+    .cost = {1, 2},
     .flags = {SALU},
 )
 
