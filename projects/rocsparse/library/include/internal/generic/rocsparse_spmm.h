@@ -100,8 +100,8 @@ extern "C" {
 *
 *  <table>
 *  <caption id="spmm_bell_algorithms">Blocked-ELL Algorithms</caption>
-*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmm_alg_bell</td>  <td>Yes</td>        <td>No</td>       <td></td>
+*  <tr><th>Blocked ELL Algorithms       <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><td>rocsparse_spmm_alg_bell</td> <td>Yes</td>        <td>No</td>       <td></td>
 *  </table>
 *
 *  <table>
