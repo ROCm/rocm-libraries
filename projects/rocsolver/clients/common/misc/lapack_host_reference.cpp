@@ -1821,7 +1821,7 @@ void ssytrd_sy2sb_(char* uplo,
                    int* kd,
                    float* A,
                    int* lda,
-                   float* AB,
+                   float* Aband,
                    int* ldab,
                    float* tau,
                    float* work,
@@ -1832,7 +1832,7 @@ void dsytrd_sy2sb_(char* uplo,
                    int* kd,
                    double* A,
                    int* lda,
-                   double* AB,
+                   double* Aband,
                    int* ldab,
                    double* tau,
                    double* work,
@@ -1843,7 +1843,7 @@ void chetrd_he2hb_(char* uplo,
                    int* kd,
                    rocblas_float_complex* A,
                    int* lda,
-                   rocblas_float_complex* AB,
+                   rocblas_float_complex* Aband,
                    int* ldab,
                    rocblas_float_complex* tau,
                    rocblas_float_complex* work,
@@ -1854,7 +1854,7 @@ void zhetrd_he2hb_(char* uplo,
                    int* kd,
                    rocblas_double_complex* A,
                    int* lda,
-                   rocblas_double_complex* AB,
+                   rocblas_double_complex* Aband,
                    int* ldab,
                    rocblas_double_complex* tau,
                    rocblas_double_complex* work,
@@ -6834,7 +6834,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      rocblas_int kd,
                      float* A,
                      rocblas_int lda,
-                     float* AB,
+                     float* Aband,
                      rocblas_int ldab,
                      float* tau,
                      float* work,
@@ -6842,7 +6842,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
 {
     int info;
     char uploC = rocblas2char_fill(uplo);
-    ssytrd_sy2sb_(&uploC, &n, &kd, A, &lda, AB, &ldab, tau, work, &size_w, &info);
+    ssytrd_sy2sb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
 }
 
 template<>
@@ -6851,7 +6851,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      rocblas_int kd,
                      double* A,
                      rocblas_int lda,
-                     double* AB,
+                     double* Aband,
                      rocblas_int ldab,
                      double* tau,
                      double* work,
@@ -6859,7 +6859,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
 {
     int info;
     char uploC = rocblas2char_fill(uplo);
-    dsytrd_sy2sb_(&uploC, &n, &kd, A, &lda, AB, &ldab, tau, work, &size_w, &info);
+    dsytrd_sy2sb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
 }
 
 template<>
@@ -6868,7 +6868,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      rocblas_int kd,
                      rocblas_float_complex* A,
                      rocblas_int lda,
-                     rocblas_float_complex* AB,
+                     rocblas_float_complex* Aband,
                      rocblas_int ldab,
                      rocblas_float_complex* tau,
                      rocblas_float_complex* work,
@@ -6876,7 +6876,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
 {
     int info;
     char uploC = rocblas2char_fill(uplo);
-    chetrd_he2hb_(&uploC, &n, &kd, A, &lda, AB, &ldab, tau, work, &size_w, &info);
+    chetrd_he2hb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
 }
 
 template<>
@@ -6885,7 +6885,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      rocblas_int kd,
                      rocblas_double_complex* A,
                      rocblas_int lda,
-                     rocblas_double_complex* AB,
+                     rocblas_double_complex* Aband,
                      rocblas_int ldab,
                      rocblas_double_complex* tau,
                      rocblas_double_complex* work,
@@ -6893,7 +6893,7 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
 {
     int info;
     char uploC = rocblas2char_fill(uplo);
-    zhetrd_he2hb_(&uploC, &n, &kd, A, &lda, AB, &ldab, tau, work, &size_w, &info);
+    zhetrd_he2hb_(&uploC, &n, &kd, A, &lda, Aband, &ldab, tau, work, &size_w, &info);
 }
 
 // sytd2 & hetd2
