@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -172,9 +173,54 @@ using TestPluginResetLastCallRecordFn = void (*)();
 namespace test_plugin_internal
 {
 
+/// Resolves a plugin path that may be relative against the directory
+/// containing the loaded `libhipdnn_backend.so`. Mirrors the resolution
+/// performed by `hipdnn_backend::plugin::SharedLibrary::load` (see
+/// `backend/src/plugin/SharedLibrary.cpp`), which rebases relative paths
+/// against `getCurrentModuleDirectory()` of the backend module. Anchoring
+/// against the backend rather than the test executable matches how the
+/// host actually loaded the plugin .so via `hipdnnSetEnginePluginPaths_ext`,
+/// so the dlopen here returns a handle to the same library instance and
+/// merely bumps its refcount.
+///
+/// The backend's `getCurrentModuleDirectory()` symbol is hidden, so this
+/// helper recovers the backend's location without linking to it: it
+/// resolves the address of a known exported backend C-API symbol via
+/// `dlsym(RTLD_DEFAULT, ...)` and then asks `dladdr` for the containing
+/// shared object's filename. Falls back to the unmodified path if the
+/// backend cannot be located (e.g., statically linked test build), so the
+/// caller still observes the original `dlopen` failure mode.
+inline std::filesystem::path resolvePluginPathRelativeToBackend(const std::string& pluginPath)
+{
+    const std::filesystem::path requestedPath{pluginPath};
+    if(requestedPath.is_absolute())
+    {
+        return requestedPath;
+    }
+
+    void* backendSymbol = dlsym(RTLD_DEFAULT, "hipdnnCreate");
+    if(backendSymbol == nullptr)
+    {
+        return requestedPath;
+    }
+
+    Dl_info info{};
+    if(dladdr(backendSymbol, &info) == 0 || info.dli_fname == nullptr || info.dli_fname[0] == '\0')
+    {
+        return requestedPath;
+    }
+
+    const auto backendDir = std::filesystem::path(info.dli_fname).parent_path();
+    return std::filesystem::weakly_canonical(backendDir / requestedPath);
+}
+
 /// Returns (and caches) the handle for the plugin .so at `pluginPath`.
 /// Returns `nullptr` if dlopen fails (e.g., the plugin was never loaded
-/// and the path is invalid in the current test layout).
+/// and the path is invalid in the current test layout). Relative paths
+/// are rebased against the backend module's directory (matching the
+/// host's plugin loader) so the dlopen succeeds regardless of the test
+/// process's current working directory — which under ctest typically
+/// differs from the directory containing `test_plugins/`.
 inline void* openPluginForSymbolLookup(const std::string& pluginPath)
 {
     static thread_local std::unordered_map<std::string, void*> s_handles;
@@ -183,7 +229,8 @@ inline void* openPluginForSymbolLookup(const std::string& pluginPath)
     {
         return iter->second;
     }
-    void* handle = dlopen(pluginPath.c_str(), RTLD_NOW | RTLD_LOCAL);
+    const auto resolvedPath = resolvePluginPathRelativeToBackend(pluginPath);
+    void* handle = dlopen(resolvedPath.string().c_str(), RTLD_NOW | RTLD_LOCAL);
     s_handles.emplace(pluginPath, handle);
     return handle;
 }
