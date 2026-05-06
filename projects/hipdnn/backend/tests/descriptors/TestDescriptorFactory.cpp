@@ -12,7 +12,6 @@
 #include "descriptors/KnobSettingDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
 #include "handle/HandleFactory.hpp"
-#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "gtest/gtest.h"
 
