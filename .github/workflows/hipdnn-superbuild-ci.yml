@@ -148,8 +148,8 @@ jobs:
         run: cmake --build build
 
       - name: Run tests
+        shell: pwsh
         run: |
-          export PATH="$ROCM_SDK_PATH/bin:$PATH"
           ctest --test-dir build --output-on-failure
 
   hipdnn-linux-superbuild:
