@@ -76,7 +76,6 @@ from Tensile.Components.ScheduleCapture import (
     SlotKey,
     TaggedInstruction,
     WrappedInstruction,
-    build_dataflow_graph,
     compare_graphs,
     diagnose_missing_edge,
     validate_edge_wait_coverage,
@@ -88,6 +87,7 @@ from Tensile.Components.CMSValidator import (
     _quad_cycle_gap_ok,
     _cvt_to_mfma_gap_ok,
     _mfma_pack_to_cvt_gap_ok,
+    build_dataflow_graph,
 )
 
 from dataflow_fixtures import (
@@ -3559,8 +3559,9 @@ class TestSSetPriorCoverage:
         from Tensile.Components.ScheduleCapture import (
             LoopBodyCaptureBuilder, FourPartCapture, BODY_LABEL_ML,
             BODY_LABEL_ML_PREV, BODY_LABEL_NGL, BODY_LABEL_NLL,
-            build_dataflow_graph, SLOT_KIND_MFMA,
+            SLOT_KIND_MFMA,
         )
+        from Tensile.Components.CMSValidator import build_dataflow_graph
         # Real ML capture: SSetPrior + MFMA filler. Use the same
         # _wrap helper convention but inline (we want SSetPrior in ML).
         builder = LoopBodyCaptureBuilder()

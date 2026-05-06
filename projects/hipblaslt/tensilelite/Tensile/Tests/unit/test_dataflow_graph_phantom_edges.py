@@ -59,8 +59,8 @@ from Tensile.Components.ScheduleCapture import (
     SlotKey,
     TaggedInstruction,
     WrappedInstruction,
-    build_dataflow_graph,
 )
+from Tensile.Components.CMSValidator import build_dataflow_graph
 
 from dataflow_fixtures import _vrange, make_capture, make_mfma
 

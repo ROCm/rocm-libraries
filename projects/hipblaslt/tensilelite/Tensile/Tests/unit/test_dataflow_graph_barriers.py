@@ -41,6 +41,8 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML_PREV,
     BODY_LABEL_NGL,
     BODY_LABEL_NLL,
+)
+from Tensile.Components.CMSValidator import (
     build_dataflow_graph,
 )
 

@@ -49,7 +49,6 @@ from Tensile.Components.ScheduleCapture import (
     SLOT_KIND_MFMA,
     SlotKey,
     TaggedInstruction,
-    build_dataflow_graph,
     compare_graphs,
     _SCC_OPCODE_FLAGS,
     _get_scc_sentinel,
@@ -58,6 +57,7 @@ from Tensile.Components.ScheduleCapture import (
 )
 from Tensile.Components.CMSValidator import (
     OverriddenInputFailure,
+    build_dataflow_graph,
 )
 
 from dataflow_fixtures import make_capture

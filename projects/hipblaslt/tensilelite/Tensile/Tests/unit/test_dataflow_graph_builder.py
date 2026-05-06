@@ -53,7 +53,6 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML_PREV,
     BODY_LABEL_NGL,
     BODY_LABEL_NLL,
-    build_dataflow_graph,
     validate_edge_wait_coverage,
     CaptureUnknownInstructionError,
     CaptureEmptyBodyError,
@@ -64,6 +63,7 @@ from Tensile.Components.CMSValidator import (
     MissingWaitFailure,
     WaitInsufficientFailure,
     OrderInvertedFailure,
+    build_dataflow_graph,
 )
 
 from dataflow_fixtures import (

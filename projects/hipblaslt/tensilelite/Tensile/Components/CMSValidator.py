@@ -47,11 +47,14 @@ from Tensile.Components.ScheduleCapture import (
     SchedulePosition,
     BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL,
     BODY_LABEL_TO_LOOP_INDEX,
+    CaptureEmptyBodyError,
     CaptureUnknownInstructionError,
+    MemoryRegion,
     make_position,
     _canonical_render,
     _is_lr, _is_lw, _is_gr, _is_mfma, _is_swait, _is_sbarrier, _is_snop,
     _is_ssetprio, _is_cvt_pack,
+    _byte_keys_for_resource, _resolve_producers,
 )
 
 if TYPE_CHECKING:
@@ -836,6 +839,365 @@ def _make_node(
 # Body order for graph construction. Cross-body queue state persists in the
 # order ML-1 -> ML -> NGL -> NLL (matching hardware execution order).
 _BODY_BUILD_ORDER = (BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL)
+
+
+# =============================================================================
+# Graph builder: build_dataflow_graph + barrier-pattern collectors (br4.7)
+# =============================================================================
+#
+# These three functions used to live in ScheduleCapture.py. They were moved
+# here in br4.7 so the bodies can reference DataflowGraph / DataflowEdge /
+# _make_node / _BODY_BUILD_ORDER / SWAIT_CATEGORY / SBARRIER_CATEGORY /
+# _swait_drains directly (no lazy reverse-imports). The intersection
+# primitives they consume (_byte_keys_for_resource, _resolve_producers,
+# MemoryRegion) STAY in ScheduleCapture per the long-term-plan audit and
+# are imported eagerly at the top of this module.
+
+
+def build_dataflow_graph(four_part_capture):
+    """Build the unified 4-body register dataflow graph from a FourPartCapture.
+
+    Two phases:
+
+    Phase 1 — node construction. Walks bodies in execution order
+    (ML-1 -> ML -> NGL -> NLL). Every captured instruction becomes a
+    node EXCEPT SWait/SBarrier/SNop (scheduler-choice; sidecar only).
+    LCC instructions (SSubU32 + SCmpEQI32, per LCC_AUDIT.md) ARE
+    nodes — their per-instruction issue cycles contribute to
+    `cumulative_issue_cycles` walks; cross-body cycle counting depends
+    on this. Per-body sidecar `_graph_nodes` is attached so
+    wait/barrier helpers can find sync ops in stream order.
+
+    Phase 2 — edge formation by RESOURCE RESOLUTION. For each consumer's
+    read resource R, walk producers in stream-position order
+    (SchedulePosition: loop_index, vmfma_index, sub_index) and yield
+    every prior writer whose written resource overlaps R. The current
+    resolver yields ALL prior overlapping writers (the per-byte
+    latest-writer rewrite is tracked as wx9.4.2 / Sub-B).
+
+    A separate barrier-edge collector (`_collect_barrier_edges`) emits
+    LDS-reuse edges (lr_to_gr_lds_reuse, gr_to_lr_lds_reuse) over the
+    unified node stream — same as before; that collector is already
+    pattern-based and reorder-invariant.
+
+    Wait-coverage validation lives elsewhere (see
+    `validate_edge_wait_coverage` and `diagnose_missing_edge`) — those
+    take the constructed graph and check, per-edge, whether CMS's
+    stream has a covering SWaitCnt that drains the producer.
+
+    Missed-instruction guard: an instruction whose category resolves to
+    no recognized scheduler-role tag AND whose Python class isn't in
+    LR/LW/GR/MFMA/SWait/SBarrier raises CaptureUnknownInstructionError.
+
+    Always raises CaptureEmptyBodyError if any body has zero
+    instructions.
+
+    An entirely-omitted body (key 0 absent from the body's dict) is
+    treated as "this body was not emitted by either scheduler", NOT as
+    an error. PGR/SuppressNoLoadLoop combinations that legitimately do
+    not emit NGL or NLL (see `kernel_emits_n_gl` / `kernel_emits_n_ll`)
+    leave the corresponding dict empty; the loop below skips that body
+    cleanly and the validator runs against the remaining bodies.
+
+    The empty-instruction-list guard above (`{0: empty_body}`) is
+    deliberately distinct from the absent-key path: a present-but-empty
+    body indicates the capture pipeline lost data for a body that
+    *should* have content, which is a real bug worth raising on. Do not
+    "fix" the absence path by synthesizing a `LoopBodyCapture(instructions=[])`
+    — that conflates the two error modes; use dict-omission instead.
+    """
+    captures = {}
+    if four_part_capture is None:
+        return DataflowGraph(nodes={}, edges=[], captures=captures)
+
+    # Seed captures dict and validate bodies are non-empty.
+    body_sources = (
+        (BODY_LABEL_ML_PREV, four_part_capture.main_loop_prev),
+        (BODY_LABEL_ML, four_part_capture.main_loop),
+        (BODY_LABEL_NGL, four_part_capture.n_gl),
+        (BODY_LABEL_NLL, four_part_capture.n_ll),
+    )
+    for label, by_cp in body_sources:
+        if 0 not in by_cp:
+            continue
+        body = by_cp[0]
+        if not body.instructions:
+            raise CaptureEmptyBodyError(
+                f"Body {label!r} has zero captured instructions; "
+                f"bodies always contain at least the MFMA loop."
+            )
+        captures[label] = body
+
+    num_mfma_per_subiter = getattr(four_part_capture, 'num_mfma_per_subiter', 0) or 0
+    # Forward the FourPartCapture's arch_profile (or None) to the graph so
+    # the four pair-specific quad-cycle helpers can resolve the per-arch
+    # constants. None => default CDNA 4 (historical bit-identical path).
+    arch_profile = getattr(four_part_capture, 'arch_profile', None)
+
+    nodes_by_identity = {}
+    nodes_per_body = {label: [] for label in _BODY_BUILD_ORDER}
+
+    # ---------------------------------------------------------------------
+    # Phase 1 — node construction + sidecar.
+    # ---------------------------------------------------------------------
+    for label in _BODY_BUILD_ORDER:
+        if label not in captures:
+            continue
+        body = captures[label]
+
+        for tagged_inst in body.instructions:
+            inst = tagged_inst.wrapped.rocisa_inst
+            try:
+                node = _make_node(tagged_inst, label, arch_profile)
+            except CaptureUnknownInstructionError as e:
+                raise CaptureUnknownInstructionError(
+                    f"build_dataflow_graph: cannot classify instruction "
+                    f"{type(inst).__name__!r} (category={tagged_inst.category!r}) "
+                    f"in body {label!r}. The capture pipeline must assign a "
+                    f"recognized category, or the instruction's class must be "
+                    f"one of LR/LW/GR/MFMA/SWait/SBarrier. Inner: {e}"
+                ) from e
+
+            # Per-body sidecar: every node lives here, including SWait/
+            # SBarrier/SNop, so waits_in_window/barriers_in_window can
+            # find them.
+            nodes_per_body[label].append(node)
+
+            # Cross-graph identity set: only "real" instructions
+            # participate (excludes scheduler-choice SWait/SBarrier/SNop/
+            # SSetPrior). SSetPrior is a wave-priority scalar op with no
+            # register dataflow (rocisa SSetPrior takes only `int prior`),
+            # mirrored by `_NoDataflowRule`.
+            # LCC instructions (SSubU32 + SCmpEQI32) ARE included — their
+            # per-instruction issue cycles contribute to
+            # `cumulative_issue_cycles` walks; cross-body cycle counting
+            # depends on it.
+            if not (
+                _is_swait(inst) or _is_sbarrier(inst)
+                or _is_snop(inst) or _is_ssetprio(inst)
+            ):
+                nodes_by_identity[node.identity] = node
+
+        # Stash per-body GraphNodes on the LoopBodyCapture for the helpers.
+        body._graph_nodes = nodes_per_body[label]
+
+    # ---------------------------------------------------------------------
+    # Phase 2 — edge formation by resource-name resolution.
+    # ---------------------------------------------------------------------
+    # Each node's wrapper carries the precomputed (reads, writes) tuples
+    # populated by `_populate_wrapper` (rule registry). Resources may be
+    # RegisterContainers or MemoryRegions; the type-dispatched
+    # `_intersection` handles both.
+    edges = []
+
+    # Skip when nothing was captured — e.g., the no-op build_dataflow_graph(None)
+    # contract holds but here we have an empty captures map after seeding.
+    if nodes_by_identity:
+        # Per-byte latest-writer construction. Walk all data-flow nodes in
+        # ascending stream-position order; for each node, first emit edges
+        # for its reads (consulting the current latest_writer state), then
+        # update latest_writer for its writes. A new write to a byte_key
+        # OVERWRITES the previous writer — exactly what "latest writer"
+        # means, and what kills the phantom-edge bug from scratch-vgpr
+        # reuse.
+        #
+        # NO subiter scoping. A vgpr is one physical register; whoever
+        # wrote it most recently in stream order is what every subsequent
+        # read sees, regardless of which subiter logically "owns" it.
+        # If a kernel writer mis-pipelines a prefetch (e.g., PackA1
+        # writes v133 before PackA0's subiter-0 consumer reads it), the
+        # resolver faithfully reports PackA1 as the producer — the same
+        # garbage value the GPU will read. compare_graphs then surfaces
+        # the divergence. Adding per-subiter scoping would HIDE such
+        # scheduling bugs to make diagnostics look cleaner — the wrong
+        # tradeoff.
+        latest_writer = {}  # byte_key -> (writer_node, write_resource)
+        sorted_nodes = sorted(nodes_by_identity.values(), key=lambda n: n.position)
+
+        for node in sorted_nodes:
+            wrapped = node.tagged_inst.wrapped
+
+            # Phase 2a — reads first: emit one edge per distinct
+            # (writer, write_resource) that contributes any byte of any
+            # read of this node.
+            for read_resource in wrapped.reads:
+                if read_resource is None:
+                    continue
+                for producer, overlap in _resolve_producers(
+                    read_resource, node, latest_writer,
+                ):
+                    is_memory = isinstance(overlap, MemoryRegion)
+                    edges.append(DataflowEdge(
+                        producer=producer,
+                        consumer=node,
+                        resource=overlap,
+                        edge_kind=("lds_raw_intrawave" if is_memory
+                                   else "raw_intrawave"),
+                    ))
+
+            # Phase 2b — writes second: update latest_writer for every
+            # byte this node covers. Done AFTER reads so a single
+            # instruction reading and writing the same register sees its
+            # PREVIOUS writer, not itself.
+            for write_resource in wrapped.writes:
+                if write_resource is None:
+                    continue
+                for bk in _byte_keys_for_resource(write_resource):
+                    latest_writer[bk] = (node, write_resource)
+
+    # =========================================================================
+    # SBarrier-edge collectors (cross-wave LDS-reuse)
+    # =========================================================================
+    # This collector is the sole source of LR0 -> GR LDS-reuse coverage.
+    # Two patterns:
+    #
+    #   lr_to_gr_lds_reuse  (must_start_after):
+    #     Producer LR0/LR1 -> SWaitCnt(dscnt drain) -> SBarrier -> Consumer GR
+    #
+    #   gr_to_lr_lds_reuse  (needed_by):
+    #     Producer GR -> SWaitCnt(vlcnt drain) -> SBarrier -> Consumer LR1/LR3
+    #
+    # Both demand strict ordering: the SWait must precede the SBarrier; SWait
+    # alone (no barrier) means cross-wave coherence isn't established; SBarrier
+    # alone (no wait) means the in-wave counter never drained.
+    #
+    # We collect across the unified node stream (all bodies in execution order)
+    # so cross-body patterns (DTL+LdsBuf: LR0 in ML-1 + GR in ML) form
+    # naturally — the producer's body_label and consumer's body_label may
+    # differ on the resulting DataflowEdge.
+
+    all_nodes_in_order = []
+    for label in _BODY_BUILD_ORDER:
+        all_nodes_in_order.extend(nodes_per_body[label])
+
+    barrier_edges = _collect_barrier_edges(all_nodes_in_order)
+    edges.extend(barrier_edges)
+
+    return DataflowGraph(nodes=nodes_by_identity, edges=edges, captures=captures,
+                         num_mfma_per_subiter=num_mfma_per_subiter,
+                         arch_profile=arch_profile)
+
+
+def _collect_barrier_edges(nodes_in_order):
+    """Walk the unified node stream once and emit SBarrier-pattern edges.
+
+    Returns a list of DataflowEdges with edge_kind in
+    {'lr_to_gr_lds_reuse', 'gr_to_lr_lds_reuse'}.
+
+    Algorithm: for each pair (producer_kind, counter, consumer_kind, edge_kind):
+      For each producer node (in stream order):
+        Walk forward looking for SWaitCnt that drains `counter`.
+        Once found, walk further forward looking for SBarrier.
+        Once both found in correct order, every consumer node of `consumer_kind`
+        appearing after the SBarrier (until a NEW producer of producer_kind is
+        seen, which restarts the pattern) becomes the edge target.
+    """
+    out = []
+
+    # Build per-kind node lists.
+    lr_categories = {"LRA0", "LRA1", "LRA3", "LRB0", "LRB1", "LRB3"}
+    gr_categories = {"GRA", "GRB", "GR"}
+
+    # ---------- Pattern 1: LR -> SWait(dscnt) -> SBarrier -> GR ----------
+    out.extend(_collect_pattern(
+        nodes_in_order,
+        producer_categories=lr_categories,
+        consumer_categories=gr_categories,
+        counter="dscnt",
+        edge_kind="lr_to_gr_lds_reuse",
+    ))
+
+    # ---------- Pattern 2: GR -> SWait(vlcnt) -> SBarrier -> LR ----------
+    # Consumer is LR (any LR* category — typically LR1 or LR3 in CMS).
+    out.extend(_collect_pattern(
+        nodes_in_order,
+        producer_categories=gr_categories,
+        consumer_categories=lr_categories,
+        counter="vlcnt",
+        edge_kind="gr_to_lr_lds_reuse",
+    ))
+
+    return out
+
+
+def _collect_pattern(nodes_in_order, *, producer_categories, consumer_categories,
+                     counter, edge_kind):
+    """Sweep nodes_in_order and emit edges where the producer/SWait/SBarrier/
+    consumer ordering invariant holds.
+
+    State machine per producer:
+      0. Producer seen -> remember it.
+      1. Find SWaitCnt with `counter` drain after the producer.
+      2. Find SBarrier strictly after the SWait.
+      3. Every consumer of `consumer_categories` strictly after the SBarrier
+         becomes an edge target — until either:
+           - a new producer of `producer_categories` resets the pattern
+             (its own pending edges will be collected on the next iteration),
+           - or stream ends.
+    """
+    edges = []
+
+    # We do an O(N^2) sweep — for each producer, scan forward. Body sizes are
+    # at most a few hundred instructions; this is comfortably fast.
+    for i, producer in enumerate(nodes_in_order):
+        if producer.category not in producer_categories:
+            continue
+
+        wait_idx = None
+        barrier_idx = None
+        for j in range(i + 1, len(nodes_in_order)):
+            node = nodes_in_order[j]
+
+            # If we hit another producer of the same kind before completing
+            # the pattern, this producer's pattern remains unfinished — but
+            # the new producer's pattern will be collected on its own iteration.
+            # We don't break (the new producer can still share the wait/barrier
+            # if they appear after both producers).
+
+            if wait_idx is None:
+                if node.category == SWAIT_CATEGORY and \
+                        _swait_drains(node, counter) is not None:
+                    wait_idx = j
+                continue
+
+            if barrier_idx is None:
+                if node.category == SBARRIER_CATEGORY:
+                    barrier_idx = j
+                # If a new SWait appears, prefer the latest (more aggressive
+                # drain). Don't change wait_idx because a later wait still
+                # drains earlier producers — but the FIRST wait/barrier pair
+                # already establishes the invariant.
+                continue
+
+            # We have both wait_idx and barrier_idx. Now any consumer of
+            # consumer_categories at j > barrier_idx becomes an edge.
+            if node.category in consumer_categories:
+                # Determine which register the producer "passed" to the consumer.
+                # For LDS-reuse patterns, the resource is an LDS slot; we
+                # represent it via the producer's written register signature
+                # (or the GR's destination, which IS the LDS slot under DTL).
+                if edge_kind == "lr_to_gr_lds_reuse":
+                    # Producer LR -> destination vgpr; consumer GR -> destination
+                    # vgpr (under DTL=1, that vgpr is bound to the same LDS slot).
+                    # We tag the edge with the producer's destination register
+                    # since that's the resource pin.
+                    resource = getattr(producer.rocisa_inst, "dst", None)
+                else:  # gr_to_lr_lds_reuse
+                    resource = getattr(producer.rocisa_inst, "dst", None)
+
+                edges.append(DataflowEdge(
+                    producer=producer,
+                    consumer=node,
+                    resource=resource,
+                    edge_kind=edge_kind,
+                ))
+
+            # Pattern reset: a NEW producer of producer_categories ends this
+            # producer's "passing window". The new producer starts fresh.
+            if node.category in producer_categories:
+                break
+
+    return edges
 
 
 # -----------------------------------------------------------------------------

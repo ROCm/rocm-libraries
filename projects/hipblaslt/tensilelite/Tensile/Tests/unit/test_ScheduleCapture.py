@@ -45,7 +45,6 @@ from Tensile.Components.ScheduleCapture import (
     LoopBodyCapture,
     LoopBodyCaptureBuilder,
     FourPartCapture,
-    build_dataflow_graph,
     clone_loop_body,
     evaluate_guard,
     expand_cms_macro,
@@ -59,6 +58,7 @@ from Tensile.Components.ScheduleCapture import (
 from Tensile.Components.CMSValidator import (
     DataflowEdge,
     DataflowGraph,
+    build_dataflow_graph,
 )
 
 
