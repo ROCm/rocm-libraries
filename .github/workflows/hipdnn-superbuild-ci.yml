@@ -146,12 +146,10 @@ jobs:
       - name: Build
         run: cmake --build build
 
-      # TODO: Enable unit tests when ready (no GPU required for unit tests)
-      # - name: Run unit tests
-      #   run: |
-      #     cmake --build build --target hipdnn-unit-check
-      #     cmake --build build --target miopen-provider-unit-check
-      #     cmake --build build --target hipblaslt-provider-unit-check
+      - name: Run tests
+        run: |
+          & "$env:VENV_PATH\Scripts\Activate.ps1"
+          ctest --test-dir build --output-on-failure
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
@@ -226,12 +224,8 @@ jobs:
       - name: Build
         run: cmake --build build
 
-      # TODO: Enable unit tests when ready (no GPU required for unit tests)
-      # - name: Run unit tests
-      #   run: |
-      #     cmake --build build --target hipdnn-unit-check
-      #     cmake --build build --target miopen-provider-unit-check
-      #     cmake --build build --target hipblaslt-provider-unit-check
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
   hipdnn_build_summary:
     name: hipDNN Superbuild Summary
