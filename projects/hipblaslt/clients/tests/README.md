@@ -6,6 +6,11 @@ hipblaslt-test is the main regression gtest for hipBLASLt. All test items should
 # Go to hipBLASLt build directory
 cd hipBLASLt; cd build/release
 
+# Before chip back, run gfx13 & matmul_medium test suite
+# due to the long runtime on FFM.
+# If want to run on ffm full -> export HIPBLASLT_TEST_TIMEOUT=6000
+./clients/hipblaslt-test --gtest_filter=*gfx13*:*matmul_medium*
+
 # Run full gtest tests
 ./clients/hipblaslt-test
 

@@ -160,10 +160,6 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: 2
   beta: 3
-  # Before chip back, this test is blocked on gfx13
-  # due to the long runtime on FFM.
-  # If want to run on ffm -> export HIPBLASLT_TEST_TIMEOUT=6000
-  gpu_arch_exclude: '13\d{2}'
 
 - name: matmul_grid_limit_real
   category: nightly
@@ -1404,7 +1400,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '1[1-3]\d{2}'
 
 - name: matmul_groupedgemm
   category: pre_checkin
@@ -1419,7 +1415,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [0, 2]
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '1[1-3]\d{2}'
 
 - name: matmul_groupedgemm_f8_fnuz
   category: pre_checkin
@@ -1480,7 +1476,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '1[1-3]\d{2}'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -1496,7 +1492,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '1[1-3]\d{2}'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -1513,7 +1509,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '1[1-3]\d{2}'
 
 - name: matmul_bias_gelu_aux_fp16
   category: pre_checkin
@@ -1530,6 +1526,7 @@ Tests:
   bias_vector: [0, 1]
   unit_check: 0
   norm_check: 1
+  gpu_arch_exclude: '13\d{2}'
 
 - name: matmul_bias_gelu_aux_fp8_fnuz_TN
   category: pre_checkin
@@ -1651,7 +1648,7 @@ Tests:
   gradient: 1
   activation_type: gelu
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1[13]\d\d|12[^5]'
 
 - name: matmul_drelu_fp16
   category: pre_checkin
@@ -1667,7 +1664,7 @@ Tests:
   gradient: 1
   activation_type: relu
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1[13]\d\d|12[^5]'
 
 - name: matmul_dgelu_bias_fp16
   category: pre_checkin
@@ -1686,7 +1683,7 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1[13]\d\d|12[^5]'
 
 - name: matmul_dgelu_bias_bf16
   category: pre_checkin
@@ -1758,7 +1755,7 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1[13]\d\d|12[^5]'
 
 - name: matmul_drelu_bias_bf16
   category: pre_checkin
@@ -2036,6 +2033,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
+  gpu_arch_exclude: '13\d{2}'
 
 - name: matmul_gemm_xf32
   category: pre_checkin
@@ -2305,6 +2303,7 @@ Tests:
   alpha: 1
   beta: 2.0
   unit_check: 1
+  gpu_arch_exclude: '13\d{2}'
 
 - name: matmul_extapi_algo_method_tuning_wgm
   category: pre_checkin
@@ -2322,6 +2321,7 @@ Tests:
   alpha: 1
   beta: 2.0
   unit_check: 1
+  gpu_arch_exclude: '13\d{2}'
 
 - name: matmul_extapi_algo_method_grouped_gemm_tuning_wgm
   category: pre_checkin
@@ -2339,7 +2339,7 @@ Tests:
   alpha: 1
   beta: 2.0
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '1[1-3]\d{2}'
 
 - name: matmul_heuristic_all_solutions_no_workspace
   category: nightly
