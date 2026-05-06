@@ -52,7 +52,7 @@ void SetEnvVars(std::vector<std::string>& envvars)
 } // namespace
 
 template <typename T>
-struct smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16
+struct smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16
     : public conv2d_test_base<T, TestCase>
 {
     void SetUp() override
@@ -62,9 +62,11 @@ struct smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16
     }
 };
 
-using GPU_Conv2dTuning_BFP16 = smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16<bfloat16>;
+using GPU_Conv2dTuning_FP16 =
+    smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16<half_float::half>;
+using GPU_Conv2dTuning_FP32 = smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16<float>;
 
-TEST_P(GPU_Conv2dTuning_BFP16, TestBFloat16)
+TEST_P(GPU_Conv2dTuning_FP16, TestFloat16)
 {
     if(IsTestSupportedForDevice() && !get_handle_xnack())
     {
@@ -85,12 +87,34 @@ TEST_P(GPU_Conv2dTuning_BFP16, TestBFloat16)
     }
 };
 
-#define INSTANTIATE_MIOPEN_BFLOAT16_SMOKE_TEST_SUITE(id, ...) \
-    INSTANTIATE_MIOPEN_SMOKE_TEST(id, GPU_Conv2dTuning_BFP16, bfloat16, __VA_ARGS__)
+TEST_P(GPU_Conv2dTuning_FP32, TestFloat32)
+{
+    if(IsTestSupportedForDevice() && !get_handle_xnack())
+    {
+        std::vector<std::string> env_vars{
+            "MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE",
+            "MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=5",
+            "MIOPEN_FIND_MODE=normal",
+            "MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC;"
+            "ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC;"
+            "ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC"};
 
-INSTANTIATE_MIOPEN_BFLOAT16_SMOKE_TEST_SUITE(
+        SetEnvVars(env_vars);
+        run();
+    }
+    else
+    {
+        GTEST_SKIP() << "Test not supported for the current device";
+    }
+};
+
+#define INSTANTIATE_MIOPEN_SMOKE_TEST_SUITE(id, ...)                                         \
+    INSTANTIATE_MIOPEN_SMOKE_TEST(id, GPU_Conv2dTuning_FP16, half_float::half, __VA_ARGS__); \
+    INSTANTIATE_MIOPEN_SMOKE_TEST(id, GPU_Conv2dTuning_FP32, float, __VA_ARGS__)
+
+INSTANTIATE_MIOPEN_SMOKE_TEST_SUITE(
     0, {64, 256, 7, 7}, {128, 256, 1, 1}, {0, 0, 1, 1, 1, 1}, true, false, false);
-INSTANTIATE_MIOPEN_BFLOAT16_SMOKE_TEST_SUITE(
+INSTANTIATE_MIOPEN_SMOKE_TEST_SUITE(
     1, {64, 256, 7, 7}, {128, 256, 1, 1}, {0, 0, 1, 1, 1, 1}, false, true, false);
-INSTANTIATE_MIOPEN_BFLOAT16_SMOKE_TEST_SUITE(
+INSTANTIATE_MIOPEN_SMOKE_TEST_SUITE(
     2, {64, 256, 7, 7}, {128, 256, 1, 1}, {0, 0, 1, 1, 1, 1}, false, false, true);
