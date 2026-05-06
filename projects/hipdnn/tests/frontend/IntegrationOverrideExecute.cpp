@@ -516,4 +516,66 @@ TEST_F(IntegrationOverrideExecuteEquivalence, MapAndParallelArrayProduceSameDisp
            "as the parallel-array form (RFC §4.2 'pure sugar').";
 }
 
+// ----------------------------------------------------------------------------
+// Execution-plan validity guard for the override-execute parallel-array form.
+//
+// The non-override `Graph::execute()` overload guards against a missing
+// compiled plan at the top of its body. The parallel-array override overload
+// must perform the SAME guard so a user calling override-execute before
+// `build_plans()` (or `from_compiled_plan_binary()`) gets a clean
+// INVALID_VALUE diagnostic instead of dereferencing a null/invalid plan
+// descriptor (RFC 0008 Phase 1 post-review fix #3).
+// ----------------------------------------------------------------------------
+
+class IntegrationOverrideExecutePlanGuard : public IntegrationOverrideExecuteBase
+{
+};
+
+/// Override-execute (parallel-array form) called BEFORE `build_plans()` must
+/// reject with INVALID_VALUE and surface the same wording as the non-override
+/// guard. Verifies the override overload mirrors the existing top-of-body
+/// guard at `Graph::execute(handle, variantPack, workspace)`.
+TEST_F(IntegrationOverrideExecutePlanGuard, ArrayFormRejectedBeforeBuildPlan)
+{
+    loadImplementingOnly();
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    SimpleTensorBundle<float> bundle(dims);
+
+    // Build but DO NOT compile (no validate / build_operation_graph /
+    // create_execution_plans / check_support / build_plans). The override
+    // overload must reject before touching the (absent) plan descriptor.
+    auto graph = createSimplePointwiseGraph(
+        "PlanGuard_ArrayBeforeBuild", dims, /*dynamicShapeEnabled=*/true);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = bundle.xTensor.memory().deviceData();
+    variantPack[2] = bundle.yTensor.memory().deviceData();
+
+    const std::vector<int64_t> overrideUids = {1, 2};
+    const std::vector<std::vector<int64_t>> overrideShapes = {dims, dims};
+    const std::vector<std::vector<int64_t>> overrideStrides
+        = {{int64_t{3} * 4 * 4, int64_t{4} * 4, 4, 1}, {int64_t{3} * 4 * 4, int64_t{4} * 4, 4, 1}};
+
+    auto result = graph->execute(
+        _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
+
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
+        << "Override-execute before build_plans must reject with INVALID_VALUE: " << result.err_msg;
+    // Mirrors the wording of the non-override guard (Graph.hpp ~line 1818).
+    EXPECT_NE(result.err_msg.find("no compiled execution plan"), std::string::npos)
+        << "Diagnostic must surface the missing plan; got: " << result.err_msg;
+
+    // The override-implementing fake must NOT have been touched: the guard
+    // runs before any backend interaction.
+    const auto* record = getLastCallRecordIfLoaded(
+        hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
+        "OverrideImplementing");
+    ASSERT_NE(record, nullptr);
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE)
+        << "Plan-guard rejection must precede any backend dispatch.";
+}
+
 #endif // HIPDNN_ENABLE_SDPA

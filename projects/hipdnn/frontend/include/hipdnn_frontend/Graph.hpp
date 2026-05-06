@@ -2000,8 +2000,25 @@ private:
             // Rule 8: stride-ordering preserved (Phase 1 phrasing).
             // Element-strides imply an axis ordering by descending magnitude;
             // the override permutation must match the declared permutation.
-            if(declaredStrides.size() == stride.size() && !declaredStrides.empty())
+            // A previous size-equality guard silently no-op'd this rule when
+            // declared-strides and override-strides ranks differed; that
+            // guard has been removed so rank-mismatched declared strides are
+            // surfaced explicitly here. Rule 3 already enforces that override
+            // shape and override stride match the declared dim rank, so the
+            // only way the two stride vectors can differ in length is via a
+            // declared-stride / declared-dim rank mismatch on the tensor
+            // itself (a graph-construction issue worth diagnosing).
+            if(!declaredStrides.empty())
             {
+                if(declaredStrides.size() != stride.size())
+                {
+                    return {ErrorCode::INVALID_VALUE,
+                            "Override stride rank for UID " + std::to_string(uid)
+                                + " does not match declared stride rank: declared="
+                                + std::to_string(declaredStrides.size()) + ", override="
+                                + std::to_string(stride.size()) + " (RFC 0008 §4.2.1 rule 8)."};
+                }
+
                 std::vector<size_t> declaredOrder(declaredStrides.size());
                 std::vector<size_t> overrideOrder(stride.size());
                 std::iota(declaredOrder.begin(), declaredOrder.end(), size_t{0});
@@ -2066,6 +2083,17 @@ public:
                   const std::vector<std::vector<int64_t>>& overrideShapes,
                   const std::vector<std::vector<int64_t>>& overrideStrides) const
     {
+        // Mirror the non-override execute guard at the top of this overload so
+        // a user calling override-execute before `build_plans()` /
+        // `from_compiled_plan_binary()` gets a clean INVALID_VALUE diagnostic
+        // instead of dereferencing a null/invalid plan descriptor.
+        if(!_executionPlanDesc || !_executionPlanDesc->valid())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has no compiled execution plan. Call build() or "
+                    "from_compiled_plan_binary() first."};
+        }
+
         // C.6 — Reject "overrides without flag" before any backend interaction.
         if(!_isDynamicShapeEnabled.value_or(false))
         {
