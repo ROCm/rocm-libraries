@@ -20,7 +20,6 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-import functools
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -130,53 +129,6 @@ def active_concerns(kernel: dict, idmap: dict) -> set[ValidationConcern]:
     return active & isa_concerns
 
 
-@dataclass(frozen=True)
-class PipelineStage:
-    """Describes one loop stage in the CMS pipeline.
-
-    Replaces the hardcoded [ML-1, ML, NGL, NLL] loop list with a model
-    that generates the correct number of stages based on PGR.
-
-    PGR=1: [ML, NLL] (2 stages)
-    PGR=2: [ML-1, ML, NGL, NLL] (4 stages — same as today)
-    PGR=3: [ML-2, ML-1, ML, NGL-2, NGL-1, NLL] (6 stages)
-    """
-    name: str
-    has_global_reads: bool
-    has_global_read_incs: bool
-    has_local_reads_lr0_only: bool
-    vlcnt_shift: int
-
-
-def build_pipeline_stages(pgr: int, nglshift: int, nllshift: int) -> list[PipelineStage]:
-    """Build the pipeline stage list for a given PGR value.
-
-    Args:
-        pgr:      PrefetchGlobalRead value (1, 2, or higher)
-        nglshift: Total vlcnt shift for no-global-load stages
-        nllshift: vlcnt shift for the no-local-load stage
-    """
-    stages = []
-    # N main loop copies
-    for i in range(pgr - 1, -1, -1):
-        stages.append(PipelineStage(
-            name=f"ML-{i}" if i > 0 else "ML",
-            has_global_reads=True, has_global_read_incs=True,
-            has_local_reads_lr0_only=False, vlcnt_shift=0))
-    # N-1 NGLL drain stages
-    for k in range(pgr - 1, 0, -1):
-        shift = nglshift * (pgr - k) // (pgr - 1) if pgr > 1 else 0
-        stages.append(PipelineStage(
-            name=f"NGL-{k}" if pgr > 2 else "NGL",
-            has_global_reads=False, has_global_read_incs=False,
-            has_local_reads_lr0_only=False, vlcnt_shift=shift))
-    # NLL
-    stages.append(PipelineStage(
-        name="NLL", has_global_reads=False, has_global_read_incs=False,
-        has_local_reads_lr0_only=True, vlcnt_shift=nllshift))
-    return stages
-
-
 # Pack-related invariants live graph-side:
 #   * LR -> Pack RAW (dscnt) and Pack -> MFMA RAW: `validate_edge_wait_coverage`
 #     + `compare_graphs` over register dataflow from `_GenericALURule`.
@@ -203,10 +155,6 @@ PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
 # `Tensile/Components/ScheduleCapture.py` alongside the
 # `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` /
 # `_mfma_pack_to_cvt_gap_ok` helpers that consume them.
-
-# --- TF32 Emulation ---
-MFMAS_PER_TILE_TF32 = 3   # 3 MFMAs per tile pair in TF32 emulation
-MFMAS_PER_TILE_BF16 = 1   # 1 MFMA per tile pair in BF16
 
 # --- VGPRs ---
 VGPRS_PER_CONVERSION_GROUP = 8   # 8 VGPRs per conversion group in TF32 emulation
@@ -636,108 +584,6 @@ def detect_pack_groups(idmap_items: list) -> list[dict]:
     return groups
 
 
-# --- Register Utilities for rocisa-based dependency analysis ---
-
-def _parse_reg_name(reg_name_str: str) -> tuple[str, int]:
-    """Parse a register name string like 'ValuA_X0_I0+12' into (base_name, offset).
-
-    Returns:
-        Tuple of (base_name, offset). If no '+' offset, offset is 0.
-        E.g. 'ValuA_X0_I0+12' → ('ValuA_X0_I0', 12)
-             'ValuA_X0_I0' → ('ValuA_X0_I0', 0)
-    """
-    parts = str(reg_name_str).split('+')
-    base = parts[0]
-    offset = int(parts[1]) if len(parts) > 1 else 0
-    return base, offset
-
-
-def get_reg_range(rc) -> Optional[tuple[str, int, int]]:
-    """Extract the register identity range from a RegisterContainer.
-
-    Returns:
-        Tuple of (base_name, start_offset, end_offset_exclusive), or None if
-        the container is not a VGPR register or cannot be resolved.
-
-        For numeric registers (regIdx >= 0): base_name is the regType string,
-        start/end are the numeric indices.
-
-        For named registers (regName set): base_name is the symbolic name,
-        start/end are the offsets within that name.
-
-    Examples:
-        v[10:13] → ('v', 10, 14)
-        v[vgprValuA_X0_I0+12:+15] → ('ValuA_X0_I0', 12, 16)
-    """
-    if rc is None:
-        return None
-
-    reg_num = int(rc.regNum)
-    if reg_num <= 0:
-        return None
-
-    if rc.regIdx >= 0:
-        # Numeric register
-        return (rc.regType, rc.regIdx, rc.regIdx + reg_num)
-
-    if rc.regName is not None:
-        # Named register with symbolic name
-        base, offset = _parse_reg_name(rc.regName)
-        return (base, offset, offset + reg_num)
-
-    return None
-
-
-def reg_ranges_overlap(a: tuple[str, int, int], b: tuple[str, int, int]) -> bool:
-    """Check if two register ranges overlap.
-
-    Both ranges must have the same base name (register file) to overlap.
-    Ranges are [start, end) — half-open intervals.
-    """
-    if a[0] != b[0]:
-        return False
-    return a[1] < b[2] and b[1] < a[2]
-
-
-def get_dst_range(rocisa_inst) -> Optional[tuple[str, int, int]]:
-    """Extract the destination register range from a rocisa instruction.
-
-    Handles CommonInstruction (.dst), MFMAInstruction (.acc), and
-    CompositeInstruction (.dst) via attribute inspection.
-    """
-    # MFMAInstruction: destination is the accumulator
-    if hasattr(rocisa_inst, 'acc') and rocisa_inst.acc is not None:
-        return get_reg_range(rocisa_inst.acc)
-    # CommonInstruction and others
-    if hasattr(rocisa_inst, 'dst') and rocisa_inst.dst is not None:
-        return get_reg_range(rocisa_inst.dst)
-    return None
-
-
-def get_src_ranges(rocisa_inst) -> list[tuple[str, int, int]]:
-    """Extract all source register ranges from a rocisa instruction.
-
-    Returns a list of register ranges for all source operands that are
-    RegisterContainer objects (skips immediates and string operands).
-    """
-    ranges = []
-    if hasattr(rocisa_inst, 'srcs'):
-        for src in rocisa_inst.srcs:
-            rng = get_reg_range(src)
-            if rng is not None:
-                ranges.append(rng)
-    # MFMAInstruction: .a and .b are sources
-    if hasattr(rocisa_inst, 'a') and rocisa_inst.a is not None:
-        rng = get_reg_range(rocisa_inst.a)
-        if rng:
-            ranges.append(rng)
-    if hasattr(rocisa_inst, 'b') and rocisa_inst.b is not None:
-        rng = get_reg_range(rocisa_inst.b)
-        if rng:
-            ranges.append(rng)
-    return ranges
-
-
 def create_unified_timeline(
     schedule_info: 'ScheduleInfo',
     kernel: 'Solution',
@@ -1040,18 +886,6 @@ class Timeline:
             self.combined_timeline.extend(self._timelines[loop_name])
 
 
-def applies_only_once(func: Callable) -> Callable:
-    """Decorator: skips the function if it has already been applied to this timeline."""
-    @functools.wraps(func)
-    def wrapper(timeline: 'Timeline', *args, **kwargs):
-        if func in timeline._applied_passes:
-            return
-        result = func(timeline, *args, **kwargs)
-        timeline._applied_passes.add(func)
-        return result
-    return wrapper
-
-
 def _compute_swap_register_pairs(vw: int, total_regs: int) -> list[tuple[int, int]]:
     """Compute the (src_reg, dst_reg) pairs for each VSwapB32 instruction, in issue order.
 
@@ -1219,20 +1053,6 @@ class ValidationContext:
     @property
     def use_shadow_limit(self) -> bool:
         return self.kernel.get("Use64bShadowLimit", True)
-
-
-# Keep backward-compatible alias during transition
-ValidatorPassContext = ValidationContext
-
-
-def format_kernel_string(kernel: 'Solution') -> str:
-    """Format a human-readable description of the kernel's tile dimensions and transpose modes."""
-    mt0 = kernel.get("MacroTile0", "?")
-    mt1 = kernel.get("MacroTile1", "?")
-    du = kernel.get("DepthU", "?")
-    transA = "T" if kernel.get("TransA") else "N"
-    transB = "T" if kernel.get("TransB") else "N"
-    return f"MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
 
 
 def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple[bool, str]:
