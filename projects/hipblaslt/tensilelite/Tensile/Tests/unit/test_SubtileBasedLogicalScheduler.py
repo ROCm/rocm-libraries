@@ -124,7 +124,8 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, numPartM=1, numPartN=1,
     )
 
 
-def make_cfg_bf16(MT0=256, MT1=256, depthU=64, numPartM=1, numPartN=1):
+def make_cfg_bf16(MT0=256, MT1=256, depthU=64, numPartM=1, numPartN=1,
+                  miWaveGroup=None, sourceSwap=False):
     """Build BF16 config without scale tensors."""
     kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
     tiA = makeTileInfo('A', kernel)
@@ -855,6 +856,36 @@ class TestPlaceGRs:
             b_idx = (pi - 5) * 2
             _assert_slot_grs(parts[pi][0], ['B'], f"P{pi} s0")
             _assert_gr(parts[pi][0], 'B', 0, 2, b_idx, b_idx+1, mt=2)
+
+    def test_1x19_bf16(self):
+        """320x304, BF16, 1x19 partition, wg=[4,1]. High partition count with sourceSwap."""
+        cfg = make_cfg_bf16(320, 304, numPartM=1, numPartN=19,
+                            miWaveGroup=[4, 1], sourceSwap=True)
+        sched = LogicalScheduler(cfg)
+        sched.place_GRs()
+        parts = sched._partitions
+
+        # Collect (partition, subIterK) for each tensor/mt.
+        b_n1 = []
+        a_n2 = []
+        for pi in range(19):
+            for slot in parts[pi]:
+                for gr in slot.grs:
+                    if gr.tensor == 'B' and gr.mtIteration == 1:
+                        b_n1.append((pi, slot.subIterK))
+                    elif gr.tensor == 'A' and gr.mtIteration == 2:
+                        a_n2.append((pi, slot.subIterK))
+
+        # 18 B n+1 atoms spread across both subIterK values in P0..P13
+        assert b_n1 == [
+            (0,0),(0,1),(1,1),(2,0),(3,0),(3,1),(4,1),(5,1),(6,0),
+            (7,0),(7,1),(8,1),(9,1),(10,0),(11,0),(11,1),(12,1),(13,0)]
+        # 5 A n+2 atoms spread across both subIterK values in P14..P17
+        assert a_n2 == [(14,0),(15,0),(15,1),(16,1),(17,0)]
+
+        # B n+2 at P18
+        _assert_slot_grs(parts[18][0], ['B'], "P18 s0")
+        _assert_gr(parts[18][0], 'B', 0, 2, 0, 1, mt=2)
 
     def test_pgr1_gr_before_corresponding_lr(self):
         """PGR=1: GR(T, mt=X) must be placed strictly before first LR(T, mt=X)."""
