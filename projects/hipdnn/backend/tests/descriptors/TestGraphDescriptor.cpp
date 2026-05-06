@@ -758,3 +758,98 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
 
     verifyGraphsEquivalent(*graph1, *graph2);
 }
+
+// ============================================================================
+// RFC 0008 Phase 1: HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED
+// ============================================================================
+
+TEST_F(TestGraphDescriptor, IsDynamicShapeEnabledDefaultsToFalseWhenUnset)
+{
+    // A freshly-created descriptor that never had IS_DYNAMIC_SHAPE_ENABLED set
+    // should report false (the wire default for an absent optional bool).
+    const GraphDescriptor descriptor;
+
+    bool value = true;
+    int64_t count = 0;
+    ASSERT_NO_THROW(descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
+                                            HIPDNN_TYPE_BOOLEAN,
+                                            1,
+                                            &count,
+                                            &value));
+    EXPECT_FALSE(value);
+}
+
+TEST_F(TestGraphDescriptor, IsDynamicShapeEnabledSetGetTrueRoundTrip)
+{
+    GraphDescriptor descriptor;
+
+    bool input = true;
+    ASSERT_NO_THROW(descriptor.setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED, HIPDNN_TYPE_BOOLEAN, 1, &input));
+
+    bool output = false;
+    int64_t count = 0;
+    ASSERT_NO_THROW(descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
+                                            HIPDNN_TYPE_BOOLEAN,
+                                            1,
+                                            &count,
+                                            &output));
+    EXPECT_TRUE(output);
+}
+
+TEST_F(TestGraphDescriptor, IsDynamicShapeEnabledTrueSurvivesSerializationRoundTrip)
+{
+    // Build a valid graph, set the opt-in flag, serialize, deserialize, verify
+    // the flag is preserved as true through the flatbuffer round-trip.
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    bool input = true;
+    ASSERT_NO_THROW(original.setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED, HIPDNN_TYPE_BOOLEAN, 1, &input));
+
+    auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    ASSERT_NO_THROW(original.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                          HIPDNN_TYPE_HANDLE,
+                                          1,
+                                          static_cast<const void*>(&handle)));
+    ASSERT_NO_THROW(original.finalize());
+
+    auto serialized = original.getSerializedGraph();
+
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    bool output = false;
+    int64_t count = 0;
+    ASSERT_NO_THROW(revived.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
+                                         HIPDNN_TYPE_BOOLEAN,
+                                         1,
+                                         &count,
+                                         &output));
+    EXPECT_TRUE(output);
+}
+
+TEST_F(TestGraphDescriptor, LegacyGraphWithoutDynamicShapeFieldRoundTripsToFalse)
+{
+    // createValidGraph() does NOT set is_dynamic_shape_enabled — it produces a
+    // wire image equivalent to a legacy graph that predates this field. Verify
+    // deserialize+get reports the wire default (false) without throwing.
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    bool value = true;
+    int64_t count = 0;
+    ASSERT_NO_THROW(descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
+                                            HIPDNN_TYPE_BOOLEAN,
+                                            1,
+                                            &count,
+                                            &value));
+    EXPECT_FALSE(value);
+}

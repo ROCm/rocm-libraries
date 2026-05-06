@@ -22,3 +22,26 @@ TEST(TestVersion, PositiveVersion)
     EXPECT_GE(version.minor, 0);
     EXPECT_GE(version.patch, 0);
 }
+
+// RFC 0008 Phase 1 — applicability filter prerequisites (B.8). The
+// constant-aware tests live alongside the host's applicability filter in
+// `backend/tests/plugin/` so the plugin SDK test executable does not pull
+// in a `backend/src/` header (preserves the `plugin_sdk` → `data_sdk`
+// linkage boundary documented in `projects/hipdnn/CLAUDE.md`). Generic
+// `Version` parsing/comparison coverage stays here.
+
+TEST(TestVersion, BaselineLessThanOnePointOne)
+{
+    // Plain string-driven checks; do NOT include the backend constant
+    // header from the plugin SDK test executable.
+    const Version baseline{std::string_view{"1.0.0"}};
+    const Version onePointOne{std::string_view{"1.1.0"}};
+    EXPECT_TRUE(baseline < onePointOne);
+}
+
+TEST(TestVersion, ZeroLessThanBaseline)
+{
+    const Version zero{std::string_view{"0.0.0"}};
+    const Version baseline{std::string_view{"1.0.0"}};
+    EXPECT_TRUE(zero < baseline);
+}

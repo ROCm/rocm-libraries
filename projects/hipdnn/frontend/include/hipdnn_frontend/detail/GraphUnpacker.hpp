@@ -27,11 +27,17 @@ namespace hipdnn_frontend::detail
 /// Extracts operations and graph-level data types from a backend descriptor and
 /// rebuilds the frontend Graph representation. Tensors are shared across operations
 /// via UID-based lookup.
+///
+/// `outIsDynamicShapeEnabled` corresponds to RFC 0008 Phase 1's
+/// `HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED` graph-level boolean.
+/// It is left as `std::nullopt` when the attribute is absent (legacy graphs)
+/// or set to the recovered value otherwise.
 [[nodiscard]] inline Error
     unpackGraphDescriptor(hipdnnBackendDescriptor_t graphDesc,
                           std::vector<std::shared_ptr<graph::INode>>& outNodes,
                           graph::GraphAttributes& outGraphAttrs,
-                          std::optional<int64_t>& outPreferredEngineId)
+                          std::optional<int64_t>& outPreferredEngineId,
+                          std::optional<bool>& outIsDynamicShapeEnabled)
 {
     if(graphDesc == nullptr)
     {
@@ -122,6 +128,27 @@ namespace hipdnn_frontend::detail
         outPreferredEngineId = preferredEngineId;
     }
 
+    // Query the RFC 0008 Phase 1 dynamic-shape opt-in flag (optional).
+    // GraphDescriptor returns the wire default (false) for legacy graphs that
+    // never had the attribute set; we still surface it so callers can round-trip
+    // the flag through serialize/deserialize without losing user intent. The
+    // backend will succeed with elementCount==1 in both cases — there is no
+    // "absent" signal at this layer — so we always populate the optional when
+    // the call succeeds.
+    bool isDynamicShapeEnabled = false;
+    int64_t dynamicFlagCount = 0;
+    auto dynamicStatus
+        = hipdnnBackend()->backendGetAttribute(graphDesc,
+                                               HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
+                                               HIPDNN_TYPE_BOOLEAN,
+                                               1,
+                                               &dynamicFlagCount,
+                                               &isDynamicShapeEnabled);
+    if(dynamicStatus == HIPDNN_STATUS_SUCCESS && dynamicFlagCount > 0)
+    {
+        outIsDynamicShapeEnabled = isDynamicShapeEnabled;
+    }
+
     // Query graph name (optional, may not be set)
     std::string graphName;
     HIPDNN_CHECK_ERROR(getDescriptorAttrString(
@@ -142,7 +169,8 @@ namespace hipdnn_frontend::detail
                            hipdnnHandle_t handle,
                            std::vector<std::shared_ptr<graph::INode>>& outNodes,
                            graph::GraphAttributes& outGraphAttrs,
-                           std::optional<int64_t>& outPreferredEngineId)
+                           std::optional<int64_t>& outPreferredEngineId,
+                           std::optional<bool>& outIsDynamicShapeEnabled)
 {
     if(handle != nullptr)
     {
@@ -163,8 +191,8 @@ namespace hipdnn_frontend::detail
         }
     }
 
-    auto unpackErr
-        = unpackGraphDescriptor(graphDesc.get(), outNodes, outGraphAttrs, outPreferredEngineId);
+    auto unpackErr = unpackGraphDescriptor(
+        graphDesc.get(), outNodes, outGraphAttrs, outPreferredEngineId, outIsDynamicShapeEnabled);
     if(unpackErr.is_bad())
     {
         return std::make_pair(std::unique_ptr<ScopedHipdnnBackendDescriptor>(nullptr), unpackErr);
@@ -185,7 +213,8 @@ namespace hipdnn_frontend::detail
                               const std::vector<uint8_t>& data,
                               std::vector<std::shared_ptr<graph::INode>>& outNodes,
                               graph::GraphAttributes& outGraphAttrs,
-                              std::optional<int64_t>& outPreferredEngineId)
+                              std::optional<int64_t>& outPreferredEngineId,
+                              std::optional<bool>& outIsDynamicShapeEnabled)
 {
     ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
     if(!graphDesc.valid())
@@ -196,8 +225,12 @@ namespace hipdnn_frontend::detail
                   "Failed to create backend graph descriptor from serialized data"});
     }
 
-    return finalizeAndUnpackGraph(
-        std::move(graphDesc), handle, outNodes, outGraphAttrs, outPreferredEngineId);
+    return finalizeAndUnpackGraph(std::move(graphDesc),
+                                  handle,
+                                  outNodes,
+                                  outGraphAttrs,
+                                  outPreferredEngineId,
+                                  outIsDynamicShapeEnabled);
 }
 
 /// Deserializes a backend graph descriptor from a JSON string and unpacks it into
@@ -211,7 +244,8 @@ namespace hipdnn_frontend::detail
                                   const std::string& jsonData,
                                   std::vector<std::shared_ptr<graph::INode>>& outNodes,
                                   graph::GraphAttributes& outGraphAttrs,
-                                  std::optional<int64_t>& outPreferredEngineId)
+                                  std::optional<int64_t>& outPreferredEngineId,
+                                  std::optional<bool>& outIsDynamicShapeEnabled)
 {
     ScopedHipdnnBackendDescriptor graphDesc(jsonData.c_str(), jsonData.size());
     if(!graphDesc.valid())
@@ -221,8 +255,12 @@ namespace hipdnn_frontend::detail
                                     "Failed to create backend graph descriptor from JSON data"});
     }
 
-    return finalizeAndUnpackGraph(
-        std::move(graphDesc), handle, outNodes, outGraphAttrs, outPreferredEngineId);
+    return finalizeAndUnpackGraph(std::move(graphDesc),
+                                  handle,
+                                  outNodes,
+                                  outGraphAttrs,
+                                  outPreferredEngineId,
+                                  outIsDynamicShapeEnabled);
 }
 
 } // namespace hipdnn_frontend::detail

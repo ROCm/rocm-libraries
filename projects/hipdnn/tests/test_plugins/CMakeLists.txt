@@ -5,6 +5,10 @@ cmake_minimum_required(VERSION 3.25.2)
 
 find_package(hip REQUIRED)
 
+# Pull in the RFC 0008 Phase 1 fake-plugin target name constants
+# (Stream B → Stream C handoff per task B.6a).
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestPluginTargets.cmake")
+
 # Define plugin names as variables
 set(TEST_GOOD_PLUGIN_NAME "test_good_plugin")
 set(TEST_EXECUTE_FAILS_PLUGIN_NAME "test_execute_fails_plugin")
@@ -91,6 +95,28 @@ add_test_plugin(${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME} TestKnobConstrain
 # test_incompatible_version_plugin is a plugin that returns an incompatible plugin API version
 add_test_plugin(${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME} TestIncompatibleVersionPlugin.cpp)
 
+# RFC 0008 Phase 1 fake plugins (target names are published in
+# `cmake/TestPluginTargets.cmake` for Stream C consumption per B.6a).
+#
+# Override-implementing fake: reports `K_PHASE1_OVERRIDE_MIN_VERSION` and
+# exports the optional override-execute symbol — admitted by the version
+# filter, dispatched through the override path.
+add_test_plugin(${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET} TestOverrideImplementingPlugin.cpp)
+
+# Override-omitting fake: reports the baseline "1.0.0" — filtered out for
+# override-flag graphs, admitted for non-override graphs (binary-compat
+# regression).
+add_test_plugin(${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET} TestOverrideOmittingPlugin.cpp)
+
+# Version-liar fake: reports `K_PHASE1_OVERRIDE_MIN_VERSION` but does NOT
+# export the override symbol — exercises the dispatch-time
+# `hasOverrideExecute()` safety net.
+add_test_plugin(${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET} TestVersionLiarPlugin.cpp)
+
+# Second override-implementing fake (distinct engine id) — Test #9
+# coverage for multiple plugins serving the same override graph.
+add_test_plugin(${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET} TestSecondOverridePlugin.cpp)
+
 # Create the default plugin in test_plugins/default
 set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")
 set(test_good_default_plugin_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/default")
@@ -125,3 +151,14 @@ set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "${TEST_INCOMPATIBLE_VERSION_PLUGIN_NA
 set(TEST_GOOD_HEURISTIC_PLUGIN_NAME "${TEST_GOOD_HEURISTIC_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME "${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME "${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}" PARENT_SCOPE)
+
+# RFC 0008 Phase 1 fake-plugin target names (B.6a published constants
+# from cmake/TestPluginTargets.cmake).
+set(HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET
+    "${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET}" PARENT_SCOPE)
+set(HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET
+    "${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET}" PARENT_SCOPE)
+set(HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET
+    "${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET}" PARENT_SCOPE)
+set(HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET
+    "${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}" PARENT_SCOPE)

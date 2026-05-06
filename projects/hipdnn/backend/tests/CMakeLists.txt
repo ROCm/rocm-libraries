@@ -106,6 +106,7 @@ add_executable(
     TestHeuristicPluginResourceManager.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
+    TestEnginePluginOverride.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
     TestVersion.cpp

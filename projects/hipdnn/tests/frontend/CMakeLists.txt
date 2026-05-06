@@ -5,6 +5,17 @@ include(GoogleTest)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
+# RFC 0008 Phase 1: pull in the override-execute fake plugin target and
+# constant names published by Stream B (B.6a). Provides:
+#   HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET (target name)
+#   HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET     (target name)
+#   HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET          (target name)
+#   HIPDNN_TEST_OVERRIDE_IMPLEMENTING_FAKE_ENGINE_ID (int64_t literal)
+#   TEST_OVERRIDE_IMPLEMENTING_PLUGIN_NAME          (library name)
+#   TEST_OVERRIDE_OMITTING_PLUGIN_NAME              (library name)
+#   TEST_VERSION_LIAR_PLUGIN_NAME                   (library name)
+include(${PROJECT_SOURCE_DIR}/tests/test_plugins/cmake/TestPluginTargets.cmake)
+
 add_executable(
     hipdnn_public_frontend_tests
     main.cpp
@@ -56,6 +67,8 @@ add_executable(
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSetPluginPathsExt.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideExecute.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideValidation.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdDescriptorLowering.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdLifting.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaFwdDescriptorLifting.cpp>
@@ -70,6 +83,7 @@ target_link_libraries(
     Threads::Threads
     hipdnn_test_sdk
     hipdnn_backend
+    hipdnn_plugin_sdk
     hip::host
     ${CMAKE_DL_LIBS}
 )
@@ -89,6 +103,12 @@ target_compile_definitions(
             TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
             TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
             TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME="${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}"
+            # RFC 0008 Phase 1 fakes (published by Stream B via TestPluginTargets.cmake).
+            TEST_OVERRIDE_IMPLEMENTING_PLUGIN_NAME="${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET}"
+            TEST_OVERRIDE_OMITTING_PLUGIN_NAME="${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET}"
+            TEST_VERSION_LIAR_PLUGIN_NAME="${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET}"
+            TEST_SECOND_OVERRIDE_PLUGIN_NAME="${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}"
+            HIPDNN_TEST_OVERRIDE_IMPLEMENTING_FAKE_ENGINE_ID=${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_FAKE_ENGINE_ID}
 )
 
 # Ensure test plugins are built before tests
@@ -104,6 +124,11 @@ add_dependencies(
     test_incomplete_api_plugin
     test_knobs_plugin
     test_knob_constraint_validation_plugin
+    # RFC 0008 Phase 1 fakes (published by Stream B via TestPluginTargets.cmake).
+    ${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET}
+    ${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET}
+    ${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET}
+    ${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}
 )
 
 clang_tidy_check(hipdnn_public_frontend_tests)

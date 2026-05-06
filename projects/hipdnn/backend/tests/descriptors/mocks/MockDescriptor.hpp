@@ -185,7 +185,28 @@ public:
 
 class MockVariantDescriptor : public VariantDescriptor
 {
+private:
+    // Backing storage for default `ReturnRef` behavior on the override accessors;
+    // tests that exercise the override-aware dispatch path program their own
+    // EXPECT_CALL / ON_CALL with their own backing vectors.
+    std::vector<int64_t> _emptyOverrideStorage;
+
 public:
+    MockVariantDescriptor()
+    {
+        // Make the override accessors return references to an empty vector by
+        // default so legacy tests that don't program the override APIs continue
+        // to take the non-override dispatch path.
+        ON_CALL(*this, getOverrideUniqueIds())
+            .WillByDefault(::testing::ReturnRef(_emptyOverrideStorage));
+        ON_CALL(*this, getOverrideShapes())
+            .WillByDefault(::testing::ReturnRef(_emptyOverrideStorage));
+        ON_CALL(*this, getOverrideStrides())
+            .WillByDefault(::testing::ReturnRef(_emptyOverrideStorage));
+        ON_CALL(*this, getOverrideLengths())
+            .WillByDefault(::testing::ReturnRef(_emptyOverrideStorage));
+    }
+
     MOCK_METHOD(void, finalize, (), (override));
     MOCK_METHOD(bool, isFinalized, (), (const, override));
     MOCK_METHOD(void,
@@ -207,6 +228,11 @@ public:
     MOCK_METHOD(void*, getWorkspace, (), (const, override));
     MOCK_METHOD(const std::vector<const void*>&, getDataPointers, (), (const, override));
     MOCK_METHOD(const std::vector<int64_t>&, getTensorIds, (), (const, override));
+
+    MOCK_METHOD(const std::vector<int64_t>&, getOverrideUniqueIds, (), (const, override));
+    MOCK_METHOD(const std::vector<int64_t>&, getOverrideShapes, (), (const, override));
+    MOCK_METHOD(const std::vector<int64_t>&, getOverrideStrides, (), (const, override));
+    MOCK_METHOD(const std::vector<int64_t>&, getOverrideLengths, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()
     {

@@ -42,6 +42,9 @@ table Graph {
 	tensors: [TensorAttributes];
 	nodes: [Node];
 	preferred_engine_id: long = null;
+	// RESERVED: this position. Phase 2's per-Tensor `is_dynamic` field goes
+	// on the Tensor table, NOT on Graph; no collision risk.
+	is_dynamic_shape_enabled: bool = false;
 }
 
 root_type Graph;

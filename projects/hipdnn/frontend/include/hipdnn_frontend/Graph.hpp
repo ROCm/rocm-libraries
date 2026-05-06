@@ -65,7 +65,10 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <numeric>
+#include <unordered_set>
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -130,6 +133,31 @@
 namespace hipdnn_frontend::graph
 {
 
+#ifdef HIPDNN_ENABLE_SDPA
+/**
+ * @struct OverrideEntry
+ * @brief Per-tensor execute-time shape/stride override (RFC 0008 Phase 1).
+ *
+ * Used as the value type of the map-keyed `Graph::execute()` override
+ * overload. The map form is pure sugar over the parallel-array form
+ * (RFC 0008 §4.2): the implementation lowers it to parallel arrays
+ * BEFORE any validation runs, so both shapes share identical validation
+ * and dispatch.
+ *
+ * Both `shape` and `stride` must equal the declared rank of the named
+ * tensor; positive values only; layout permutation must match the
+ * declared element-stride argsort. See RFC 0008 §4.2.1 for the full set
+ * of rules enforced by `Graph::execute()` before any backend call.
+ */
+struct OverrideEntry
+{
+    /// Per-axis override dims for the tensor identified by the map key.
+    std::vector<int64_t> shape;
+    /// Per-axis override strides for the tensor identified by the map key.
+    std::vector<int64_t> stride;
+};
+#endif // HIPDNN_ENABLE_SDPA
+
 /**
  * @class Graph
  * @brief The main class for building and executing hipDNN computational graphs
@@ -166,6 +194,15 @@ private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _executionPlanDesc;
 
     std::optional<int64_t> _preferredEngineId;
+
+    /// RFC 0008 Phase 1 dynamic-shape opt-in. The optional distinguishes
+    /// "user explicitly set a value" (round-trips through serialize) from
+    /// "user never touched it" (omitted from the serialized form). The backend
+    /// default is `false` for legacy graphs deserialized without the field.
+    /// The PUBLIC setter/getter is `#ifdef HIPDNN_ENABLE_SDPA`-gated; the member
+    /// itself is unconditionally compiled so internal pack/unpack/lowering paths
+    /// can thread the flag through whether or not SDPA is enabled at build time.
+    std::optional<bool> _isDynamicShapeEnabled;
 
     static std::optional<int64_t> getDefaultEngineId()
     {
@@ -375,6 +412,7 @@ private:
                 toHipdnnDataType(graph_attributes.get_intermediate_data_type()),
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
+                _isDynamicShapeEnabled,
                 graph_attributes.get_name(),
                 desc));
             setGraphDesc(std::move(desc), true);
@@ -387,6 +425,7 @@ private:
                 toHipdnnDataType(graph_attributes.get_intermediate_data_type()),
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
+                _isDynamicShapeEnabled,
                 graph_attributes.get_name(),
                 desc));
             setGraphDesc(std::move(desc), false);
@@ -916,13 +955,15 @@ protected:
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
         graph::GraphAttributes tempAttrs;
         std::optional<int64_t> tempEngineId;
+        std::optional<bool> tempDynamicShapeEnabled;
 
-        HIPDNN_CHECK_ERROR(
-            detail::unpackGraphDescriptor(graphDesc, tempNodes, tempAttrs, tempEngineId));
+        HIPDNN_CHECK_ERROR(detail::unpackGraphDescriptor(
+            graphDesc, tempNodes, tempAttrs, tempEngineId, tempDynamicShapeEnabled));
 
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
+        _isDynamicShapeEnabled = tempDynamicShapeEnabled;
 
         // The frontend state has been fully replaced from the backend descriptor.
         // Any cached backend descriptors are stale and must be cleared. The caller
@@ -1286,9 +1327,10 @@ public:
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
         graph::GraphAttributes tempAttrs;
         std::optional<int64_t> tempEngineId;
+        std::optional<bool> tempDynamicShapeEnabled;
 
-        auto [graphDesc, err]
-            = detail::deserializeAndUnpackGraph(handle, data, tempNodes, tempAttrs, tempEngineId);
+        auto [graphDesc, err] = detail::deserializeAndUnpackGraph(
+            handle, data, tempNodes, tempAttrs, tempEngineId, tempDynamicShapeEnabled);
         if(err.is_bad())
         {
             return err;
@@ -1297,6 +1339,7 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
+        _isDynamicShapeEnabled = tempDynamicShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
@@ -1513,9 +1556,10 @@ public:
         std::vector<std::shared_ptr<graph::INode>> tempNodes;
         graph::GraphAttributes tempAttrs;
         std::optional<int64_t> tempEngineId;
+        std::optional<bool> tempDynamicShapeEnabled;
 
         auto [graphDesc, err] = detail::deserializeAndUnpackJsonGraph(
-            handle, jsonData, tempNodes, tempAttrs, tempEngineId);
+            handle, jsonData, tempNodes, tempAttrs, tempEngineId, tempDynamicShapeEnabled);
         if(err.is_bad())
         {
             return err;
@@ -1524,6 +1568,7 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
+        _isDynamicShapeEnabled = tempDynamicShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
@@ -1830,6 +1875,382 @@ public:
 
         return {ErrorCode::OK, ""};
     }
+
+#ifdef HIPDNN_ENABLE_SDPA
+private:
+    /**
+     * @brief RFC 0008 §4.2.1 input validation for the parallel-array
+     *        execute overload.
+     *
+     * Enforces the eight rules from RFC 0008 §4.2.1 in order. Each violation
+     * returns `{ErrorCode::INVALID_VALUE, ...}` with a rule-specific message
+     * before any backend call. The map-keyed overload lowers to the
+     * parallel-array form before calling this helper, so map-overload
+     * callers see identical errors.
+     *
+     * Note: rule 4 ("max-shape exceeded") compares ALL declared dims for
+     * Phase 1 (no wildcards yet); RFC 0008 §4.2.1 r4 carves wildcards
+     * (`-1`) out for Phase 2. The Phase-1 phrasing is intentional — when
+     * Phase 2 lands and introduces wildcards, the test suite for rule 4
+     * will exercise the new carve-out.
+     */
+    Error validateOverrideArguments(const std::vector<int64_t>& overrideUids,
+                                    const std::vector<std::vector<int64_t>>& overrideShapes,
+                                    const std::vector<std::vector<int64_t>>& overrideStrides) const
+    {
+        // Rule 1: length consistency across the three parallel arrays.
+        if(overrideUids.size() != overrideShapes.size()
+           || overrideUids.size() != overrideStrides.size())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Override arrays have inconsistent sizes: "
+                    "override_uids.size()="
+                        + std::to_string(overrideUids.size()) + ", override_shapes.size()="
+                        + std::to_string(overrideShapes.size()) + ", override_strides.size()="
+                        + std::to_string(overrideStrides.size()) + " (RFC 0008 §4.2.1 rule 1)."};
+        }
+
+        // Rule 5: duplicate UIDs in the parallel-array form.
+        {
+            std::unordered_set<int64_t> seen;
+            seen.reserve(overrideUids.size());
+            for(const auto uid : overrideUids)
+            {
+                if(!seen.insert(uid).second)
+                {
+                    return {ErrorCode::INVALID_VALUE,
+                            "Duplicate UID " + std::to_string(uid)
+                                + " in override_uids (RFC 0008 §4.2.1 rule 5)."};
+                }
+            }
+        }
+
+        // Look up declared graph tensors so rules 2/3/4/8 can check against them.
+        const auto tensorsByUid = getTensorsByUid();
+
+        for(size_t i = 0; i < overrideUids.size(); ++i)
+        {
+            const auto uid = overrideUids[i];
+            const auto& shape = overrideShapes[i];
+            const auto& stride = overrideStrides[i];
+
+            // Rule 2: unknown UID. Workspace is not a graph tensor and so is
+            // never present in this map; checking presence covers both cases.
+            const auto it = tensorsByUid.find(uid);
+            if(it == tensorsByUid.end())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "Override UID " + std::to_string(uid)
+                            + " does not identify any graph tensor "
+                              "(RFC 0008 §4.2.1 rule 2)."};
+            }
+            const auto& declaredDims = it->second->get_dim();
+            const auto& declaredStrides = it->second->get_stride();
+
+            // Rule 3: rank mismatch.
+            if(shape.size() != declaredDims.size() || stride.size() != declaredDims.size())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "Override rank mismatch for UID " + std::to_string(uid) + ": declared rank="
+                            + std::to_string(declaredDims.size()) + ", override shape rank="
+                            + std::to_string(shape.size()) + ", override stride rank="
+                            + std::to_string(stride.size()) + " (RFC 0008 §4.2.1 rule 3)."};
+            }
+
+            // Rule 6: positive dim values. Compare ALL dims (Phase 1 has no
+            // wildcards; Phase 2's `-1` sentinel will require carve-out).
+            for(size_t d = 0; d < shape.size(); ++d)
+            {
+                if(shape[d] <= 0)
+                {
+                    return {ErrorCode::INVALID_VALUE,
+                            "Override shape value for UID " + std::to_string(uid) + " axis "
+                                + std::to_string(d) + " must be positive: "
+                                + std::to_string(shape[d]) + " (RFC 0008 §4.2.1 rule 6)."};
+                }
+            }
+
+            // Rule 7: positive stride values.
+            for(size_t d = 0; d < stride.size(); ++d)
+            {
+                if(stride[d] <= 0)
+                {
+                    return {ErrorCode::INVALID_VALUE,
+                            "Override stride value for UID " + std::to_string(uid) + " axis "
+                                + std::to_string(d) + " must be positive: "
+                                + std::to_string(stride[d]) + " (RFC 0008 §4.2.1 rule 7)."};
+                }
+            }
+
+            // Rule 4: max-shape exceeded. Phase 1: ALL dims compared. Phase 2
+            // will carve out wildcards (`-1`); the Phase-1 phrasing is "all
+            // dims" so a Phase-2 change to skip wildcards trips Test #17.
+            for(size_t d = 0; d < shape.size(); ++d)
+            {
+                if(shape[d] > declaredDims[d])
+                {
+                    return {ErrorCode::INVALID_VALUE,
+                            "Override shape for UID " + std::to_string(uid) + " axis "
+                                + std::to_string(d) + " exceeds declared max: override="
+                                + std::to_string(shape[d]) + ", declared="
+                                + std::to_string(declaredDims[d]) + " (RFC 0008 §4.2.1 rule 4)."};
+                }
+            }
+
+            // Rule 8: stride-ordering preserved (Phase 1 phrasing).
+            // Element-strides imply an axis ordering by descending magnitude;
+            // the override permutation must match the declared permutation.
+            if(declaredStrides.size() == stride.size() && !declaredStrides.empty())
+            {
+                std::vector<size_t> declaredOrder(declaredStrides.size());
+                std::vector<size_t> overrideOrder(stride.size());
+                std::iota(declaredOrder.begin(), declaredOrder.end(), size_t{0});
+                std::iota(overrideOrder.begin(), overrideOrder.end(), size_t{0});
+                std::sort(declaredOrder.begin(),
+                          declaredOrder.end(),
+                          [&declaredStrides](size_t a, size_t b) {
+                              return declaredStrides[a] > declaredStrides[b];
+                          });
+                std::sort(overrideOrder.begin(),
+                          overrideOrder.end(),
+                          [&stride](size_t a, size_t b) { return stride[a] > stride[b]; });
+                if(declaredOrder != overrideOrder)
+                {
+                    return {ErrorCode::INVALID_VALUE,
+                            "Override stride permutation for UID " + std::to_string(uid)
+                                + " does not match declared element-stride argsort "
+                                  "(RFC 0008 §4.2.1 rule 8 / D4 Phase-1 phrasing)."};
+                }
+            }
+        }
+
+        return {};
+    }
+
+public:
+    /**
+     * @brief Execute the graph with execute-time per-tensor shape/stride
+     *        overrides (RFC 0008 Phase 1, parallel-array form).
+     *
+     * The graph must have opted in via `set_dynamic_shape_enabled(true)`
+     * before this overload is called. If not, the call returns
+     * `INVALID_VALUE` before any backend interaction (RFC 0008 §7.1).
+     *
+     * The three parallel arrays are positionally indexed: for each `i`,
+     * `overrideShapes[i]` and `overrideStrides[i]` describe the per-axis
+     * dims and element-strides for the tensor identified by
+     * `overrideUids[i]`. Eight validation rules from RFC 0008 §4.2.1 are
+     * enforced before any backend call; on the first violation the
+     * function returns `INVALID_VALUE` with a rule-specific message.
+     *
+     * **No-overrides short-circuit.** Calling this overload with empty
+     * vectors is equivalent to a non-override execute call: the
+     * variant-pack OVERRIDE_* attribute writes are skipped entirely so
+     * dispatch falls through to the existing engine entry (RFC 0008 §4.2
+     * final paragraph).
+     *
+     * @param handle The hipDNN handle.
+     * @param variantPack Map from tensor UID to device pointer (existing payload).
+     * @param workspace Workspace pointer (may be nullptr if size is 0).
+     * @param overrideUids Tensor UIDs whose shape/stride is being overridden.
+     * @param overrideShapes Per-tensor override dims (parallel to overrideUids).
+     * @param overrideStrides Per-tensor override element-strides (parallel to overrideUids).
+     * @return ErrorCode::OK on success; ErrorCode::INVALID_VALUE on validation
+     *         failure or "overrides without flag"; ErrorCode::HIPDNN_BACKEND_ERROR
+     *         on backend failure.
+     */
+    Error execute(hipdnnHandle_t handle,
+                  std::unordered_map<int64_t, void*>& variantPack,
+                  void* workspace,
+                  const std::vector<int64_t>& overrideUids,
+                  const std::vector<std::vector<int64_t>>& overrideShapes,
+                  const std::vector<std::vector<int64_t>>& overrideStrides) const
+    {
+        // C.6 — Reject "overrides without flag" before any backend interaction.
+        if(!_isDynamicShapeEnabled.value_or(false))
+        {
+            HIPDNN_FE_LOG_INFO("Override execute called on graph "
+                               << graph_attributes.get_name()
+                               << " without set_dynamic_shape_enabled(true); "
+                                  "rejecting per RFC 0008 §7.1.");
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph::execute override overload called on a graph that did "
+                    "not call set_dynamic_shape_enabled(true). The override flag "
+                    "must be set at build time before per-execute overrides are "
+                    "supplied (RFC 0008 §7.1)."};
+        }
+
+        // C.5 — No-overrides short-circuit. Empty parallel arrays mean the
+        // caller wants the existing entry; skip writing the OVERRIDE_*
+        // variant-pack attributes so host dispatch falls through to the
+        // non-override plugin entry.
+        if(overrideUids.empty() && overrideShapes.empty() && overrideStrides.empty())
+        {
+            HIPDNN_FE_LOG_INFO("Override execute called on graph "
+                               << graph_attributes.get_name()
+                               << " with empty override vectors; falling through to "
+                                  "non-override entry (RFC 0008 §4.2 final paragraph).");
+            return execute(handle, variantPack, workspace);
+        }
+
+        // C.4 — RFC 0008 §4.2.1 validation (8 rules) BEFORE any setAttribute call.
+        HIPDNN_CHECK_ERROR(
+            validateOverrideArguments(overrideUids, overrideShapes, overrideStrides));
+
+        HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name() << " with "
+                                              << overrideUids.size()
+                                              << " override entries (RFC 0008 Phase 1).");
+
+        auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+            HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
+        if(!variantPackDesc || !variantPackDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create variant pack descriptor."};
+        }
+
+        // Existing variant-pack payload (mirrors the non-override execute path).
+        std::vector<int64_t> variantPackKeys;
+        std::vector<void*> variantPackValues;
+        variantPackKeys.reserve(variantPack.size());
+        variantPackValues.reserve(variantPack.size());
+        for(const auto& [key, value] : variantPack)
+        {
+            variantPackKeys.push_back(key);
+            variantPackValues.push_back(value);
+        }
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             variantPackDesc->get(),
+                                             HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
+                                             HIPDNN_TYPE_VOID_PTR,
+                                             static_cast<int64_t>(variantPackValues.size()),
+                                             static_cast<const void*>(variantPackValues.data())),
+                                         "failed to set the variant pack data pointers.");
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             variantPackDesc->get(),
+                                             HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS,
+                                             HIPDNN_TYPE_INT64,
+                                             static_cast<int64_t>(variantPackKeys.size()),
+                                             variantPackKeys.data()),
+                                         "failed to set the variant pack unique ids.");
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendSetAttribute(variantPackDesc->get(),
+                                                         HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
+                                                         HIPDNN_TYPE_VOID_PTR,
+                                                         1,
+                                                         static_cast<const void*>(&workspace)),
+            "failed to set the variant pack workspace.");
+
+        // RFC 0008 §4.3 — flatten the per-tensor shape/stride vectors and
+        // publish a per-UID rank sideband. The host dispatch reconstructs
+        // the per-UID pointer array using the flat buffers + lengths.
+        std::vector<int64_t> overrideLengths;
+        overrideLengths.reserve(overrideUids.size());
+        size_t totalElements = 0;
+        for(const auto& shape : overrideShapes)
+        {
+            totalElements += shape.size();
+            overrideLengths.push_back(static_cast<int64_t>(shape.size()));
+        }
+
+        std::vector<int64_t> flatShapes;
+        std::vector<int64_t> flatStrides;
+        flatShapes.reserve(totalElements);
+        flatStrides.reserve(totalElements);
+        for(size_t i = 0; i < overrideUids.size(); ++i)
+        {
+            flatShapes.insert(flatShapes.end(), overrideShapes[i].begin(), overrideShapes[i].end());
+            flatStrides.insert(
+                flatStrides.end(), overrideStrides[i].begin(), overrideStrides[i].end());
+        }
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendSetAttribute(
+                variantPackDesc->get(),
+                HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS,
+                HIPDNN_TYPE_INT64,
+                static_cast<int64_t>(overrideUids.size()),
+                static_cast<const void*>(overrideUids.data())),
+            "failed to set HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS.");
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendSetAttribute(
+                variantPackDesc->get(),
+                HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS,
+                HIPDNN_TYPE_INT64,
+                static_cast<int64_t>(overrideLengths.size()),
+                static_cast<const void*>(overrideLengths.data())),
+            "failed to set HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS.");
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             variantPackDesc->get(),
+                                             HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES,
+                                             HIPDNN_TYPE_INT64,
+                                             static_cast<int64_t>(flatShapes.size()),
+                                             static_cast<const void*>(flatShapes.data())),
+                                         "failed to set HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES.");
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendSetAttribute(
+                variantPackDesc->get(),
+                HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES,
+                HIPDNN_TYPE_INT64,
+                static_cast<int64_t>(flatStrides.size()),
+                static_cast<const void*>(flatStrides.data())),
+            "failed to set HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES.");
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendFinalize(variantPackDesc->get()),
+            "Failed to finalize variant pack descriptor");
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendExecute(
+                handle, _executionPlanDesc->get(), variantPackDesc->get()),
+            "Execute failed.");
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /**
+     * @brief Execute the graph with execute-time per-tensor shape/stride
+     *        overrides (RFC 0008 Phase 1, map-keyed convenience overload).
+     *
+     * Pure sugar over the parallel-array overload (RFC 0008 §4.2): the map
+     * is lowered to parallel arrays before any validation runs, so identical
+     * validation, dispatch, and error messages apply. See the parallel-array
+     * overload for the full contract (flag-required, no-overrides short-circuit,
+     * eight validation rules).
+     *
+     * @param handle The hipDNN handle.
+     * @param variantPack Map from tensor UID to device pointer (existing payload).
+     * @param workspace Workspace pointer (may be nullptr if size is 0).
+     * @param overrides Map from tensor UID to per-tensor OverrideEntry.
+     * @return Same return semantics as the parallel-array overload.
+     */
+    Error execute(hipdnnHandle_t handle,
+                  std::unordered_map<int64_t, void*>& variantPack,
+                  void* workspace,
+                  const std::unordered_map<int64_t, OverrideEntry>& overrides) const
+    {
+        std::vector<int64_t> overrideUids;
+        std::vector<std::vector<int64_t>> overrideShapes;
+        std::vector<std::vector<int64_t>> overrideStrides;
+        overrideUids.reserve(overrides.size());
+        overrideShapes.reserve(overrides.size());
+        overrideStrides.reserve(overrides.size());
+        for(const auto& [uid, entry] : overrides)
+        {
+            overrideUids.push_back(uid);
+            overrideShapes.push_back(entry.shape);
+            overrideStrides.push_back(entry.stride);
+        }
+
+        return execute(
+            handle, variantPack, workspace, overrideUids, overrideShapes, overrideStrides);
+    }
+#endif // HIPDNN_ENABLE_SDPA
 
     /// @brief Get the graph name
     const std::string& get_name() const // NOLINT(readability-identifier-naming)
@@ -2984,6 +3405,51 @@ public:
         HIPDNN_FE_LOG_INFO("Engine name '" << engineName << "' mapped to ID: " << engineId);
         return *this;
     }
+
+#ifdef HIPDNN_ENABLE_SDPA
+    /**
+     * @brief Opt this graph into RFC 0008 Phase 1 execute-time tensor-shape
+     *        overrides.
+     *
+     * Setting this flag at graph construction time declares "max-shape"
+     * semantics for the per-tensor dims declared at build time: an
+     * `execute()` call may then re-supply shapes (and strides) per UID that
+     * fit within those declared dims, without rebuilding the graph.
+     *
+     * The flag round-trips through `serialize()` / `deserialize()`. Setting
+     * the flag without supplying overrides at execute time is allowed and
+     * dispatches to the existing engine entry. Supplying overrides without
+     * setting the flag is rejected at the frontend before any backend call.
+     *
+     * @param enabled True to opt the graph into override-execute semantics,
+     *                false to explicitly opt out (the wire/runtime default
+     *                if never called).
+     * @return Reference to this Graph for method chaining.
+     *
+     * @see is_dynamic_shape_enabled, execute (override overloads),
+     *      RFC 0008 §4.1, §4.2
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    Graph& set_dynamic_shape_enabled(bool enabled)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        _isDynamicShapeEnabled = enabled;
+        return *this;
+    }
+
+    /**
+     * @brief Whether this graph has opted into RFC 0008 Phase 1 execute-time
+     *        tensor-shape overrides.
+     * @return The user-set value (true/false), or false if `set_dynamic_shape_enabled`
+     *         was never called (matching the wire default for legacy graphs).
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    bool is_dynamic_shape_enabled() const
+    // NOLINTEND(readability-identifier-naming)
+    {
+        return _isDynamicShapeEnabled.value_or(false);
+    }
+#endif // HIPDNN_ENABLE_SDPA
 
     /**
      * @brief Create a new tensor with similar properties to an existing tensor

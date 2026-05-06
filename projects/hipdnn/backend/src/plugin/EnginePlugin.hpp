@@ -67,6 +67,43 @@ public:
                                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                 uint32_t numDeviceBuffers) const;
 
+    /**
+     * @brief Reports whether this plugin exports the optional override-execute
+     *        symbol (`hipdnnEnginePluginExecuteOpGraphWithOverrides`).
+     *
+     * Plugins that do not export the symbol are filtered out for graphs that
+     * opt in to RFC 0008 Phase 1 dynamic shapes. Per RFC 0008 §4.6, even
+     * when a plugin reports a recent-enough API version, callers must check
+     * this predicate before attempting to dispatch through the override
+     * path so that a version-liar plugin yields a clean
+     * `HIPDNN_STATUS_NOT_SUPPORTED` rather than a missing-symbol crash.
+     */
+    virtual bool hasOverrideExecute() const;
+
+    /**
+     * @brief Override-aware execute dispatch (RFC 0008 Phase 1).
+     *
+     * Wraps the optional `hipdnnEnginePluginExecuteOpGraphWithOverrides`
+     * symbol. Callers must guard with `hasOverrideExecute()`; invoking this
+     * method on a plugin that did not export the symbol throws
+     * `HIPDNN_STATUS_NOT_SUPPORTED`.
+     *
+     * Pointer-lifetime contract: all override pointers (and the inner
+     * per-tensor shape/stride buffers reachable through them) must remain
+     * valid for the duration of the call. The plugin is forbidden from
+     * retaining any of them. See RFC 0008 §4.6.
+     */
+    virtual void executeOpGraphWithOverrides(hipdnnEnginePluginHandle_t handle,
+                                             hipdnnEnginePluginExecutionContext_t executionContext,
+                                             void* workspace,
+                                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                             uint32_t numDeviceBuffers,
+                                             uint32_t numOverrides,
+                                             const int64_t* overrideUniqueIds,
+                                             const uint32_t* overrideLengths,
+                                             const int64_t* const* overrideShapes,
+                                             const int64_t* const* overrideStrides) const;
+
     // Cleanup functions (called in reverse order)
     virtual void
         destroyExecutionContext(hipdnnEnginePluginHandle_t handle,
@@ -128,6 +165,20 @@ private:
                                                 void*,
                                                 const hipdnnPluginDeviceBuffer_t*,
                                                 uint32_t);
+
+    // Optional override-execute symbol (RFC 0008 Phase 1). Resolved via
+    // tryAssignSymbol; nullptr when the plugin does not export it.
+    hipdnnPluginStatus_t (*_funcExecuteOpGraphWithOverrides)(hipdnnEnginePluginHandle_t,
+                                                             hipdnnEnginePluginExecutionContext_t,
+                                                             void*,
+                                                             const hipdnnPluginDeviceBuffer_t*,
+                                                             uint32_t,
+                                                             uint32_t,
+                                                             const int64_t*,
+                                                             const uint32_t*,
+                                                             const int64_t* const*,
+                                                             const int64_t* const*)
+        = nullptr;
 
     friend class PluginManagerBase<EnginePlugin>;
 };

@@ -302,6 +302,75 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
                                      const hipdnnPluginDeviceBuffer_t* device_buffers,
                                      uint32_t num_device_buffers);
 
+/**
+ * @brief Optional override-aware execute entry point (RFC 0008 Phase 1).
+ *
+ * Plugins that support per-execute tensor-shape overrides export this symbol
+ * in addition to `hipdnnEnginePluginExecuteOpGraph`. Plugins that do not
+ * support overrides simply omit this symbol from their dynamic library; the
+ * host treats absence as "not supported" and either filters the plugin out
+ * during applicability (when the graph opts in to dynamic shapes) or, as a
+ * dispatch-time safety net, returns `HIPDNN_STATUS_NOT_SUPPORTED`.
+ *
+ * @param[in] handle             The engine plugin handle.
+ * @param[in] execution_context  Execution context produced for this engine
+ *                               configuration.
+ * @param[in] workspace          User-provided workspace memory; may be NULL
+ *                               when the workspace size is zero.
+ * @param[in] device_buffers     Tensor unique-id-keyed device pointer table
+ *                               (same layout as the existing execute entry).
+ * @param[in] num_device_buffers Number of entries in `device_buffers`.
+ * @param[in] num_overrides      Number of tensor unique-ids in the override
+ *                               selectors. May be zero, in which case the
+ *                               override pointer arrays are unused and the
+ *                               call is observably equivalent to the existing
+ *                               execute entry.
+ * @param[in] override_unique_ids Pointer to an array of length `num_overrides`
+ *                                identifying which graph tensors carry an
+ *                                override. Each unique id must also appear in
+ *                                `device_buffers`.
+ * @param[in] override_lengths   Pointer to an array of length `num_overrides`
+ *                                holding the rank (number of dimensions) of
+ *                                each override tensor's shape and stride
+ *                                vectors.
+ * @param[in] override_shapes    Pointer to an array of length `num_overrides`
+ *                                where the i-th entry points to a buffer of
+ *                                `override_lengths[i]` int64 values: the
+ *                                runtime shape for the i-th override tensor.
+ * @param[in] override_strides   Pointer to an array of length `num_overrides`
+ *                                where the i-th entry points to a buffer of
+ *                                `override_lengths[i]` int64 values: the
+ *                                runtime strides for the i-th override tensor.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the
+ *         operation.
+ *
+ * @note **Pointer-lifetime invariant.** All pointers passed via
+ *       `override_unique_ids`, `override_lengths`, `override_shapes`,
+ *       `override_strides`, and the inner per-tensor buffers reachable
+ *       through them are owned by the host and are valid only for the
+ *       duration of this call. Plugins must not retain any of these
+ *       pointers past return; copy any data that must outlive the call.
+ *       This matches the lifetime of `device_buffers` for the existing
+ *       execute entry. See RFC 0008 §4.6.
+ *
+ * @note This symbol is OPTIONAL. The host resolves it via dlsym; missing
+ *       symbols are not an error and are equivalent to the plugin opting
+ *       out of override support.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginExecuteOpGraphWithOverrides(
+        hipdnnEnginePluginHandle_t handle,
+        hipdnnEnginePluginExecutionContext_t execution_context,
+        void* workspace,
+        const hipdnnPluginDeviceBuffer_t* device_buffers,
+        uint32_t num_device_buffers,
+        uint32_t num_overrides,
+        const int64_t* override_unique_ids,
+        const uint32_t* override_lengths,
+        const int64_t* const* override_shapes,
+        const int64_t* const* override_strides);
+
 /** @} */ // End of EnginePluginFunctions group
 
 #ifdef __cplusplus
