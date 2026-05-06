@@ -63,13 +63,13 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_NLL,
     FourPartCapture,
     LoopBodyCapture,
-    compare_graphs,
     validate_edge_wait_coverage,
 )
 from Tensile.Components.CMSValidator import (
     DataflowGraph,
     Failure,
     build_dataflow_graph,
+    compare_graphs,
 )
 
 from dataflow_fixtures import make_capture, make_mfma

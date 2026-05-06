@@ -47,8 +47,10 @@ from Tensile.Components.ScheduleCapture import (
     SchedulePosition,
     BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL,
     BODY_LABEL_TO_LOOP_INDEX,
+    CaptureConsistencyError,
     CaptureEmptyBodyError,
     CaptureUnknownInstructionError,
+    UnexplainedMissingEdgeError,
     MemoryRegion,
     make_position,
     _canonical_render,
@@ -2194,6 +2196,425 @@ def _body_for_node(graph: "DataflowGraph", node: NodeLike) -> Optional["LoopBody
     return graph.captures.get(label)
 
 
+# =============================================================================
+# Cross-graph comparison: compare_graphs + diagnose_missing_edge
+# =============================================================================
+# compare_graphs takes the default-side (reference) and CMS-side (subject)
+# DataflowGraphs and emits Failure objects for every reference edge missing
+# from the subject graph, routed through diagnose_missing_edge.
+#
+# diagnose_missing_edge classifies a single missing edge into one of:
+#   OrderInvertedFailure, MissingWaitFailure, WaitInsufficientFailure,
+#   MissingBarrierFailure, OverriddenInputFailure, TimingTooCloseFailure.
+
+
+def compare_graphs(
+    reference: DataflowGraph,
+    subject: DataflowGraph,
+    *,
+    raise_on_unexplained: bool = True,
+) -> List["Failure"]:
+    """Compare two dataflow graphs as edge sets keyed on
+    (producer.identity, consumer.identity, register, edge_kind).
+
+    Returns a list of Failure objects — one or more per missing edge,
+    routed through diagnose_missing_edge.
+
+    Raises CaptureConsistencyError BEFORE comparison if the two graphs'
+    DATA-FLOW node identity sets differ — a capture-pipeline bug, not a
+    CMS schedule defect.
+
+    `raise_on_unexplained` propagates to diagnose_missing_edge — soft mode
+    (False) is intended for production observability so unclassified
+    misses don't crash the build.
+    """
+    # Identity-coverage check at entry, restricted to DATA-FLOW nodes
+    # (LR/LW/GR/MFMA). CMS legitimately adds/removes scheduling control
+    # flow (SWait, SBarrier, SNop) — those identity differences are NOT
+    # capture-pipeline bugs. The check guards against the only true
+    # capture-pipeline failure mode: a producer or consumer present in
+    # one capture but missing from the other.
+    _DATA_FLOW_KINDS = ("LR", "LW", "GR", "MFMA")
+
+    def _data_flow_ids(graph):
+        return {k for k in graph.nodes.keys() if k and k[0] in _DATA_FLOW_KINDS}
+
+    ref_ids = _data_flow_ids(reference)
+    subj_ids = _data_flow_ids(subject)
+    if ref_ids != subj_ids:
+        only_ref = ref_ids - subj_ids
+        only_subj = subj_ids - ref_ids
+        # Categorize the diff by class_tag (LR/LW/GR/MFMA) to make the
+        # error actionable. The full identity tuple list is too long for
+        # a single error string when 16+ identities differ.
+        def _summary_by_class(ids):
+            counts = {}
+            for ident in ids:
+                cls_tag = ident[0] if ident else "?"
+                counts[cls_tag] = counts.get(cls_tag, 0) + 1
+            return counts
+        msg_parts = []
+        if only_ref:
+            counts = _summary_by_class(only_ref)
+            msg_parts.append(
+                f"in reference but not subject: {len(only_ref)} identities "
+                f"({counts}); first 3: {sorted(only_ref)[:3]}"
+            )
+        if only_subj:
+            counts = _summary_by_class(only_subj)
+            msg_parts.append(
+                f"in subject but not reference: {len(only_subj)} identities "
+                f"({counts}); first 3: {sorted(only_subj)[:3]}"
+            )
+        raise CaptureConsistencyError(
+            "compare_graphs: data-flow node identity sets differ. "
+            + "; ".join(msg_parts)
+        )
+
+    ref_keys = reference.edge_keys()
+    subj_keys = subject.edge_keys()
+    missing_keys = ref_keys - subj_keys
+
+    # Map missing keys back to reference edge objects for diagnosis.
+    failures = []
+    ref_edges_by_key = {
+        (e.producer.identity, e.consumer.identity, e.resource, e.edge_kind): e
+        for e in reference.edges
+    }
+    for key in missing_keys:
+        ref_edge = ref_edges_by_key[key]
+        failures.extend(diagnose_missing_edge(
+            ref_edge, subject, raise_on_unexplained=raise_on_unexplained,
+        ))
+    return failures
+
+
+def diagnose_missing_edge(
+    ref_edge: DataflowEdge,
+    subj_graph: DataflowGraph,
+    *,
+    raise_on_unexplained: bool = True,
+) -> List["Failure"]:
+    """Classify why a reference edge is absent from the CMS subject graph.
+
+    See plan §"Comparison and diagnosis" for the phased classifier:
+      Phase 0: identity lookup (gating — missing nodes raise).
+      Phase 1: OrderInvertedFailure (same-body only — gating for Phase 2).
+      Phase 2: MissingWaitFailure / WaitInsufficientFailure (mutually
+               exclusive); plus MissingBarrierFailure when a wait covers
+               but no barrier sits in the post-wait window (LDS-reuse
+               edges only). MissingWaitFailure carries
+               `nearby_other_counter_waits` populated when SWaitCnts on
+               other counters sit in the window — replaces the former
+               WaitOnWrongCounterFailure.
+
+    `raise_on_unexplained=True` (default) raises UnexplainedMissingEdgeError
+    when the classifier reaches a fall-through — used in unit tests to
+    catch classifier regressions. `raise_on_unexplained=False` is used
+    by production observability paths that prefer a soft Failure return
+    over a hard exception.
+    """
+    p_id = ref_edge.producer.identity
+    c_id = ref_edge.consumer.identity
+    p_node = subj_graph.nodes.get(p_id)
+    c_node = subj_graph.nodes.get(c_id)
+
+    # Phase 0 — gating. Missing nodes: raise (not assert; survive python -O).
+    if p_node is None or c_node is None:
+        raise CaptureConsistencyError(
+            f"diagnose_missing_edge invoked with missing node — "
+            f"identity-coverage check at compare_graphs entry was bypassed. "
+            f"p_id={p_id} (found={p_node is not None}), "
+            f"c_id={c_id} (found={c_node is not None})."
+        )
+
+    # Phase 1 — gating: order check, default schedule as canonical reference.
+    # The default schedule IS the canonical order. If default emitted the
+    # producer before the consumer and subject emitted them in the opposite
+    # relative order, the subject reordered a real dataflow dependency past
+    # its producer. Cross-body edges are skipped (different stream-position
+    # spaces — can't compare directly).
+    ref_p = ref_edge.producer
+    ref_c = ref_edge.consumer
+    if p_node.body_label == c_node.body_label:
+        default_p_before_c = ref_p.position < ref_c.position
+        subj_p_before_c = p_node.position < c_node.position
+        if default_p_before_c and not subj_p_before_c:
+            # Cross-subiter ALU-producer edges are a known false-positive
+            # source: a PackA3 (subiter 3) writes a symbolic vgpr that an
+            # earlier-subiter MFMA reads under the same symbolic name. The
+            # default schedule emits all Packs before all MFMAs (linear
+            # within-body); CMS pipelines so subiter-N+1's Pack issues after
+            # subiter-N's MFMA — the order inversion across subiters is
+            # legitimate pipelining, not a real reorder of a same-subiter
+            # dependency. Mirrors the same-subiter gate
+            # _classify_edge_coverage uses in within-graph mode.
+            nmps = subj_graph.num_mfma_per_subiter
+            if (_is_alu_producer(p_node)
+                    and _node_subiter(p_node, nmps)
+                        != _node_subiter(c_node, nmps)):
+                return []  # cross-subiter pipelined dependency — legitimate
+            return [OrderInvertedFailure(
+                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
+                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
+                iter_delta=_cms_iter_delta(p_node, c_node),
+                default_producer_position=ref_p.position,
+                default_consumer_position=ref_c.position,
+            )]
+        if default_p_before_c and subj_p_before_c:
+            # Order preserved — fall through to wait/barrier coverage checks.
+            pass
+        # default has producer at-or-after consumer (e.g., kind_rank-induced
+        # edge from default's resolver). Don't flag — subj's order can't be
+        # judged against an artifactual default ordering. Falls through to
+        # Phase 2 wait coverage if applicable.
+
+    # SCC-typed missing edge: if the reference edge's resource is the SCC
+    # sentinel and Phase-1's order check passed, the most likely cause is
+    # a CLOBBER — an unrelated SCC writer issued between the producer and
+    # consumer in the subject schedule, displacing the producer's SCC
+    # value. Find that intervening writer in the subject graph (the new
+    # SCC producer the consumer pairs with) and emit a typed
+    # OverriddenInputFailure carrying the producer/consumer/clobber triple.
+    #
+    # If no intervening SCC writer exists in the subject graph (e.g. the
+    # consumer simply lost its SCC edge to the producer for an unrelated
+    # reason), fall through to the ALU-producer early-return below — the
+    # missing edge is a non-clobber phenomenon that this branch can't
+    # classify, and a soft return matches the prior behavior for
+    # ALU-immediate producers.
+    ref_resource = ref_edge.resource
+    if getattr(ref_resource, "regType", None) == "scc":
+        # Same-body only. SCC is a single-bit hw status register that is
+        # NOT preserved across loop iterations by any compiler convention,
+        # so a cross-body SCC edge in the default graph is an aliasing
+        # artifact of the per-byte latest-writer resolver running over the
+        # SCC sentinel — not a real dataflow dependency. Suppress to
+        # avoid false-positive failures on cross-body SCC handoffs.
+        if p_node.body_label != c_node.body_label:
+            return []
+        intervening_writer = None
+        for e in subj_graph.edges:
+            if (e.consumer.identity == c_id
+                    and getattr(e.resource, "regType", None) == "scc"
+                    and e.producer.identity != p_id):
+                intervening_writer = e.producer
+                break
+        if intervening_writer is not None:
+            return [OverriddenInputFailure(
+                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
+                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
+                iter_delta=_cms_iter_delta(p_node, c_node),
+                resource="SCC",
+                intervening_writer=cms_node_label(
+                    intervening_writer,
+                    _body_for_node(subj_graph, intervening_writer),
+                ),
+            )]
+        # No intervening SCC writer found — the consumer's SCC slot is
+        # simply unsourced in subj. Fall through to the generic ALU early
+        # return so we don't double-emit on a non-clobber miss.
+
+    # 4x4 PackMFMA-as-producer feeding CVTPack-as-consumer: 5-quad-cycle
+    # settle window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1`).
+    # Must run BEFORE the generic `_is_mfma_producer` branch below:
+    # `_is_mfma_producer` claims PackMFMA producers and would otherwise
+    # route this pair through `_quad_cycle_gap_ok`, which uses
+    # `_mfma_finish_cycles_for(producer) == 1` for 4x4 PackMFMAs — too
+    # weak by 4 quad-cycles versus the 5-cycle CVT1 visibility window.
+    # The structural-side mirror (`_handle_min_pack_quad_cycles` /
+    # `MFMAPack.min_quad_cycles_before_result_used`) was removed; this
+    # dispatch is now the only enforcement path.
+    if (_is_mfma_pack_producer(p_node)
+            and _is_cvt_pack_producer(c_node)):
+        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+            p_node, c_node, subj_graph)
+        if not ok:
+            return [TimingTooCloseFailure(
+                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
+                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
+                iter_delta=_cms_iter_delta(p_node, c_node),
+                expected_quad_cycles=expected,
+                actual_quad_cycles=actual,
+            )]
+        return []
+
+    # MFMA-as-producer: governed by quad-cycle issue-timing constraints,
+    # not by the dscnt/vlcnt FIFO. An explicit gap check fires; an MFMA
+    # producer whose consumer fires too soon after it is a TimingTooClose
+    # violation. Dispatch is via `_is_mfma_producer` (rather than `category
+    # == "MFMA"`) so 4x4 PackMFMAs (categorized Pack* but syntactically
+    # MFMAInstruction) are routed here BEFORE the ALU exemption claims
+    # them.
+    if _is_mfma_producer(p_node):
+        nmps = subj_graph.num_mfma_per_subiter
+        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
+        if not ok:
+            return [TimingTooCloseFailure(
+                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
+                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
+                iter_delta=_cms_iter_delta(p_node, c_node),
+                expected_quad_cycles=expected,
+                actual_quad_cycles=actual,
+            )]
+        return []
+
+    # CVTPack-as-producer feeding MFMA-as-consumer: 2-quad-cycle settle
+    # window (CDNA 4 ISA 7.6, `_QUAD_CYCLES_CVT_BEFORE_MFMA`). The
+    # structural-side mirror was removed; this dispatch is now the only
+    # enforcement path. Must precede the ALU-immediate exemption below
+    # (same dispatch-order constraint as the MFMA branch above) so
+    # CVTPacks don't get silently waved through. Non-MFMA consumers fall
+    # through to the ALU exemption — only the CVT->MFMA edge carries the
+    # quad-cycle constraint.
+    if _is_cvt_pack_producer(p_node) and _is_mfma_producer(c_node):
+        ok, expected, actual = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
+        if not ok:
+            return [TimingTooCloseFailure(
+                producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
+                consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
+                iter_delta=_cms_iter_delta(p_node, c_node),
+                expected_quad_cycles=expected,
+                actual_quad_cycles=actual,
+            )]
+        return []
+
+    # ALU-as-producer (scalar/vector ALU, GRInc, m0 setters): result is
+    # immediately visible to the next issued instruction; no SWaitCnt drain
+    # applies. Phase 1 already classified any order inversion; nothing else
+    # to verify.
+    if _is_alu_producer(p_node):
+        return []
+
+    # Phase 2 — independent checks. Run all; collect failures.
+    # All wait/barrier helpers walk subj_graph cross-body: producer in
+    # body=ML-1 with consumer in body=ML must see the FIFO state from
+    # body=ML-1 forward. Passing only the consumer's body capture would
+    # exclude the producer from the simulated queue and mis-classify
+    # cross-body edges.
+    failures: list = []
+
+    # Determine the counter that the producer requires.
+    expected_counter = counter_for(p_node)
+
+    # Look at SWaits in the window between producer.position and consumer.position.
+    waits = waits_in_window(subj_graph, p_node.position, c_node.position,
+                            counter=expected_counter)
+    waits_other = waits_in_window(subj_graph, p_node.position, c_node.position,
+                                  exclude_counter=expected_counter)
+
+    wait_failure_emitted = False
+
+    p_label = cms_node_label(p_node, _body_for_node(subj_graph, p_node))
+    c_label = cms_node_label(c_node, _body_for_node(subj_graph, c_node))
+    iter_delta = _cms_iter_delta(p_node, c_node)
+
+    if not waits:
+        # No SWait on the expected counter at all in the window. If other-
+        # counter SWaits exist, surface their vmfma indices via
+        # `nearby_wait_indices` so the user can extend one of them rather
+        # than insert a new SWaitCnt; the underlying fix is the same either
+        # way.
+        nearby_indices = tuple(_node_position(w).vmfma_index for w in waits_other)
+        failures.append(MissingWaitFailure(
+            producer=p_label,
+            consumer=c_label,
+            iter_delta=iter_delta,
+            counter_kind=expected_counter,
+            nearby_wait_indices=nearby_indices,
+        ))
+        wait_failure_emitted = True
+    else:
+        # At least one wait on the right counter. Check if any drains the producer.
+        if not _any_drains(waits, p_node, subj_graph):
+            insufficient = _first_insufficient(waits, p_node, subj_graph)
+            if insufficient is not None:
+                # Compute queue depth at the wait's position for diagnostic.
+                depth = _queue_depth_at(insufficient, p_node, subj_graph)
+                cv = _swait_drains(insufficient, expected_counter)
+                pos = _producer_queue_position(p_node, subj_graph)
+                failures.append(WaitInsufficientFailure(
+                    producer=p_label,
+                    consumer=c_label,
+                    iter_delta=iter_delta,
+                    wait_idx=_node_position(insufficient).vmfma_index,
+                    counter_kind=expected_counter,
+                    counter_value=cv if cv is not None else 0,
+                    queue_depth_at_wait=depth,
+                    producer_position=pos,
+                ))
+                wait_failure_emitted = True
+            else:
+                # waits exist on the right counter but none drains the producer.
+                # Treat as MissingWait — every wait fired before the producer
+                # entered the queue (or the producer is positioned after every
+                # wait we found).
+                failures.append(MissingWaitFailure(
+                    producer=p_label,
+                    consumer=c_label,
+                    iter_delta=iter_delta,
+                    counter_kind=expected_counter,
+                ))
+                wait_failure_emitted = True
+
+    # Barrier check is meaningful ONLY when a covering wait actually drains
+    # the producer. If wait_failure_emitted, suppress MissingBarrier — the
+    # user's wait fix will cascade-restore barrier semantics on the next build.
+    if (ref_edge.edge_kind in ("lr_to_gr_lds_reuse", "gr_to_lr_lds_reuse")
+            and not wait_failure_emitted):
+        last_drain = _last_drain(waits, p_node, subj_graph)
+        if last_drain is not None:
+            barriers = barriers_in_window(subj_graph,
+                                          start=last_drain.position,
+                                          end=c_node.position)
+            if not barriers:
+                role = ("must_start_after"
+                        if ref_edge.edge_kind == "lr_to_gr_lds_reuse"
+                        else "needed_by")
+                failures.append(MissingBarrierFailure(
+                    producer=p_label,
+                    consumer=c_label,
+                    iter_delta=iter_delta,
+                    role=role,
+                    wait_idx=_node_position(last_drain).vmfma_index,
+                ))
+
+    if not failures:
+        # Cross-body edges where waits exist that DO drain the producer:
+        # this is a loop-carried dataflow handoff — the captured stream
+        # has the producer at body N's end, the consumer at body N+1's
+        # start, and the SWaitCnt that bridges them drains the producer's
+        # counter. The edge is "missing" from subj only because the
+        # symbolic register name is reused across iterations and the
+        # subj graph paired this consumer with a different (closer)
+        # producer. No real classifier bug; suppress.
+        if (p_node.body_label != c_node.body_label
+                and waits and _any_drains(waits, p_node, subj_graph)):
+            return []
+
+        # Couldn't classify — capture pipeline bug or classifier bug.
+        msg = (
+            f"diagnose_missing_edge could not classify missing edge "
+            f"{p_id} -> {c_id} (kind={ref_edge.edge_kind}). "
+            f"This indicates either a classifier bug or a capture-pipeline "
+            f"bug that bypassed earlier sanity checks."
+        )
+        if raise_on_unexplained:
+            raise UnexplainedMissingEdgeError(msg)
+        # Soft-mode: return a synthetic Failure so production observability
+        # logs the issue without crashing the build. (The historic
+        # `.with_legacy_msg(...)` chained call referenced a setter that
+        # was planned but never implemented; the bare MissingWaitFailure
+        # carries enough info to be actionable.)
+        return [MissingWaitFailure(
+            producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
+            consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
+            iter_delta=_cms_iter_delta(p_node, c_node),
+            counter_kind="unknown",
+        )]
+    return failures
+
+
 @dataclass
 class ValidatorInstruction(ABC):
     """Abstract base for all validator instructions."""
@@ -3115,9 +3536,11 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
     # this kernel was scheduled). Validates the CMS schedule against the
     # default via dataflow-graph equality + per-edge wait-coverage.
     if context.default_capture is not None and context.cms_capture is not None:
-        from Tensile.Components.ScheduleCapture import (
-            build_dataflow_graph, compare_graphs, validate_edge_wait_coverage,
-        )
+        # br4.7 moved build_dataflow_graph; br4.8 moved compare_graphs into
+        # this module. validate_edge_wait_coverage still lives in
+        # ScheduleCapture (br4.9 territory) — pulled in lazily to avoid the
+        # remaining cycle.
+        from Tensile.Components.ScheduleCapture import validate_edge_wait_coverage
         # Attach the per-arch quad-cycle profile derived from this kernel's
         # ISA tuple so the four pair-specific gap helpers consult arch-
         # appropriate finish-cycle / settle-window values. Unknown ISAs

@@ -37,8 +37,6 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML_PREV,
     BODY_LABEL_NGL,
     BODY_LABEL_NLL,
-    compare_graphs,
-    diagnose_missing_edge,
     validate_edge_wait_coverage,
     CaptureConsistencyError,
     UnexplainedMissingEdgeError,
@@ -49,6 +47,8 @@ from Tensile.Components.CMSValidator import (
     WaitInsufficientFailure,
     MissingBarrierFailure,
     build_dataflow_graph,
+    compare_graphs,
+    diagnose_missing_edge,
 )
 
 from dataflow_fixtures import (

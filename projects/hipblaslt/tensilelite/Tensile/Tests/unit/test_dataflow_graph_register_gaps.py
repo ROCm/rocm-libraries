@@ -76,8 +76,6 @@ from Tensile.Components.ScheduleCapture import (
     SlotKey,
     TaggedInstruction,
     WrappedInstruction,
-    compare_graphs,
-    diagnose_missing_edge,
     validate_edge_wait_coverage,
 )
 from Tensile.Components.CMSValidator import (
@@ -88,6 +86,8 @@ from Tensile.Components.CMSValidator import (
     _cvt_to_mfma_gap_ok,
     _mfma_pack_to_cvt_gap_ok,
     build_dataflow_graph,
+    compare_graphs,
+    diagnose_missing_edge,
 )
 
 from dataflow_fixtures import (
