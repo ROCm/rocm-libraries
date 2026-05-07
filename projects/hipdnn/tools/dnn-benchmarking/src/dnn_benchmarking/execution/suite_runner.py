@@ -333,6 +333,7 @@ def run_graph_all_providers(
         graph_name=graph_name,
         graph_path=str(graph_path),
         results=pe_results,
+        engine_ids=engine_ids,
     )
 
 

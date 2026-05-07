@@ -11,7 +11,7 @@ statistics and correctness data. Error entries carry status + message only.
 import json
 import socket
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, NamedTuple, Optional
@@ -128,18 +128,6 @@ class ProviderEngineResult:
                 f"Must be one of: {self._VALID_STATUSES}"
             )
 
-    def is_no_engine_result(self) -> bool:
-        """True when this result represents a no-engine-available outcome."""
-        if self.provider != "unknown":
-            return False
-        if self.status == "skipped":
-            return True
-        return (
-            self.status == "error"
-            and self.error_message is not None
-            and "engine" in self.error_message.lower()
-        )
-
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.
 
@@ -200,10 +188,11 @@ class GraphResult:
     graph_name: str
     graph_path: str
     results: List[ProviderEngineResult]
+    engine_ids: List[int] = field(default_factory=list)
 
     def is_no_engine_graph(self) -> bool:
         """True when this graph result represents a no-engine outcome."""
-        return len(self.results) == 1 and self.results[0].is_no_engine_result()
+        return len(self.engine_ids) == 0
 
     def count_by_status(self) -> StatusCounts:
         """Bucket results into pass/fail/skip/error counts.
