@@ -1,0 +1,31 @@
+name: "pip install + pytest"
+description: "Build a Python package with pip install and run pytest in an isolated venv"
+
+inputs:
+  package_path:
+    description: "Path to the Python package (e.g. shared/stinkytofu)"
+    required: true
+  test_path:
+    description: "Pytest target directory relative to package_path (e.g. test/ or python_module/tests/)"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: pip install and pytest
+      shell: bash
+      env:
+        CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
+        CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
+      run: |
+        VENV_DIR=$(mktemp -d)
+        python3 -m venv "$VENV_DIR"
+        if [ -f "$VENV_DIR/bin/activate" ]; then
+          source "$VENV_DIR/bin/activate"
+        else
+          source "$VENV_DIR/Scripts/activate"
+        fi
+        pip install ${{ inputs.package_path }}
+        pytest ${{ inputs.package_path }}/${{ inputs.test_path }}
+        deactivate
+        rm -rf "$VENV_DIR"
