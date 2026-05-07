@@ -235,6 +235,10 @@ if("hipdnn-samples" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 # --- Projects not yet configured for superbuild ---
+if("tensile" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    message(FATAL_ERROR "tensile is not yet supported in the superbuild")
+endif()
+
 if("rocsparse" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "rocsparse is not yet supported in the superbuild")
 endif()
