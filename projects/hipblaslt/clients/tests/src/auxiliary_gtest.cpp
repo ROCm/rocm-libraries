@@ -113,6 +113,8 @@ namespace
                 testing_aux_tuple_helper_equal_func(arg);
             else if(!strcmp(arg.function, "aux_rocblaslt_rocroller_host_func"))
                 testing_aux_rocblaslt_rocroller_host_func(arg);
+            else if(!strcmp(arg.function, "aux_check_numerics_func"))
+                testing_aux_check_numerics_func(arg);
 #endif
             else if(!strcmp(arg.function, "aux_mat_copy"))
                 testing_aux_mat_copy(arg);
@@ -168,6 +170,7 @@ namespace
                    || !strcmp(arg.function, "aux_tensile_host_func")
                    || !strcmp(arg.function, "aux_tuple_helper_equal_func")
                    || !strcmp(arg.function, "aux_rocblaslt_rocroller_host_func")
+                   || !strcmp(arg.function, "aux_check_numerics_func")
 #endif
                    || !strcmp(arg.function, "aux_mat_copy");
         }
