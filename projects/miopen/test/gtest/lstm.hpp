@@ -31,6 +31,7 @@
 #include "workspace.hpp"
 #include "verify.hpp"
 #include "gtest_desc_guard.hpp"
+#include "gtest_handle_guard.hpp"
 
 #include <tuple>
 #include <numeric>

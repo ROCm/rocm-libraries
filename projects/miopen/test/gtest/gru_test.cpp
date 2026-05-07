@@ -8,6 +8,7 @@
 
 #include "compare_helper.hpp"
 #include "gtest_desc_guard.hpp"
+#include "gtest_handle_guard.hpp"
 #include "../dropout_util.hpp"
 #include "../rnn_util.hpp"
 #include "../workspace.hpp"
