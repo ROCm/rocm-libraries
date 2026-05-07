@@ -78,12 +78,14 @@ Selected probe outputs (full log in `/tmp/q9j_probe.py` stdout):
 - `SCBranchSCC0`: `getParams() = ["label"]` — label-only
 - `SAddU32`, `SCSelectB32`, `SAddCU32`, `SOrSaveExecB64`: standard `[dst, src0, src1]`
 
-Surprise finding: **plain `VAddU32(vgpr, vgpr, vgpr)` silently sets `dst1 = VCC()`**
+Historical finding (no longer load-bearing — VCC tracking dropped per `uraq`): **plain `VAddU32(vgpr, vgpr, vgpr)` silently sets `dst1 = VCC()`**
 in the C++ ctor (when neither `ExplicitNC` nor `ExplicitCO` asm-bug is set).
 Probe output: `VAddU32 getParams() = [vgpr(0), VCC, vgpr(1), vgpr(2)]`. The
-validator's `_VCCRule` already catches this via the `_is_vcc(p)` scan — but it
-means the "generic" v_add path is implicitly VCC-touching on some ISAs, which
-makes the pure VCC-classification by class name (in dzl's sketch) less complete
+pre-removal validator's `_VCCRule` caught this via the `_is_vcc(p)` scan. The
+finding is preserved here for the record — it shows the per-build-config
+nature of VCC implicit-write — but is no longer load-bearing for any open
+bead. (The class-name-based VCC classification this finding warned against
+is moot now that VCC tracking is dropped entirely.)
 than expected. Worth a comment in dzl's design.
 
 ---
