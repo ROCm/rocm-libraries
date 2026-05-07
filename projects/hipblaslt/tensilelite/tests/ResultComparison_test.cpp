@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include <complex>
+#include <cstdint>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -32,7 +34,14 @@
 
 #include <DataInitialization.hpp>
 #include <ResultComparison.hpp>
+#include <Tensile/DataTypes.hpp>
 
+using TensileLite::BFloat16;
+using TensileLite::BFloat8;
+using TensileLite::BFloat8_fnuz;
+using TensileLite::Float8;
+using TensileLite::Float8_fnuz;
+using TensileLite::Half;
 using TensileLite::Client::FastPointwiseComparison;
 using TensileLite::Client::PointwiseComparison;
 
@@ -58,6 +67,43 @@ namespace
 
         func();
         return captured.str();
+    }
+
+    // Per-type construction. Going through float covers every type the
+    // validator dispatches on (integer, half/bf16/fp8 variants, real fp).
+    // std::complex specializes to put the value in the real part.
+    template <typename T>
+    T fromInt(int v)
+    {
+        return static_cast<T>(static_cast<float>(v));
+    }
+
+    template <>
+    double fromInt<double>(int v)
+    {
+        return static_cast<double>(v);
+    }
+
+    template <>
+    std::complex<float> fromInt<std::complex<float>>(int v)
+    {
+        return std::complex<float>(static_cast<float>(v), 0.0f);
+    }
+
+    template <>
+    std::complex<double> fromInt<std::complex<double>>(int v)
+    {
+        return std::complex<double>(static_cast<double>(v), 0.0);
+    }
+
+    template <typename T>
+    std::vector<T> makeVec(std::initializer_list<int> ints)
+    {
+        std::vector<T> out;
+        out.reserve(ints.size());
+        for(int v : ints)
+            out.push_back(fromInt<T>(v));
+        return out;
     }
 
     // Simulates the OLD single-pass validation flow (before this PR).
@@ -104,11 +150,31 @@ namespace
     }
 } // namespace
 
-// Test: mismatches present, printing enabled — output should be identical.
-TEST(ResultComparison, WithErrors_SameOutput)
+template <typename T>
+struct ResultComparisonTest : public ::testing::Test
 {
-    std::vector<float> ref = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
-    std::vector<float> res = {1.0f, 9.0f, 3.0f, 8.0f, 5.0f};
+};
+
+using SupportedTypes = ::testing::Types<float,
+                                        double,
+                                        std::complex<float>,
+                                        std::complex<double>,
+                                        Half,
+                                        BFloat16,
+                                        Float8,
+                                        BFloat8,
+                                        Float8_fnuz,
+                                        BFloat8_fnuz,
+                                        int8_t,
+                                        int32_t>;
+
+TYPED_TEST_SUITE(ResultComparisonTest, SupportedTypes);
+
+// Test: mismatches present, printing enabled — output should be identical.
+TYPED_TEST(ResultComparisonTest, WithErrors_SameOutput)
+{
+    auto ref = makeVec<TypeParam>({1, 2, 3, 4, 5});
+    auto res = makeVec<TypeParam>({1, 9, 3, 8, 5});
 
     auto oldOutput = runSinglePassFlow(ref.data(), res.data(), ref.size(), false, 10, -1.0);
     auto newOutput = runTwoPassFlow(ref.data(), res.data(), ref.size(), false, 10, -1.0);
@@ -118,10 +184,10 @@ TEST(ResultComparison, WithErrors_SameOutput)
 }
 
 // Test: mismatches with printValids=true — output should be identical.
-TEST(ResultComparison, WithErrors_PrintValids_SameOutput)
+TYPED_TEST(ResultComparisonTest, WithErrors_PrintValids_SameOutput)
 {
-    std::vector<float> ref = {1.0f, 2.0f, 3.0f, 4.0f};
-    std::vector<float> res = {1.0f, 9.0f, 3.0f, 4.0f};
+    auto ref = makeVec<TypeParam>({1, 2, 3, 4});
+    auto res = makeVec<TypeParam>({1, 9, 3, 4});
 
     auto oldOutput = runSinglePassFlow(ref.data(), res.data(), ref.size(), true, 10, -1.0);
     auto newOutput = runTwoPassFlow(ref.data(), res.data(), ref.size(), true, 10, -1.0);
@@ -131,10 +197,10 @@ TEST(ResultComparison, WithErrors_PrintValids_SameOutput)
 }
 
 // Test: no mismatches — both flows should produce no output.
-TEST(ResultComparison, NoErrors_SameOutput)
+TYPED_TEST(ResultComparisonTest, NoErrors_SameOutput)
 {
-    std::vector<float> ref = {1.0f, 2.0f, 3.0f};
-    std::vector<float> res = {1.0f, 2.0f, 3.0f};
+    auto ref = makeVec<TypeParam>({1, 2, 3});
+    auto res = makeVec<TypeParam>({1, 2, 3});
 
     auto oldOutput = runSinglePassFlow(ref.data(), res.data(), ref.size(), false, 10, -1.0);
     auto newOutput = runTwoPassFlow(ref.data(), res.data(), ref.size(), false, 10, -1.0);
@@ -144,10 +210,10 @@ TEST(ResultComparison, NoErrors_SameOutput)
 }
 
 // Test: mismatches present but printMax=0 — both flows should produce no output.
-TEST(ResultComparison, PrintMaxZero_SameOutput)
+TYPED_TEST(ResultComparisonTest, PrintMaxZero_SameOutput)
 {
-    std::vector<float> ref = {1.0f, 2.0f, 3.0f};
-    std::vector<float> res = {1.0f, 9.0f, 3.0f};
+    auto ref = makeVec<TypeParam>({1, 2, 3});
+    auto res = makeVec<TypeParam>({1, 9, 3});
 
     auto oldOutput = runSinglePassFlow(ref.data(), res.data(), ref.size(), false, 0, -1.0);
     auto newOutput = runTwoPassFlow(ref.data(), res.data(), ref.size(), false, 0, -1.0);
