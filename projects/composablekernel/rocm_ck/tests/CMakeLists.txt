@@ -22,7 +22,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/gtest.cmake)
 # ---------------------------------------------------------------------------
 function(add_rocm_ck_test test_name)
     add_executable(${test_name} ${ARGN})
-    target_compile_features(${test_name} PRIVATE cxx_std_20)
     target_link_libraries(${test_name} PRIVATE rocm_ck GTest::gtest_main)
     target_compile_options(${test_name} PRIVATE
         -Wno-global-constructors  # GTest registration macros
@@ -34,13 +33,16 @@ endfunction()
 # Smoke tests (fast, host-only, no GPU)
 # ---------------------------------------------------------------------------
 set(ROCM_CK_SMOKE_TESTS
-    test_index_t
+    unit/test_index_t.cpp
 )
 
-foreach(test_target ${ROCM_CK_SMOKE_TESTS})
-    add_rocm_ck_test(${test_target} unit/${test_target}.cpp)
-    add_test(NAME ${test_target} COMMAND ${test_target})
-    set_tests_properties(${test_target} PROPERTIES LABELS "ROCM_CK_SMOKE")
+set(ROCM_CK_SMOKE_TARGETS)
+foreach(test_source ${ROCM_CK_SMOKE_TESTS})
+    get_filename_component(test_name ${test_source} NAME_WLE)
+    add_rocm_ck_test(${test_name} ${test_source})
+    add_test(NAME ${test_name} COMMAND ${test_name})
+    set_tests_properties(${test_name} PROPERTIES LABELS "ROCM_CK_SMOKE")
+    list(APPEND ROCM_CK_SMOKE_TARGETS ${test_name})
 endforeach()
 
 # test_index_t verifies rocm_ck index types match ck_tile
@@ -49,7 +51,7 @@ target_include_directories(test_index_t PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../.
 # ---------------------------------------------------------------------------
 # Convenience targets
 # ---------------------------------------------------------------------------
-add_custom_target(build-smoke-rocm-ck DEPENDS ${ROCM_CK_SMOKE_TESTS})
+add_custom_target(build-smoke-rocm-ck DEPENDS ${ROCM_CK_SMOKE_TARGETS})
 
 add_custom_target(smoke-rocm-ck
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -L "ROCM_CK_SMOKE"
