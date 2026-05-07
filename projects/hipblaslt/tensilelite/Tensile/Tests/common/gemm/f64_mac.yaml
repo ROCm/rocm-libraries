@@ -12,7 +12,7 @@ GlobalParameters:
   CSVExportWinner: 1
   CSVMergeSameProblemID: 1
   Device: 0
-  PrintSolutionRejectionReason: True
+  # PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
   ########################################
