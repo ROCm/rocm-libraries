@@ -942,8 +942,11 @@ class TestValidationStartupGate:
 class TestNoGpuDetected:
     """main() returns 1 when no GPU is detected (check is centralized in main)."""
 
+    @patch("dnn_benchmarking.cli.main._resolve_graphs")
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=False)
-    def test_main_returns_one_when_no_gpu(self, mock_gpu: MagicMock) -> None:
+    def test_main_returns_one_when_no_gpu(
+        self, mock_gpu: MagicMock, mock_resolve: MagicMock
+    ) -> None:
         from dnn_benchmarking.cli.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -953,3 +956,4 @@ class TestNoGpuDetected:
                 result = main()
 
         assert result == 1
+        mock_resolve.assert_not_called()

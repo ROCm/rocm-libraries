@@ -64,16 +64,14 @@ def main() -> int:
     args = parser.parse_args()
     reporter = Reporter()
 
-    tmpdirs, resolved_files, tarball_source = _resolve_graphs(args, reporter)
-    if resolved_files is None:
-        return 1
-
     if not gpu_is_available():
         reporter.print_error(
             "No GPU detected. A GPU with ROCm or CUDA support is required."
         )
-        for td in tmpdirs:
-            td.cleanup()
+        return 1
+
+    tmpdirs, resolved_files, tarball_source = _resolve_graphs(args, reporter)
+    if resolved_files is None:
         return 1
 
     try:
