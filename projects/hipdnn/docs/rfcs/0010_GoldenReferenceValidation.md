@@ -271,6 +271,8 @@ std::string computeGraphFingerprint(const graph::Graph& graph) {
 }
 ```
 
+**Existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order and builds a tensor-UID map. `computeGraphFingerprint()` extends this pattern: add tensor names, dims, and operation parameters (padding, stride, dilation) to the per-node collection, then compose into a single graph-level hash.
+
 At validation time:
 
 ```cpp
