@@ -25,13 +25,13 @@ Run the provided setup script from the `dnn-benchmarking` directory:
 
 ```bash
 bash setup.sh
-source .venv/bin/activate
+source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
 ```
 
 This script handles everything automatically:
-1. Creates a `.venv` virtual environment
-2. Installs ROCm-compatible dependencies (`requirements-rocm.txt`) and the package with dev extras
-3. Builds hipDNN (if `build/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake` is not found)
+1. Creates a virtual environment under `$DNN_BENCH_WORKSPACE` (defaults to `/workspace`)
+2. Detects the GPU architecture and installs ROCm-compatible PyTorch
+3. Builds hipDNN and the MIOpen provider (if not already installed, or with `--force-build`)
 4. Installs the hipDNN Python bindings from the hipDNN source tree
 
 ### For ROCm/AMD GPUs (hipDNN benchmarking)
@@ -64,18 +64,6 @@ source .venv/bin/activate
 # Install CUDA torch + PyPI deps
 pip install -r requirements-cuda.txt
 pip install -e . --no-deps
-```
-
-### Development Installation
-
-```bash
-# For ROCm development
-pip install -r requirements-rocm.txt
-pip install -e .
-
-# For CUDA development
-pip install -r requirements-cuda.txt
-pip install -e .
 ```
 
 **Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately for hipDNN benchmarking.
@@ -341,7 +329,7 @@ Commit only the `.dvc` pointer file and the updated `.gitignore` — never the t
 
 ```bash
 # Activate venv
-source .venv/bin/activate
+source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
 
 # All non-GPU tests (no hipDNN required)
 pytest -m "not gpu"
@@ -358,10 +346,7 @@ LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest -m gpu
 GPU tests require hipDNN Python bindings and ROCm libraries:
 
 ```bash
-source .venv/bin/activate
-export CMAKE_PREFIX_PATH=/path/to/hipdnn/build/lib/cmake
-cd /path/to/hipdnn/python && pip install -e .
-cd -
+source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
 
 # Run tests with ROCm libraries available
 LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest
