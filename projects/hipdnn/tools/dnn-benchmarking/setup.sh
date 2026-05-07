@@ -15,13 +15,15 @@ MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
 MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
 
 FORCE_BUILD=0
+AUTO_YES=0
 usage() {
-    echo "Usage: $0 [--force-build] [--install-dir <path>]"
+    echo "Usage: $0 [--force-build] [--install-dir <path>] [-y]"
     echo ""
     echo "  --force-build        Force rebuild of hipDNN and the MIOpen provider,"
     echo "                           overwriting existing artifacts."
     echo "  --install-dir <path> Install prefix for hipDNN and the MIOpen provider."
     echo "                           Default: $INSTALL_DIR"
+    echo "  -y                   Skip confirmation prompts."
     echo ""
     echo "  The installed plugin will be at:"
     echo "    <install-dir>/lib/hipdnn_plugins/engines/"
@@ -32,6 +34,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --force-build) FORCE_BUILD=1 ;;
         --install-dir) shift; INSTALL_DIR="$1" ;;
+        -y) AUTO_YES=1 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown argument: $1"; usage; exit 1 ;;
     esac
@@ -103,6 +106,12 @@ pip install -e "$SCRIPT_DIR"
 # the raw build dir causes "non-existent path" errors in hipdnn_data_sdkConfig.cmake.
 HIPDNN_CONFIG="$INSTALL_DIR/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
 if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
+    if [ "$AUTO_YES" -eq 0 ]; then
+        read -r -p "This will install hipDNN to $INSTALL_DIR. Continue? [Y/n] " confirm
+        case "$confirm" in
+            [nN]) echo "Aborted."; exit 0 ;;
+        esac
+    fi
     echo "Building and installing hipDNN..."
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
