@@ -277,7 +277,7 @@ def make_graph_correctness():
     arr_down(d, cols[1], c2a[3], c2b[1])
 
     # Column 3: Python
-    c3a = box(d, cols[2], col_top + 28, ["Python reads", "graph.bin (Layer 2)", "extracts params"],
+    c3a = box(d, cols[2], col_top + 28, ["Python reads", "graph.bin (Graph Export)", "extracts params"],
               font=FONT_SM, min_w=180)
     c3b_cy = c3a[3] + gap
     c3b = box(d, cols[2], c3b_cy, ["Runs PyTorch"], font=FONT_SM, min_w=150)
@@ -292,7 +292,7 @@ def make_graph_correctness():
 
     # Diamond: compare hash
     c4_dia_cy = c4a[3] + gap + 45
-    c4_dia = diamond(d, cols[3], c4_dia_cy, ["Compare hash", "to stored hash", "(Layer 1)"],
+    c4_dia = diamond(d, cols[3], c4_dia_cy, ["Compare hash", "to stored hash"],
                      font=FONT_SM, pad=25)
     arr_down(d, cols[3], c4a[3], c4_dia_cy - c4_dia[5])
 
@@ -317,7 +317,7 @@ def make_graph_correctness():
     cross_cy = junction_y + gap + 45
 
     cross_dia = diamond(d, cross_cx, cross_cy,
-                        ["Cross-validate", "(Layer 3)", "Do they agree?"],
+                        ["Cross-validate:", "Do they agree?"],
                         font=FONT_SM, pad=25)
 
     # Vertical lines from each golden output down to junction, then horizontal bar
@@ -330,8 +330,23 @@ def make_graph_correctness():
                (cross_cx - ARROW_SZ // 2, cross_cy - cross_dia[5] - ARROW_SZ),
                (cross_cx + ARROW_SZ // 2, cross_cy - cross_dia[5] - ARROW_SZ)], fill=BLACK)
 
+    # Cross-validate results: Yes → right, No → down
+    # Yes → PASS box to the right
+    cv_pass_cx = cross_cx + cross_dia[4] + 120
+    cv_pass = box(d, cv_pass_cx, cross_cy, ["PASS", "References agree"],
+                  font=FONT_SM, fill=GRAY, min_w=160)
+    arr_right(d, cross_cx + cross_dia[4], cross_cy, cv_pass[0])
+    d.text((cross_cx + cross_dia[4] + 8, cross_cy - 22), "Yes", fill=BLACK, font=FONT_SM)
+
+    # No → FAIL box below
+    cv_fail_cy = cross_cy + cross_dia[5] + gap + 20
+    cv_fail = box(d, cross_cx, cv_fail_cy, ["FAIL", "Investigate"],
+                  font=FONT_SM, fill=GRAY, min_w=140)
+    arr_down(d, cross_cx, cross_cy + cross_dia[5], cv_fail[1])
+    d.text((cross_cx + 8, cross_cy + cross_dia[5] + 3), "No", fill=BLACK, font=FONT_SM)
+
     # Crop to content
-    crop_h = int(max(c4_match[3], cross_cy + cross_dia[5]) + 35)
+    crop_h = int(max(c4_match[3], cv_fail[3]) + 35)
     crop_w = int(max(W, c4_fail[2] + 30))
     img = img.crop((0, 0, min(crop_w, W), crop_h))
     img.save(os.path.join(OUTPUT_DIR, "graph_level_correctness.png"))
