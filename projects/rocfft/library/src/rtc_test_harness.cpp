@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -306,6 +306,7 @@ void write_standalone_test_harness(const Function& f, const std::string& src)
     main_file << "#include <functional>\n";
     main_file << "#include <future>\n";
     main_file << "#include <memory>\n";
+    main_file << "#include <optional>\n";
     main_file << "#include <mutex>\n";
     main_file << "#include <random>\n";
     main_file << "#include <shared_mutex>\n";

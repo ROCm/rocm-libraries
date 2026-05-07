@@ -77,7 +77,7 @@ inline std::ostream& operator<<(std::ostream& os, const SDelayAluData& delayAluD
             case SDelayAluData::InstType::SALU:
                 return "SALU";
             case SDelayAluData::InstType::TRANS:
-                return "TRANS";
+                return "TRANS32";
             case SDelayAluData::InstType::NO_DEP:
                 return "NO_DEP";
             default:
@@ -202,6 +202,9 @@ inline std::ostream& operator<<(std::ostream& os, const MUBUFModifiers& mubufMod
             os << " slc";
         else if (mubufMod.hasSC0Modifier)
             os << " sc1";
+    }
+    if (mubufMod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mubufMod.scope);
     }
     if (mubufMod.nt) {
         os << " nt";
@@ -337,10 +340,19 @@ static void emitRegister(std::ostream& os, const StinkyRegister& reg,
             if (reg.reg.num > 1) {
                 // Register range
                 if (useSymbolic) {
-                    // Symbolic format: v[vgprG2LA+0:vgprG2LA+0+3]
-                    // The symbolicName already includes offsets (e.g., "vgprG2LA+0")
-                    os << "[" << symbolicName << offsetStr << ":" << symbolicName << offsetStr
-                       << "+" << (reg.reg.num - 1) << "]";
+                    // Two symbolic-name conventions are accepted here:
+                    //   (a) Self-contained range from RawAsmParser, e.g.
+                    //       "vgprFoo+0:vgprFoo+3" — already contains the ':'
+                    //       separator, so emit it verbatim as "v[<symbolic>]".
+                    //   (b) Single-token start name from rocisa, e.g.
+                    //       "vgprG2LA+0" — emitter constructs the range as
+                    //       "v[<symbolic>:<symbolic>+(num-1)]".
+                    if (symbolicName.find(':') != std::string::npos) {
+                        os << "[" << symbolicName << "]";
+                    } else {
+                        os << "[" << symbolicName << offsetStr << ":" << symbolicName << offsetStr
+                           << "+" << (reg.reg.num - 1) << "]";
+                    }
                 } else {
                     // Numeric format: v[46:49]
                     // Note: rocisa could use "v[256-256:259-256]", that's why we add offsetStr to
