@@ -17,7 +17,6 @@
    - [Verification Modes](#verification-modes)
    - [Tolerance Framework](#tolerance-framework)
    - [Data Integrity](#data-integrity)
-   - [Bundle Inspection Tool (v2)](#bundle-inspection-tool-v2)
    - [Harness Integration](#harness-integration)
 4. [Folder Convention](#folder-convention)
 5. [CLI and Configuration](#cli-and-configuration)
@@ -62,11 +61,11 @@ The core test-as-data infrastructure is already built and working for batchnorm.
 
 | Component | File(s) | What it does |
 |-----------|---------|-------------|
-| Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Loads a bundle (`{Name}.json` + `.tensor{uid}.bin`) from disk. Returns `GraphAndTensorMap` — extract golden outputs, validate results, get host/device buffer maps |
-| CPU golden runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | gtest fixture. Loads bundle → runs CPU ref → validates against golden outputs. Auto-discovers `.json` files via `getGoldenReferenceParams()` |
-| GPU golden runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same as CPU runner but executes on GPU via MIOpen engine plugin. Defined but no tests yet |
-| Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Build graphs, create tensors, run PyTorch ops, write bundles. Classes: `Graph`, `TensorAttributes`, `DTypeConverter`, per-op nodes |
-| Golden data | [`hipdnn_reference_data/BatchnormFwdInference/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm test cases — nchw/{fp32,fp16,bfp16}, ncdhw/fp32 — `Small`, `Large`, `MIOpen` sizes |
+| Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | **Read**: loads `{Name}.json` + `.tensor{uid}.bin` → `GraphAndTensorMap`. **Split**: `extractAndClearOutputTensorData()` separates golden outputs from inputs. **Compare**: `validateTensors()` checks engine output against golden data |
+| CPU golden runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | **Discover**: `getGoldenReferenceParams()` scans a folder for `.json` files → gtest parameters. **Run**: loads bundle, executes CPU reference, validates outputs. One fixture covers all operations |
+| GPU golden runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern as CPU runner but executes via MIOpen GPU engine plugin. Defined but no tests yet |
+| Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | **Build**: `Graph` + `TensorAttributes` define the computation. **Compute**: run PyTorch (or any reference) to produce outputs. **Write**: `Graph.save()` emits `{Name}.json` + `.tensor{uid}.bin` |
+| Golden data | [`hipdnn_reference_data/BatchnormFwdInference/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm bundles across nchw/{fp32,fp16,bfp16} and ncdhw/fp32, in `Small`, `Large`, `MIOpen` sizes |
 
 ### The Graph IS the Key
 
@@ -540,7 +539,7 @@ for(auto uid : outputTensorUids)
 }
 ```
 
-This is more expensive than the file-size check (it reads the data), but only runs on output tensors (not inputs) and catches the exact failure mode adickin identified: NaN in golden data means the reference was wrong.
+This is more expensive than the file-size check (it reads the data), but only runs on output tensors (not inputs) and catches the exact failure mode: NaN in golden data means the reference was wrong.
 
 **Acceptance criteria**:
 - [ ] `loadGraphAndTensors()` validates file size before reading tensor data
@@ -549,48 +548,6 @@ This is more expensive than the file-size check (it reads the data), but only ru
 - [ ] `Graph.save()` calls `_validate_outputs()` internally — no generator can bypass it
 - [ ] `loadGraphAndTensors()` rejects NaN/Inf in output tensors after loading (safety net for legacy/external bundles)
 - [ ] Both checks produce actionable error messages naming the tensor UID
-
----
-
-### Bundle Inspection Tool (v2)
-
-A command-line tool that reads golden data bundles and reports their contents. Not required for v1 (the core loader and generator cover initial needs), but becomes essential as the number of operations and bundles grows.
-
-```bash
-# Inspect a single bundle
-python inspect_bundle.py hipdnn_reference_data/ConvFwd/nchw/fp32/Small.json
-
-# Output:
-# Bundle: Small.json
-# Operation: ConvolutionForwardAttributes
-# io_data_type: float    compute_data_type: float
-# Tensors:
-#   UID 0  x       [1, 16, 16, 16]  float  1024 bytes  min=-0.98  max=0.99  mean=0.01  std=0.58
-#   UID 1  w       [16, 16, 3, 3]   float  9216 bytes  min=-0.97  max=0.98  mean=0.00  std=0.57
-#   UID 2  y (out) [1, 16, 14, 14]  float  12544 bytes min=-4.21  max=4.35  mean=0.02  std=1.23
-# Integrity: OK (all file sizes match, no NaN/Inf)
-```
-
-```bash
-# Validate all bundles in a directory
-python inspect_bundle.py --validate hipdnn_reference_data/
-
-# Output:
-# Scanning hipdnn_reference_data/ ...
-# BatchnormFwdInference/nchw/fp32/Small.json    OK
-# BatchnormFwdInference/nchw/fp32/Large.json    OK
-# BatchnormFwdInference/nchw/fp32/MIOpen.json   OK
-# ...
-# 6/6 bundles OK, 0 errors
-```
-
-The tool runs the same integrity checks described in [Data Integrity](#data-integrity) (file size validation, NaN/Inf detection, variance check) and adds human-readable metadata (tensor shapes, value statistics). It uses the existing `Graph.from_file()` and `TensorAttributes.load_data_from_binary()` from the Python framework.
-
-**Acceptance criteria**:
-- [ ] `inspect_bundle.py` reads any valid bundle and prints operation type, tensor metadata, and value statistics
-- [ ] `--validate` mode checks all bundles in a directory tree, reports pass/fail per bundle
-- [ ] Exit code non-zero if any bundle fails validation
-- [ ] Tool reuses existing `reference_data_scripts/utilities/` framework (no duplication)
 
 ---
 
@@ -955,8 +912,12 @@ Comparison testing can confirm that two implementations agree, not that either i
 
 4. **C++ graph export**: A utility to export a graph built by `buildGraph()` in an existing test-as-code test to the golden data bundle format (`{Name}.json` + `{Name}.tensor{uid}.bin`). This would let teams convert existing computed tests into golden test cases without rewriting the graph in Python.
 
-5. **Compression**: Optional zstd compression of binary blobs for full-tier golden data with large tensors.
+5. **Bundle metadata sidecar**: Optional `{Name}.meta.json` alongside the bundle for per-operation statistics (min/max/mean/std per tensor), generator provenance (tool, version, timestamp), and other metadata. Keeps the graph JSON computation-only while enabling tooling and CI dashboards.
 
-6. **Mathematical invariant checks**: Per-operation invariants (layernorm output mean ~0 / variance ~1, softmax rows sum to 1, batchnorm output statistics) that require no reference executor and catch bugs that comparison testing structurally cannot. Separate RFC.
+6. **Bundle inspection tool**: A Python CLI (`inspect_bundle.py`) that reads golden data bundles and reports operation type, tensor metadata, and value statistics (min/max/mean/std). A `--validate` mode scans a directory tree and runs the same integrity checks from [Data Integrity](#data-integrity) (file size validation, NaN/Inf detection, variance check). Reuses the existing `reference_data_scripts/utilities/` framework.
 
-7. **Hand-verified micro cases**: At least one test case per operation family with expected outputs computed by hand from the mathematical definition, not by any executor. Separate RFC.
+7. **Compression**: Optional zstd compression of binary blobs for full-tier golden data with large tensors.
+
+8. **Mathematical invariant checks**: Per-operation invariants (layernorm output mean ~0 / variance ~1, softmax rows sum to 1, batchnorm output statistics) that require no reference executor and catch bugs that comparison testing structurally cannot. Separate RFC.
+
+9. **Hand-verified micro cases**: At least one test case per operation family with expected outputs computed by hand from the mathematical definition, not by any executor. Separate RFC.
