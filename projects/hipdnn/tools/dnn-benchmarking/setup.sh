@@ -7,7 +7,10 @@ WORKSPACE_ROOT="$(cd "$HIPDNN_ROOT/../.." && pwd)"
 
 BUILD_DIR="$HIPDNN_ROOT/build"
 INSTALL_DIR="/opt/rocm"
-VENV_DIR="/workspace/.venv"
+DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-/workspace}"
+mkdir -p "$DNN_BENCH_WORKSPACE"
+export DNN_BENCH_WORKSPACE
+VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
 MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
 MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
 
@@ -52,14 +55,17 @@ source "$VENV_DIR/bin/activate"
 # Python code is too late for that process's own imports).
 ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
 if [ ! -f "$ACTIVATE_LOCAL" ] || ! grep -q PYTHONPYCACHEPREFIX "$ACTIVATE_LOCAL"; then
-    echo 'export PYTHONPYCACHEPREFIX=/workspace/pycache' >> "$ACTIVATE_LOCAL"
+    {
+        echo "export PYTHONPYCACHEPREFIX=$DNN_BENCH_WORKSPACE/pycache"
+        echo "export DNN_BENCH_WORKSPACE=$DNN_BENCH_WORKSPACE"
+    } >> "$ACTIVATE_LOCAL"
 fi
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \
         >> "$VENV_DIR/bin/activate"
 fi
-export PYTHONPYCACHEPREFIX=/workspace/pycache
+export PYTHONPYCACHEPREFIX="$DNN_BENCH_WORKSPACE/pycache"
 
 # 2. Detect GPU architecture and install ROCm PyTorch from the matching nightly index.
 detect_gpu_arch() {

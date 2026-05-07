@@ -6,19 +6,23 @@
 import os
 import sys
 
+from pathlib import Path
+
 # Redirect ROCm/tool caches away from the network home directory before any
 # ROCm library is imported. MIOpen, comgr, pip, and torch all default to
 # ~/.cache/ or ~/.miopen/, which is a network filesystem on AMD dev machines.
-# Only set each variable if the user has not already overridden it.
+# DNN_BENCH_WORKSPACE is set by setup.sh; fall back to /tmp/dnn-bench-cache.
+_CACHE_BASE = Path(os.environ.get("DNN_BENCH_WORKSPACE", "/workspace"))
 _LOCAL_CACHE_DEFAULTS = {
-    "XDG_CACHE_HOME": "/workspace/cache",  # pip, torch, black, all XDG-aware tools
-    "MIOPEN_USER_DB_PATH": "/workspace/miopen_cache",  # MIOpen user kernel DB
-    "MIOPEN_CUSTOM_CACHE_DIR": "/workspace/miopen_cache",  # MIOpen find-db / system DB
-    "AMD_COMGR_CACHE_DIR": "/workspace/comgr_cache",  # ROCm compiler cache
+    "XDG_CACHE_HOME": _CACHE_BASE / "cache",
+    "MIOPEN_USER_DB_PATH": _CACHE_BASE / "miopen_cache",
+    "MIOPEN_CUSTOM_CACHE_DIR": _CACHE_BASE / "miopen_cache",
+    "AMD_COMGR_CACHE_DIR": _CACHE_BASE / "comgr_cache",
 }
 for _var, _default in _LOCAL_CACHE_DEFAULTS.items():
-    os.environ.setdefault(_var, _default)
-from pathlib import Path
+    if _var not in os.environ:
+        _default.mkdir(parents=True, exist_ok=True)
+        os.environ[_var] = str(_default)
 
 from ..common.exceptions import GraphLoadError
 from ..reporting.reporter import Reporter

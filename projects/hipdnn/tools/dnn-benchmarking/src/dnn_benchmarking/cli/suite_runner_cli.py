@@ -110,6 +110,10 @@ def run_suite_benchmark(
             "hipdnn_frontend not available. Install hipDNN Python bindings first."
         )
         return 1
+    except RuntimeError as e:
+        reporter.print_hipdnn_init_newline()
+        reporter.print_error(f"Failed to create hipDNN handle: {e}")
+        return 1
 
     reporter.print_hipdnn_init_done()
     reporter.print_running_benchmark(total)

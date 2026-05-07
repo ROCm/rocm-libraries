@@ -17,6 +17,7 @@ from dnn_benchmarking.graph.resolver import (
     extract_tarball,
     is_tarball,
     resolve_graph_files,
+    resolve_graph_files_multi,
 )
 
 
@@ -164,6 +165,24 @@ class TestResolveGraphFiles:
         for td in tmpdirs:
             td.cleanup()
 
+    def test_glob_collects_json_and_tarballs(self, tmp_path: Path) -> None:
+        (tmp_path / "loose.json").write_text(
+            json.dumps({"name": "loose", "nodes": [], "tensors": []})
+        )
+        graph = json.dumps({"name": "packed", "nodes": [], "tensors": []})
+        _make_tarball(tmp_path / "packed.tar.gz", {"packed.json": graph})
+
+        pattern = str(tmp_path / "*")
+        tmpdirs, files, tarball_source = resolve_graph_files(pattern)
+        try:
+            assert len(files) == 2
+            assert any("loose.json" in f for f in files)
+            assert any("packed.json" in f for f in files)
+            assert tarball_source == pattern
+        finally:
+            for td in tmpdirs:
+                td.cleanup()
+
     def test_directory_collects_json_recursively(self, tmp_path: Path) -> None:
         subdir = tmp_path / "sub"
         subdir.mkdir()
@@ -216,3 +235,63 @@ class TestResolveGraphFiles:
         finally:
             for td in tmpdirs:
                 td.cleanup()
+
+
+class TestResolveGraphFilesMulti:
+    """Tests for resolve_graph_files_multi()."""
+
+    def test_single_json_arg(self, tmp_path: Path) -> None:
+        f = tmp_path / "graph.json"
+        f.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
+
+        tmpdirs, files, tarball_source = resolve_graph_files_multi([str(f)])
+        assert len(files) == 1
+        assert files[0] == str(f)
+        assert tarball_source is None
+        for td in tmpdirs:
+            td.cleanup()
+
+    def test_multiple_json_args(self, tmp_path: Path) -> None:
+        paths = []
+        for i in range(3):
+            f = tmp_path / f"g{i}.json"
+            f.write_text(json.dumps({"name": f"g{i}", "nodes": [], "tensors": []}))
+            paths.append(str(f))
+
+        tmpdirs, files, _ = resolve_graph_files_multi(paths)
+        assert len(files) == 3
+        for td in tmpdirs:
+            td.cleanup()
+
+    def test_deduplicates_overlapping_args(self, tmp_path: Path) -> None:
+        f = tmp_path / "graph.json"
+        f.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
+
+        tmpdirs, files, _ = resolve_graph_files_multi([str(f), str(f)])
+        assert len(files) == 1
+        for td in tmpdirs:
+            td.cleanup()
+
+    def test_mixed_json_and_tarball(self, tmp_path: Path) -> None:
+        loose = tmp_path / "loose.json"
+        loose.write_text(json.dumps({"name": "loose", "nodes": [], "tensors": []}))
+        graph = json.dumps({"name": "packed", "nodes": [], "tensors": []})
+        tb = _make_tarball(tmp_path / "packed.tar.gz", {"packed.json": graph})
+
+        tmpdirs, files, tarball_source = resolve_graph_files_multi(
+            [str(loose), str(tb)]
+        )
+        try:
+            assert len(files) == 2
+            assert any("loose.json" in f for f in files)
+            assert any("packed.json" in f for f in files)
+            assert tarball_source == str(tb)
+        finally:
+            for td in tmpdirs:
+                td.cleanup()
+
+    def test_empty_args_returns_empty(self) -> None:
+        tmpdirs, files, tarball_source = resolve_graph_files_multi([])
+        assert files == []
+        assert tmpdirs == []
+        assert tarball_source is None
