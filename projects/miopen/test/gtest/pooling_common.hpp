@@ -151,7 +151,7 @@ struct verify_forward_pooling
                 filter.GetMode() == miopenPoolingAverageInclusive
                     ? std::accumulate(kers.begin(), kers.end(), 1, std::multiplies<int>())
                     : std::accumulate(win_sz.begin(), win_sz.end(), 1, std::multiplies<int>());
-            pool_size = std::max(pool_size, 1);
+            pool_size = std::max(pool_size, 1); // Avoid division by zero when window is in padding
 
             double acc = op.start();
             miopen::unpacker(miopen::ford)(win_sz)([&](auto... in_spatial_id_pack) {
