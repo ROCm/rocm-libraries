@@ -72,8 +72,8 @@ template <typename ADataType_,
           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
           bool CTranspose            = false,
           typename CompilerTarget =
-              decltype(get_compiler_target()), // TODO: c++20 amdgcn_target_arch_id GfxTargetId =
-                                               // get_compiler_target(),
+              decltype(getCMakeCompilerTarget()), // TODO: c++20 amdgcn_target_arch_id GfxTargetId =
+                                                  // get_compiler_target(),
           typename MmaOp_ =
               typename MmaDefaultSelector<ADataType_, // TODO: c++20 MmaOpI MmaOp = typename
                                                       // MmaDefaultSelector<ADataType_,
@@ -125,6 +125,15 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
     // K0 or kABKPerLane (plus MmaPipeline k iter!)
     // TODO: Check if this makes sense with numAccess and Compression.
     static constexpr index_t kKPerThread = MmaOp::kABKPerLane * FragsK;
+
+    // CK Tile expects this structure with some old-style layout params. Added for compatibility.
+    struct WarpGemmAttribute
+    {
+        struct Impl
+        {
+            static constexpr index_t kCNLane = MmaOp::kN / MmaOp::kCNBlocks;
+        };
+    };
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
     // A layout.

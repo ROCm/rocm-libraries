@@ -6,11 +6,15 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm.hpp"
 #include "ck_tile/ops/gemm/warp/warp_wmma_gemm.hpp"
+#include "ck_tile/core/arch/arch.hpp"
 
 namespace ck_tile {
 
 namespace impl {
 namespace warp_gemm_dispatcher {
+
+using namespace ck_tile::core::arch;
+using namespace mma;
 
 // C++20 using enum
 static inline constexpr auto ESingle  = WGAttrNumAccessEnum::Single;

@@ -89,7 +89,8 @@ struct BlockUniversalGemmAsBsCr
     };
 
     public:
-    using Traits = GemmTraits_<Problem_, Policy_>;
+    static constexpr const char* name = "BlockUniversalGemmAsBsCr";
+    using Traits                      = GemmTraits_<Problem_, Policy_>;
 
     using ADataType        = remove_cvref_t<typename Traits::ADataType>;
     using BDataType        = remove_cvref_t<typename Traits::BDataType>;

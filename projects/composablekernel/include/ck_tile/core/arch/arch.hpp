@@ -393,6 +393,63 @@ constexpr auto get_compiler_target()
     }
 }
 
+/**
+ * @brief Returns the amdgcn_target of the target GPU architecture, as defined at configuration
+ * time.
+ * @note This is a workaround because there are a lot of cases in CK Tile where the host code
+ * inspects Device constructions like WarpGemm, and we need to get the version that *will* be used
+ * on the device. This is a big kludge and we need to figure out a better solution. Also this util
+ * will always pick the *first* cmakelists target arch, so there will be issues when compiling for
+ * multiple target architectures.
+ */
+template <auto V>
+constexpr bool always_false = false;
+
+template <typename = void>
+static constexpr auto getCMakeCompilerTarget()
+{
+    using ck_tile::core::arch::amdgcn_target_id;
+#ifdef CK_CMAKE_GPU_TARGET_IDS
+    constexpr uint32_t ids[] = {CK_CMAKE_GPU_TARGET_IDS};
+    constexpr amdgcn_target_id id =
+        static_cast<amdgcn_target_id>(ids[0]); // We pick the *first* target arch. TODO.
+
+    if constexpr(id == amdgcn_target_id::GFX908 || id == amdgcn_target_id::GFX90A ||
+                 id == amdgcn_target_id::GFX942 || id == amdgcn_target_id::GFX950)
+    {
+        return make_amdgcn_gfx9_target<id>();
+    }
+    else if constexpr(id == amdgcn_target_id::GFX1030 || id == amdgcn_target_id::GFX1031 ||
+                      id == amdgcn_target_id::GFX1032 || id == amdgcn_target_id::GFX1033 ||
+                      id == amdgcn_target_id::GFX1034 || id == amdgcn_target_id::GFX1035 ||
+                      id == amdgcn_target_id::GFX1036 || id == amdgcn_target_id::GFX103_GENERIC)
+    {
+        return make_amdgcn_gfx10_3_target<id>();
+    }
+    else if constexpr(id == amdgcn_target_id::GFX1100 || id == amdgcn_target_id::GFX1101 ||
+                      id == amdgcn_target_id::GFX1102 || id == amdgcn_target_id::GFX1103 ||
+                      id == amdgcn_target_id::GFX1150 || id == amdgcn_target_id::GFX1151 ||
+                      id == amdgcn_target_id::GFX1152 || id == amdgcn_target_id::GFX1153 ||
+                      id == amdgcn_target_id::GFX11_GENERIC)
+    {
+        return make_amdgcn_gfx11_target<id>();
+    }
+    else if constexpr(id == amdgcn_target_id::GFX1200 || id == amdgcn_target_id::GFX1201 ||
+                      id == amdgcn_target_id::GFX12_GENERIC)
+    {
+        return make_amdgcn_gfx12_target<id>();
+    }
+    else
+    {
+        static_assert(always_false<id>, "CK_CMAKE_TARGET_IDS is HOST or UNKNOWN!\n");
+        return amdgcn_target<>{};
+    }
+#else
+    static_assert(0, "CK_CMAKE_TARGET_IDS was not made available!\n");
+    return amdgcn_target<>{};
+#endif
+}
+
 // Cleanup
 #undef MAP_COMPILER_STATE_TO_GFX9_TARGET
 #undef MAP_COMPILER_STATE_TO_GFX10_3_TARGET

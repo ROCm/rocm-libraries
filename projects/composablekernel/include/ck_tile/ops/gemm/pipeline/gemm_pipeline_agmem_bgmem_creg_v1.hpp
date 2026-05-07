@@ -54,6 +54,8 @@ struct BaseGemmPipelineAGmemBGmemCRegV1
 template <typename Problem, typename Policy = UniversalGemmPipelineAgBgCrPolicy>
 struct GemmPipelineAGmemBGmemCRegV1 : public BaseGemmPipelineAGmemBGmemCRegV1<Problem>
 {
+    using Policy_ = Policy;
+
     using Base             = BaseGemmPipelineAGmemBGmemCRegV1<Problem>;
     using PipelineImplBase = GemmPipelineAgBgCrImplBase<Problem, Policy>;
 

@@ -36,62 +36,63 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type<GemmConfig, Invoker, ck_tile::half_t>(
             a_layout, b_layout, arg_parser);
     }
-    else if(data_type == "bf16")
-    {
-        return run_gemm_example_prec_type<GemmConfig, Invoker, ck_tile::bf16_t>(
-            a_layout, b_layout, arg_parser);
-    }
-#ifdef CK_GFX950_SUPPORT
-    else if(data_type == "tf32")
-    {
-        // Pass tf32_t as A/B types - epilogue auto-detects and maps to float for data operations
-        return run_gemm_example_prec_type<GemmConfig,
-                                          Invoker,
-                                          ck_tile::tf32_t,
-                                          ck_tile::tf32_t,
-                                          float>(a_layout, b_layout, arg_parser);
-    }
-#endif
-    else if(data_type == "fp8")
-    {
-        return run_gemm_example_prec_type<GemmConfig,
-                                          Invoker,
-                                          ck_tile::fp8_t,
-                                          ck_tile::fp8_t,
-                                          ck_tile::half_t>(a_layout, b_layout, arg_parser);
-    }
-    else if(data_type == "bf8")
-    {
-        return run_gemm_example_prec_type<GemmConfig,
-                                          Invoker,
-                                          ck_tile::bf8_t,
-                                          ck_tile::bf8_t,
-                                          ck_tile::half_t>(a_layout, b_layout, arg_parser);
-    }
-    else if(data_type == "i8")
-    {
-        return run_gemm_example_prec_type<GemmConfig,
-                                          Invoker,
-                                          ck_tile::int8_t,
-                                          ck_tile::int8_t,
-                                          int32_t>(a_layout, b_layout, arg_parser);
-    }
-    else if(data_type == "pk_int4_t")
-    {
-        // TODO: Add support for bhalf_t ADataType
-        if constexpr(GemmConfig::Pipeline == ck_tile::GemmPipeline::COMPUTE_V3)
-        {
-            return run_gemm_example_prec_type<GemmConfig,
-                                              Invoker,
-                                              ck_tile::half_t,
-                                              ck_tile::pk_int4_t,
-                                              ck_tile::half_t>(a_layout, b_layout, arg_parser);
-        }
-        else
-        {
-            throw std::runtime_error("Unsupported data type for this operation !!!");
-        }
-    }
+    //     else if(data_type == "bf16")
+    //     {
+    //         return run_gemm_example_prec_type<GemmConfig, Invoker, ck_tile::bf16_t>(
+    //             a_layout, b_layout, arg_parser);
+    //     }
+    // #ifdef CK_GFX950_SUPPORT
+    //     else if(data_type == "tf32")
+    //     {
+    //         // Pass tf32_t as A/B types - epilogue auto-detects and maps to float for data
+    //         operations return run_gemm_example_prec_type<GemmConfig,
+    //                                           Invoker,
+    //                                           ck_tile::tf32_t,
+    //                                           ck_tile::tf32_t,
+    //                                           float>(a_layout, b_layout, arg_parser);
+    //     }
+    // #endif
+    //     else if(data_type == "fp8")
+    //     {
+    //         return run_gemm_example_prec_type<GemmConfig,
+    //                                           Invoker,
+    //                                           ck_tile::fp8_t,
+    //                                           ck_tile::fp8_t,
+    //                                           ck_tile::half_t>(a_layout, b_layout, arg_parser);
+    //     }
+    //     else if(data_type == "bf8")
+    //     {
+    //         return run_gemm_example_prec_type<GemmConfig,
+    //                                           Invoker,
+    //                                           ck_tile::bf8_t,
+    //                                           ck_tile::bf8_t,
+    //                                           ck_tile::half_t>(a_layout, b_layout, arg_parser);
+    //     }
+    //     else if(data_type == "i8")
+    //     {
+    //         return run_gemm_example_prec_type<GemmConfig,
+    //                                           Invoker,
+    //                                           ck_tile::int8_t,
+    //                                           ck_tile::int8_t,
+    //                                           int32_t>(a_layout, b_layout, arg_parser);
+    //     }
+    //     else if(data_type == "pk_int4_t")
+    //     {
+    //         // TODO: Add support for bhalf_t ADataType
+    //         if constexpr(GemmConfig::Pipeline == ck_tile::GemmPipeline::COMPUTE_V3)
+    //         {
+    //             return run_gemm_example_prec_type<GemmConfig,
+    //                                               Invoker,
+    //                                               ck_tile::half_t,
+    //                                               ck_tile::pk_int4_t,
+    //                                               ck_tile::half_t>(a_layout, b_layout,
+    //                                               arg_parser);
+    //         }
+    //         else
+    //         {
+    //             throw std::runtime_error("Unsupported data type for this operation !!!");
+    //         }
+    //     }
     else
     {
         throw std::runtime_error("Unsupported data type for this operation !!!");
