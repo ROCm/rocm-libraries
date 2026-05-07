@@ -18,6 +18,7 @@ runs:
         CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
         CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
         CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
+        LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
       run: |
         VENV_DIR=$(mktemp -d)
         python3 -m venv "$VENV_DIR"
