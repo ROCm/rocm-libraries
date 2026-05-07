@@ -30,10 +30,9 @@ public:
     bool isApplicable(const HipdnnMiopenHandle& handle,
                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
-    size_t getMaxWorkspaceSize(
-        const HipdnnMiopenHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const HipdnnMiopenSettings& executionSettings) const override;
+    size_t getMaxWorkspaceSize(const HipdnnMiopenHandle& handle,
+                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                               const HipdnnMiopenSettings& executionSettings) const override;
 
     void initializeExecutionSettings(
         const HipdnnMiopenHandle& handle,
@@ -41,11 +40,10 @@ public:
         const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         HipdnnMiopenSettings& executionSettings) const override;
 
-    void buildPlan(
-        const HipdnnMiopenHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        HipdnnMiopenContext& executionContext) const override;
+    void buildPlan(const HipdnnMiopenHandle& handle,
+                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                   const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+                   HipdnnMiopenContext& executionContext) const override;
 
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnMiopenHandle& handle,

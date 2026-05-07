@@ -17,38 +17,49 @@ using namespace hipdnn_data_sdk::flatbuffer_utilities;
 namespace
 {
 
-flatbuffers::FlatBufferBuilder createPointwiseGraph(
-    hipdnn_data_sdk::data_objects::PointwiseMode mode,
-    hipdnn_data_sdk::data_objects::DataType computeDataType
-        = hipdnn_data_sdk::data_objects::DataType::FLOAT,
-    bool virtualInput  = false,
-    bool virtualOutput = false)
+flatbuffers::FlatBufferBuilder
+    createPointwiseGraph(hipdnn_data_sdk::data_objects::PointwiseMode mode,
+                         hipdnn_data_sdk::data_objects::DataType computeDataType
+                         = hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                         bool virtualInput = false,
+                         bool virtualOutput = false)
 {
     flatbuffers::FlatBufferBuilder builder;
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> dims    = {1, 3, 4, 4};
+    std::vector<int64_t> dims = {1, 3, 4, 4};
     std::vector<int64_t> strides = {48, 16, 4, 1};
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "input", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims, virtualInput));
+        builder,
+        1,
+        "input",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &strides,
+        &dims,
+        virtualInput));
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "output", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides, &dims, virtualOutput));
-
-    auto pwAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
         builder,
-        mode,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        1,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        2);
+        2,
+        "output",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        &strides,
+        &dims,
+        virtualOutput));
+
+    auto pwAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(builder,
+                                                                           mode,
+                                                                           flatbuffers::nullopt,
+                                                                           flatbuffers::nullopt,
+                                                                           flatbuffers::nullopt,
+                                                                           flatbuffers::nullopt,
+                                                                           1,
+                                                                           flatbuffers::nullopt,
+                                                                           flatbuffers::nullopt,
+                                                                           2);
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
