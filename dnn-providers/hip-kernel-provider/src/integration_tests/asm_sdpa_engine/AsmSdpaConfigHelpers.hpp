@@ -72,11 +72,11 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
  * @param config The fmha_v3_fwdConfig containing kernel configuration
  * @return GraphTestCase containing the graph and description
  */
-GraphTestCase configToCompatibleGraph(const fmha_v3_fwdConfig& config);
+GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config);
 
 /**
  * @brief Generates compatible graph test cases for all configs.
- * @note ConfigType requires a corresponding configToCompatibleGraph and getConfigDescription function
+ * @note ConfigType requires a corresponding configToCompatibleGraphTestCase and getConfigDescription function
  * @todo If we upgrade to C++20, add a concept that guarantees these functions are declared
  *
  * @tparam ConfigType The config type

@@ -39,7 +39,7 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config)
            + std::to_string(config.hdim_v) + maskStr + modeStr;
 }
 
-GraphTestCase configToCompatibleGraph(const fmha_v3_fwdConfig& config)
+GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
 {
     using namespace hipdnn_frontend;
     using namespace hipdnn_frontend::graph;
