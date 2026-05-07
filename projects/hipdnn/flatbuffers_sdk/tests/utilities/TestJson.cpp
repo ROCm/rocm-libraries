@@ -12,6 +12,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Common.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -330,6 +331,46 @@ TEST(TestJson, FlatbufferNullStringVectorToJson)
     flatbuffers::to_json(j, sc->valid_values());
     ASSERT_TRUE(j.is_array());
     EXPECT_EQ(j.size(), 0u);
+}
+
+TEST(TestJson, TensorAttributesBoolValueRoundTrip)
+{
+    for(const bool boolVal : {true, false})
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        const std::vector<int64_t> dims = {1};
+        const std::vector<int64_t> strides = {1};
+        const BoolValue value(boolVal);
+        auto valueOffset = builder.CreateStruct(value).Union();
+        auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                       /*uid*/ 7,
+                                                       /*name*/ "boolean_attr",
+                                                       DataType::BOOLEAN,
+                                                       &strides,
+                                                       &dims,
+                                                       /*virtual*/ false,
+                                                       TensorValue::BoolValue,
+                                                       valueOffset);
+        builder.Finish(attrOffset);
+
+        auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+        const nlohmann::json attrJson = *attr;
+
+        EXPECT_EQ(attrJson.at("value_type").get<TensorValue>(), TensorValue::BoolValue);
+        EXPECT_EQ(attrJson.at("value").get<bool>(), boolVal);
+
+        flatbuffers::FlatBufferBuilder roundTripBuilder;
+        auto newAttrOffset
+            = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(roundTripBuilder, attrJson);
+        roundTripBuilder.Finish(newAttrOffset);
+
+        auto* newAttr = flatbuffers::GetRoot<TensorAttributes>(roundTripBuilder.GetBufferPointer());
+
+        ASSERT_EQ(newAttr->value_type(), TensorValue::BoolValue);
+        ASSERT_NE(newAttr->value_as_BoolValue(), nullptr);
+        EXPECT_EQ(newAttr->value_as_BoolValue()->value(), boolVal);
+    }
 }
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB

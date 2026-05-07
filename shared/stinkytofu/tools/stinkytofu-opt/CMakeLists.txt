@@ -5,6 +5,7 @@
 add_executable(stinkytofu-opt
     stinkytofu-opt.cpp
 )
+target_link_libraries(stinkytofu-opt PRIVATE stinkytofu-warnings)
 
 target_include_directories(stinkytofu-opt PRIVATE
     "${TABLEGEN_OUTPUT_DIR}"

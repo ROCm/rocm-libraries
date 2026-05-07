@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "MiopenConvFwdBiasActivPlanBuilder.hpp"
+#include "Workarounds.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
 
 namespace miopen_plugin
@@ -417,6 +418,8 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
     const HipdnnMiopenHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    REJECT_IF_WORKAROUND_ISSUE_5409(handle);
+
     auto nodeAttrs = getNodeAttrsLogErrors(opGraph);
     if(!nodeAttrs.has_value())
     {

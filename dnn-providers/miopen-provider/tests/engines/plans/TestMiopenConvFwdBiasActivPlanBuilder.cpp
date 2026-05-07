@@ -17,6 +17,7 @@
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "tests/common/ActivationCommon.hpp"
 #include "tests/common/ConvolutionCommon.hpp"
+#include "tests/common/TestWorkarounds.hpp"
 
 #include <memory>
 #include <unordered_map>
@@ -33,6 +34,10 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        // No #6979 SKIP here: every TEST_F in this fixture exercises non-CBA
+        // graphs or mocks, so isApplicable returns false regardless of whether
+        // the device has a CBA solver. The skip belongs in the GPU fixture
+        // below where buildPlan is actually invoked on a CBA graph.
         _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
     }
 
@@ -585,6 +590,15 @@ TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAnd
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     auto graph = GraphWrapper(graphBuffer.data(), graphBuffer.size());
     MockEngineConfig mockEngineConfig;
+
+    // Per ROCm/rocm-libraries#6979: when this case expects an applicable engine
+    // but the device's MIOpen has no CBA solver, skip rather than fail.
+    // Negative cases (`_isApplicable == false`) intentionally proceed: their
+    // rejection assertion passes either way.
+    if(_isApplicable)
+    {
+        SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
+    }
 
     EXPECT_EQ(_planBuilder.isApplicable(*_handle, graph), _isApplicable);
 

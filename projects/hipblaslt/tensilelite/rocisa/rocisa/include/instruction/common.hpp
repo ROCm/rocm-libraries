@@ -5056,9 +5056,10 @@ namespace rocisa
         VMovB32(const std::shared_ptr<Container>&   dst,
                 const InstructionInput&             src,
                 const std::optional<SDWAModifiers>& sdwa    = std::nullopt,
-                const std::string&                  comment = "")
+                const std::string&                  comment = "",
+                const std::optional<DPPModifiers>&  dpp     = std::nullopt)
             : CommonInstruction(
-                InstType::INST_B32, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, dpp, sdwa, std::nullopt, comment)
         {
             setInst("v_mov_b32");
         }
@@ -5191,6 +5192,50 @@ namespace rocisa
             if(dst)
                 params.push_back(dst);
             return params;
+        }
+    };
+
+    struct VPermlane16SwapB32 : public CommonInstruction
+    {
+        VPermlane16SwapB32(const std::shared_ptr<Container>&   dst,
+                const InstructionInput&             src,
+                const std::string&                  comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_permlane16_swap_b32");
+        }
+
+        VPermlane16SwapB32(const VPermlane16SwapB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VPermlane16SwapB32>(*this);
+        }
+    };
+
+    struct VPermlane32SwapB32 : public CommonInstruction
+    {
+        VPermlane32SwapB32(const std::shared_ptr<Container>&   dst,
+                const InstructionInput&             src,
+                const std::string&                  comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_permlane32_swap_b32");
+        }
+
+        VPermlane32SwapB32(const VPermlane32SwapB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VPermlane32SwapB32>(*this);
         }
     };
 

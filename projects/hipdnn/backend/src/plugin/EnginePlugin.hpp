@@ -50,6 +50,17 @@ public:
         createExecutionContext(hipdnnEnginePluginHandle_t handle,
                                const hipdnnPluginConstData_t* engineConfig,
                                const hipdnnPluginConstData_t* opGraph) const;
+    virtual bool supportsExecutionContextSerialization() const;
+    virtual void serializeExecutionContext(hipdnnEnginePluginHandle_t handle,
+                                           hipdnnEnginePluginExecutionContext_t executionContext,
+                                           hipdnnPluginConstData_t* serializedContext) const;
+    virtual void
+        destroySerializedExecutionContext(hipdnnEnginePluginHandle_t handle,
+                                          hipdnnPluginConstData_t* serializedContext) const;
+    [[nodiscard]] virtual hipdnnEnginePluginExecutionContext_t createExecutionContextFromSerialized(
+        hipdnnEnginePluginHandle_t handle,
+        const hipdnnPluginConstData_t* engineConfig,
+        const hipdnnPluginConstData_t* serializedContext) const;
     virtual void executeOpGraph(hipdnnEnginePluginHandle_t handle,
                                 hipdnnEnginePluginExecutionContext_t executionContext,
                                 void* workspace,
@@ -100,6 +111,16 @@ private:
                                                         hipdnnEnginePluginExecutionContext_t*);
     hipdnnPluginStatus_t (*_funcDestroyExecutionContext)(hipdnnEnginePluginHandle_t,
                                                          hipdnnEnginePluginExecutionContext_t);
+    hipdnnPluginStatus_t (*_funcSerializeExecutionContext)(hipdnnEnginePluginHandle_t,
+                                                           hipdnnEnginePluginExecutionContext_t,
+                                                           hipdnnPluginConstData_t*);
+    hipdnnPluginStatus_t (*_funcDestroySerializedExecutionContext)(hipdnnEnginePluginHandle_t,
+                                                                   hipdnnPluginConstData_t*);
+    hipdnnPluginStatus_t (*_funcCreateExecutionContextFromSerialized)(
+        hipdnnEnginePluginHandle_t,
+        const hipdnnPluginConstData_t*,
+        const hipdnnPluginConstData_t*,
+        hipdnnEnginePluginExecutionContext_t*);
     hipdnnPluginStatus_t (*_funcGetWorkspaceSizeFromExecutionContext)(
         hipdnnEnginePluginHandle_t, hipdnnEnginePluginExecutionContext_t, size_t*);
     hipdnnPluginStatus_t (*_funcExecuteOpGraph)(hipdnnEnginePluginHandle_t,

@@ -1,26 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Support standalone builds (e.g. pip install / tox)
+# Support both standalone (scikit-build-core / tox) and subdirectory
+# (hipblaslt CMake) builds.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    cmake_minimum_required(VERSION 3.21)
+    cmake_minimum_required(VERSION 3.25)
     project(rocisa LANGUAGES CXX)
     set(ROCISA_STANDALONE ON)
-    set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON)
-
-    # nanobind requires the Python::Module target (FindPython, not FindPython3)
-    find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
-
-    # Find HIP (needed by nanobind target and origami)
-    find_package(hip REQUIRED)
-
-    # origami: prefer a sibling monorepo checkout, fall back to find_package
-    set(_origami_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/origami")
-    if(EXISTS "${_origami_sibling}/CMakeLists.txt")
-        add_subdirectory("${_origami_sibling}" "${CMAKE_CURRENT_BINARY_DIR}/origami")
-    else()
-        find_package(origami REQUIRED)
-    endif()
 else()
     set(ROCISA_STANDALONE OFF)
 endif()
@@ -40,14 +26,40 @@ target_include_directories(rocisa-cpp
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
-if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
-    include(FetchContent)
-    FetchContent_Declare(
-      nanobind
-      GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-      GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
-    )
-    FetchContent_MakeAvailable(nanobind)
+# Build the Python extension when bundling deps (hipblaslt subdir build)
+# or when building standalone.
+if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
+    if(ROCISA_STANDALONE)
+        # scikit-build-core pre-installs nanobind (from build-system.requires)
+        # and injects its CMake path, so find_package works without FetchContent.
+        # nanobind requires Python to be found first.
+        find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+        find_package(nanobind REQUIRED CONFIG)
+    else()
+        include(FetchContent)
+        FetchContent_Declare(
+          nanobind
+          GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+          GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
+        )
+        FetchContent_MakeAvailable(nanobind)
+    endif()
+
+    # HIP is required to build _rocisa (via hip::host).  Set the search prefix
+    # so find_package works both in developer environments and in the temporary
+    # build sandbox created by scikit-build-core / uv.
+    list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
+    find_package(hip REQUIRED)
+
+    # Locate origami: prefer the monorepo sibling, fall back to installed package.
+    if(NOT TARGET roc::origami)
+        set(_origami_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/origami")
+        if(IS_DIRECTORY "${_origami_sibling}")
+            add_subdirectory("${_origami_sibling}" origami EXCLUDE_FROM_ALL)
+        else()
+            find_package(origami REQUIRED)
+        endif()
+    endif()
 
     set(ROCISAINST_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruction.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/common.cpp"
@@ -85,16 +97,17 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
                             ${ROCISAFUNC_SOURCE})
     target_include_directories(_rocisa PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/origami/include"
     )
 
-    # Optional inclusion of external shared/stinkytofu CMake project
-    set(STINKYTOFU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-    if(EXISTS "${STINKYTOFU_DIR}/CMakeLists.txt")
-        # Add the external directory; build output goes into a local binary dir 'stinkytofu'
-        add_subdirectory("${STINKYTOFU_DIR}" stinkytofu)
-    else()
-        message(FATAL_ERROR "External directory not found: ${STINKYTOFU_DIR} (skipping)")
+    # Locate stinkytofu: prefer the monorepo sibling, fall back to installed package.
+    if(NOT TARGET stinkytofu)
+        set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+        if(IS_DIRECTORY "${_stinkytofu_sibling}")
+            set(STINKYTOFU_ENABLE_WERROR ON)
+            add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
+        else()
+            find_package(stinkytofu REQUIRED)
+        endif()
     endif()
 
     target_link_libraries(_rocisa PUBLIC roc::origami)
@@ -103,10 +116,44 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
     # transitively include generated files (hardware/gfxIsa.inc) from
     # stinkytofu's build directory.
     target_include_directories(_rocisa PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu")
-    set_target_properties(_rocisa PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa")
+    set_target_properties(_rocisa PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa"
+        # At install time (wheel/site-packages): libstinkytofu.so sits next to
+        # _rocisa.so in the same rocisa/ directory.
+        INSTALL_RPATH "$ORIGIN"
+        # At build time: libstinkytofu.so is in the stinkytofu/ subdirectory of
+        # the binary dir, not co-located with _rocisa.so.
+        BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
+    )
+    # On Windows there is no RPATH; copy stinkytofu.dll next to _rocisa.pyd
+    # so the dynamic linker can find it at runtime.
+    if(WIN32)
+        add_custom_command(TARGET _rocisa POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:stinkytofu>
+                $<TARGET_FILE_DIR:_rocisa>
+        )
+    endif()
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
         "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
         COPYONLY
     )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/_build_info.py.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py"
+        @ONLY
+    )
+    # _build_info.py is intentionally NOT in install() rules so it is absent
+    # from wheels and pre-built packages, acting as the source-build sentinel.
+
+    if(ROCISA_STANDALONE)
+        # Install rules for scikit-build-core: place _rocisa.so, libstinkytofu.so,
+        # and __init__.py into the rocisa/ package directory in the wheel.
+        install(TARGETS _rocisa DESTINATION rocisa)
+        # Co-install libstinkytofu.so and its SONAME symlink next to _rocisa.so.
+        install(FILES $<TARGET_FILE:stinkytofu> DESTINATION rocisa)
+        install(FILES $<TARGET_SONAME_FILE:stinkytofu> DESTINATION rocisa)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
+    endif()
 endif()

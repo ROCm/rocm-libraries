@@ -527,6 +527,10 @@ hipblasClientProcessor getArch()
     {
         return hipblasClientProcessor::gfx1201;
     }
+    else if(deviceString.find("gfx1250") != std::string::npos)
+    {
+        return hipblasClientProcessor::gfx1250;
+    }
     return static_cast<hipblasClientProcessor>(0);
 }
 
