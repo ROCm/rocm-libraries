@@ -127,7 +127,25 @@ T rocsparse::rng_t::generator_exact(int a, int b)
 template <typename T>
 T rocsparse::rng_t::cached_generator(T a, T b)
 {
-    return static_cast<T>(this->uniform_double(a, b));
+    if constexpr(std::is_integral_v<T>)
+    {
+        // Match std::uniform_int_distribution: inclusive on both ends.
+        // Scale the cached [0, 1) sample into [0, b - a + 1), truncate to
+        // an integer offset in {0, ..., b - a}, then add a.
+        // All arithmetic is performed in a wider type so int8_t/uint8_t
+        // ranges that don't fit in T don't overflow before the final cast.
+        const int64_t lo    = static_cast<int64_t>(a);
+        const int64_t hi    = static_cast<int64_t>(b);
+        const int64_t range = hi - lo + 1;
+        const int64_t off
+            = static_cast<int64_t>(this->uniform_double(0.0, static_cast<double>(range)));
+        return static_cast<T>(lo + off);
+    }
+    else
+    {
+        // Match std::uniform_real_distribution: [a, b).
+        return static_cast<T>(this->uniform_double(a, b));
+    }
 }
 
 template <typename T>
