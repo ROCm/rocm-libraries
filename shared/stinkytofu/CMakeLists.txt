@@ -4,6 +4,28 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(stinkytofu)
+
+set(STINKYTOFU_VERSION "0.1.0")
+string(REPLACE "." ";" _ver_list ${STINKYTOFU_VERSION})
+list(GET _ver_list 0 STINKYTOFU_VERSION_MAJOR)
+list(GET _ver_list 1 STINKYTOFU_VERSION_MINOR)
+list(GET _ver_list 2 STINKYTOFU_VERSION_PATCH)
+
+find_package(ROCmCMakeBuildTools QUIET CONFIG)
+set(STINKYTOFU_VERSION_TWEAK "")
+if(ROCmCMakeBuildTools_FOUND)
+    include(ROCMSetupVersion)
+    rocm_get_git_commit_tag(STINKYTOFU_VERSION_TWEAK)
+else()
+    message(WARNING "ROCmCMakeBuildTools not found — version TWEAK (git hash) will be empty.")
+endif()
+message(STATUS "StinkyTofu version: ${STINKYTOFU_VERSION} (${STINKYTOFU_VERSION_TWEAK})")
+
+configure_file(
+    include/stinkytofu/Version.h.in
+    ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
+    @ONLY)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -119,13 +141,17 @@ set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 add_library(stinkytofu ${STINKYTOFU_GENERATED_SOURCES})
 target_link_libraries(stinkytofu PRIVATE stinkytofu-warnings)
+set_target_properties(stinkytofu PROPERTIES
+    VERSION "${STINKYTOFU_VERSION_MAJOR}.${STINKYTOFU_VERSION_MINOR}.${STINKYTOFU_VERSION_PATCH}"
+    SOVERSION "${STINKYTOFU_VERSION_MAJOR}")
 if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
 endif()
 target_include_directories(stinkytofu
     PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include> # For generated files
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+        $<INSTALL_INTERFACE:include/stinkytofu>
     PRIVATE
         # Make the generated files' directories available to the library
         # This allows source files to #include the generated .inc files
@@ -182,12 +208,37 @@ add_subdirectory(tools)
 # Install targets
 ##===----------------------------------------------------------------------===##
 
-# Install the stinkytofu library
-install(TARGETS stinkytofu
+# Install the stinkytofu library and export targets for find_package().
+install(TARGETS stinkytofu stinkytofu-warnings
+    EXPORT stinkytofu-targets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
 )
+install(EXPORT stinkytofu-targets
+    FILE stinkytofu-targets.cmake
+    NAMESPACE stinkytofu::
+    DESTINATION lib/cmake/stinkytofu
+)
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    cmake/stinkytofuConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfig.cmake
+    INSTALL_DESTINATION lib/cmake/stinkytofu
+)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
+    VERSION "${STINKYTOFU_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
+    DESTINATION lib/cmake/stinkytofu
+)
+# Build-tree export so find_package() works without installing.
+export(TARGETS stinkytofu stinkytofu-warnings NAMESPACE stinkytofu:: FILE stinkytofuConfig.cmake)
 
 # Install public header files with stinkytofu/ namespace
 # Exclude ir/python/ (Python-specific, internal headers)
@@ -201,4 +252,8 @@ install(DIRECTORY include/
 install(FILES
     ${PROJECT_BINARY_DIR}/stinkytofu/ir/logical/LogicalInstructions_generated.hpp
     DESTINATION include/stinkytofu/ir/logical
+)
+install(FILES
+    ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
+    DESTINATION include/stinkytofu
 )

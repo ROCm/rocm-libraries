@@ -24,7 +24,10 @@ struct EngineInfo
 inline EngineInfo getEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
 {
     EngineInfo info;
-    size_t engineNameLen = 0, pluginNameLen = 0, versionLen = 0, typeLen = 0;
+    size_t engineNameLen = 0;
+    size_t pluginNameLen = 0;
+    size_t versionLen = 0;
+    size_t typeLen = 0;
 
     hipdnnGetEngineInfo_ext(handle,
                             engineIndex,

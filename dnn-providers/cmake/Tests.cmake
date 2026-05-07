@@ -247,6 +247,106 @@ function(add_integration_test_target TARGET WORKING_DIR)
     _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
 endfunction()
 
+# ~~~
+# Adds a tiered test target with Smoke/Standard/Comprehensive/Full ctest entries.
+#
+# Use this instead of add_unit_test_target() for test binaries that use GTest
+# prefix-based tier filtering (INSTANTIATE_TEST_SUITE_P with Smoke/Standard/
+# Comprehensive/Full prefixes).  Creates four ctest entries with appropriate
+# exclusion/inclusion filters, cumulative labels, and per-tier timeouts.
+# The smoke-only entry is accumulated for install staging so TheRock CI
+# (which runs bare ctest with no -L filter) only executes quick tests.
+#
+# Usage:
+#   add_tiered_test_target(TARGET WORKING_DIR
+#       [SMOKE_TIMEOUT seconds]          # default 600
+#       [STANDARD_TIMEOUT seconds]       # default 1800
+#       [COMPREHENSIVE_TIMEOUT seconds]  # default 3600
+#       [FULL_TIMEOUT seconds])          # default 7200
+# ~~~
+function(add_tiered_test_target TARGET WORKING_DIR)
+    cmake_parse_arguments(ARG ""
+        "SMOKE_TIMEOUT;STANDARD_TIMEOUT;COMPREHENSIVE_TIMEOUT;FULL_TIMEOUT" "" ${ARGN})
+
+    # Default timeouts
+    if(NOT ARG_SMOKE_TIMEOUT)
+        set(ARG_SMOKE_TIMEOUT 600)
+    endif()
+    if(NOT ARG_STANDARD_TIMEOUT)
+        set(ARG_STANDARD_TIMEOUT 1800)
+    endif()
+    if(NOT ARG_COMPREHENSIVE_TIMEOUT)
+        set(ARG_COMPREHENSIVE_TIMEOUT 3600)
+    endif()
+    if(NOT ARG_FULL_TIMEOUT)
+        set(ARG_FULL_TIMEOUT 7200)
+    endif()
+
+    set(TARGET_EXE "${TARGET}${CMAKE_EXECUTABLE_SUFFIX}")
+
+    message(STATUS "Adding tiered test target: ${TARGET} -> ${TARGET_EXE}")
+
+    # -- Infra setup (same as _add_test_target_internal, without the unfiltered add_test) --
+    set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
+        CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
+    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL}
+        "${CMAKE_INSTALL_BINDIR}/${TARGET_EXE}"
+        CACHE INTERNAL "Accumulated global check executable paths" FORCE)
+
+    set_target_properties(${TARGET} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+        INSTALL_RPATH
+            "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR};\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/hipdnn_plugins/engines"
+        INSTALL_RPATH_USE_LINK_PATH TRUE
+        BUILD_RPATH_USE_ORIGIN TRUE)
+    install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # -- Four ctest entries with cumulative labels --
+    # Each tier gets a FAIL_REGULAR_EXPRESSION guard.  GTest prints "Running 0
+    # tests from 0 test suites" and exits 0 when no tests match a filter — the
+    # guard turns that silent pass into a ctest failure so accidentally empty
+    # tiers are caught early.  If a tier is intentionally empty, add a single
+    # INSTANTIATE_TEST_SUITE_P with a minimal case rather than removing the guard.
+    set(_no_tests_re "Running 0 tests from 0 test suites")
+
+    # Smoke: catch-all exclusion (everything not Standard/Comprehensive/Full).
+    # The "unit_test" label is intentional — smoke tests are quick enough to
+    # run in the unit-check target alongside real unit tests.
+    add_test(NAME ${TARGET}_quick
+        COMMAND ${TARGET} --gtest_filter=-Standard*:Comprehensive*:Full*
+        WORKING_DIRECTORY ${WORKING_DIR})
+    set_tests_properties(${TARGET}_quick PROPERTIES
+        LABELS "quick;standard;comprehensive;full;unit_test" TIMEOUT ${ARG_SMOKE_TIMEOUT}
+        FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
+
+    add_test(NAME ${TARGET}_standard
+        COMMAND ${TARGET} --gtest_filter=Standard*
+        WORKING_DIRECTORY ${WORKING_DIR})
+    set_tests_properties(${TARGET}_standard PROPERTIES
+        LABELS "standard;comprehensive;full" TIMEOUT ${ARG_STANDARD_TIMEOUT}
+        FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
+
+    add_test(NAME ${TARGET}_comprehensive
+        COMMAND ${TARGET} --gtest_filter=Comprehensive*
+        WORKING_DIRECTORY ${WORKING_DIR})
+    set_tests_properties(${TARGET}_comprehensive PROPERTIES
+        LABELS "comprehensive;full" TIMEOUT ${ARG_COMPREHENSIVE_TIMEOUT}
+        FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
+
+    add_test(NAME ${TARGET}_full
+        COMMAND ${TARGET} --gtest_filter=Full*
+        WORKING_DIRECTORY ${WORKING_DIR})
+    set_tests_properties(${TARGET}_full PROPERTIES
+        LABELS "full" TIMEOUT ${ARG_FULL_TIMEOUT}
+        FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
+
+    # -- Install staging: smoke only --
+    # Accumulated in a global property so install_integration_tests_ctest_files()
+    # can emit all tiered entries automatically.
+    set_property(GLOBAL APPEND_STRING PROPERTY TIERED_TEST_INSTALL_STAGING
+        "add_test(${TARGET}_quick \"../${TARGET_EXE}\" --gtest_filter=-Standard*:Comprehensive*:Full*)\nset_tests_properties(${TARGET}_quick PROPERTIES LABELS \"quick\" TIMEOUT ${ARG_SMOKE_TIMEOUT})\n")
+endfunction() # add_tiered_test_target
+
 # Install CTest configuration files for direct test execution. This should be called once at the end
 # of the main CMakeLists.txt after all tests are registered.
 #
@@ -270,6 +370,14 @@ function(install_provider_ctest_files INSTALL_SUBDIR)
     foreach(test_target ${all_tests})
         file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
+
+    # Append tiered test entries (smoke tier only for CI).
+    # These are accumulated by add_tiered_test_target() calls.
+    get_property(_tiered_staging GLOBAL PROPERTY TIERED_TEST_INSTALL_STAGING)
+    if(_tiered_staging)
+        file(APPEND "${INSTALLED_CTEST_FILE}" "\n# Tiered test entries (smoke tier only for CI)\n")
+        file(APPEND "${INSTALLED_CTEST_FILE}" "${_tiered_staging}")
+    endif()
 
     install(FILES "${INSTALLED_CTEST_FILE}"
             DESTINATION ${CTEST_INSTALL_PATH} RENAME CTestTestfile.cmake

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -145,15 +145,15 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  <table>
 *  <caption id="spgeam_csr_uniform_indextype">CSR Uniform Index Types</caption>
 *  <tr><th>CSR Row offset                 <th>CSR Column indices
-*  <tr><td>rocsparse_datatype_f32_r</td>  <td>rocsparse_datatype_f32_r</td>
-*  <tr><td>rocsparse_datatype_f64_r</td>  <td>rocsparse_datatype_f64_r</td>
+*  <tr><td>rocsparse_indextype_i32</td>   <td>rocsparse_indextype_i32</td>
+*  <tr><td>rocsparse_indextype_i64</td>   <td>rocsparse_indextype_i64</td>
 *  </table>
 *
 *  \par Mixed Index Types:
 *  <table>
 *  <caption id="spgeam_csr_mixed_indextype">CSR Mixed Index Types</caption>
 *  <tr><th>CSR Row offset                 <th>CSR Column indices
-*  <tr><td>rocsparse_datatype_f64_r</td>  <td>rocsparse_datatype_f32_r</td>
+*  <tr><td>rocsparse_indextype_i64</td>   <td>rocsparse_indextype_i32</td>
 *  </table>
 *
 *  In general, when adding two sparse matrices together, it is possible that the resulting matrix will require
@@ -163,10 +163,10 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  scenario, store the \f$A\f$, \f$B\f$, and \f$C\f$ matrices using the higher index precision.
 *
 *  Additionally, all three matrices \f$A\f$, \f$B\f$, and \f$C\f$ must use the same index types. For example, if \f$A\f$ uses the
-*  index type \ref rocsparse_datatype_f32_r for the row offset array and the index type \ref rocsparse_datatype_f32_r for the column
+*  index type \ref rocsparse_indextype_i32 for the row offset array and the index type \ref rocsparse_indextype_i32 for the column
 *  indices array, then both \f$B\f$ and \f$C\f$ must also use these same index types for their respective row offset and column index
 *  arrays. In the scenario where \f$C\f$ requires a larger index type for the row offset array, store all three
-*  matrices using the larger index type \ref rocsparse_datatype_f64_r for the row offsets array.
+*  matrices using the larger index type \ref rocsparse_indextype_i64 for the row offsets array.
 *
 *  \note Currently only CSR format is supported.
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
