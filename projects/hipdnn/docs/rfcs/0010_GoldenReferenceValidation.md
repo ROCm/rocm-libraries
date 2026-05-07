@@ -93,10 +93,6 @@ Two pipelines share the same set of steps:
 
 The graph fingerprint check is the **first gate**. Before loading any tensors or running any engine, the harness serializes the current graph and compares its hash to the stored `graph.bin`. If the hash differs, the golden data may no longer match the graph the engine will execute, so the test fails immediately and asks the developer to regenerate. This check is conservative -- it may reject golden data that is still technically valid (e.g., when only internal UIDs changed but tensor names and shapes are the same). That is by design: a false failure is cheap (just regenerate), while a false pass is dangerous.
 
-This assumes `graph.to_binary()` produces identical bytes for the same logical graph. If the serialization is non-deterministic (e.g., map iteration order varies), the fingerprint will fire spuriously. If that becomes an issue, the check can be replaced with a semantic comparison.
-
-The graph construction (step 1) is shared by both pipelines -- the same `buildGraph()` code produces the same graph. This means golden data and the test under execution always agree on tensor names, shapes, and semantics.
-
 ---
 
 ## Step 1: construct -- Build the Graph
@@ -108,6 +104,8 @@ The graph construction (step 1) is shared by both pipelines -- the same `buildGr
 **What exists today**: This step already works. Every test fixture (e.g., `IntegrationGpuConvForward.cpp`) implements `buildGraph()` which creates a `graph::Graph`, adds tensors with explicit **names** (e.g., `"x"`, `"w"`, `"y"`), creates operations, validates, and builds the operation graph.
 
 **What changes**: Nothing. The graph construction code is untouched.
+
+**Determinism requirement:** `graph.to_binary()` must produce identical bytes for the same logical graph. If the serializer is non-deterministic (e.g., map iteration order varies between runs), the fingerprint check will report false mismatches. Mitigation: if this surfaces in practice, replace the byte-level hash with a semantic comparison.
 
 **Design constraint**: Tensor names set in `buildGraph()` are the **identity contract** for golden data. They are how golden files map to runtime tensors. A tensor named `"x"` in the golden file must correspond to a tensor named `"x"` in the graph.
 
