@@ -200,20 +200,23 @@ The golden data format is **reference-source-agnostic**. The manifest records wh
 
 The first two (CPU/GPU ref) are built-in -- the generator calls them directly. Everything else goes through `--external-reference`, which reads pre-computed tensor files from a directory. The golden data format doesn't distinguish between them; only the manifest metadata records the origin.
 
-**Future-proofing**: As new engines are added to hipDNN (e.g., Fusilli, or a new plugin), their outputs can also serve as reference data for cross-engine comparison. The golden data format doesn't need to change -- just generate from one engine, validate against another.
-
 ### External Reference Pipeline
 
 For operations where no C++ reference executor exists, **PyTorch (or any framework) can produce the truth instead**. This avoids writing and maintaining a C++ reference kernel for every operation -- PyTorch already has a correct, well-tested implementation.
 
 ```bash
-# 1. Generate reference outputs with PyTorch
+# 1. Export graph definitions from C++ (see Graph Export below)
+./hipdnn_integration_tests \
+  --export-graph \
+  --output-dir /tmp/graph_exports/ \
+  --gtest_filter="*SdpaFwd*Smoke*"
+
+# 2. Generate reference outputs with PyTorch (reads exported graph)
 python scripts/generate_reference.py \
-  --op sdpa_fwd \
-  --cases "B1_H8_S128_D64,B2_H16_S256_D64" \
+  --graph-export /tmp/graph_exports/SdpaFwd_Smoke/ \
   --output-dir ./pytorch_outputs/
 
-# 2. Feed them into the golden data generator
+# 3. Feed them into the golden data generator
 ./hipdnn_integration_tests \
   --generate-golden \
   --external-reference ./pytorch_outputs/ \
@@ -261,17 +264,28 @@ The graph fingerprint is the **key** in the key-value store described in [Golden
 
 ```cpp
 std::string computeGraphFingerprint(const graph::Graph& graph) {
+    SHA256Hasher hasher;
+
     // Walk graph nodes in deterministic (sorted-by-name) order.
-    // For each node, collect:
-    //   - operation type (e.g., ConvFwd, Matmul, SDPA)
-    //   - operation parameters (padding, stride, dilation, etc.)
-    // For each tensor, collect:
-    //   - name, dims, data type
-    // Canonicalize into a deterministic string, then SHA-256.
+    for(const auto& node : getSortedNodes(graph)) {
+        // Reuse the existing per-node signature key (e.g., ConvolutionFwdSignatureKey,
+        // MatmulSignatureKey) to collect operation type and data types.
+        auto key = SignatureKeyRegistry::getKey(node);
+        key.hashSelf(hasher);
+
+        // Extend with properties the signature keys don't currently cover:
+        //   - tensor names and dims
+        //   - operation parameters (padding, stride, dilation, etc.)
+        for(const auto& tensor : node.getTensorAttributes())
+            hasher.update(tensor.name, tensor.dims, tensor.dataType);
+        hashOperationParams(hasher, node);
+    }
+
+    return hasher.hexDigest();
 }
 ```
 
-**Reuses existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order and builds a tensor-UID map. `computeGraphFingerprint()` reuses this graph walk and per-node key pattern. **What it adds**: tensor names, dims, and operation parameters (padding, stride, dilation) to the per-node collection, then composes into a single graph-level SHA-256.
+**Reuses existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order. `computeGraphFingerprint()` reuses both: the graph walk and the per-node signature keys. It extends each key's hash with tensor names, dims, and operation parameters (padding, stride, dilation), then composes into a single graph-level SHA-256.
 
 At validation time:
 
@@ -396,7 +410,7 @@ a3f8c2e1/
     "gpu_architecture": "gfx942",
     "rocm_version": "6.4.0",
     "reference_executor": "cpu",
-    "reference_executor_hash": "a3f8c2e1",
+    "reference_executor_hash": "7b3f9e2d",
     "operation": "conv_fwd",
     "seed": 42
   },
@@ -489,7 +503,7 @@ void verifyGoldenIntegrity(const GoldenManifest& manifest,
 
 #### Versioning
 
-The manifest stores `format_version`, `generator_version`, and `reference_executor_hash`. The loader refuses to read manifests with an unrecognized `format_version` -- this prevents silently misinterpreting a future format as the current one. `generator_version` and `reference_executor_hash` are for diagnostics and forensics only; no comparison logic is built on them. When the reference executor changes, regenerate golden data. "Truth should be truth."
+The manifest stores `format_version`, `generator_version`, and `reference_executor_hash`. The loader refuses to read manifests with an unrecognized `format_version` -- this prevents silently misinterpreting a future format as the current one. `generator_version` and `reference_executor_hash` are for diagnostics and forensics only; no comparison logic is built on them. When the reference executor changes, regenerate golden data.
 
 #### Stride Safety
 
@@ -760,7 +774,7 @@ expected_failures = [
 The `reference_executor_hash` field in the manifest (short git hash of the reference executor source) enables detection of stale golden data. When the current reference executor hash differs from the golden data's hash, the harness logs a warning. This is advisory -- it does not change pass/fail -- but provides a clear signal that regeneration may be needed.
 
 **Acceptance criteria**:
-- [ ] All 5 CLI flags parsed and stored in `TestConfig` singleton
+- [ ] All 6 CLI flags parsed and stored in `TestConfig` singleton
 - [ ] Environment variable fallbacks work when CLI flag is absent
 - [ ] Generator writes `reference_executor_hash` to manifest
 - [ ] `verifyGraphGolden()` logs a warning if hashes differ
@@ -795,7 +809,7 @@ protected:
 
         if(mode == VerificationMode::GOLDEN || mode == VerificationMode::BOTH)
         {
-            auto goldenPath = resolveGoldenPath();
+            auto goldenPath = resolveGoldenPath(graph);
             if(!std::filesystem::exists(goldenPath / "manifest.json"))
             {
                 if(mode == VerificationMode::GOLDEN)
@@ -841,7 +855,7 @@ private:
 ```cpp
 void generateGoldenData(graph::Graph& graph, unsigned int seed)
 {
-    auto goldenDir = resolveGoldenPath();
+    auto goldenDir = resolveGoldenPath(graph);
 
     // Overwrite protection: refuse to clobber existing golden data
     if(std::filesystem::exists(goldenDir / "manifest.json")
@@ -915,12 +929,12 @@ integration-tests/
 
 The case directory name is a short prefix of the graph fingerprint. The fingerprint uniquely identifies the graph configuration. The per-case `manifest.json` contains the full fingerprint and all graph properties in human-readable form for inspection.
 
-**Path resolution.** `resolveGoldenPath()` computes the graph fingerprint and looks up `golden_data/<operation>/<direction>/<short_hash>/manifest.json`. A CI health check script scans the directory tree against the test executable's test list to detect orphaned or missing golden data.
+**Path resolution.** `resolveGoldenPath(graph)` computes the graph fingerprint and looks up `golden_data/<operation>/<direction>/<short_hash>/manifest.json`. A CI health check script scans the directory tree against the test executable's test list to detect orphaned or missing golden data.
 
 **Test tiers are a selection concern.** The test framework selects which cases to run via `--gtest_filter`. If a smoke test and a full test use the same graph, they share the same golden data directory.
 
 **Acceptance criteria**:
-- [ ] `resolveGoldenPath()` uses graph fingerprint to resolve directory
+- [ ] `resolveGoldenPath(graph)` uses graph fingerprint to resolve directory
 - [ ] Missing `manifest.json` in resolved directory in golden mode: **hard FAIL** with suggestion to generate
 - [ ] Missing `manifest.json` in resolved directory in both mode: **warning + skip golden check**
 - [ ] CI health check script detects orphaned golden data (directories not matching any test) and missing golden data (tests with no directory)
@@ -1108,7 +1122,7 @@ Both computed and golden validation must pass. This confirms the golden data is 
 **What ships**: Storage integration, CI integration, path resolution, staleness detection.
 
 **Scope**:
-1. `resolveGoldenPath()` implementation (fingerprint → directory path)
+1. `resolveGoldenPath(graph)` implementation (fingerprint → directory path)
 2. `reference_executor_hash` in metadata + staleness warnings
 3. `--external-reference` flag for ops without reference executors
 4. Storage setup and CI pipeline snippet (tool chosen by infrastructure team)
@@ -1186,7 +1200,7 @@ These are not flaws in the design — they are the boundary of what comparison t
 
 4. **Golden data garbage collection**: A CI job that scans the golden data directory tree against the test executable's test list to detect and clean up orphaned golden data from removed test cases.
 
-5. **Fused graph naming convention**: The directory layout handles mixed-precision via the case directory name (e.g., `_fp16_fp32acc`). Fused graphs (conv+bias+relu) need a naming convention for the operation directory level — either a compound name (`conv_bias_relu/`) or a generic `fused/` directory with descriptive case names. Decide when these tests arrive.
+5. **Fused graph directory convention**: Fused graphs (conv+bias+relu) need a convention for the operation directory level — either a compound name (`conv_bias_relu/`) or a generic `fused/` directory. Decide when these tests arrive.
 
 6. **Compression**: Optional zstd compression of binary blobs for full-tier golden data with large tensors. The manifest would gain a `"compression": "zstd"` field.
 
