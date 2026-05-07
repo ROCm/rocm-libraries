@@ -1,1116 +1,790 @@
 # RFC 0010: Golden Reference Validation
 
 > Owner: Integration Test Team
-> Last updated: 2026-05-04
+> Last updated: 2026-05-07
 
 ## Table of Contents
-1. [Executive Summary](#executive-summary)
-2. [Problem Statement](#problem-statement)
-3. [Pipeline Overview](#pipeline-overview)
-4. [Step 1: construct -- Build the Graph](#step-1-construct----build-the-graph)
-5. [Step 2: execute-reference -- Run the Reference Executor](#step-2-execute-reference----run-the-reference-executor)
-6. [Step 3: serialize -- Save Inputs and Outputs to Disk](#step-3-serialize----save-inputs-and-outputs-to-disk)
-7. [Step 4: deserialize -- Load Inputs Back](#step-4-deserialize----load-inputs-back)
-8. [Step 5: execute-engine -- Run the Engine Under Test](#step-5-execute-engine----run-the-engine-under-test)
-9. [Step 6: deserialize -- Load Saved Outputs](#step-6-deserialize----load-saved-outputs)
-10. [Step 7: validate -- Compare Engine Output to Saved Output](#step-7-validate----compare-engine-output-to-saved-output)
-11. [Verification Modes](#verification-modes)
-12. [CLI and Configuration](#cli-and-configuration)
-13. [Harness Integration](#harness-integration)
-14. [Data Management](#data-management)
-15. [CI Integration](#ci-integration)
-16. [Adding New Golden Reference Tests](#adding-new-golden-reference-tests)
-17. [Implementation Phases](#implementation-phases)
-18. [Risk Register](#risk-register)
-19. [Quality Principles](#quality-principles)
-20. [Known Limitations](#known-limitations)
-21. [Future Work](#future-work)
+1. [Summary](#summary)
+2. [Design Overview](#design-overview)
+   - [Existing Infrastructure](#existing-infrastructure)
+   - [The Graph IS the Key](#the-graph-is-the-key)
+   - [Pipeline Overview](#pipeline-overview)
+3. [Detailed Design](#detailed-design)
+   - [Golden Data Format](#golden-data-format)
+   - [Generic Test Runner](#generic-test-runner)
+   - [Generation Pipeline (Python)](#generation-pipeline-python)
+   - [Reference Sources](#reference-sources)
+   - [Verification Modes](#verification-modes)
+   - [Tolerance Framework](#tolerance-framework)
+   - [Data Integrity](#data-integrity)
+   - [Bundle Inspection Tool (v2)](#bundle-inspection-tool-v2)
+   - [Harness Integration](#harness-integration)
+4. [Folder Convention](#folder-convention)
+5. [CLI and Configuration](#cli-and-configuration)
+6. [Integration](#integration)
+   - [CI Integration](#ci-integration)
+   - [Adding New Golden Reference Tests](#adding-new-golden-reference-tests)
+7. [Data Management](#data-management)
+8. [Risk Register](#risk-register)
+9. [Known Limitations](#known-limitations)
+10. [Future Work](#future-work)
 
 ---
 
-## Executive Summary
+## Summary
 
-The integration test suite currently supports two verification modes. This RFC adds a third:
-
-1. **CPU reference** (existing) -- compute reference on CPU at runtime
-2. **GPU reference** (existing) -- compute reference on GPU at runtime
-3. **Golden reference** (new) -- compare against pre-computed, version-controlled reference data from disk
-
-### Key Benefits
-- **Deterministic baselines and regression detection**: Reference data is frozen from an agreed-upon known-good source. Test outcomes depend only on the engine under test. Unlike computed mode -- where both the reference executor and the engine can drift together and the test still passes -- golden mode compares against a locked baseline, so any engine change is caught
-- **Unblocks testing before C++ reference kernels exist**: Generate golden data from any trusted source (see [Reference Sources](#reference-sources)) and start validating immediately -- the C++ reference kernel can follow later without delaying test coverage
-- **Faster execution**: Eliminates runtime reference computation for large tensors
-
-### How It Works
-
-At its core, the golden reference feature follows these steps across two pipelines -- generation (run once) and validation (run every CI):
-
-| Step | Tag | What happens | Generation | Validation |
-|------|-----|-------------|:---:|:---:|
-| 1 | `construct` | Build the graph from the test fixture's `buildGraph()` | Y | Y |
-| 2 | `execute-reference` | Run a trusted reference (CPU ref, GPU ref, or external) to produce truth | Y | -- |
-| 3 | `serialize` | Save inputs + outputs to disk | Y | -- |
-| 4 | `deserialize` | Load saved inputs from disk | -- | Y |
-| 5 | `execute-engine` | Run MIOpen GPU (the thing being tested) | -- | Y |
-| 6 | `deserialize` | Load saved reference outputs from disk | -- | Y |
-| 7 | `validate` | Compare engine output to saved output | -- | Y |
-
-No reference executor runs in CI. The truth was computed once and frozen to disk. The graph is always rebuilt from `buildGraph()` in the test fixture. A graph fingerprint (hash of graph properties) detects when the graph has changed since golden data was generated. The diagrams in [Pipeline Overview](#pipeline-overview) show both pipelines visually.
-
-### Golden Data Is a Key-Value Store
-
-Golden data is a **key-value store**:
-
-- **Key** = the graph identity (what computation are we testing?)
-- **Value** = the tensor data (what are the correct inputs and expected outputs?)
-
-If the key is wrong — the graph has changed since generation but the fingerprint didn't catch it — every downstream step (deserialize, execute, compare) operates on stale data from a different computation. A pass is false confidence. A fail is a wild goose chase.
-
-The graph fingerprint must be correct, deterministic, and under our control. See [Graph Fingerprint](#graph-fingerprint) for the design.
-
----
-
-## Problem Statement
-
-The integration test suite currently validates engine outputs by computing references at runtime via [`CpuReferenceGraphExecutor`](../../test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp) or [`GpuReferenceGraphExecutor`](../../../../dnn-providers/integration-tests/src/harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp). This creates several gaps:
+The integration test suite validates engine outputs by computing references at runtime via [`CpuReferenceGraphExecutor`](../../test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp) or [`GpuReferenceGraphExecutor`](../../../../dnn-providers/integration-tests/src/harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp). This creates several gaps:
 
 1. **Circular dependency risk**: If the reference executor has a bug, both sides produce the same wrong answer and the test passes
-2. **Coverage gap**: Operations not yet implemented in the reference executor cannot be tested (e.g., instead of writing a C++ SDPA reference kernel, golden data lets us use an external framework's output as truth via `--external-reference`)
+2. **Coverage gap**: Operations not yet implemented in the reference executor cannot be tested (e.g., SDPA has no C++ reference kernel)
 3. **Non-determinism**: GPU reference results can vary across runs, making failure investigation harder
 4. **Slowness**: CPU reference execution for large tensors is the bottleneck in full-tier tests
 
-A prior effort established a golden reference pattern in the MIOpen plugin's test suite ([`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp)) using serialized graph+tensor JSON files loaded from `hipdnn_reference_data/`. This RFC builds on that pattern, extends it for broader use, and integrates it into the shared integration test harness so it works across all plugins (MIOpen, Fusilli, and future ones) without plugin-specific code.
+This RFC extends the existing golden reference pattern -- graph+tensor bundles loaded from disk and validated against engine outputs -- to cover all operation types and integrate with CI. It adds a third verification mode alongside the existing CPU and GPU reference modes:
+
+- **Golden reference** (new) -- compare against pre-computed, version-controlled reference data from disk
+
+A prior effort established this pattern and it is already partially working. The existing infrastructure includes graph+tensor JSON bundles at [`hipdnn_reference_data/BatchnormFwdInference/`](../../hipdnn_reference_data/BatchnormFwdInference/), CPU and GPU golden test runners ([`TestGoldenReferenceCpu`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp), [`TestGoldenReferenceGpu`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp)), and a Python generation framework ([`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/)). What's missing: only batchnorm has data; no CI integration; no formalized folder convention; the GPU runner has no tests; there is no coverage for convolution, matmul, SDPA, layernorm, RMS norm, reduction, or pointwise operations. This RFC fills those gaps.
+
+### Key Benefits
+- **Deterministic baselines**: Reference data is frozen from a known-good source. Unlike computed mode -- where both the reference executor and the engine can drift together -- golden mode compares against a locked baseline, so any engine change is caught
+- **Unblocks testing before C++ reference kernels exist**: Generate golden data from any stable source -- PyTorch, AITER, AOTriton, Perf & benchmark team tools, or any tool that can produce the bundle format (see [Reference Sources](#reference-sources))
+- **Minimal C++ to add a test case**: Adding a test case to an existing operation/layout/datatype requires zero C++ -- drop the bundle in the folder. Adding a **new** operation/layout/datatype requires a one-time `INSTANTIATE_TEST_SUITE_P` (see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests))
+- **Faster execution**: Eliminates runtime reference computation for large tensors
 
 ---
 
-## Pipeline Overview
+## Design Overview
 
-Two pipelines share the same set of steps:
+### Existing Infrastructure
 
-### Generation Pipeline (runs once, produces golden data)
+The core test-as-data infrastructure is already built and working for batchnorm. The table below summarizes each component:
+
+| Component | File(s) | What it does |
+|-----------|---------|-------------|
+| Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | `loadGraphAndTensors()` reads `{Name}.json` + `{Name}.tensor{uid}.bin`, deserializes via FlatBuffers JSON parser. Returns `GraphAndTensorMap` with `extractAndClearOutputTensorData()`, `validateTensors()`, `hostBufferMap()`, `deviceBuffers()` |
+| CPU golden runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | gtest fixture parameterized by path. Loads graph+tensors, runs `CpuReferenceGraphExecutor`, validates. `getGoldenReferenceParams()` discovers `.json` files |
+| GPU golden runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern but executes via `hipdnnEnginePluginExecuteOpGraphImpl` on GPU (defined but not yet exercised in tests) |
+| Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | `Graph` (save/load JSON+bins), `TensorAttributes` (tensor I/O), `DTypeConverter`, per-operation node classes (e.g., `BatchnormInference`). Generator scripts use these to produce bundles |
+| Golden data | [`hipdnn_reference_data/BatchnormFwdInference/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 test cases across nchw/{fp32,fp16,bfp16} and ncdhw/fp32 with `Small`, `Large`, and `MIOpen` sizes |
+
+### The Graph IS the Key
+
+The graph JSON serialization captures **every property that determines the computation**:
+
+- All 18 operation types have complete JSON serializers (ConvFwd/Bwd/Wrw, BatchnormInf/Train/Bwd, Pointwise all modes, Matmul, Layernorm, RMSNorm, SDPA Fwd/Bwd, Reduction, BlockScaleDequantize/Quantize)
+- Per-tensor `data_type`, `dims`, `strides` are serialized
+- All operation-specific parameters (padding, stride, dilation, epsilon, momentum, etc.) are serialized
+- Graph-level `io_data_type`, `compute_data_type`, `intermediate_data_type` are serialized
+
+Changing ANY computation-affecting property produces a different JSON. The saved graph JSON **IS** the unique key for the computation -- no separate fingerprint, manifest, or hash is needed. A golden data bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained: it does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
+
+This is the architectural difference from a test-as-code approach: the graph definition lives on disk, not in C++. The test runner is generic -- it loads whatever graph JSON it finds and validates it. **To add a new test, you export the graph to the bundle format and drop it into the tests folder. No new C++ code is needed.** The runner discovers it automatically via `getGoldenReferenceParams()`.
+
+### Pipeline Overview
+
+Two pipelines operate on the same golden data format:
+
+**Generation (Python, run once):**
+1. Build graph in Python (define tensors, operation, parameters)
+2. Create random input tensors
+3. Run PyTorch (or another framework) to produce reference outputs
+4. Call `Graph.save(base_filename)` to write `{Name}.json` + `{Name}.tensor{uid}.bin`
+
+**Validation (C++, every CI run):**
+1. `loadGraphAndTensors(path)` reads JSON + tensor bins into `GraphAndTensorMap`
+2. `extractAndClearOutputTensorData()` separates reference outputs, zeros the output slots
+3. Execute engine under test (CPU ref or GPU plugin)
+4. `validateTensors(referenceOutputs, atol, rtol)` compares engine output to reference
+
+#### Generation Pipeline (runs once, produces golden data)
 
 ![Generation Pipeline](images/generation_pipeline.png)
 
-### Validation Pipeline (runs every CI)
+#### Validation Pipeline (runs every CI)
 
 ![Validation Pipeline](images/validation_pipeline.png)
 
 ---
 
-## Step 1: construct -- Build the Graph
-
-**What**: Construct the computation graph using the test fixture's `buildGraph()` method.
-
-**Who calls it**: Both the generation pipeline and the validation pipeline.
-
-**What exists today**: This step already works. Every test fixture (e.g., `IntegrationGpuConvForward.cpp`) implements `buildGraph()` which creates a `graph::Graph`, adds tensors with explicit **names** (e.g., `"x"`, `"w"`, `"y"`), creates operations, validates, and builds the operation graph.
-
-**What changes to `buildGraph()`**: Nothing. The graph construction code is untouched. **What's new**: a [graph-property hash](#graph-fingerprint) computed from the constructed graph's properties (tensor names, dims, types, operation parameters) to detect when `buildGraph()` has changed since golden data was generated.
-
-**Design constraint**: Tensor names set in `buildGraph()` are the **identity contract** for golden data. They are how golden files map to runtime tensors. A tensor named `"x"` in the golden file must correspond to a tensor named `"x"` in the graph.
-
-### Tensor Identity Contract
-
-**Invariant**: Golden data maps tensors by **name** (e.g., `"X"`, `"W"`, `"Y"`), never by UID.
-
-UIDs are assigned during `buildGraph()` and can change across refactors. Names are set explicitly by test authors and are part of the test's semantic contract. Names must be unique within a graph -- if two tensors share a name, the manifest silently drops one and the name-to-UID map silently overwrites the other, causing wrong data to load with no error. The generator enforces this at write time. The golden data loader resolves names to UIDs at load time:
-
-```cpp
-// Resolve golden tensor names to runtime UIDs
-void resolveGoldenTensors(
-    const graph::Graph& graph,
-    const GoldenManifest& manifest,
-    GraphTensorBundle& bundle)
-{
-    std::unordered_map<std::string, int64_t> nameToUid;
-    graph.visit([&](const graph::INode& node) {
-        auto insertUnique = [&](const auto& attr) {
-            auto [it, inserted] = nameToUid.emplace(attr->get_name(), attr->get_uid());
-            if(!inserted)
-            {
-                FAIL() << "Duplicate tensor name '" << attr->get_name()
-                       << "' in graph. Tensor names must be unique.";
-            }
-        };
-        for(const auto& attr : node.getNodeInputTensorAttributes())
-            insertUnique(attr);
-        for(const auto& attr : node.getNodeOutputTensorAttributes())
-            insertUnique(attr);
-    });
-
-    for(const auto& [name, tensorInfo] : manifest.inputs)
-    {
-        auto it = nameToUid.find(name);
-        if(it == nameToUid.end())
-        {
-            FAIL() << "Golden data references tensor '" << name
-                   << "' not found in runtime graph. "
-                   << "Graph construction may have changed since golden data was generated.";
-        }
-        bundle.tensors.insert({it->second, loadTensorFromBin(tensorInfo)});
-    }
-}
-```
-
-If a golden file references a tensor name that does not exist in the runtime graph, the test **fails immediately** with a diagnostic message. This is a fail-fast guard against silent data staleness.
-
-**Acceptance criteria**:
-- [ ] `resolveGoldenTensors()` maps by `attr->get_name()`, never by UID
-- [ ] Golden tensor name absent from runtime graph: **hard FAIL** with message naming the missing tensor
-- [ ] Runtime output tensor absent from golden data: **hard FAIL** listing expected golden names
-- [ ] Unit test: Rename a tensor UID, verify golden validation still works (name unchanged)
-- [ ] Unit test: Rename a tensor name, verify golden validation fails with clear diagnostic
-- [ ] Unit test: Add a new output tensor not in golden data, verify hard FAIL
-- [ ] Generator refuses to write golden data if any tensor name is empty or duplicated within the graph
-
-### Graph Fingerprint
-
-The graph fingerprint is the **key** in the key-value store described in [Golden Data Is a Key-Value Store](#golden-data-is-a-key-value-store). If it fails, nothing else matters.
-
-**Goal:** Detect when `buildGraph()` has changed since golden data was generated, *before* loading any tensors or running any engine.
-
-**Why not hash `to_binary()`?** The obvious approach is to hash the output of `graph.to_binary()`. This delegates to the backend's `backendGetSerializedBinaryGraphExt()`, which uses FlatBuffers internally. FlatBuffers does **not** guarantee deterministic serialization — the official docs state *"two different implementations may produce different binaries given the same input values, and this is perfectly valid."* In practice, the same binary produces identical bytes, but FlatBuffers library upgrades, schema changes, or compiler changes can silently break every fingerprint without a single graph actually changing. Since the fingerprint is the foundation of the entire system (see [Golden Data Is a Key-Value Store](#golden-data-is-a-key-value-store)), we cannot build it on a format we don't control.
-
-**Design: Graph-property hash.** Instead of hashing serialized bytes, hash the **graph properties that determine numerical output**:
-
-```cpp
-std::string computeGraphFingerprint(const graph::Graph& graph) {
-    SHA256Hasher hasher;
-
-    // Walk graph nodes in deterministic (sorted-by-name) order.
-    for(const auto& node : getSortedNodes(graph)) {
-        // Reuse the existing per-node signature key (e.g., ConvolutionFwdSignatureKey,
-        // MatmulSignatureKey) to collect operation type and data types.
-        auto key = SignatureKeyRegistry::getKey(node);
-        key.hashSelf(hasher);
-
-        // Extend with properties the signature keys don't currently cover:
-        //   - tensor names and dims
-        //   - operation parameters (padding, stride, dilation, etc.)
-        for(const auto& tensor : node.getTensorAttributes())
-            hasher.update(tensor.name, tensor.dims, tensor.dataType);
-        hashOperationParams(hasher, node);
-    }
-
-    return hasher.hexDigest();
-}
-```
-
-**Reuses existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order. `computeGraphFingerprint()` reuses both: the graph walk and the per-node signature keys. It extends each key's hash with tensor names, dims, and operation parameters (padding, stride, dilation), then composes into a single graph-level SHA-256.
-
-At validation time:
-
-```cpp
-auto fingerprint = computeGraphFingerprint(graph);
-if(fingerprint != manifest.graph_fingerprint)
-{
-    FAIL() << "Graph definition has changed since golden data was generated."
-           << "\n  Golden fingerprint: " << manifest.graph_fingerprint
-           << "\n  Current fingerprint: " << fingerprint
-           << "\n  Regenerate golden data with --generate-golden";
-}
-```
-
-**Why this is the right design:**
-
-| Property | `to_binary()` hash | Graph-property hash |
-|----------|-------------------|-------------------|
-| Deterministic by construction | No (FlatBuffers gives no guarantee) | Yes (we control sort order and canonicalization) |
-| Survives FlatBuffers upgrades | No (all hashes break) | Yes (no FlatBuffers dependency) |
-| Survives serialization format change | No | Yes |
-| Catches real `buildGraph()` changes | Yes | Yes |
-| Catches changes we care about only | No (false positives on format changes) | Yes (only mathematical semantics) |
-
-The graph-property hash changes when — and only when — the computation changes. A FlatBuffers upgrade, a schema migration, or a backend swap does not affect it. This is the correct foundation for a system where every downstream step depends on the fingerprint being right.
-
-**What if we miss a property?** If the hash omits a property that affects computation (e.g., a new convolution attribute), the fingerprint won't catch that change. But Step 7 (value comparison) will — the numerical output will differ. The fingerprint is the first gate, not the only one. Missing a property produces a confusing error message (numerical mismatch instead of "graph changed"), not a silent pass.
-
-**Acceptance criteria**:
-- [ ] `computeGraphFingerprint()` hashes tensor names, dims, types, and operation parameters
-- [ ] Graph fingerprint is deterministic (same graph → same hash across builds)
-- [ ] Graph fingerprint changes when any numerical-output-affecting property changes
-- [ ] Graph fingerprint does NOT change on FlatBuffers upgrades or schema changes
-- [ ] Unit test: Change a tensor dim, verify fingerprint changes
-- [ ] Unit test: Change an operation parameter (e.g., padding), verify fingerprint changes
-- [ ] Unit test: Same graph built twice produces identical fingerprint
-
----
-
-## Step 2: execute-reference -- Run the Reference Executor
-
-**What**: Execute the CPU reference to produce trusted output values.
-
-**Who calls it**: Only the generation pipeline. This step does NOT run during CI validation -- that's the whole point of golden data.
-
-**What exists today**: `CpuReferenceGraphExecutor` serializes the graph to flatbuffer, then walks nodes in topological order using `PlanBuilderRegistry` to look up a CPU implementation for each operation. It supports: ConvFwd/Bwd/Wrw, BatchnormInf/Train/Bwd, Pointwise (all modes), Matmul, Layernorm, RMSNorm, SDPA, Reduction, BlockScaleDequantize.
-
-**What changes**: Nothing to the executor itself. The generation pipeline calls it exactly as the existing `verifyGraph()` does:
-
-```cpp
-executeCpuGraph(graph, cpuBundle);
-
-// Which is:
-auto [serializedGraph, serErr] = graph.to_binary();
-CpuReferenceGraphExecutor().execute(
-    serializedGraph.data(), serializedGraph.size(),
-    cpuBundle.toHostVariantPack());
-```
-
-**Two distinct executors -- do not confuse**:
-
-| | execute-reference (Step 2) | execute-engine (Step 5) |
-|---|---|---|
-| **What** | A trusted reference source | MIOpen GPU engine |
-| **When** | Once, during golden data generation | Every CI run, during validation |
-| **Purpose** | Produce trusted truth | Produce output to validate |
-| **Source** | CPU ref, GPU ref, or external (e.g., PyTorch) | `graph.execute(handle, ...)` |
-
-### Reference Sources
-
-The golden data format is **reference-source-agnostic**. The manifest records which source produced the truth (via `reference_executor` field), but the validation pipeline doesn't care -- it just loads tensors and compares. This means any trusted source can produce golden data:
-
-| Category | Examples | Flag | When to use |
-|----------|----------|------|------------|
-| In-house CPU ref | `CpuReferenceGraphExecutor` | `--reference-executor cpu` (default) | Most ops -- already implemented, trusted |
-| In-house GPU ref | `GpuReferenceGraphExecutor` | `--reference-executor gpu` | When CPU ref is too slow or unavailable |
-| Python frameworks | PyTorch, TensorFlow, JAX | `--external-reference <dir>` | New ops with no C++ ref kernel yet; unblocks testing immediately |
-| Third-party engines | Other vendor libraries, other hipDNN plugins | `--external-reference <dir>` | Cross-engine validation, competitive benchmarking |
-| Other C++ implementations | Standalone C++ reference code, research prototypes | `--external-reference <dir>` | When a team has a verified implementation outside the test SDK |
-
-There are two generation paths — **built-in** (C++ does everything) and **external** (Python or another tool produces the outputs). Both produce the same golden data format. The sections below spell out the exact steps for each path and what each step reads and writes.
-
-### Built-in Reference Path (CPU or GPU)
-
-**When to use:** A C++ reference executor exists for the operation (conv, batchnorm, matmul, etc.).
-
-**Who creates what:**
-
-| What | Who creates it | How |
-|------|---------------|-----|
-| Graph | C++ `buildGraph()` | Test fixture code |
-| Input tensors | C++ `initializeBundle(seed)` | Random fill from seed |
-| Output tensors | C++ `CpuReferenceGraphExecutor` or `GpuReferenceGraphExecutor` | Executes the graph on the inputs |
-| Golden data (manifest + .bin files) | C++ `GoldenDataWriter` | Packages inputs + outputs + metadata |
-
-**Steps:**
-
-```bash
-# Single command. C++ does everything:
-#   a) buildGraph()          → creates the graph
-#   b) initializeBundle(42)  → creates input tensors from seed
-#   c) executeCpuGraph()     → runs CPU ref on those inputs → produces output tensors
-#   d) GoldenDataWriter      → writes manifest.json + tensor_X.bin + tensor_W.bin + tensor_Y.bin
-./hipdnn_integration_tests \
-  --generate-golden \
-  --reference-executor cpu \
-  --golden-data-dir ./golden_data \
-  --golden-seed 42 \
-  --gtest_filter="*ConvFwd*Smoke*"
-```
-
-No external tools. No export step. C++ owns the graph, the inputs, and the outputs. The golden data directory contains everything needed for validation.
-
-### External Reference Path (Python / ONNX / third-party)
-
-**When to use:** No C++ reference executor exists for the operation, or you want an independent implementation to produce the truth.
-
-**Who creates what:**
-
-| What | Who creates it | How |
-|------|---------------|-----|
-| Graph | C++ `buildGraph()` | Test fixture code |
-| Graph definition (params, shapes) | C++ `--export-graph` | Exported for Python to read |
-| Input tensors | C++ `initializeBundle(seed)` | Random fill from seed, exported for Python to read |
-| Output tensors | **Python** (or other external tool) | Reads graph definition + input tensors from C++ export, runs computation |
-| Golden data (manifest + .bin files) | C++ `GoldenDataWriter` | Re-creates inputs from same seed, reads external outputs, packages both |
-
-**Critical constraint:** The external script must compute outputs from the **exact same inputs** that will be stored in the golden data. If it generates its own inputs, the golden data will pair C++ inputs with external outputs computed from different inputs — silently wrong.
-
-**Steps:**
-
-```bash
-# Step 1: C++ creates the graph, generates inputs, and exports BOTH.
-#
-#   READS:  nothing (builds graph from test fixture)
-#   WRITES: /tmp/graph_exports/SdpaFwd_Smoke/
-#             graph_def.json   ← operation params, tensor shapes, data types
-#             tensor_X.bin     ← input tensor (generated from seed 42)
-#             tensor_W.bin     ← input tensor (generated from seed 42)
-#
-./hipdnn_integration_tests \
-  --export-graph \
-  --output-dir /tmp/graph_exports/ \
-  --golden-seed 42 \
-  --gtest_filter="*SdpaFwd*Smoke*"
-
-# Step 2: Python reads the graph definition AND input tensors that C++ exported.
-#          It runs the computation on those inputs. It writes ONLY output tensors.
-#
-#   READS:  /tmp/graph_exports/SdpaFwd_Smoke/graph_def.json   ← knows what op to run
-#           /tmp/graph_exports/SdpaFwd_Smoke/tensor_X.bin      ← same inputs as C++
-#           /tmp/graph_exports/SdpaFwd_Smoke/tensor_W.bin      ← same inputs as C++
-#   WRITES: ./pytorch_outputs/tensor_Y.bin                     ← output tensor ONLY
-#
-python scripts/generate_reference.py \
-  --graph-export /tmp/graph_exports/SdpaFwd_Smoke/ \
-  --output-dir ./pytorch_outputs/
-
-# Step 3: C++ packages the golden data.
-#          It re-creates the same inputs from the same seed (identical to Step 1),
-#          reads Python's output tensors, and writes the golden data directory.
-#
-#   READS:  ./pytorch_outputs/tensor_Y.bin   ← Python's output
-#   WRITES: ./golden_data/sdpa/fwd/a3f8c2e1/
-#             manifest.json                  ← metadata, tensor map, checksums
-#             tensor_X.bin                   ← input  (re-created from seed 42)
-#             tensor_W.bin                   ← input  (re-created from seed 42)
-#             tensor_Y.bin                   ← output (copied from Python's output)
-#
-./hipdnn_integration_tests \
-  --generate-golden \
-  --external-reference ./pytorch_outputs/ \
-  --golden-data-dir ./golden_data \
-  --golden-seed 42 \
-  --gtest_filter="*SdpaFwd*Smoke*"
-```
-
-**Why this is safe:** Step 1 and Step 3 use the same seed, so `initializeBundle(seed)` produces identical inputs. Step 1 exports those inputs for Python. Step 3 re-creates them internally and packages them with Python's outputs. The seed is the single source of input identity.
-
-#### What the external script must produce
-
-The `--external-reference` directory must contain one raw binary file per **output** tensor, named to match the tensor name in the graph (e.g., `Y.bin`). The generator reads these files instead of running a C++ reference executor, then packages them with the inputs it generated into the standard golden data format (manifest + binary blobs + SHA-256). The script must **never** generate its own inputs — it reads them from the `--graph-export` directory.
-
-#### Where the scripts live
-
-External reference scripts live in `scripts/reference_generators/` within the integration test project:
-
-```
-integration-tests/
-  scripts/
-    reference_generators/
-      generate_sdpa_reference.py    # SDPA fwd/bwd
-      generate_layernorm_reference.py
-      common.py                     # Shared utilities (tensor I/O, shape parsing)
-      requirements.txt              # torch, numpy
-```
-
-#### Graph-Level Correctness: Closing the Semantic Gap
-
-The core risk with external references is: **how do we know the Python script ran the same computation as the C++ graph?** If the Python script hardcodes `padding=1` but the C++ graph says `padding=0`, the golden data is wrong and nothing catches it.
-
-The following diagram shows how the graph definition flows through the system and where each correctness check happens:
-
-![Graph-Level Correctness](images/graph_level_correctness.png)
-
-Two checks, each catching a different kind of mismatch:
-
-#### Graph Export
-
-Instead of the Python script independently defining operation parameters or input data, it reads **everything** from the C++ export: graph properties (operation parameters, tensor shapes) and input tensors. The export is a **transient artifact** — consumed by the Python script during generation and discarded. It is not stored in the golden data directory.
-
-`buildGraph()` in C++ is the **single source of truth** for both the computation definition and the inputs. The Python script never independently defines parameters or generates inputs — it reads both from the export. The exact export format (FlatBuffers binary, JSON, or extending the manifest with a `graph_properties` section) is an implementation detail to decide when the first external reference script is written.
-
-**Why the serialized graph is not stored in golden data.** The validation pipeline never reads it — it rebuilds the graph from `buildGraph()` and checks the fingerprint. Storing it would couple golden data to the FlatBuffers schema version: a schema upgrade would make every stored `graph.bin` unreadable, forcing regeneration even when the computation hasn't changed. The manifest and tensor files have no such coupling.
-
-#### Cross-Validation
-
-When a C++ reference executor IS available for an operation, a CI health check generates golden data from both sources and compares the **output tensor values** directly.
-
-**Prerequisite: both executors must run on the same inputs.** Same constraint as the [External Reference Pipeline](#external-reference-pipeline) — if the two executors use different inputs, the comparison is meaningless.
-
-**How same-input is guaranteed:** The C++ generator creates golden data first (inputs from seed + outputs from CPU ref). Then the Python script reads the **saved input tensors** from the C++ golden data directory — it never generates its own inputs. Both executors now compute outputs from the exact same input values.
-
-```bash
-# Step 1: Generate golden data from C++ CPU reference (built-in path).
-#
-#   READS:  nothing (builds graph from test fixture, generates inputs from seed)
-#   WRITES: ./golden_cpu/sdpa/fwd/a3f8c2e1/
-#             manifest.json, tensor_X.bin, tensor_W.bin, tensor_Y.bin
-#
-./hipdnn_integration_tests --generate-golden --reference-executor cpu \
-  --golden-data-dir ./golden_cpu/ --gtest_filter="*SdpaFwd*Smoke*"
-
-# Step 2: Export graph definition (so Python knows the operation parameters).
-#
-#   READS:  nothing (builds graph from test fixture)
-#   WRITES: /tmp/graph_exports/SdpaFwd_Smoke/graph_def.json
-#
-./hipdnn_integration_tests --export-graph \
-  --output-dir /tmp/graph_exports/ --gtest_filter="*SdpaFwd*Smoke*"
-
-# Step 3: Python reads graph params from Step 2 AND input tensors from Step 1.
-#          It computes outputs from the SAME inputs the C++ ref used.
-#
-#   READS:  /tmp/graph_exports/SdpaFwd_Smoke/graph_def.json        ← op params
-#           ./golden_cpu/sdpa/fwd/a3f8c2e1/tensor_X.bin             ← C++ inputs
-#           ./golden_cpu/sdpa/fwd/a3f8c2e1/tensor_W.bin             ← C++ inputs
-#   WRITES: ./pytorch_outputs/tensor_Y.bin                          ← output ONLY
-#
-python scripts/generate_reference.py \
-  --graph-export /tmp/graph_exports/SdpaFwd_Smoke/ \
-  --inputs ./golden_cpu/sdpa/fwd/a3f8c2e1/ \
-  --output-dir ./pytorch_outputs/
-
-# Step 4: Compare C++ outputs vs Python outputs.
-#          Pure tensor value comparison — no fingerprint, no manifest.
-#
-#   READS:  ./golden_cpu/sdpa/fwd/a3f8c2e1/tensor_Y.bin   ← C++ output
-#           ./pytorch_outputs/tensor_Y.bin                  ← Python output
-#   WRITES: nothing (prints pass/fail)
-#
-python scripts/compare_golden_sets.py \
-  ./golden_cpu/sdpa/fwd/a3f8c2e1/ \
-  ./pytorch_outputs/
-```
-
-Both executors ran the same computation (guaranteed by [Graph Export](#graph-export)) on the same inputs (Python read them from C++ golden data via `--inputs`). The only variable is the implementation. If outputs agree within tolerance, the external reference is validated. If they disagree, one of the two implementations has a bug.
-
-#### Summary
-
-| Check | What it catches | How |
-|-------|----------------|-----|
-| Graph export | Python and C++ disagree on operation parameters | Single source of truth (flatbuffer) |
-| Cross-validation | Python implementation bug (correct params, wrong math) | Generate from both sources, compare outputs |
-
-(The [Graph Fingerprint](#graph-fingerprint) check is defined in Step 1 — it catches C++ graph changes after golden data was generated via hash comparison at validation time.)
-
-**Acceptance criteria**:
-- [ ] `--reference-executor cpu` calls `CpuReferenceGraphExecutor` (default)
-- [ ] `--reference-executor gpu` calls `GpuReferenceGraphExecutor`
-- [ ] `--external-reference <dir>` reads raw binary files by tensor name, skips executor
-- [ ] External reference with missing output tensor file (e.g., `Y.bin` absent): **hard FAIL** naming the missing file
-- [ ] `reference_executor` field written to manifest for all three sources (`cpu`, `gpu`, `external`)
-- [ ] Generator validates reference outputs contain no NaN/Inf before writing
-- [ ] `--export-graph` exports both graph definition and input tensors (generated from `--golden-seed`)
-- [ ] External reference scripts read input tensors from the export directory, never generate their own
-
----
-
-## Step 3: serialize -- Save Inputs and Outputs to Disk
-
-**What**: After the reference executor produces outputs, write all tensor data (inputs AND outputs) plus metadata to disk.
-
-**Who calls it**: Only the generation pipeline.
-
-**This is where format decisions live.** The question "JSON or binary?" is answered here.
+## Detailed Design
 
 ### Golden Data Format
 
-Golden data uses a **manifest + binary blobs** format. Each test case produces a directory:
+Golden data uses the existing format already established by `LoadGraphAndTensors.hpp` and `Graph.save()`. Each test case is a set of files with a shared base name:
 
 ```
-a3f8c2e1/
-  manifest.json          # Metadata, tensor map, checksums
-  tensor_X.bin           # Raw binary tensor data (input)
-  tensor_W.bin           # Raw binary tensor data (input)
-  tensor_Y.bin           # Raw binary tensor data (reference output)
+{TestName}.json                    # Full graph definition (JSON)
+{TestName}.tensor{uid}.bin         # Raw binary tensor data, one file per tensor UID
 ```
 
-#### Manifest Format
+For example, the `Small` batchnorm test case in `nchw/fp32` consists of:
+
+```
+Small.json
+Small.tensor0.bin    # x (input)
+Small.tensor1.bin    # mean (input)
+Small.tensor2.bin    # inv_variance (input)
+Small.tensor3.bin    # scale (input)
+Small.tensor4.bin    # bias (input)
+Small.tensor5.bin    # y (output)
+```
+
+#### Graph JSON Structure
+
+The JSON file contains the complete graph definition. Here is an example from an existing batchnorm test case:
 
 ```json
 {
-  "format_version": 1,
-  "metadata": {
-    "generator_version": "1.0.0",
-    "created_at": "2026-05-04T18:00:00Z",
-    "gpu_architecture": "gfx942",
-    "rocm_version": "6.4.0",
-    "reference_executor": "cpu",
-    "reference_executor_hash": "7b3f9e2d",
-    "operation": "conv_fwd",
-    "seed": 42
-  },
-  "graph_fingerprint": "a3f8c2e1d4b7...",
-  "inputs": {
-    "X": {
-      "file": "tensor_X.bin",
-      "dims": [1, 16, 16, 16],
-      "data_type": "FLOAT",
-      "sha256": "a1b2c3d4e5f6..."
-    },
-    "W": {
-      "file": "tensor_W.bin",
-      "dims": [16, 16, 3, 3],
-      "data_type": "FLOAT",
-      "sha256": "f6e5d4c3b2a1..."
-    }
-  },
-  "outputs": {
-    "Y": {
-      "file": "tensor_Y.bin",
-      "dims": [1, 16, 16, 16],
-      "data_type": "FLOAT",
-      "sha256": "1a2b3c4d5e6f..."
-    }
-  }
-}
-```
-
-#### Why Not JSON + Base64?
-
-An earlier golden reference pattern in the MIOpen plugin uses JSON with embedded tensor data. This works for small tensors, but a single `8x512x64x64` fp32 tensor is 64 MB raw — Base64 adds 33% overhead and JSON parsing becomes the bottleneck. Separating the manifest (JSON) from the tensor data (raw binary) avoids both problems:
-
-- Tensors stored at raw size (no encoding overhead)
-- Memory-mapped reads possible for large tensors
-- Manifest remains human-readable for inspection and debugging
-
-#### Extensibility to Binary
-
-Start with JSON manifest for velocity. The reader/writer are behind abstract interfaces (`GoldenDataReader` / `GoldenDataWriter`), making a future binary manifest format a drop-in replacement:
-
-```cpp
-// Scaffold: abstract reader interface
-class IGoldenDataReader
-{
-public:
-    virtual ~IGoldenDataReader() = default;
-    virtual GoldenManifest loadManifest(const std::filesystem::path& dir) = 0;
-    virtual std::unique_ptr<ITensor> loadTensor(const GoldenTensorInfo& info,
-                                                 const std::filesystem::path& dir) = 0;
-};
-
-// Phase 1: JSON implementation
-class JsonGoldenDataReader : public IGoldenDataReader { ... };
-// Future: binary implementation (if needed for velocity at scale)
-```
-
-#### Integrity Verification (SHA-256)
-
-Every golden file is integrity-checked before use. This catches partial downloads, disk corruption, and storage-side bit flips:
-
-```cpp
-void verifyGoldenIntegrity(const GoldenManifest& manifest,
-                           const std::filesystem::path& directory)
-{
-    auto verifyFile = [&](const std::string& file, const std::string& expectedHash) {
-        auto path = directory / file;
-        if(!std::filesystem::exists(path))
-        {
-            FAIL() << "Golden data file missing: " << path;
-        }
-        auto actualHash = computeSha256(path);
-        if(actualHash != expectedHash)
-        {
-            FAIL() << "Golden data integrity check failed for " << path
-                   << "\n  Expected SHA-256: " << expectedHash
-                   << "\n  Actual SHA-256:   " << actualHash
-                   << "\n  File may be corrupted. Re-fetch golden data from storage.";
-        }
-    };
-
-    for(const auto& [name, info] : manifest.inputs)
-        verifyFile(info.file, info.sha256);
-    for(const auto& [name, info] : manifest.outputs)
-        verifyFile(info.file, info.sha256);
-}
-```
-
-`computeSha256()` takes either a byte buffer (for the graph fingerprint) or a file path (for integrity checks) and returns a lowercase hex SHA-256 string. Implementation uses OpenSSL's EVP interface, which is already a ROCm build dependency.
-
-#### Versioning
-
-The manifest stores `format_version`, `generator_version`, and `reference_executor_hash`. The loader refuses to read manifests with an unrecognized `format_version` -- this prevents silently misinterpreting a future format as the current one. `generator_version` and `reference_executor_hash` are for diagnostics and forensics only; no comparison logic is built on them. When the reference executor changes, regenerate golden data.
-
-#### Stride Safety
-
-Strides are **not stored** in the manifest. `buildGraph()` produces strides from dims deterministically, so if golden dims match the graph's dims at load time, strides are guaranteed to match. Storing strides would create a second source of truth to maintain with no safety benefit. The primary safety mechanism is **dim validation at load time**: dims mismatch → hard FAIL before any comparison.
-
-**Acceptance criteria** (for serialize):
-- [ ] Tensor data stored as raw binary `.bin` files (no encoding overhead)
-- [ ] Manifest is JSON (human-readable, < 1 KB per test case)
-- [ ] Generator computes SHA-256 at write time and writes it to manifest
-- [ ] `writeTensorBin()` writes raw bytes with no transformation
-- [ ] Memory usage for loading a 64 MB tensor: < 128 MB (raw + GPU copy)
-- [ ] Reader/writer behind abstract interfaces for future format extensibility
-- [ ] Dims stored in manifest; dim mismatch at load time is hard FAIL
-- [ ] Unrecognized `format_version` in manifest: hard FAIL (never silently misinterpret a future format)
-
-**Acceptance criteria** (for integrity):
-- [ ] Every `.bin` file has a `sha256` field in the manifest
-- [ ] `verifyGoldenIntegrity()` runs before any tensor comparison
-- [ ] Missing file: **hard FAIL** with file path and suggestion to re-fetch from storage
-- [ ] Hash mismatch: **hard FAIL** with expected vs actual hash
-- [ ] Unit test: Corrupt a tensor file (truncate by 1 byte), verify clear failure message
-- [ ] Unit test: Delete a tensor file, verify clear failure message
-- [ ] Unit test: Valid golden data, verify integrity check passes silently
-
----
-
-## Step 4: deserialize -- Load Inputs Back
-
-**What**: Read saved input tensors from golden data files and populate the GPU bundle with them.
-
-**Who calls it**: The validation pipeline. During golden mode, inputs come from disk instead of being randomly generated.
-
-**What this step replaces**: In computed mode, `initializeBundle()` fills tensors with random data using a seed. In golden mode, `resolveGoldenTensors()` fills tensors from binary files.
-
-**How tensor matching works**: The golden manifest stores tensors by name (e.g., `"X"`, `"W"`). The graph has tensors with UIDs. Step 4 builds a name-to-UID map by visiting graph nodes, then loads each golden tensor into the bundle slot corresponding to its UID. (See [Tensor Identity Contract](#tensor-identity-contract) in Step 1.)
-
-**Before loading tensors, verify the graph hasn't changed** (graph fingerprint check):
-
-The first thing Step 4 does is compute the current graph's fingerprint (a hash of graph properties — tensor names, dims, types, operation parameters) and compare it to the fingerprint stored in the manifest. If they differ, the graph definition has changed since golden data was generated — the tensor data is stale and cannot be trusted. This is a hard FAIL with a message to regenerate. See [Graph Fingerprint](#graph-fingerprint) for the full design.
-
-**What can go wrong** (from pen test):
-- Graph definition changed since generation → hard FAIL on graph fingerprint mismatch
-- Golden file references a tensor name not in the graph → hard FAIL (Step 1 contract)
-- Binary file is shorter than expected (dims * element_size) → hard FAIL on short read
-- Dims in manifest don't match dims from `buildGraph()` → hard FAIL with shape diagnostic
-- Data type mismatch → hard FAIL before comparison
-- All-zeros or all-NaN in golden data → detected by NaN/Inf checks in generator (Step 3)
-
-**Acceptance criteria**:
-- [ ] Graph fingerprint check runs before any tensor loading
-- [ ] Graph fingerprint mismatch: hard FAIL with both hashes and regeneration suggestion
-- [ ] `loadTensorFromBin()` reads raw bytes and casts to appropriate type per manifest `data_type`
-- [ ] Short read: hard FAIL with expected vs actual byte count
-- [ ] Dim mismatch between manifest and runtime graph: hard FAIL naming both shapes
-- [ ] All golden input tensors loaded before execution begins (no partial loads)
-
----
-
-## Step 5: execute-engine -- Run the Engine Under Test
-
-**What**: Execute the MIOpen GPU engine on the inputs loaded from golden data.
-
-**Who calls it**: The validation pipeline.
-
-**What exists today**: `executeGpuGraph()` in `IntegrationGraphVerificationHarness.hpp`:
-
-```cpp
-void executeGpuGraph(hipdnnHandle_t handle,
-                     graph::Graph& graph,
-                     GraphTensorBundle& bundle)
-{
-    int64_t workspaceSize;
-    auto result = graph.get_workspace_size(workspaceSize);
-    ASSERT_EQ(result.code, ErrorCode::OK);
-    Workspace workspace(static_cast<size_t>(workspaceSize));
-
-    auto variantPack = bundle.toDeviceVariantPack();
-    result = graph.execute(handle, variantPack, workspace.get());
-    ASSERT_EQ(result.code, ErrorCode::OK);
-}
-```
-
-**What changes**: Nothing to the execution code itself. The golden path calls it exactly as the computed path does. The only difference is where the inputs came from: random fill (computed) vs disk (golden).
-
-**Design bug found during pen test**: Engine support check (engine ID lookup, `create_execution_plans()`, `check_support()`, `build_plans()`) currently lives inside `verifyGraphComputed()`. The golden path needs these same checks. Fix: extract engine support check into a shared method called by both the dispatcher and `verifyGraphGolden()`:
-
-```cpp
-// Shared engine setup -- called before BOTH computed and golden paths
-void prepareEngine(graph::Graph& graph)
-{
-    // Engine support check (existing code from verifyGraph lines 96-137)
-    // create_execution_plans + check_support + build_plans (lines 141-146)
-}
-```
-
-### Architecture Guard
-
-Golden data generated by a GPU reference executor is only valid on the architecture that generated it. Golden data generated by the CPU reference executor is architecture-independent.
-
-```cpp
-void checkArchitectureCompatibility(const GoldenMetadata& metadata)
-{
-    if(metadata.reference_executor == "cpu")
+  "nodes": [
     {
-        // CPU-generated golden data is architecture-independent
-        return;
+      "inputs": {
+        "x_tensor_uid": 0,
+        "mean_tensor_uid": 1,
+        "inv_variance_tensor_uid": 2,
+        "scale_tensor_uid": 3,
+        "bias_tensor_uid": 4
+      },
+      "outputs": { "y_tensor_uid": 5 },
+      "type": "BatchnormInferenceAttributes",
+      "compute_data_type": "float",
+      "name": ""
     }
+  ],
+  "tensors": [
+    { "name": "", "uid": 0, "strides": [60, 20, 5, 1],
+      "dims": [2, 3, 4, 5], "data_type": "float", "virtual": false },
+    { "name": "", "uid": 1, "strides": [3, 1, 1, 1],
+      "dims": [1, 3, 1, 1], "data_type": "float", "virtual": false },
+    ...
+  ],
+  "io_data_type": "float",
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "name": ""
+}
+```
 
-    // GPU-generated golden data: architecture must match
-    std::string currentArch = getCurrentGpuArchitecture();
-    if(currentArch != metadata.gpu_architecture)
+#### Why This Format Is Sufficient
+
+No separate manifest is needed. The graph JSON already contains:
+
+- **Operation type** (`"type": "BatchnormInferenceAttributes"`) -- what operation to run
+- **Tensor metadata** (dims, strides, data_type) -- shape and type of every tensor
+- **Operation parameters** (encoded in the node's input/output UIDs and attributes) -- all computation-determining parameters
+- **Graph-level types** (io_data_type, compute_data_type, intermediate_data_type) -- precision configuration
+- **Tensor UIDs** -- the key linking each `.bin` file to its role in the graph
+
+The tensor binary files are raw bytes with no encoding overhead. A `float32` tensor of shape `[2, 3, 4, 5]` is exactly `2*3*4*5*4 = 480` bytes. This avoids the 33% Base64 overhead that would be needed to embed tensor data in JSON.
+
+#### Tensor Identity
+
+Tensors are identified by **UID** (from the graph JSON), not by name. The file naming convention is `{TestName}.tensor{uid}.bin`. `loadGraphAndTensors()` iterates over `graph->tensors()`, reads each tensor's UID from the JSON, and loads the corresponding `.bin` file:
+
+```cpp
+for(auto attributes : *graph->tensors())
+{
+    auto tensorPath = basePath.string() + ".tensor"
+                      + std::to_string(attributes->uid()) + ".bin";
+    tensorMap[attributes->uid()] = tensorFromFileAndAttributes(tensorPath, *attributes);
+}
+```
+
+UIDs are internal to each bundle -- there is no cross-bundle dependency on UID assignment. Each bundle is self-contained.
+
+---
+
+### Generic Test Runner
+
+The existing test runners (`TestGoldenReferenceCpu` and `TestGoldenReferenceGpu`) already implement the generic pattern. Here is how `TestGoldenReferenceCpu` works:
+
+```cpp
+class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::path>
+{
+protected:
+    GraphAndTensorMap _graphAndTensors;
+    std::unordered_map<int64_t, std::unique_ptr<ITensor>> _referenceOutputTensors;
+
+    void SetUp() override
     {
-        GTEST_SKIP() << "Golden data was generated on " << metadata.gpu_architecture
-                     << " but current GPU is " << currentArch
-                     << ". GPU-generated golden data is architecture-specific.";
+        const auto& path = GetParam();
+        if(path.empty()) { GTEST_SKIP(); }
+
+        // Step 1: Load graph definition + all tensor data from disk
+        _graphAndTensors = loadGraphAndTensors(path);
+
+        // Step 2: Separate output tensors (reference truth), zero the output slots
+        _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
-}
-```
 
-**Acceptance criteria**:
-- [ ] GPU-generated golden data on architecture mismatch: **GTEST_SKIP** naming both architectures
-- [ ] CPU-generated golden data: no architecture check, runs everywhere
-- [ ] Engine support check shared between computed and golden paths
-- [ ] `prepareEngine()` runs before any GPU execution in both paths
+    void goldenReferenceTestSuite(float absoluteTolerance, float relativeTolerance)
+    {
+        // Step 3: Execute CPU reference on the loaded graph + inputs
+        auto tensorMap = _graphAndTensors.hostBufferMap();
+        CpuReferenceGraphExecutor().execute(
+            _graphAndTensors.graphBuffer.data(),
+            _graphAndTensors.graphBuffer.size(), tensorMap);
 
----
-
-## Step 6: deserialize -- Load Saved Outputs
-
-**What**: Read saved reference output tensors from golden data files for comparison.
-
-**Who calls it**: The validation pipeline, after Step 5 completes.
-
-**This is distinct from Step 4**: Step 4 loads inputs (to feed the engine). Step 6 loads outputs (to compare against the engine's results). They use the same `loadTensorFromBin()` function but at different points in the pipeline.
-
-**What can go wrong**:
-- Same failure modes as Step 4 (missing files, short reads, dim mismatches)
-- Golden output shape doesn't match engine output shape → hard FAIL (detected by dim validation)
-
----
-
-## Step 7: validate -- Compare Engine Output to Saved Output
-
-**What**: Compare the engine's output (from Step 5) against the golden reference output (from Step 6) using the harness's tolerance framework.
-
-**Who calls it**: The validation pipeline.
-
-### Tolerance: Single Source of Truth
-
-Tolerances are **always computed by the harness** via `getTolerance()` / `registerValidator()`. The golden manifest does NOT store tolerance values. This eliminates dual-source-of-truth bugs where the harness formula changes but golden data retains the old tolerance.
-
-The validation step uses the same `_tensorIdToValidatorMap` as the computed path. `registerValidator()` is called during `runGraphTest()` before `verifyGraph()`, so the validators are available for both computed and golden paths.
-
-**Diagnostic output on failure**:
-
-```cpp
-if(!valid)
-{
-    auto stats = computeMismatchStats(*goldenTensor, *gpuTensor);
-    FAIL() << "Golden reference mismatch for tensor '" << name << "'"
-           << "\n  Max absolute error: " << stats.maxAbsError
-           << "\n  Max relative error: " << stats.maxRelError
-           << "\n  Mismatched elements: " << stats.mismatchCount
-           << " / " << stats.totalElements
-           << "\n  Golden data from: " << manifest.metadata.created_at
-           << "\n  Reference executor: " << manifest.metadata.reference_executor
-           << "\n  Generator version: " << manifest.metadata.generator_version;
-}
-```
-
-### Floating-Point Edge Cases
-
-The comparison function must handle two edge cases that are mathematically correct but fail naive checks:
-
-- **NaN == NaN**: If both golden and engine output NaN at the same position, treat them as matching (IEEE `NaN != NaN` would otherwise reject two equally-correct outputs). If only one side is NaN, that is a hard FAIL.
-- **-0.0 vs +0.0**: Mathematically equal, bitwise different. The comparator uses value comparison, not bitwise comparison. Note that SHA-256 integrity checks use bitwise comparison on the raw file -- this is correct because integrity checks verify "same bytes on disk," not "same mathematical value."
-
-**Acceptance criteria**:
-- [ ] Golden manifest contains no tolerance fields
-- [ ] `verifyGraphGolden()` uses `_tensorIdToValidatorMap` (same as computed path)
-- [ ] `registerValidator()` is called before golden validation, same as computed path
-- [ ] Changing `toleranceForNodeTyped()` takes effect immediately for both modes
-- [ ] Failure message includes: tensor name, max errors, mismatch count, golden metadata
-- [ ] Both golden and engine NaN at same position: treated as match
-- [ ] One side NaN, other side finite: hard FAIL
-
----
-
-## Verification Modes
-
-The harness gains a `VerificationMode` that controls which pipeline runs:
-
-```cpp
-// src/harness/TestConfig.hpp
-
-enum class VerificationMode
-{
-    COMPUTED,  // CPU/GPU reference executor (existing behavior, default)
-    GOLDEN,   // Pre-computed golden data from disk
-    BOTH,     // Run both; computed is authoritative for pass/fail
+        // Step 4: Compare CPU output against saved reference output
+        EXPECT_TRUE(_graphAndTensors.validateTensors(
+            _referenceOutputTensors, absoluteTolerance, relativeTolerance));
+    }
 };
 ```
 
-| Mode | Steps executed | Reference Source |
-|------|---------------|-----------------|
-| `computed` | 1, random fill, 5 (CPU ref), 5 (GPU engine), 7 | CPU/GPU reference executor at runtime |
-| `golden` | 1, 4, 5, 6, 7 | Pre-computed data from disk |
-| `both` | Both pipelines | Both; computed is authoritative |
+`TestGoldenReferenceGpu` follows the same pattern but executes via `hipdnnEnginePluginExecuteOpGraphImpl` on the GPU.
 
-### `both` Mode Failure Semantics
+Test cases are discovered automatically via `getGoldenReferenceParams()`:
 
-When `both` mode is active, the computed result is always authoritative. Golden comparison is advisory:
-
-| Computed | Golden | Test Result | Action |
-|----------|--------|-------------|--------|
-| PASS | PASS | **PASS** | None |
-| PASS | FAIL | **PASS** | Emit warning: golden data may be stale |
-| FAIL | PASS | **FAIL** | Engine regression; golden data confirms old behavior worked |
-| FAIL | FAIL | **FAIL** | Engine regression confirmed by both methods |
-
-This ensures `both` mode never blocks merges due to stale golden data, while still providing signal when golden and computed disagree.
-
-**Acceptance criteria**:
-- [ ] Truth table implemented exactly as specified above
-- [ ] Warning for computed-pass/golden-fail includes: golden data path, creation date, reference executor hash, and suggestion to regenerate
-- [ ] `both` mode with missing golden data directory: **warning + continue** (does not fail, does not skip)
-- [ ] Unit test: Each of the 4 truth table cells verified
-- [ ] Unit test: `both` mode with nonexistent golden directory produces warning-only
-- [ ] Integration test: Real graph in `both` mode with valid golden data produces PASS
-
----
-
-## CLI and Configuration
-
-New CLI flags added to `main.cpp`:
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--vm, --verification-mode` | `computed`, `golden`, `both` | `computed` | Selects verification strategy |
-| `--gd, --golden-data-dir` | path | `<exe_dir>/../lib/hipdnn_golden_data` | Root directory for golden data |
-| `--generate-golden` | flag | off | Generate golden data instead of running tests |
-| `--golden-seed` | integer | 42 | Seed for golden data input generation |
-| `--force-regenerate` | flag | off | Overwrite existing golden data (without this, generator refuses to clobber) |
-| `--external-reference` | path | none | Directory with external reference outputs |
-| `--export-graph` | flag | off | Export graph definition and input tensors for external reference scripts |
-| `--output-dir` | path | none | Output directory for `--export-graph` |
-
-Environment variable fallbacks:
-- `HIPDNN_TEST_VERIFICATION_MODE`
-- `HIPDNN_TEST_GOLDEN_DATA_DIR`
-
-TOML config integration (extends existing format):
-```toml
-[verification]
-mode = "computed"                              # "computed" | "golden" | "both"
-golden_data_dir = "/path/to/golden_data"       # overridden by CLI flag
-
-[engines.MIOPEN_PLUGIN]
-tolerance = "dynamic"
-# expected_failures applies to all verification modes
-expected_failures = [
-    "IntegrationGpuConvFwd3dFp32/Smoke.Correctness/NCDHW_1x1x4x4x4_1x1x3x3x3",
-]
+```cpp
+inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
+{
+    return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
+        getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data" / subDirectory,
+        ".json"));
+}
 ```
 
-`expected_failures` applies uniformly across verification modes. A test marked as expected-to-fail is expected to fail regardless of whether the reference comes from a computed executor or golden data.
+This scans a subdirectory of `hipdnn_reference_data/` for `.json` files and returns each file path as a gtest parameter. Adding a new test case is as simple as adding a new `.json` + `.bin` bundle to the directory.
 
-### Staleness Detection
+#### What Needs to Change for Full Genericity
 
-The `reference_executor_hash` field in the manifest (short git hash of the reference executor source) enables detection of stale golden data. When the current reference executor hash differs from the golden data's hash, the harness logs a warning. This is advisory -- it does not change pass/fail -- but provides a clear signal that regeneration may be needed.
+The current CPU runner has a hardcoded check that should be removed:
 
-**Acceptance criteria**:
-- [ ] All 8 CLI flags parsed and stored in `TestConfig` singleton
-- [ ] Environment variable fallbacks work when CLI flag is absent
-- [ ] Generator writes `reference_executor_hash` to manifest
-- [ ] `verifyGraphGolden()` logs a warning if hashes differ
-- [ ] Warning does NOT change test pass/fail
+```cpp
+// Current code in goldenReferenceTestSuite():
+EXPECT_EQ(tensorMap.size(), 6);  // Only works for batchnorm (5 inputs + 1 output)
+```
+
+This must be removed so the runner works with any operation regardless of tensor count.
+
+Additionally, tolerances are currently passed as arguments to `goldenReferenceTestSuite()`. For full genericity across all operations, tolerances should come from a per-operation configuration -- a lookup table keyed by operation type and data type. This can be a simple function:
+
+```cpp
+// Proposed: tolerance lookup by operation type + data type
+std::pair<float, float> getToleranceForOperation(
+    const std::string& operationType, const std::string& dataType);
+```
+
+#### `GraphAndTensorMap` Key Methods
+
+The `GraphAndTensorMap` struct (defined in `LoadGraphAndTensors.hpp`) provides the core data manipulation methods used by both runners:
+
+| Method | What it does |
+|--------|-------------|
+| `extractAndClearOutputTensorData()` | Moves output tensors out of the map (these are the reference truth), replaces them with zero-filled tensors (these will receive the engine's output) |
+| `validateTensors(refTensors, atol, rtol)` | Per-element comparison of engine output against reference, using `CpuFpReferenceValidation::allClose()` |
+| `hostBufferMap()` | Returns `{uid → raw_host_pointer}` map for CPU execution |
+| `deviceBuffers()` | Returns `vector<hipdnnPluginDeviceBuffer_t>` for GPU execution |
 
 ---
 
-## Harness Integration
+### Generation Pipeline (Python)
 
-The existing `verifyGraph()` is refactored into a dispatcher that routes to the appropriate pipeline. The public API is unchanged -- existing tests work without modification:
+Golden data is generated by Python scripts in [`reference_data_scripts/`](../../reference_data_scripts/), using PyTorch as the reference executor. The Python framework mirrors the C++ graph structure so that the generated JSON is directly loadable by `loadGraphAndTensors()`.
+
+#### How It Works
+
+1. A generator script creates `TensorAttributes` objects with random data for each input tensor
+2. It constructs a node object (e.g., `BatchnormInference`) with those tensors
+3. It calls `node.execute()` which runs the PyTorch equivalent operation
+4. It wraps the node in a `Graph` and calls `graph.save(base_filename)`
+5. `Graph.save()` writes the JSON (via `graph.as_dict()`) and binary tensor files (via `dump_data_as_binary()`)
+
+Example from `generate_batchnorm_reference.py`:
+
+```python
+def save_batchnorm_inference_execution(x_size, io_data_type, ...):
+    x = TensorAttributes.random(min_val, max_val, io_data_type, x_size)
+    mean = TensorAttributes.random(min_val, max_val, intermediate_data_type, derived_sizes)
+    # ... create all input tensors ...
+    y = TensorAttributes.empty()
+
+    node = BatchnormInference(x, mean, inv_variance, scale, bias, y)
+    node.execute(using_gpu)  # Runs torch.nn.functional.batch_norm
+
+    graph = Graph([node], io_data_type=io_data_type, ...)
+    graph.save(base_filename)  # Writes {base_filename}.json + .tensor{uid}.bin
+```
+
+#### Writing a New Generator
+
+To add golden data for a new operation (e.g., convolution forward):
+
+1. **Create a node class** in `reference_data_scripts/utilities/`:
+   ```python
+   # reference_data_scripts/utilities/conv_forward.py
+   @register_node
+   class ConvForward:
+       type_str = "ConvolutionForwardAttributes"
+
+       class Input:
+           def __init__(self, x: TensorAttributes, w: TensorAttributes): ...
+
+       class Output:
+           def __init__(self, y: TensorAttributes): ...
+
+       def execute(self, using_gpu: bool):
+           self.outputs.y.tensor = torch.nn.functional.conv2d(
+               self.inputs.x.tensor, self.inputs.w.tensor,
+               padding=self.padding, stride=self.stride, dilation=self.dilation)
+
+       def as_dict(self): ...       # JSON serialization matching C++ schema
+       @staticmethod
+       def from_dict(d, tensors): ...  # Deserialization
+   ```
+
+2. **Create a generator script** in `reference_data_scripts/`:
+   ```python
+   # reference_data_scripts/generate_conv_reference.py
+   def save_conv_forward(x_size, w_size, padding, stride, dilation, dtype, base_filename):
+       x = TensorAttributes.random(-1, 1, dtype, x_size)
+       w = TensorAttributes.random(-1, 1, dtype, w_size)
+       y = TensorAttributes.empty()
+       node = ConvForward(x, w, y, padding=padding, stride=stride, dilation=dilation)
+       node.execute(using_gpu=False)
+       graph = Graph([node], dtype=dtype)
+       graph.save(base_filename)
+   ```
+
+3. **Run the generator** to produce data bundles:
+   ```bash
+   python generate_conv_reference.py \
+     --base-filename ../hipdnn_reference_data/ConvFwd/nchw/fp32/Small \
+     --io-type float --x-size 1 16 16 16 --w-size 16 16 3 3 \
+     --padding 1 1 --stride 1 1 --dilation 1 1
+   ```
+
+4. **Commit** the generated `.json` + `.bin` files to `hipdnn_reference_data/`.
+
+The `@register_node` decorator (from `common.py`) adds the node class to `NODE_REGISTRY`, keyed by `type_str`. This enables `Graph.from_file()` to deserialize any graph JSON back into executable Python objects.
+
+#### Current Coverage
+
+| Operation | Generator exists | Data bundles exist | Notes |
+|-----------|:---:|:---:|-------|
+| BatchnormFwdInference | Yes | Yes (6 cases) | nchw/{fp32,fp16,bfp16}, ncdhw/fp32 |
+| ConvFwd / ConvBwd / ConvWrw | No | No | Needed |
+| Matmul | No | No | Needed |
+| SDPA Fwd / Bwd | No | No | Needed -- primary motivation for golden ref |
+| Pointwise (all modes) | No | No | Needed |
+| Layernorm / RMSNorm | No | No | Needed |
+| Reduction | No | No | Needed |
+| BatchnormTrain / BatchnormBwd | No | No | Needed |
+| BlockScaleDequantize / Quantize | No | No | Needed |
+
+---
+
+### Reference Sources
+
+The golden data format is **reference-source-agnostic**. Any tool that can produce a graph JSON matching the bundle schema and write the corresponding tensor `.bin` files is a valid reference source. The validation pipeline does not know or care what produced the data -- it loads tensors and compares.
+
+| Category | Examples | When to use |
+|----------|----------|------------|
+| Python frameworks | PyTorch, TensorFlow, JAX | Primary path. Independent implementation, covers all ops, no C++ build required |
+| In-house CPU ref | `CpuReferenceGraphExecutor` | Cross-validation against Python; fallback when no Python generator exists |
+| In-house GPU ref | `GpuReferenceGraphExecutor` | When CPU ref is too slow or unavailable |
+| AMD internal tools | AITER, AOTriton, Perf & benchmark team tools | Validated kernels from other AMD teams; especially useful for SDPA and fused operations |
+| Third-party engines | cuDNN (via shim), oneDNN | Cross-vendor validation |
+
+The key requirement is not **which** tool generates the data, but that the output matches the bundle schema. The canonical schema is the FlatBuffers definition at [`flatbuffers_sdk/schemas/graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs), which defines the `Graph`, `Node`, `TensorAttributes`, and `NodeAttributes` union types. The JSON must be parseable by the FlatBuffers JSON parser using this schema, and each `{Name}.tensor{uid}.bin` must contain raw bytes matching the tensor's declared `dims` and `data_type`. A generation script is a thin adapter: it translates between the source tool's API and this format.
+
+Python/PyTorch is the **recommended starting point** because:
+- It's independent of the C++ codebase (breaks the circular dependency in Problem #1)
+- It covers all operation types via PyTorch's `torch.nn.functional` API
+- Generation scripts are simple and auditable
+- It doesn't require building the C++ project to generate test data
+
+However, for operations where another source is more trusted (e.g., AITER's SDPA kernels, AOTriton's matmul), that source should be preferred. The format is the contract, not the tool.
+
+---
+
+### Verification Modes
+
+Three modes control which test suites run:
+
+| Mode | What runs | Reference source |
+|------|-----------|-----------------|
+| `computed` | Existing test-as-code tests (`IntegrationGraphVerificationHarness`) | CPU/GPU reference executor at runtime |
+| `golden` | Data-driven tests (`TestGoldenReferenceCpu` / `TestGoldenReferenceGpu`) | Pre-computed data from disk |
+| `both` | Both test suites | Both; both must pass |
+
+**Key distinction**: `computed` and `golden` are **separate gtest suites**, not merged within a single test. They have different test fixtures, different parameterization, and different data sources.
+
+- **COMPUTED** tests use `IntegrationGraphVerificationHarness`. The graph is built by `buildGraph()` in C++. Inputs are randomly generated. The CPU/GPU reference executor runs at test time. This is the existing behavior, unchanged.
+
+- **GOLDEN** tests use `TestGoldenReferenceCpu` or `TestGoldenReferenceGpu`. The graph is loaded from JSON on disk. Inputs come from the data bundle. No `buildGraph()`. No runtime reference computation.
+
+- **BOTH** means both test suites run in CI. They are independent -- both must pass. There is no complex truth table or advisory mode. If either suite fails, the CI fails.
+
+#### Floating-Point Edge Cases
+
+- **NaN in golden data is a generation error.** Golden reference tensors should never contain NaN. If the reference executor produces NaN, the generator script is wrong (bad input range, numerical overflow, or a bug in the reference operation). The [generation-time validation](#generation-time-check-output-validation-python) rejects NaN before writing. If the engine under test produces NaN where the golden reference is a finite value, that is a hard FAIL.
+- **-0.0 vs +0.0**: Mathematically equal, bitwise different. The comparator uses value comparison, not bitwise comparison.
+
+#### Architecture Note
+
+All current golden data is generated from Python (PyTorch) or the CPU reference executor, which produce architecture-independent results. If GPU-generated golden data is introduced in the future, an architecture guard will be needed to skip tests when the current GPU does not match the generation architecture. See [Future Work](#future-work).
+
+---
+
+### Tolerance Framework
+
+#### Single Source of Truth
+
+Tolerances are **always defined in code**, never stored in the data bundle. The data bundle contains only the graph definition and tensor values. This eliminates dual-source-of-truth bugs where the code formula changes but golden data retains the old tolerance.
+
+The current approach passes tolerances as arguments to `goldenReferenceTestSuite(atol, rtol)`, with values determined per test class:
+
+```cpp
+// Current pattern (from TestCpuFpReferenceBatchnorm.cpp):
+class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32 : public TestGoldenReferenceCpu
+{
+protected:
+    void runTest() { goldenReferenceTestSuite(/*atol=*/1e-5, /*rtol=*/1e-5); }
+};
+```
+
+**Proposed improvement**: tolerance lookup by operation type + data type, so a single generic test class can handle all operations:
+
+```cpp
+// Future: single test class for all operations
+// Operation type extracted from the loaded FlatBuffers graph via node.attributes_type()
+// (returns the NodeAttributes enum: PointwiseAttributes, ConvolutionFwdAttributes, etc.)
+auto opType = graph->nodes()->Get(0)->attributes_type();
+auto [atol, rtol] = getToleranceForOperation(opType, graph->io_data_type());
+goldenReferenceTestSuite(atol, rtol);
+```
+
+The exact format of the tolerance configuration (lookup table, config file, or constexpr map) is an implementation detail. The operation type is available from the loaded graph via the FlatBuffers-generated `NodeAttributes` enum (see [`graph_generated.h`](../../flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/graph_generated.h)). The principle is: tolerances come from code keyed by operation type and data type, not from the data bundle.
+
+**Acceptance criteria**:
+- [ ] Golden data bundles contain no tolerance fields
+- [ ] Changing tolerance values in code takes effect immediately for both computed and golden modes
+- [ ] Failure message includes: tensor UID, max absolute error, max relative error, mismatch count
+
+---
+
+### Data Integrity
+
+Key-value consistency is mostly guaranteed by construction: `Graph.save()` writes the JSON and `.bin` files from the same in-memory graph in a single call, and `loadGraphAndTensors()` reads UIDs from the JSON and loads the corresponding `.bin` files. The UIDs match because they come from the same source. Corruption can only happen after generation (partial downloads, disk errors, manual edits).
+
+Two checks catch the real failure modes:
+
+#### Load-Time Check: File Size Validation (C++)
+
+Before loading tensor data, verify that the file size matches what the graph JSON declares:
+
+```cpp
+auto expectedBytes = product(attributes->dims()) * sizeOfDataType(attributes->data_type());
+auto actualBytes = std::filesystem::file_size(tensorPath);
+if(actualBytes != expectedBytes)
+{
+    FAIL() << "Tensor file size mismatch for UID " << attributes->uid()
+           << "\n  Expected: " << expectedBytes << " bytes"
+           << " (dims=" << formatDims(attributes->dims())
+           << ", dtype=" << attributes->data_type() << ")"
+           << "\n  Actual:   " << actualBytes << " bytes"
+           << "\n  File:     " << tensorPath;
+}
+```
+
+This catches truncated files (the most common corruption from partial downloads or crashed writes), oversized files (wrong tensor written to the wrong path), and complete mismatches (binary file from a different bundle). It's cheap — a single `stat()` call per tensor, no data reading.
+
+`loadGraphAndTensors()` does not perform this check today. A truncated file silently produces garbage in the tail of the tensor. This must be added.
+
+A missing `.bin` file for a UID in the JSON already causes `fillTensorFromFile()` to throw, but the error message should be improved to name the UID and suggest the bundle may be incomplete.
+
+#### Generation-Time Check: Output Validation (Python)
+
+`Graph.save()` must validate all output tensors before writing. This is not an opt-in per-script check — it is built into `Graph.save()` itself so that no generator can bypass it:
+
+```python
+class Graph:
+    def save(self, base_filename):
+        self._validate_outputs()       # Runs BEFORE any file I/O
+        self._write_json(base_filename)
+        self._write_tensors(base_filename)
+
+    def _validate_outputs(self):
+        for uid, tensor_attr in self.output_tensors.items():
+            t = tensor_attr.tensor
+            if torch.isnan(t).any():
+                raise ValueError(f"Tensor UID {uid} contains NaN — check input ranges or reference op")
+            if torch.isinf(t).any():
+                raise ValueError(f"Tensor UID {uid} contains Inf — check input ranges or reference op")
+            if t.numel() > 1 and t.std() == 0:
+                raise ValueError(f"Tensor UID {uid} has zero variance (all-same values)")
+```
+
+A tensor of all NaN, all Inf, or all-same-value makes the test meaningless — everything passes within tolerance. Because the check is inside `Graph.save()`, it is impossible to write a bundle with degenerate outputs.
+
+#### Load-Time Check: NaN/Inf Rejection (C++)
+
+As a safety net (catches bundles generated before this check existed, or by external tools), `loadGraphAndTensors()` must also reject NaN/Inf in output tensors after loading:
+
+```cpp
+for(auto uid : outputTensorUids)
+{
+    auto* data = static_cast<const float*>(tensorMap.at(uid)->hostPtr());
+    auto size = tensorMap.at(uid)->numElements();
+    for(size_t i = 0; i < size; ++i)
+    {
+        if(std::isnan(data[i]) || std::isinf(data[i]))
+        {
+            FAIL() << "Golden output tensor UID " << uid
+                   << " contains NaN/Inf at index " << i
+                   << " — regenerate the bundle";
+        }
+    }
+}
+```
+
+This is more expensive than the file-size check (it reads the data), but only runs on output tensors (not inputs) and catches the exact failure mode adickin identified: NaN in golden data means the reference was wrong.
+
+**Acceptance criteria**:
+- [ ] `loadGraphAndTensors()` validates file size before reading tensor data
+- [ ] File size mismatch: hard FAIL with expected vs actual bytes, dims, data type, and file path
+- [ ] Missing `.bin` file: hard FAIL naming the UID and file path
+- [ ] `Graph.save()` calls `_validate_outputs()` internally — no generator can bypass it
+- [ ] `loadGraphAndTensors()` rejects NaN/Inf in output tensors after loading (safety net for legacy/external bundles)
+- [ ] Both checks produce actionable error messages naming the tensor UID
+
+---
+
+### Bundle Inspection Tool (v2)
+
+A command-line tool that reads golden data bundles and reports their contents. Not required for v1 (the core loader and generator cover initial needs), but becomes essential as the number of operations and bundles grows.
+
+```bash
+# Inspect a single bundle
+python inspect_bundle.py hipdnn_reference_data/ConvFwd/nchw/fp32/Small.json
+
+# Output:
+# Bundle: Small.json
+# Operation: ConvolutionForwardAttributes
+# io_data_type: float    compute_data_type: float
+# Tensors:
+#   UID 0  x       [1, 16, 16, 16]  float  1024 bytes  min=-0.98  max=0.99  mean=0.01  std=0.58
+#   UID 1  w       [16, 16, 3, 3]   float  9216 bytes  min=-0.97  max=0.98  mean=0.00  std=0.57
+#   UID 2  y (out) [1, 16, 14, 14]  float  12544 bytes min=-4.21  max=4.35  mean=0.02  std=1.23
+# Integrity: OK (all file sizes match, no NaN/Inf)
+```
+
+```bash
+# Validate all bundles in a directory
+python inspect_bundle.py --validate hipdnn_reference_data/
+
+# Output:
+# Scanning hipdnn_reference_data/ ...
+# BatchnormFwdInference/nchw/fp32/Small.json    OK
+# BatchnormFwdInference/nchw/fp32/Large.json    OK
+# BatchnormFwdInference/nchw/fp32/MIOpen.json   OK
+# ...
+# 6/6 bundles OK, 0 errors
+```
+
+The tool runs the same integrity checks described in [Data Integrity](#data-integrity) (file size validation, NaN/Inf detection, variance check) and adds human-readable metadata (tensor shapes, value statistics). It uses the existing `Graph.from_file()` and `TensorAttributes.load_data_from_binary()` from the Python framework.
+
+**Acceptance criteria**:
+- [ ] `inspect_bundle.py` reads any valid bundle and prints operation type, tensor metadata, and value statistics
+- [ ] `--validate` mode checks all bundles in a directory tree, reports pass/fail per bundle
+- [ ] Exit code non-zero if any bundle fails validation
+- [ ] Tool reuses existing `reference_data_scripts/utilities/` framework (no duplication)
+
+---
+
+### Harness Integration
+
+Two test patterns coexist in the codebase today. The long-term direction is convergence toward Pattern 2 (test-as-data) as the primary pattern, with Pattern 1 (test-as-code) maintained for backward compatibility:
+
+#### Pattern 1: Test-as-Code (`IntegrationGraphVerificationHarness`)
+
+Used for **computed** verification. The graph is built in C++ by `buildGraph()`. Inputs are randomly generated. The CPU/GPU reference executor runs at test time. This is the existing pattern, unchanged by this RFC.
 
 ```cpp
 template <typename DataType, typename TestCaseType>
 class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
 {
-protected:
-    void verifyGraph(graph::Graph& graph, unsigned int seed)
-    {
-        // Generate mode: create golden data and return
-        if(TestConfig::get().isGenerateGoldenMode())
-        {
-            generateGoldenData(graph, seed);
-            return;
-        }
-
-        auto mode = TestConfig::get().getVerificationMode();
-
-        if(mode == VerificationMode::COMPUTED || mode == VerificationMode::BOTH)
-        {
-            verifyGraphComputed(graph, seed);
-        }
-
-        if(mode == VerificationMode::GOLDEN || mode == VerificationMode::BOTH)
-        {
-            auto goldenPath = resolveGoldenPath(graph);
-            if(!std::filesystem::exists(goldenPath / "manifest.json"))
-            {
-                if(mode == VerificationMode::GOLDEN)
-                {
-                    FAIL() << "Golden data not found: " << goldenPath
-                           << "\nFetch golden data from storage or generate with --generate-golden";
-                }
-                // BOTH mode: missing golden data is a warning, not a failure
-                HIPDNN_PLUGIN_LOG_WARN(
-                    "Golden data not found, skipping golden check: " << goldenPath);
-                return;
-            }
-            verifyGraphGolden(graph, goldenPath);
-        }
-    }
-
-private:
-    // Existing computed verification flow, extracted verbatim from current verifyGraph()
-    void verifyGraphComputed(graph::Graph& graph, unsigned int seed)
-    {
-        // ... existing code from IntegrationGraphVerificationHarness.hpp ...
-    }
-
-    void verifyGraphGolden(graph::Graph& graph, const std::filesystem::path& goldenDir)
-    {
-        // Step 4: deserialize inputs
-        // Step 5: execute-engine
-        // Step 6: deserialize outputs
-        // Step 7: validate
-    }
-
-    void generateGoldenData(graph::Graph& graph, unsigned int seed)
-    {
-        // Step 1: construct (already done by caller)
-        // Step 2: execute-reference
-        // Step 3: serialize
-    }
+    void verifyGraph(graph::Graph& graph, unsigned int seed) { ... }
 };
 ```
 
-### Generator Flow (Steps 1-3)
+Every existing test (conv, matmul, SDPA, etc.) uses this pattern. This RFC does not modify it.
+
+#### Pattern 2: Test-as-Data (`TestGoldenReferenceCpu` / `TestGoldenReferenceGpu`)
+
+Used for **golden** verification. The graph is loaded from JSON on disk. No `buildGraph()`. No runtime reference computation. This is the pattern established by the existing golden reference infrastructure and extended by this RFC.
 
 ```cpp
-void generateGoldenData(graph::Graph& graph, unsigned int seed)
+class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::path>
 {
-    auto goldenDir = resolveGoldenPath(graph);
-
-    // Overwrite protection: refuse to clobber existing golden data
-    if(std::filesystem::exists(goldenDir / "manifest.json")
-       && !TestConfig::get().forceRegenerate())
+    void SetUp() override
     {
-        FAIL() << "Golden data already exists at: " << goldenDir
-               << "\nUse --force-regenerate to overwrite.";
+        _graphAndTensors = loadGraphAndTensors(GetParam());
+        _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
+    void goldenReferenceTestSuite(float atol, float rtol) { ... }
+};
+```
 
-    // Atomic write: generate into a temporary directory, then rename
-    auto tmpDir = goldenDir.parent_path() / (goldenDir.filename().string() + ".tmp");
-    std::filesystem::create_directories(tmpDir);
+New golden tests should use Pattern 2. Existing computed tests continue using Pattern 1. Over time, as golden data coverage grows, Pattern 2 becomes the primary validation path and Pattern 1 serves as a cross-validation supplement.
 
-    GraphTensorBundle refBundle;
-    std::vector<int64_t> outputTensorIds;
-    generateBundles(graph, refBundle, refBundle, outputTensorIds);
-    initializeBundle(graph, refBundle, seed);
+#### Engine Setup for GPU Runner
 
-    executeCpuGraph(graph, refBundle);  // Step 2: execute-reference
+The GPU runner (`TestGoldenReferenceGpu`) handles engine setup internally:
 
-    GoldenDataWriter writer(tmpDir);
-    writer.writeManifest(graph, refBundle, outputTensorIds, buildMetadata());
-    writer.writeTensorBlobs(refBundle);  // Step 3: serialize
+```cpp
+void SetUp() override
+{
+    hipdnnEnginePluginCreateImpl(&_handle);
+    _engineConfigBuffer = createValidEngineConfig(1).Release();
+    _graphAndTensors = loadGraphAndTensors(path);
+    _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
+}
+```
 
-    // Atomic swap: rename only after all files are written
-    std::filesystem::rename(tmpDir, goldenDir);
+The execution creates a plugin execution context, executes the graph, marks device-modified output tensors, and validates:
 
-    std::cout << "Golden data written to: " << goldenDir << std::endl;
+```cpp
+void goldenReferenceTestSuite(float atol, float rtol)
+{
+    hipdnnEnginePluginCreateExecutionContextImpl(_handle, &engineConfig, &opGraph, &ctx);
+    hipdnnEnginePluginExecuteOpGraphImpl(_handle, ctx, nullptr, deviceBuffers.data(), ...);
+    for(auto uid : _graphAndTensors.outputTensorUids)
+        _graphAndTensors.tensorMap.at(uid)->markDeviceModified();
+    EXPECT_TRUE(_graphAndTensors.validateTensors(_referenceOutputTensors, atol, rtol));
 }
 ```
 
 **Acceptance criteria**:
-- [ ] `verifyGraph()` signature unchanged (zero changes to existing tests)
-- [ ] `verifyGraphComputed()` is exact rename of existing `verifyGraph()` body
-- [ ] `--generate-golden` calls `generateGoldenData()` which uses same `buildGraph()`, `generateBundles()`, `initializeBundle()`
-- [ ] Engine support check shared between computed and golden paths (not duplicated, not missing from golden)
-- [ ] Output directory structure matches manifest layout
-- [ ] Generator refuses to overwrite existing golden data without `--force-regenerate`
-- [ ] Generator writes to a temp directory and renames atomically (no partial golden data on disk if process crashes)
-- [ ] Clang-tidy clean
+- [ ] Pattern 1 (computed) tests are unchanged -- zero modifications to existing test fixtures
+- [ ] Pattern 2 (golden) tests work for any operation type (after removing `EXPECT_EQ(tensorMap.size(), 6)`)
+- [ ] Both patterns can coexist in the same test binary
+- [ ] `getGoldenReferenceParams()` discovers test cases by scanning for `.json` files
 
 ---
 
-## Data Management
+## Folder Convention
 
-### Repository Layout
+Golden data is organized under `hipdnn_reference_data/` with a three-level hierarchy:
 
 ```
-integration-tests/
-  golden_data/
-    conv/
-      fwd/
-        a3f8c2e1/
-          manifest.json
-          tensor_X.bin
-          tensor_W.bin
-          tensor_Y.bin
-        b7d4e9f0/
-          manifest.json
-          ...
-      bwd/
-        ...
-    batchnorm/
-      ...
-    sdpa/
-      fwd/
-        c5a1b3d2/
-          manifest.json
-          ...
+hipdnn_reference_data/
+  {Operation}/            # e.g., BatchnormFwdInference, ConvFwd, MatmulFwd
+    {Layout}/             # e.g., nchw, nhwc, ncdhw
+      {DataType}/         # e.g., fp32, fp16, bfp16
+        {TestName}.json + {TestName}.tensor{uid}.bin
 ```
 
-The case directory name is a short prefix of the graph fingerprint. The fingerprint uniquely identifies the graph configuration. The per-case `manifest.json` contains the full fingerprint and all graph properties in human-readable form for inspection.
+### Naming Conventions
 
-**Path resolution.** `resolveGoldenPath(graph)` computes the graph fingerprint and looks up `golden_data/<operation>/<direction>/<short_hash>/manifest.json`. A CI health check script scans the directory tree against the test executable's test list to detect orphaned or missing golden data.
+| Level | Convention | Examples |
+|-------|-----------|----------|
+| Operation | PascalCase, direction suffix | `BatchnormFwdInference`, `ConvFwd`, `ConvBwd`, `MatmulFwd`, `SdpaFwd`, `PointwiseRelu` |
+| Layout | Lowercase | `nchw`, `nhwc`, `ncdhw`, `ndhwc` |
+| DataType | Lowercase abbreviation | `fp32`, `fp16`, `bfp16` |
+| TestName | PascalCase, describes tensor size/source | `Small`, `Large`, `MIOpen`, `Smoke` |
 
-**Test tiers are a selection concern.** The test framework selects which cases to run via `--gtest_filter`. If a smoke test and a full test use the same graph, they share the same golden data directory.
+### Example: Current Data
 
-**Acceptance criteria**:
-- [ ] `resolveGoldenPath(graph)` uses graph fingerprint to resolve directory
-- [ ] Missing `manifest.json` in resolved directory in golden mode: **hard FAIL** with suggestion to generate
-- [ ] Missing `manifest.json` in resolved directory in both mode: **warning + skip golden check**
-- [ ] CI health check script detects orphaned golden data (directories not matching any test) and missing golden data (tests with no directory)
+```
+hipdnn_reference_data/
+  BatchnormFwdInference/
+    ncdhw/
+      fp32/
+        Small.json + Small.tensor{0..5}.bin
+    nchw/
+      bfp16/
+        Small.json + Small.tensor{0..5}.bin
+      fp16/
+        Small.json + Small.tensor{0..5}.bin
+      fp32/
+        Small.json + Small.tensor{0..5}.bin
+        Large.json + Large.tensor{0..5}.bin
+        MIOpen.json + MIOpen.tensor{0..5}.bin
+```
 
-### Storage Requirements
+### How Test Discovery Works
 
-Golden data is too large for git (a single test case with large tensors can be tens of megabytes). It needs external storage that satisfies three requirements:
+`getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32")` scans the directory for `.json` files and returns each file path as a gtest parameter. Each `.json` file becomes a separate test case.
 
-1. **CI-pullable**: CI jobs can fetch golden data before running tests
-2. **Versioned**: Golden data versions are tied to code versions (regenerating golden data after a `buildGraph()` change should be trackable)
-3. **Integrity-checked**: Partial or corrupted downloads are detected before comparison (SHA-256 in the manifest handles this regardless of storage tool)
+To add a new test case to an existing operation/layout/datatype, drop a new `.json` + `.bin` bundle into the directory. The next test run picks it up automatically.
 
-### Storage Options
+### gtest Filtering
 
-The choice of storage tool is an infrastructure decision, not an architectural one. The golden data format (manifest + binary blobs) is tool-agnostic. Any of the following work:
-
-| Option | Pros | Cons |
-|--------|------|------|
-| DVC | Data versioned alongside code via `.dvc` files, backend-agnostic (S3/Azure/GCS) | Third-party tool, learning curve, CI integration |
-| git-lfs | Built into git, no new tool | GitHub storage/bandwidth costs at scale |
-| S3/Azure + script | No new dependency, simple | No automatic version linkage to code |
-| CI artifact storage | Already in CI infrastructure | No cross-job versioning, harder to share |
-
-This RFC does not prescribe a specific tool. The examples below use DVC for concreteness, but the workflow is the same with any tool that can push/pull files to remote storage.
-
-### Example Workflow (DVC)
+Because test names include the file path, standard gtest filtering works:
 
 ```bash
-# Generate golden data (Steps 1-3)
-./build/hipdnn_integration_tests \
-  --generate-golden \
-  --golden-data-dir ./golden_data \
-  --gtest_filter="*ConvFwd*"
+# Run all batchnorm golden tests
+./test_binary --gtest_filter="*BatchnormFwd*"
 
-# Track and push
-dvc add golden_data/
-git add golden_data.dvc .gitignore
-git commit -m "Add conv fwd golden data"
-dvc push
-
-# On another machine or in CI (Steps 4-7)
-dvc pull
-./hipdnn_integration_tests \
-  --verification-mode golden \
-  --golden-data-dir ./golden_data
+# Run only fp32 nchw batchnorm golden tests
+./test_binary --gtest_filter="*nchw*fp32*"
 ```
 
-**Acceptance criteria**:
-- [ ] CI pipeline: golden data fetch step skipped entirely for `--verification-mode computed`
-- [ ] CI pipeline: golden data fetch failure is **non-fatal warning** if `--verification-mode computed`
-- [ ] CI pipeline: golden data fetch failure is **hard failure** if `--verification-mode golden`
-- [ ] Runbook: Step-by-step for setting up storage credentials for CI and developer workstations
+### Adding a New Operation
+
+1. Create the folder hierarchy: `hipdnn_reference_data/{Operation}/{Layout}/{DataType}/`
+2. Generate data bundles using a Python script (see [Generation Pipeline](#generation-pipeline-python))
+3. Add C++ test instantiation (see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests))
 
 ---
 
-## CI Integration
+## CLI and Configuration
 
-### Recommended CI Strategy
+### CLI Flags
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `--vm, --verification-mode` | `computed`, `golden`, `both` | `computed` | Controls which test suites run |
+| `--gd, --golden-data-dir` | path | `<exe_dir>/../lib/hipdnn_reference_data` | Root directory for golden data |
+
+### Environment Variable Fallbacks
+
+- `HIPDNN_TEST_VERIFICATION_MODE` -- overridden by `--verification-mode` CLI flag
+- `HIPDNN_TEST_GOLDEN_DATA_DIR` -- overridden by `--golden-data-dir` CLI flag
+
+Generation is performed by Python scripts (see [Generation Pipeline](#generation-pipeline-python)), not by the C++ test binary. The test binary is purely a consumer of golden data.
+
+#### Implementation
+
+Each golden test fixture checks the verification mode in `SetUp()` and skips itself if disabled:
+
+```cpp
+void SetUp() override
+{
+    if(TestConfig::instance().verificationMode() == VerificationMode::Computed)
+    {
+        GTEST_SKIP() << "Golden tests disabled (--verification-mode=computed)";
+    }
+    // ... load graph and tensors ...
+}
+```
+
+Computed test fixtures use the same pattern in reverse, skipping when mode is `golden`. In `both` mode, neither fixture skips -- both suites run.
+
+**Acceptance criteria**:
+- [ ] Both CLI flags parsed and stored in `TestConfig` singleton
+- [ ] Environment variable fallbacks work when CLI flag is absent
+- [ ] `--verification-mode golden` with missing golden data directory: hard FAIL with path and suggestion
+- [ ] `--verification-mode computed` ignores golden data entirely (no fetch, no directory check)
+
+---
+
+## Integration
+
+### CI Integration
+
+#### Recommended CI Strategy
 
 | CI Stage | Verification Mode | Golden Data Required | Rationale |
 |----------|-------------------|---------------------|-----------|
 | Pre-submit (smoke) | `computed` | No | Fast feedback, no external storage dependency |
 | Post-submit (full) | `both` | Yes | Cross-validates golden against computed |
 | Nightly | `golden` | Yes | Regression gate against locked baselines |
-| Weekly | `both` (all tiers) | Yes | Full cross-validation, staleness detection |
 
-### CI Pipeline Integration
+#### CI Pipeline Integration
 
 ```yaml
 # Excerpt from integration test CI job
@@ -1118,139 +792,138 @@ dvc pull
   if: inputs.verification_mode != 'computed'
   run: |
     # Tool-specific fetch command (e.g., dvc pull, aws s3 sync, etc.)
-    cd dnn-providers/integration-tests
+    cd projects/hipdnn
     ./scripts/fetch_golden_data.sh
 
 - name: Run integration tests
   run: |
     ./hipdnn_integration_tests \
       --verification-mode ${{ inputs.verification_mode }} \
-      --golden-data-dir ./golden_data \
+      --golden-data-dir ${{ github.workspace }}/projects/hipdnn/hipdnn_reference_data \
       --gtest_filter=${{ inputs.gtest_filter }}
 ```
 
 Pre-submit jobs omit the golden data fetch step entirely, keeping them fast and independent of remote storage availability.
 
----
+### Adding New Golden Reference Tests
 
-## Adding New Golden Reference Tests
+Adding a test case to an **existing** operation/layout/datatype requires zero C++ changes: generate the data bundle and drop it into the folder. The runner discovers it on the next run.
 
-### Step 1: Write the test (existing workflow)
+Adding a **new** operation requires a one-time C++ `INSTANTIATE_TEST_SUITE_P` (Step 4 below).
 
-Follow the test fixture convention. No golden-specific code is required in the test itself:
+#### Step 1: Generate the data bundle
+
+Use an existing generation script, or write a new one following the pattern in `generate_batchnorm_reference.py` (see [Writing a New Generator](#writing-a-new-generator)). Any tool that produces a valid bundle (matching the schema in [Golden Data Format](#golden-data-format)) works -- PyTorch, AITER, AOTriton, or any other stable reference source.
+
+#### Step 2: Run the generator
+
+```bash
+cd reference_data_scripts/
+python generate_conv_reference.py \
+  --base-filename ../hipdnn_reference_data/ConvFwd/nchw/fp32/Small \
+  --io-type float --x-size 1 16 16 16 --w-size 16 16 3 3 \
+  --padding 1 1 --stride 1 1 --dilation 1 1
+```
+
+#### Step 3: Commit the bundle to `hipdnn_reference_data/`
+
+```bash
+git add hipdnn_reference_data/ConvFwd/nchw/fp32/Small.*
+git commit -m "Add conv fwd golden reference data (nchw fp32 Small)"
+```
+
+For large tensor data, use git-lfs, DVC, or another storage solution (see [Data Management](#data-management)).
+
+#### Step 4: Add C++ test instantiation (new operations only)
+
+If this is the first golden test for a new operation, add a test instantiation. If the operation already has golden tests (e.g., adding a new size to `BatchnormFwdInference/nchw/fp32/`), skip this step -- the runner discovers the new bundle automatically.
 
 ```cpp
-template <typename DataType>
-class MyOperation : public IntegrationGraphVerificationHarness<DataType, TestCaseType>
+// In a test .cpp file (CPU runner):
+using TestConvFwdGoldenFp32 = hipdnn_test_sdk::utilities::TestGoldenReferenceCpu;
+
+TEST_P(TestConvFwdGoldenFp32, Correctness)
 {
-public:
-    static std::pair<graph::Graph, GraphOutputs> buildGraph(
-        hipdnnHandle_t handle, const TestCaseType& tc);
+    goldenReferenceTestSuite(/*atol=*/1e-5, /*rtol=*/1e-5);
+}
 
-protected:
-    void runGraphTest() override
-    {
-        auto [graphObj, outputs] = buildGraph(getSharedHandle(), this->GetParam());
-        this->registerValidator(outputs.y, this->getTolerance(graphObj, outputs.y));
-        this->verifyGraph(graphObj, seed);  // automatically routes to golden if configured
-    }
-};
+INSTANTIATE_TEST_SUITE_P(,
+    TestConvFwdGoldenFp32,
+    hipdnn_test_sdk::utilities::getGoldenReferenceParams("ConvFwd/nchw/fp32"));
 ```
 
-### Step 2: Generate golden data (Steps 1-3 of the pipeline)
+For GPU golden tests, use `TestGoldenReferenceGpu` instead:
+
+```cpp
+// GPU runner:
+using TestConvFwdGoldenGpuFp32 = test_helpers::TestGoldenReferenceGpu;
+
+TEST_P(TestConvFwdGoldenGpuFp32, Correctness)
+{
+    goldenReferenceTestSuite(/*atol=*/1e-5, /*rtol=*/1e-5);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+    TestConvFwdGoldenGpuFp32,
+    test_helpers::getGoldenReferenceParams("ConvFwd/nchw/fp32"));
+```
+
+#### Step 5: Verify
 
 ```bash
-./hipdnn_integration_tests \
-  --generate-golden \
-  --golden-data-dir ./golden_data \
-  --reference-executor cpu \
-  --gtest_filter="*MyOperation*Smoke*"
+# Run the new golden tests
+./test_binary --gtest_filter="*ConvFwdGolden*"
 ```
-
-### Step 3: Inspect the generated data
-
-```bash
-cat golden_data/myop/fwd/a3f8c2e1/manifest.json | python -m json.tool
-```
-
-Verify tensor shapes and value ranges match expectations.
-
-### Step 4: Push to storage
-
-```bash
-# Push golden data to remote storage (tool-specific)
-# Example with DVC:
-dvc add golden_data/ && git add golden_data.dvc && dvc push
-# Example with S3:
-aws s3 sync golden_data/ s3://bucket/golden_data/
-```
-
-### Step 5: Validate with `both` mode (Steps 4-7 of the pipeline)
-
-```bash
-./hipdnn_integration_tests \
-  --verification-mode both \
-  --golden-data-dir ./golden_data \
-  --gtest_filter="*MyOperation*Smoke*"
-```
-
-Both computed and golden validation must pass. This confirms the golden data is consistent with the current reference executor.
 
 ---
 
-## Implementation Phases
+## Data Management
 
-### Phase 1: Foundation
+### Repository Layout
 
-**What ships**: The core 7-step pipeline end-to-end.
+Golden data lives in `hipdnn_reference_data/` at the project root, following the [Folder Convention](#folder-convention):
 
-**Scope**:
-1. `VerificationMode` enum and CLI flags in `TestConfig`
-2. `GoldenManifest` struct with JSON parsing
-3. `resolveGoldenTensors()` with name-based matching
-4. `verifyGraphGolden()` in harness (steps 4-7)
-5. `generateGoldenData()` in harness (steps 1-3)
-6. Architecture guard
-7. `both` mode truth table logic
-8. Binary blob I/O (read/write) behind abstract interface
-9. SHA-256 integrity verification
-10. Unit tests for all acceptance criteria above
+```
+projects/hipdnn/
+  hipdnn_reference_data/
+    BatchnormFwdInference/
+      nchw/
+        fp32/
+          Small.json + .tensor{0..5}.bin
+          Large.json + .tensor{0..5}.bin
+          MIOpen.json + .tensor{0..5}.bin
+        fp16/
+          Small.json + .tensor{0..5}.bin
+        bfp16/
+          Small.json + .tensor{0..5}.bin
+      ncdhw/
+        fp32/
+          Small.json + .tensor{0..5}.bin
+    ConvFwd/
+      nchw/
+        fp32/
+          ...
+    ...
+```
 
-**Definition of done**:
-- Round-trip test passes (generate + validate) for conv fwd fp32 smoke
-- All acceptance criteria in Steps 1-7, Verification Modes, Harness Integration checked off
-- Code review approved
-- Clang-tidy clean
-- Unit tests pass on CPU-only build
-- Integration test passes on GPU machine
+At install time, golden data is placed at `<exe_dir>/../lib/hipdnn_reference_data/`, which is where `getGoldenReferenceParams()` looks by default.
 
----
+### Storage Options
 
-### Phase 2: Integration & Scale
+Golden data can grow large (a single test case with `8x512x64x64` fp32 tensors is ~64 MB). For large datasets, external storage is needed. The golden data format is tool-agnostic -- any of the following work:
 
-**What ships**: Storage integration, CI integration, path resolution, staleness detection.
+| Option | Pros | Cons |
+|--------|------|------|
+| git (small data) | Simplest, no extra tools | Only practical for small tensors |
+| git-lfs | Built into git, no new tool | GitHub storage/bandwidth costs at scale |
+| DVC | Data versioned alongside code, backend-agnostic (S3/Azure/GCS) | Third-party tool, learning curve |
+| S3/Azure + script | No new dependency, simple | No automatic version linkage to code |
 
-**Scope**:
-1. `resolveGoldenPath(graph)` implementation (fingerprint → directory path)
-2. `reference_executor_hash` in metadata + staleness warnings
-3. `--external-reference` flag for ops without reference executors
-4. Storage setup and CI pipeline snippet (tool chosen by infrastructure team)
-5. Storage credential runbook
-6. Golden data generated for at least 10 test cases across conv fwd/bwd/wrw, batchnorm, fp32/fp16
+This RFC does not prescribe a specific storage tool. The existing batchnorm data (small tensors) is committed directly to git.
 
-**Definition of done**:
-- All acceptance criteria in Data Management, CLI and Configuration checked off
-- Storage round-trip documented and tested (generate → push → pull → validate)
-- CI pipeline snippet reviewed by DevOps
-- Corrupted golden data always produces a clear diagnostic
-
----
-
-### Phase 3: Polish (ongoing)
-
-**What ships**: Developer experience improvements as need arises.
-
-**Scope**: Items from [Future Work](#future-work), picked up when the specific pain point emerges.
+**Acceptance criteria**:
+- [ ] CI pipeline: golden data fetch step skipped entirely for `--verification-mode computed`
+- [ ] CI pipeline: golden data fetch failure is **hard failure** if `--verification-mode golden`
 
 ---
 
@@ -1258,67 +931,32 @@ Both computed and golden validation must pass. This confirms the golden data is 
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| Remote storage becomes unavailable | Golden-mode CI fails | Low | Compute-mode CI is independent of storage; CI fallback to compute-only |
-| Tensor naming conventions diverge across op families | Name-based matching breaks | Medium | Lint rule: all test tensors must have non-empty, unique names within a graph |
-| Golden data regeneration cadence unclear | Stale data accumulates | Medium | `reference_executor_hash` provides signal; weekly `both`-mode CI catches drift |
-| Large golden data sets slow down CI | CI feedback loop degrades | Low | Storage caching, selective fetch by test filter, compression (future) |
-| Team unfamiliar with storage tool | Onboarding friction | Medium | Runbook in Phase 2, pair programming during first 3 onboardings |
-| Engine support check missing from golden path | Silent failures or crashes | High | Design bug identified in pen test. Fix: extract `prepareEngine()` shared method |
-| Shape/stride mismatch between golden data and runtime | Wrong comparison, subtle bugs | Medium | Dim validation at load time; hard FAIL on any mismatch |
-| NaN/Inf in golden data goes undetected | All comparisons pass vacuously | Low | Generator validates outputs contain no NaN/Inf before writing |
-| Partial download leaves truncated files | Integrity check catches it | Low | SHA-256 verification before any comparison |
-| Reference executor bug frozen into golden data | Wrong truth accepted permanently | Medium | Cross-validation catches disagreements; future invariant checks provide code-independent anchors |
-| Generator crash leaves partial golden data | Orphaned files, missing manifest | Low | Atomic write protocol: generate into `.tmp` dir, rename on success |
-| CRLF line endings change SHA-256 on Windows | Integrity check fires on valid data | Low | `.gitattributes` forces LF for all golden data files; binary blobs are unaffected |
-| Generator silently overwrites existing golden data | Good data clobbered without notice | Medium | `--force-regenerate` required to overwrite; default is hard FAIL |
-
----
-
-## Quality Principles
-
-1. **Fail loud, never fail silent**: Every failure mode produces an actionable error message. No silent passes on corrupted/stale data.
-2. **Computed reference is always authoritative**: Golden is a second opinion, never the sole source of truth for pass/fail in `both` mode.
-3. **Test authors should not think about golden data**: The harness handles everything. Writing a golden-validated test is identical to writing a computed-validated test.
-4. **CI should work with zero golden data**: Compute-mode is always available. Golden mode is an overlay, not a dependency.
-5. **Every golden file is integrity-checked**: SHA-256 before comparison, always. No exceptions.
-6. **Three verbs, seven steps**: If a design decision doesn't serve serialize, deserialize, or validate, question whether it belongs.
+| FlatBuffers schema change | Old JSON bundles unreadable by `loadGraphAndTensors()` | Medium | Regenerate from Python scripts (Python framework is schema-independent) |
+| Reference script bug freezes wrong data | Silent incorrect baseline | Medium | Cross-validate against C++ CPU ref; review generated data before committing; [generation-time validation](#generation-time-check-output-validation-python) rejects degenerate outputs |
+| PyTorch version drift | Different versions produce slightly different outputs | Low | Pin PyTorch version in `requirements.txt`; regenerate when upgrading |
+| Large golden data sets slow CI | CI feedback loop degrades | Low | Storage caching, selective fetch by test filter, compression (future) |
+| Remote storage unavailable | Golden-mode CI fails | Low | Computed-mode CI is independent of storage; CI fallback to computed-only |
 
 ---
 
 ## Known Limitations
 
-This system adds a **comparison-based** verification layer. All comparison-based systems share a structural limitation: they can tell you that two things agree, not that either is correct. Three failure modes are irreducible within this RFC's scope:
-
-1. **Correlated spec misunderstanding**: If both the reference executor and the engine under test implement the same wrong interpretation of an operation (e.g., both apply SDPA masking incorrectly in the same way), they agree, and the test passes. No amount of comparison infrastructure catches this — it requires an independent anchor derived from the mathematical definition, not from any code. Future work on invariant checks and hand-verified micro cases (computed from the spec by a human, not by any executor) addresses this.
-
-2. **Spec ambiguity**: When the operation specification admits multiple valid interpretations (e.g., SDPA masking with `-inf` vs. a large negative number), the golden data captures one interpretation. A correct engine implementing the other interpretation will either fail (if tolerance is tight) or silently pass (if tolerance masks the difference). This requires a canonical spec document, not more verification code.
-
-3. **Small-size coverage gap**: Hand-verified cases and smoke tests exercise small tensor sizes. Bugs that only appear at larger sizes (tile boundary conditions, padding edges, memory layout transitions) are not caught by small cases. Mitigated by ensuring test suites include boundary-straddling sizes, but never fully eliminated.
-
-These are not flaws in the design — they are the boundary of what comparison testing can do. The RFC is designed so that future layers (invariant checking, hand-verified micro cases, cross-validation with structurally independent implementations) can plug these gaps without changing the golden data format or pipeline.
+Comparison testing can confirm that two implementations agree, not that either is correct. If the reference executor and the engine under test share the same bug, the test passes. Future work on mathematical invariant checks and hand-verified micro cases addresses this gap without changing the golden data format.
 
 ---
 
 ## Future Work
 
-1. **Golden data inspection CLI**: A `--inspect-golden` mode that reads a golden directory and prints metadata, tensor shapes, and value statistics (min/max/mean/std) for debugging.
+1. **Per-operation tolerance configuration**: A structured configuration mapping `(operation_type, data_type) → (atol, rtol)` so the generic test runner doesn't need per-operation test classes.
 
-2. **Automated staleness detection**: A weekly CI job that compares reference executor hashes across all golden data and opens a tracking issue when mismatches are detected.
+2. **Automatic test discovery**: Recursive scanning of `hipdnn_reference_data/` to auto-generate test instantiations, eliminating the need to manually write `INSTANTIATE_TEST_SUITE_P` for each operation/layout/datatype combination.
 
-3. **Incremental generation**: Per-test-case generation that detects existing files and only generates missing ones, reducing regeneration overhead.
+3. **Cross-validation within `IntegrationGraphVerificationHarness`**: Add a golden mode to Pattern 1 (test-as-code) that loads golden data for the same graph built by `buildGraph()` and compares both computed and golden results in a single test.
 
-4. **Golden data garbage collection**: A CI job that scans the golden data directory tree against the test executable's test list to detect and clean up orphaned golden data from removed test cases.
+4. **C++ graph export**: A utility to export a graph built by `buildGraph()` in an existing test-as-code test to the golden data bundle format (`{Name}.json` + `{Name}.tensor{uid}.bin`). This would let teams convert existing computed tests into golden test cases without rewriting the graph in Python.
 
-5. **Fused graph directory convention**: Fused graphs (conv+bias+relu) need a convention for the operation directory level — either a compound name (`conv_bias_relu/`) or a generic `fused/` directory. Decide when these tests arrive.
+5. **Compression**: Optional zstd compression of binary blobs for full-tier golden data with large tensors.
 
-6. **Compression**: Optional zstd compression of binary blobs for full-tier golden data with large tensors. The manifest would gain a `"compression": "zstd"` field.
+6. **Mathematical invariant checks**: Per-operation invariants (layernorm output mean ~0 / variance ~1, softmax rows sum to 1, batchnorm output statistics) that require no reference executor and catch bugs that comparison testing structurally cannot. Separate RFC.
 
-7. **GPU non-determinism**: Some GPU operations (e.g., atomics in backward passes) are non-deterministic across runs. Golden validation for these operations may need a wider tolerance band or a deterministic execution mode flag.
-
-8. **Binary manifest format**: If JSON parsing of manifests becomes a bottleneck at scale, swap the `IGoldenDataReader` implementation to a binary format (flatbuffer or protobuf) behind the same interface.
-
-9. **Mathematical invariant checks**: Per-operation invariants (layernorm output mean ~0 / variance ~1, softmax rows sum to 1, batchnorm output statistics) that require no reference executor and catch bugs that comparison testing structurally cannot. These run in both pipelines — at generation time to guard what gets frozen, at validation time to gate before comparison. Separate RFC.
-
-10. **Hand-verified micro cases**: At least one test case per operation family with expected outputs computed by hand from the mathematical definition, not by any executor. These serve as the external anchor for the entire chain — the only check that catches correlated spec misunderstandings between the reference executor and the engine. Separate RFC.
-
-11. **Statistical masking detection**: In addition to per-element max error, check the percentage of elements outside a tighter inner tolerance. A tensor where 0.3% of elements are wrong by a small amount passes per-element max-error checks but accumulates errors in downstream fused operations.
+7. **Hand-verified micro cases**: At least one test case per operation family with expected outputs computed by hand from the mathematical definition, not by any executor. Separate RFC.

@@ -138,7 +138,7 @@ def make_generation():
 
     texts = [
         ["Step 1: construct", "buildGraph()"],
-        ["Step 2: execute-reference", "Run trusted reference", "(CPU / GPU / PyTorch)"],
+        ["Step 2: execute-reference", "Run trusted reference", "(CPU / GPU / external)"],
         ["Step 3: serialize", "Save inputs + outputs", "(manifest + tensor blobs)"],
     ]
     rects = []
@@ -230,7 +230,13 @@ def make_validation():
 # Diagram 3: Graph-Level Correctness (vertical with 4-column branching)
 # ===========================================================================
 def make_graph_correctness():
-    W, H = 1400, 1100
+    """Graph-Level Correctness diagram showing two checks:
+       1. Graph Export — single source of truth for params + inputs
+       2. Cross-Validation — compare outputs from C++ ref vs external script
+
+    Note: The graph fingerprint check is in Step 1 (not shown here).
+    """
+    W, H = 1100, 1000
     img = Image.new("RGB", (W, H), WHITE)
     d = ImageDraw.Draw(img)
 
@@ -241,116 +247,104 @@ def make_graph_correctness():
     r0 = box(d, top_cx, 45, ["buildGraph() in C++", "(single source of truth)"],
              fill=GRAY, min_w=300)
 
-    # Row 1: graph.to_binary()
+    # Row 1: --export-graph
     r1_cy = r0[3] + gap + 20
-    r1 = box(d, top_cx, r1_cy, ["graph.to_binary()"], min_w=220)
+    r1 = box(d, top_cx, r1_cy,
+             ["--export-graph", "graph_def.json + input tensors"],
+             min_w=320)
     arr_down(d, top_cx, r0[3], r1[1])
 
-    # Row 2: graph export (transient)
-    r2_cy = r1[3] + gap + 20
-    r2 = box(d, top_cx, r2_cy, ["graph export (transient)"], fill=GRAY, min_w=220)
-    arr_down(d, top_cx, r1[3], r2[1])
+    # Label: "Check 1: Graph Export"
+    label_y = r1[1] - 4
+    d.text((r1[2] + 12, label_y), "Check 1: Graph Export", fill=BLACK, font=FONT_BOLD)
+    d.text((r1[2] + 12, label_y + 20),
+           "External script reads params + inputs", fill=BLACK, font=FONT_SM)
+    d.text((r1[2] + 12, label_y + 38),
+           "from C++ export. Never generates its own.", fill=BLACK, font=FONT_SM)
 
-    # 4 columns: well spaced
-    cols = [145, 385, 640, 1050]
-    branch_y = r2[3] + 25  # horizontal bar
-    col_top = branch_y + gap  # where column boxes start
+    # 3 columns: C++ ref, external script, graph export consumed by both
+    cols = [200, 550, 900]
+    branch_y = r1[3] + 25
+    col_top = branch_y + gap
 
-    # Horizontal bar from graph export
-    d.line([(top_cx, r2[3]), (top_cx, branch_y)], fill=BLACK, width=LINE_W)
-    d.line([(cols[0], branch_y), (cols[-1], branch_y)], fill=BLACK, width=LINE_W)
-    for cx in cols:
-        arr_down(d, cx, branch_y, col_top)
+    # Horizontal bar
+    d.line([(top_cx, r1[3]), (top_cx, branch_y)], fill=BLACK, width=LINE_W)
+    d.line([(cols[0], branch_y), (cols[1], branch_y)], fill=BLACK, width=LINE_W)
+    arr_down(d, cols[0], branch_y, col_top)
+    arr_down(d, cols[1], branch_y, col_top)
 
-    # Column 1: CPU ref
-    c1a = box(d, cols[0], col_top + 28, ["CPU ref executor", "(C++ runs graph)"],
-              font=FONT_SM, min_w=170)
+    # Column 1: C++ ref executor
+    c1a = box(d, cols[0], col_top + 28,
+              ["C++ ref executor", "(runs graph on exported inputs)"],
+              font=FONT_SM, min_w=240)
     c1b_cy = c1a[3] + gap
-    c1b = box(d, cols[0], c1b_cy, ["golden outputs"], font=FONT_SM, fill=GRAY, min_w=150)
+    c1b = box(d, cols[0], c1b_cy, ["C++ outputs"],
+              font=FONT_SM, fill=GRAY, min_w=150)
     arr_down(d, cols[0], c1a[3], c1b[1])
 
-    # Column 2: GPU ref
-    c2a = box(d, cols[1], col_top + 28, ["GPU ref executor", "(C++ runs graph)"],
-              font=FONT_SM, min_w=170)
+    # Column 2: External script
+    c2a = box(d, cols[1], col_top + 28,
+              ["External script", "(reads export, runs computation)"],
+              font=FONT_SM, min_w=240)
     c2b_cy = c2a[3] + gap
-    c2b = box(d, cols[1], c2b_cy, ["golden outputs"], font=FONT_SM, fill=GRAY, min_w=150)
+    c2b = box(d, cols[1], c2b_cy, ["External outputs"],
+              font=FONT_SM, fill=GRAY, min_w=150)
     arr_down(d, cols[1], c2a[3], c2b[1])
 
-    # Column 3: Python
-    c3a = box(d, cols[2], col_top + 28, ["Python reads", "graph export (Graph Export)", "extracts params"],
-              font=FONT_SM, min_w=180)
-    c3b_cy = c3a[3] + gap
-    c3b = box(d, cols[2], c3b_cy, ["Runs PyTorch"], font=FONT_SM, min_w=150)
-    arr_down(d, cols[2], c3a[3], c3b[1])
-    c3c_cy = c3b[3] + gap
-    c3c = box(d, cols[2], c3c_cy, ["golden outputs"], font=FONT_SM, fill=GRAY, min_w=150)
-    arr_down(d, cols[2], c3b[3], c3c[1])
-
-    # Column 4: Validation
-    c4a = box(d, cols[3], col_top + 28, ["VALIDATION (CI)", "current graph hash"],
-              font=FONT_SM, min_w=180)
-
-    # Diamond: compare hash
-    c4_dia_cy = c4a[3] + gap + 45
-    c4_dia = diamond(d, cols[3], c4_dia_cy, ["Compare hash", "to stored hash"],
-                     font=FONT_SM, pad=25)
-    arr_down(d, cols[3], c4a[3], c4_dia_cy - c4_dia[5])
-
-    # Mismatch → FAIL box to the right of diamond
-    c4_fail_cx = cols[3] + c4_dia[4] + 140
-    c4_fail = box(d, c4_fail_cx, c4_dia_cy, ["FAIL", "Graph changed,", "regenerate"],
-                  font=FONT_SM, fill=GRAY, min_w=160)
-    arr_right(d, cols[3] + c4_dia[4], c4_dia_cy, c4_fail[0])
-    d.text((cols[3] + c4_dia[4] + 8, c4_dia_cy - 22), "Mismatch", fill=BLACK, font=FONT_SM)
-
-    # Match → down to "Proceed"
-    c4_match_cy = c4_dia_cy + c4_dia[5] + gap + 20
-    c4_match = box(d, cols[3], c4_match_cy, ["Proceed to", "value comparison"],
-                   font=FONT_SM, min_w=160)
-    arr_down(d, cols[3], c4_dia_cy + c4_dia[5], c4_match[1])
-    d.text((cols[3] + 8, c4_dia_cy + c4_dia[5] + 3), "Match", fill=BLACK, font=FONT_SM)
-
-    # Cross-validate diamond at bottom, fed by cols 1,2,3 golden outputs
-    golden_bots = [c1b[3], c2b[3], c3c[3]]
+    # Cross-validate diamond at bottom
+    golden_bots = [c1b[3], c2b[3]]
     junction_y = max(golden_bots) + 35
-    cross_cx = (cols[0] + cols[2]) / 2
+    cross_cx = (cols[0] + cols[1]) / 2
     cross_cy = junction_y + gap + 45
 
     cross_dia = diamond(d, cross_cx, cross_cy,
-                        ["Cross-validate:", "Do they agree?"],
+                        ["Cross-validate:", "Do outputs agree?"],
                         font=FONT_SM, pad=25)
 
-    # Vertical lines from each golden output down to junction, then horizontal bar
-    for i in range(3):
-        d.line([(cols[i], golden_bots[i]), (cols[i], junction_y)], fill=BLACK, width=LINE_W)
-    d.line([(cols[0], junction_y), (cols[2], junction_y)], fill=BLACK, width=LINE_W)
-    d.line([(cross_cx, junction_y), (cross_cx, cross_cy - cross_dia[5])], fill=BLACK, width=LINE_W)
-    # Arrowhead into diamond top
+    # Vertical lines from each output down to junction
+    for i in range(2):
+        d.line([(cols[i], golden_bots[i]), (cols[i], junction_y)],
+               fill=BLACK, width=LINE_W)
+    d.line([(cols[0], junction_y), (cols[1], junction_y)],
+           fill=BLACK, width=LINE_W)
+    d.line([(cross_cx, junction_y), (cross_cx, cross_cy - cross_dia[5])],
+           fill=BLACK, width=LINE_W)
     d.polygon([(cross_cx, cross_cy - cross_dia[5]),
                (cross_cx - ARROW_SZ // 2, cross_cy - cross_dia[5] - ARROW_SZ),
-               (cross_cx + ARROW_SZ // 2, cross_cy - cross_dia[5] - ARROW_SZ)], fill=BLACK)
+               (cross_cx + ARROW_SZ // 2, cross_cy - cross_dia[5] - ARROW_SZ)],
+              fill=BLACK)
 
-    # Cross-validate results: Yes → right, No → down
+    # Label: "Check 2: Cross-Validation"
+    cv_label_y = junction_y - 20
+    d.text((cols[1] + 100, cv_label_y), "Check 2: Cross-Validation",
+           fill=BLACK, font=FONT_BOLD)
+    d.text((cols[1] + 100, cv_label_y + 20),
+           "Same inputs, independent implementations.", fill=BLACK, font=FONT_SM)
+    d.text((cols[1] + 100, cv_label_y + 38),
+           "If outputs disagree, one has a bug.", fill=BLACK, font=FONT_SM)
+
     # Yes → PASS box to the right
     cv_pass_cx = cross_cx + cross_dia[4] + 120
     cv_pass = box(d, cv_pass_cx, cross_cy, ["PASS", "References agree"],
                   font=FONT_SM, fill=GRAY, min_w=160)
     arr_right(d, cross_cx + cross_dia[4], cross_cy, cv_pass[0])
-    d.text((cross_cx + cross_dia[4] + 8, cross_cy - 22), "Yes", fill=BLACK, font=FONT_SM)
+    d.text((cross_cx + cross_dia[4] + 8, cross_cy - 22), "Yes",
+           fill=BLACK, font=FONT_SM)
 
     # No → FAIL box below
     cv_fail_cy = cross_cy + cross_dia[5] + gap + 20
     cv_fail = box(d, cross_cx, cv_fail_cy, ["FAIL", "Investigate"],
                   font=FONT_SM, fill=GRAY, min_w=140)
     arr_down(d, cross_cx, cross_cy + cross_dia[5], cv_fail[1])
-    d.text((cross_cx + 8, cross_cy + cross_dia[5] + 3), "No", fill=BLACK, font=FONT_SM)
+    d.text((cross_cx + 8, cross_cy + cross_dia[5] + 3), "No",
+           fill=BLACK, font=FONT_SM)
 
     # Crop to content
-    crop_h = int(max(c4_match[3], cv_fail[3]) + 35)
-    crop_w = int(max(W, c4_fail[2] + 30))
+    crop_h = int(cv_fail[3] + 35)
+    crop_w = int(max(W, cv_pass[2] + 30))
     img = img.crop((0, 0, min(crop_w, W), crop_h))
     img.save(os.path.join(OUTPUT_DIR, "graph_level_correctness.png"))
-    print(f"  graph_level_correctness.png  {W}x{crop_h}")
+    print(f"  graph_level_correctness.png  {crop_w}x{crop_h}")
 
 
 # ===========================================================================
