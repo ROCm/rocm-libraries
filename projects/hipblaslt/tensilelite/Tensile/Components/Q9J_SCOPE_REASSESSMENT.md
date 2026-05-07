@@ -99,11 +99,11 @@ than expected. Worth a comment in dzl's design.
 | `_MFMARule` | **A** | `MFMAInstruction::getDstParams()={acc}`, `getSrcParams()={a, b, acc2}`. **Correction (2026-05-07):** the initial "B" categorization assumed `acc` was the read register and the rule needed a validator-side union to add it. That's wrong. Per `mfma.hpp:76,96`: `acc` is the destination accumulator (write); `acc2` is the **source** accumulator (read), defaulting to `acc` for the in-place RMW case (the dominant case). The assembly form is `v_mfma_* dst_acc, src_a, src_b, src_acc[, neg]` where `src_acc = acc2`. The current validator's `reads = (a, b, acc)` synthesis is correct only when `acc2 == acc` (in-place); for the out-of-place case (`acc2 != acc`) it's silently wrong because the actual hardware read is from `acc2`. Once the binding lands, the validator just uses `getSrcParams()` and gets the correct register whether in-place or out-of-place — strictly more correct than today, no special-case. Pure A. |
 | `_NoDataflowRule` | **A** | `SBarrier`/`SNop`/`SWaitCnt`/`SSetPrior` all have empty or non-register `getParams()`; `getDstParams() = getSrcParams() = {}` falls out trivially because `_is_register` filters non-Containers. |
 | `_VSwapRule` | **A** | `VSwapB32` already overrides `getDstParams()` and `getSrcParams()` to return BOTH operands in BOTH lists (`common.hpp:5179-5194`). The symmetric semantic is **already encoded in C++**. Validator side becomes `reads = getSrcParams(); writes = getDstParams()` — no special-case. This is the strongest "A" item. |
-| `_VCCRule` | **B** | `VAddCOU32::getDstParams() = {dst, dst1}` where `dst1 = VCC` — naturally returns VCC in writes. `getSrcParams()` returns srcs which include the carry-in VCC for VAddCCOU32. So the partition is **already correct in C++**. Two ergonomic asks: (1) the VCC sentinel needs to expose a `regType="vcc"` shape so the byte-key resolver doesn't drop it (currently `_VCC_RESOURCE` workaround substitutes one); (2) Python needs to see the methods. Both addressable separately. The dispatch logic / `_VCC_DST1_CARRY_OUT_CLASSES` set deletes once both methods are bound. |
+| `_VCCRule` | **REMOVED** | **(2026-05-07)** VCC dataflow tracking is permanently removed from the validator. Bead `rocm-libraries-uraq` deletes `_VCCRule` and supporting helpers (`_is_vcc`, `_vcc_resource`, `_VCC_RESOURCE`, `_VCC_DST1_CARRY_OUT_CLASSES`) entirely. q9j MUST land after `uraq` so the VCC machinery is already gone when q9j executes. No Category B / no migration / no replacement. See `CMSValidator_LIMITATIONS.md` §"VCC dataflow tracking is intentionally not provided". |
 | `_SCCRule` | **C** | The register partition (no_dst vs dst_then_srcs) is **already correct via getDstParams/getSrcParams** — `SCmpEQU32` has `dst=nullptr` so `getDstParams() = {}`, exactly the no_dst shape. But the SCC sentinel itself + the `_SCC_OPCODE_FLAGS` table (which opcodes touch SCC) is implicit-operand metadata that q9j can't carry. This is dzl + z48's scope. |
 | `_GenericALURule` | **A** | This is literally `writes = getDstParams(); reads = getSrcParams()` plus `_is_register` filtering. Pure A. |
 
-**Counts: A=7, B=1, C=2.** (Updated 2026-05-07: `_MFMARule` reclassified A→A; original A=6, B=2, C=2 was based on a misreading of MFMA's `acc`/`acc2` split. Per `mfma.hpp:76,96`, `acc2` is the source accumulator that the validator can read directly via `getSrcParams()`, no union needed.)
+**Counts: A=7, REMOVED=1 (`_VCCRule`), C=2.** (Updated 2026-05-07: `_MFMARule` reclassified A→A; `_VCCRule` removed entirely from q9j's scope per bead `uraq` — VCC tracking is permanently dropped from the validator. q9j is now A-only plus the C-deferral to dzl.)
 
 ---
 
@@ -147,15 +147,16 @@ After this re-examination, q9j is a **vastly smaller** piece of work than the
      case but can differ) is the source accumulator (read). The validator
      just reads `getSrcParams()` and gets `{a, b, acc2}` — the correct read
      set, no union needed. See the §2 table for details.
-   - `_VCCRule` uses the new accessors plus a thin filter/substitution to
-     handle the `_VCC_RESOURCE` sentinel until VCC gets a proper `regType`.
+   - `_VCCRule` is **deleted** by bead `uraq` before q9j runs. q9j does
+     nothing with VCC. See `CMSValidator_LIMITATIONS.md` §"VCC dataflow
+     tracking is intentionally not provided".
 
 ### 3.2 What q9j explicitly does NOT need to do
 
 These belong to dzl/z48, NOT q9j:
 
 - `_SCC_OPCODE_FLAGS` table and SCC sentinel (z48 + dzl)
-- `_VCC_RESOURCE` synthetic singleton (dzl)
+- ~~`_VCC_RESOURCE` synthetic singleton~~ — REMOVED by `uraq` (not deferred to dzl; deleted permanently as part of dropping VCC dataflow tracking)
 - DTL BufferLoad implicit-m0 reads (dzl)
 
 **Removed (2026-05-07):** the original draft listed "MFMA acc-as-RAW
@@ -175,12 +176,11 @@ Re-estimate after factoring out C-bucket items deferred to dzl:
 - Subtotal: **~260 LoC validator-side reduction**
 - Plus: ~12 lines added to `instruction.cpp` (3 lines × 4 classes)
 
-The remaining ~420 LoC of the original 680 estimate (`_VCCRule`, `_SCCRule`,
-`_DTLBufferLoadRule`, `_VCC_DST1_CARRY_OUT_CLASSES`, `_SCC_OPCODE_FLAGS`,
-`_SCC_SENTINEL`, `_VCC_RESOURCE`) is in **dzl's** scope — q9j's API design
-alone doesn't unlock it. (The original draft also listed "MFMA acc-as-RAW
-special case" here; per the 2026-05-07 correction it's q9j Category A, not
-deferred — see §2 table.)
+The remaining ~420 LoC of the original 680 estimate splits two ways:
+- **Removed permanently by `uraq`:** `_VCCRule`, `_VCC_DST1_CARRY_OUT_CLASSES`, `_VCC_RESOURCE`, `_is_vcc`, `_vcc_resource` (plus the two contract-pinning tests). VCC dataflow tracking is not part of the validator going forward; this is not deferred work.
+- **Deferred to `dzl`:** `_SCCRule`, `_DTLBufferLoadRule`, `_SCC_OPCODE_FLAGS`, `_SCC_SENTINEL`. SCC + m0 implicit-operand work; q9j's API design alone doesn't unlock these.
+
+(The original draft also listed "MFMA acc-as-RAW special case" here; per the 2026-05-07 correction it's q9j Category A, not deferred — see §2 table.)
 
 ---
 
@@ -199,12 +199,11 @@ For completeness, the things q9j **cannot** solve and dzl **must**:
 - `is_dtl: bool` (or split BufferLoadDTL) on `MUBUFReadInstruction` so the
   validator can distinguish without `getDstParams()[0] is None` structural
   inference.
-- `implicit_reads()` / `implicit_writes()` on every class touching SCC/VCC/m0
+- `implicit_reads()` / `implicit_writes()` on every class touching SCC/m0
   (or per-flag accessors). The C++ doesn't currently model implicit operands
-  at all — they're encoded in the assembly text format only.
-- A `RegisterContainer` shape for VCC (so VCC sentinels round-trip through the
-  dataflow byte-key resolver without needing the `_VCC_RESOURCE` substitution
-  hack).
+  at all — they're encoded in the assembly text format only. **VCC was
+  originally on this list; removed 2026-05-07 because VCC tracking is no
+  longer a validator goal (bead `uraq`).**
 - A `RegisterContainer` for SCC (a `regType="scc"` factory).
 **Removed (2026-05-07):** the original draft proposed a "Per-slot
 `is_accumulator: bool` on MFMA" or a "MFMA-mirrors-VSwap" 1-line C++

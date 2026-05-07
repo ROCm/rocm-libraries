@@ -3207,10 +3207,10 @@ class TestVCCCarryChain:
         upper-half add (VAddCCOU32) writes v101 and reads the carry-in VCC.
 
         REMOVAL TARGET — bead `rocm-libraries-uraq`. This test pins the
-        contract for `_VCCRule`, which is itself slated for removal.
-        Delete this test when `_VCCRule` is deleted; the limitation that
-        replaces it (no VCC dataflow tracking until q9j+dzl land) is
-        documented in `CMSValidator_LIMITATIONS.md`.
+        contract for `_VCCRule`, which is itself slated for permanent
+        removal. Delete this test when `_VCCRule` is deleted; no
+        replacement is planned. See `CMSValidator_LIMITATIONS.md`
+        §"VCC dataflow tracking is intentionally not provided".
 
         The two instructions touch DISJOINT vgprs (lo: v100, v50; hi: v101,
         v51), so without VCC tracking there is NO edge in the reference
@@ -3252,12 +3252,11 @@ class TestVCCCarryChain:
         `_vcc_resource()` is a singleton with regType="vcc"/regNum=2, and
         `_VCCRule` publishes VCC as the carry-out write of VAddCOU32 and
 
-        REMOVAL TARGET — bead `rocm-libraries-uraq`. This test pins the
-        primitives backing `_VCCRule` (`_is_vcc`, `_vcc_resource`,
-        `_VCC_RESOURCE`); delete it together with the rule. The
-        replacement (q9j-bound `getDstParams`/`getSrcParams` plus dzl's
-        `regType="vcc"` on the rocisa side) supersedes everything this
-        test pins.
+        REMOVAL TARGET — bead `rocm-libraries-uraq`. This test pins
+        the primitives backing `_VCCRule` (`_is_vcc`, `_vcc_resource`,
+        `_VCC_RESOURCE`); delete it together with the rule. No
+        replacement is planned — VCC dataflow tracking is permanently
+        removed from the validator's scope.
 
 
         the carry-in read of VAddCCOU32.
