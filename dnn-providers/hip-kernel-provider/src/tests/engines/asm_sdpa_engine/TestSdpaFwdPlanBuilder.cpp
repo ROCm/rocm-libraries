@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
+#include "ConfigHelpers.hpp"
 #include "GraphTest.hpp"
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
@@ -70,6 +71,18 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         alibiMask,
         paddingMask,
         causalMask);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAvailableKernels)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    std::string deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+
+    for(const auto& test : getCompatibleGraphsForArch(deviceString))
+    {
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)

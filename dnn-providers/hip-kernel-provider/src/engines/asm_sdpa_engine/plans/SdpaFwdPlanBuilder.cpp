@@ -10,6 +10,7 @@
 #include <cmath>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -17,15 +18,7 @@
 namespace asm_sdpa_engine
 {
 
-enum MaskType : int
-{
-    NO_MASK = 0,
-    TOP_LEFT_CAUSAL,
-    BOTTOM_RIGHT_CAUSAL,
-    WINDOW_GENERIC
-};
-
-MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+inline MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -63,26 +56,14 @@ MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes&
     return MaskType::WINDOW_GENERIC;
 }
 
-enum RoundingMode : int
-{
-    RTNE = 0, // Round to Nearest Even (IEEE default)
-    RTNA, // Round to Nearest Away from zero
-    RTZ // Round toward Zero
-};
-
-RoundingMode getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
+inline RoundingMode
+    getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
 {
     // TODO Cannot be specified in the graph, this will require specialized handling
     return RoundingMode::RTNE;
 }
 
-enum BatchMode : int
-{
-    BATCH = 0, // All sequences have same length
-    GROUP // Variable sequence lengths
-};
-
-BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+inline BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
 {
     return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
                ? BatchMode::GROUP
