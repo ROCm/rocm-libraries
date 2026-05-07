@@ -177,8 +177,10 @@ Re-estimate after factoring out C-bucket items deferred to dzl:
 
 The remaining ~420 LoC of the original 680 estimate (`_VCCRule`, `_SCCRule`,
 `_DTLBufferLoadRule`, `_VCC_DST1_CARRY_OUT_CLASSES`, `_SCC_OPCODE_FLAGS`,
-`_SCC_SENTINEL`, `_VCC_RESOURCE`, MFMA acc-as-RAW special case) is in
-**dzl's** scope — q9j's API design alone doesn't unlock it.
+`_SCC_SENTINEL`, `_VCC_RESOURCE`) is in **dzl's** scope — q9j's API design
+alone doesn't unlock it. (The original draft also listed "MFMA acc-as-RAW
+special case" here; per the 2026-05-07 correction it's q9j Category A, not
+deferred — see §2 table.)
 
 ---
 
@@ -257,17 +259,15 @@ Rescope q9j to:
 >    `MacroInstruction` `nb::class_` blocks in
 >    `rocisa/src/instruction/instruction.cpp`.
 > 2. Migrate `_DSLoadRule`, `_DSStoreRule`, `_BufferLoadRule`,
->    `_NoDataflowRule`, `_VSwapRule`, `_GenericALURule`, plus
->    `_inst_dst` / `_inst_lds_offset` / `_inst_buffer_srd` /
+>    `_NoDataflowRule`, `_VSwapRule`, `_MFMARule`, `_GenericALURule`,
+>    plus `_inst_dst` / `_inst_lds_offset` / `_inst_buffer_srd` /
 >    `_inst_buffer_offset` / `_inst_mfma_acc` / `_inst_mfma_a` /
 >    `_inst_mfma_b` / `_inst_dsstore_src` / `_get_param` from
 >    `Tensile/Components/ScheduleCapture.py` to use the new accessors.
-> 3. `_MFMARule`: union acc into reads validator-side (one line) — OR
->    promote MFMA-mirrors-VSwap into this bead (1-line C++ change in
->    `mfma.hpp:200-214` so MFMA's `getDstParams()` and `getSrcParams()`
->    both list `acc`, identical to how `VSwapB32` handles symmetric R+W
->    in `common.hpp:5179-5194`).
-> 4. NOT in scope (dzl owns these): `_VCCRule`, `_SCCRule`,
+>    `_MFMARule` reads `getSrcParams() = {a, b, acc2}` directly — no
+>    union or special-case needed; `acc2` is the source accumulator
+>    (defaults to `acc` for in-place RMW).
+> 3. NOT in scope (dzl owns these): `_VCCRule`, `_SCCRule`,
 >    `_DTLBufferLoadRule`, `_VCC_DST1_CARRY_OUT_CLASSES`,
 >    `_SCC_OPCODE_FLAGS`, `_SCC_SENTINEL`, `_VCC_RESOURCE`. Implicit
 >    operands (SCC, VCC sentinels-as-resources, DTL m0 reads) require new
@@ -275,8 +275,8 @@ Rescope q9j to:
 >
 > **Acceptance**:
 > - `_DSLoadRule`, `_DSStoreRule`, `_BufferLoadRule`, `_NoDataflowRule`,
->   `_VSwapRule`, `_GenericALURule`, the 8 `_inst_*` extractors, and
->   `_get_param` all deleted from `ScheduleCapture.py`.
+>   `_VSwapRule`, `_MFMARule`, `_GenericALURule`, the 8 `_inst_*`
+>   extractors, and `_get_param` all deleted from `ScheduleCapture.py`.
 > - Snapshot test passes: every captured instruction's (reads, writes)
 >   tuples are byte-identical before and after migration.
 > - Estimated reduction: ~260 LoC validator-side, +12 LoC rocisa binding.
