@@ -14,6 +14,50 @@ rocisa-side deficiency.
 
 ---
 
+## Status update (2026-05-07)
+
+Subsequent investigations re-categorized several rows in this audit.
+The table and prose below are preserved as the original artifact, but
+several entries no longer reflect current scope:
+
+- **Row #3 (`_OPERAND_RULES`):** estimated ~600 LoC. Reassessed in
+  `Q9J_SCOPE_REASSESSMENT.md` (commit `c12dd242e7`). The rocisa
+  `Instruction` C++ hierarchy already exposes `getDstParams()` /
+  `getSrcParams()` as pure virtuals (`instruction.hpp:272-275`); only
+  the nanobind binding is missing. q9j is now ~12 lines C++ binding
+  + ~260 LoC validator-side migration, not new rocisa API design.
+- **Row #7 (`_VCC_RESOURCE` / `_vcc_resource`):** REMOVED. Bead `uraq`
+  deleted these entirely (commit `7cd1e994e1`/merged as `~fd7de8ccfe`).
+  VCC dataflow tracking is permanently dropped from the validator's
+  scope — no rocisa-side `vcc_resource()` factory will be added.
+- **Row #8 (`_VCCRule` + `_VCC_DST1_CARRY_OUT_CLASSES`):** REMOVED
+  by `uraq`. No `reads_vcc` / `writes_vcc` will be added to rocisa.
+- **Row #19 (`_VCC_DST1_CARRY_OUT_CLASSES`):** REMOVED by `uraq`.
+  No per-slot `OperandRole` work for VCC.
+- **MFMA accumulator special-casing** (referenced under Category C):
+  RECLASSIFIED. Per Q9J_SCOPE_REASSESSMENT.md §2 (commit `14efe6225f`),
+  MFMA's `acc` is the destination accumulator and `acc2` is the
+  source accumulator (defaults to `acc` for in-place RMW). Both are
+  already in the C++ `getDstParams()` / `getSrcParams()` partition.
+  No new MFMA-side metadata needed; q9j Category A handles it.
+- **Category C (SCC + m0 only, no longer SCC/VCC/m0/acc):** SCC and
+  m0 confirmed to genuinely need new C++ work
+  (`DZL_SCOPE_REASSESSMENT.md`, commit `2e76bffa5a`; source-level
+  confirmation that `CommonInstruction` has only `dst`/`dst1`/`srcs`
+  fields and no field for SCC). dzl scope is unchanged for the SCC +
+  m0 piece; VCC and acc are out.
+
+In short: the audit's broad strokes hold (validator workarounds exist
+because of rocisa-side gaps), but four of the listed workarounds are
+either resolved by binding existing C++ surface (Row #3 → q9j) or
+removed entirely without rocisa-side replacement (Rows #7/#8/#19 →
+uraq), and one Category-C item has been reclassified out (MFMA acc).
+The remaining live rows are #1, #2, #4, #5 (SCC subset), #6 (covered
+by dzl jointly), #9 (m0/DTL), #10–18, and #20 — see the docs cited
+above for the current canonical reframing of each.
+
+---
+
 ## 1. Inventory
 
 | # | Workaround | Lives in | Root cause | Rocisa-side fix sketch | Est. LoC saved |

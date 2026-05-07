@@ -23,6 +23,46 @@ any flag, and not in any factory.
 Probe (`/tmp/scc_m0_probe.py`) instantiated the canonical SCC-touching
 classes and dumped every public attribute. Findings:
 
+**(Source-level confirmation, 2026-05-07.)** The Python probe could
+only inspect bound surface; to rule out the q9j-style "the C++ side
+has the API, only the binding is missing" scenario, we read the
+rocisa C++ source for `CommonInstruction` (the parent of every
+SCC-touching SOPx class) at `rocisa/include/instruction/instruction.hpp:382`.
+
+`CommonInstruction` has exactly three operand-bearing fields:
+
+```cpp
+struct CommonInstruction : public Instruction {
+    std::shared_ptr<Container>    dst;
+    std::shared_ptr<Container>    dst1;   // VCC carry-out lives here for VAddCOU32
+    std::vector<InstructionInput> srcs;
+    // ... no scc field anywhere ...
+
+    std::vector<InstructionInput> getDstParams() const override {
+        std::vector<InstructionInput> dsts;
+        if (dst)  dsts.push_back(dst);
+        if (dst1) dsts.push_back(dst1);
+        return dsts;
+    }
+    std::vector<InstructionInput> getSrcParams() const override {
+        return srcs;
+    }
+};
+```
+
+For `SCmpEQU32`: ctor passes `dst=nullptr, srcs=[src0, src1]`. So
+`getDstParams() → {}` and `getSrcParams() → [src0, src1]`. **SCC
+appears in NEITHER.** For `SAddU32` (silently writes SCC):
+`getDstParams() → {sgpr}` and `getSrcParams() → [src0, src1]`. Still
+no SCC.
+
+This confirms the Python-side findings below at the source level: no
+binding gap; SCC is not modeled anywhere in the rocisa data model.
+Contrast with VCC, which IS modeled — `VAddCOU32`'s ctor explicitly
+sets `dst1 = VCC()`, so VCC shows up in `getDstParams()` natively.
+There's no equivalent path for SCC because there's no field to store
+it in.
+
 **No SCC base class.** Every SCC-touching SOP1/SOP2/SOPC/SOPK class
 inherits the same MRO as every other CommonInstruction:
 
