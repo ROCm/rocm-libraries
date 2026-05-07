@@ -313,57 +313,14 @@ struct tile_window_linear
     template <index_t i_access = -1, bool oob_conditional_check = true>
     CK_TILE_DEVICE auto load(number<i_access> = {}, bool_constant<oob_conditional_check> = {}) const
     {
-        using vector_t = typename Base::Traits::vector_t;
-        using SFC_Ys   = typename Base::Traits::SFC_Ys;
-
         constexpr auto tile_dstr = typename Base::TileDstr{};
-
         auto dst_tensor = make_static_distributed_tensor<typename Base::DataType>(tile_dstr);
-
-        auto issue = [&](auto i_access_) {
-            constexpr auto IAccess = number<i_access_>{};
-
-            constexpr auto non_linear_id    = number<AccessMap_NonLinear{}[IAccess]>{};
-            auto bottom_tensor_thread_coord = cached_coords_[non_linear_id];
-            auto bottom_tensor_flag         = cached_flags_[IAccess];
-
-            constexpr auto linear_offset = get_bottom_linear_offset(IAccess);
-
-            // read from bottom tensor
-            const vector_t vec_value =
-                this->get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
-                    bottom_tensor_thread_coord,
-                    linear_offset,
-                    bottom_tensor_flag,
-                    bool_constant<oob_conditional_check>{});
-
-            // data index [y0, y1, ...]
-            constexpr auto idx_diff_ys = SFC_Ys::get_index(IAccess);
-            // write into distributed tensor
-            static_for<0, Base::Traits::ScalarPerVector, Base::Traits::PackedSize>{}([&](auto j) {
-                constexpr auto idx_ys = generate_tuple(
-                    [&](auto jj) {
-                        return jj == Base::Traits::VectorDimY ? (idx_diff_ys[jj] + j)
-                                                              : idx_diff_ys[jj];
-                    },
-                    number<Base::NDimY>{});
-
-                constexpr index_t d = tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
-                                      Base::Traits::PackedSize;
-
-                dst_tensor.get_thread_buffer().template at<d>() =
-                    vec_value
-                        .template get_as<typename Base::DataType>()[j / Base::Traits::PackedSize];
-            });
-        };
-
-        WINDOW_DISPATCH_ISSUE();
-
+        load(dst_tensor, number<i_access>{}, bool_constant<oob_conditional_check>{});
         return dst_tensor;
     }
 
     template <typename DstTile, index_t i_access = -1, bool oob_conditional_check = true>
-    CK_TILE_DEVICE auto load(DstTile& dst_tensor,
+    CK_TILE_DEVICE void load(DstTile& dst_tensor,
                              number<i_access>                     = {},
                              bool_constant<oob_conditional_check> = {}) const
     {
@@ -411,8 +368,6 @@ struct tile_window_linear
         };
 
         WINDOW_DISPATCH_ISSUE();
-
-        return dst_tensor;
     }
 
     template <typename DstTile,

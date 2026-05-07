@@ -156,16 +156,15 @@ struct tile_window_with_static_distribution
     }
 
     template <typename IAccess_>
-    CK_TILE_DEVICE static void advance_access_coords(
-        typename Base::WindowAdaptorCoord& window_adaptor_thread_coord,
-        typename Base::BottomTensorCoord& bottom_tensor_thread_coord,
-        IAccess_)
+    CK_TILE_DEVICE void
+    advance_access_coords(typename Base::WindowAdaptorCoord& window_adaptor_thread_coord,
+                          typename Base::BottomTensorCoord& bottom_tensor_thread_coord,
+                          IAccess_) const
     {
-        using SFC_Ys = typename Base::Traits::SFC_Ys;
-        constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(IAccess_{});
+        using SFC_Ys                  = typename Base::Traits::SFC_Ys;
+        constexpr auto idx_diff_ys    = SFC_Ys::get_forward_step(IAccess_{});
         constexpr auto idx_diff_ps_ys = container_concat(
-            generate_tuple([](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-            idx_diff_ys);
+            generate_tuple([](auto) { return number<0>{}; }, number<Base::NDimP>{}), idx_diff_ys);
         Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
             window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
     }
@@ -601,7 +600,6 @@ struct tile_window_with_static_distribution
         using Traits = typename Base::Traits;
 
         using vector_t = typename Traits::vector_t;
-        using SFC_Ys   = typename Traits::SFC_Ys;
 
         LdsDataType* smem = lds_tile.get_bottom_tensor_view().get_buffer_view().p_data_;
 
@@ -1481,7 +1479,7 @@ struct tile_window_with_static_distribution
     }
 
     template <typename WriteFunc>
-    CK_TILE_DEVICE void write_dstr_tensor_to_bottom_impl(
+    CK_TILE_DEVICE void write_vectors_to_bottom_tensor(
         const static_distributed_tensor<typename Base::DataType, typename Base::TileDstr>&
             dstr_tensor,
         WriteFunc write_func) const
@@ -1544,12 +1542,10 @@ struct tile_window_with_static_distribution
               number<i_access_unsupport_> = {}) const
     {
         using vector_t = typename Base::Traits::vector_t;
-        write_dstr_tensor_to_bottom_impl(
-            dstr_tensor,
-            [&](const auto& bottom_tensor_thread_coord, const vector_t& vec_value) {
-                this->get_bottom_tensor_view()
-                    .template set_vectorized_elements_raw<vector_t, true>(
-                        bottom_tensor_thread_coord, 0, vec_value);
+        write_vectors_to_bottom_tensor(
+            dstr_tensor, [&](const auto& bottom_tensor_thread_coord, const vector_t& vec_value) {
+                this->get_bottom_tensor_view().template set_vectorized_elements_raw<vector_t, true>(
+                    bottom_tensor_thread_coord, 0, vec_value);
             });
     }
 
@@ -1561,9 +1557,8 @@ struct tile_window_with_static_distribution
            bool_constant<oob_conditional_check> = {}) const
     {
         using vector_t = typename Base::Traits::vector_t;
-        write_dstr_tensor_to_bottom_impl(
-            dstr_tensor,
-            [&](const auto& bottom_tensor_thread_coord, const vector_t& vec_value) {
+        write_vectors_to_bottom_tensor(
+            dstr_tensor, [&](const auto& bottom_tensor_thread_coord, const vector_t& vec_value) {
                 this->get_bottom_tensor_view().template update_vectorized_elements<vector_t>(
                     bottom_tensor_thread_coord,
                     0,
@@ -1581,9 +1576,8 @@ struct tile_window_with_static_distribution
                bool_constant<pre_nop>               = {}) const
     {
         using vector_t = typename Base::Traits::vector_t;
-        write_dstr_tensor_to_bottom_impl(
-            dstr_tensor,
-            [&](const auto& bottom_tensor_thread_coord, const vector_t& vec_value) {
+        write_vectors_to_bottom_tensor(
+            dstr_tensor, [&](const auto& bottom_tensor_thread_coord, const vector_t& vec_value) {
                 this->get_bottom_tensor_view().template update_vectorized_elements_raw<vector_t>(
                     bottom_tensor_thread_coord,
                     0,
