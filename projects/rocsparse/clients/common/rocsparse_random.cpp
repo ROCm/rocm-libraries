@@ -23,7 +23,6 @@
  * ************************************************************************ */
 
 #include "rocsparse_random.hpp"
-#include "rocsparse_reproducibility.hpp"
 #include <iostream>
 
 rocsparse::rng_t::rng_t()
@@ -82,7 +81,7 @@ void rocsparse::rng_t::set_rng_nan(rocsparse_rng_t a)
 {
     m_rng_nan = a;
 }
-void rocsparse::rng_t::rng_seed_set(rocsparse_rng_t a)
+void rocsparse::rng_t::set_rng_seed(rocsparse_rng_t a)
 {
     m_rng_seed = a;
 }
