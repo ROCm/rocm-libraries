@@ -85,11 +85,11 @@ This is the architectural difference from a test-as-code approach: the graph def
 
 Two pipelines operate on the same golden data format:
 
-**Generation (Python, run once):**
-1. Build graph in Python (define tensors, operation, parameters)
-2. Create random input tensors
-3. Run PyTorch (or another framework) to produce reference outputs
-4. Call `Graph.save(base_filename)` to write `{Name}.json` + `{Name}.tensor{uid}.bin`
+**Generation (run once, any tool):**
+1. Define the graph (tensors, operation, parameters)
+2. Create input tensors (random or from a real workload)
+3. Run a reference source (PyTorch, CPU ref, GPU ref, AITER, AOTriton, etc.) to produce outputs
+4. Write the bundle: `{Name}.json` + `{Name}.tensor{uid}.bin`
 
 **Validation (C++, every CI run):**
 1. `loadGraphAndTensors(path)` reads JSON + tensor bins into `GraphAndTensorMap`
