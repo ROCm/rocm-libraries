@@ -66,7 +66,7 @@ Golden data is a **key-value store**:
 
 If the key is wrong — the graph has changed since generation but the fingerprint didn't catch it — every downstream step (deserialize, execute, compare) operates on stale data from a different computation. A pass is false confidence. A fail is a wild goose chase.
 
-The graph fingerprint must be correct, deterministic, and under our control. See [Graph Fingerprint](#graph-fingerprint----catches-graph-drift-after-generation) for the design.
+The graph fingerprint must be correct, deterministic, and under our control. See [Graph Fingerprint](#graph-fingerprint) for the design.
 
 ---
 
@@ -105,7 +105,7 @@ Two pipelines share the same set of steps:
 
 **What exists today**: This step already works. Every test fixture (e.g., `IntegrationGpuConvForward.cpp`) implements `buildGraph()` which creates a `graph::Graph`, adds tensors with explicit **names** (e.g., `"x"`, `"w"`, `"y"`), creates operations, validates, and builds the operation graph.
 
-**What changes**: Nothing. The graph construction code is untouched. The golden data system uses a [graph-property hash](#graph-fingerprint----catches-graph-drift-after-generation) built from graph properties (tensor names, dims, types, operation parameters) to detect when `buildGraph()` has changed since golden data was generated.
+**What changes to `buildGraph()`**: Nothing. The graph construction code is untouched. **What's new**: a [graph-property hash](#graph-fingerprint) computed from the constructed graph's properties (tensor names, dims, types, operation parameters) to detect when `buildGraph()` has changed since golden data was generated.
 
 **Design constraint**: Tensor names set in `buildGraph()` are the **identity contract** for golden data. They are how golden files map to runtime tensors. A tensor named `"x"` in the golden file must correspond to a tensor named `"x"` in the graph.
 
@@ -124,10 +124,18 @@ void resolveGoldenTensors(
 {
     std::unordered_map<std::string, int64_t> nameToUid;
     graph.visit([&](const graph::INode& node) {
+        auto insertUnique = [&](const auto& attr) {
+            auto [it, inserted] = nameToUid.emplace(attr->get_name(), attr->get_uid());
+            if(!inserted)
+            {
+                FAIL() << "Duplicate tensor name '" << attr->get_name()
+                       << "' in graph. Tensor names must be unique.";
+            }
+        };
         for(const auto& attr : node.getNodeInputTensorAttributes())
-            nameToUid[attr->get_name()] = attr->get_uid();
+            insertUnique(attr);
         for(const auto& attr : node.getNodeOutputTensorAttributes())
-            nameToUid[attr->get_name()] = attr->get_uid();
+            insertUnique(attr);
     });
 
     for(const auto& [name, tensorInfo] : manifest.inputs)
@@ -154,6 +162,77 @@ If a golden file references a tensor name that does not exist in the runtime gra
 - [ ] Unit test: Rename a tensor name, verify golden validation fails with clear diagnostic
 - [ ] Unit test: Add a new output tensor not in golden data, verify hard FAIL
 - [ ] Generator refuses to write golden data if any tensor name is empty or duplicated within the graph
+
+### Graph Fingerprint
+
+The graph fingerprint is the **key** in the key-value store described in [Golden Data Is a Key-Value Store](#golden-data-is-a-key-value-store). If it fails, nothing else matters.
+
+**Goal:** Detect when `buildGraph()` has changed since golden data was generated, *before* loading any tensors or running any engine.
+
+**Why not hash `to_binary()`?** The obvious approach is to hash the output of `graph.to_binary()`. This delegates to the backend's `backendGetSerializedBinaryGraphExt()`, which uses FlatBuffers internally. FlatBuffers does **not** guarantee deterministic serialization — the official docs state *"two different implementations may produce different binaries given the same input values, and this is perfectly valid."* In practice, the same binary produces identical bytes, but FlatBuffers library upgrades, schema changes, or compiler changes can silently break every fingerprint without a single graph actually changing. Since the fingerprint is the foundation of the entire system (see [Golden Data Is a Key-Value Store](#golden-data-is-a-key-value-store)), we cannot build it on a format we don't control.
+
+**Design: Graph-property hash.** Instead of hashing serialized bytes, hash the **graph properties that determine numerical output**:
+
+```cpp
+std::string computeGraphFingerprint(const graph::Graph& graph) {
+    SHA256Hasher hasher;
+
+    // Walk graph nodes in deterministic (sorted-by-name) order.
+    for(const auto& node : getSortedNodes(graph)) {
+        // Reuse the existing per-node signature key (e.g., ConvolutionFwdSignatureKey,
+        // MatmulSignatureKey) to collect operation type and data types.
+        auto key = SignatureKeyRegistry::getKey(node);
+        key.hashSelf(hasher);
+
+        // Extend with properties the signature keys don't currently cover:
+        //   - tensor names and dims
+        //   - operation parameters (padding, stride, dilation, etc.)
+        for(const auto& tensor : node.getTensorAttributes())
+            hasher.update(tensor.name, tensor.dims, tensor.dataType);
+        hashOperationParams(hasher, node);
+    }
+
+    return hasher.hexDigest();
+}
+```
+
+**Reuses existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order. `computeGraphFingerprint()` reuses both: the graph walk and the per-node signature keys. It extends each key's hash with tensor names, dims, and operation parameters (padding, stride, dilation), then composes into a single graph-level SHA-256.
+
+At validation time:
+
+```cpp
+auto fingerprint = computeGraphFingerprint(graph);
+if(fingerprint != manifest.graph_fingerprint)
+{
+    FAIL() << "Graph definition has changed since golden data was generated."
+           << "\n  Golden fingerprint: " << manifest.graph_fingerprint
+           << "\n  Current fingerprint: " << fingerprint
+           << "\n  Regenerate golden data with --generate-golden";
+}
+```
+
+**Why this is the right design:**
+
+| Property | `to_binary()` hash | Graph-property hash |
+|----------|-------------------|-------------------|
+| Deterministic by construction | No (FlatBuffers gives no guarantee) | Yes (we control sort order and canonicalization) |
+| Survives FlatBuffers upgrades | No (all hashes break) | Yes (no FlatBuffers dependency) |
+| Survives serialization format change | No | Yes |
+| Catches real `buildGraph()` changes | Yes | Yes |
+| Catches changes we care about only | No (false positives on format changes) | Yes (only mathematical semantics) |
+
+The graph-property hash changes when — and only when — the computation changes. A FlatBuffers upgrade, a schema migration, or a backend swap does not affect it. This is the correct foundation for a system where every downstream step depends on the fingerprint being right.
+
+**What if we miss a property?** If the hash omits a property that affects computation (e.g., a new convolution attribute), the fingerprint won't catch that change. But Step 7 (value comparison) will — the numerical output will differ. The fingerprint is the first gate, not the only one. Missing a property produces a confusing error message (numerical mismatch instead of "graph changed"), not a silent pass.
+
+**Acceptance criteria**:
+- [ ] `computeGraphFingerprint()` hashes tensor names, dims, types, and operation parameters
+- [ ] Graph fingerprint is deterministic (same graph → same hash across builds)
+- [ ] Graph fingerprint changes when any numerical-output-affecting property changes
+- [ ] Graph fingerprint does NOT change on FlatBuffers upgrades or schema changes
+- [ ] Unit test: Change a tensor dim, verify fingerprint changes
+- [ ] Unit test: Change an operation parameter (e.g., padding), verify fingerprint changes
+- [ ] Unit test: Same graph built twice produces identical fingerprint
 
 ---
 
@@ -250,71 +329,9 @@ The following diagram shows how the graph definition flows through the system an
 
 ![Graph-Level Correctness](images/graph_level_correctness.png)
 
-Three checks, each catching a different kind of mismatch:
+Two checks, each catching a different kind of mismatch:
 
-#### Graph Fingerprint -- catches graph drift after generation
-
-The graph fingerprint is the **key** in the key-value store described in [Golden Data Is a Key-Value Store](#golden-data-is-a-key-value-store). If it fails, nothing else matters.
-
-**Goal:** Detect when `buildGraph()` has changed since golden data was generated, *before* loading any tensors or running any engine.
-
-**Why not hash `to_binary()`?** The obvious approach is to hash the output of `graph.to_binary()`. This delegates to the backend's `backendGetSerializedBinaryGraphExt()`, which uses FlatBuffers internally. FlatBuffers does **not** guarantee deterministic serialization — the official docs state *"two different implementations may produce different binaries given the same input values, and this is perfectly valid."* In practice, the same binary produces identical bytes, but FlatBuffers library upgrades, schema changes, or compiler changes can silently break every fingerprint without a single graph actually changing. Since the fingerprint is the foundation of the entire system (see [Golden Data Is a Key-Value Store](#golden-data-is-a-key-value-store)), we cannot build it on a format we don't control.
-
-**Design: Graph-property hash.** Instead of hashing serialized bytes, hash the **graph properties that determine numerical output**:
-
-```cpp
-std::string computeGraphFingerprint(const graph::Graph& graph) {
-    SHA256Hasher hasher;
-
-    // Walk graph nodes in deterministic (sorted-by-name) order.
-    for(const auto& node : getSortedNodes(graph)) {
-        // Reuse the existing per-node signature key (e.g., ConvolutionFwdSignatureKey,
-        // MatmulSignatureKey) to collect operation type and data types.
-        auto key = SignatureKeyRegistry::getKey(node);
-        key.hashSelf(hasher);
-
-        // Extend with properties the signature keys don't currently cover:
-        //   - tensor names and dims
-        //   - operation parameters (padding, stride, dilation, etc.)
-        for(const auto& tensor : node.getTensorAttributes())
-            hasher.update(tensor.name, tensor.dims, tensor.dataType);
-        hashOperationParams(hasher, node);
-    }
-
-    return hasher.hexDigest();
-}
-```
-
-**Reuses existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order. `computeGraphFingerprint()` reuses both: the graph walk and the per-node signature keys. It extends each key's hash with tensor names, dims, and operation parameters (padding, stride, dilation), then composes into a single graph-level SHA-256.
-
-At validation time:
-
-```cpp
-auto fingerprint = computeGraphFingerprint(graph);
-if(fingerprint != manifest.graph_fingerprint)
-{
-    FAIL() << "Graph definition has changed since golden data was generated."
-           << "\n  Golden fingerprint: " << manifest.graph_fingerprint
-           << "\n  Current fingerprint: " << fingerprint
-           << "\n  Regenerate golden data with --generate-golden";
-}
-```
-
-**Why this is the right design:**
-
-| Property | `to_binary()` hash | Graph-property hash |
-|----------|-------------------|-------------------|
-| Deterministic by construction | No (FlatBuffers gives no guarantee) | Yes (we control sort order and canonicalization) |
-| Survives FlatBuffers upgrades | No (all hashes break) | Yes (no FlatBuffers dependency) |
-| Survives serialization format change | No | Yes |
-| Catches real `buildGraph()` changes | Yes | Yes |
-| Catches changes we care about only | No (false positives on format changes) | Yes (only mathematical semantics) |
-
-The graph-property hash changes when — and only when — the computation changes. A FlatBuffers upgrade, a schema migration, or a backend swap does not affect it. This is the correct foundation for a system where every downstream step depends on the fingerprint being right.
-
-**What if we miss a property?** If the hash omits a property that affects computation (e.g., a new convolution attribute), the fingerprint won't catch that change. But Step 7 (value comparison) will — the numerical output will differ. The fingerprint is the first gate, not the only one. Missing a property produces a confusing error message (numerical mismatch instead of "graph changed"), not a silent pass.
-
-#### Graph Export -- eliminates dual-spec
+#### Graph Export
 
 Instead of the Python script independently defining operation parameters, it reads graph properties exported from `buildGraph()`. The exported graph is a **transient artifact** — it is consumed by the Python script during generation and discarded. It is not stored in the golden data directory.
 
@@ -342,7 +359,7 @@ python scripts/generate_reference.py \
 
 **Why the serialized graph is not stored in golden data.** The validation pipeline never reads it — it rebuilds the graph from `buildGraph()` and checks the fingerprint. Storing it would couple golden data to the FlatBuffers schema version: a schema upgrade would make every stored `graph.bin` unreadable, forcing regeneration even when the computation hasn't changed. The manifest and tensor files have no such coupling.
 
-#### Cross-Validation -- catches implementation bugs
+#### Cross-Validation
 
 When a C++ reference executor IS available for an operation, a CI health check generates golden data from both sources and confirms they agree:
 
@@ -363,11 +380,12 @@ If both produce the same outputs (within tolerance), the external reference is v
 
 #### Summary
 
-| Check | Phase | What it catches | How |
-|-------|-------|----------------|-----|
-| Graph fingerprint | Phase 1 | C++ graph changed after golden data was generated | Hash comparison at validation time |
-| Graph export | Phase 2 | Python and C++ disagree on operation parameters | Single source of truth (flatbuffer) |
-| Cross-validation | Phase 2 | Python implementation bug (correct params, wrong math) | Generate from both sources, compare outputs |
+| Check | What it catches | How |
+|-------|----------------|-----|
+| Graph export | Python and C++ disagree on operation parameters | Single source of truth (flatbuffer) |
+| Cross-validation | Python implementation bug (correct params, wrong math) | Generate from both sources, compare outputs |
+
+(The [Graph Fingerprint](#graph-fingerprint) check is defined in Step 1 — it catches C++ graph changes after golden data was generated via hash comparison at validation time.)
 
 **Acceptance criteria**:
 - [ ] `--reference-executor cpu` calls `CpuReferenceGraphExecutor` (default)
@@ -542,7 +560,7 @@ Strides are **not stored** in the manifest. `buildGraph()` produces strides from
 
 **Before loading tensors, verify the graph hasn't changed** (graph fingerprint check):
 
-The first thing Step 4 does is compute the current graph's fingerprint (a hash of graph properties — tensor names, dims, types, operation parameters) and compare it to the fingerprint stored in the manifest. If they differ, the graph definition has changed since golden data was generated — the tensor data is stale and cannot be trusted. This is a hard FAIL with a message to regenerate. See [Graph Fingerprint](#graph-fingerprint----catches-graph-drift-after-generation) for the full design.
+The first thing Step 4 does is compute the current graph's fingerprint (a hash of graph properties — tensor names, dims, types, operation parameters) and compare it to the fingerprint stored in the manifest. If they differ, the graph definition has changed since golden data was generated — the tensor data is stale and cannot be trusted. This is a hard FAIL with a message to regenerate. See [Graph Fingerprint](#graph-fingerprint) for the full design.
 
 **What can go wrong** (from pen test):
 - Graph definition changed since generation → hard FAIL on graph fingerprint mismatch
