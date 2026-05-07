@@ -246,14 +246,14 @@ class TestDTLm0Tracking:
         )
 
     def test_m0_register_distinct_from_sgpr(self):
-        """Confirm m0's regType differs from sgpr — the existing _reg_overlaps
-        will (correctly) refuse to overlap m0 with an sgpr. Any future m0
+        """Confirm m0's regType differs from sgpr — Register.overlaps refuses
+        to overlap m0 with an sgpr because reg_type differs. Any future m0
         tracking must therefore add an explicit m0-aware overlap path."""
         m0_reg = mgpr(0)
         s0_reg = sgpr(0, 1)
         assert m0_reg.regType != s0_reg.regType, (
             "If m0 ever shares regType with sgpr, the false-positive "
-            "overlap risk in _reg_overlaps must be re-audited."
+            "overlap risk in Register.overlaps must be re-audited."
         )
 
 

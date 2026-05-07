@@ -750,82 +750,87 @@ class TestMultiWriteProducer:
 
 
 # =============================================================================
-# _reg_intersection direct unit tests
+# Register intersection through the production `_intersection` dispatcher
 # =============================================================================
+# The register-vs-register path is implemented inside `_intersection`, which
+# wraps inputs via `Register.from_rocisa`, intersects via
+# `Register.intersection`, and materializes the result back into a fresh
+# `RegisterContainer` for downstream consumers. These tests exercise that
+# end-to-end path on the rocisa-typed inputs the production resolver sees.
 
 
 class TestRegIntersection:
     def test_numeric_full_overlap(self):
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr
-        r = _reg_intersection(vgpr(8, 4), vgpr(8, 4))
+        r = _intersection(vgpr(8, 4), vgpr(8, 4))
         assert r is not None
         assert (r.regType, r.regIdx, r.regNum) == ("v", 8, 4)
 
     def test_numeric_partial_overlap(self):
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr
         # v[8:11] intersected with v[10:13] -> v[10:11]
-        r = _reg_intersection(vgpr(8, 4), vgpr(10, 4))
+        r = _intersection(vgpr(8, 4), vgpr(10, 4))
         assert r is not None
         assert (r.regIdx, r.regNum) == (10, 2)
 
     def test_numeric_no_overlap_returns_none(self):
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr
-        assert _reg_intersection(vgpr(8, 4), vgpr(20, 4)) is None
+        assert _intersection(vgpr(8, 4), vgpr(20, 4)) is None
 
     def test_cross_type_returns_none(self):
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr, sgpr
-        assert _reg_intersection(vgpr(8, 4), sgpr(8, 4)) is None
+        assert _intersection(vgpr(8, 4), sgpr(8, 4)) is None
 
     def test_none_inputs_return_none(self):
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr
-        assert _reg_intersection(None, vgpr(8, 4)) is None
-        assert _reg_intersection(vgpr(8, 4), None) is None
+        assert _intersection(None, vgpr(8, 4)) is None
+        assert _intersection(vgpr(8, 4), None) is None
 
     def test_symbolic_full_overlap(self):
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr
         # vgpr("ValuA", 4) intersected with itself -> same
         a = vgpr("ValuA", 4)
         b = vgpr("ValuA", 4)
-        r = _reg_intersection(a, b)
+        r = _intersection(a, b)
         assert r is not None
         assert r.regName.name == "ValuA"
         assert r.regNum == 4
 
     def test_symbolic_partial_overlap(self):
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr
         # ValuA+0..3 intersected with ValuA+2..5 -> ValuA+2..3 (regNum=2)
         a = vgpr("ValuA", 4)             # offset 0, count 4
         b = vgpr("ValuA+2", 4)           # offset 2, count 4
-        r = _reg_intersection(a, b)
+        r = _intersection(a, b)
         assert r is not None
         assert r.regName.name == "ValuA"
         assert r.regName.getTotalOffsets() == 2
         assert r.regNum == 2
 
     def test_symbolic_different_names_no_overlap(self):
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr
-        assert _reg_intersection(vgpr("ValuA", 4), vgpr("ValuB", 4)) is None
+        assert _intersection(vgpr("ValuA", 4), vgpr("ValuB", 4)) is None
 
     def test_mixed_symbolic_numeric_returns_none(self):
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr
-        assert _reg_intersection(vgpr("ValuA", 4), vgpr(8, 4)) is None
+        assert _intersection(vgpr("ValuA", 4), vgpr(8, 4)) is None
 
     def test_intersection_is_hashable_and_dedups(self):
         """Two intersections produced from equivalent inputs must compare
         equal so DataflowGraph.edge_keys()'s set dedup works."""
-        from Tensile.Components.ScheduleCapture import _reg_intersection
+        from Tensile.Components.ScheduleCapture import _intersection
         from rocisa.container import vgpr
-        r1 = _reg_intersection(vgpr(8, 4), vgpr(10, 4))
-        r2 = _reg_intersection(vgpr(8, 4), vgpr(10, 4))
+        r1 = _intersection(vgpr(8, 4), vgpr(10, 4))
+        r2 = _intersection(vgpr(8, 4), vgpr(10, 4))
         assert r1 == r2
         assert hash(r1) == hash(r2)
         assert {r1, r2} == {r1}

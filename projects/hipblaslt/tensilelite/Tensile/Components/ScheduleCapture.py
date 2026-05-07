@@ -41,6 +41,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
+from Tensile.Components.register import Register
+
 if TYPE_CHECKING:
     # Imported only for type hints — CMSValidator imports from this module at
     # runtime, so a hard import here would create a cycle. PEP 563
@@ -972,35 +974,12 @@ def _is_ssetprio(inst):
     return type(inst).__name__ in _SSETPRIO_CLASS_NAMES
 
 
-def _reg_signature(reg) -> tuple:
-    """Stable hashable tuple summary of a RegisterContainer.
-
-    Real CMS schedules use SYMBOLIC register names (regIdx=-1, regName
-    holds the actual identity like 'ValuA_X0_I0'). Including only
-    (regType, regIdx, regNum) would collapse all symbolic registers to
-    the same signature and corrupt graph identity. Include the regName's
-    name + offsets when present so symbolic-named registers are
-    distinguishable.
-    """
-    if reg is None:
-        return ()
-    name_sig = ()
-    rname = getattr(reg, "regName", None)
-    if rname is not None:
-        try:
-            offs = tuple(rname.getOffsets()) if hasattr(rname, "getOffsets") else ()
-        except Exception:
-            offs = ()
-        name_sig = (getattr(rname, "name", None), offs)
-    return (getattr(reg, "regType", None),
-            getattr(reg, "regIdx", None),
-            getattr(reg, "regNum", None),
-            name_sig)
-
+# Stable hashable signatures for RegisterContainers are obtained via
+# `Register.from_rocisa(rc).signature()` — see Tensile/Components/register.py.
 
 # Per-shape positional `getParams()` extractors removed in q9j: each
 # rule now reads `inst.getSrcParams()` / `inst.getDstParams()` directly
-# (rocisa nanobind-bound) and filters through `_is_register`.
+# (rocisa nanobind-bound) and filters through `Register.is_register`.
 
 
 _COMMENT_STRIP_RE = None  # lazy-compiled
@@ -1127,19 +1106,11 @@ def _resolve_producers(read_resource: Any, consumer: GraphNode, latest_writer: D
 # into one extensible pipeline. New classes just add a rule.
 
 
-def _is_register(x) -> bool:
-    """True if x walks like a RegisterContainer (has regType + regIdx).
-
-    Used by the GenericALURule fallback to filter getParams() entries that
-    aren't registers (modifiers, ints, comments, None)."""
-    return x is not None and hasattr(x, "regType") and hasattr(x, "regIdx")
-
-
 # -----------------------------------------------------------------------------
 # Operand-rule helpers
 # -----------------------------------------------------------------------------
 # Most rules below collapse to "read getSrcParams(), write getDstParams(),
-# filter through _is_register". The rocisa C++ side encodes per-shape
+# filter through Register.is_register". The rocisa C++ side encodes per-shape
 # semantics directly (see Q9J_SCOPE_REASSESSMENT.md §2):
 #
 #   * DSLoadInstruction::getDstParams = {dst}, getSrcParams = {srcs}
@@ -1159,7 +1130,7 @@ def _is_register(x) -> bool:
 
 def _operands_via_accessors(inst):
     """Return `(reads, writes)` from `inst.getSrcParams()` /
-    `inst.getDstParams()` filtered through `_is_register`.
+    `inst.getDstParams()` filtered through `Register.is_register`.
 
     The single-source-of-truth pattern shared by `_DSLoadRule`,
     `_DSStoreRule`, `_BufferLoadRule`, `_MFMARule`, `_VSwapRule`, and
@@ -1173,14 +1144,14 @@ def _operands_via_accessors(inst):
         dsts = inst.getDstParams()
     except Exception:
         return (), ()
-    reads = tuple(r for r in srcs if _is_register(r))
-    writes = tuple(w for w in dsts if _is_register(w))
+    reads = tuple(r for r in srcs if Register.is_register(r))
+    writes = tuple(w for w in dsts if Register.is_register(w))
     return reads, writes
 
 
 class _DSLoadRule:
     """DSLoadB* — `getDstParams() = {dst}`, `getSrcParams() = {src_lds_addr, ...}`.
-    Both filtered through `_is_register` (modifiers/None drop out).
+    Both filtered through `Register.is_register` (modifiers/None drop out).
     """
     def applies(self, inst, category=None): return _is_lr(inst)
     def extract(self, inst, category=None):
@@ -1340,12 +1311,12 @@ class _VSwapRule:
 # consumer-read containers stays stable.
 #
 # This singleton rides on existing register machinery:
-#   * `_is_register` accepts it (has regType + regIdx).
-#   * `_reg_intersection` short-circuits on `regType` mismatch, so SCC
+#   * `Register.is_register` accepts it (has regType + regIdx).
+#   * `Register.intersection` short-circuits on `reg_type` mismatch, so SCC
 #     never accidentally aliases vgpr/sgpr.
-#   * For two SCC instances `_reg_intersection` falls into the numeric
-#     branch and looks up `_NUMERIC_REG_FACTORIES["scc"]`, which we
-#     register below as a constant-returning factory.
+#   * For two SCC instances the `_intersection` materializer looks up
+#     `_NUMERIC_REG_FACTORIES["scc"]`, which we register below as a
+#     constant-returning factory.
 #   * `_byte_keys_for_resource` keys it as `("scc", 0)`, giving the
 #     per-byte latest-writer resolver one slot to track.
 
@@ -1408,15 +1379,15 @@ class _SCCRule:
         # string only — also no register dst, no register srcs.
         has_dst = getattr(inst, "dst", None) is not None
         if not has_dst:
-            reg_reads = tuple(p for p in params if _is_register(p))
+            reg_reads = tuple(p for p in params if Register.is_register(p))
             reg_writes = ()
         else:
-            if params and _is_register(params[0]):
+            if params and Register.is_register(params[0]):
                 reg_writes = (params[0],)
-                reg_reads = tuple(p for p in params[1:] if _is_register(p))
+                reg_reads = tuple(p for p in params[1:] if Register.is_register(p))
             else:
                 reg_writes = ()
-                reg_reads = tuple(p for p in params if _is_register(p))
+                reg_reads = tuple(p for p in params if Register.is_register(p))
 
         # Direct attribute access: only SCC-relevant rocisa instances
         # reach `extract()` (gated by `applies()` above). The flags are
@@ -1441,10 +1412,10 @@ class _GenericALURule:
 
     Convention (matches Pack rocisa shape: dst at slot 0, srcs follow):
       writes = (params[0],) iff params[0] walks like a register
-      reads  = tuple(p for p in params[1:] if _is_register(p))
+      reads  = tuple(p for p in params[1:] if Register.is_register(p))
 
     Non-register positional params (modifiers, ints, comments, VCC, labels)
-    are filtered out by `_is_register`. Branch instructions whose only
+    are filtered out by `Register.is_register`. Branch instructions whose only
     param is a label string therefore yield (reads, writes) == ((), ()) —
     no dataflow contribution, which is the desired behavior for control
     flow.
@@ -1474,7 +1445,7 @@ class _GenericALURule:
         not tracked by the validator (permanent design choice — see
         `CMSValidator_LIMITATIONS.md` §"VCC dataflow tracking is
         intentionally not provided"). VCC sentinels have no
-        regType/regIdx so this rule's `_is_register` filter drops them
+        regType/regIdx so this rule's `Register.is_register` filter drops them
         from reads/writes; VCC RAW edges are not formed.
       - VSwap symmetric R+W (both operands read AND written) — handled by
         `_VSwapRule`, which precedes this rule.
@@ -1562,52 +1533,9 @@ def _populate_wrapper(wrapper, category=None) -> None:
     wrapper.writes = ()
 
 
-def _reg_overlaps(read_reg, written_reg) -> bool:
-    """True if `read_reg` overlaps with `written_reg` (vgpr ranges intersect).
-
-    Handles three cases:
-      - Numeric registers (regIdx >= 0): overlap by numeric range.
-      - Symbolic registers (regIdx == -1, regName set): overlap requires
-        same regName.name AND overlapping range using getTotalIdx() (the
-        offset within the named region).
-      - Mixed numeric + symbolic: NEVER overlap — different naming
-        conventions can't be compared without a name-resolution table.
-    """
-    if read_reg is None or written_reg is None:
-        return False
-    if read_reg.regType != written_reg.regType:
-        return False
-
-    a_named = read_reg.regIdx == -1 and getattr(read_reg, "regName", None) is not None
-    b_named = written_reg.regIdx == -1 and getattr(written_reg, "regName", None) is not None
-
-    if a_named != b_named:
-        # Mixed naming convention; can't compare safely.
-        return False
-
-    if a_named:
-        # Both symbolic — must share the same name root, then compare offsets.
-        if read_reg.regName.name != written_reg.regName.name:
-            return False
-        a_off = read_reg.regName.getTotalOffsets() if hasattr(read_reg.regName, "getTotalOffsets") else 0
-        b_off = written_reg.regName.getTotalOffsets() if hasattr(written_reg.regName, "getTotalOffsets") else 0
-        a_lo = a_off
-        a_hi = a_lo + (read_reg.regNum or 1)
-        b_lo = b_off
-        b_hi = b_lo + (written_reg.regNum or 1)
-        return a_lo < b_hi and b_lo < a_hi
-
-    # Both numeric.
-    a_lo = read_reg.regIdx
-    a_hi = a_lo + (read_reg.regNum or 1)
-    b_lo = written_reg.regIdx
-    b_hi = b_lo + (written_reg.regNum or 1)
-    return a_lo < b_hi and b_lo < a_hi
-
-
 # Lazy-populated factory map: regType character -> RegisterContainer factory
-# function (idx, count) -> RegisterContainer. Populated on first call to
-# _reg_intersection so this module stays free of a top-level rocisa import.
+# function (idx, count) -> RegisterContainer. Populated on first invocation so
+# this module stays free of a top-level rocisa import.
 # vgpr/sgpr/accvgpr factories produce the canonical regName=None numeric
 # form that compares equal under value-based __eq__/__hash__; that property
 # is what makes the set-based dedup in DataflowGraph.edge_keys() work after
@@ -1635,76 +1563,30 @@ def _ensure_numeric_factories():
     }
 
 
-def _reg_intersection(read_reg, written_reg):
-    """Return a new RegisterContainer covering the overlap between
-    `read_reg` and `written_reg`, or None if they don't overlap or have
-    incompatible naming.
+def _materialize_register(reg):
+    """Build a rocisa ``RegisterContainer`` from a ``Register``.
 
-    Mirrors the structure of `_reg_overlaps` but constructs the precise
-    overlap subrange. Two reasons this matters:
+    Numeric ``Register``s use the per-regType factory (vgpr/sgpr/accvgpr/...)
+    so the resulting container has the canonical ``regName=None`` form that
+    set-based edge dedup relies on. Symbolic ``Register``s rebuild a fresh
+    ``RegisterContainer(regType, RegName(name, [base]), -1, count)``.
 
-      1. Diagnostic precision — a downstream Failure formatter that prints
-         `edge.resource` shows the actual sub-range the consumer reads,
-         not the producer's full write. Example: LR writes v[8:11], MFMA
-         reads v[8:9] — edge.resource == v[8:9].
-
-      2. Set-based edge dedup in `DataflowGraph.edge_keys()`. When a
-         producer with multiple writes feeds a consumer with multiple
-         reads, the per-(producer,consumer,register) tuple needs the
-         register field to reflect the actual overlap to remain a stable
-         hashable identity. Numeric containers built via vgpr/sgpr/...
-         factories use regName=None and compare equal to other
-         factory-built containers with the same (regIdx, regNum); that's
-         what set dedup relies on.
-
-    Symbolic intersections preserve the regName.name root and adjust the
-    offset list to point at the intersection's start.
+    Returns ``None`` for unknown ``reg_type`` — callers (the per-byte edge
+    resolver) skip the edge rather than emit a bogus container.
     """
-    if read_reg is None or written_reg is None:
-        return None
-    if read_reg.regType != written_reg.regType:
-        return None
-
-    a_named = read_reg.regIdx == -1 and getattr(read_reg, "regName", None) is not None
-    b_named = written_reg.regIdx == -1 and getattr(written_reg, "regName", None) is not None
-
-    if a_named != b_named:
-        return None
-
-    if a_named:
-        if read_reg.regName.name != written_reg.regName.name:
-            return None
-        a_off = read_reg.regName.getTotalOffsets() if hasattr(read_reg.regName, "getTotalOffsets") else 0
-        b_off = written_reg.regName.getTotalOffsets() if hasattr(written_reg.regName, "getTotalOffsets") else 0
-        a_lo, a_hi = a_off, a_off + (read_reg.regNum or 1)
-        b_lo, b_hi = b_off, b_off + (written_reg.regNum or 1)
-        lo, hi = max(a_lo, b_lo), min(a_hi, b_hi)
-        if lo >= hi:
-            return None
-        # Symbolic: same name root, offset = lo, count = hi-lo.
+    if reg.is_symbolic():
         from rocisa.container import RegisterContainer, RegName
         return RegisterContainer(
-            read_reg.regType,
-            RegName(read_reg.regName.name, [lo]),
+            reg.reg_type,
+            RegName(reg.name, [reg.base]),
             -1,
-            hi - lo,
+            reg.count,
         )
-
-    # Numeric.
-    a_lo = read_reg.regIdx
-    a_hi = a_lo + (read_reg.regNum or 1)
-    b_lo = written_reg.regIdx
-    b_hi = b_lo + (written_reg.regNum or 1)
-    lo, hi = max(a_lo, b_lo), min(a_hi, b_hi)
-    if lo >= hi:
-        return None
     _ensure_numeric_factories()
-    factory = _NUMERIC_REG_FACTORIES.get(read_reg.regType)
+    factory = _NUMERIC_REG_FACTORIES.get(reg.reg_type)
     if factory is None:
-        # Unknown regType (shouldn't happen for v/s/m/acc). Return None so
-        # the resolver skips this edge rather than emitting a bogus container.
         return None
-    return factory(lo, hi - lo)
+    return factory(reg.base, reg.count)
 
 
 def _memory_intersection(a, b):
@@ -1730,13 +1612,29 @@ def _intersection(a, b):
     """Type-dispatched resource intersection. Returns the overlap (subresource
     of the same type) or None if no overlap (including heterogeneous types
     — a register and a MemoryRegion never overlap).
+
+    Register-typed inputs are dispatched through the ``Register`` abstraction:
+    inputs are wrapped via :meth:`Register.from_rocisa`, intersected via
+    :meth:`Register.intersection`, and the result is materialized back into
+    a fresh ``RegisterContainer`` for downstream consumers (edge formatters,
+    set-based edge dedup).
     """
     if isinstance(a, MemoryRegion) and isinstance(b, MemoryRegion):
         return _memory_intersection(a, b)
     if isinstance(a, MemoryRegion) or isinstance(b, MemoryRegion):
         return None
-    # Both are RegisterContainers (or duck-types). Reuse the register path.
-    return _reg_intersection(a, b)
+    # Both are RegisterContainers (or duck-types). Wrap and intersect.
+    if a is None or b is None:
+        return None
+    try:
+        ra = Register.from_rocisa(a)
+        rb = Register.from_rocisa(b)
+    except ValueError:
+        return None
+    overlap = ra.intersection(rb)
+    if overlap is None:
+        return None
+    return _materialize_register(overlap)
 
 
 # _min_issue_quad_cycles_for, _make_node, and _BODY_BUILD_ORDER moved to

@@ -99,11 +99,11 @@ than expected. Worth a comment in dzl's design.
 | `_DTLBufferLoadRule` | **C** | `MUBUFReadInstruction::getDstParams()` will return `{nullptr}` when DTL — the validator can detect that, but the implicit `m0` read is **not** in `getSrcParams()`. m0 has to come from elsewhere. This is squarely dzl's "implicit operands" scope. |
 | `_BufferLoadRule` | **A** | `MUBUFReadInstruction::getDstParams()={dst}` (or `{nullptr}` for DTL — filterable), `getSrcParams()={vaddr, saddr, soffset}`. Matches `_BufferLoadRule` (note `vaddr` is also picked up — currently the validator only tracks `srd=saddr`; this would be a slight expansion of read coverage, possibly desired). |
 | `_MFMARule` | **A** | `MFMAInstruction::getDstParams()={acc}`, `getSrcParams()={a, b, acc2}`. **Correction (2026-05-07):** the initial "B" categorization assumed `acc` was the read register and the rule needed a validator-side union to add it. That's wrong. Per `mfma.hpp:76,96`: `acc` is the destination accumulator (write); `acc2` is the **source** accumulator (read), defaulting to `acc` for the in-place RMW case (the dominant case). The assembly form is `v_mfma_* dst_acc, src_a, src_b, src_acc[, neg]` where `src_acc = acc2`. The current validator's `reads = (a, b, acc)` synthesis is correct only when `acc2 == acc` (in-place); for the out-of-place case (`acc2 != acc`) it's silently wrong because the actual hardware read is from `acc2`. Once the binding lands, the validator just uses `getSrcParams()` and gets the correct register whether in-place or out-of-place — strictly more correct than today, no special-case. Pure A. |
-| `_NoDataflowRule` | **A** | `SBarrier`/`SNop`/`SWaitCnt`/`SSetPrior` all have empty or non-register `getParams()`; `getDstParams() = getSrcParams() = {}` falls out trivially because `_is_register` filters non-Containers. |
+| `_NoDataflowRule` | **A** | `SBarrier`/`SNop`/`SWaitCnt`/`SSetPrior` all have empty or non-register `getParams()`; `getDstParams() = getSrcParams() = {}` falls out trivially because `Register.is_register` filters non-Containers. |
 | `_VSwapRule` | **A** | `VSwapB32` already overrides `getDstParams()` and `getSrcParams()` to return BOTH operands in BOTH lists (`common.hpp:5179-5194`). The symmetric semantic is **already encoded in C++**. Validator side becomes `reads = getSrcParams(); writes = getDstParams()` — no special-case. This is the strongest "A" item. |
 | `_VCCRule` | **REMOVED** | **(2026-05-07)** VCC dataflow tracking is permanently removed from the validator. Bead `rocm-libraries-uraq` deletes `_VCCRule` and supporting helpers (`_is_vcc`, `_vcc_resource`, `_VCC_RESOURCE`, `_VCC_DST1_CARRY_OUT_CLASSES`) entirely. q9j MUST land after `uraq` so the VCC machinery is already gone when q9j executes. No Category B / no migration / no replacement. See `CMSValidator_LIMITATIONS.md` §"VCC dataflow tracking is intentionally not provided". |
 | `_SCCRule` | **C** | The register partition (no_dst vs dst_then_srcs) is **already correct via getDstParams/getSrcParams** — `SCmpEQU32` has `dst=nullptr` so `getDstParams() = {}`, exactly the no_dst shape. But the SCC sentinel itself + the `_SCC_OPCODE_FLAGS` table (which opcodes touch SCC) is implicit-operand metadata that q9j can't carry. This is dzl + z48's scope. |
-| `_GenericALURule` | **A** | This is literally `writes = getDstParams(); reads = getSrcParams()` plus `_is_register` filtering. Pure A. |
+| `_GenericALURule` | **A** | This is literally `writes = getDstParams(); reads = getSrcParams()` plus `Register.is_register` filtering. Pure A. |
 
 **Counts: A=7, REMOVED=1 (`_VCCRule`), C=2.** (Updated 2026-05-07: `_MFMARule` reclassified A→A; `_VCCRule` removed entirely from q9j's scope per bead `uraq` — VCC tracking is permanently dropped from the validator. q9j is now A-only plus the C-deferral to dzl.)
 
@@ -136,7 +136,7 @@ After this re-examination, q9j is a **vastly smaller** piece of work than the
    - `_DSLoadRule`, `_DSStoreRule`, `_BufferLoadRule`, `_NoDataflowRule`,
      `_VSwapRule`, `_GenericALURule` collapse to a single
      `reads = inst.getSrcParams(); writes = inst.getDstParams()` pattern with
-     the existing `_is_register` filter.
+     the existing `Register.is_register` filter.
    - `_inst_dst`, `_inst_lds_offset`, `_inst_buffer_srd`, `_inst_buffer_offset`,
      `_inst_dsstore_src`, `_get_param` — most callers reduce to walking
      `getDstParams()[0]` / `getSrcParams()[i]`. The named extractors that
