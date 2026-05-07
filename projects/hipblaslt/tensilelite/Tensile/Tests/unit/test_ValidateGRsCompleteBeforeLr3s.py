@@ -39,8 +39,11 @@ to assert the same Failures with LR3 categories, demonstrating the
 unification.
 """
 
+import pytest
+
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
+    UnexplainedMissingEdgeError,
 )
 from Tensile.Components.CMSValidator import (
     MissingBarrierFailure,
@@ -257,11 +260,14 @@ class TestGRBeforeLR3_Negatives(GraphNativeValidationTest):
             make_sbarrier(slot=4, sequence=1),
             _lr3(slot=5, category="LRB3", vgpr_base=12),
         ])
-        failures = self.compare(
-            self.wrap_single_body(ref_cap),
-            self.wrap_single_body(subj_cap),
-            raise_on_unexplained=False,
-        )
-        f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
-        assert f.producer.category in {"GRA", "GRB"}
-        assert f.consumer.category in {"LRA3", "LRB3"}
+        # Mirror of test_swap_global_read_order_failure in
+        # test_ValidateGRsCompleteBeforeLr1s: this fixture is intentionally
+        # broken enough that some cross-graph misses fall through every
+        # classifier branch. Post rocm-libraries-6bue, an unclassified miss
+        # raises UnexplainedMissingEdgeError unconditionally — that is the
+        # contract this test now pins.
+        with pytest.raises(UnexplainedMissingEdgeError):
+            self.compare(
+                self.wrap_single_body(ref_cap),
+                self.wrap_single_body(subj_cap),
+            )

@@ -6086,9 +6086,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             )
             ref_graph = build_dataflow_graph(ctx.default)
             subj_graph = build_dataflow_graph(ctx.cms)
-            graph_failures = compare_graphs(
-              ref_graph, subj_graph, raise_on_unexplained=False,
-            )
+            graph_failures = compare_graphs(ref_graph, subj_graph)
             assert not graph_failures, (
               f"Dataflow graph comparison failed for kernel {kernel_label}: "
               f"{len(graph_failures)} edge difference(s):\n  "
@@ -6097,9 +6095,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 for f in graph_failures
               )
             )
-            wait_failures = validate_edge_wait_coverage(
-              subj_graph, raise_on_unexplained=False,
-            )
+            wait_failures = validate_edge_wait_coverage(subj_graph)
             assert not wait_failures, (
               f"Wait-coverage validation failed for kernel {kernel_label}: "
               f"{len(wait_failures)} failure(s):\n  "

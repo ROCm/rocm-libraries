@@ -181,29 +181,22 @@ class GraphNativeValidationTest:
         self,
         ref_capture: FourPartCapture,
         subj_capture: FourPartCapture,
-        *,
-        raise_on_unexplained: bool = True,
     ) -> list:
-        """Build both graphs, run ``compare_graphs``, return failures."""
+        """Build both graphs, run ``compare_graphs``, return failures.
+
+        Unclassified missing edges raise ``UnexplainedMissingEdgeError``
+        unconditionally — production and tests share the same contract.
+        """
         ref = self.build_graph(ref_capture)
         subj = self.build_graph(subj_capture)
-        return compare_graphs(ref, subj, raise_on_unexplained=raise_on_unexplained)
+        return compare_graphs(ref, subj)
 
     def validate_waits(
         self,
         graph: DataflowGraph,
-        *,
-        raise_on_unexplained: bool = False,
     ) -> list:
-        """Thin wrapper around ``validate_edge_wait_coverage``.
-
-        Defaults ``raise_on_unexplained=False`` to match production: the
-        intent of negative tests is to inspect the failure list, not to
-        crash on an unclassified edge.
-        """
-        return validate_edge_wait_coverage(
-            graph, raise_on_unexplained=raise_on_unexplained,
-        )
+        """Thin wrapper around ``validate_edge_wait_coverage``."""
+        return validate_edge_wait_coverage(graph)
 
     # =========================================================================
     # Failure-list assertions

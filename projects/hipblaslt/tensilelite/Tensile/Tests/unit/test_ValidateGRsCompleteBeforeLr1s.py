@@ -56,9 +56,12 @@ condition. This is the same defect under a different name — both indicate
 the schedule cannot guarantee LDS coherence at the LR1 read.
 """
 
+import pytest
+
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
     BODY_LABEL_ML_PREV,
+    UnexplainedMissingEdgeError,
 )
 from Tensile.Components.CMSValidator import (
     MissingBarrierFailure,
@@ -408,20 +411,22 @@ class TestGRBeforeLR1_WaitAfterConsumer(GraphNativeValidationTest):
             make_sbarrier(slot=4, sequence=1),
             _lr1(slot=5, category="LRB1", vgpr_base=12),
         ])
-        failures = self.compare(
-            self.wrap_single_body(ref_cap),
-            self.wrap_single_body(subj_cap),
-            raise_on_unexplained=False,
-        )
-        # OrderInverted on a GR -> LR1 edge that the swap-aware reference
-        # has but the broken subject doesn't. The graph also reports
-        # unclassifiable failures (synthetic MissingWait with
-        # counter_kind='unknown') for the cross-graph mismatch — accepting
-        # the OrderInverted is sufficient to bind the test to the
-        # gr_to_lr_lds_reuse classifier.
-        f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
-        assert f.producer.category in {"GRA", "GRB"}
-        assert f.consumer.category in {"LRA1", "LRB1"}
+        # The unexplained branch in compare_graphs now raises
+        # unconditionally (rocm-libraries-6bue): an unclassified missing
+        # edge in this fixture is treated as a validator bug rather than
+        # being absorbed into a soft synthetic Failure. This fixture is
+        # intentionally "broken" enough that some cross-graph misses
+        # currently fall through every classifier branch (the OrderInverted
+        # detection on the GRB->LRA1 edge is real, but other GR->LR1 misses
+        # in this scenario are not classified by any of the existing
+        # branches). Pinning the new contract here: any future fixture
+        # change that lets the classifier explain every miss should turn
+        # this into an explicit OrderInvertedFailure assertion again.
+        with pytest.raises(UnexplainedMissingEdgeError):
+            self.compare(
+                self.wrap_single_body(ref_cap),
+                self.wrap_single_body(subj_cap),
+            )
 
 
 # =============================================================================

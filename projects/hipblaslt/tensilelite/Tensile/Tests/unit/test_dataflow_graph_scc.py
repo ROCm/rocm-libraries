@@ -477,7 +477,7 @@ class TestSCCClobberFailure:
         diagnose_missing_edge surfaces OverriddenInputFailure with
         intervening_writer pointing at SAddU32."""
         default, subj = self._build_pair(with_clobber=True)
-        failures = compare_graphs(default, subj, raise_on_unexplained=False)
+        failures = compare_graphs(default, subj)
         scc_failures = [f for f in failures if isinstance(f, OverriddenInputFailure)]
         assert len(scc_failures) >= 1, (
             f"Expected at least one OverriddenInputFailure; got "
@@ -507,7 +507,7 @@ class TestSCCClobberFailure:
         present in both graphs — compare_graphs must NOT emit any
         OverriddenInputFailure."""
         default, subj = self._build_pair(with_clobber=False)
-        failures = compare_graphs(default, subj, raise_on_unexplained=False)
+        failures = compare_graphs(default, subj)
         scc_failures = [f for f in failures if isinstance(f, OverriddenInputFailure)]
         assert scc_failures == [], (
             f"Expected no OverriddenInputFailure on the no-clobber path; got "

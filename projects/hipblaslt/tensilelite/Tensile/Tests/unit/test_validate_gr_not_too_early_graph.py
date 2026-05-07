@@ -937,7 +937,7 @@ class TestNonDTLPathCoverage(GraphNativeValidationTest):
             _nd_gr(slot=1),
             make_swait(slot=2, vlcnt=0),
         ]))
-        failures = self.compare(ref_cap, subj_cap, raise_on_unexplained=False)
+        failures = self.compare(ref_cap, subj_cap)
         f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
         assert f.producer.category == "GRA"
         assert f.consumer.category == "LWA"

@@ -795,8 +795,7 @@ class TestMFMAQuadCycleGap:
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
-        # Soft mode so an unexplained miss doesn't crash before assertion.
-        failures = compare_graphs(g_ref, g_subj, raise_on_unexplained=False)
+        failures = compare_graphs(g_ref, g_subj)
         mfma_timing = [
             f for f in failures
             if isinstance(f, TimingTooCloseFailure)
@@ -912,7 +911,7 @@ class TestMFMAQuadCycleGap:
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
-        failures = compare_graphs(g_ref, g_subj, raise_on_unexplained=False)
+        failures = compare_graphs(g_ref, g_subj)
         mfma_timing = [
             f for f in failures
             if isinstance(f, TimingTooCloseFailure)
@@ -956,8 +955,7 @@ class TestMFMAQuadCycleGap:
 
         # Cross-graph route: identical graphs ⇒ no missing edges ⇒ no
         # diagnose_missing_edge dispatch ⇒ no TimingTooClose from that path.
-        failures_cross = compare_graphs(g_ref, g_subj,
-                                        raise_on_unexplained=False)
+        failures_cross = compare_graphs(g_ref, g_subj)
         assert not any(
             isinstance(f, TimingTooCloseFailure)
             and getattr(f.producer, "category", None) == "MFMA"

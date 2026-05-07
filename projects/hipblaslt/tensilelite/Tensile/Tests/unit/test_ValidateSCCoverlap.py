@@ -223,8 +223,7 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         the clobber as a structural diff that doesn't qualify as an SCC
         clobber); we only assert about the SCC-conflict subclass.
         """
-        failures = self.compare(default_cap, subject_cap,
-                                raise_on_unexplained=False)
+        failures = self.compare(default_cap, subject_cap)
         scc_failures = [f for f in failures
                         if isinstance(f, OverriddenInputFailure)]
         assert scc_failures == [], (
@@ -257,8 +256,7 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
             so tests can verify that the clobber was correctly classified
             as belonging to the right capture category.
         """
-        failures = self.compare(default_cap, subject_cap,
-                                raise_on_unexplained=False)
+        failures = self.compare(default_cap, subject_cap)
         scc_failures = [f for f in failures
                         if isinstance(f, OverriddenInputFailure)]
         assert len(scc_failures) == 1, (

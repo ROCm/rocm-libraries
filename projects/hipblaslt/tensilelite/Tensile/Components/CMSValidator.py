@@ -2346,8 +2346,6 @@ def _body_for_node(graph: "DataflowGraph", node: NodeLike) -> Optional["LoopBody
 def compare_graphs(
     reference: DataflowGraph,
     subject: DataflowGraph,
-    *,
-    raise_on_unexplained: bool = True,
 ) -> List["Failure"]:
     """Compare two dataflow graphs as edge sets keyed on
     (producer.identity, consumer.identity, register, edge_kind).
@@ -2359,9 +2357,11 @@ def compare_graphs(
     DATA-FLOW node identity sets differ — a capture-pipeline bug, not a
     CMS schedule defect.
 
-    `raise_on_unexplained` propagates to diagnose_missing_edge — soft mode
-    (False) is intended for production observability so unclassified
-    misses don't crash the build.
+    Unclassified missing edges raise UnexplainedMissingEdgeError
+    unconditionally (via diagnose_missing_edge): a fall-through is a
+    validator bug, not a soft observability event. There is no
+    silent-Failure path — production observes the raise the same way
+    tests do.
     """
     # Identity-coverage check at entry, restricted to DATA-FLOW nodes
     # (LR/LW/GR/MFMA). CMS legitimately adds/removes scheduling control
@@ -2418,17 +2418,13 @@ def compare_graphs(
     }
     for key in missing_keys:
         ref_edge = ref_edges_by_key[key]
-        failures.extend(diagnose_missing_edge(
-            ref_edge, subject, raise_on_unexplained=raise_on_unexplained,
-        ))
+        failures.extend(diagnose_missing_edge(ref_edge, subject))
     return failures
 
 
 def diagnose_missing_edge(
     ref_edge: DataflowEdge,
     subj_graph: DataflowGraph,
-    *,
-    raise_on_unexplained: bool = True,
 ) -> List["Failure"]:
     """Classify why a reference edge is absent from the CMS subject graph.
 
@@ -2443,11 +2439,12 @@ def diagnose_missing_edge(
                other counters sit in the window — replaces the former
                WaitOnWrongCounterFailure.
 
-    `raise_on_unexplained=True` (default) raises UnexplainedMissingEdgeError
-    when the classifier reaches a fall-through — used in unit tests to
-    catch classifier regressions. `raise_on_unexplained=False` is used
-    by production observability paths that prefer a soft Failure return
-    over a hard exception.
+    A fall-through (no classifier branch claimed the edge) raises
+    UnexplainedMissingEdgeError unconditionally — it indicates a
+    classifier or capture-pipeline bug. Production observes the same
+    raise as unit tests; there is no soft synthetic-Failure path. This
+    matches the validator's no-silent-ignore contract: the validator
+    either knows or admits it doesn't know, by raising.
     """
     p_id = ref_edge.producer.identity
     c_id = ref_edge.consumer.identity
@@ -2728,25 +2725,16 @@ def diagnose_missing_edge(
             return []
 
         # Couldn't classify — capture pipeline bug or classifier bug.
-        msg = (
+        # Always raise: an unclassified edge means the validator doesn't
+        # know what to make of something the graph builder produced. A
+        # silent soft-Failure here would be the silent-miss pattern the
+        # validator is explicitly designed to eliminate.
+        raise UnexplainedMissingEdgeError(
             f"diagnose_missing_edge could not classify missing edge "
             f"{p_id} -> {c_id} (kind={ref_edge.edge_kind}). "
             f"This indicates either a classifier bug or a capture-pipeline "
             f"bug that bypassed earlier sanity checks."
         )
-        if raise_on_unexplained:
-            raise UnexplainedMissingEdgeError(msg)
-        # Soft-mode: return a synthetic Failure so production observability
-        # logs the issue without crashing the build. (The historic
-        # `.with_legacy_msg(...)` chained call referenced a setter that
-        # was planned but never implemented; the bare MissingWaitFailure
-        # carries enough info to be actionable.)
-        return [MissingWaitFailure(
-            producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
-            consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
-            iter_delta=_cms_iter_delta(p_node, c_node),
-            counter_kind="unknown",
-        )]
     return failures
 
 
@@ -2769,7 +2757,7 @@ def diagnose_missing_edge(
 
 
 def validate_edge_wait_coverage(
-    graph: "DataflowGraph", *, raise_on_unexplained: bool = False
+    graph: "DataflowGraph",
 ) -> List["Failure"]:
     """Validate that every dataflow edge has a covering wait/barrier in
     the captured stream.
@@ -2792,18 +2780,21 @@ def validate_edge_wait_coverage(
     schedule placed the producer after its consumer, which the wait
     machinery can't recover from.
 
-    `raise_on_unexplained`: if True, raise UnexplainedMissingEdgeError
-    when an edge falls through every classifier branch (defensive —
-    means the classifier missed a case). Default False (production
-    observability prefers a soft synthetic Failure).
+    Every edge classifies positively — no unexplained fall-through
+    path: typed early-return branches (MFMA/CVT/ALU exemptions) cover
+    structural cases, and Phase-2 wait coverage either appends a
+    failure or confirms the edge is properly covered. (The historic
+    `raise_on_unexplained` parameter and its synthetic Failure soft
+    path were dead code: no caller ever passed `True`, and an empty
+    failure list at the bottom of `_classify_edge_coverage` is a
+    positive classification, not a miss.)
 
     Returns a list of Failure objects. Empty list means "every edge in
     the graph has a covering wait/barrier in the captured stream".
     """
     failures = []
     for edge in graph.edges:
-        edge_failures = _classify_edge_coverage(edge, graph,
-                                                raise_on_unexplained=raise_on_unexplained)
+        edge_failures = _classify_edge_coverage(edge, graph)
         failures.extend(edge_failures)
     # MiddlePack pair-interleaving is a stream-shape invariant, not an
     # edge-shape invariant, so it's a sibling pass driven from the same
@@ -2813,11 +2804,17 @@ def validate_edge_wait_coverage(
 
 
 def _classify_edge_coverage(
-    edge: "DataflowEdge", subj_graph: "DataflowGraph", *, raise_on_unexplained: bool = False
+    edge: "DataflowEdge", subj_graph: "DataflowGraph",
 ) -> List["Failure"]:
     """Per-edge coverage classifier — same logic diagnose_missing_edge
     runs in compare_graphs, but driven from a single graph rather than
     a missing-edge diff.
+
+    Every reachable end-state classifies: typed early-return branches
+    (MFMA/CVT/ALU producer exemptions) or Phase-2 wait coverage. There
+    is no unexplained fall-through — if Phase-2 cannot find a draining
+    wait it appends a MissingWait/WaitInsufficient failure; if it does,
+    the edge is positively classified as covered.
     """
     p_node = edge.producer
     c_node = edge.consumer
@@ -2967,12 +2964,18 @@ def _classify_edge_coverage(
                     wait_idx=_node_position(last_drain).vmfma_index,
                 ))
 
-    if not failures and raise_on_unexplained:
-        raise UnexplainedMissingEdgeError(
-            f"validate_edge_wait_coverage: edge {p_node.identity} -> "
-            f"{c_node.identity} (kind={edge.edge_kind}) wasn't classified "
-            f"by any branch. Classifier bug."
-        )
+    # No fall-through case here: every reachable end-state of this
+    # function either returned early from a typed branch (MFMA/CVT/ALU
+    # producer exemptions) or classified the edge against Phase-2 wait
+    # coverage. `failures == []` at this point means "edge is properly
+    # covered by an SWaitCnt that drains the producer (and a barrier if
+    # required for LDS reuse)" — that is a positive classification, not
+    # an unexplained miss. The historic `raise_on_unexplained=True`
+    # branch that fired here was dead code; if ever exercised, it would
+    # have raised on every clean edge. (Compare with
+    # `diagnose_missing_edge`, which runs only on edges already known to
+    # be missing from the subject — an unclassifiable miss there is
+    # genuinely a validator bug and does raise.)
     return failures
 
 
@@ -3995,9 +3998,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> None:
             context.cms_capture.arch_profile = arch_profile
         ref_graph = build_dataflow_graph(context.default_capture)
         subj_graph = build_dataflow_graph(context.cms_capture)
-        graph_failures = compare_graphs(
-            ref_graph, subj_graph, raise_on_unexplained=False,
-        )
+        graph_failures = compare_graphs(ref_graph, subj_graph)
         if graph_failures:
             summary = "\n  ".join(
                 f.format()
@@ -4007,9 +4008,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> None:
                 f"Dataflow graph comparison failed: "
                 f"{len(graph_failures)} edge difference(s):\n  {summary}"
             ))
-        wait_failures = validate_edge_wait_coverage(
-            subj_graph, raise_on_unexplained=False,
-        )
+        wait_failures = validate_edge_wait_coverage(subj_graph)
         if wait_failures:
             summary = "\n  ".join(
                 f.format()
