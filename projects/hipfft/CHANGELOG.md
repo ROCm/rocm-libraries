@@ -32,6 +32,7 @@ Documentation for hipFFT is available at
 
 * Moved library to C++20 standard.
 * Removed Boost as a dependency for clients and samples.
+* Callback functions will be deprecated in a future release.
 
 ### Added
 * Support for gfx1150 architecture.

@@ -31,14 +31,11 @@ jobs:
 
       - name: Add Repositories to the Monorepo
         run: |
-          for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
-            repo_name=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .reponame")
-            url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
-            branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
-            category=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .category")
-
-            git subtree add --prefix "${category}/${repo}" https://github.com/${url}.git "$branch"
-          done
+          # Skip entries whose url is the monorepo itself (in-tree-only subtrees;
+          # git subtree add cannot pull the monorepo into its own prefix).
+          while IFS=$'\t' read -r repo url branch category; do
+            git subtree add --prefix "${category}/${repo}" "https://github.com/${url}.git" "$branch"
+          done < <(jq -r '.repositories[] | select(.url != "ROCm/rocm-libraries") | [.name,.url,.branch,.category] | @tsv' .github/repos-config.json)
 
       - name: Push changes to Monorepo
         run: git push https://${{ env.MONOREPO_URL }} ${{ env.MONOREPO_BRANCH }}

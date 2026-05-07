@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -20,6 +23,13 @@ namespace hipdnn_integration_tests
 enum class ToleranceMode
 {
     DEFAULT,
+};
+
+// Selects the reference executor used for graph validation.
+enum class ReferenceExecutorType
+{
+    CPU,
+    GPU,
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -47,7 +57,9 @@ public:
                            std::optional<std::string> engineName,
                            bool failOnUnsupported = false,
                            bool skipGraphValidation = false,
-                           std::optional<std::filesystem::path> configPath = std::nullopt)
+                           std::optional<std::filesystem::path> configPath = std::nullopt,
+                           std::optional<ReferenceExecutorType> referenceExecutorType
+                           = std::nullopt)
     {
         TestConfig& instance = get();
         if(instance._initialized)
@@ -58,6 +70,32 @@ public:
         instance._engineName = std::move(engineName);
         instance._failOnUnsupported = failOnUnsupported;
         instance._skipGraphValidation = skipGraphValidation;
+        instance._referenceExecutorType = referenceExecutorType;
+
+        // If CLI didn't provide a value, check env var once at init
+        if(!instance._referenceExecutorType.has_value())
+        {
+            auto val = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_REFERENCE_EXECUTOR");
+            if(!val.empty())
+            {
+                std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                if(val == "gpu")
+                {
+                    instance._referenceExecutorType = ReferenceExecutorType::GPU;
+                }
+                else if(val == "cpu")
+                {
+                    instance._referenceExecutorType = ReferenceExecutorType::CPU;
+                }
+                else
+                {
+                    throw std::runtime_error("Invalid HIPDNN_TEST_REFERENCE_EXECUTOR value '" + val
+                                             + "'; expected 'cpu' or 'gpu'");
+                }
+            }
+        }
 
         if(configPath.has_value())
         {
@@ -150,6 +188,14 @@ public:
         return _testSettings->findToleranceOverride(testName);
     }
 
+    // Get the reference executor type. Value is resolved once at init time:
+    // CLI flag > HIPDNN_TEST_REFERENCE_EXECUTOR env var > CPU default.
+    ReferenceExecutorType getReferenceExecutorType() const
+    {
+        throwIfNotInitialized();
+        return _referenceExecutorType.value_or(ReferenceExecutorType::CPU);
+    }
+
 private:
     TestConfig() = default;
 
@@ -164,6 +210,7 @@ private:
     std::optional<std::filesystem::path> _articlePath;
     std::optional<std::string> _engineName;
     std::optional<TestSettings> _testSettings;
+    std::optional<ReferenceExecutorType> _referenceExecutorType;
     bool _failOnUnsupported = false;
     bool _skipGraphValidation = false;
     bool _initialized = false;

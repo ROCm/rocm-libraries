@@ -24,7 +24,11 @@ NB_MODULE(origami, m) {
       .value("gfx950", hardware_t::architecture_t::gfx950)
       .value("gfx1201", hardware_t::architecture_t::gfx1201)
       .value("gfx1100", hardware_t::architecture_t::gfx1100)
+      .value("gfx1150", hardware_t::architecture_t::gfx1150)
       .value("gfx1151", hardware_t::architecture_t::gfx1151)
+      .value("gfx1152", hardware_t::architecture_t::gfx1152)
+      .value("gfx1153", hardware_t::architecture_t::gfx1153)
+      .value("gfx1250", hardware_t::architecture_t::gfx1250)
       .export_values();
 
   nanobind::enum_<origami::data_type_t>(m, "data_type_t")

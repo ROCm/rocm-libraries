@@ -199,12 +199,16 @@ if(ROCM_LIBS_SUPERBUILD)
     # This only runs when example_engine_plugin is built (due to DEPENDS).
     add_custom_target(example_plugin_hipdnn-staging-install
         COMMAND ${CMAKE_COMMAND} -E make_directory ${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
-        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR}/projects/hipdnn
-                --prefix ${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
-                --component Runtime
-        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR}/projects/hipdnn
-                --prefix ${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
-                --component Development
+        COMMAND ${CMAKE_COMMAND}
+                -DBUILD_DIR=${CMAKE_BINARY_DIR}/projects/hipdnn
+                -DPREFIX=${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
+                -DCOMPONENT=Runtime
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/scripts/quiet_install.cmake
+        COMMAND ${CMAKE_COMMAND}
+                -DBUILD_DIR=${CMAKE_BINARY_DIR}/projects/hipdnn
+                -DPREFIX=${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
+                -DCOMPONENT=Development
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/scripts/quiet_install.cmake
         DEPENDS hipdnn_backend hipdnn_data_sdk hipdnn_plugin_sdk hipdnn_flatbuffers_sdk hipdnn_frontend
         COMMENT "Installing hipDNN to staging directory for example_engine_plugin"
     )
@@ -215,9 +219,12 @@ endif()
 
 ExternalProject_Add(example_engine_plugin
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/example_engine_plugin
+    BUILD_ALWAYS TRUE
+    USES_TERMINAL_BUILD TRUE
     CMAKE_CACHE_ARGS
         "-DCMAKE_PREFIX_PATH:STRING=${_example_plugin_prefix_path}"
         "-DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}"
+        "-DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}"
         "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
         "-DCMAKE_MAKE_PROGRAM:FILEPATH=${CMAKE_MAKE_PROGRAM}"
         "-DEXAMPLEPROVIDER_BUILD_UNIT_TESTS:BOOL=ON"
