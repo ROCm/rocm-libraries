@@ -195,7 +195,32 @@ stinkytofu::VOP3PModifiers convertVOP3PModifiers(const rocisa::VOP3PModifiers& r
 }
 
 stinkytofu::DPPModifiers convertDPPModifiers(const rocisa::DPPModifiers& rocMod) {
-    return stinkytofu::DPPModifiers(rocMod.row_shr, rocMod.row_bcast, rocMod.bound_ctrl);
+    // rocisa's WaveSplitK reduction is the only producer; it sends
+    //   row_shr   in {1, 2, 4, 8}      -> DppCtrl::ROW_SHR0 + n
+    //   row_bcast in {15, 31}          -> DppCtrl::BCAST15 / BCAST31
+    //   bound_ctrl in {0, 1}
+    // Other fields stay at the rocisa "unset" sentinel (-1).
+    constexpr int kUnset = -1;
+    constexpr int kBcastLane15 = 15;  // row_bcast:15 -> DppCtrl::BCAST15
+    constexpr int kBcastLane31 = 31;  // row_bcast:31 -> DppCtrl::BCAST31
+
+    auto ctrl = stinkytofu::DppCtrl::NONE;
+    if (rocMod.row_shr != kUnset) {
+        auto candidate = stinkytofu::dppRowShr(rocMod.row_shr);
+        if (candidate <= stinkytofu::DppCtrl::ROW_SHR_LAST) ctrl = candidate;
+    } else if (rocMod.row_bcast == kBcastLane15) {
+        ctrl = stinkytofu::DppCtrl::BCAST15;
+    } else if (rocMod.row_bcast == kBcastLane31) {
+        ctrl = stinkytofu::DppCtrl::BCAST31;
+    } else if (rocMod.quad_perm.size() == 4) {
+        ctrl = stinkytofu::dppQuadPerm(rocMod.quad_perm[0], rocMod.quad_perm[1],
+                                       rocMod.quad_perm[2], rocMod.quad_perm[3]);
+    }
+
+    // bound_ctrl is {0, 1}. Anything else (unset -1, or stray) -> default 0.
+    uint8_t boundCtrl = (rocMod.bound_ctrl == 1) ? 1 : 0;
+    // rocisa has no row_mask/bank_mask field; pass default 0xF (all rows/banks active).
+    return stinkytofu::DPPModifiers(ctrl, /*rowMask=*/0xF, /*bankMask=*/0xF, boundCtrl);
 }
 
 stinkytofu::SDWAModifiers convertSDWAModifiers(const rocisa::SDWAModifiers& rocMod) {

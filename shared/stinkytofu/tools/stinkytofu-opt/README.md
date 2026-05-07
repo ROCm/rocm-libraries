@@ -313,6 +313,9 @@ Modifiers are serialized as attribute keys `mod.<type>` with a dict value. Examp
 - **mod.flat**: `mod.flat = { offset12 = 0, glc = false, slc = false, lds = false }`
 - **mod.mfma**: `mod.mfma = { inputPermute = "...", scaleStr = "...", negStr = "...", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false }`
 
+- **mod.dpp** (DPP16): `mod.dpp = { dppCtrl = 273, rowMask = 15, bankMask = 15, boundCtrl = 0, fi = 0 }` (dppCtrl is the numeric DppCtrl enum value)
+- **mod.dpp** (DPP8): `mod.dpp = { isDPP8 = true, dpp8 = [7,6,5,4,3,2,1,0], boundCtrl = 0, fi = 0 }`
+
 Other modifier types (e.g. `mod.vop3`, `mod.swaitcnt`, `mod.delayalu`) follow the same pattern. The serializer emits only fields that apply to the modifier instance.
 
 ### Example IR

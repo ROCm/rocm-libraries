@@ -272,9 +272,21 @@ inline std::ostream& operator<<(std::ostream& os, const SDWAModifiers& sdwaMod) 
 }
 
 inline std::ostream& operator<<(std::ostream& os, const DPPModifiers& dppMod) {
-    if (dppMod.row_shr != -1) os << " row_shr:" << dppMod.row_shr;
-    if (dppMod.row_bcast != -1) os << " row_bcast:" << dppMod.row_bcast;
-    if (dppMod.bound_ctrl != -1) os << " bound_ctrl:" << dppMod.bound_ctrl;
+    if (dppMod.isDPP8) {
+        os << " dpp8:[" << (int)dppMod.dpp8[0];
+        for (int i = 1; i < 8; ++i) os << "," << (int)dppMod.dpp8[i];
+        os << "]";
+    } else if (dppMod.dppCtrl != DppCtrl::NONE) {
+        os << " " << dppCtrlToAsmStr(dppMod.dppCtrl);
+    }
+    if (!dppMod.isDPP8) {
+        if (dppMod.rowMask != 0xF)
+            os << " row_mask:0x" << std::hex << (int)dppMod.rowMask << std::dec;
+        if (dppMod.bankMask != 0xF)
+            os << " bank_mask:0x" << std::hex << (int)dppMod.bankMask << std::dec;
+    }
+    if (dppMod.boundCtrl) os << " bound_ctrl:1";
+    if (dppMod.fi) os << " fi:1";
     return os;
 }
 

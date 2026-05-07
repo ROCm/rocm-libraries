@@ -189,8 +189,17 @@ bool serializeVisit(const SDWAModifiers& mod, std::ostream& os) {
 // DPPModifiers
 bool serializeVisit(const DPPModifiers& mod, std::ostream& os) {
     os << ", mod.dpp = {";
-    os << " row_shr = " << mod.row_shr << ", row_bcast = " << mod.row_bcast
-       << ", bound_ctrl = " << mod.bound_ctrl;
+    if (mod.isDPP8) {
+        os << " isDPP8 = true, dpp8 = [" << (int)mod.dpp8[0];
+        for (int i = 1; i < 8; ++i) os << "," << (int)mod.dpp8[i];
+        os << "]";
+    } else {
+        os << " dppCtrl = " << static_cast<int>(mod.dppCtrl);
+        os << ", rowMask = " << (int)mod.rowMask;
+        os << ", bankMask = " << (int)mod.bankMask;
+    }
+    os << ", boundCtrl = " << (int)mod.boundCtrl;
+    os << ", fi = " << (int)mod.fi;
     os << " }";
     return true;
 }
@@ -451,12 +460,29 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                                        getInt(fields, "hold_cnt", -1),
                                        getInt(fields, "vm_vsrc", -1), getInt(fields, "va_vcc", -1),
                                        getInt(fields, "sa_sdst", -1)));
+    } else if (attrKey == "mod.dpp") {
+        bool isDPP8 = getBool(fields, "isDPP8", false);
+        if (isDPP8) {
+            auto dpp8Vec = getIntVector(fields, "dpp8");
+            std::array<uint8_t, 8> dpp8Perm = {0, 0, 0, 0, 0, 0, 0, 0};
+            for (size_t i = 0; i < dpp8Vec.size() && i < 8; ++i)
+                dpp8Perm[i] = static_cast<uint8_t>(dpp8Vec[i]);
+            inst->addModifier(
+                DPPModifiers(dpp8Perm, static_cast<uint8_t>(getInt(fields, "fi", 0))));
+        } else {
+            DppCtrl ctrl = static_cast<DppCtrl>(getInt(fields, "dppCtrl", 0xFFFF));
+            inst->addModifier(DPPModifiers(ctrl,
+                                           static_cast<uint8_t>(getInt(fields, "rowMask", 0xF)),
+                                           static_cast<uint8_t>(getInt(fields, "bankMask", 0xF)),
+                                           static_cast<uint8_t>(getInt(fields, "boundCtrl", 0)),
+                                           static_cast<uint8_t>(getInt(fields, "fi", 0))));
+        }
     } else if (attrKey == "mod.memtoken") {
         if (fields.count("tokens")) {
             inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
         }
     }
-    // mod.sdwa, mod.dpp, mod.vop3p, mod.true16: no deserialize support yet
+    // mod.sdwa, mod.vop3p, mod.true16: no deserialize support yet
 }
 
 }  // namespace
