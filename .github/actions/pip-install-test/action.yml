@@ -12,6 +12,10 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Setup MSVC environment
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
     - name: Create venv
       shell: bash
       run: |
@@ -25,17 +29,13 @@ runs:
         CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
         CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
         CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
+        CMAKE_GENERATOR: Ninja
         LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
       run: |
         if [ -f "$VENV_DIR/bin/activate" ]; then
           source "$VENV_DIR/bin/activate"
         else
           source "$VENV_DIR/Scripts/activate"
-        fi
-        export CMAKE_GENERATOR=Ninja
-        RC_PATH=$(python3 -c "import shutil; p=shutil.which('rc') or shutil.which('rc.exe') or ''; print(p)" 2>/dev/null)
-        if [ -n "$RC_PATH" ]; then
-          export CMAKE_ARGS="-DCMAKE_RC_COMPILER=$RC_PATH"
         fi
         pip install pytest
         pip install ${{ inputs.package_path }}
