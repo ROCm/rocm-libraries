@@ -2409,16 +2409,49 @@ class Solution(collections.abc.Mapping):
       if (state["MacroTile0"] == 16 and state["MacroTile1"] == 16 and state["DepthU"] == 512):
         state["UseDirect32XEmulation"] = False
 
-    # backup UsePLRPack from yaml before calling hasCustomSchedule
-    backup_UsePLRPack = state["UsePLRPack"]
-    # Check if CMS is available for this solution
+    # CMS-vs-default flag-handling reconciliation (rocm-libraries-9lcs):
+    #
+    # The CMS path and the default (SIA3) path must accept the same set of
+    # YAML kernel-config flags so that a kernel with UseCustomMainLoopSchedule=1
+    # produces an equivalent solution to the same kernel with =0, except for
+    # the schedule-content choice. Earlier, this block silently pre-zeroed
+    # SwapGlobalReadOrder and UsePLRPack on the CMS path (and only on the
+    # CMS path), then restored UsePLRPack on the non-CMS branch via a
+    # `backup_UsePLRPack` shim. That asymmetry meant a YAML `SwapGlobalReadOrder: 1`
+    # silently became 0 on the CMS path while it remained 1 on the default path,
+    # invalidating any "did CMS produce the same result as default?" comparison.
+    #
+    # Resolution per flag (see hasCustomSchedule and the registered schedule
+    # functions in Tensile/Components/CustomSchedule.py):
+    #
+    # * SwapGlobalReadOrder — NECESSARY divergence. CMS schedule functions
+    #   set this themselves (see _get_schedule_*_16bit, _tf32 etc.) based on
+    #   the schedule shape. The user has no say on the CMS path: the schedule
+    #   IS the data layout. We therefore reject loudly if the YAML requests
+    #   SwapGlobalReadOrder=1 and CMS is actually selected.
+    #
+    # * UsePLRPack — NECESSARY divergence. Same reason: matched CMS schedules
+    #   set kernel["UsePLRPack"] = True themselves when the schedule packs LR
+    #   data. The user cannot opt in/out independently on the CMS path.
+    #
+    # * TailloopInNll — NECESSARY divergence (already loudly rejected below).
+    #
+    # In auto mode (UseCustomMainLoopSchedule == -1), we cannot reject until
+    # hasCustomSchedule resolves: if it returns False we fall through to the
+    # non-CMS path and the YAML's SwapGlobalReadOrder/UsePLRPack must be
+    # honored as the default-path semantics describe.
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
-      # initialize CMS related config parameters (for CMS only)
-      state["SwapGlobalReadOrder"] = 0
-      state["UsePLRPack"] = 0
+      user_requested_cms = (state["UseCustomMainLoopSchedule"] == 1)
+      # Stash the YAML-supplied values so the rejection messages can quote
+      # them and so we can re-zero just before the schedule function runs.
+      yaml_SwapGlobalReadOrder = state["SwapGlobalReadOrder"]
+      yaml_UsePLRPack = state["UsePLRPack"]
 
+      # hasCustomSchedule does not read SwapGlobalReadOrder or UsePLRPack
+      # (verified in Tensile/Components/CustomSchedule.py), so it is safe
+      # to call without mutating those flags first.
       hasCMS,_ = hasCustomSchedule(state)
-      if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
+      if user_requested_cms and not hasCMS:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
       # Validator-coverage note: setting UseCustomMainLoopSchedule=0 here
       # bypasses the CMS validator (Tensile/Components/CMSValidator.py) for
@@ -2426,10 +2459,33 @@ class Solution(collections.abc.Mapping):
       # optimization-path decision AND a silent loss of validation coverage.
       # See hasCustomSchedule docstring for the validator-side implication.
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
-      # reject CMS + TailloopInNll
-      if state["TailloopInNll"] and state["UseCustomMainLoopSchedule"] == 1:
-        reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with TailloopInNll=True")
-        return
+
+      if state["UseCustomMainLoopSchedule"] == 1:
+        # CMS is actually selected. Reject loudly any YAML flag that the CMS
+        # path cannot honor. Quote the YAML value so the rejection message is
+        # actionable.
+        if yaml_SwapGlobalReadOrder:
+          reject(state, printRejectionReason,
+                 "CMS does not support YAML-requested SwapGlobalReadOrder=%d "
+                 "(the matched CMS schedule decides this flag itself). "
+                 "Either drop SwapGlobalReadOrder from the YAML or set "
+                 "UseCustomMainLoopSchedule=0." % yaml_SwapGlobalReadOrder)
+          return
+        if yaml_UsePLRPack:
+          reject(state, printRejectionReason,
+                 "CMS does not support YAML-requested UsePLRPack=%d "
+                 "(the matched CMS schedule decides this flag itself). "
+                 "Either drop UsePLRPack from the YAML or set "
+                 "UseCustomMainLoopSchedule=0." % yaml_UsePLRPack)
+          return
+        # Now zero them so the schedule function can affirmatively set them
+        # only when the matched schedule shape requires it.
+        state["SwapGlobalReadOrder"] = 0
+        state["UsePLRPack"] = 0
+        # reject CMS + TailloopInNll
+        if state["TailloopInNll"]:
+          reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with TailloopInNll=True")
+          return
     # UseSubtileImpl has its own main loop scheduler; CMS is not compatible.
     if state["UseSubtileImpl"] and state["UseCustomMainLoopSchedule"] == 1:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 is incompatible with UseSubtileImpl")
@@ -2444,10 +2500,11 @@ class Solution(collections.abc.Mapping):
         _applySubIterSetting(False)
       if state["UseMFMAF32XEmulation"]:
         state["MfmaInitCVgprs"] = True
-      # usePLRPack check
-      # adjust setting only for non CMS (keep original setting for CMS)
-      if backup_UsePLRPack:
-        state["UsePLRPack"] = 1
+      # usePLRPack check (default / non-CMS path)
+      # state["UsePLRPack"] still holds the YAML-supplied value here because
+      # the CMS-path block above no longer pre-zeros it on the auto fallback.
+      # Gate it down to 0 if any of the documented preconditions fail.
+      if state["UsePLRPack"]:
         # MatrixInstruction only
         if not state["EnableMatrixInstruction"]:
           state["UsePLRPack"] = 0
