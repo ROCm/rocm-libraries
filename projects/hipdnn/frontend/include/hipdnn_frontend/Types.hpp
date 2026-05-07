@@ -26,6 +26,7 @@
 #pragma once
 
 #include <HipdnnAttentionImplementation.h>
+#include <HipdnnBackendBehaviorNote.h>
 #include <HipdnnBackendHeuristicType.h>
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
@@ -228,6 +229,20 @@ enum class HeuristicMode
     FALLBACK, ///< Use fallback heuristics for engine selection
 };
 typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
+
+/**
+ * @enum BehaviorNote
+ * @brief Advisory behavior metadata reported by an engine
+ */
+enum class BehaviorNote
+{
+    RUNTIME_COMPILATION = 0,
+    REQUIRES_LAYOUT_TRANSFORM = 1,
+    SUPPORTS_GRAPH_CAPTURE = 2,
+    EXTERNAL_LIBRARY_DEPENDENCY = 3,
+    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 4
+};
+typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
 
 /**
  * @enum BuildPlanPolicy
@@ -854,6 +869,49 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
     case HeuristicMode::FALLBACK:
     default:
         return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
+    }
+}
+
+/// @brief Convert backend behavior note to frontend behavior note
+inline std::pair<BehaviorNote, Error> fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
+{
+    switch(note)
+    {
+    case HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION:
+        return {BehaviorNote::RUNTIME_COMPILATION, {}};
+    case HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM:
+        return {BehaviorNote::REQUIRES_LAYOUT_TRANSFORM, {}};
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE:
+        return {BehaviorNote::SUPPORTS_GRAPH_CAPTURE, {}};
+    case HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY:
+        return {BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY, {}};
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return {BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION, {}};
+    default:
+        return {BehaviorNote::RUNTIME_COMPILATION,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnBackendBehaviorNote_t value: "
+                     + std::to_string(static_cast<int>(note))}};
+    }
+}
+
+/// @brief Convert frontend behavior note to backend behavior note
+inline hipdnnBackendBehaviorNote_t toBackendType(const BehaviorNote& note)
+{
+    switch(note)
+    {
+    case BehaviorNote::RUNTIME_COMPILATION:
+        return HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
+    case BehaviorNote::REQUIRES_LAYOUT_TRANSFORM:
+        return HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM;
+    case BehaviorNote::SUPPORTS_GRAPH_CAPTURE:
+        return HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE;
+    case BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY:
+        return HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY;
+    case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+    default:
+        return HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT;
     }
 }
 

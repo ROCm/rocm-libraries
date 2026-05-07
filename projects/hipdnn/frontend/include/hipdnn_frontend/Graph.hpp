@@ -1027,6 +1027,65 @@ public:
     }
 
     /**
+     * @brief Get behavior notes for an engine applicable to this graph.
+     *
+     * @param engineId Backend global engine ID to query
+     * @param notes Output behavior notes; cleared on entry
+     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR on failure
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_behavior_notes_for_engine(int64_t engineId, std::vector<BehaviorNote>& notes)
+    {
+        notes.clear();
+
+        if(!hasReadyGraphDesc())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot get "
+                    "behavior notes for engine."};
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
+
+        int64_t noteCount = 0;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetAttribute(engineDesc.get(),
+                                                         HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
+                                                         HIPDNN_TYPE_BEHAVIOR_NOTE,
+                                                         0,
+                                                         &noteCount,
+                                                         nullptr),
+            "Failed to get behavior note count from engine descriptor.");
+
+        if(noteCount == 0)
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        std::vector<hipdnnBackendBehaviorNote_t> backendNotes(static_cast<size_t>(noteCount));
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetAttribute(engineDesc.get(),
+                                                         HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
+                                                         HIPDNN_TYPE_BEHAVIOR_NOTE,
+                                                         noteCount,
+                                                         &noteCount,
+                                                         backendNotes.data()),
+            "Failed to get behavior notes from engine descriptor.");
+
+        notes.reserve(backendNotes.size());
+        for(auto note : backendNotes)
+        {
+            auto [frontendNote, error] = fromHipdnnBehaviorNote(note);
+            HIPDNN_CHECK_ERROR(error);
+            notes.push_back(frontendNote);
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /**
      * @brief Create execution plans using heuristics
      *
      * Queries the backend for available engines and selects based on the

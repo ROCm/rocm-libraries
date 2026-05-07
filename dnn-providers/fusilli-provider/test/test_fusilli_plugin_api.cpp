@@ -7,11 +7,13 @@
 #include <flatbuffers/flatbuffer_builder.h>
 #include <fusilli.h>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/BehaviorNote.h>
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
@@ -370,6 +372,43 @@ TEST(TestFusilliPluginApi, GetAllEngineIdsNullNumEngines) {
   hipdnnPluginGetLastErrorString(&errorStr);
   ASSERT_NE(errorStr, nullptr);
   EXPECT_GT(strlen(errorStr), 0u);
+}
+
+TEST(TestFusilliPluginApi, GetEngineDetailsIncludesBehaviorNotes) {
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+  hipdnnPluginConstData_t opGraph;
+  opGraph.ptr = builder.GetBufferPointer();
+  opGraph.size = builder.GetSize();
+
+  hipdnnPluginConstData_t engineDetails;
+  ASSERT_EQ(hipdnnEnginePluginGetEngineDetails(
+                handle, hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID, &opGraph,
+                &engineDetails),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper
+      wrapper(engineDetails.ptr, engineDetails.size);
+  ASSERT_TRUE(wrapper.isValid());
+  EXPECT_EQ(wrapper.engineId(), hipdnn_data_sdk::utilities::FUSILLI_ENGINE_ID);
+
+  const auto behaviorNotes = wrapper.behaviorNotes();
+  ASSERT_EQ(behaviorNotes.size(), 3u);
+  EXPECT_EQ(behaviorNotes[0],
+            static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION));
+  EXPECT_EQ(
+      behaviorNotes[1],
+      static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY));
+  EXPECT_EQ(behaviorNotes[2],
+            static_cast<int32_t>(
+                HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION));
+
+  EXPECT_EQ(hipdnnEnginePluginDestroyEngineDetails(handle, &engineDetails),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestFusilliPluginApi, GetApplicableEngineIds) {

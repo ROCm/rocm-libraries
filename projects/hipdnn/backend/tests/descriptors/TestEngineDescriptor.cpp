@@ -103,13 +103,24 @@ protected:
         _engineWrapper.reset();
     }
 
-private:
     void serializeEngineDetails(int64_t engineId)
     {
         flatbuffers::FlatBufferBuilder builder;
         hipdnn_flatbuffers_sdk::data_objects::EngineDetailsBuilder engineDetailsBuilder(builder);
         engineDetailsBuilder.add_engine_id(engineId);
         builder.Finish(engineDetailsBuilder.Finish());
+        _engineDetailsBuffer = builder.Release();
+        _serializedEngineDetails = {_engineDetailsBuffer.data(), _engineDetailsBuffer.size()};
+    }
+
+    void serializeEngineDetailsWithBehaviorNotes(int64_t engineId,
+                                                 const std::vector<int32_t>& behaviorNotes)
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        auto behaviorNotesVector = builder.CreateVector(behaviorNotes);
+        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+            builder, engineId, 0, behaviorNotesVector);
+        builder.Finish(engineDetails);
         _engineDetailsBuffer = builder.Release();
         _serializedEngineDetails = {_engineDetailsBuffer.data(), _engineDetailsBuffer.size()};
     }
@@ -246,6 +257,95 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorUnsupportedAttr)
         engine->getAttribute(
             HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT, HIPDNN_TYPE_INT32, 1, nullptr, &dummy),
         HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(TestEngineDescriptor, GetBehaviorNotesCountWithNoNotes)
+{
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    int64_t noteCount = -1;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, &noteCount, nullptr));
+    ASSERT_EQ(noteCount, 0);
+}
+
+TEST_F(TestEngineDescriptor, GetBehaviorNotesReturnsNotes)
+{
+    serializeEngineDetailsWithBehaviorNotes(
+        0,
+        {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+         static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY),
+         static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    int64_t noteCount = 0;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, &noteCount, nullptr));
+    ASSERT_EQ(noteCount, 3);
+
+    std::vector<hipdnnBackendBehaviorNote_t> notes(static_cast<size_t>(noteCount));
+    int64_t returnedCount = 0;
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
+                                         HIPDNN_TYPE_BEHAVIOR_NOTE,
+                                         noteCount,
+                                         &returnedCount,
+                                         notes.data()));
+    ASSERT_EQ(returnedCount, 3);
+    EXPECT_EQ(notes[0], HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
+    EXPECT_EQ(notes[1], HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY);
+    EXPECT_EQ(notes[2], HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+}
+
+TEST_F(TestEngineDescriptor, GetBehaviorNotesInvalidType)
+{
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    int64_t noteCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_INT64, 0, &noteCount, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptor, GetBehaviorNotesInsufficientOutputCount)
+{
+    serializeEngineDetailsWithBehaviorNotes(
+        0,
+        {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+         static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY)});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT;
+    int64_t returnedCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, &returnedCount, &note),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptor, FinalizeFailsWithInvalidBehaviorNote)
+{
+    serializeEngineDetailsWithBehaviorNotes(
+        0, {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT)});
+
+    setGraph();
+    setGlobalIndex(0);
+    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+        .WillOnce(Return(std::vector<int64_t>{0}));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
+        .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
+            *d = this->_serializedEngineDetails;
+        }));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
+
+    ASSERT_THROW_HIPDNN_STATUS(getEngineDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestEngineDescriptor, GetEngineDescriptorGraph)

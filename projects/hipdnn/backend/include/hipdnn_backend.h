@@ -46,6 +46,7 @@
 
 #include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
+#include "HipdnnBackendBehaviorNote.h"
 #include "HipdnnBackendCallbackTypes.h"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendHeuristicType.h"
