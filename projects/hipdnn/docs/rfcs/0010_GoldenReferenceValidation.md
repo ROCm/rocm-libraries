@@ -39,7 +39,7 @@ The integration test suite validates engine outputs by computing references at r
 3. **Non-determinism**: GPU reference results can vary across runs, making failure investigation harder
 4. **Slowness**: CPU reference execution for large tensors is the bottleneck in full-tier tests
 
-A prior effort established a golden reference pattern -- golden data bundles (graph JSON + tensor `.bin` files) loaded from disk and validated against engine outputs. It is already partially working for batchnorm. This RFC extends that pattern to all operation types, formalizes the folder convention, adds data integrity checks, and integrates with CI.
+A prior effort established a golden reference pattern -- golden data bundles (graph JSON + tensor `.bin` files) loaded from disk and validated against engine outputs. The initial infrastructure is in place for batchnorm. This RFC extends that pattern to all operation types, formalizes the folder convention, adds data integrity checks, and integrates with CI.
 
 ---
 
@@ -892,4 +892,5 @@ Comparison testing can confirm that two implementations agree, not that either i
 2. **Automatic test discovery**: Recursive scanning of `hipdnn_reference_data/` to auto-generate test instantiations, eliminating manual `INSTANTIATE_TEST_SUITE_P`.
 3. **C++ graph export**: Utility to export a graph from an existing test-as-code `buildGraph()` to the bundle format, enabling conversion of computed tests to golden tests.
 4. **Bundle inspection and validation tool**: CLI that reads bundles, reports tensor metadata and statistics, and validates integrity across a directory tree.
-5. **Mathematical invariant checks and hand-verified micro cases**: Per-operation invariants (e.g., softmax rows sum to 1) and hand-computed expected outputs that catch bugs comparison testing cannot. Separate RFC.
+5. **External data validation**: Because bundles are self-contained and tool-agnostic, external parties (customers, partner teams) could submit their own input+output tensor data for a given graph and validate it against golden references — or vice versa — without any C++ code. A Python-only comparison tool could load two bundles with the same graph and diff their output tensors.
+6. **Mathematical invariant checks and hand-verified micro cases**: Per-operation invariants (e.g., softmax rows sum to 1) and hand-computed expected outputs that catch bugs comparison testing cannot. Separate RFC.
