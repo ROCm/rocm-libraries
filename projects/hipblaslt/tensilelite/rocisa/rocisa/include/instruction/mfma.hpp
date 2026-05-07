@@ -233,8 +233,7 @@ namespace rocisa
             size_t f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
-            // workaround for sp3 modifier not supported yet
-            negStr = !neg ? "" : (getAsmCaps()["HasWMMA_V4"] ? " signed_a signed_b" : negStr);
+            negStr = !neg ? "" : (getAsmCaps()["HasWMMA_V4"] ? " matrix_a_signed matrix_b_signed" : negStr);
             std::string inputPermuteStr = "";
             std::string scaleStr        = "";
             if(getAsmCaps()["HasMFMA_f8f6f4"])
@@ -544,126 +543,6 @@ namespace rocisa
                 break;
             default:
                 break;
-            }
-
-            // workaround for modifier not supported yet
-            if(getAsmCaps()["HasWMMA_V4"] && variant[2] == 64)
-            {
-                static const std::string MATRIX_FMT_FP8 = "000";
-                static const std::string MATRIX_FMT_BF8 = "001";
-                static const std::string MATRIX_FMT_FP6 = "010";
-                static const std::string MATRIX_FMT_BF6 = "011";
-                static const std::string MATRIX_FMT_FP4 = "100";
-
-                switch(instType)
-                {
-                case InstType::INST_F8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
-                    break;
-                case InstType::INST_BF8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
-                    break;
-                case InstType::INST_F8_BF8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
-                    break;
-                case InstType::INST_BF8_F8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
-                    break;
-                case InstType::INST_F6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
-                    break;
-                case InstType::INST_BF6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
-                    break;
-                case InstType::INST_F6_B6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
-                    break;
-                case InstType::INST_B6_F6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
-                    break;
-                case InstType::INST_F4:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
-                    break;
-                case InstType::INST_F8_F4:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
-                    break;
-                case InstType::INST_F4_F8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
-                    break;
-                case InstType::INST_F6_F4:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
-                    break;
-                case InstType::INST_F4_F6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
-                    break;
-                case InstType::INST_F8_F6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
-                    break;
-                case InstType::INST_F6_F8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
-                    break;
-                case InstType::INST_F8_B6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
-                    break;
-                case InstType::INST_B6_F8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
-                    break;
-                case InstType::INST_B8_F4:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
-                    break;
-                case InstType::INST_F4_B8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
-                    break;
-                case InstType::INST_B6_F4:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
-                    break;
-                case InstType::INST_F4_B6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
-                    break;
-                case InstType::INST_B8_F6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
-                    break;
-                case InstType::INST_F6_B8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
-                    break;
-                case InstType::INST_B8_B6:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
-                    break;
-                case InstType::INST_B6_B8:
-                    inputPermuteStr
-                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
-                    break;
-                default:
-                    break;
-                }
-
-                return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                       + acc2->toString() + ", " + mxsa->toString() + ", " + mxsb->toString()
-                       + inputPermuteStr;
             }
 
             switch(mxScaleAType)
