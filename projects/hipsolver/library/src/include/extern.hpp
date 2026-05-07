@@ -35,62 +35,63 @@ HIPSOLVER_BEGIN_NAMESPACE
 extern "C" {
 #endif
 
-void sgeev_(char*  jobvl,
-            char*  jobvr,
-            int*   n,
-            float* A,
-            int*   lda,
-            float* wr,
-            float* wi,
-            float* vl,
-            int*   ldvl,
-            float* vr,
-            int*   ldvr,
-            float* work,
-            int*   lwork,
-            int*   info);
-void dgeev_(char*   jobvl,
-            char*   jobvr,
-            int*    n,
-            double* A,
-            int*    lda,
-            double* wr,
-            double* wi,
-            double* vl,
-            int*    ldvl,
-            double* vr,
-            int*    ldvr,
-            double* work,
-            int*    lwork,
-            int*    info);
-void cgeev_(char*            jobvl,
-            char*            jobvr,
-            int*             n,
-            hipFloatComplex* A,
-            int*             lda,
-            hipFloatComplex* w,
-            hipFloatComplex* vl,
-            int*             ldvl,
-            hipFloatComplex* vr,
-            int*             ldvr,
-            hipFloatComplex* work,
-            int*             lwork,
-            float*           rwork,
-            int*             info);
-void zgeev_(char*             jobvl,
-            char*             jobvr,
-            int*              n,
-            hipDoubleComplex* A,
-            int*              lda,
-            hipDoubleComplex* w,
-            hipDoubleComplex* vl,
-            int*              ldvl,
-            hipDoubleComplex* vr,
-            int*              ldvr,
-            hipDoubleComplex* work,
-            int*              lwork,
-            double*           rwork,
-            int*              info);
+// OpenBLAS symbols are prefixed with hipsolver_detail_ to avoid conflicts with downstream BLAS/LAPACK
+void hipsolver_detail_sgeev_(char*  jobvl,
+                              char*  jobvr,
+                              int*   n,
+                              float* A,
+                              int*   lda,
+                              float* wr,
+                              float* wi,
+                              float* vl,
+                              int*   ldvl,
+                              float* vr,
+                              int*   ldvr,
+                              float* work,
+                              int*   lwork,
+                              int*   info);
+void hipsolver_detail_dgeev_(char*   jobvl,
+                              char*   jobvr,
+                              int*    n,
+                              double* A,
+                              int*    lda,
+                              double* wr,
+                              double* wi,
+                              double* vl,
+                              int*    ldvl,
+                              double* vr,
+                              int*    ldvr,
+                              double* work,
+                              int*    lwork,
+                              int*    info);
+void hipsolver_detail_cgeev_(char*            jobvl,
+                              char*            jobvr,
+                              int*             n,
+                              hipFloatComplex* A,
+                              int*             lda,
+                              hipFloatComplex* w,
+                              hipFloatComplex* vl,
+                              int*             ldvl,
+                              hipFloatComplex* vr,
+                              int*             ldvr,
+                              hipFloatComplex* work,
+                              int*             lwork,
+                              float*           rwork,
+                              int*             info);
+void hipsolver_detail_zgeev_(char*             jobvl,
+                              char*             jobvr,
+                              int*              n,
+                              hipDoubleComplex* A,
+                              int*              lda,
+                              hipDoubleComplex* w,
+                              hipDoubleComplex* vl,
+                              int*              ldvl,
+                              hipDoubleComplex* vr,
+                              int*              ldvr,
+                              hipDoubleComplex* work,
+                              int*              lwork,
+                              double*           rwork,
+                              int*              info);
 
 #ifdef __cplusplus
 }
@@ -117,7 +118,7 @@ inline void cpu_geev(char                    jobvl,
             if(!std::isfinite(A[i + j * lda]))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    sgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+    hipsolver_detail_sgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
 inline void cpu_geev(char                     jobvl,
@@ -141,7 +142,7 @@ inline void cpu_geev(char                     jobvl,
             if(!std::isfinite(A[i + j * lda]))
                 throw HIPSOLVER_STATUS_INTERNAL_ERROR;
 
-    dgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+    hipsolver_detail_dgeev_(&jobvl, &jobvr, &n, A, &lda, w, w + n, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
 inline void cpu_geev(char             jobvl,
@@ -173,7 +174,7 @@ inline void cpu_geev(char             jobvl,
         }
     }
 
-    cgeev_(&jobvl, &jobvr, &n, A, &lda, w, vl, &ldvl, vr, &ldvr, work, &lwork, rwork, info);
+    hipsolver_detail_cgeev_(&jobvl, &jobvr, &n, A, &lda, w, vl, &ldvl, vr, &ldvr, work, &lwork, rwork, info);
 }
 
 inline void cpu_geev(char              jobvl,
@@ -205,7 +206,7 @@ inline void cpu_geev(char              jobvl,
         }
     }
 
-    zgeev_(&jobvl, &jobvr, &n, A, &lda, w, vl, &ldvl, vr, &ldvr, work, &lwork, rwork, info);
+    hipsolver_detail_zgeev_(&jobvl, &jobvr, &n, A, &lda, w, vl, &ldvl, vr, &ldvr, work, &lwork, rwork, info);
 }
 
 HIPSOLVER_END_NAMESPACE

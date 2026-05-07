@@ -185,6 +185,8 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             -DUSE_OPENMP=OFF
             -DUSE_THREAD=OFF
             -DCMAKE_C_VISIBILITY_PRESET=hidden
+            -DSYMBOLPREFIX=hipsolver_detail_
+            -DSYMBOLSUFFIX=
         )
 
         # Only pass CMAKE_BUILD_TYPE for single-config generators (it is
@@ -225,7 +227,19 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             BINARY_DIR          ${LAPACK_BINARY_DIR}
             CMAKE_ARGS          ${LAPACK_CMAKE_ARGS}
             INSTALL_COMMAND     ""
+            UPDATE_DISCONNECTED TRUE
         )
+
+        # Rename symbols in the static library to avoid conflicts with downstream BLAS/LAPACK
+        # OpenBLAS's SYMBOLPREFIX only works for shared libraries, so we use objcopy post-build
+        # The gensymbol script doesn't include Fortran LAPACK symbols, so we generate a complete mapping
+        ExternalProject_Add_Step(hipsolver-static-lapack rename_symbols
+            COMMAND ${CMAKE_COMMAND} -E echo "Prefixing OpenBLAS symbols with hipsolver_detail_"
+            COMMAND sh ${PROJECT_SOURCE_DIR}/cmake/prefix_openblas_symbols.sh ${LAPACK_BINARY_DIR}/lib hipsolver_detail_ ${LAPACK_BINARY_DIR}/objcopy.def
+            DEPENDEES build
+            WORKING_DIRECTORY ${LAPACK_BINARY_DIR}
+        )
+
         add_library(lapack_libraries STATIC IMPORTED)
 
         if(IS_MULTI_CONFIG)
@@ -243,6 +257,23 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
         endif()
 
         add_dependencies(lapack_libraries hipsolver-static-lapack)
+
+        # Clients (tests/benchmarks) need access to unprefixed LAPACK for their own use
+        # They should link to system LAPACK, not our prefixed internal version
+        set(THREADS_PREFER_PTHREAD_FLAG ON)
+        find_package(Threads REQUIRED)
+        if(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
+            find_package(LAPACK 3.7 REQUIRED CONFIG)
+        else()
+            find_package(LAPACK 3.7 REQUIRED)
+        endif()
+
+        if(NOT LAPACK_LIBRARIES)
+            set(LAPACK_LIBRARIES
+                ${LAPACK_blas_LIBRARIES}
+                ${LAPACK_lapack_LIBRARIES}
+            )
+        endif()
     else() # NOT HIPSOLVER_INTERNAL_LAPACK_BUILD
         # Some CPU side functionality is provided by external lapack
         # Linking lapack library requires fortran flags

@@ -154,6 +154,11 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   # It should be removed once geev is implemented in rocSOLVER
   if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
       target_link_libraries(hipsolver PRIVATE lapack_libraries)
+
+      # Prevent static library symbols from being re-exported in shared library (Linux/ELF only)
+      if(BUILD_SHARED_LIBS AND NOT WIN32)
+          target_link_options(hipsolver PRIVATE "LINKER:--exclude-libs,ALL")
+      endif()
   endif()
 
   target_link_libraries(hipsolver PRIVATE roc::rocblas roc::rocsolver)
