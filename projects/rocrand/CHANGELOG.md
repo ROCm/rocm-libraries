@@ -1,4 +1,4 @@
-# Changelog for rocRAND
+#Changelog for rocRAND
 
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
@@ -7,6 +7,7 @@ Documentation for rocRAND is available at
 
 ### Added
 
+* gfx1150,gfx1152 and gfx1153 support
 * rocrand.dll now contains embedded file version metadata.
 
 ### Resolved Issues

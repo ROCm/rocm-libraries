@@ -43,7 +43,6 @@ def make_tensor_field(**overrides) -> TensorField:
         "fbs_field": "x_tensor_uid",
         "attr_suffix": "X",
         "required": True,
-        "frontend_getter": "get_x()",
     }
     defaults.update(overrides)
     return TensorField(**defaults)

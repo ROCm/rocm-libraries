@@ -150,6 +150,7 @@ int main() {
 | gfx1152 | Radeon 860M/840M iGPU | ✔️ | |
 | gfx1153 | TBA | ✔️ | |
 | gfx1201 | Radeon RX 9070 (XT/GRE), Radeon AI PRO R9700 (D/S) | ✔️ | |
+| gfx1250 | TBA | ✔️ | |
 
 For more information on GPU hardware specifications, check out [ROCm documentation](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
 

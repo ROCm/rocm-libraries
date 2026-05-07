@@ -25,38 +25,41 @@ using namespace common;
 namespace
 {
 
-template <typename IODataType, typename ComputeDataType>
+template <typename InputDataType,
+          typename ScaleDataType,
+          typename OutputDataType,
+          typename ComputeDataType>
 class RMSNormForwardTraining
-    : public IntegrationGraphVerificationHarness<IODataType, RMSnormTestCase>
+    : public IntegrationGraphVerificationHarness<InputDataType, RMSnormTestCase>
 {
 protected:
     void runGraphTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         const RMSnormTestCase& testCase = this->GetParam();
 
-        auto derivedDims = getDerivedShape(testCase.dims);
-
         hipdnn_frontend::graph::Graph graphObj;
-
         graphObj.set_name("RMSnormTest");
 
-        auto dataType = getDataTypeEnumFromType<IODataType>();
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        auto inputDataType = getDataTypeEnumFromType<InputDataType>();
+        auto computeDataType = getDataTypeEnumFromType<ComputeDataType>();
+        graphObj.set_compute_data_type(computeDataType)
             .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
-            .set_io_data_type(dataType);
+            .set_io_data_type(inputDataType);
 
-        auto xAttr = makeTensorAttributes(
-            "X", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
+        auto xAttr = makeTensorAttributes("X",
+                                          inputDataType,
+                                          testCase.ioDims,
+                                          generateStrides(testCase.ioDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto computeDataType = getDataTypeEnumFromType<ComputeDataType>();
+        auto scaleDataType = getDataTypeEnumFromType<ScaleDataType>();
         auto scaleAttr = makeTensorAttributes(
-            "scale", computeDataType, derivedDims, generateStrides(derivedDims));
+            "scale", scaleDataType, testCase.scaleDims, generateStrides(testCase.scaleDims));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         // type must match scale
         auto biasAttr = makeTensorAttributes(
-            "bias", computeDataType, derivedDims, generateStrides(derivedDims));
+            "bias", scaleDataType, testCase.scaleDims, generateStrides(testCase.scaleDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
@@ -71,7 +74,9 @@ protected:
             = graphObj.rmsnorm(xTensorAttr, scaleTensorAttr, rmsnormAttrs);
 
         yTensorAttr->set_output(true);
-        this->registerValidator(yTensorAttr, getTolerance<IODataType>());
+        auto outputDataType = getDataTypeEnumFromType<OutputDataType>();
+        yTensorAttr->set_data_type(outputDataType);
+        this->registerValidator(yTensorAttr, getTolerance<OutputDataType>());
 
         if(testCase.isTraining)
         {
@@ -89,105 +94,57 @@ protected:
     }
 };
 
-// NCHW
-using IntegrationGpuRMSnormForwardNchwFp32 = RMSNormForwardTraining<float, float>;
-using IntegrationGpuRMSnormForwardNchwFp16 = RMSNormForwardTraining<half, float>;
-using IntegrationGpuRMSnormForwardNchwBfp16 = RMSNormForwardTraining<bfloat16, float>;
+// ============================================================================
+// Test cases
+// ============================================================================
 
-// NCDHW layouts
-using IntegrationGpuRMSnormForwardNcdhwFp32 = RMSNormForwardTraining<float, float>;
-using IntegrationGpuRMSnormForwardNcdhwFp16 = RMSNormForwardTraining<half, float>;
-using IntegrationGpuRMSnormForwardNcdhwBfp16 = RMSNormForwardTraining<bfloat16, float>;
+// 1. Input: FP32, Scale: FP32, Output: FP32, Compute: FP32
+using IntegrationGpuRMSnormForwardFp32Fp32Fp32Fp32
+    = RMSNormForwardTraining<float, float, float, float>;
 
+// 2. Input: FP16, Scale: FP32, Output: FP16, Compute: FP32
+using IntegrationGpuRMSnormForwardFp16Fp32Fp16Fp32
+    = RMSNormForwardTraining<half, float, half, float>;
+
+// 3. Input: BFP16, Scale: FP32, Output: BFP16, Compute: FP32
+using IntegrationGpuRMSnormForwardBfp16Fp32Bfp16Fp32
+    = RMSNormForwardTraining<bfloat16, float, bfloat16, float>;
+
+// 4. Input: FP16, Scale: FP32, Output: FP32, Compute: FP32
+using IntegrationGpuRMSnormForwardFp16Fp32Fp32Fp32
+    = RMSNormForwardTraining<half, float, float, float>;
+
+// 5. Input: BFP16, Scale: FP32, Output: FP32, Compute: FP32
+using IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32
+    = RMSNormForwardTraining<bfloat16, float, float, float>;
 }
 
 // ============================================================================
-// NCHW FP32
+// Test Registrations
 // ============================================================================
 
-TEST_P(IntegrationGpuRMSnormForwardNchwFp32, Correctness)
-{
-    runGraphTest(TensorLayout::NCHW);
-}
+// Register tests with different data types and layouts
+#define REGISTER_RMS_TEST(TestCase)                                                               \
+    /* --- NCHW --- */                                                                            \
+    using TestCase##NCHW = TestCase;                                                              \
+    TEST_P(TestCase##NCHW, Correctness)                                                           \
+    {                                                                                             \
+        runGraphTest(TensorLayout::NCHW);                                                         \
+    }                                                                                             \
+    INSTANTIATE_TEST_SUITE_P(Smoke, TestCase##NCHW, testing::ValuesIn(getRMSnormTestCases()));    \
+    INSTANTIATE_TEST_SUITE_P(Full, TestCase##NCHW, testing::ValuesIn(getRMSnormFullTestCases())); \
+    /* --- NCDHW --- */                                                                           \
+    using TestCase##NCDHW = TestCase;                                                             \
+    TEST_P(TestCase##NCDHW, Correctness)                                                          \
+    {                                                                                             \
+        runGraphTest(TensorLayout::NCDHW);                                                        \
+    }                                                                                             \
+    INSTANTIATE_TEST_SUITE_P(Smoke, TestCase##NCDHW, testing::ValuesIn(getRMSnorm3dTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuRMSnormForwardNchwFp32,
-                         testing::ValuesIn(getRMSnormTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuRMSnormForwardNchwFp32,
-                         testing::ValuesIn(getRMSnormFullTestCases()));
-
-// ============================================================================
-// NCHW FP16
-// ============================================================================
-
-TEST_P(IntegrationGpuRMSnormForwardNchwFp16, Correctness)
-{
-    runGraphTest(TensorLayout::NCHW);
-}
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuRMSnormForwardNchwFp16,
-                         testing::ValuesIn(getRMSnormTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuRMSnormForwardNchwFp16,
-                         testing::ValuesIn(getRMSnormFullTestCases()));
-
-// ============================================================================
-// NCHW BFP16
-// ============================================================================
-
-TEST_P(IntegrationGpuRMSnormForwardNchwBfp16, Correctness)
-{
-    runGraphTest(TensorLayout::NCHW);
-}
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuRMSnormForwardNchwBfp16,
-                         testing::ValuesIn(getRMSnormTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuRMSnormForwardNchwBfp16,
-                         testing::ValuesIn(getRMSnormFullTestCases()));
-
-// ============================================================================
-// NCDHW FP32 (5D)
-// ============================================================================
-
-TEST_P(IntegrationGpuRMSnormForwardNcdhwFp32, Correctness)
-{
-    runGraphTest(TensorLayout::NCDHW);
-}
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuRMSnormForwardNcdhwFp32,
-                         testing::ValuesIn(getRMSnorm3dTestCases()));
-
-// ============================================================================
-// NCDHW FP16 (5D)
-// ============================================================================
-
-TEST_P(IntegrationGpuRMSnormForwardNcdhwFp16, Correctness)
-{
-    runGraphTest(TensorLayout::NCDHW);
-}
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuRMSnormForwardNcdhwFp16,
-                         testing::ValuesIn(getRMSnorm3dTestCases()));
-// ============================================================================
-// NCDHW BFP16 (5D)
-// ============================================================================
-
-TEST_P(IntegrationGpuRMSnormForwardNcdhwBfp16, Correctness)
-{
-    runGraphTest(TensorLayout::NCDHW);
-}
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuRMSnormForwardNcdhwBfp16,
-                         testing::ValuesIn(getRMSnorm3dTestCases()));
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp32Fp32Fp32Fp32);
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp16Fp32Fp16Fp32);
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardBfp16Fp32Bfp16Fp32);
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardFp16Fp32Fp32Fp32);
+REGISTER_RMS_TEST(IntegrationGpuRMSnormForwardBfp16Fp32Fp32Fp32);
 
 } // namespace hip_kernel_provider::rmsnorm::test

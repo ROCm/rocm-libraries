@@ -16,7 +16,6 @@ endif()
 
 add_executable(
     miopen_plugin_tests
-    common/TestWorkarounds.cpp
     engines/plans/TestMiopenBatchnormApplicabilityChecks.cpp
     engines/plans/TestMiopenBatchnormBwdPlan.cpp
     engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
@@ -33,6 +32,7 @@ add_executable(
     engines/plans/TestMiopenConvPlanBuilder.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
     engines/TestMiopenEngine.cpp
+    common/TestWorkarounds.cpp
     main.cpp
     TestMiopenActivationDescriptor.cpp
     TestMiopenConvDescriptor.cpp

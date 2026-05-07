@@ -25,6 +25,7 @@
 #include <array>
 #include <string>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 
 namespace stinkytofu {
@@ -40,7 +41,7 @@ class StinkyAsmModule;
 /// Backend backend(module);
 /// backend.runOptimization();
 /// @endcode
-class Backend {
+class STINKYTOFU_EXPORT Backend {
    public:
     explicit Backend(StinkyAsmModule& module);
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,9 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
+#endif
 #include "near.hpp"
 #include "norm.hpp"
 #include "unit.hpp"
@@ -53,6 +55,7 @@
 #include <map>
 #include <numeric>
 #include <omp.h>
+#include <optional>
 #include <set>
 
 extern "C" __global__ void flush_icache()
@@ -77,6 +80,15 @@ extern "C" __global__ void flush_icache()
                          :);
 }
 
+// Convert element count to byte count, accounting for sub-byte packing.
+// FP4 (4-bit) packs 2 elements per byte; all other types use realDataTypeSize.
+size_t elementsToBytes(size_t numElements, hipDataType dtype)
+{
+    if(static_cast<int>(dtype) == HIP_R_4F_E2M1)
+        return numElements / 2;
+    return numElements * realDataTypeSize(dtype);
+}
+
 bool isSwizzleSupported(hipDataType datatype)
 {
     switch(datatype)
@@ -84,7 +96,7 @@ bool isSwizzleSupported(hipDataType datatype)
     case HIP_R_16BF:
     case HIP_R_16F:
     case HIP_R_8F_E4M3_FNUZ:
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         return true;
     default:
         return false;
@@ -100,7 +112,7 @@ hipblasLtOrder_t orderForDatatype(hipDataType datatype)
         return HIPBLASLT_ORDER_COL16_4R8;
     case HIP_R_8F_E4M3_FNUZ:
         return HIPBLASLT_ORDER_COL16_4R16;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         return HIPBLASLT_ORDER_COL16_4R32;
     default:
         throw std::runtime_error("unsupported datatype in orderForDatatype");
@@ -141,7 +153,7 @@ void calculateKforSwizzling(
         MiK  = 32;
         MiKv = 8;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         // For fp4 viewed as uint8: matches shuffle_weight with layout=(16,16)
         // BK=32 bytes, K=16 bytes, BK/K=2
         MiK  = 16; // K inner block = 16 bytes
@@ -243,7 +255,7 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
             throw std::runtime_error("Error type in mx_type_to_f32()");
         }
 #if defined(HIPBLASLT_USE_FP6)
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
@@ -255,7 +267,7 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         }
 #endif
 #if defined(HIPBLASLT_USE_BF6)
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
@@ -267,7 +279,7 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         }
 #endif
 #if defined(HIPBLASLT_USE_FP4)
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
@@ -276,7 +288,10 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         case HIP_R_8F_E4M3:
             return mx_type_to_f32(
                 buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_f8>(), row, col, srow, scol);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
         case HIP_R_8F_E5M3_EXT:
+#pragma GCC diagnostic pop
             return mx_type_to_f32(
                 buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_e5m3>(), row, col, srow, scol);
         default:
@@ -396,7 +411,7 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
         swizzle_tensor<hipblaslt_bf8>(
             dst.as<hipblaslt_bf8>(), src.as<hipblaslt_bf8>(), datatype, arg, b, m_n, k, ld, colMaj);
         return;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         // fp4: 2 elements per byte, so k_bytes = k/2, ld_bytes = ld/2
         swizzle_tensor<uint8_t>(
             dst.as<uint8_t>(), src.as<uint8_t>(), datatype, arg, b, m_n, k / 2, ld / 2, colMaj);
@@ -466,13 +481,13 @@ Tout cast_from_type(void* in, hipDataType type, size_t index)
         return static_cast<Tout>((static_cast<int32_t*>(in))[index]);
     case HIP_R_8I:
         return static_cast<Tout>((static_cast<hipblasLtInt8*>(in))[index]);
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "cast_from_type() does not support FP6" << std::endl;
         return 0;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "cast_from_type() does not support BF6" << std::endl;
         return 0;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "cast_from_type() does not support FP4" << std::endl;
         return 0;
     default:
@@ -516,13 +531,13 @@ void saturate_cast_to_type(void* dst, Tin src, hipDataType typeD, size_t indexD)
     case HIP_R_8I:
         static_cast<hipblasLtInt8*>(dst)[indexD] = saturate_cast<hipblasLtInt8>(src);
         return;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "cast_from_type() does not support FP6!" << std::endl;
         return;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "cast_from_type() does not support BF6!" << std::endl;
         return;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "cast_from_type() does not support FP4!" << std::endl;
         return;
     default:
@@ -1233,7 +1248,8 @@ void check(hipStream_t                   stream,
             hipblaslt_error += norm_error;
             if(arg.norm_check_assert)
             {
-                CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type));
+                CHECK_SUCCESS(
+                    norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
             }
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
@@ -1267,7 +1283,8 @@ void check(hipStream_t                   stream,
                     hipblaslt_error += norm_error;
                     if(arg.norm_check_assert)
                     {
-                        CHECK_SUCCESS(norm_check(norm_error, Taux, arg.compute_type));
+                        CHECK_SUCCESS(
+                            norm_check(norm_error, Taux, arg.compute_type, arg.a_type, arg.b_type));
                     }
                 }
                 if(arg.gradient && arg.bias_vector)
@@ -1369,9 +1386,9 @@ hipDataType derive_unset_bias_type(const Arguments& arg)
             else //more default cases once support C != D
                 real_bias_type = HIP_R_16F;
         }
-        else if((arg.a_type == HIP_R_6F_E2M3_EXT && arg.b_type == HIP_R_6F_E2M3_EXT)
-                || (arg.a_type == HIP_R_6F_E3M2_EXT && arg.b_type == HIP_R_6F_E3M2_EXT)
-                || (arg.a_type == HIP_R_4F_E2M1_EXT && arg.b_type == HIP_R_4F_E2M1_EXT))
+        else if((arg.a_type == HIP_R_6F_E2M3 && arg.b_type == HIP_R_6F_E2M3)
+                || (arg.a_type == HIP_R_6F_E3M2 && arg.b_type == HIP_R_6F_E3M2)
+                || (arg.a_type == HIP_R_4F_E2M1 && arg.b_type == HIP_R_4F_E2M1))
         {
             if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
                 real_bias_type = HIP_R_16BF;
@@ -1429,9 +1446,9 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
         HIP_R_8F_E5M2,
         HIP_R_8F_E4M3_FNUZ,
         HIP_R_8F_E5M2_FNUZ,
-        static_cast<hipDataType>(HIP_R_6F_E2M3_EXT),
-        static_cast<hipDataType>(HIP_R_6F_E3M2_EXT),
-        static_cast<hipDataType>(HIP_R_4F_E2M1_EXT),
+        static_cast<hipDataType>(HIP_R_6F_E2M3),
+        static_cast<hipDataType>(HIP_R_6F_E3M2),
+        static_cast<hipDataType>(HIP_R_4F_E2M1),
     };
 
     hipDataType real_compute_input_typeA = arg.compute_input_typeA;
@@ -2246,8 +2263,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleA))
             {
-                // For MX format, use uin8_t for the scale (E8M0)
-                dScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * block_count, HMM);
+                // For MX format, use uint8_t for the scale (E8M0), allocate for all batches
+                dScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * num_batches[i] * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
@@ -2258,8 +2275,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleB))
             {
-                // For MX format, use uin8_t for the scale (E8M0)
-                dScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * block_count, HMM);
+                // For MX format, use uint8_t for the scale (E8M0), allocate for all batches
+                dScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * num_batches[i] * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
             if(arg.scaleC)
@@ -2310,7 +2327,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleA))
             {
-                hScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i]);
+                hScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * num_batches[i]);
             }
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
                || arg.scaleB == hipblaslt_scaling_format::Vector)
@@ -2319,7 +2336,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleB))
             {
-                hScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i]);
+                hScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * num_batches[i]);
             }
             if(arg.scaleC)
                 hScaleC.emplace_back(Talpha, 1);
@@ -2481,6 +2498,9 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
+        // TODO: mxDataGenerator can only generate data on CPU. Using
+        //       GPU to generate data might be more efficient and avoid
+        //       unnecessary hipMemCpy when CPU verification is not needed.
         if(isBlockScaling(arg.scaleA))
         {
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -2500,29 +2520,36 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             // For MX format, use mxDataGenerator to generate input data
             // (consists of data part and scale part)
-            // TODO: mxDataGenerator can only generate data on CPU. Using
-            //       GPU to generate data might be more efficient and avoid
-            //       unnecessary hipMemCpy when CPU verification is not needed.
-
             // preTile for A: {tileK, tileM} - swap from preTileSizeForScaleA which returns {tileM, tileK}
             auto preTileATmp = preTileSizeForScaleA(arg.scaleA);
-            auto preTileA    = (preTileATmp.size() == 2)
-                                   ? std::vector<size_t>{preTileATmp[1], preTileATmp[0]}
-                                   : std::vector<size_t>{};
-            refA.emplace_back(generateMXInput(TiA,
-                                              scaleDataType(arg.scaleA),
-                                              hA[i].buf(),
-                                              hScaleA[i].buf(),
-                                              A_row[i],
-                                              A_col[i],
-                                              lda[i],
-                                              transA == HIPBLAS_OP_T,
-                                              preSwizzleSizeForScale(arg.scaleA),
-                                              preTileA,
-                                              blockSize(arg.scaleA),
-                                              1,
-                                              true,
-                                              hipblaslt_initialization2string(arg.initialization)));
+            auto preTileA = (preTileATmp.size() == 2) ? std::vector<size_t>{preTileATmp[1], preTileATmp[0]} : std::vector<size_t>{};
+            // Compute batch strides in bytes for data and scale buffers.
+            size_t dataBatchBytesA  = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
+            size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
+            // Generate MX data for each batch and collect reference floats
+            std::vector<float> refAAll;
+            refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
+            for(int64_t b = 0; b < num_batches[i]; b++)
+            {
+                auto* dataPtr  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
+                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
+                auto batchRef = generateMXInput(TiA,
+                                                scaleDataType(arg.scaleA),
+                                                dataPtr,
+                                                scalePtr,
+                                                A_row[i],
+                                                A_col[i],
+                                                lda[i],
+                                                transA == HIPBLAS_OP_T,
+                                                preSwizzleSizeForScale(arg.scaleA),
+                                                preTileA,
+                                                blockSize(arg.scaleA),
+                                                1,
+                                                true,
+                                                hipblaslt_initialization2string(arg.initialization));
+                refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
+            }
+            refA.emplace_back(std::move(refAAll));
             // Copy data and scale to device buffers
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
@@ -2606,25 +2633,35 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             // For MX format, use mxDataGenerator to generate
             // input data (consists of data part and scale part)
-            // TODO: mxDataGenerator can only generate data on CPU. Using
-            //       GPU to generate data might be more efficient and avoid
-            //       unnecessary hipMemCpy when CPU verification is not needed.
             // preTile for B: {tileK, tileN}
             auto preTileB = preTileSizeForScaleB(arg.scaleB);
-            refB.emplace_back(generateMXInput(TiB,
-                                              scaleDataType(arg.scaleB),
-                                              hB[i].buf(),
-                                              hScaleB[i].buf(),
-                                              B_row[i],
-                                              B_col[i],
-                                              ldb[i],
-                                              transB == HIPBLAS_OP_T,
-                                              preSwizzleSizeForScale(arg.scaleB),
-                                              preTileB,
-                                              1,
-                                              blockSize(arg.scaleB),
-                                              false,
-                                              hipblaslt_initialization2string(arg.initialization)));
+            // Compute batch strides in bytes for data and scale buffers.
+            size_t dataBatchBytesB  = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
+            size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
+            // Generate MX data for each batch and collect reference floats
+            std::vector<float> refBAll;
+            refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
+            for(int64_t b = 0; b < num_batches[i]; b++)
+            {
+                auto* dataPtr  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
+                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
+                auto batchRef = generateMXInput(TiB,
+                                                scaleDataType(arg.scaleB),
+                                                dataPtr,
+                                                scalePtr,
+                                                B_row[i],
+                                                B_col[i],
+                                                ldb[i],
+                                                transB == HIPBLAS_OP_T,
+                                                preSwizzleSizeForScale(arg.scaleB),
+                                                preTileB,
+                                                1,
+                                                blockSize(arg.scaleB),
+                                                false,
+                                                hipblaslt_initialization2string(arg.initialization));
+                refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
+            }
+            refB.emplace_back(std::move(refBAll));
             // Copy data and scale to device buffers
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
@@ -2728,34 +2765,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                             do_swizzle_b,
                                             stream));
                 CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
-#ifndef HIPBLASLT_USE_ROCROLLER
-                if(isBlockScaling(arg.scaleA))
-                {
-                    CHECK_HIP_ERROR(
-                        synchronize(hScaleA[i], dScaleA[i], 0, 0, 0, 0, 1, false, stream));
-                    refA.emplace_back(mx_type_to_f32(TiA,
-                                                     scaleDataType(arg.scaleA),
-                                                     hA[i],
-                                                     hScaleA[i],
-                                                     A_row[i],
-                                                     A_col[i],
-                                                     scaleA_row,
-                                                     scaleA_col));
-                }
-                if(isBlockScaling(arg.scaleB))
-                {
-                    CHECK_HIP_ERROR(
-                        synchronize(hScaleB[i], dScaleB[i], 0, 0, 0, 0, 1, false, stream));
-                    refB.emplace_back(mx_type_to_f32(TiB,
-                                                     scaleDataType(arg.scaleB),
-                                                     hB[i],
-                                                     hScaleB[i],
-                                                     B_row[i],
-                                                     B_col[i],
-                                                     scaleB_row,
-                                                     scaleB_col));
-                }
-#endif
+
 
                 if(arg.dump_matrix)
                 {
@@ -3722,144 +3732,125 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     if(arg.algo_method == 2)
     {
-        std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo;
         heuristicResult.clear();
         heuristicTuningIndex.clear();
 
-        int algoIndexCount = 0;
-        int algoIndexInc   = 100;
-        while(1)
+        const bool indicesAreDiscovered = (arg.solution_index == -1);
+
+        std::vector<int> validIndices;
+        auto             discoverValidIndices = [&]() {
+            std::vector<hipblasLtMatmulHeuristicResult_t> allAlgos;
+            EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
+                                                             gemmType,
+                                                             transA,
+                                                             transB,
+                                                             arg.a_type,
+                                                             arg.b_type,
+                                                             arg.c_type,
+                                                             arg.d_type,
+                                                             arg.compute_type,
+                                                             allAlgos),
+                                  HIPBLAS_STATUS_SUCCESS);
+            validIndices.reserve(allAlgos.size());
+            for(auto& a : allAlgos)
+            {
+                validIndices.push_back(hipblaslt_ext::getIndexFromAlgo(a.algo));
+            }
+        };
+
+        if(indicesAreDiscovered)
         {
-            std::vector<int>                              algoIndex;
-            std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo;
-            bool                                          foundAlgo = false;
-            if(arg.solution_index == -1)
-            {
-                // Get algos by index
-                // In real cases, the user can use the saved algo index to get the algorithm.
-                // isAlgoSupported is not necessary if the user is sure that the algo supports the problem.
-                algoIndex.resize(algoIndexInc);
-                std::iota(std::begin(algoIndex), std::end(algoIndex), algoIndexCount);
-                algoIndexCount += algoIndexInc;
-            }
-            else
-            {
-                // Specify the index
-                algoIndex.resize(1);
-                algoIndex[0] = arg.solution_index;
-            }
+            discoverValidIndices();
+        }
 
-            // INVALID_VALUE means some indices exceeded the pool size; valid algos are still returned in tmpAlgo
-            bool lastBatch = (HIPBLAS_STATUS_INVALID_VALUE
-                              == hipblaslt_ext::getAlgosFromIndex(handle, algoIndex, tmpAlgo));
-            if(tmpAlgo.empty())
-            {
-                break;
-            }
-            returnedAlgoCount = tmpAlgo.size();
+        bool selectionWasAttempted = false;
 
-            if(!do_grouped_gemm)
-            {
-                if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+        auto searchForSupportedAlgoViaIndexAPI = [&]() {
+            constexpr size_t batchSize        = 100;
+            size_t           batchStart       = 0;
+            bool             explicitConsumed = false;
+
+            auto nextBatchOfIndices = [&]() -> std::optional<std::vector<int>> {
+                if(indicesAreDiscovered)
                 {
-                    if(arg.use_ext_setproblem)
+                    if(batchStart >= validIndices.size())
                     {
-                        for(int32_t b = 0; b < block_count; b++)
-                            CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(M[0],
-                                                                        N[0],
-                                                                        K[0],
-                                                                        num_batches[0],
-                                                                        lda[0],
-                                                                        ldb[0],
-                                                                        ldc[0],
-                                                                        ldd[0],
-                                                                        stride_da[0],
-                                                                        stride_db[0],
-                                                                        stride_c[0],
-                                                                        stride_d[0],
-                                                                        extepilogue[0],
-                                                                        extinputs[b][0],
-                                                                        extproblemtype));
+                        return std::nullopt;
                     }
-                    else
-                    {
-                        for(int32_t b = 0; b < block_count; b++)
-                            CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(
-                                matmul[b][0],
-                                alpha_in[0],
-                                (dA[0].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA),
-                                matA[0],
-                                (dB[0].as<char>()) + b * size_dB[0] * realDataTypeSize(TiB),
-                                matB[0],
-                                &h_beta[0],
-                                (dC[0].as<char>()) + b * size_C[0] * realDataTypeSize(To),
-                                matC[0],
-                                ((*dDp)[0].as<char>()) + b * size_D[0] * realDataTypeSize(To),
-                                matD[0]));
-                    }
-                    for(int j = 0; j < returnedAlgoCount; j++)
-                    {
-                        for(size_t t = 0; t < tuningVec.size(); t++)
-                        {
-                            size_t tmpWorkspaceSize = 0;
-                            if(gemmVec[0].isAlgoSupported(
-                                   tmpAlgo[j].algo, tuningVec[t], tmpWorkspaceSize)
-                               == HIPBLAS_STATUS_SUCCESS)
-                            {
-                                if(tmpWorkspaceSize <= max_workspace_size)
-                                {
-                                    heuristicResult.push_back(tmpAlgo[j]);
-                                    heuristicTuningIndex.push_back(t);
-                                    workspace_size = std::max(workspace_size, tmpWorkspaceSize);
-                                    foundAlgo      = true;
-                                }
-                            }
-                        }
-                        CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
-                        if(foundAlgo)
-                            break;
-                    }
+                    const size_t batchEnd
+                        = std::min<size_t>(batchStart + batchSize, validIndices.size());
+                    std::vector<int> batch(validIndices.begin() + batchStart,
+                                           validIndices.begin() + batchEnd);
+                    batchStart = batchEnd;
+                    return batch;
                 }
-                else
+                if(explicitConsumed)
                 {
-                    for(int j = 0; j < returnedAlgoCount; j++)
-                    {
-                        for(size_t t = 0; t < 1; t++) // CAPI not supported yet
-                        {
-                            size_t tmpWorkspaceSize = 0;
-                            if(hipblaslt_ext::matmulIsAlgoSupported(handle,
-                                                                    matmul[0][0],
-                                                                    alpha_in[0],
-                                                                    matA[0],
-                                                                    matB[0],
-                                                                    &h_beta[0],
-                                                                    matC[0],
-                                                                    matD[0],
-                                                                    tmpAlgo[j].algo,
-                                                                    tmpWorkspaceSize)
-                               == HIPBLAS_STATUS_SUCCESS)
-                            {
-                                if(tmpWorkspaceSize <= max_workspace_size)
-                                {
-                                    heuristicResult.push_back(tmpAlgo[j]);
-                                    heuristicTuningIndex.push_back(t);
-                                    workspace_size = std::max(workspace_size, tmpWorkspaceSize);
-                                    foundAlgo      = true;
-                                    break;
-                                }
-                            }
-                        }
-                        CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
-                    }
+                    return std::nullopt;
                 }
-            }
-            else
-            {
+                explicitConsumed = true;
+                return std::vector<int>{arg.solution_index};
+            };
+
+            auto fetchAlgosForBatch
+                = [&](std::vector<int>&                              batch,
+                      std::vector<hipblasLtMatmulHeuristicResult_t>& candidates) {
+                      candidates.clear();
+                      const auto status
+                          = hipblaslt_ext::getAlgosFromIndex(handle, batch, candidates);
+                      if(indicesAreDiscovered)
+                      {
+                          EXPECT_HIPBLAS_STATUS(status, HIPBLAS_STATUS_SUCCESS);
+                      }
+                  };
+
+            auto configureExtGemmForCurrentProblem = [&]() {
+                if(arg.use_ext_setproblem)
+                {
+                    for(int32_t b = 0; b < block_count; b++)
+                    {
+                        CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(M[0],
+                                                                    N[0],
+                                                                    K[0],
+                                                                    num_batches[0],
+                                                                    lda[0],
+                                                                    ldb[0],
+                                                                    ldc[0],
+                                                                    ldd[0],
+                                                                    stride_da[0],
+                                                                    stride_db[0],
+                                                                    stride_c[0],
+                                                                    stride_d[0],
+                                                                    extepilogue[0],
+                                                                    extinputs[b][0],
+                                                                    extproblemtype));
+                    }
+                    return;
+                }
+                for(int32_t b = 0; b < block_count; b++)
+                {
+                    CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(
+                        matmul[b][0],
+                        alpha_in[0],
+                        (dA[0].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA),
+                        matA[0],
+                        (dB[0].as<char>()) + b * size_dB[0] * realDataTypeSize(TiB),
+                        matB[0],
+                        &h_beta[0],
+                        (dC[0].as<char>()) + b * size_C[0] * realDataTypeSize(To),
+                        matC[0],
+                        ((*dDp)[0].as<char>()) + b * size_D[0] * realDataTypeSize(To),
+                        matD[0]));
+                }
+            };
+
+            auto configureGroupedGemmForCurrentProblem = [&]() {
                 if(arg.use_ext_setproblem)
                 {
                     auto num_batches_64
                         = std::vector<int64_t>{num_batches.begin(), num_batches.end()};
                     for(int32_t b = 0; b < block_count; b++)
+                    {
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(M,
                                                                            N,
                                                                            K,
@@ -3875,62 +3866,241 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                            extepilogue,
                                                                            extinputs[b],
                                                                            extproblemtype));
-                }
-                else
-                {
-                    std::vector<void*> h_alpha_void, h_beta_void;
-                    for(size_t i = 0; i < h_alpha.size(); i++)
-                    {
-                        h_alpha_void.push_back(&h_alpha[i]);
-                        h_beta_void.push_back(&h_beta[i]);
                     }
-                    for(int32_t b = 0; b < block_count; b++)
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(matmul[b],
-                                                                           h_alpha_void,
-                                                                           da[b],
-                                                                           matA,
-                                                                           db[b],
-                                                                           matB,
-                                                                           h_beta_void,
-                                                                           dc[b],
-                                                                           matC,
-                                                                           dd[b],
-                                                                           matD));
+                    return;
                 }
-
-                for(int j = 0; j < returnedAlgoCount; j++)
+                std::vector<void*> h_alpha_void, h_beta_void;
+                for(size_t i = 0; i < h_alpha.size(); i++)
                 {
-                    for(size_t t = 0; t < tuningVec.size(); t++)
-                    {
-                        size_t tmpWorkspaceSize = 0;
-                        if(groupedGemmVec[0].isAlgoSupported(
-                               tmpAlgo[j].algo, tuningVec[t], tmpWorkspaceSize)
-                           == HIPBLAS_STATUS_SUCCESS)
-                        {
-                            if(tmpWorkspaceSize <= max_workspace_size)
-                            {
-                                heuristicResult.push_back(tmpAlgo[j]);
-                                heuristicTuningIndex.push_back(t);
-                                workspace_size = std::max(workspace_size, tmpWorkspaceSize);
-                                foundAlgo      = true;
-                            }
-                        }
-                    }
-                    CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
-                    if(foundAlgo)
-                        break;
+                    h_alpha_void.push_back(&h_alpha[i]);
+                    h_beta_void.push_back(&h_beta[i]);
+                }
+                for(int32_t b = 0; b < block_count; b++)
+                {
+                    CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(matmul[b],
+                                                                       h_alpha_void,
+                                                                       da[b],
+                                                                       matA,
+                                                                       db[b],
+                                                                       matB,
+                                                                       h_beta_void,
+                                                                       dc[b],
+                                                                       matC,
+                                                                       dd[b],
+                                                                       matD));
+                }
+            };
+
+            auto collectTuningsForFirstViableAlgo
+                = [&](std::vector<hipblasLtMatmulHeuristicResult_t>& candidates,
+                      auto&                                          gemmObject,
+                      bool&                                          foundAlgo) {
+                      foundAlgo = false;
+                      for(int j = 0; j < returnedAlgoCount; j++)
+                      {
+                          for(size_t t = 0; t < tuningVec.size(); t++)
+                          {
+                              size_t tmpWorkspaceSize = 0;
+                              if(gemmObject.isAlgoSupported(
+                                     candidates[j].algo, tuningVec[t], tmpWorkspaceSize)
+                                 != HIPBLAS_STATUS_SUCCESS)
+                              {
+                                  continue;
+                              }
+                              if(tmpWorkspaceSize > max_workspace_size)
+                              {
+                                  continue;
+                              }
+                              heuristicResult.push_back(candidates[j]);
+                              heuristicTuningIndex.push_back(t);
+                              workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                              foundAlgo      = true;
+                          }
+                          CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+                          if(foundAlgo)
+                          {
+                              break;
+                          }
+                      }
+                  };
+
+            auto collectAllSupportedAlgosViaCAPI
+                = [&](std::vector<hipblasLtMatmulHeuristicResult_t>& candidates,
+                      bool&                                          foundAlgo) {
+                      foundAlgo = false;
+                      for(int j = 0; j < returnedAlgoCount; j++)
+                      {
+                          size_t tmpWorkspaceSize = 0;
+                          if(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                                  matmul[0][0],
+                                                                  alpha_in[0],
+                                                                  matA[0],
+                                                                  matB[0],
+                                                                  &h_beta[0],
+                                                                  matC[0],
+                                                                  matD[0],
+                                                                  candidates[j].algo,
+                                                                  tmpWorkspaceSize)
+                                 == HIPBLAS_STATUS_SUCCESS
+                             && tmpWorkspaceSize <= max_workspace_size)
+                          {
+                              heuristicResult.push_back(candidates[j]);
+                              heuristicTuningIndex.push_back(0);
+                              workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                              foundAlgo      = true;
+                          }
+                          CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+                      }
+                  };
+
+            auto trySelectFromBatch
+                = [&](std::vector<hipblasLtMatmulHeuristicResult_t>& candidates,
+                      bool&                                          foundAlgo) {
+                      returnedAlgoCount = candidates.size();
+                      foundAlgo         = false;
+                      if(do_grouped_gemm)
+                      {
+                          configureGroupedGemmForCurrentProblem();
+                          collectTuningsForFirstViableAlgo(
+                              candidates, groupedGemmVec[0], foundAlgo);
+                          return;
+                      }
+                      if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                      {
+                          configureExtGemmForCurrentProblem();
+                          collectTuningsForFirstViableAlgo(candidates, gemmVec[0], foundAlgo);
+                          return;
+                      }
+                      collectAllSupportedAlgosViaCAPI(candidates, foundAlgo);
+                  };
+
+            while(auto batch = nextBatchOfIndices())
+            {
+                std::vector<hipblasLtMatmulHeuristicResult_t> candidates;
+                fetchAlgosForBatch(*batch, candidates);
+                if(candidates.empty())
+                {
+                    break;
+                }
+                selectionWasAttempted = true;
+                bool foundAlgo        = false;
+                trySelectFromBatch(candidates, foundAlgo);
+                if(foundAlgo)
+                {
+                    break;
                 }
             }
+        };
 
-            if(arg.solution_index != -1)
+        auto verifyMixedValidityContract = [&]() {
+            auto verifyShape = [&](const char*             shapeName,
+                                   const std::vector<int>& indices,
+                                   hipblasStatus_t         expectedStatus,
+                                   size_t                  expectedValidCount) {
+                std::vector<hipblasLtMatmulHeuristicResult_t> mixedOut;
+                std::vector<int>                              indicesCopy = indices;
+                const auto                                    status
+                    = hipblaslt_ext::getAlgosFromIndex(handle, indicesCopy, mixedOut);
+                if(status != expectedStatus || mixedOut.size() != expectedValidCount)
+                {
+                    hipblaslt_cerr
+                        << "verifyMixedValidityContract[" << shapeName
+                        << "]: status=" << hipblas_status_to_string(status) << " (expected "
+                        << hipblas_status_to_string(expectedStatus)
+                        << "), mixedOut.size()=" << mixedOut.size() << " (expected "
+                        << expectedValidCount << ")" << std::endl;
+                }
+                EXPECT_HIPBLAS_STATUS(status, expectedStatus);
+#ifdef GOOGLE_TEST
+                EXPECT_EQ(mixedOut.size(), expectedValidCount) << "shape: " << shapeName;
+#endif
+            };
+
+            const size_t numValid = validIndices.size();
+
             {
-                CHECK_SOLUTION_FOUND(foundAlgo);
-                foundAlgo = true;
+                std::vector<int> shape = validIndices;
+                shape.push_back(std::numeric_limits<int>::max());
+                verifyShape("trailing-invalid", shape, HIPBLAS_STATUS_INVALID_VALUE, numValid);
             }
-            if(lastBatch || foundAlgo)
             {
-                break;
+                std::vector<int> shape = validIndices;
+                shape.insert(shape.begin() + (numValid / 2),
+                             std::numeric_limits<int>::max());
+                verifyShape("middle-invalid", shape, HIPBLAS_STATUS_INVALID_VALUE, numValid);
             }
+            {
+                std::vector<int> shape = validIndices;
+                std::reverse(shape.begin(), shape.end());
+                verifyShape("reversed", shape, HIPBLAS_STATUS_SUCCESS, numValid);
+            }
+            {
+                std::vector<int> shape;
+                shape.reserve(2 * numValid);
+                for(int idx : validIndices)
+                {
+                    shape.push_back(idx);
+                    shape.push_back(idx);
+                }
+                verifyShape("duplicated", shape, HIPBLAS_STATUS_SUCCESS, 2 * numValid);
+            }
+            {
+                verifyShape("empty", {}, HIPBLAS_STATUS_SUCCESS, 0);
+            }
+            {
+                // INT_MIN is avoided here because under HIPBLASLT_USE_ROCROLLER negative
+                // indices route to a different (rocroller) code path; two large positive
+                // out-of-range values pin the all-miss return in both build configs.
+                const std::vector<int> shape{std::numeric_limits<int>::max(),
+                                             std::numeric_limits<int>::max() - 1};
+                verifyShape("all-invalid", shape, HIPBLAS_STATUS_INVALID_VALUE, 0);
+            }
+        };
+
+        searchForSupportedAlgoViaIndexAPI();
+
+        if(!indicesAreDiscovered)
+        {
+            if(!selectionWasAttempted)
+            {
+                hipblaslt_cerr
+                    << "MatmulAlgoIndex: explicit solution_index=" << arg.solution_index
+                    << " returned no candidates from getAlgosFromIndex() (M=" << M[0]
+                    << " N=" << N[0] << " K=" << K[0] << " batch=" << num_batches[0]
+                    << " transA=" << arg.transA << " transB=" << arg.transB
+                    << " a=" << hip_datatype_to_string(arg.a_type)
+                    << " b=" << hip_datatype_to_string(arg.b_type)
+                    << " c=" << hip_datatype_to_string(arg.c_type)
+                    << " d=" << hip_datatype_to_string(arg.d_type)
+                    << " compute=" << hipblas_computetype_to_string(arg.compute_type) << ")"
+                    << std::endl;
+                CHECK_SOLUTION_FOUND(0);
+            }
+            else
+            {
+                CHECK_SOLUTION_FOUND(heuristicResult.size());
+            }
+        }
+        else if(!validIndices.empty())
+        {
+            if(heuristicResult.empty())
+            {
+                hipblaslt_cerr
+                    << "MatmulAlgoIndex: " << validIndices.size()
+                    << " algo indices discovered via getAllAlgos() but none produced a "
+                       "viable algo+tuning under the workspace budget (M="
+                    << M[0] << " N=" << N[0] << " K=" << K[0]
+                    << " batch=" << num_batches[0] << " transA=" << arg.transA
+                    << " transB=" << arg.transB
+                    << " a=" << hip_datatype_to_string(arg.a_type)
+                    << " b=" << hip_datatype_to_string(arg.b_type)
+                    << " c=" << hip_datatype_to_string(arg.c_type)
+                    << " d=" << hip_datatype_to_string(arg.d_type)
+                    << " compute=" << hipblas_computetype_to_string(arg.compute_type) << ")"
+                    << std::endl;
+                CHECK_SOLUTION_FOUND(0);
+            }
+            verifyMixedValidityContract();
         }
     }
     else if(arg.algo_method == 1)
@@ -4624,7 +4794,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         lda[gemmIdx],
                         isScaleBMXFormat
                             ? reinterpret_cast<char*>(refB[gemmIdx].data())
-                                  + stride_a[gemmIdx] * batchIdx * realDataTypeSize(HIP_R_32F)
+                                  + stride_b[gemmIdx] * batchIdx * realDataTypeSize(HIP_R_32F)
                             : hB[gemmIdx].as<char>()
                                   + stride_b[gemmIdx] * batchIdx * realDataTypeSize(TiB),
                         ldb[gemmIdx],
