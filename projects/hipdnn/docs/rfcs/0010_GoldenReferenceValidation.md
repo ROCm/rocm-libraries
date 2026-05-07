@@ -428,12 +428,11 @@ a3f8c2e1/
 
 #### Why Not JSON + Base64?
 
-Jeremy's original pattern uses JSON with embedded tensor data. For small tensors this works, but a single `8x512x64x64` fp32 tensor is 64 MB raw. Base64 adds 33% overhead and JSON parsing becomes the bottleneck. The binary blob format:
+An earlier golden reference pattern in the MIOpen plugin uses JSON with embedded tensor data. This works for small tensors, but a single `8x512x64x64` fp32 tensor is 64 MB raw — Base64 adds 33% overhead and JSON parsing becomes the bottleneck. Separating the manifest (JSON) from the tensor data (raw binary) avoids both problems:
 
-- Stores tensors at raw size (no encoding overhead)
-- Enables memory-mapped reads for large tensors
-- Keeps the manifest human-readable for inspection and debugging
-- Adds ~3 lines of I/O code compared to all-JSON
+- Tensors stored at raw size (no encoding overhead)
+- Memory-mapped reads possible for large tensors
+- Manifest remains human-readable for inspection and debugging
 
 #### Extensibility to Binary
 
