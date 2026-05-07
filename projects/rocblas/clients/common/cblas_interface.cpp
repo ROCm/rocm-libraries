@@ -129,12 +129,12 @@ template void ref_axpy<rocblas_double_complex>(int64_t                 n,
                                                int64_t                 incy);
 
 template <>
-void ref_axpy<rocblas_bfloat16>(int64_t            n,
-                                rocblas_bfloat16   alpha,
-                                rocblas_bfloat16*  x,
-                                int64_t            incx,
-                                rocblas_bfloat16*  y,
-                                int64_t            incy)
+void ref_axpy<rocblas_bfloat16>(int64_t           n,
+                                rocblas_bfloat16  alpha,
+                                rocblas_bfloat16* x,
+                                int64_t           incx,
+                                rocblas_bfloat16* y,
+                                int64_t           incy)
 {
     // Handle negative increments
     int64_t abs_incx = incx < 0 ? -incx : incx;
