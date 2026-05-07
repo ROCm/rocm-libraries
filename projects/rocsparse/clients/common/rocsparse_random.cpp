@@ -67,8 +67,8 @@ double rocsparse::rng_t::normal_double()
 
 void rocsparse::rng_t::reset_seed()
 {
-    m_rand_uniform_idx = 0;
-    m_rand_normal_idx  = 0;
+    m_rand_uniform_idx = s_rand_cache_size - 1;
+    m_rand_normal_idx  = s_rand_cache_size - 1;
 
     set_rng(m_rng_seed);
     set_rng_nan(m_rng_seed);
@@ -100,16 +100,17 @@ rocsparse_rng_t& rocsparse::rng_t::get_rng_seed()
     return m_rng_seed;
 }
 
-template <typename T, typename std::enable_if_t<std::is_integral<T>::value, bool> = true>
+template <typename T>
 static T std_generator(T a, T b, rocsparse_rng_t& rng)
 {
-    return std::uniform_int_distribution<T>(a, b)(rng);
-}
-
-template <typename T, typename std::enable_if_t<!std::is_integral<T>::value, bool> = true>
-static T std_generator(T a, T b, rocsparse_rng_t& rng)
-{
-    return std::uniform_real_distribution<T>(a, b)(rng);
+    if constexpr(std::is_integral_v<T>)
+    {
+        return std::uniform_int_distribution<T>(a, b)(rng);
+    }
+    else
+    {
+        return std::uniform_real_distribution<T>(a, b)(rng);
+    }
 }
 
 template <typename T>

@@ -43,13 +43,17 @@ namespace rocsparse
         rng_t& operator=(const rng_t&) = delete;
 
         static constexpr size_t s_rand_cache_size = 1024;
+        static_assert(s_rand_cache_size > 0
+                          && (s_rand_cache_size & (s_rand_cache_size - 1)) == 0,
+                      "s_rand_cache_size must be a positive power of two "
+                      "(required by the bitmask used in cache index updates)");
 
         rocsparse_rng_t m_rng;
         rocsparse_rng_t m_rng_nan;
         rocsparse_rng_t m_rng_seed;
 
-        int32_t                               m_rand_uniform_idx = 0;
-        int32_t                               m_rand_normal_idx  = 0;
+        size_t                                m_rand_uniform_idx = s_rand_cache_size - 1;
+        size_t                                m_rand_normal_idx  = s_rand_cache_size - 1;
         std::array<double, s_rand_cache_size> m_rand_uniform_cache;
         std::array<double, s_rand_cache_size> m_rand_normal_cache;
 
