@@ -70,6 +70,7 @@ from Tensile.Components.CMSValidator import (
     build_dataflow_graph,
     compare_graphs,
     validate_edge_wait_coverage,
+    _DEFAULT_CDNA4_ARCH_PROFILE,
 )
 
 from dataflow_fixtures import make_capture, make_mfma
@@ -163,6 +164,7 @@ class GraphNativeValidationTest:
             num_codepaths=num_codepaths,
             source=source,
             num_mfma_per_subiter=num_mfma_per_subiter,
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
 
     def build_graph(self, capture: FourPartCapture) -> DataflowGraph:

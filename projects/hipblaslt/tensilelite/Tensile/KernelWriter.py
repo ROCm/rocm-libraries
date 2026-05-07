@@ -6055,10 +6055,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # Resolve the per-arch quad-cycle profile from the kernel's ISA
           # tuple so the validator's gap checks pick up the right
           # finish-cycle / settle-window values for this kernel's target.
-          # Unknown ISAs fall back to CDNA 4 (historical default).
-          arch_profile = _resolve_arch_profile_for_isa(
-            tuple(kernel["ISA"]) if "ISA" in kernel else None
-          )
+          # Unknown ISAs (no ArchProfile registered) get `arch_profile is
+          # None` from the resolver — the resolver emits a warning every
+          # time it's called with an unknown ISA; this single call site
+          # keeps the warning surface to once-per-kernel-resolution.
+          # `arch_profile=None` propagates through the FourPartCapture and
+          # DataflowGraph; the timing helpers short-circuit on it
+          # (rocm-libraries-zkzw).
+          isa_tuple = tuple(kernel["ISA"]) if "ISA" in kernel else None
+          arch_profile = _resolve_arch_profile_for_isa(isa_tuple)
           ctx.default = FourPartCapture(
             main_loop={0: main},
             main_loop_prev={0: clone_loop_body(main)},

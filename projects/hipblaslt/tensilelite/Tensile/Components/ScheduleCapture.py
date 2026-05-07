@@ -330,10 +330,13 @@ class FourPartCapture:
     # all MFMAs at subiter 0, which loses cross-subiter PLR dataflow edges.
     # Test fixtures may safely leave it unset.
     num_mfma_per_subiter: int = 0
-    # Per-architecture timing profile. None = default CDNA 4. Production
-    # callers pass the profile resolved via `_resolve_arch_profile_for_isa`
-    # from `kernel["ISA"]`; test fixtures may leave it unset to keep the
-    # historical code path bit-identical.
+    # Per-architecture timing profile resolved via
+    # `_resolve_arch_profile_for_isa(kernel["ISA"])`. `None` means
+    # "no profile registered for this kernel's ISA; timing-related
+    # validation is skipped." Production callers must resolve and pass
+    # explicitly; test fixtures must either pass an explicit profile
+    # (e.g. `_DEFAULT_CDNA4_ARCH_PROFILE`) or accept that timing checks
+    # will be skipped. Tracked: `rocm-libraries-zkzw`.
     arch_profile: Optional[ArchProfile] = None
 
 

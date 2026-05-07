@@ -59,6 +59,7 @@ from Tensile.Components.CMSValidator import (
     DataflowEdge,
     DataflowGraph,
     build_dataflow_graph,
+    _DEFAULT_CDNA4_ARCH_PROFILE,
 )
 
 
@@ -212,6 +213,7 @@ def _make_capture(
         num_mfma=num_mfma,
         num_codepaths=num_codepaths,
         source=source,
+        arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
     )
 
 
@@ -294,6 +296,7 @@ class TestDataflowGraphShape:
             n_ll={0: make_capture(BODY_LABEL_NLL, [
                 make_mfma(0, 8, 32, slot=0)])},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         g = build_dataflow_graph(cap)
         assert set(g.captures.keys()) == {
@@ -1260,6 +1263,7 @@ class TestAssertCaptureBodyConsistency:
             num_mfma=1,
             num_codepaths=1,
             source="test-fixture",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
 
     def test_passes_when_pgr0_and_both_absent(self):
@@ -1327,6 +1331,7 @@ class TestBuildDataflowGraphAbsentBodies:
             num_mfma=2,
             num_codepaths=1,
             source="test-fixture",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         # Must NOT raise — historically this raised CaptureEmptyBodyError.
         graph = build_dataflow_graph(cap)
@@ -1347,6 +1352,7 @@ class TestBuildDataflowGraphAbsentBodies:
             num_mfma=2,
             num_codepaths=1,
             source="test-fixture",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         graph = build_dataflow_graph(cap)
         assert "NGL" not in graph.captures
@@ -1366,6 +1372,7 @@ class TestBuildDataflowGraphAbsentBodies:
             num_mfma=2,
             num_codepaths=1,
             source="test-fixture",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         with pytest.raises(CaptureEmptyBodyError):
             build_dataflow_graph(cap)

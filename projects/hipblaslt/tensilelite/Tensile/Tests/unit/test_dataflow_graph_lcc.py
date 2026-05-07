@@ -53,6 +53,7 @@ from Tensile.Components.ScheduleCapture import (
 from Tensile.Components.CMSValidator import (
     build_dataflow_graph,
     cumulative_issue_cycles,
+    _DEFAULT_CDNA4_ARCH_PROFILE,
 )
 
 from dataflow_fixtures import (
@@ -91,6 +92,7 @@ def _wrap(ml_capture):
         n_gl={0: _filler(BODY_LABEL_NGL)},
         n_ll={0: _filler(BODY_LABEL_NLL)},
         num_mfma=1, num_codepaths=1, source="cms",
+        arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
     )
 
 

@@ -49,6 +49,7 @@ from Tensile.Components.CMSValidator import (
     compare_graphs,
     diagnose_missing_edge,
     validate_edge_wait_coverage,
+    _DEFAULT_CDNA4_ARCH_PROFILE,
 )
 
 from dataflow_fixtures import (
@@ -79,6 +80,7 @@ def _wrap(ml_capture, *, ml_prev=None, ngl=None, nll=None):
         n_gl={0: ngl if ngl is not None else _filler(BODY_LABEL_NGL)},
         n_ll={0: nll if nll is not None else _filler(BODY_LABEL_NLL)},
         num_mfma=1, num_codepaths=1, source="cms",
+        arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
     )
 
 

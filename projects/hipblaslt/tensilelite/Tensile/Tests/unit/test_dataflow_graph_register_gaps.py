@@ -83,7 +83,9 @@ from Tensile.Components.ScheduleCapture import (
 )
 from Tensile.Components.CMSValidator import (
     OrderInvertedFailure,
+    TimingResult,
     TimingTooCloseFailure,
+    _DEFAULT_CDNA4_ARCH_PROFILE,
     cumulative_issue_cycles,
     _quad_cycle_gap_ok,
     _cvt_to_mfma_gap_ok,
@@ -108,7 +110,10 @@ from dataflow_fixtures import (
 def _wrap(ml_capture):
     """Wrap a single main-loop capture into a FourPartCapture, fillering the
     other 3 bodies with a no-op MFMA so build_dataflow_graph's
-    non-empty-body precondition is satisfied."""
+    non-empty-body precondition is satisfied. Pinned to
+    `_DEFAULT_CDNA4_ARCH_PROFILE` so the timing helpers fire against the
+    historical CDNA 4 quad-cycle constants every test in this file
+    expects (rocm-libraries-zkzw)."""
     _FILLER_RANGES = {
         BODY_LABEL_ML_PREV: (200, 204, 208),
         BODY_LABEL_NGL:     (220, 224, 228),
@@ -126,6 +131,7 @@ def _wrap(ml_capture):
         n_gl={0: _filler(BODY_LABEL_NGL)},
         n_ll={0: _filler(BODY_LABEL_NLL)},
         num_mfma=1, num_codepaths=1, source="cms",
+        arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
     )
 
 
@@ -440,11 +446,12 @@ class TestMFMAQuadCycleGap:
             None,
         )
         assert acc_edge is not None
-        ok, exp, act = _quad_cycle_gap_ok(
+        check = _quad_cycle_gap_ok(
             acc_edge.producer, acc_edge.consumer, 0, graph=g)
-        assert ok and exp == 3 and act == 3, (
-            f"nk0 contract: same-slot MFMAs report exp=3, act=3 (matches "
-            f"precompute_issue_times); got ok={ok}, exp={exp}, act={act}."
+        assert check.result == TimingResult.PASS and check.required == 3 and check.observed == 3, (
+            f"nk0 contract: same-slot MFMAs report required=3, observed=3 (matches "
+            f"precompute_issue_times); got result={check.result}, required={check.required}, "
+            f"observed={check.observed}."
         )
 
     def test_mfma_acc_chain_consecutive_slots_no_failure(self):
@@ -508,6 +515,7 @@ class TestMFMAQuadCycleGap:
                 num_codepaths=wrapped.num_codepaths,
                 source=wrapped.source,
                 num_mfma_per_subiter=nmps,
+                arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
             )
 
         g_nmps1 = build_dataflow_graph(_wrap_with_nmps(_build_cap(), 1))
@@ -524,17 +532,18 @@ class TestMFMAQuadCycleGap:
         e2 = _acc_edge(g_nmps2)
         assert e1 is not None and e2 is not None
 
-        ok1, exp1, act1 = _quad_cycle_gap_ok(
+        check1 = _quad_cycle_gap_ok(
             e1.producer, e1.consumer, 1, graph=g_nmps1)
-        ok2, exp2, act2 = _quad_cycle_gap_ok(
+        check2 = _quad_cycle_gap_ok(
             e2.producer, e2.consumer, 2, graph=g_nmps2)
 
-        # nk0 contract: nmps is unused → same actual for both runs.
-        assert act1 == act2 == 3, (
-            f"nk0: cycle-exact arithmetic ignores nmps. Expected act1==act2==3; "
-            f"got act1={act1}, act2={act2}."
+        # nk0 contract: nmps is unused → same observed for both runs.
+        assert check1.observed == check2.observed == 3, (
+            f"nk0: cycle-exact arithmetic ignores nmps. Expected observed1==observed2==3; "
+            f"got observed1={check1.observed}, observed2={check2.observed}."
         )
-        assert ok1 and ok2 and exp1 == 3 and exp2 == 3
+        assert (check1.result == TimingResult.PASS and check2.result == TimingResult.PASS
+                and check1.required == 3 and check2.required == 3)
 
     def test_mfma_acc_chain_cross_body_uses_unified_simulator(self):
         """Producer in body=ML, consumer in body=NGL sharing accumulator
@@ -577,6 +586,7 @@ class TestMFMAQuadCycleGap:
             n_gl={0: ngl_cap},
             n_ll={0: nll_filler},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         g = build_dataflow_graph(four)
 
@@ -590,21 +600,21 @@ class TestMFMAQuadCycleGap:
             "(ML producer -> NGL consumer)."
         )
         edge = cross[0]
-        ok, expected, actual = _quad_cycle_gap_ok(
+        check = _quad_cycle_gap_ok(
             edge.producer, edge.consumer, 0, graph=g)
 
         # The unified simulator computes the exact cross-body cycle gap.
         # This fixture's intermediate-free MFMA pair gates exactly on the
-        # producer's mfma_free_at backlog, yielding actual=3=expected.
-        assert ok, "Cross-body gap of 3 meets the 3-cycle MFMA finish."
-        assert expected == 3, f"Expected QUAD_CYCLES_STANDARD_MFMA_FINISH=3; got {expected}."
-        assert actual == 3, (
-            f"Cross-body MFMA->MFMA actual is the unified-stream cycle "
+        # producer's mfma_free_at backlog, yielding observed=3=required.
+        assert check.result == TimingResult.PASS, "Cross-body gap of 3 meets the 3-cycle MFMA finish."
+        assert check.required == 3, f"Expected QUAD_CYCLES_STANDARD_MFMA_FINISH=3; got {check.required}."
+        assert check.observed == 3, (
+            f"Cross-body MFMA->MFMA observed is the unified-stream cycle "
             f"count, not body_delta*1000. For this "
             f"fixture (one MFMA in ML, one MFMA in NGL, no intervening "
             f"work between them) the gap is exactly mfma_free_at = 3. "
-            f"Got actual={actual}. If actual==1000, the cross-body branch "
-            f"was reintroduced; if actual==0, the unified walk failed to "
+            f"Got observed={check.observed}. If observed==1000, the cross-body branch "
+            f"was reintroduced; if observed==0, the unified walk failed to "
             f"locate producer or consumer in the cross-body stream."
         )
 
@@ -653,6 +663,7 @@ class TestMFMAQuadCycleGap:
             n_gl={0: ngl_filler},
             n_ll={0: nll_filler},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         g = build_dataflow_graph(four)
 
@@ -665,30 +676,30 @@ class TestMFMAQuadCycleGap:
             "(ML-1 4x4 producer -> ML standard consumer)."
         )
         edge = cross[0]
-        ok, expected, actual = _quad_cycle_gap_ok(
+        check = _quad_cycle_gap_ok(
             edge.producer, edge.consumer, 0, graph=g)
-        assert expected == 1, (
-            f"4x4 PackMFMA producer expected = 1 quad-cycle "
-            f"(_QUAD_CYCLES_MFMA_4X4_FINISH); got {expected}."
+        assert check.required == 1, (
+            f"4x4 PackMFMA producer required = 1 quad-cycle "
+            f"(_QUAD_CYCLES_MFMA_4X4_FINISH); got {check.required}."
         )
-        assert ok and actual == 2, (
+        assert check.result == TimingResult.PASS and check.observed == 2, (
             f"Cross-body 4x4->standard MFMA pair must apply the "
             f"FROM_4X4=3 type-switch stall in the unified walk. "
-            f"Expected actual=2 (mfma_free_at=2 + 1 type-switch stall = 3, "
-            f"gap = 3 - 0 - 1 = 2). Got ok={ok}, actual={actual}. "
-            f"If actual==1, the type-switch stall is not being applied "
+            f"Expected observed=2 (mfma_free_at=2 + 1 type-switch stall = 3, "
+            f"gap = 3 - 0 - 1 = 2). Got result={check.result}, observed={check.observed}. "
+            f"If observed==1, the type-switch stall is not being applied "
             f"across the body boundary (placeholder may have been "
             f"reintroduced or unified walk skipped the cross-body span)."
         )
 
     def test_mfma_acc_chain_cross_body_strict_when_graph_missing(self):
         """When no graph is provided, `_quad_cycle_gap_ok` returns
-        `(False, expected, 0)` — strict, conservative. An earlier
-        cross-body branch unconditionally returned
-        `(True, expected, body_delta * 1000)` even without a graph,
-        masking real issues in degenerate test paths. The unified path
-        treats missing-graph as a hard failure regardless of whether the
-        producer and consumer share a body.
+        `(False, 0, 0)` — strict, conservative. no graph -> no profile
+        -> no derivable threshold. An earlier cross-body branch
+        unconditionally returned `(True, expected, body_delta * 1000)`
+        even without a graph, masking real issues in degenerate test
+        paths. The unified path treats missing-graph as a hard failure
+        regardless of whether the producer and consumer share a body.
 
         This is the negative pin: drop the cross-body branch and the
         result for a cross-body pair WITHOUT a graph flips from
@@ -712,6 +723,7 @@ class TestMFMAQuadCycleGap:
             n_gl={0: ngl_cap},
             n_ll={0: nll_filler},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         g = build_dataflow_graph(four)
         cross = [e for e in g.edges
@@ -723,17 +735,18 @@ class TestMFMAQuadCycleGap:
         # No graph passed: with the cross-body placeholder REMOVED, the
         # function falls through to the strict `graph is None` branch
         # regardless of whether producer/consumer share a body.
-        ok, expected, actual = _quad_cycle_gap_ok(
+        check = _quad_cycle_gap_ok(
             edge.producer, edge.consumer, 0, graph=None)
-        assert not ok, (
-            "Cross-body pair without a graph must report ok=False. "
-            "An earlier placeholder returned ok=True / actual=body_delta*1000 "
+        assert check.result == TimingResult.FAIL, (
+            "Cross-body pair without a graph must report FAIL. "
+            "An earlier placeholder returned ok=True / observed=body_delta*1000 "
             "for any cross-body pair regardless of graph presence — this is "
             "the regression to pin."
         )
-        assert expected == 3 and actual == 0, (
-            f"Expected (False, 3, 0) for graph=None; got "
-            f"(ok={ok}, expected={expected}, actual={actual})."
+        assert check.required == 0 and check.observed == 0, (
+            f"Expected TimingCheck(FAIL, observed=0, required=0) for graph=None "
+            f"(no graph -> no profile -> no derivable threshold); got "
+            f"(result={check.result}, required={check.required}, observed={check.observed})."
         )
 
     def test_mfma_acc_chain_diagnose_missing_edge_dispatches_through_mfma_branch(self):
@@ -969,9 +982,9 @@ class TestMFMAQuadCycleGap:
             f"{failures_within}"
         )
 
-        # Direct check on _quad_cycle_gap_ok: at the boundary, ok=True with
-        # actual == expected == 3. A future strict-inequality regression
-        # would flip ok to False here.
+        # Direct check on _quad_cycle_gap_ok: at the boundary, PASS with
+        # observed == required == 3. A future strict-inequality regression
+        # would flip the result to FAIL here.
         # Find the MFMA→MFMA edge for the direct invariant assertion.
         acc_edge = None
         for e in g_subj.edges:
@@ -980,15 +993,16 @@ class TestMFMAQuadCycleGap:
                 acc_edge = e
                 break
         assert acc_edge is not None, "expected MFMA→MFMA acc-chain edge"
-        ok, exp, act = _quad_cycle_gap_ok(
+        check = _quad_cycle_gap_ok(
             acc_edge.producer, acc_edge.consumer, 0, graph=g_subj)
-        assert ok, (
+        assert check.result == TimingResult.PASS, (
             f"_quad_cycle_gap_ok must accept the boundary case "
-            f"(actual={act}, expected={exp}); ok was False."
+            f"(observed={check.observed}, required={check.required}); "
+            f"result was {check.result}."
         )
-        assert exp == 3 and act == 3, (
-            f"At slot_delta==1, expected==actual==3; got "
-            f"expected={exp}, actual={act}."
+        assert check.required == 3 and check.observed == 3, (
+            f"At slot_delta==1, required==observed==3; got "
+            f"required={check.required}, observed={check.observed}."
         )
 
     def test_mfma_to_mfma_cross_subiter_routing_exact(self):
@@ -1022,6 +1036,7 @@ class TestMFMAQuadCycleGap:
                 num_codepaths=wrapped.num_codepaths,
                 source=wrapped.source,
                 num_mfma_per_subiter=nmps,
+                arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
             )
 
         g_same = build_dataflow_graph(_wrap_with_nmps(_build_cap(), 4))
@@ -1040,21 +1055,22 @@ class TestMFMAQuadCycleGap:
             "Expected an MFMA→MFMA acc-chain edge in both graphs."
         )
 
-        ok_s, exp_s, act_s = _quad_cycle_gap_ok(
+        check_same = _quad_cycle_gap_ok(
             e_same.producer, e_same.consumer, 4, graph=g_same)
-        ok_c, exp_c, act_c = _quad_cycle_gap_ok(
+        check_cross = _quad_cycle_gap_ok(
             e_cross.producer, e_cross.consumer, 2, graph=g_cross)
 
         # Both pass.
-        assert ok_s and ok_c
-        # nk0: identical actual under exact arithmetic (nmps unused).
-        assert act_s == act_c, (
+        assert check_same.result == TimingResult.PASS and check_cross.result == TimingResult.PASS
+        # nk0: identical observed under exact arithmetic (nmps unused).
+        assert check_same.observed == check_cross.observed, (
             f"nk0: cycle-exact arithmetic ignores nmps; expected equal "
-            f"actuals. Got same-subiter act={act_s}, cross-subiter act={act_c}."
+            f"observeds. Got same-subiter observed={check_same.observed}, "
+            f"cross-subiter observed={check_cross.observed}."
         )
         # And it's the simulator's value: MFMA1 issue=0, mfma_free=4;
         # MFMA2 max(1, 4)=4 → gap=4-0-1=3.
-        assert act_s == 3 and act_c == 3
+        assert check_same.observed == 3 and check_cross.observed == 3
 
     def test_mfma_producer_multi_consumer_varied_gaps_exact(self):
         """Under cycle-exact arithmetic the simulator's mfma_free_at
@@ -1197,11 +1213,13 @@ class TestMFMAQuadCycleGap:
              and getattr(e.consumer, "category", None) == "MFMA"),
             None,
         )
-        ok, exp, act = _quad_cycle_gap_ok(
+        check = _quad_cycle_gap_ok(
             acc_edge.producer, acc_edge.consumer, 0, graph=g)
-        assert ok and exp == 1 and act == 2, (
-            f"nk0 contract: 4x4 producer expected=1; type-switch +1 stall "
-            f"yields act=2; got ok={ok}, exp={exp}, act={act}."
+        assert (check.result == TimingResult.PASS and check.required == 1
+                and check.observed == 2), (
+            f"nk0 contract: 4x4 producer required=1; type-switch +1 stall "
+            f"yields observed=2; got result={check.result}, "
+            f"required={check.required}, observed={check.observed}."
         )
 
     def test_mfma_pack_acc_chain_meets_finish_1_no_failure(self):
@@ -1746,11 +1764,11 @@ class TestMFMAQuadCycleGap:
             None,
         )
         assert acc_edge is not None
-        ok, expected, actual = _quad_cycle_gap_ok(
+        check = _quad_cycle_gap_ok(
             acc_edge.producer, acc_edge.consumer, 0, graph=g)
-        assert ok
-        assert expected == 3
-        assert actual == 4
+        assert check.result == TimingResult.PASS
+        assert check.required == 3
+        assert check.observed == 4
 
     def test_mfma_type_switch_4x4_to_standard_adds_one_to_actual(self):
         """4x4 PackMFMA producer (finish=1) at slot=2; standard MFMA
@@ -1776,11 +1794,11 @@ class TestMFMAQuadCycleGap:
             None,
         )
         assert acc_edge is not None
-        ok, expected, actual = _quad_cycle_gap_ok(
+        check = _quad_cycle_gap_ok(
             acc_edge.producer, acc_edge.consumer, 0, graph=g)
-        assert ok
-        assert expected == 1
-        assert actual == 2
+        assert check.result == TimingResult.PASS
+        assert check.required == 1
+        assert check.observed == 2
 
     def test_mfma_same_class_chain_no_type_switch_penalty(self):
         """Regression guard: same-class chain (standard producer → standard
@@ -1811,13 +1829,15 @@ class TestMFMAQuadCycleGap:
                 acc_edge = e
                 break
         assert acc_edge is not None
-        ok, expected, actual = _quad_cycle_gap_ok(
+        check = _quad_cycle_gap_ok(
             acc_edge.producer, acc_edge.consumer, 0, graph=g)
         # nk0 cycle-exact: producer at 0 with mfma_free=4; consumer max(1,4)=4
         # → gap=3. Same class, no type-switch +1.
-        assert ok and expected == 3 and actual == 3, (
-            f"Same-class standard→standard must yield actual==expected==3. "
-            f"Got ok={ok}, expected={expected}, actual={actual}."
+        assert (check.result == TimingResult.PASS and check.required == 3
+                and check.observed == 3), (
+            f"Same-class standard→standard must yield observed==required==3. "
+            f"Got result={check.result}, required={check.required}, "
+            f"observed={check.observed}."
         )
 
         # Sanity sibling: same-class 4x4→4x4 chain — no +1 either.
@@ -1839,13 +1859,15 @@ class TestMFMAQuadCycleGap:
                 acc_edge_pack = e
                 break
         assert acc_edge_pack is not None
-        ok_p, expected_p, actual_p = _quad_cycle_gap_ok(
+        check_p = _quad_cycle_gap_ok(
             acc_edge_pack.producer, acc_edge_pack.consumer, 0, graph=g_pack)
         # nk0 cycle-exact: 4x4 producer at 0, mfma_free=2; consumer max(1,2)=2;
         # same class → no type-switch. gap=2-0-1=1.
-        assert ok_p and expected_p == 1 and actual_p == 1, (
-            f"Same-class 4x4→4x4: actual==expected==1. Got "
-            f"ok={ok_p}, expected={expected_p}, actual={actual_p}."
+        assert (check_p.result == TimingResult.PASS and check_p.required == 1
+                and check_p.observed == 1), (
+            f"Same-class 4x4→4x4: observed==required==1. Got "
+            f"result={check_p.result}, required={check_p.required}, "
+            f"observed={check_p.observed}."
         )
 
     # -------------------------------------------------------------------------
@@ -2172,6 +2194,7 @@ class TestMFMAQuadCycleGap:
             n_gl={0: ngl_filler},
             n_ll={0: nll_filler},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         g = build_dataflow_graph(four)
 
@@ -2190,22 +2213,22 @@ class TestMFMAQuadCycleGap:
             f"(ML-1 producer -> ML consumer). Got edges: {edge_summary}"
         )
         edge = cross[0]
-        ok, expected, actual = _cvt_to_mfma_gap_ok(
+        check = _cvt_to_mfma_gap_ok(
             edge.producer, edge.consumer, g)
 
-        assert expected == 2, (
-            f"_QUAD_CYCLES_CVT_BEFORE_MFMA == 2; expected must always "
-            f"be 2. Got expected={expected}."
+        assert check.required == 2, (
+            f"_QUAD_CYCLES_CVT_BEFORE_MFMA == 2; required must always "
+            f"be 2. Got required={check.required}."
         )
         # CVT cost (1) + 2 LR costs (2) - 1 = 2 cycles real gap.
-        assert actual == 2, (
+        assert check.observed == 2, (
             f"Cross-body cycle-exact walk: 1 (CVT) + 2 (LR x2) - 1 = 2. "
-            f"Got actual={actual}. A regression that fails to walk past "
+            f"Got observed={check.observed}. A regression that fails to walk past "
             f"the body boundary would return 0."
         )
-        assert ok, (
-            f"actual=2 >= expected=2 → ok=True. Got ok={ok}, "
-            f"actual={actual}."
+        assert check.result == TimingResult.PASS, (
+            f"observed=2 >= required=2 → PASS. Got result={check.result}, "
+            f"observed={check.observed}."
         )
         # No TimingTooCloseFailure should be emitted at the threshold.
         failures = validate_edge_wait_coverage(g)
@@ -2260,6 +2283,7 @@ class TestMFMAQuadCycleGap:
             n_gl={0: ngl_cap},
             n_ll={0: nll_filler},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         g = build_dataflow_graph(four)
         cross = [e for e in g.edges
@@ -2277,11 +2301,13 @@ class TestMFMAQuadCycleGap:
             f"Got: {edge_summary}"
         )
         edge = cross[0]
-        ok, expected, actual = _cvt_to_mfma_gap_ok(
+        check = _cvt_to_mfma_gap_ok(
             edge.producer, edge.consumer, g)
-        assert expected == 2 and actual == 2 and ok, (
+        assert (check.required == 2 and check.observed == 2
+                and check.result == TimingResult.PASS), (
             f"ML -> NGL cross-body cycle-exact walk: 1 + 2 - 1 = 2. "
-            f"Got ok={ok}, expected={expected}, actual={actual}."
+            f"Got result={check.result}, required={check.required}, "
+            f"observed={check.observed}."
         )
 
     def test_cvt_to_mfma_cross_body_below_threshold_fires_failure(self):
@@ -2324,6 +2350,7 @@ class TestMFMAQuadCycleGap:
             n_gl={0: ngl_filler},
             n_ll={0: nll_filler},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         g = build_dataflow_graph(four)
 
@@ -2333,13 +2360,15 @@ class TestMFMAQuadCycleGap:
                  and e.producer.body_label != e.consumer.body_label]
         assert cross, "Expected a cross-body CVTPack->MFMA edge."
         edge = cross[0]
-        ok, expected, actual = _cvt_to_mfma_gap_ok(
+        check = _cvt_to_mfma_gap_ok(
             edge.producer, edge.consumer, g)
-        assert expected == 2 and actual == 0 and not ok, (
+        assert (check.required == 2 and check.observed == 0
+                and check.result == TimingResult.FAIL), (
             f"Below-threshold cross-body CVT->MFMA must fire: "
-            f"actual={actual} < expected={expected}, ok={ok}. "
-            f"A regression that swallows the cross-body case (e.g., a "
-            f"body-delta sentinel) would return ok=True / actual>=1000."
+            f"observed={check.observed} < required={check.required}, "
+            f"result={check.result}. A regression that swallows the "
+            f"cross-body case (e.g., a body-delta sentinel) would return "
+            f"result=PASS / observed>=1000."
         )
 
         failures = validate_edge_wait_coverage(g)
@@ -2359,10 +2388,11 @@ class TestMFMAQuadCycleGap:
     def test_cvt_to_mfma_no_graph_returns_strict_fail(self):
         """Direct call to `_cvt_to_mfma_gap_ok` with `subj_graph=None`.
         Pre-`2bu.4` this took the cross-body sentinel branch and returned
-        `(True, 2, 1000)`. Post-`2bu.4` the helper's first action is to
-        check `subj_graph is None` and return `(False, 2, 0)` — strictly
-        conservative: degenerate test paths surface as failures rather
-        than silently passing.
+        `(True, 2, 1000)`. The helper's first action is to check
+        `subj_graph is None` and return `(False, 0, 0)` — strictly
+        conservative: no graph -> no profile -> no derivable threshold;
+        degenerate test paths surface as failures rather than silently
+        passing.
 
         Production callers always pass `subj_graph=graph`; this branch
         exists purely as a defensive guard for unit-test scaffolding."""
@@ -2388,18 +2418,18 @@ class TestMFMAQuadCycleGap:
             body_label=BODY_LABEL_ML,
         )
 
-        ok, expected, actual = _cvt_to_mfma_gap_ok(producer, consumer, None)
-        assert ok is False, (
-            f"`subj_graph=None` must return ok=False (strict). "
-            f"Got ok={ok}."
+        check = _cvt_to_mfma_gap_ok(producer, consumer, None)
+        assert check.result == TimingResult.FAIL, (
+            f"`subj_graph=None` must return FAIL (strict). "
+            f"Got result={check.result}."
         )
-        assert expected == 2, (
-            f"expected=_QUAD_CYCLES_CVT_BEFORE_MFMA=2. Got "
-            f"expected={expected}."
+        assert check.required == 0, (
+            f"`subj_graph=None` must return required=0 (no graph -> no "
+            f"profile -> no derivable threshold). Got required={check.required}."
         )
-        assert actual == 0, (
-            f"`subj_graph=None` must return actual=0 (no graph to walk). "
-            f"Got actual={actual}."
+        assert check.observed == 0, (
+            f"`subj_graph=None` must return observed=0 (no graph to walk). "
+            f"Got observed={check.observed}."
         )
 
     def test_cvt_to_mfma_same_body_old_vs_new_formula_documented_divergence(self):
@@ -2504,11 +2534,11 @@ class TestMFMAQuadCycleGap:
             f"contribution — investigate before changing this assertion."
         )
         # And the helper itself reports the cycle-exact number.
-        ok, expected, actual = _cvt_to_mfma_gap_ok(
+        check = _cvt_to_mfma_gap_ok(
             edge.producer, edge.consumer, g)
-        assert actual == new_actual, (
+        assert check.observed == new_actual, (
             f"_cvt_to_mfma_gap_ok must delegate to "
-            f"cumulative_issue_cycles. Got helper actual={actual}, "
+            f"cumulative_issue_cycles. Got helper observed={check.observed}, "
             f"direct walk={new_actual}."
         )
 
@@ -2598,6 +2628,7 @@ class TestMFMAQuadCycleGap:
             n_gl={0: ngl_filler},
             n_ll={0: nll_filler},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
 
     def test_mfma_pack_to_cvt1_cross_body_gap_meets_5_no_failure(self):
@@ -2627,22 +2658,22 @@ class TestMFMAQuadCycleGap:
             f"{[(getattr(e.producer, 'category', None), e.producer.body_label, getattr(e.consumer, 'category', None), e.consumer.body_label) for e in g.edges]}"
         )
         edge = cross[0]
-        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+        check = _mfma_pack_to_cvt_gap_ok(
             edge.producer, edge.consumer, g)
-        assert expected == 5, (
-            f"PackMFMA->CVT1 expected=5 (QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1); "
-            f"got expected={expected}."
+        assert check.required == 5, (
+            f"PackMFMA->CVT1 required=5 (QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1); "
+            f"got required={check.required}."
         )
-        # actual = ml_prev_pad_count = 5 (cross-body walk arithmetic).
-        assert actual == 5, (
+        # observed = ml_prev_pad_count = 5 (cross-body walk arithmetic).
+        assert check.observed == 5, (
             f"Cross-body cumulative_issue_cycles arithmetic: PackMFMA at "
             f"current_issue=0 + 5 LRs (cost 1 each) → CVT issues at 6; "
-            f"gap = 6-0-1 = 5. Got actual={actual}. If actual==1000, the "
+            f"gap = 6-0-1 = 5. Got observed={check.observed}. If observed==1000, the "
             f"old body_delta * 1000 placeholder is back."
         )
-        assert ok, (
-            f"Cross-body PackMFMA->CVT1 with actual=5 >= expected=5 must "
-            f"pass. Got ok={ok}, actual={actual}."
+        assert check.result == TimingResult.PASS, (
+            f"Cross-body PackMFMA->CVT1 with observed=5 >= required=5 must "
+            f"pass. Got result={check.result}, observed={check.observed}."
         )
         # End-to-end: validate_edge_wait_coverage must NOT flag this edge.
         failures = validate_edge_wait_coverage(g)
@@ -2677,17 +2708,17 @@ class TestMFMAQuadCycleGap:
                  and e.producer.body_label != e.consumer.body_label]
         assert cross
         edge = cross[0]
-        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+        check = _mfma_pack_to_cvt_gap_ok(
             edge.producer, edge.consumer, g)
-        assert expected == 5
-        assert actual == 2, (
+        assert check.required == 5
+        assert check.observed == 2, (
             f"Cross-body arithmetic: PackMFMA + 2 LRs → CVT issues at 3; "
-            f"gap = 3-0-1 = 2. Got actual={actual}."
+            f"gap = 3-0-1 = 2. Got observed={check.observed}."
         )
-        assert not ok, (
-            f"Cross-body PackMFMA->CVT1 with actual=2 < expected=5 MUST "
-            f"fail the gap check. Got ok={ok}. If ok==True, the cross-body "
-            f"branch is still using the always-true placeholder."
+        assert check.result == TimingResult.FAIL, (
+            f"Cross-body PackMFMA->CVT1 with observed=2 < required=5 MUST "
+            f"fail the gap check. Got result={check.result}. If PASS, the "
+            f"cross-body branch is still using the always-true placeholder."
         )
         failures = validate_edge_wait_coverage(g)
         cross_body_pack_to_cvt = [
@@ -2723,20 +2754,20 @@ class TestMFMAQuadCycleGap:
                  and e.producer.body_label != e.consumer.body_label]
         assert cross
         edge = cross[0]
-        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+        check = _mfma_pack_to_cvt_gap_ok(
             edge.producer, edge.consumer, g)
-        assert expected == 5, (
-            f"PackMFMA->CVT1 expected=5; got expected={expected}. A change "
+        assert check.required == 5, (
+            f"PackMFMA->CVT1 required=5; got required={check.required}. A change "
             f"here means QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 was mutated."
         )
-        assert actual == 4, (
+        assert check.observed == 4, (
             f"Cross-body off-by-one: PackMFMA + 4 LRs → CVT at "
-            f"current_issue=5; gap = 5-0-1 = 4. Got actual={actual}. "
+            f"current_issue=5; gap = 5-0-1 = 4. Got observed={check.observed}. "
             f"A ±1 miscount in the cross-body cumulative_issue_cycles walk "
             f"would shift this to 3 or 5 and be caught here."
         )
-        assert not ok, (
-            f"Cross-body actual=4 < expected=5 MUST fail. Got ok={ok}."
+        assert check.result == TimingResult.FAIL, (
+            f"Cross-body observed=4 < required=5 MUST fail. Got result={check.result}."
         )
         failures = validate_edge_wait_coverage(g)
         cross_body_pack_to_cvt = [
@@ -3504,6 +3535,7 @@ class TestSSetPriorCoverage:
             n_gl={0: _filler(BODY_LABEL_NGL)},
             n_ll={0: _filler(BODY_LABEL_NLL)},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         graph = build_dataflow_graph(cap)
         # SSetPrior must NOT appear as a data-flow node identity.
@@ -3522,8 +3554,9 @@ class TestSSetPriorCoverage:
         from Tensile.Components.CMSValidator import (
             _min_issue_quad_cycles_for,
         )
-        # No arch profile -> default CDNA4 base = 1.
-        cycles = _min_issue_quad_cycles_for(self._build_ssetprio(), None)
+        # Pass an explicit profile (helper now requires non-None profile).
+        cycles = _min_issue_quad_cycles_for(
+            self._build_ssetprio(), _DEFAULT_CDNA4_ARCH_PROFILE)
         assert cycles == 1, (
             "SSetPrior must use the default issue cost (1 quad-cycle); "
             "the SNop wait_state add path must NOT pick it up."

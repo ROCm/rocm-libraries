@@ -271,37 +271,65 @@ _ARCH_PROFILES_BY_ISA: Dict[Tuple[int, int, int], ArchProfile] = {
 }
 
 
-def _resolve_arch_profile_for_isa(isa: Optional[Tuple[int, int, int]]) -> ArchProfile:
-    """Return the ArchProfile for an ISA tuple. Default = CDNA 4.
+def _resolve_arch_profile_for_isa(
+    isa: Optional[Tuple[int, int, int]],
+) -> Optional[ArchProfile]:
+    """Return the ArchProfile for an ISA tuple, or `None` when unknown.
 
-    Unknown / missing ISAs intentionally fall back to CDNA 4 rather than
-    raising — the validator's pre-existing behavior was hardcoded CDNA 4,
-    so this keeps every uncharacterized arch on the historical code path.
+    Behavior:
+      - `isa is None`: returns `_DEFAULT_CDNA4_ARCH_PROFILE` (legacy
+        callers that haven't plumbed ISA through still get the historical
+        CDNA 4 path — we can't tell "no ISA available" apart from the
+        historical "didn't bother" case here).
+      - `isa` registered in `_ARCH_PROFILES_BY_ISA`: returns that profile.
+      - `isa` NOT registered: emits a `printWarning(...)` naming the ISA
+        tuple verbatim (grep-able), then returns `None`. There is NO
+        silent fallback to CDNA 4 — callers that receive `None` must
+        skip timing-related validation for this kernel (cross-graph
+        diff, wait coverage, SCC, MiddlePack interleaving still run).
+
+    Every call with an unknown ISA emits the warning — there is no
+    process-wide de-dup. A build that schedules N kernels for the same
+    uncharacterized arch fires N warnings. Production callers gate the
+    warning surface by calling the resolver once per kernel resolution.
+
+    Tracked: `rocm-libraries-zkzw`. The previous behavior silently
+    substituted CDNA 4 timing constants for any uncharacterized arch,
+    producing wrong timing answers without any signal to the user.
     """
     if isa is None:
         return _DEFAULT_CDNA4_ARCH_PROFILE
-    return _ARCH_PROFILES_BY_ISA.get(tuple(isa), _DEFAULT_CDNA4_ARCH_PROFILE)
+    isa_key = tuple(isa)
+    profile = _ARCH_PROFILES_BY_ISA.get(isa_key)
+    if profile is not None:
+        return profile
+    printWarning(
+        f"CMSValidator: no ArchProfile registered for ISA {isa_key!r}; "
+        f"skipping timing-related validation."
+    )
+    return None
 
 
-def _resolve_arch_profile(carrier: object) -> ArchProfile:
+def _resolve_arch_profile(carrier: object) -> Optional[ArchProfile]:
     """Return the ArchProfile attached to a DataflowGraph or FourPartCapture.
 
     `carrier` may be:
       - DataflowGraph with `.arch_profile` set,
       - FourPartCapture with `.arch_profile` set,
-      - GraphNode (resolves via its captured graph back-ref, if any),
       - None (degenerate test path).
 
-    Defaults to `_DEFAULT_CDNA4_ARCH_PROFILE` when no profile is attached
-    so the historical code path stays bit-identical for callers that don't
-    plumb arch info through.
+    Returns:
+      - The attached `ArchProfile` if one is set.
+      - `None` when `carrier.arch_profile is None` (unknown-ISA case;
+        the resolver returned None and the timing-related validation
+        is skipped downstream).
     """
     if carrier is None:
-        return _DEFAULT_CDNA4_ARCH_PROFILE
+        return None
     profile = getattr(carrier, "arch_profile", None)
     if isinstance(profile, ArchProfile):
         return profile
-    return _DEFAULT_CDNA4_ARCH_PROFILE
+    return None
 
 
 # --- Quad-cycle constants (default-CDNA 4 aliases) ---------------------------
@@ -433,9 +461,11 @@ class DataflowGraph:
     edges: list                            # list[DataflowEdge]
     captures: dict                         # body_label -> LoopBodyCapture
     num_mfma_per_subiter: int = 0          # copied from FourPartCapture; 0 ⇒ all-subiter-0
-    # Per-architecture timing profile. None = default CDNA 4. Copied from
-    # FourPartCapture by `build_dataflow_graph` so the four pair-specific
-    # quad-cycle helpers can resolve arch-specific constants from the graph.
+    # Per-architecture timing profile copied from FourPartCapture by
+    # `build_dataflow_graph`. `None` means "no profile registered for
+    # this kernel's ISA; the four pair-specific timing helpers and any
+    # other timing-related validation are skipped." Tracked:
+    # `rocm-libraries-zkzw`.
     arch_profile: Optional[ArchProfile] = None
 
     def edge_keys(self):
@@ -780,9 +810,12 @@ def _min_issue_quad_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = Non
     canonical per-instruction cost table.
     """
     if profile is None:
-        p = _DEFAULT_CDNA4_ARCH_PROFILE
-    else:
-        p = profile
+        raise ValueError(
+            "_min_issue_quad_cycles_for requires an explicit ArchProfile; "
+            "callers must pass the resolved per-arch profile (production "
+            "callers always do; tests must pass an explicit fixture)."
+        )
+    p = profile
     base = p.default_issue_quad_cycles
     if rocisa_inst is None:
         return base
@@ -814,6 +847,12 @@ def _make_node(
     identity = _identity_for(inst, body_label, category=tagged_inst.category)
     position = make_position(body_label, tagged_inst.slot)
     name = f"{tagged_inst.category}@{position.vmfma_index}.{position.sub_index}"
+    # `issue_cycles` is only meaningful when an arch profile is available
+    # (the field is never consumed downstream — `cumulative_issue_cycles`
+    # calls `_min_issue_quad_cycles_for` directly). Skip the helper call
+    # entirely on the unknown-ISA path so the helper can require a
+    # non-None profile.
+    issue_cycles = _min_issue_quad_cycles_for(inst, profile) if profile is not None else 0
     return GraphNode(
         identity=identity,
         position=position,
@@ -822,7 +861,7 @@ def _make_node(
         tagged_inst=tagged_inst,
         body_label=body_label,
         name=name,
-        issue_cycles=_min_issue_quad_cycles_for(inst, profile),
+        issue_cycles=issue_cycles,
     )
 
 
@@ -921,7 +960,8 @@ def build_dataflow_graph(four_part_capture):
     num_mfma_per_subiter = getattr(four_part_capture, 'num_mfma_per_subiter', 0) or 0
     # Forward the FourPartCapture's arch_profile (or None) to the graph so
     # the four pair-specific quad-cycle helpers can resolve the per-arch
-    # constants. None => default CDNA 4 (historical bit-identical path).
+    # constants. `None` means "no profile registered for this kernel's
+    # ISA; timing checks are skipped." Tracked: `rocm-libraries-zkzw`.
     arch_profile = getattr(four_part_capture, 'arch_profile', None)
 
     nodes_by_identity = {}
@@ -1296,9 +1336,12 @@ def _mfma_finish_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) 
     and `profile.mfma_4x4_finish_cycles`.
     """
     if profile is None:
-        p = _DEFAULT_CDNA4_ARCH_PROFILE
-    else:
-        p = profile
+        raise ValueError(
+            "_mfma_finish_cycles_for requires an explicit ArchProfile; "
+            "callers must pass the resolved per-arch profile (production "
+            "callers always do; tests must pass an explicit fixture)."
+        )
+    p = profile
     if rocisa_inst is None:
         return p.standard_mfma_finish_cycles
     # Fast path: test fixtures expose `variant` directly.
@@ -1434,12 +1477,15 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
     if not captures:
         return 0
 
-    # Resolve the per-arch profile from the graph; default = CDNA 4 so
-    # callers that haven't plumbed arch info through get the historical
-    # bit-identical numbers. The simulator below uses
+    # Resolve the per-arch profile from the graph. The simulator below uses
     # `profile.mfma_4x4_finish_cycles` for MFMA-class discrimination
     # (rather than the legacy module-scope alias) so per-arch overrides
     # to the 4x4 finish window don't decouple from the discriminator.
+    # All callers (the four pair-specific timing helpers) short-circuit
+    # on `graph.arch_profile is None` before invoking this function;
+    # production code paths therefore never reach here with a None
+    # profile. Test fixtures that want timing checks must pass an
+    # explicit profile (e.g. `_DEFAULT_CDNA4_ARCH_PROFILE`).
     profile = _resolve_arch_profile(graph)
 
     # Producer must always be strictly before consumer in stream order. The
@@ -1575,16 +1621,62 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
     return c_issue_start - p_issue_start - 1
 
 
+class TimingResult(Enum):
+    """Outcome of a per-edge timing check.
+
+    PASS                 — observed cycle gap >= required threshold.
+    FAIL                 — observed gap is strictly less than required;
+                           caller emits a `TimingTooCloseFailure`.
+    ARCH_NOT_SUPPORTED   — the kernel's ISA had no `ArchProfile` registered
+                           in `_ARCH_PROFILES_BY_ISA`. The check is
+                           short-circuited (no timing failure emitted) and
+                           the warning was already fired at resolve time.
+    """
+    PASS = "pass"
+    FAIL = "fail"
+    ARCH_NOT_SUPPORTED = "arch_not_supported"
+
+
+@dataclass(frozen=True)
+class TimingCheck:
+    """Return value of the four pair-specific timing helpers
+    (`_quad_cycle_gap_ok`, `_cvt_to_mfma_gap_ok`,
+    `_mfma_pack_to_cvt_gap_ok`).
+
+    Fields:
+      result   — `TimingResult` enum (PASS / FAIL / ARCH_NOT_SUPPORTED).
+      observed — observed quad-cycles between producer and consumer
+                 (0 when ARCH_NOT_SUPPORTED or graph absent).
+      required — per-arch threshold the gap must meet for PASS
+                 (0 when ARCH_NOT_SUPPORTED).
+    """
+    result: TimingResult
+    observed: int
+    required: int
+
+    @classmethod
+    def arch_not_supported(cls) -> "TimingCheck":
+        return cls(result=TimingResult.ARCH_NOT_SUPPORTED, observed=0, required=0)
+
+    @classmethod
+    def passing(cls, observed: int, required: int) -> "TimingCheck":
+        return cls(result=TimingResult.PASS, observed=observed, required=required)
+
+    @classmethod
+    def failing(cls, observed: int, required: int) -> "TimingCheck":
+        return cls(result=TimingResult.FAIL, observed=observed, required=required)
+
+
 def _quad_cycle_gap_ok(
     producer: GraphNode,
     consumer: GraphNode,
     num_mfma_per_subiter: int = 0,
     graph: Optional[DataflowGraph] = None,
-) -> Tuple[bool, int, int]:
+) -> "TimingCheck":
     """Verify that enough quad-cycles separate an MFMA producer from its
     consumer for the producer's result to be visible.
 
-    Returns (ok, expected_quad_cycles, actual_quad_cycles).
+    Returns a `TimingCheck` (result, observed, required).
 
     Same-body and cross-body share ONE code path that delegates to
     `cumulative_issue_cycles`. The hardware MFMA pipeline does not reset
@@ -1601,33 +1693,43 @@ def _quad_cycle_gap_ok(
     longer consulted (the helper has the body context). `graph` is the
     DataflowGraph the producer/consumer belong to; when omitted (or when
     the body can't be located) we degrade gracefully by reporting an
-    `actual` of 0 — strictly conservative, will fail the gap check.
+    `observed` of 0 — strictly conservative, will fail the gap check.
     """
-    profile = _resolve_arch_profile(graph)
-    finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None), profile)
-    expected = finish
-
+    # Defensive guard for unit-test scaffolding: production callers always
+    # pass a real graph. No graph -> no profile -> no derivable threshold;
+    # report a strict FAIL so degenerate test paths surface rather than
+    # silently passing.
     if graph is None:
-        # No graph passed (degenerate test path): treat as zero-gap. Strict
-        # callers always pass `graph=subj_graph`.
-        return False, expected, 0
+        return TimingCheck.failing(observed=0, required=0)
+    # Unknown-ISA short-circuit (rocm-libraries-zkzw): no characterized
+    # timing constants for this arch. Report ARCH_NOT_SUPPORTED so the
+    # caller treats the gap as passing and emits no `TimingTooCloseFailure`.
+    # All other (non-timing) validation continues to run.
+    if graph.arch_profile is None:
+        return TimingCheck.arch_not_supported()
 
-    actual = cumulative_issue_cycles(graph, producer, consumer)
-    return actual >= expected, expected, actual
+    profile = graph.arch_profile
+    finish = _mfma_finish_cycles_for(getattr(producer, "rocisa_inst", None), profile)
+    required = finish
+
+    observed = cumulative_issue_cycles(graph, producer, consumer)
+    if observed >= required:
+        return TimingCheck.passing(observed, required)
+    return TimingCheck.failing(observed, required)
 
 
 def _cvt_to_mfma_gap_ok(
     producer: GraphNode, consumer: GraphNode, subj_graph: Optional[DataflowGraph]
-) -> Tuple[bool, int, int]:
+) -> "TimingCheck":
     """Verify that enough quad-cycles separate a CVTPack producer from its
     downstream MFMA consumer for the CVT result to be visible.
 
     The threshold is fixed at `_QUAD_CYCLES_CVT_BEFORE_MFMA == 2`
     (CDNA 4 ISA 7.6).
 
-    Returns `(ok, expected, actual)` — same triple shape as
-    `_quad_cycle_gap_ok` so callers can wrap a single
-    `TimingTooCloseFailure(expected, actual)` regardless of the gap kind.
+    Returns a `TimingCheck` — same shape as `_quad_cycle_gap_ok` so
+    callers can wrap a single `TimingTooCloseFailure(required, observed)`
+    regardless of the gap kind.
 
     Same-body and cross-body share ONE code path that delegates to
     `cumulative_issue_cycles`. WARNING for future reverts: the previous
@@ -1635,24 +1737,31 @@ def _cvt_to_mfma_gap_ok(
     was DOUBLE-COUNTING — it charged 1 cycle per slot-INDEX gap AND
     +intervening for actual instructions in those slots. The cycle-exact
     walk only counts actual instructions, producing a smaller (more
-    conservative) `actual` for densely-populated streams. A previous
+    conservative) `observed` for densely-populated streams. A previous
     `body_delta * 1000` cross-body placeholder is also gone;
     `cumulative_issue_cycles` walks the unified instruction stream
     across all bodies in `_BODY_BUILD_ORDER`.
     """
-    profile = _resolve_arch_profile(subj_graph)
-    expected = profile.cvt_before_mfma_quad_cycles
-
+    # Defensive guard for unit-test scaffolding: see _quad_cycle_gap_ok.
+    # No graph -> no profile -> no derivable threshold; strict FAIL.
     if subj_graph is None:
-        return False, expected, 0  # Strict: no graph -> conservative fail.
+        return TimingCheck.failing(observed=0, required=0)
+    # Unknown-ISA short-circuit (rocm-libraries-zkzw): see _quad_cycle_gap_ok.
+    if subj_graph.arch_profile is None:
+        return TimingCheck.arch_not_supported()
 
-    actual = cumulative_issue_cycles(subj_graph, producer, consumer)
-    return actual >= expected, expected, actual
+    profile = subj_graph.arch_profile
+    required = profile.cvt_before_mfma_quad_cycles
+
+    observed = cumulative_issue_cycles(subj_graph, producer, consumer)
+    if observed >= required:
+        return TimingCheck.passing(observed, required)
+    return TimingCheck.failing(observed, required)
 
 
 def _mfma_pack_to_cvt_gap_ok(
     producer: GraphNode, consumer: GraphNode, subj_graph: Optional[DataflowGraph]
-) -> Tuple[bool, int, int]:
+) -> "TimingCheck":
     """Verify that enough quad-cycles separate a 4x4 PackMFMA producer from
     its downstream CVTPack (CVT1) consumer for the accumulator to settle.
 
@@ -1663,10 +1772,10 @@ def _mfma_pack_to_cvt_gap_ok(
     helper enforces a larger min-gap on PackMFMA->CVTPack edges than
     the bare finish would suggest.
 
-    Returns `(ok, expected, actual)` — same triple shape as
-    `_quad_cycle_gap_ok` and `_cvt_to_mfma_gap_ok` so callers can wrap a
-    single `TimingTooCloseFailure(expected, actual)` regardless of the
-    gap kind.
+    Returns a `TimingCheck` — same shape as `_quad_cycle_gap_ok` and
+    `_cvt_to_mfma_gap_ok` so callers can wrap a single
+    `TimingTooCloseFailure(required, observed)` regardless of the gap
+    kind.
 
     Approach: CYCLE-EXACT via `cumulative_issue_cycles`, the same
     simulator `_quad_cycle_gap_ok` uses. The helper walks the captured
@@ -1687,15 +1796,21 @@ def _mfma_pack_to_cvt_gap_ok(
     PackMFMA -> CVT1 edges are enforced with the same 5-quad-cycle
     threshold as same-body edges.
     """
-    profile = _resolve_arch_profile(subj_graph)
-    expected = profile.mfma_4x4_before_cvt_quad_cycles
-
+    # Defensive guard for unit-test scaffolding: see _quad_cycle_gap_ok.
+    # No graph -> no profile -> no derivable threshold; strict FAIL.
     if subj_graph is None:
-        # Strict: no graph -> conservative fail (cannot compute gap).
-        return False, expected, 0
+        return TimingCheck.failing(observed=0, required=0)
+    # Unknown-ISA short-circuit (rocm-libraries-zkzw): see _quad_cycle_gap_ok.
+    if subj_graph.arch_profile is None:
+        return TimingCheck.arch_not_supported()
 
-    actual = cumulative_issue_cycles(subj_graph, producer, consumer)
-    return actual >= expected, expected, actual
+    profile = subj_graph.arch_profile
+    required = profile.mfma_4x4_before_cvt_quad_cycles
+
+    observed = cumulative_issue_cycles(subj_graph, producer, consumer)
+    if observed >= required:
+        return TimingCheck.passing(observed, required)
+    return TimingCheck.failing(observed, required)
 
 
 def _is_alu_producer(producer: GraphNode) -> bool:
@@ -2445,15 +2560,15 @@ def diagnose_missing_edge(
     # dispatch is now the only enforcement path.
     if (_is_mfma_pack_producer(p_node)
             and _is_cvt_pack_producer(c_node)):
-        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+        check = _mfma_pack_to_cvt_gap_ok(
             p_node, c_node, subj_graph)
-        if not ok:
+        if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
                 producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
                 consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
                 iter_delta=_cms_iter_delta(p_node, c_node),
-                expected_quad_cycles=expected,
-                actual_quad_cycles=actual,
+                expected_quad_cycles=check.required,
+                actual_quad_cycles=check.observed,
             )]
         return []
 
@@ -2466,14 +2581,14 @@ def diagnose_missing_edge(
     # them.
     if _is_mfma_producer(p_node):
         nmps = subj_graph.num_mfma_per_subiter
-        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
-        if not ok:
+        check = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
+        if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
                 producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
                 consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
                 iter_delta=_cms_iter_delta(p_node, c_node),
-                expected_quad_cycles=expected,
-                actual_quad_cycles=actual,
+                expected_quad_cycles=check.required,
+                actual_quad_cycles=check.observed,
             )]
         return []
 
@@ -2486,14 +2601,14 @@ def diagnose_missing_edge(
     # through to the ALU exemption — only the CVT->MFMA edge carries the
     # quad-cycle constraint.
     if _is_cvt_pack_producer(p_node) and _is_mfma_producer(c_node):
-        ok, expected, actual = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
-        if not ok:
+        check = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
+        if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
                 producer=cms_node_label(p_node, _body_for_node(subj_graph, p_node)),
                 consumer=cms_node_label(c_node, _body_for_node(subj_graph, c_node)),
                 iter_delta=_cms_iter_delta(p_node, c_node),
-                expected_quad_cycles=expected,
-                actual_quad_cycles=actual,
+                expected_quad_cycles=check.required,
+                actual_quad_cycles=check.observed,
             )]
         return []
 
@@ -2727,15 +2842,15 @@ def _classify_edge_coverage(
 
     if (_is_mfma_pack_producer(p_node)
             and _is_cvt_pack_producer(c_node)):
-        ok, expected, actual = _mfma_pack_to_cvt_gap_ok(
+        check = _mfma_pack_to_cvt_gap_ok(
             p_node, c_node, subj_graph)
-        if not ok:
+        if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
                 producer=p_label,
                 consumer=c_label,
                 iter_delta=iter_delta,
-                expected_quad_cycles=expected,
-                actual_quad_cycles=actual,
+                expected_quad_cycles=check.required,
+                actual_quad_cycles=check.observed,
             )]
         return []
 
@@ -2747,14 +2862,14 @@ def _classify_edge_coverage(
     # `_is_alu_producer` below.
     if _is_mfma_producer(p_node):
         nmps = subj_graph.num_mfma_per_subiter
-        ok, expected, actual = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
-        if not ok:
+        check = _quad_cycle_gap_ok(p_node, c_node, nmps, graph=subj_graph)
+        if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
                 producer=p_label,
                 consumer=c_label,
                 iter_delta=iter_delta,
-                expected_quad_cycles=expected,
-                actual_quad_cycles=actual,
+                expected_quad_cycles=check.required,
+                actual_quad_cycles=check.observed,
             )]
         return []
 
@@ -2771,14 +2886,14 @@ def _classify_edge_coverage(
     # carries no quad-cycle constraint — fall through to the ALU
     # exemption in that case.
     if _is_cvt_pack_producer(p_node) and _is_mfma_producer(c_node):
-        ok, expected, actual = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
-        if not ok:
+        check = _cvt_to_mfma_gap_ok(p_node, c_node, subj_graph)
+        if check.result == TimingResult.FAIL:
             return [TimingTooCloseFailure(
                 producer=p_label,
                 consumer=c_label,
                 iter_delta=iter_delta,
-                expected_quad_cycles=expected,
-                actual_quad_cycles=actual,
+                expected_quad_cycles=check.required,
+                actual_quad_cycles=check.observed,
             )]
         return []
 
@@ -3861,10 +3976,17 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> None:
         # Attach the per-arch quad-cycle profile derived from this kernel's
         # ISA tuple so the four pair-specific gap helpers consult arch-
         # appropriate finish-cycle / settle-window values. Unknown ISAs
-        # fall back to the CDNA 4 default for historical compatibility.
-        arch_profile = _resolve_arch_profile_for_isa(
-            tuple(kernel["ISA"]) if "ISA" in kernel else None
-        )
+        # (no ArchProfile registered in `_ARCH_PROFILES_BY_ISA`) get a
+        # `None` profile back from the resolver — the resolver emits a
+        # warning every time it's called with an unknown ISA; this single
+        # call site keeps the warning surface to once-per-kernel-resolution.
+        # `arch_profile=None` propagates through both captures and graphs;
+        # the four pair-specific timing helpers short-circuit when they
+        # see it (rocm-libraries-zkzw). Cross-graph diff, wait coverage,
+        # SCC, and MiddlePack interleaving still run for unknown ISAs;
+        # only the four pair-specific timing checks are suppressed.
+        isa_tuple = tuple(kernel["ISA"]) if "ISA" in kernel else None
+        arch_profile = _resolve_arch_profile_for_isa(isa_tuple)
         if context.default_capture.arch_profile is None:
             context.default_capture.arch_profile = arch_profile
         if context.cms_capture.arch_profile is None:

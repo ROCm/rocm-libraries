@@ -64,6 +64,7 @@ from Tensile.Components.CMSValidator import (
     OrderInvertedFailure,
     build_dataflow_graph,
     validate_edge_wait_coverage,
+    _DEFAULT_CDNA4_ARCH_PROFILE,
 )
 
 from dataflow_fixtures import (
@@ -105,6 +106,7 @@ def _wrap(ml_capture, *, ml_prev=None, ngl=None, nll=None):
         n_gl={0: ngl if ngl is not None else _filler(BODY_LABEL_NGL)},
         n_ll={0: nll if nll is not None else _filler(BODY_LABEL_NLL)},
         num_mfma=1, num_codepaths=1, source="cms",
+        arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
     )
 
 
@@ -489,6 +491,7 @@ class TestStructuralProperties:
             n_ll={0: make_capture(BODY_LABEL_NLL, [
                 make_mfma(0, 8, 32, slot=0)])},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         g = build_dataflow_graph(cap)
         assert set(g.captures.keys()) == {
@@ -592,6 +595,7 @@ class TestStructuralProperties:
             n_ll={0: make_capture(BODY_LABEL_NLL, [
                 make_mfma(0, 8, 32, slot=0)])},
             num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
         )
         with pytest.raises(CaptureEmptyBodyError):
             build_dataflow_graph(cap)

@@ -58,6 +58,7 @@ from Tensile.Components.CMSValidator import (
     OverriddenInputFailure,
     build_dataflow_graph,
     compare_graphs,
+    _DEFAULT_CDNA4_ARCH_PROFILE,
 )
 
 from dataflow_fixtures import make_capture
@@ -102,6 +103,7 @@ def _wrap_single_body(ml_capture):
         n_gl={0: _filler(BODY_LABEL_NGL, 220, 224, 228)},
         n_ll={0: _filler(BODY_LABEL_NLL, 240, 244, 248)},
         num_mfma=1, num_codepaths=1, source="cms",
+        arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
     )
 
 
