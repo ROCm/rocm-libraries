@@ -41,6 +41,14 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+HIPDNN_CONFIG="$INSTALL_DIR/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
+if { [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; } && [ "$AUTO_YES" -eq 0 ]; then
+    read -r -p "This will install hipDNN to $INSTALL_DIR. Continue? [Y/n] " confirm
+    case "$confirm" in
+        [nN]) echo "Aborted."; exit 0 ;;
+    esac
+fi
+
 # 1. Create or activate venv
 if [ -d "$VENV_DIR" ]; then
     echo "Removing existing virtual environment at $VENV_DIR..."
@@ -104,14 +112,7 @@ pip install -e "$SCRIPT_DIR"
 # 3. Build and install hipDNN + MIOpen
 # The installed cmake configs use install-tree paths; pointing CMAKE_PREFIX_PATH at
 # the raw build dir causes "non-existent path" errors in hipdnn_data_sdkConfig.cmake.
-HIPDNN_CONFIG="$INSTALL_DIR/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
 if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
-    if [ "$AUTO_YES" -eq 0 ]; then
-        read -r -p "This will install hipDNN to $INSTALL_DIR. Continue? [Y/n] " confirm
-        case "$confirm" in
-            [nN]) echo "Aborted."; exit 0 ;;
-        esac
-    fi
     echo "Building and installing hipDNN..."
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
