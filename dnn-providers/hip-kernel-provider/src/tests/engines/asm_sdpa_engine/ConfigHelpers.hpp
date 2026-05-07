@@ -17,10 +17,12 @@
 namespace asm_sdpa_engine
 {
 
-inline std::vector<fmha_v3_fwdConfig> getConfigsForArch(const std::string& archId)
+template <class T>
+inline std::vector<T> getConfigsForArch(const std::string& archId,
+                                        const std::unordered_map<std::string, T>& configMap)
 {
-    std::vector<fmha_v3_fwdConfig> configs;
-    for(const auto& [key, config] : cfg_fmha_fwd)
+    std::vector<T> configs;
+    for(const auto& [key, config] : configMap)
     {
         if(config.arch == archId)
         {
@@ -240,10 +242,12 @@ inline flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdC
     return builder;
 }
 
-inline auto getCompatibleGraphsForArch(const std::string& archId)
+template <class T>
+auto getCompatibleGraphsForArch(const std::string& archId,
+                                const std::unordered_map<std::string, T>& configMap)
 {
     std::vector<GraphTest> graphs;
-    for(const auto& config : getConfigsForArch(archId))
+    for(const auto& config : getConfigsForArch(archId, configMap))
     {
         graphs.emplace_back(configToCompatibleGraph(config), config.co_name);
     }
