@@ -344,7 +344,7 @@ TEST_F(IntegrationPluginLoading, PluginWithIncompatibleApiVersion)
     std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> buffer;
     hipdnnGetLastErrorString(buffer.data(), buffer.size());
 
-    EXPECT_NE(std::string{buffer.data()}.find("does not match backend major version"),
+    EXPECT_NE(std::string{buffer.data()}.find("does not match expected engine API major version"),
               std::string::npos);
     EXPECT_EQ(test_util::getLoadedPlugins(_handle).size(), 0);
 }

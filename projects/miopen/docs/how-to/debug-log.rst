@@ -151,7 +151,7 @@ Some of the solutions have individual controls, which affect both find and immed
   * ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD11X11`` -- ``ConvHipDirectFwd11x11``
   * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWDGEN`` -- ``ConvOclDirectFwdGen``
   * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD`` -- ``ConvOclDirectFwd``
-  * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD1X1`` -- ``ConvOclDirectFwd1x1``
+
   * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW2`` -- ``ConvOclBwdWrW2<n>`` (where n =
     ``{1,2,4,8,16}``) and ``ConvOclBwdWrW2NonTunable``
   * ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW53`` -- ``ConvOclBwdWrW53``

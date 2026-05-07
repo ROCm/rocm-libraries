@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """MFMATile-based logical scheduler.
 
 Builds a logical schedule using MFMA tile indices as the core primitive,
@@ -1925,7 +1928,7 @@ class LogicalScheduler:
         For subIterKs with MFMAs: calls instructionSchedule for interleaving.
         For subIterKs without MFMAs (preloop): emits instructions sequentially.
         """
-        from Tensile.Components.SubtileBasedInstructionScheduler import instructionSchedule
+        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
         from rocisa.code import Module
 
         module = Module(label)
@@ -2089,7 +2092,7 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.VGPR_TILES)
 
-        from Tensile.Components.SubtileBasedKernel import TileInfo
+        from Tensile.Components.Subtile.Kernel import RegisterTileInfo
 
         cfg = self.config
 
@@ -2099,7 +2102,7 @@ class LogicalScheduler:
         def _alloc_tiles(count, numRegs):
             tiles = []
             for _ in range(count):
-                tile = TileInfo.RegisterTileInfo(writer.vgprPool)
+                tile = RegisterTileInfo(writer.vgprPool)
                 for j in range(0, numRegs, 4):
                     blockSize = min(4, numRegs - j)
                     vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize)
@@ -2126,7 +2129,7 @@ class LogicalScheduler:
         """Deallocate VGPR tiles allocated by allocVgprTiles."""
         def _dealloc_tiles(tiles):
             for tile in tiles:
-                pool = tile.regList.regPool
+                pool = tile.regList.pool
                 for val in tile:
                     if tile.index(val) % 4 == 0:
                         pool.checkIn(val)
@@ -2154,7 +2157,7 @@ class LogicalScheduler:
                 or self._nll_emitted is None:
             self.build()
 
-        from Tensile.Components.SubtileBasedInstructionEmitter import InstructionEmitter
+        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
 
         emitter = InstructionEmitter(
             writer, kernel, self.config,
@@ -2389,7 +2392,7 @@ class LogicalScheduler:
 
     def print_emit_dep_order(self, all_partitions: List[List[List[EmittedModule]]] = None) -> str:
         """Print emit output as dependency paths (same decomposition as _extractPathsFromBeforeDeps)."""
-        from Tensile.Components.SubtileBasedInstructionScheduler import extractPathsFromBeforeDeps
+        from Tensile.Components.Subtile.InstructionScheduler import extractPathsFromBeforeDeps
         if all_partitions is None:
             all_partitions = self._emitted
         buf = io.StringIO()

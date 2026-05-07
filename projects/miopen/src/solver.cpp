@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include <miopen/activ/solvers.hpp>
@@ -310,7 +310,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
              Primitive::Fusion,
              fusion::ConvOclDirectFwdFused{}.SolverDbId(),
              miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd1x1{}, miopenConvolutionAlgoDirect);
+    ++id; // removed ConvOclDirectFwd1x1
     RegisterWithSolver(registry, ++id, conv::ConvBinWinograd3x3U{}, miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry, ++id, conv::ConvBinWinogradRxS{}, miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry, ++id, conv::ConvAsmBwdWrW3x3{}, miopenConvolutionAlgoDirect);

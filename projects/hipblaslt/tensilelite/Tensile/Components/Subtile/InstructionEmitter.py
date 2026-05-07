@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Instruction emitter for LogicalScheduler.
 
 Converts the logical schedule (EmittedModule chains) into concrete GPU
@@ -6,10 +9,14 @@ instructions by dispatching each opType to its emit method.
 
 from __future__ import annotations
 
-from Tensile.Components.SubtileBasedKernel import (
-    emitMfmaInstruction, emitSingleDsRead, emitSingleBufferLoad,
-    globalReadPtrUpdates, globalReadLDSBufferSwap,
-    localReadLDSBufferSwap,
+from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
+from Tensile.Components.Subtile.SubtileGREmit import (
+    emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
+)
+from Tensile.Components.Subtile.SubtileLREmit import (
+    emitSingleDsRead, localReadLDSBufferSwap,
+)
+from Tensile.Components.Subtile.SubtileScaleEmit import (
     globalReadDoScaleSubtile, globalReadScalePtrUpdates,
 )
 from rocisa.code import Module

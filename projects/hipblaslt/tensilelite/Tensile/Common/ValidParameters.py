@@ -123,6 +123,11 @@ def makeValidMFMA():
     validMFMA["B8NB8N"] = validMFMA["F8NF8N"]
     validMFMA["F8NB8N"] = validMFMA["F8NF8N"]
     validMFMA["B8NF8N"] = validMFMA["F8NF8N"]
+    # fnuz (NANOO) OCP pairings: DataType *_fnuz uses *N suffix; same MFMA sets as F8B8 / B8F8.
+    validMFMA["F8B8NF8B8N"] = validMFMA["F8B8"]
+    validMFMA["B8F8NB8F8N"] = validMFMA["B8F8"]
+    validMFMA["F8B8NB8F8N"] = validMFMA["F8B8"]
+    validMFMA["B8F8NF8B8N"] = validMFMA["F8B8"]
     validMFMA["F6F6"] = [[16,16,128,1], [32,32,64,1]]
     validMFMA["B6B6"] = [[16,16,128,1], [32,32,64,1]]
     validMFMA["F6B6"] = [[16,16,128,1], [32,32,64,1]]
@@ -173,6 +178,10 @@ def makeValidSMFMA():
     validSMFMA["B8NB8N"] = validSMFMA["F8F8"]
     validSMFMA["F8NB8N"] = validSMFMA["F8NF8N"]
     validSMFMA["B8NF8N"] = validSMFMA["F8NF8N"]
+    validSMFMA["F8B8NF8B8N"] = validSMFMA["F8B8"]
+    validSMFMA["B8F8NB8F8N"] = validSMFMA["B8F8"]
+    validSMFMA["F8B8NB8F8N"] = validSMFMA["F8B8"]
+    validSMFMA["B8F8NF8B8N"] = validSMFMA["F8B8"]
     validSMFMA["_format9"] = []
     for SMFMA in [validSMFMA["HH"], validSMFMA["BB"], validSMFMA["4xi84xi8"], validSMFMA["F8NF8N"], makeValidSWMMAC()]:
         for MI in SMFMA:

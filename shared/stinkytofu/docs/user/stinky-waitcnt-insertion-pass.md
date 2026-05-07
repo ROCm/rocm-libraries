@@ -1,0 +1,447 @@
+# StinkyWaitCntInsertionPass - Def-Use Chain Based Wait Count Insertion
+
+`StinkyWaitCntInsertionPass` inserts `s_waitcnt` instructions so that asynchronous memory operations complete before their results are consumed. It determines where waits are needed by walking instruction-level def-use chains, rather than tracking individual registers.
+
+### Key Characteristics
+
+- **Instruction-level tracking** via def-use chains (not register-level)
+- **Three counter types**: DS (`dlcnt`), buffer/load (`vlcnt`), tensor (`tlcnt`)
+- **Cross-block analysis** using pre-scanned exit states and predecessor lookup
+- **Tensor handling** via a separate barrier-token heuristic phase that always runs
+- **Selective processing**: only basic blocks approved by `PassContext::shouldProcessBasicBlock` are analyzed and modified
+
+## Pass Flow
+
+```
++---------------------------------------------------------------+
+|              StinkyWaitCntInsertionPass::run()                 |
++---------------------------------------------------------------+
+
+                  Function Entry
+                        |
+                        v
+            +-----------------------+
+            |  buildUseDefChain()   |   Build instruction-level
+            |                       |   def-use chains with PHIs
+            +-----------+-----------+
+                        |
+                        v
+            +-----------------------+
+            |  buildBlockExitStates |   Pre-scan processed blocks to
+            |                       |   record in-flight memory ops
+            +-----------+-----------+
+                        |
+                        v
+            +-----------------------+
+            | traverseCFGInRPO      |   For each processed block
+            |                       |   (reverse post-order):
+            | 1. computeRequiredWaits  Determine (anchor, waitSpec) pairs
+            | 2. emitWaitInstructions  Insert s_wait_* before each anchor
+            +-----------+-----------+
+                        |
+                        v
+            +-----------------------+
+            | reinsertTensorWaits   |   Remove + reinsert tensor
+            | Heuristic             |   waits using token matching
+            +-----------+-----------+
+                        |
+                        v
+            +-----------------------+
+            |  removePHIs           |   Strip PHI pseudo-instructions
+            +-----------+-----------+
+                        |
+                        v
+                  Function Exit
+```
+
+## Dependency Resolution: collectSources
+
+Before the pass can determine where waits are needed, it must resolve each instruction's dependencies back to the memory operations that produce its inputs. The `collectSources` function does this by walking the def-use chain and flattening through PHI nodes.
+
+PHI pseudo-instructions represent merge points in the CFG where a value may come from different predecessors. Instead of treating a PHI as a dependency itself, the pass recursively replaces it with all of its incoming values (the real instructions behind the PHI). A `seenPhi` set prevents infinite recursion on cyclic PHI webs (e.g., loop-carried dependencies).
+
+```
+v_wmma uses v[0:3]
+  -> def-use chain: v[0:3] comes from PHI
+       -> PHI incoming[0]: ds_read (from preloop block)
+       -> PHI incoming[1]: ds_read (from loop body)
+  -> collectSources returns: {ds_read_preloop, ds_read_loop}
+```
+
+An optional filter restricts which sources are collected. For wait count insertion, only DS and buffer memory operations are kept:
+
+```cpp
+collectSources(inst, [](StinkyInstruction* src) {
+    return isDSMemoryOp(*src) || isBufferMemoryOp(*src);
+});
+```
+
+## Data Structures
+
+### PendingMemOpTracker
+
+Tracks in-flight (not yet waited-on) memory operations as ordered queues. Each processed basic block has an associated tracker that represents its exit state.
+
+```
++----------------------------------------------+
+|            PendingMemOpTracker               |
++----------------------------------------------+
+| pendingDSOps:     deque<Instruction*>        |  DS reads/writes in issue order
+| activeDSTokens:   unordered_set<int>         |  MemTokenData tokens from DS ops
+| pendingBufferOps: deque<Instruction*>        |  Global loads/stores in issue order
++----------------------------------------------+
+| pendingDSCount()            -> int           |  Total pending DS ops
+| pendingBufferCount()        -> int           |  Total pending buffer ops
+| pendingDSCountFrom(inst)    -> int           |  Ops from inst to end of DS queue
+| pendingBufferCountFrom(inst) -> int          |  Ops from inst to end of buffer queue
+| recordDSOperation(inst)     -> bool          |  Append DS op + collect tokens
+| recordBufferOperation(inst) -> bool          |  Append buffer op
+| trimQueueToLastWait(queue, lastWait)         |  Remove completed ops from front
++----------------------------------------------+
+```
+
+The `pendingDSCountFrom(inst)` / `pendingBufferCountFrom(inst)` methods return how many ops remain from `inst` to the end of the queue. This value directly maps to the hardware wait count immediate: it represents the number of outstanding ops that must still complete (including `inst` itself). Returns 0 if `inst` is not found in the queue.
+
+### WaitCountSpec
+
+A descriptor for which wait counter(s) to emit before an anchor instruction. Each field is either a non-negative count immediate or `kUnused` (-1) if that counter is not needed.
+
+```
++--------------------------------+
+|         WaitCountSpec          |
++--------------------------------+
+| dsCount:     int  (dlcnt)      |  s_wait_dscnt immediate, or kUnused
+| bufferCount: int  (vlcnt)      |  s_wait_loadcnt immediate, or kUnused
+| tensorCount: int  (tlcnt)      |  s_wait_tensorcnt immediate, or kUnused
++--------------------------------+
+```
+
+### CounterWaitState
+
+Per-counter bookkeeping during a single block walk. Tracks the last emitted wait value and how many new ops have been issued since, enabling redundancy elision.
+
+```
++--------------------------------+
+|       CounterWaitState         |
++--------------------------------+
+| lastEmittedWait: int           |  Value of last emitted wait (or kUnused)
+| opsSinceLastWait: int          |  New ops issued since last wait
++--------------------------------+
+| recordNewOp()                  |  Increment opsSinceLastWait
+| needsNewWait(required) -> bool |  Is another wait actually needed?
+| recordEmittedWait(value)       |  Record that a wait was emitted
++--------------------------------+
+```
+
+## Memory Tokens (MemTokenData)
+
+Several instructions in the IR carry `MemTokenData` modifiers -- integer token IDs that represent logical LDS memory regions. These tokens are attached upstream by `StinkyBuildImplicitDependencyPass`, which assigns them to tensor loads, DS writes, DS reads, and barriers to express implicit ordering dependencies that are not visible in the register def-use chain.
+
+This pass uses `MemTokenData` in two ways:
+
+1. **DS barrier conflict** (in `computeRequiredWaits`): if a barrier's tokens overlap with the `activeDSTokens` accumulated from pending DS ops, force a `s_wait_dscnt 0`.
+2. **Tensor barrier matching** (in `reinsertTensorWaitsHeuristic`): if the oldest pending tensor load's tokens overlap with a barrier's tokens, emit a `s_wait_tensorcnt`.
+
+## Core Algorithm: computeRequiredWaits
+
+This method walks a single basic block in program order and determines which instructions need a preceding wait. It returns a list of `(anchorInstruction, WaitCountSpec)` pairs.
+
+### Per-instruction logic
+
+```
+For each non-PHI instruction in the block:
+
+  1. Record it as a DS or buffer op (if applicable)
+     -> Increment the corresponding counter's opsSinceLastWait
+
+  2. If it is a barrier with MemTokenData token conflict:
+     -> Emit DS wait-0 (all pending DS ops must complete)
+     -> Clear DS state and continue to next instruction
+
+  3. Collect its memory-op dependencies via collectSources
+     (flatten through PHIs, filter to DS/buffer ops only)
+     -> If no memory-op dependencies, skip to next instruction
+
+  4. For each counter (DS, buffer):
+     a. Compute the required wait value (current block + predecessors)
+     b. Check if a new wait is actually needed (redundancy elision)
+     c. If needed, record the (anchor, waitSpec) pair
+
+After the loop:
+  5. Trim exit state queues based on last emitted waits
+  6. Store the trimmed state into blockExitMemState for successor blocks
+```
+
+### Barrier token conflict handling
+
+When a barrier instruction carries `MemTokenData` tokens that overlap with the `activeDSTokens` accumulated from pending DS operations, the pass forces a `s_wait_dscnt 0` before that barrier. This ensures all DS operations sharing a token with the barrier complete before the barrier executes.
+
+```
+Pending DS ops: [ds_read @token=1, ds_write @token=2]
+activeDSTokens: {1, 2}
+
+Barrier @tokens=[2, 3]:
+  -> hasTokenOverlap({1,2}, [2,3]) = true (token 2)
+  -> Emit s_wait_dscnt 0 before barrier
+  -> Clear activeDSTokens and pendingDSOps
+```
+
+## Wait Value Computation: computeWaitValueForCounter
+
+This method computes the minimum wait count value needed for a single counter (DS or buffer) given the consumer instruction's memory-op dependencies. It is called twice per consumer instruction -- once for the DS counter, once for the buffer counter -- with a callback that delegates to the appropriate `pendingCountFrom` method:
+
+```cpp
+// DS counter
+computeWaitValueForCounter(
+    localState.pendingDSCount(), localState, memOpDependencies, dsWait,
+    [](const PendingMemOpTracker& t, StinkyInstruction* s) {
+        return t.pendingDSCountFrom(s);   // delegates to DS queue lookup
+    });
+
+// Buffer counter
+computeWaitValueForCounter(
+    localState.pendingBufferCount(), localState, memOpDependencies, bufferWait,
+    [](const PendingMemOpTracker& t, StinkyInstruction* s) {
+        return t.pendingBufferCountFrom(s);   // delegates to buffer queue lookup
+    });
+```
+
+### Algorithm
+
+```
+Input:
+  initialPendingCount  = total pending ops for this counter in current block
+  localState           = current block's PendingMemOpTracker
+  memOpDependencies    = set of source instructions the consumer depends on
+  counterState         = last emitted wait state for this counter
+  getCountFrom(tracker, inst)  = callback to query a specific queue
+
+Start with: requiredWait = initialPendingCount
+
+For each dependency source:
+  count = getCountFrom(localState, source)
+
+  Case 1: source found in current block (count > 0)
+    requiredWait = min(requiredWait, count - 1)
+    needsWait = true
+
+  Case 2: source not in current block
+    (skip predecessor lookup if lastEmittedWait == 0 -- all ops already completed)
+    count = getCountFrom(blockExitMemState[source's parent block], source)
+    if count > 0: collect (count - 1) into predecessorValues
+    needsWait = true
+
+After loop:
+  if predecessorValues not empty:
+    requiredWait += min(predecessorValues)
+
+Return (requiredWait, needsWait)
+```
+
+Note: when a source is a buffer op, the DS queue lookup returns 0, so the DS counter correctly ignores it (and vice versa). This means all dependencies are passed to both counter computations, and each counter naturally filters to its own op type.
+
+### Why `count - 1`?
+
+The hardware wait count represents how many ops may still be outstanding *after* the wait completes. If a dependency is at position `count` from the end of the queue, we need everything from the dependency onward to complete. The wait immediate tells the hardware "let at most N ops remain outstanding", so we pass `count - 1`: all ops up to and including the dependency complete, leaving `count - 1` newer ops still in flight.
+
+```
+Queue:  [op_A] [op_B] [op_C] [op_D]
+                 ^
+                 dependency is op_B
+                 pendingCountFrom(op_B) = 3  (op_B, op_C, op_D)
+                 wait value = 3 - 1 = 2
+                 -> s_wait_dscnt 2: let 2 ops remain (C, D), completing A and B
+```
+
+### Predecessor contribution
+
+When a dependency comes from a predecessor block, the pass adds the minimum predecessor contribution to the current block's wait value. This handles the case where some ops were issued in a predecessor and more were issued in the current block -- the total number of in-flight ops visible to the hardware is the sum.
+
+```
+Predecessor block exit state:
+  pendingDSOps = [pred_op0, pred_op1]
+
+Current block (so far):
+  pendingDSOps = [cur_op0, cur_op1, cur_op2]
+
+Instruction uses pred_op1:
+  Current block: pendingDSCountFrom(pred_op1) = 0  (not in current block)
+  Predecessor:   pendingDSCountFrom(pred_op1) = 1  (pred_op1 is last)
+  predecessorValues = [1 - 1] = [0]
+
+  requiredWait = initialPendingCount + min(predecessorValues)
+               = 3 + 0 = 3
+  -> s_wait_dscnt 3
+```
+
+## Redundancy Elision
+
+Not every computed wait needs to produce an instruction. `CounterWaitState::needsNewWait` checks whether the previously emitted wait already covers the required value:
+
+```
+needsNewWait(required) =
+    lastEmittedWait == kUnused                         // No wait emitted yet
+    OR lastEmittedWait + opsSinceLastWait > required   // Gap has grown past coverage
+```
+
+The intuition: after emitting `s_wait_dscnt N`, at most N ops remain outstanding. If K new ops are issued after that, the effective outstanding count becomes `N + K`. A new wait is only needed if this effective count exceeds the required value.
+
+**Example:**
+
+```
+1. s_wait_dscnt 2    -> lastEmittedWait=2, opsSinceLastWait=0
+                        effective outstanding: 2
+2. ds_read ...       -> opsSinceLastWait=1, effective outstanding: 3
+3. ds_read ...       -> opsSinceLastWait=2, effective outstanding: 4
+
+4. instruction needs wait value 3
+   -> needsNewWait(3): 2 + 2 = 4 > 3 -> true, emit new wait
+
+5. instruction needs wait value 5
+   -> needsNewWait(5): 2 + 2 = 4 <= 5 -> false, skip (already satisfied)
+```
+
+## Cross-Block Analysis
+
+### Exit state pre-scanning
+
+`buildBlockExitStates` walks all processed blocks once (those passing `shouldProcessBasicBlock`), recording every DS and buffer memory operation in issue order. This populates `blockExitMemState[bb]` with the full set of in-flight ops at each block's exit point, before any waits are considered.
+
+### Refined exit state
+
+After `computeRequiredWaits` finishes a block, it trims the exit state based on the last emitted wait. Without this, successor blocks would see ops that are already guaranteed to have completed, leading to unnecessarily large wait values.
+
+```
+Before trim: pendingDSOps = [op_A, op_B, op_C, op_D], lastEmittedWait = 2
+After trim:  pendingDSOps = [op_C, op_D]  (only 2 ops remain in-flight)
+```
+
+The trimmed state is stored back into `blockExitMemState[&bb]`, overwriting the pre-scanned state. Successor blocks then see only the ops that are genuinely still in-flight.
+
+### Predecessor lookup guard
+
+When looking up a dependency in a predecessor's exit state, the pass skips the lookup if `counterState.lastEmittedWait == 0`. A wait-0 means all outstanding ops for that counter have completed, so no predecessor ops can still be in-flight -- the lookup would be wasted work and could produce incorrect (non-zero) contributions.
+
+## Tensor Wait Insertion: reinsertTensorWaitsHeuristic
+
+Tensor waits are handled in a separate heuristic phase that runs after the main DS/buffer wait insertion. This phase operates in two steps:
+
+### Phase 1: Remove existing tensor waits from loop blocks
+
+The pass removes all `IF_WaitTensorCnt` instructions from blocks labeled `label_LoopBeginL` and `label_LoopEndL`. This clears any tensor waits that were inserted by earlier passes and may no longer be optimal.
+
+### Phase 2: Reinsert tensor waits based on barrier token matching
+
+Walking all processed blocks in RPO, the pass maintains a **cross-block** deque of tensor load instructions (those carrying `MemTokenData`). At each barrier, it checks the oldest pending tensor load's tokens for overlap with the barrier's tokens:
+
+```
+tensorLoads: [T0, T1, T2]   (oldest first, accumulated across blocks)
+
+Barrier @tokens=[5, 6]:
+  Check T0's tokens against barrier tokens:
+    T0 @tokens=[5] -> overlap with [5, 6] -> match!
+
+  Pop T0, emit s_wait_tensorcnt with remaining count:
+    tensorLoads after pop: [T1, T2]
+    -> Emit s_wait_tensorcnt 2 before barrier
+```
+
+The wait count equals the number of tensor loads still pending *after* removing the matched one. This ensures the oldest load completes before the barrier while allowing newer loads to remain in flight.
+
+Note: tensor waits collected per block are emitted at the end of each block's scan via `emitWaitInstructions`, while the `tensorLoads` deque persists across blocks.
+
+## Emit Phase: emitWaitInstructions
+
+For each `(anchorInst, waitSpec)` pair, the method inserts wait instructions immediately before the anchor using `AsmIRBuilder::create`. Each counter that has a non-`kUnused` value produces one instruction:
+
+| WaitCountSpec field | Emitted instruction | Modifier |
+|---------------------|---------------------|----------|
+| `dsCount` | `s_wait_dscnt <N>` | `SWaitCntData.dlcnt` |
+| `bufferCount` | `s_wait_loadcnt <N>` | `SWaitCntData.vlcnt` |
+| `tensorCount` | `s_wait_tensorcnt <N>` | `SWaitTensorCntData.tlcnt` |
+
+## Example Walkthrough
+
+### Input: DS reads consumed by WMMA
+
+```assembly
+label_LoopBeginL:
+    ds_read_b128 v[0:3],  v8           ; DS op 0
+    ds_read_b128 v[4:7],  v9           ; DS op 1
+    ds_read_b128 v[8:11], v10          ; DS op 2
+    ds_read_b128 v[12:15], v11         ; DS op 3
+    v_wmma_f32 v[16:23], v[0:3], v[4:7], v[16:23]    ; uses DS ops 0,1
+    v_wmma_f32 v[24:31], v[8:11], v[12:15], v[24:31]  ; uses DS ops 2,3
+```
+
+### Analysis
+
+```
+After recording DS ops 0-3:
+  pendingDSOps = [op0, op1, op2, op3], pendingDSCount = 4
+
+At first v_wmma (uses op0, op1):
+  initialPendingCount = 4
+  op0: pendingDSCountFrom = 4, requiredWait = min(4, 4-1) = 3
+  op1: pendingDSCountFrom = 3, requiredWait = min(3, 3-1) = 2
+  needsNewWait(2): lastEmittedWait is kUnused -> true
+  -> Emit s_wait_dscnt 2
+
+At second v_wmma (uses op2, op3):
+  initialPendingCount = 4  (queue unchanged; trimming happens after the loop)
+  op2: pendingDSCountFrom = 2, requiredWait = min(4, 2-1) = 1
+  op3: pendingDSCountFrom = 1, requiredWait = min(1, 1-1) = 0
+  needsNewWait(0): lastEmitted=2, opsSinceLastWait=0, 2+0=2 > 0 -> true
+  -> Emit s_wait_dscnt 0
+```
+
+### Output
+
+```assembly
+label_LoopBeginL:
+    ds_read_b128 v[0:3],  v8
+    ds_read_b128 v[4:7],  v9
+    ds_read_b128 v[8:11], v10
+    ds_read_b128 v[12:15], v11
+    s_wait_dscnt 2                                     ; <-- inserted
+    v_wmma_f32 v[16:23], v[0:3], v[4:7], v[16:23]
+    s_wait_dscnt 0                                     ; <-- inserted
+    v_wmma_f32 v[24:31], v[8:11], v[12:15], v[24:31]
+```
+
+## File Structure
+
+```
+anonymous namespace {
+    // --- Free-standing helpers ---
+    collectSourcesRec(...)         // Recursive PHI-flattening source collection
+    collectSources(...)            // Entry point for source collection
+    isDSMemoryOp(...)              // DS read or write predicate
+    isBufferMemoryOp(...)          // Global load or store predicate
+    hasTokenOverlap(A, B)          // Template: any shared token between containers
+
+    // --- Data structures ---
+    struct PendingMemOpTracker     // In-flight memory op queues + token tracking
+    struct WaitCountSpec           // Wait counter immediate triplet
+
+    // --- Pass class ---
+    class StinkyWaitCntInsertionPass : public StinkyInstPass {
+        struct CounterWaitState    // Per-counter state during block walk
+
+        buildBlockExitStates()           // Phase 1: pre-scan all blocks
+        scanBlockMemOps()                //    helper: record DS/buffer ops in one block
+        computeWaitValueForCounter()     //    Per-counter wait value computation
+        computeRequiredWaits()           // Phase 2: determine waits for one block
+        emitWaitInstructions()           // Phase 3: insert wait IR nodes
+        reinsertTensorWaitsHeuristic()   // Phase 4: tensor wait heuristic
+        removePHIs()                     // Phase 5: cleanup
+    };
+}
+
+namespace stinkytofu {
+    createStinkyWaitCntInsertionPass()  // Public factory
+}
+```
+
+## See Also
+- [WaitCnt Insertion Tests](../tests/unit/waitcnt-insertion-tests.md) -- unit test documentation
