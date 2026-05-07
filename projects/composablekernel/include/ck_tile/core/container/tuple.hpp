@@ -688,9 +688,12 @@ CK_TILE_HOST_DEVICE constexpr auto operator+(const tuple<Xs...>& x, const Y& y)
     static_assert(Y::size() == sizeof...(Xs), "wrong! size not the same");
     constexpr index_t NSize = sizeof...(Xs);
 
-    tuple<Xs...> r;
-    static_for<0, NSize, 1>{}([&](auto i) { r[i] = x[i] + y[i]; });
-    return r;
+    // (X+) Step B2 fix — was in-place `tuple<Xs...> r; r[i] = x[i] + y[i];`
+    // which couldn't write a runtime int back into a `constant<N>` slot when
+    // x is a mixed (runtime, compile-time) tuple. Mirror the existing
+    // `operator+(tuple<Xs>, tuple<Ys>)` overload below: build a fresh tuple
+    // via generate_tuple so each element type is deduced from the lambda.
+    return generate_tuple([&](auto i) { return x[i] + y[i]; }, number<NSize>{});
 }
 
 template <typename... Xs, typename... Ys>
@@ -710,9 +713,10 @@ CK_TILE_HOST_DEVICE constexpr auto operator-(const tuple<Xs...>& x, const Y& y)
     static_assert(Y::size() == sizeof...(Xs), "wrong! size not the same");
     constexpr index_t NSize = sizeof...(Xs);
 
-    tuple<Xs...> r;
-    static_for<0, NSize, 1>{}([&](auto i) { r[i] = x[i] - y[i]; });
-    return r;
+    // (X+) Step B2 fix — see operator+ above. Mirror tuple<Xs>-tuple<Ys>
+    // overload below to support mixed (runtime, compile-time) lengths,
+    // required by TDM `get_cached_global_strides` callgraph.
+    return generate_tuple([&](auto i) { return x[i] - y[i]; }, number<NSize>{});
 }
 
 template <typename... Xs, typename... Ys>
@@ -732,9 +736,9 @@ CK_TILE_HOST_DEVICE constexpr auto operator*(const tuple<Xs...>& x, const Y& y)
     static_assert(Y::size() == sizeof...(Xs), "wrong! size not the same");
     constexpr index_t NSize = sizeof...(Xs);
 
-    tuple<Xs...> r;
-    static_for<0, NSize, 1>{}([&](auto i) { r[i] = x[i] * y[i]; });
-    return r;
+    // (X+) Step B2 fix — see operator+ above. Mirror tuple<Xs>*tuple<Ys>
+    // overload below to support mixed (runtime, compile-time) lengths.
+    return generate_tuple([&](auto i) { return x[i] * y[i]; }, number<NSize>{});
 }
 
 // MultiIndex = scalar * MultiIndex
@@ -745,9 +749,9 @@ template <
 CK_TILE_HOST_DEVICE constexpr auto operator*(Y a, const tuple<Xs...>& x)
 {
     constexpr index_t NSize = sizeof...(Xs);
-    tuple<Xs...> r;
-    static_for<0, NSize, 1>{}([&](auto i) { r[i] = a * x[i]; });
-    return r;
+    // (X+) Step B2 fix — see operator+ above. Use generate_tuple to support
+    // mixed (runtime, compile-time) tuple<Xs...> elements.
+    return generate_tuple([&](auto i) { return a * x[i]; }, number<NSize>{});
 }
 
 // MultiIndex = MultiIndex * scalar
