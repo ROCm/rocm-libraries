@@ -83,7 +83,7 @@ public:
     void checkBwdTensorConfigSupported(
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr);
 
-    void checkBwdTrainingActivationTensorConfigSupported(
+    void checkBwdActivationTensorConfigSupported(
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr);

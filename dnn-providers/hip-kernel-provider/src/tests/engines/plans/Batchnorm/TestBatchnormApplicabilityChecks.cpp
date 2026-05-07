@@ -110,7 +110,7 @@ TEST(TestBatchnormValidator, ValidInferenceActivationBackward)
 
     BatchnormValidator validator(graph.getTensorMap());
     EXPECT_NO_THROW(
-        validator.checkBwdTrainingActivationTensorConfigSupported(bnInfAttr, actAttr, bnBwdAttr));
+        validator.checkBwdActivationTensorConfigSupported(bnInfAttr, actAttr, bnBwdAttr));
 }
 
 TEST(TestBatchnormValidator, MismatchShapes)

@@ -525,10 +525,9 @@ bool BatchnormPlanBuilder::isApplicable(
         try
         {
             BatchnormValidator validator(opGraph.getTensorMap());
-            validator.checkBwdTrainingActivationTensorConfigSupported(
-                std::get<0>(nodeAttrs.value()),
-                std::get<1>(nodeAttrs.value()),
-                std::get<2>(nodeAttrs.value()));
+            validator.checkBwdActivationTensorConfigSupported(std::get<0>(nodeAttrs.value()),
+                                                              std::get<1>(nodeAttrs.value()),
+                                                              std::get<2>(nodeAttrs.value()));
         }
         catch(const std::exception& e)
         {

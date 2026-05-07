@@ -303,7 +303,9 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     HipKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
     options.add("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
     options.add("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
+    // Not using FP16 and BFP16 paths due to affine data type requirements
     options.update("HIP_PLUGIN_USE_FP16", 0);
+    options.update("HIP_PLUGIN_USE_BFP16", 0);
     options.add("HIP_PLUGIN_BN_GFX103X", dims.isGfx103X);
     options.add("HIP_PLUGIN_BN_GFX110X", dims.isGfx110X);
     options.add("HIP_PLUGIN_BN_GFX115X", dims.isGfx115X);

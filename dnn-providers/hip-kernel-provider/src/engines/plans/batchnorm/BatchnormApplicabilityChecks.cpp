@@ -358,7 +358,7 @@ void BatchnormValidator::checkBwdTensorConfigSupported(
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
 }
 
-void BatchnormValidator::checkBwdTrainingActivationTensorConfigSupported(
+void BatchnormValidator::checkBwdActivationTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr)
