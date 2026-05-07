@@ -87,9 +87,17 @@ def _runChecks(
         # YAML header, not of any individual solution. Run it unconditionally
         # so that --check-only-custom-kernels (which produces empty `solutions`
         # for non-custom-kernel files) cannot bypass it.
-        chip_id_valid = _validateChipId(file, rel)
+        # When `logicPath` is a single .yaml file, `rel` collapses to Path('.')
+        # and the chip-ID directory walker would lose all path context. Fall
+        # back to the absolute path in that case so placement validation
+        # still has the gfx/<gfx>_id<chip>/ ancestors to inspect.
+        chip_id_display = file if rel == Path(".") else rel
+        chip_id_valid = _validateChipId(file, chip_id_display)
         if not chip_id_valid:
             chip_id_failures += 1
+            # The whole file is invalid; skip per-solution validators (which
+            # would only spam noise) and let the file-level failure stand.
+            continue
 
         solutions = []
         data = readYAML(file)
@@ -117,7 +125,6 @@ def _runChecks(
 
             if all(
                 [
-                    chip_id_valid,
                     _validateMatrixInstruction(s, isaInfoMap, rel),
                     _validateWorkGroup(s, rel),
                     _validateWorkGroupMappingXCC(s, rel),

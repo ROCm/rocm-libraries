@@ -60,6 +60,7 @@ def _load_validchipid_mod():
 
 _vci = _load_validchipid_mod()
 _validateChipId = _vci._validateChipId
+_fallbackFamily = _vci._fallbackFamily
 
 # Architectures.py uses package-relative imports, so spec_from_file_location
 # is not viable here. The rocisa stub above is sufficient to import it
@@ -130,18 +131,35 @@ def test_validateChipIdRejectsDefaultFallbackChipIdInVariantDirectory(tmp_path, 
     assert "may not declare default fallback chip IDs" in out
 
 
-@pytest.mark.parametrize(
-    "content",
-    [
+def test_validateChipIdRejectsEmptyDeviceList(tmp_path, capsys):
+    # `- [Device]` (no chip after the keyword) is the only form that yields
+    # an empty DeviceIds set without raising in the parser. ValidChipId must
+    # surface the specific "must declare at least one Device chip ID" branch.
+    logic_file = _baseGfx950Path(tmp_path)
+    logic_file.parent.mkdir(parents=True, exist_ok=True)
+    logic_file.write_text(
         "\n".join(
             [
                 "- MinimumRequiredVersion: 4.33.0",
                 "- gfx950",
                 "- gfx950",
-                "- []",
+                "- [Device]",
                 "",
             ]
-        ),
+        )
+    )
+
+    assert not _validateChipId(logic_file)
+    out = capsys.readouterr().out
+    assert "must declare at least one Device chip ID" in out
+
+
+def test_validateChipIdRejectsMissingDeviceLine(tmp_path, capsys):
+    # File with no Device line raises LogicFileError in the parser, which
+    # ValidChipId must surface via the "Chip ID validation failed" path.
+    logic_file = _baseGfx950Path(tmp_path)
+    logic_file.parent.mkdir(parents=True, exist_ok=True)
+    logic_file.write_text(
         "\n".join(
             [
                 "- {MinimumRequiredVersion: 4.33.0}",
@@ -149,22 +167,12 @@ def test_validateChipIdRejectsDefaultFallbackChipIdInVariantDirectory(tmp_path, 
                 "- gfx950",
                 "",
             ]
-        ),
-    ],
-)
-def test_validateChipIdRejectsMissingOrMalformedGfx950DeviceLine(tmp_path, content, capsys):
-    logic_file = _baseGfx950Path(tmp_path)
-    logic_file.parent.mkdir(parents=True, exist_ok=True)
-    logic_file.write_text(content)
+        )
+    )
 
     assert not _validateChipId(logic_file)
     out = capsys.readouterr().out
-    # Either "must declare at least one Device chip ID" (empty list path) or
-    # "Chip ID validation failed" (missing line / LogicFileError path).
-    assert (
-        "must declare at least one Device chip ID" in out
-        or "Chip ID validation failed" in out
-    )
+    assert "Chip ID validation failed" in out
 
 
 def test_validateChipIdRejectsMismatchedChipIdReportsPredicateError(tmp_path, capsys):
@@ -366,3 +374,31 @@ def test_validateChipIdSkipsAllNonGatedArchs(tmp_path, gfx):
     )
 
     assert _validateChipId(logic_file)
+
+
+# ---------------------------------------------------------------------------
+# Direct unit tests for _fallbackFamily — pin the documented behaviour so
+# changes to SUPPORTED_CHIP_ID_FALLBACKS or the family-expansion algorithm
+# fail loudly here, not silently in placement validation.
+# ---------------------------------------------------------------------------
+
+def test_fallbackFamilyForDefaultChipIdIsSingleton():
+    # A default chip ID has no entry in SUPPORTED_CHIP_ID_FALLBACKS; its
+    # family must be just itself.
+    assert _fallbackFamily("id=75a0", "gfx950") == {"id=75a0"}
+
+
+def test_fallbackFamilyForSourceChipIdIncludesSiblingsAndFallback():
+    # All gfx950 source IDs share id=75a0 as their direct fallback. The
+    # family expansion is intentionally permissive so a single variant
+    # directory can host logic for siblings sharing a fallback root.
+    family = _fallbackFamily("id=75a3", "gfx950")
+    assert "id=75a3" in family           # the chip itself
+    assert "id=75a0" in family           # its direct fallback
+    # All other source IDs whose direct fallback is also id=75a0 are siblings.
+    expected_siblings = {
+        src
+        for src, fallbacks in _arch.SUPPORTED_CHIP_ID_FALLBACKS.items()
+        if "id=75a0" in fallbacks and src in {f"id={c.lower()}" for c in GFX_CHIP_IDS["gfx950"]}
+    }
+    assert expected_siblings.issubset(family)

@@ -330,7 +330,10 @@ def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> 
     def l3(line: str):
         if re.match(r"- \[Device", line):
             devIds = re.findall(r"Device (\w+)", line)
-            return set(f"id={id}" for id in devIds)
+            # Normalize to lowercase so downstream consumers (predicate
+            # tables, fallback maps, chip-ID directory matchers) all agree
+            # on the canonical form.
+            return set(f"id={id.lower()}" for id in devIds)
         else:
             raise LogicFileError(f"No device IDs found: line: {line}")
 

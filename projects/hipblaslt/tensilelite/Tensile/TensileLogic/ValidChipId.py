@@ -48,10 +48,6 @@ def _chipIdKey(chip_id: str) -> str:
     return f"id={chip_id.lower()}"
 
 
-def _chipIdValue(chip_id: str) -> str:
-    return chip_id.split("=", 1)[1].lower()
-
-
 def _archChipIds(gfx: str) -> Set[str]:
     return {_chipIdKey(chip_id) for chip_id in GFX_CHIP_IDS.get(gfx, [])}
 
@@ -187,10 +183,12 @@ def _validateChipId(filepath: Path, display_path: Optional[Path] = None) -> bool
             )
             return False
 
+        # _extractArchInfo lowercases device IDs at parse time, so no further
+        # case normalization is needed here.
         for device_id in arch_info.DeviceIds:
-            _verifyPredicate(device_id.lower(), arch_info.Gfx)
+            _verifyPredicate(device_id, arch_info.Gfx)
 
-        device_ids = {_chipIdKey(_chipIdValue(device_id)) for device_id in arch_info.DeviceIds}
+        device_ids = set(arch_info.DeviceIds)
         # Walk the logic-root-relative path so that ancestor directories outside
         # the logic root (e.g. CI workspaces containing 'gfx950') cannot
         # masquerade as chip-ID directories.
