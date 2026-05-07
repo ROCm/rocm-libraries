@@ -28,6 +28,7 @@
 #pragma once
 
 #include "common/misc/rocblas_random.hpp"
+#include "common/misc/rocsolver_test.hpp"
 
 #include <random>
 
@@ -227,47 +228,56 @@ void hbrand( rocblas_int n, rocblas_int kl, rocblas_int ku,
         if (kl >= ku)
         {
             // Fill in lower band and copy conjugate to upper band.
-            for (rocblas_int i = 1; i < kl + 1 && i + j < n; ++i)
+            // k is index of diagonal, k > 0 is a subdiagonal, k < 0 is a superdiagonal.
+            // idiag+k is row index in Aband array. A[ i, j ] is Aband[ idiag+j+k, j ].
+            for (rocblas_int k = 1; k < kl + 1 && k + j < n; ++k)
             {
                 // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
-                Aband[idiag + i + j*ldab] = rand_value<T>( dist );
+                Aband[idiag + k + j*ldab] = rand_value<T>( dist );
 
-                // Within the requested ku bandwidth,
-                // copy conj of lower band to upper band, A{j, j+i} = conj( A{j+i, j} ).
-                if (i < kd)
+                // Within the requested ku bandwidth, copy conj of lower band
+                // to upper band, A{j, j+k} = conj( A{j+k, j} ).
+                if (k < ku)
                 {
-                    Aband[idiag - i + (j + i)*ldab]
-                        = sconj( Aband[idiag + i + j*ldab] );
+                    Aband[idiag - k + (j + k)*ldab]
+                        = sconj( Aband[idiag + k + j*ldab] );
                 }
             }
         }
-        else
+        else // kl < ku
         {
-        }
-        #if 0
-            // Zero out entries outside band where bulges will fill in.
-            for (rocblas_int i = kd+1; i < 2*kd; ++i)
+            // Fill in upper band and copy conjugate to lower band.
+            for (rocblas_int k = 1; k < ku + 1 && k + j < n; ++k)
             {
-                Aband[idiag + i + j*ldab] = 0;
+                // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
+                Aband[idiag - k + (j + k)*ldab] = rand_value<T>( dist );
+
+                // Within the requested kl bandwidth, copy conj of upper band
+                // to lower band, A{j, j+k} = conj( A{j+k, j} ).
+                if (k < kl)
+                {
+                    Aband[idiag + k + j*ldab]
+                        = sconj( Aband[idiag - k + (j + k)*ldab] );
+                }
             }
-        #endif
+        }
     }
 
     // Mark entries outside the band structure as nan,
     // to ensure we don't use them.
     for (rocblas_int j = 0; j < ku; ++j)
     {
-        for (rocblas_int i = 0; i < ku - j; ++i)
+        for (rocblas_int k = 0; k < ku - j; ++k)
         {
-            Aband[i + j*ldab] = nan( "" );
+            Aband[k + j*ldab] = nan( "" );
         }
     }
     // For lower band, work from right-most column (n-1) to left.
     for (rocblas_int j = 0; j < kl; ++j)
     {
-        for (rocblas_int i = j; i < kl; ++i)
+        for (rocblas_int k = j; k < kl; ++k)
         {
-            Aband[idiag + 1 + i + (n - 1 - j)*ldab] = nan( "" );
+            Aband[idiag + 1 + k + (n - 1 - j)*ldab] = nan( "" );
         }
     }
 }
