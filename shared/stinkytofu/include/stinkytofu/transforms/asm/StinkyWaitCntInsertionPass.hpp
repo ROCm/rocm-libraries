@@ -34,11 +34,9 @@ class Pass;
  * @brief Creates a minimal wait-count insertion pass.
  *
  * Inserts architecture-specific wait instructions so asynchronous memory operations
- * complete before their results are used.
- *
- * @param insertTensorWaitCnt Whether to insert tensor waitcnt instructions.
+ * complete before their results are used. Tensor waits are reinserted at barriers
+ * via a token-matching heuristic.
  */
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(
-    bool insertTensorWaitCnt = false);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyWaitCntInsertionPass();
 
 }  // namespace stinkytofu

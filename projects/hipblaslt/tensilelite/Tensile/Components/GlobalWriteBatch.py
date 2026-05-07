@@ -20,22 +20,24 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa.code import Label, Module, RegSet
+from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister
+  SDWAModifiers, replaceHolder, EXEC, EXECLO, EXECHI, VCC, vgpr, sgpr, ContinuousRegister
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
-  BufferAtomicCmpswapB64, FlatAtomicCmpswapB32, SAddCU32, SAddU32, SAndB32, \
+  BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, FlatAtomicCmpswapB32, \
+  SAddCU32, SAddU32, SAndB32, \
   SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
-  SCBranchSCC1, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, \
+  SCBranchSCC0, SCBranchSCC1, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, \
   SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, \
   SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
   SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
-  VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF32toI32, \
-  VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkFP8toF32, VFmaF64, VFmaMixF32, \
+  VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toF16, VCvtF32toI32, \
+  VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
+  VFmaF64, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
-  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
+  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, VSubU32
 from rocisa.functions import vectorStaticMultiply
 
 from ..Common import DataDirection, SemanticVersion
@@ -49,7 +51,7 @@ from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 
-from math import ceil
+from math import ceil, log2
 
 class GlobalWriteBatchComponent(GlobalWriteComponents):
   kernel = {"ProblemType": {"OperationType": "GEMM" }}
@@ -110,6 +112,16 @@ class GlobalWriteBatchWriter:
     self.factorDim = factorDim
     self.amdClangVersion = amdClangVersion
 
+    # Stateful tracking for N-group OOB guard deduplication (_emitSubtileOobGuard).
+    # The outer loop iterates N-outer / M-inner, so all M elements within a fixed N
+    # group share the same N guard result.  We emit the N s_cmp/s_cbranch only once
+    # per N group and skip it for subsequent M elements in the same group.
+    self._subtilePrevBlockIdxN = -1       # sentinel: no group seen yet
+    self._subtileNGroupSkipLabel = None   # end-of-N-group label (M cbranch target)
+    self._subtileAllStoresEndLabel = None # end-of-all-stores label (N cbranch target)
+    self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
+    self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
+
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
     self.storeBiasD = 0
@@ -169,6 +181,13 @@ class GlobalWriteBatchWriter:
     module = Module(self.moduleName)
     self._prolog(module)
     self._emitAdd(module)
+    # UseSubtileImpl with bias/SAV: drain LDS reads and sync waves after alpha
+    # multiply to prevent cross-wave LDS corruption from ds_bpermute.
+    if self.kernel.get("UseSubtileImpl") and \
+       (self.parentWriter.states.useBias != DataDirection.NONE or \
+        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0)):
+      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
+      module.add(SBarrier("sync waves before subtile paired stores"))
     self._epilog(module)
     return module
 
@@ -190,7 +209,12 @@ class GlobalWriteBatchWriter:
         waitLoadCnt += self.eLoadIssued[elementIdx]
         waitLoadCntStrList.append("%d (load E)"%self.eLoadIssued[elementIdx])
       # Calculate local loads
-      if self.parentWriter.states.useBias == DataDirection.READ:
+      # UseSubtileImpl with bias/SAV: skip bias/SAV LDS loads from interleaved
+      # waitcnt and rely on the batch-start barrier for LDS synchronization.
+      subtileBarrierDrains = self.kernel.get("UseSubtileImpl") and \
+        (self.parentWriter.states.useBias != DataDirection.NONE or \
+         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
+      if self.parentWriter.states.useBias == DataDirection.READ and not subtileBarrierDrains:
         waitLocalLoadCnt += self.biasLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (bias)"%self.biasLoadIssued[elementIdx])
       if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
@@ -198,7 +222,8 @@ class GlobalWriteBatchWriter:
         waitLocalLoadCntStrList.append("%d (scaleAVec)"%self.scaleAVecLoadIssued[elementIdx])
         waitLocalLoadCnt += self.scaleBVecLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (scaleBVec)"%self.scaleBVecLoadIssued[elementIdx])
-      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
+      # Skip scaleAlphaVec when subtileBarrierDrains
+      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel and not subtileBarrierDrains:
         waitLocalLoadCnt += self.scaleAlphaVecLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (scaleAlphaVec)"%self.scaleAlphaVecLoadIssued[elementIdx])
       # Get vlcnt and dscnt
@@ -221,7 +246,10 @@ class GlobalWriteBatchWriter:
         dscnt = -1
       # Get vscnt
       if vlcnt != -1 and not (self.parentWriter.states.asmCaps["SeparateVscnt"] or self.parentWriter.states.asmCaps["SeparateVMcnt"]):
-          vscnt = self.storesIssued if not self.kernel["GroupLoadStore"] else 0
+          if self.kernel.get("UseSubtileImpl") and not self.kernel["GroupLoadStore"]:
+            vscnt = 0
+          else:
+            vscnt = self.storesIssued if not self.kernel["GroupLoadStore"] else 0
       if (vlcnt != -1) or (vscnt != -1) or (dscnt != -1):
         # Get comment
         comment = ""
@@ -372,6 +400,7 @@ class GlobalWriteBatchWriter:
                 module.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
               module.add(rh)
 
+
     loadInputCode    = Module("loadInputCode")
 
     self.betaLoadIssued = []
@@ -424,6 +453,37 @@ class GlobalWriteBatchWriter:
       if self.beta:
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrCVgpr, self.addrC, 0))
         if dataBeta not in loadedDataBeta:
+          # In the UseSubtileImpl NonEdge path the workgroup-level edge check is relaxed
+          # (subtile-aligned remainder is allowed into NonEdge), so individual waves may
+          # own rows/columns beyond the valid output region.  Gate each C load by writing
+          # SrdC+2 (num_records): BufferOOB → normal load, 0 → hardware returns zero.
+          #
+          # element loop is N(d1)-outer / M(d0)-inner.
+          # d1 (N) check: emitted once per d1 group — sets SrdC+2 = BufferOOB if N valid, else 0.
+          # d0 (M) check: emitted per element — overwrites SrdC+2 = SrdC+2 if M valid, else 0.
+          #   (AND semantics: SrdC+2 = BufferOOB only when both M and N are valid.)
+          # d0 is monotone within each d1 group: once OOB, remaining d0s are also OOB.
+          mGuardSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
+          nGuardSgpr = self.parentWriter.states.subtileN16ValidBlocksSgpr
+          if not self.edge and (mGuardSgpr is not None or nGuardSgpr is not None):
+            d1, d0 = element[0], element[1]
+            # N guard: emit once per d1 group.
+            if nGuardSgpr is not None and d1 != self._subtileCloadPrevD1:
+              module.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=d1,
+                                    comment="subtile C load: numNBlocks > d1=%d?" % d1))
+              module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0="BufferOOB", src1=0,
+                                     comment="SrdC+2 = BufferOOB if N valid, else 0"))
+              self._subtileCloadPrevD1 = d1
+            # M guard: emit per element, AND into SrdC+2.
+            if mGuardSgpr is not None:
+              module.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=d0,
+                                    comment="subtile C load: numMBlocks > d0=%d?" % d0))
+              if nGuardSgpr is not None:
+                module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0=sgpr("SrdC+2"), src1=0,
+                                       comment="SrdC+2 = SrdC+2 if M valid, else 0 (AND with N result)"))
+              else:
+                module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0="BufferOOB", src1=0,
+                                       comment="SrdC+2 = BufferOOB if M valid, else 0"))
           if self.kernel["GroupLoadStore"]:
             loadInputCode.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01))
           else:
@@ -581,6 +641,14 @@ class GlobalWriteBatchWriter:
 
     module.add(loadInputCode)
 
+    # Restore SrdC+2 = BufferOOB after subtile NonEdge C-load OOB gating (which may have set it to 0).
+    if self.beta and not self.edge:
+      mGuardSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
+      nGuardSgpr = self.parentWriter.states.subtileN16ValidBlocksSgpr
+      if mGuardSgpr is not None or nGuardSgpr is not None:
+        module.add(SMovB32(dst=sgpr("SrdC+2"), src="BufferOOB",
+                           comment="restore SrdC+2 after subtile NonEdge C-load OOB gating"))
+
     if self.beta and self.kernel["StoreSyncOpt"]:
       self._storeSyncOpt(module)
 
@@ -588,6 +656,7 @@ class GlobalWriteBatchWriter:
     # AccVgpr read
     if self.codeAccVgprRead is not None and (self.kernel["LocalSplitU"] == 1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
       regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
+      #TODOBS: Need to change this, for LSU>1 + subtile impl case
       if self.kernel["MIArchVgpr"] and self.kernel["LocalSplitU"] > 1:
         tmpStartVgprValuC = self.parentWriter.states.c.startVgprValu
         self.parentWriter.states.c.startVgprValu = 0
@@ -811,7 +880,59 @@ class GlobalWriteBatchWriter:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBf16Mask), "0xffff0000", comment="mask for pack two bfloat16 element to 32bit" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp32Nan), "0x7fff0000", comment="fp32 Nan" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBf16Inc), "0x7fff", comment="rounding bias for bfloat16" ))
-      elif self.kernel["ProblemType"]["DestDataType"].isFloat8_fnuz() and self.kernel["ProblemType"]["HighPrecisionAccumulate"]:
+    # is16bitSubtile: controls partner-lane address setup for dwordx4 paired-subtile stores.
+    # Must match is16bitSubtilePaired (per-element store dispatch) exactly.
+    # Excluded for "MultipleBufferSingleKernel" and "MultipleBuffer" (StreamK partial-tile
+    # workspace path) — both write float32 to workspace, not 16bit to D output.
+    isSubtileNonEdge = (
+      self.kernel.get("UseSubtileImpl") and not self.edge
+      and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
+    )
+    is16bitSubtile = (
+      isSubtileNonEdge
+      and (self.kernel["ProblemType"]["DestDataType"].isBFloat16() or
+           self.kernel["ProblemType"]["DestDataType"].isHalf())
+      and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
+    )
+    if is16bitSubtile:
+      assert self.kernel["BufferStore"], \
+        "UseSubtileImpl 16bit optimized store requires BufferStore=1"
+      # Compute ds_permute partner-lane address for 16bit dwordx4 paired-subtile stores.
+      # vtmp1 = lane_id, vtmp2 = partner_lane_id (for ds_permute forward scatter)
+      # After v_permlane32_swap + v_permlane16_swap + exec masking:
+      #   each lane ends up with the lane_id of the partner that will scatter data to it.
+      # vPermAddr = partner_lane_id * 4  (byte address for ds_permute_b32)
+      vPermAddr = self.cvtVgprStruct.vgprPermAddr
+      vTmp = self.cvtVgprStruct.vgprBf16Temp  # reuse scratch temp before it's used for mask init
+      module.addComment1("16bit dwordx4 UseSubtileImpl: compute ds_permute partner-lane address")
+      module.add(VAndB32(dst=vgpr(vTmp),     src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"), comment="lane_id & (WS-1)"))
+      module.add(VAndB32(dst=vgpr(vPermAddr), src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"), comment="copy of lane_id"))
+      module.add(VPermlane32SwapB32(dst=vgpr(vTmp), src=vgpr(vTmp), comment="lane XOR 32 swap"))
+      module.add(SNop(waitState=0, comment="delay after v_permlane32_swap"))
+      module.add(VPermlane16SwapB32(dst=vgpr(vTmp), src=vgpr(vTmp), comment="lane XOR 16 swap"))
+      # Exec mask: lanes where both XOR swaps changed the value (i.e., the 'first' half of each pair)
+      # selects lanes 0-15 and 32-47 within the wave.
+      stmp = self.parentWriter.sgprPool.checkOutAligned(2,2)
+      module.add(SMovB32(dst=sgpr(stmp), src="0x0000ffff", comment="select lanes 0-15, 32-47"))
+      module.add(SMovB32(dst=sgpr(stmp+1), src="0xffff0000"))
+      module.add(VCndMaskB32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=vgpr(vPermAddr), src2=sgpr(stmp,2), comment="restore original lane_id for selected lanes"))
+      self.parentWriter.sgprPool.checkIn(stmp)
+      module.add(VLShiftLeftB32(dst=vgpr(vPermAddr), shiftHex=2, src=vgpr(vTmp), comment="partner_lane * 4 = ds_permute byte addr"))
+      # Pre-compute lane_group*8 once; reused as the row-byte address correction in every
+      # paired dwordx4 store (addrDVgpr encodes lane_group*8 but we need lane_group*16).
+      vLGDelta = self.cvtVgprStruct.vgprLaneGroupDelta
+      module.addComment1("16bit dwordx4: pre-compute lane_group*8 row-byte correction")
+      module.add(VAndB32(dst=vgpr(vLGDelta), src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"),
+                         comment="lane_id = Serial & (WS-1)"))
+      module.add(VLShiftRightB32(dst=vgpr(vLGDelta), shiftHex=4, src=vgpr(vLGDelta),
+                                 comment="lane_group = lane_id >> 4"))
+      module.add(VLShiftLeftB32(dst=vgpr(vLGDelta), shiftHex=3, src=vgpr(vLGDelta),
+                                comment="vgprLaneGroupDelta = lane_group * 8"))
+      # Compute bpe scale shift once (compile-time constant); used inside
+      # _emit16bitSubtilePairedStore to adjust addrDVgpr inline without
+      # modifying it in place, so no restore loop is needed after the stores.
+    elif self.kernel["_GlobalAccumulation"] != 'MultipleBuffer':
+      if self.kernel["ProblemType"]["DestDataType"].isFloat8_fnuz() and self.kernel["ProblemType"]["HighPrecisionAccumulate"]:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8NanInf), "0x207", comment="Nan and +/- inf" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8Max), "0x43700000", comment="Fp8 Max value 240 as float32" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8Min), "0xc3700000", comment="Fp8 Min value -240 as float32" ))
@@ -854,6 +975,19 @@ class GlobalWriteBatchWriter:
           module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01))
           module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
           module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
+
+      # When stores are interleaved (GLS=0) with subtile NonEdge guards, the
+      # M-guard branch for the last store in N-group K targets the N-group end
+      # label.  That label must be placed BEFORE the beta*C fmacs for N-group K+1,
+      # otherwise the M-guard branch skips the fmacs and the next N-group stores zeros.
+      if isSubtileNonEdge and not self.kernel["GroupLoadStore"]:
+        blockIdxN = element[0]
+        if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
+          module.add(self._subtileNGroupSkipLabel)
+          self._subtileNGroupSkipLabel = None
+          if self._subtilePendingSrdDInc is not None:
+            module.add(self._subtilePendingSrdDInc)
+            self._subtilePendingSrdDInc = None
 
       # apply in-bounds exec mask
       if self.edge and not self.kernel["BufferStore"]:
@@ -1129,10 +1263,14 @@ class GlobalWriteBatchWriter:
         else:
           destIdx = self.ss.elementSumIdx[elementIdx]
         if self.kernel["ProblemType"]["DestDataType"].isHalf():
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
+          if not is16bitSubtile:
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isBFloat16():
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
-                                     tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
+          if not is16bitSubtile:
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
+                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
           packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
                                      tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
@@ -1182,16 +1320,125 @@ class GlobalWriteBatchWriter:
         module.add(packModule)
 
       if not self.kernel["StoreRemapVectorWidth"]:
-        if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
+        # 16bit UseSubtileImpl non-edge: emit paired dwordx4 stores combining sba=0
+        # with sba=1 subtile data into one buffer_store_dwordx4.  Works for both
+        # bf16 and fp16 HPA output types.
+        #
+        # UseSubtileImpl splits MIWaveTile[0] into two subtile groups:
+        #   sba=0 owns even tt0 values (0, 2, 4, ...)
+        #   sba=1 owns odd  tt0 values (1, 3, 5, ...)
+        # The element list interleaves them as consecutive (even, odd) tt0 pairs:
+        #   element 0: tt0=0 (sba=0)
+        #   element 1: tt0=1 (sba=1)   <- pair with element 0
+        #   element 2: tt0=2 (sba=0)   (if MIWaveTile[0]>2)
+        #   ...
+        # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
+        storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
+        if is16bitSubtile:
+          tt0 = element[1]  # d0: thread-tile index along M
+          # Epilogue (bias/activation) is applied per-element in iteration order.
+          # The paired store must be emitted AFTER both sba=0 and sba=1 elements have
+          # had their epilogue applied, so we defer it to the sba=1 (odd tt0) iteration.
+          if tt0 % 2 == 1:
+            # sba=1 element (odd tt0): both sba=0 and sba=1 epilogues are done — emit paired store.
+            # Find the sba=0 partner: the immediately preceding element with tt0-1.
+            partnerElementIdx = elementIdx - 1
+            partnerExists = (partnerElementIdx >= 0 and
+                             self.batchElements[partnerElementIdx][1] == tt0 - 1)
+            if partnerExists:
+              # Paired dwordx4 store for (sba=0 at tt0-1, sba=1 at tt0).
+              partnerAddrCalc: AddrCalculation = self.ss.elementAddr[partnerElementIdx]
+              sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
+              sumIdx1 = self.ss.elementSumIdx[elementIdx]
+              prefixOffset = self.parentWriter.states.c.startVgprValu
+              blockIdxN = element[0]  # d1 = tt1
+              # Guard with tt0-1 (lower block): skip if even the lower M-block is OOB.
+              # This also handles N-group transitions.
+              blockIdxM = tt0 - 1
+              skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                    labelPrefix="subtile_skip_store")
+              # Additional check: paired store needs BOTH blocks valid (MGuard > tt0).
+              # When only the lower block is valid, fall through to a scalar fallback.
+              guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
+              if guardMSgpr is not None:
+                afterPairedLabel = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"),
+                                        f"after paired/fallback store tt0={tt0}")
+                fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
+                fallbackLabel = Label(fallbackLabelName,
+                                      f"scalar fallback for d0={tt0-1} when d0={tt0} is OOB")
+                storeCodeModule.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=tt0,
+                                               comment=f"paired store: both M-blocks valid? (MGuard > {tt0})"))
+                storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
+                                                 comment=f"only d0={tt0-1} valid -> scalar fallback"))
+                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1)
+                storeCodeModule.add(tmpStoreCode)
+                storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
+                                            comment="skip scalar fallback"))
+                storeCodeModule.add(fallbackLabel)
+                tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1)
+                storeCodeModule.add(tmpFallbackCode)
+                storeCodeModule.add(afterPairedLabel)
+              else:
+                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1)
+                storeCodeModule.add(tmpStoreCode)
+              if skipLabel is not None:
+                storeCodeModule.add(skipLabel)
+              self.storesIssued += 1
+            else:
+              # sba=1 orphan (no sba=0 partner in this batch — split by batch boundary).
+              blockIdxM = tt0
+              blockIdxN = element[0]
+              orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                          labelPrefix="subtile_skip_orphan")
+              sumIdx0 = self.ss.elementSumIdx[elementIdx]
+              prefixOffset = self.parentWriter.states.c.startVgprValu
+              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0)
+              storeCodeModule.add(tmpStoreCode)
+              if orphanSkipLabel is not None:
+                storeCodeModule.add(orphanSkipLabel)
+              self.storesIssued += 1
+          else:
+            # sba=0 element (even tt0): defer SRD row increment until after N-group label.
+            if self.ss.optSrdIncForRow and addrCalc.rowInc:
+              self._subtilePendingSrdDInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
+            partnerElementIdx = elementIdx + 1
+            partnerExists = (partnerElementIdx < len(self.batchElements) and
+                             self.batchElements[partnerElementIdx][1] == tt0 + 1)
+            if not partnerExists:
+              # Orphan element (no sba=1 partner in this batch): scalar 16bit store now.
+              # Guard against OOB wave groups (same as paired store path).
+              blockIdxM = tt0
+              blockIdxN = element[0]
+              # Early exit: skip this orphan scalar store if the wave group is outside the valid M/N tile bounds.
+              orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                          labelPrefix="subtile_skip_orphan")
+              sumIdx0 = self.ss.elementSumIdx[elementIdx]
+              prefixOffset = self.parentWriter.states.c.startVgprValu
+              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0)
+              storeCodeModule.add(tmpStoreCode)
+              if orphanSkipLabel is not None:
+                storeCodeModule.add(orphanSkipLabel)
+              self.storesIssued += 1
+        elif self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'TD', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store TD not StoreRemapVectorWidth")
+          storeCodeModule.add(tmpStoreCode)
+          self.storesIssued += 1
         else:
+          # Regular store path. If UseSubtileImpl NonEdge, guard against OOB wave groups.
+          skipLabel = None
+          if isSubtileNonEdge:
+            tt0 = element[1]
+            blockIdxM = tt0  # each tt0 maps to one mBlockSize-row block
+            blockIdxN = element[0]  # tt1
+            # Early exit: skip this store if the wave group is outside the valid M/N tile bounds.
+            skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                  labelPrefix="subtile_skip_store")
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store D")
-        if self.kernel["GroupLoadStore"]:
-          storeCode.add(tmpStoreCode)
-        else:
-          module.add(tmpStoreCode)
+          storeCodeModule.add(tmpStoreCode)
+          if skipLabel is not None:
+            storeCodeModule.add(skipLabel)
+          self.storesIssued += 1
 
-        self.storesIssued += 1
         if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
           self.storesIssued += 1
         if self.storeBiasD == 1:
@@ -1216,6 +1463,9 @@ class GlobalWriteBatchWriter:
             self.storesIssued += 1
           if self.storeBiasD == 1:
             self.storesIssued += 1
+
+    # Close the last N-group OOB skip label (if any) opened by _emitSubtileOobGuard.
+    self._finalizeSubtileOobGuards(storeCode if self.kernel["GroupLoadStore"] else module)
 
     module.add(storeCode)
 
@@ -1272,6 +1522,427 @@ class GlobalWriteBatchWriter:
       module.add(SBarrier("debug"))
       module.add(SWaitCnt(vscnt=0, comment="ConservativeWaitCnt"))
       module.add(SBarrier("debug"))
+
+  def _emitSubtilePackedPermute(self, vPack: int, vPermAddr: int, addrWhilePermuting=None) -> Module:
+    """Shuffle four packed dwords across wave halves for a subtile dwordx4 store.
+
+    After the caller packs 8 f32 accumulator values into four 16bit dwords
+    (vPack+0..+3), this routine performs the two-step permute that assembles
+    eight consecutive M-rows owned by a pair of lane-groups into a contiguous
+    dwordx4 payload:
+
+      Step 1 — ds_bpermute (in-place, 4×): each lane fetches vPack+k from its
+               partner lane l' (= the lane at LG±1 distance, pre-encoded as a
+               byte address in vPermAddr).  The LDS pipe latches vPermAddr at
+               issue time, so vPermAddr can be repurposed as soon as all four
+               ds_bpermute instructions are issued.
+
+      Step 2 — v_permlane32_swap_b32 (2×): exchange (vPack+0 ↔ vPack+2) and
+               (vPack+1 ↔ vPack+3) across the 32-lane boundary so that lanes
+               0-31 end up with rows LG*8+0..LG*8+7 in ascending order.
+
+    The caller may supply an optional `addrWhilePermuting` callable that adds
+    address-preparation instructions to the same module *between* the four
+    ds_bpermute issues and the SWaitCnt.  This overlaps address arithmetic
+    with the LDS round-trip latency at no extra cost.
+
+    Args:
+      vPack:              Base VGPR index of the four packed dwords (must be
+                          2-aligned to satisfy dwordx4 store alignment).
+      vPermAddr:          VGPR holding the partner-lane byte address (pre-computed
+                          once per batch in the vgprPermAddr slot).
+      addrWhilePermuting: Optional callable() that appends address instructions
+                          to `module` while the ds_bpermute results are in-flight.
+
+    Returns:
+      Module containing ds_bpermute × 4, optional address code, SWaitCnt,
+      and v_permlane32_swap_b32 × 2.  Leaves vPack+0..+3 holding the
+      correctly ordered dwords ready for buffer_store_dwordx4.
+    """
+    module = Module("SubtilePackedPermute")
+
+    module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
+    for k in range(4):
+      module.add(DSBPermuteB32(dst=vgpr(vPack+k), src0=vgpr(vPermAddr), src1=vgpr(vPack+k),
+                               comment=f"perm dword {k}"))
+
+    if addrWhilePermuting is not None:
+      addrWhilePermuting()
+
+    module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
+
+    module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
+    module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
+    module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
+
+    return module
+
+  def _emitSubtileOobGuard(self, targetModule, blockIdxM: int, blockIdxN: int, labelPrefix: str = "subtile_skip_store"):
+    """Emit M/N OOB guard branches for UseSubtileImpl NonEdge stores.
+
+    Background
+    ----------
+    UseSubtileImpl assigns each wave a fixed subtile region of the output matrix.
+    In the NonEdge path the macro-tile fits entirely within the output bounds, but
+    individual wave groups within the macro-tile may still be out-of-bounds when
+    the problem size is not a multiple of the macro-tile.  The SGPRs
+    subtileM32ValidBlocksSgpr and subtileN16ValidBlocksSgpr count how many M/N
+    blocks (in units of mBlockSize rows / nBlockSize columns) belong to valid
+    output for this wave, and are set to None when no guard is needed (edge path
+    or problem is tile-aligned).
+
+    Logic
+    -----
+    For a store at (blockIdxM, blockIdxN):
+      - If numValidNBlocks <= blockIdxN → N OOB: jump past ALL remaining stores.
+        Valid because N is monotone: subsequent N groups (blockIdxN+1, ...) are also OOB.
+      - If numValidMBlocks <= blockIdxM → M OOB: jump to the end of the current N group.
+        Valid because M is monotone: remaining M elements in this N group are also OOB.
+
+    The N guard is emitted ONCE per N group (when blockIdxN changes).  It branches to
+    _subtileAllStoresEndLabel (past all stores).  _subtileNGroupSkipLabel marks the
+    boundary between N groups; M guards branch there to skip the rest of the current
+    N group without re-testing the remaining M elements.
+    Both labels are placed by _finalizeSubtileOobGuards (called after the element loop).
+
+    Returns a per-element skip Label only when there is no N guard (M-only case); the
+    caller must add it after the store.  Returns None in all other cases.
+    """
+    guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
+    guardNSgpr = self.parentWriter.states.subtileN16ValidBlocksSgpr
+    # No guard SGPRs means the store is always in-bounds for this path; nothing to emit.
+    if guardMSgpr is None and guardNSgpr is None:
+      return None
+
+    # --- N-group guard (emitted once per unique blockIdxN) ---
+    # Branches to _subtileAllStoresEndLabel when N OOB, skipping all remaining stores.
+    # Because N is monotone (blockIdxN increases each group), if this group is OOB
+    # then every subsequent group is also OOB — no need to test them.
+    if guardNSgpr is not None and blockIdxN != self._subtilePrevBlockIdxN:
+      # Place the previous N group's end label before starting a new group.
+      if self._subtileNGroupSkipLabel is not None:
+        targetModule.add(self._subtileNGroupSkipLabel)
+        self._subtileNGroupSkipLabel = None
+      if self._subtilePendingSrdDInc is not None:
+        targetModule.add(self._subtilePendingSrdDInc)
+        self._subtilePendingSrdDInc = None
+      # Create the single end-of-all-stores label on the first N group.
+      if self._subtileAllStoresEndLabel is None:
+        endLabelName = self.parentWriter.labels.getNameInc("subtile_all_stores_end")
+        self._subtileAllStoresEndLabel = Label(endLabelName, "end of all subtile NonEdge D stores")
+      nGroupEndLabelName = self.parentWriter.labels.getNameInc(
+        f"{labelPrefix}_N{blockIdxN}_end")
+      nGroupEndLabel = Label(nGroupEndLabelName,
+                             f"end of N group blockIdxN={blockIdxN} (M cbranch target)")
+      targetModule.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=blockIdxN,
+                                   comment=f"quick-exit: numValidNBlocks > {blockIdxN}? (OOB -> skip all stores)"))
+      targetModule.add(SCBranchSCC0(labelName=self._subtileAllStoresEndLabel.getLabelName(),
+                                     comment=f"quick-exit: N OOB at blockIdxN={blockIdxN}, skip all remaining stores"))
+      self._subtileNGroupSkipLabel = nGroupEndLabel
+      self._subtilePrevBlockIdxN = blockIdxN
+
+    # --- M guard (emitted per element) ---
+    # Branches to end of current N group when M OOB, skipping remaining M elements.
+    # Because M is monotone (blockIdxM increases within the N group), if this element
+    # is OOB then all subsequent M elements in this N group are also OOB.
+    if guardMSgpr is None:
+      return None
+    targetModule.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=blockIdxM,
+                                 comment=f"quick-exit: numValidMBlocks > {blockIdxM}? (OOB -> skip N group)"))
+    if guardNSgpr is not None and self._subtileNGroupSkipLabel is not None:
+      # M OOB → jump to end of this N group (no per-element label needed).
+      targetModule.add(SCBranchSCC0(labelName=self._subtileNGroupSkipLabel.getLabelName(),
+                                     comment=f"quick-exit: M OOB at blockIdxM={blockIdxM}, skip rest of N group"))
+      return None
+    else:
+      # No N guard → fall back to a per-element skip label (caller places it after the store).
+      skipLabelName = self.parentWriter.labels.getNameInc(
+        f"{labelPrefix}_M{blockIdxM}_N{blockIdxN}")
+      skipLabel = Label(skipLabelName,
+                        f"skip OOB store blockIdxM={blockIdxM} blockIdxN={blockIdxN}")
+      targetModule.add(SCBranchSCC0(labelName=skipLabel.getLabelName(),
+                                     comment=f"quick-exit: M OOB at blockIdxM={blockIdxM}, skip store"))
+      return skipLabel
+
+  def _finalizeSubtileOobGuards(self, targetModule):
+    """Place the pending N-group end label and end-of-all-stores label after the element loop.
+
+    Must be called once after all elements have been emitted to close out the last
+    N group and anchor the N-cbranch target past all stores.
+    """
+    if self._subtileNGroupSkipLabel is not None:
+      targetModule.add(self._subtileNGroupSkipLabel)
+      self._subtileNGroupSkipLabel = None
+    if self._subtilePendingSrdDInc is not None:
+      targetModule.add(self._subtilePendingSrdDInc)
+      self._subtilePendingSrdDInc = None
+    if self._subtileAllStoresEndLabel is not None:
+      targetModule.add(self._subtileAllStoresEndLabel)
+      self._subtileAllStoresEndLabel = None
+
+  def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0) -> Module:
+    """Emit a paired 16bit store combining sba=0 and sba=1 subtile data.
+
+    Works for both bf16 and fp16 HPA output types.
+
+    sba = subtile block index along A (M dimension).  UseSubtileImpl iterates over
+    two subtile groups (sba=0, sba=1) that share the same (tt1, tt0) element
+    coordinates but draw from different accumulator registers.  The element list
+    therefore contains consecutive pairs with identical (tt1, tt0): sba=0 first
+    (even elementIdx), sba=1 second (odd elementIdx).
+
+    Converts 8 f32 accvgprs (4 from sba=0, 4 from sba=1) to 16bit, shuffles them
+    across wave halves via ds_bpermute + v_permlane32_swap_b32, then issues
+    1 × buffer_store_dwordx4 at the sba=0 element's address.  The cvtVgpr block
+    is 2-aligned (64-bit) in KWA so vgprBf16Temp satisfies the dwordx4 alignment.
+
+    Args:
+      addrCalc:     AddrCalculation for the sba=0 element.
+      sumIdx0:      elementSumIdx for the sba=0 element.
+      sumIdx1:      elementSumIdx for the sba=1 element.
+      prefixOffset: parentWriter.states.c.startVgprValu (offset into ValuC).
+      tt0:          thread-tile M index (same for both sba=0 and sba=1).
+    """
+    module = Module("16bitSubtilePairedStore")
+    isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
+
+    ntd = self.kernel["NonTemporalD"]
+    isGlc = bool(ntd & 0x1)
+    isSlc = bool(ntd & 0x2)
+    isNT  = bool(ntd & 0x4)
+
+    # Reuse cvtVgprStruct.vgprBf16Temp..vgprBf16Inc (+0..+3) as 4 scratch vgprs.
+    # The cvtVgpr block is allocated with 2-alignment (64-bit aligned) in KWA so that
+    # vgprBf16Temp is at an even VGPR index, satisfying buffer_store_dwordx4's
+    # alignment requirement.  The +0..+3 slots are safely overwritten here as pack/perm
+    # staging for each pair.
+    vPack = self.cvtVgprStruct.vgprBf16Temp  # +0..3: packed 16bit dwords, 2-aligned
+
+    vPermAddr    = self.cvtVgprStruct.vgprPermAddr
+    vLGDelta     = self.cvtVgprStruct.vgprLaneGroupDelta
+    vAddrScratch = self.cvtVgprStruct.vgprAddrScratch
+    addrDVgpr    = addrCalc.addrDVgpr
+
+    typeStr = "fp16" if isFp16 else "bf16"
+    VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
+    module.addComment1(f"{typeStr} paired dwordx4 store tt0={tt0} (sba=0+sba=1): pack 8 f32 accvgprs -> 4 {typeStr} dwords")
+
+    # Pack sba=0 subtile: ValuC+sumIdx0+{0,1} → vPack+0; ValuC+sumIdx0+{2,3} → vPack+1
+    # Pack sba=1 subtile: ValuC+sumIdx1+{0,1} → vPack+2; ValuC+sumIdx1+{2,3} → vPack+3
+    def vc(sumIdx, vi):
+      idx = sumIdx + vi - prefixOffset
+      return vgpr("ValuC+" + str(idx))
+
+    def packF32pair(dst, src0, src1, comment):
+      """Pack two f32 VGPRs into one dword of two 16bit values."""
+      module.add(VCvtPkF32to16(dst=vgpr(dst), src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
+
+    packF32pair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"sba=0 tt0={tt0}[0:1]")
+    packF32pair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"sba=0 tt0={tt0}[2:3]")
+    packF32pair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"sba=1 tt0={tt0}[0:1]")
+    packF32pair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"sba=1 tt0={tt0}[2:3]")
+
+    # Compute adjusted D address into vgprAddrScratch while ds_bpermute results are in-flight.
+    # addrDVgpr holds the M-byte offset in bpeCexternal units; scale to bpeCexternalGSU1
+    # (16bit=2 bytes) then add lane_group*8 so the dwordx4 store lands at the correct row.
+    # addrDVgpr and vgprPermAddr are left unchanged — vgprAddrScratch is dedicated scratch
+    # for this purpose so no restore is needed.
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpeDest = self.parentWriter.states.bpeCexternalGSU1
+    globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
+    addrScaleShift = int(log2(bpeCurr // bpeDest)) if bpeCurr > bpeDest else 0
+
+    def emitAddrWhilePermuting():
+      """Compute vAddrScratch overlapped with the in-flight ds_bpermute."""
+      if addrScaleShift:
+        module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
+                                   src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
+        module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vLGDelta),
+                           comment="adjusted D addr = scaled addrDVgpr + lane_group*8"))
+      else:
+        module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
+                           comment="adjusted D addr = addrDVgpr + lane_group*8"))
+
+    module.add(self._emitSubtilePackedPermute(vPack, vPermAddr, addrWhilePermuting=emitAddrWhilePermuting))
+
+    module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
+    module.add(BufferStoreB128(
+      src=vgpr(vPack, 4),
+      vaddr=vgpr(vAddrScratch),
+      saddr=sgpr("SrdD", 4),
+      soffset=0,
+      mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
+      comment=f"16bit paired dwordx4 store tt0={tt0},{tt0+1}"
+    ))
+
+    # WAR hazard: buffer_store_dwordx4 reads vPack[0:3] as source operands.
+    # The next paired store's v_cvt_pk_bf16_f32 will overwrite vPack.
+    # Insert nop to ensure the store has latched its source VGPRs.
+    module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
+
+    return module
+
+  def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0) -> Module:
+    """Emit a 16bit store for an orphan subtile element with no partner.
+
+    Used when MIWaveTile[0] is odd and the last sba=0 element has no sba=1
+    partner, or when batch boundaries split an (sba=0, sba=1) pair.
+
+    The layout below is specific to the mfma instruction used here: lane l = LG*16 + r
+    owns 4 output values at M-rows (LG*4 + 0..3) and a single N-column
+    (l % 16 = r = lane_id & 15).  In column-major (row-first in memory) layout
+    these 4 values ARE contiguous
+    in memory (consecutive M-rows at fixed N-col), so we use 2x buffer_store_dwordx2
+    after packing all 4 16bit values into 2 dwords.
+
+    The per-lane vaddr encodes:
+      vaddr = (lane_id & 15) * StrideD1J * bpe   [N-col byte offset within wave tile]
+            + vLGDelta                            [LG*4 M-rows * bpe = LG*8 bytes]
+            + wg0*MT0*bpe                         [workgroup M byte base]
+            + waveId0 * waveM_stride * bpe        [M-wave byte offset within WG]
+            + waveId1 * waveN_stride * StrideD1J * bpe  [N-wave byte offset]
+    and a constant offset12 = globalOffset (encodes d0 M-tile position within wave).
+
+    The SRD base encodes only wg1*MT1*StrideD1J*bpe (N workgroup offset).
+    The M workgroup offset (wg0*MT0*bpe) and wave-within-WG offsets must be
+    included in the vaddr explicitly.
+
+    Args:
+      addrCalc:     AddrCalculation for the element.
+      sumIdx0:      elementSumIdx for the element.
+      prefixOffset: parentWriter.states.c.startVgprValu (offset into ValuC).
+    """
+    module = Module("16bitSubtileScalarStore")
+    isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
+
+    ntd = self.kernel["NonTemporalD"]
+    isGlc = bool(ntd & 0x1)
+    isSlc = bool(ntd & 0x2)
+    isNT  = bool(ntd & 0x4)
+
+    # Scratch vgprs from the cvtVgprStruct block (overwritten each call):
+    #   vPack+0  : 16bit packed dword (vc=0,1)
+    #   vPack+1  : wave ID scratch / 16bit packed dword (vc=2,3)
+    #   vPack+2  : per-lane vaddr (N-col byte offset + M offsets)
+    #   vPack+3  : temp for N-col byte offset computation
+    vPack    = self.cvtVgprStruct.vgprBf16Temp
+    vLGDelta = self.cvtVgprStruct.vgprLaneGroupDelta  # LG*4*bpe = LG*8 bytes (pre-computed)
+
+    # addrCalc.globalOffset was computed with bpeCexternal (may be 4 for _GlobalAccumulation kernels),
+    # but the 16bit orphan store always targets the final 16bit output (bpeCexternalGSU1=2).
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpe     = self.parentWriter.states.bpeCexternalGSU1  # always 2 for 16bit dest
+    globalOffset = addrCalc.globalOffset * bpe // bpeCurr
+
+    def vc(vi):
+      idx = sumIdx0 + vi - prefixOffset
+      return vgpr("ValuC+" + str(idx))
+
+    # Derive the D-stride sgpr name (e.g. "StrideDJ") the same way incrementToNextRow does.
+    packedC1  = self.kernel["PackedC1IndicesX"]
+    indexChar = self.parentWriter.states.indexChars[packedC1[0]]
+    strideD1J = "StrideD%s" % indexChar
+
+    ws     = self.kernel["WavefrontSize"]
+    miwg0  = self.kernel["MIWaveGroup"][0]
+    miwg1  = self.kernel["MIWaveGroup"][1]
+    matM   = self.kernel["MatrixInstM"]
+    matN   = self.kernel["MatrixInstN"]
+
+    typeStr = "fp16" if isFp16 else "bf16"
+    VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
+    module.addComment1(f"{typeStr} orphan subtile tt0={tt0}: pack 4 M-rows (vc=0..3) at fixed N-col, store as 2x dwordx2")
+
+    # Build per-lane vaddr:
+    #   vaddr = (lane_id & 15) * StrideD1J * bpe   [N-col]
+    #         + vLGDelta                            [LG*4 M-rows = LG*8 bytes]
+    #         + wg0*MT0*bpe                         [M-WG base]
+    #         + waveId0*waveM_stride*bpe            [M-wave offset, if miwg0>1]
+    #         + waveId1*waveN_stride*StrideD1J*bpe  [N-wave offset, if miwg1>1]
+    # The SRD already encodes wg1*MT1*StrideD1J*bpe (N-WG offset).
+    tmpS = self.tmpS01
+    mt0bpe = self.kernel["MacroTile0"] * bpe
+
+    module.addComment1("compute per-lane orphan vaddr = N_col_off + LG_M_off + wg0_M_off [+ wave offsets]")
+
+    # N-col byte offset: (lane_id & 15) * StrideD1J * bpe
+    module.add(VAndB32(dst=vgpr(vPack+2), src0=15, src1=vgpr("Serial"),
+                       comment="col_in_wave = lane_id & 15  (N-column index)"))
+    module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+2), src1=sgpr(strideD1J),
+                         comment="col_in_wave * StrideD1J"))
+    if bpe == 2:
+      module.add(VLShiftLeftB32(dst=vgpr(vPack+2), shiftHex=1, src=vgpr(vPack+3),
+                                comment="N_col_off = col_in_wave * StrideD1J * 2"))
+    else:
+      module.add(VMulLOU32(dst=vgpr(vPack+2), src0=vgpr(vPack+3), src1=bpe,
+                           comment="N_col_off = col_in_wave * StrideD1J * bpe"))
+
+    # Add LG M-row offset: vLGDelta = LG*4*bpe = LG*8 bytes (pre-computed at batch start)
+    module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vLGDelta),
+                       comment="vaddr += LG_M_off (= vLGDelta = LG*4*bpe)"))
+
+    # Add M-WG offset: wg0 * MT0 * bpe
+    module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=mt0bpe,
+                       comment="wg0_M_off = WorkGroup0 * MT0 * bpe"))
+    module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=sgpr(tmpS),
+                       comment="vaddr += wg0_M_off"))
+
+    # Add M-wave offset: waveId0 * MIWaveTile[0] * matM * bpe.
+    if miwg0 > 1:
+      wsLog2 = int(log2(ws))
+      waveM_stride_bpe = self.kernel["MIWaveTile"][0] * matM * bpe
+      module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=wsLog2, src=vgpr("Serial"),
+                                 comment=f"waveId = Serial >> {wsLog2}"))
+      if miwg0 & (miwg0 - 1) == 0:  # power of 2 — use AND mask
+        module.add(VAndB32(dst=vgpr(vPack+3), src0=miwg0 - 1, src1=vgpr(vPack+3),
+                           comment=f"waveId0 = waveId & {miwg0-1}"))
+      else:
+        raise NotImplementedError(f"Non-power-of-2 MIWaveGroup[0]={miwg0} not supported in orphan store")
+      module.add(SMovB32(dst=sgpr(tmpS), src=waveM_stride_bpe,
+                         comment=f"waveM_stride_bpe={waveM_stride_bpe}"))
+      module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(tmpS),
+                           comment=f"wave_M_off = waveId0 * {waveM_stride_bpe}"))
+      module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vPack+3),
+                         comment="vaddr += wave_M_off"))
+
+    # Add N-wave offset: waveId1 * MIWaveTile[1] * matN * StrideD1J * bpe.
+    if miwg1 > 1:
+      wsLog2 = int(log2(ws))
+      waveN_stride_bpe = self.kernel["MIWaveTile"][1] * matN * bpe
+      module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=wsLog2, src=vgpr("Serial"),
+                                 comment=f"waveId = Serial >> {wsLog2}"))
+      if miwg0 & (miwg0 - 1) == 0:  # miwg0 is power of 2
+        module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=int(log2(miwg0)),
+                                   src=vgpr(vPack+3),
+                                   comment=f"waveId1 = waveId / {miwg0}"))
+      else:
+        raise NotImplementedError(f"Non-power-of-2 MIWaveGroup[0]={miwg0} not supported in orphan store")
+      module.add(SMovB32(dst=sgpr(tmpS), src=waveN_stride_bpe,
+                         comment=f"waveN_stride_bpe={waveN_stride_bpe}"))
+      module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(tmpS),
+                           comment=f"waveId1 * {waveN_stride_bpe}"))
+      module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(strideD1J),
+                           comment=f"wave_N_off = waveId1 * {waveN_stride_bpe} * StrideD1J"))
+      module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vPack+3),
+                         comment="vaddr += wave_N_off"))
+
+    # Pack all 4 16bit values (consecutive M-rows at fixed N-col) into 2 dwords.
+    # vc=0 → M-row+0 (lo16 of dword0), vc=1 → M-row+1 (hi16 of dword0)
+    # vc=2 → M-row+2 (lo16 of dword1), vc=3 → M-row+3 (hi16 of dword1)
+    #
+    module.add(VCvtPkF32to16(dst=vgpr(vPack+0), src0=vc(0), src1=vc(1), comment=f"M-row+0/+1 -> {typeStr}"))
+    module.add(VCvtPkF32to16(dst=vgpr(vPack+1), src0=vc(2), src1=vc(3), comment=f"M-row+2/+3 -> {typeStr}"))
+    module.add(SNop(waitState=0, comment=f"delay after pk_{typeStr}"))
+    module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
+    module.add(BufferStoreB64(
+      src=vgpr(vPack+0, 2),
+      vaddr=vgpr(vPack+2),
+      saddr=sgpr("SrdD", 4),
+      soffset=0,
+      mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
+      comment=f"orphan tt0={tt0} vc=0..3: 4 consecutive M-rows at fixed N-col"
+    ))
+    return module
 
   def _emitAtomicAdd(self, module: Module):
     ########################################

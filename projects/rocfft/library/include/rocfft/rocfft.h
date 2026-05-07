@@ -555,8 +555,10 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *
  *  Callback function pointers/data are given as arrays, with one
  *  function/data pointer per brick in the input field of the plan.
- *  A plan with no input field specified is considered to have one
- *  brick.
+ *  Load callbacks require at least one brick in the input field to
+ *  be assigned to the current device used at plan creation. A plan
+ *  with no input field specified is considered to have one brick on
+ *  the current device used at plan creation.
  *
  *  All functions in the array must perform the same logical
  *  operation.  That is, any function in the array must be
@@ -589,7 +591,8 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  @param[in] info execution info handle
  *  @param[in] cb_functions callback function pointers
  *  @param[in] cb_data callback function data, passed to the function pointer when it is called
- *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use */
+ *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use 
+ * */
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execution_info info,
                                                                     void** cb_functions,
                                                                     void** cb_data,
@@ -602,8 +605,10 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *
  *  Callback function pointers/data are given as arrays, with one
  *  function/data pointer per brick in the output field of the plan.
- *  A plan with no output field specified is considered to have one
- *  brick.
+ *  Store callbacks require at least one brick in the output field to
+ *  be assigned to the current device used at plan creation. A plan
+ *  with no output field specified is considered to have one brick on
+ *  the current device used at plan creation.
  *
  *  All functions in the array must perform the same logical
  *  operation.  That is, any function in the array must be

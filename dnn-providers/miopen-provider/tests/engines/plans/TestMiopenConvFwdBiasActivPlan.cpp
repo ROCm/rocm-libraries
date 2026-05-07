@@ -12,6 +12,7 @@
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
+#include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "tests/common/TestWorkarounds.hpp"
 
 using namespace miopen_plugin;
@@ -25,11 +26,14 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        SKIP_IF_WORKAROUND_ISSUE_5409();
         _handle = std::make_unique<HipdnnMiopenHandle>();
     }
 
+    // Per ROCm/rocm-libraries#6979 these tests must skip when the device has
+    // no applicable CBA solver. Each test passes its own constructed graph so
+    // the skip check uses the same shape the test would actually exercise.
     std::unique_ptr<HipdnnMiopenHandle> _handle;
+    MiopenConvFwdBiasActivPlanBuilder _planBuilder;
 };
 
 TEST(TestConvFwdBiasActivParams, InitializeFromValidConvFwdActivGraph)
@@ -114,6 +118,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraph)
     auto builder = createValidConvFwdActivGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -134,6 +139,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphCompileO
     auto builder = createValidConvFwdActivGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -154,6 +160,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphWorkspac
     auto builder = createValidConvFwdActivGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -174,6 +181,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraph)
     auto builder = createValidConvFwdBiasActivGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -198,6 +206,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphComp
     auto builder = createValidConvFwdBiasActivGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -222,6 +231,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphWork
     auto builder = createValidConvFwdBiasActivGraph();
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                                      builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
