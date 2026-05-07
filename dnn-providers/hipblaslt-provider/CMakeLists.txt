@@ -66,6 +66,7 @@ list(
     -Wunreachable-code # Warn about unreachable code
     -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
     -Wswitch-default # Warn if a switch statement does not have a default case
+    -Wno-ignored-attributes # disable warning about unused declspec(dllexport)
 )
 
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
@@ -147,9 +148,13 @@ target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE
 
 add_library(hipblaslt_plugin SHARED HipblasltPluginPublic.cpp)
 target_link_libraries(hipblaslt_plugin PRIVATE hipblaslt_plugin_private)
-target_link_libraries(
-    hipblaslt_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
-) # Hide symbols from linked static libs
+
+if(NOT WIN32)
+    target_link_libraries(
+        hipblaslt_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
+    ) # Hide symbols from linked static libs
+endif()
+
 target_compile_options(hipblaslt_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
     hipblaslt_plugin

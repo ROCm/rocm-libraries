@@ -1,11 +1,11 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 #pragma once
 
 #include "Node.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
-#include <hipdnn_frontend/attributes/{{ op.attributes_header_filename }}>
+#include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_filename_full }}.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/{{ op.packer_filename }}>
 {% if op.frontend.unpacker_function %}
@@ -73,13 +73,6 @@ public:
 {% endfor %}
 
 {% endfor %}
-{% endif %}
-{% if op.validation.dim_consistency_checks %}
-        // Dimension consistency checks
-{% for check in op.validation.dim_consistency_checks %}
-        // TODO: Implement dimension consistency check: {{ check }}
-{% endfor %}
-
 {% endif %}
 {% if op.validation.custom_checks %}
         // Custom validation checks
@@ -155,27 +148,6 @@ public:
             auto {{ first_output.name }}Strides = hipdnn_data_sdk::utilities::generateStrides({{ first_output.name }}Dims, strideOrder);
             {{ first_output.name }}Tensor->set_stride({{ first_output.name }}Strides);
         }
-{% elif op.infer_properties and op.infer_properties.strategy == "broadcast" %}
-        // TODO: Implement broadcast inference for output dimensions
-{% if op.infer_properties.dimension_formula %}
-        // Formula hint: {{ op.infer_properties.dimension_formula }}
-{% endif %}
-
-{% set first_output = op.frontend.outputs[0] %}
-{% set first_input = op.frontend.inputs[0] %}
-        auto {{ first_output.name }}Tensor = attributes.{{ first_output.effective_getter_name }}();
-
-        // Infer output strides if not set
-        if({{ first_output.name }}Tensor->get_stride().empty() && !{{ first_output.name }}Tensor->get_dim().empty())
-        {
-            auto {{ first_output.name }}Strides = hipdnn_data_sdk::utilities::generateStrides({{ first_output.name }}Tensor->get_dim());
-            {{ first_output.name }}Tensor->set_stride({{ first_output.name }}Strides);
-        }
-{% elif op.infer_properties and op.infer_properties.strategy == "custom" %}
-        // TODO: Implement custom inference strategy
-{% if op.infer_properties.dimension_formula %}
-        // Formula: {{ op.infer_properties.dimension_formula }}
-{% endif %}
 {% else %}
 {% if op.frontend.outputs %}
 {% set first_output = op.frontend.outputs[0] %}

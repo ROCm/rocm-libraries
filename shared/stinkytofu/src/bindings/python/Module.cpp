@@ -152,7 +152,7 @@ void StinkyAsmModule::updateInstructionGroups(const std::vector<const std::strin
             auto& groupRange = pImpl->instructionGroups.at(*groupName);
             if (groupRange.first == IntrusiveListIterator<IRBase>()) {
                 auto it = bb.rbegin();
-                for (auto i = 1; i < newInstructionCount; ++i) {
+                for (size_t i = 1; i < newInstructionCount; ++i) {
                     it++;
                 }
                 groupRange.first = IntrusiveListIterator<IRBase>(it.getNodePtr());
