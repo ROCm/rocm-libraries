@@ -18,7 +18,7 @@
 namespace asm_sdpa_engine
 {
 
-inline MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -56,14 +56,13 @@ inline MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttr
     return MaskType::WINDOW_GENERIC;
 }
 
-inline RoundingMode
-    getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
+RoundingMode getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
 {
     // TODO Cannot be specified in the graph, this will require specialized handling
     return RoundingMode::RTNE;
 }
 
-inline BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
 {
     return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
                ? BatchMode::GROUP
