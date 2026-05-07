@@ -450,13 +450,11 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
     std::vector<uint8_t> pluginPayload(serializedPluginPayload->begin(),
                                        serializedPluginPayload->end());
 
-    const hipdnnPluginConstData_t engineConfigData{_serializedEngineConfig.data(),
-                                                   _serializedEngineConfig.size()};
     const hipdnnPluginConstData_t pluginPayloadData{pluginPayload.data(), pluginPayload.size()};
 
     _pluginResourceManager = pluginResourceManager;
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContextFromSerialized(
-        _pluginResourceManager, _engineId, &engineConfigData, &pluginPayloadData);
+        _pluginResourceManager, _engineId, &pluginPayloadData);
 
     HipdnnBackendDescriptorImpl<ExecutionPlanDescriptor>::finalize();
 }

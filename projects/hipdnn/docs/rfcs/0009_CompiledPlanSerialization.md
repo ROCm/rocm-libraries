@@ -132,7 +132,6 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroySerializedExecutionContext_ext(
 
 hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized_ext(
     hipdnnEnginePluginHandle_t handle,
-    const hipdnnPluginConstData_t* engineConfig,
     const hipdnnPluginConstData_t* serializedContext,
     hipdnnEnginePluginExecutionContext_t* executionContext);
 ```

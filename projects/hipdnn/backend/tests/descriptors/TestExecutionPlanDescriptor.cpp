@@ -467,11 +467,8 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRestoresSerializedExecutionPlan)
     auto serializedPlan = makeSerializedPlan();
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _, _))
-        .WillOnce([](int64_t,
-                     const hipdnnPluginConstData_t* engineConfig,
-                     const hipdnnPluginConstData_t* serializedContext) {
-            EXPECT_EQ(engineConfig->size, 3);
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce([](int64_t, const hipdnnPluginConstData_t* serializedContext) {
             EXPECT_EQ(serializedContext->size, 3);
             return getExecutionContext();
         });
@@ -515,7 +512,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _, _))
+                createExecutionContextFromSerialized(ENGINE_ID, _))
         .WillOnce(Return(getExecutionContext()));
     EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
     ASSERT_NO_THROW(plan->deserializeBackendPlan(
@@ -563,7 +560,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _, _))
+                createExecutionContextFromSerialized(ENGINE_ID, _))
         .WillOnce(Return(getExecutionContext()));
     EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
     ASSERT_NO_THROW(plan->deserializeBackendPlan(
