@@ -51,6 +51,7 @@ const vector<vector<int>> matrix_size_range = {
     {32, 32, 36, 32},
     {50, 50, 50, 56},
     {70, 100, 70, 70},
+    {128, 128, 128, 128},
 };
 
 // // for daily_lapack tests

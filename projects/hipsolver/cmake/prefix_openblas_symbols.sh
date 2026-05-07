@@ -22,8 +22,9 @@ fi
 
 echo "Found library: $LIBRARY"
 
-# Extract all global text symbols and create objcopy rename definitions
-nm "$LIBRARY" | grep ' T ' | awk '{print $3}' | while read sym; do
+# Extract all global symbols (text T, data D, BSS B, and other global G) and create objcopy rename definitions
+# We need to rename both functions AND global variables to avoid conflicts
+nm "$LIBRARY" | grep ' [TDBG] ' | awk '{print $3}' | while read sym; do
     # Skip symbols that already have the prefix
     case "$sym" in
         ${PREFIX}*)
@@ -34,7 +35,7 @@ nm "$LIBRARY" | grep ' T ' | awk '{print $3}' | while read sym; do
     esac
 done > "$OUTPUT"
 
-echo "Generated $(wc -l < "$OUTPUT") symbol mappings in $OUTPUT"
+echo "Generated $(wc -l < "$OUTPUT") symbol mappings (functions + global data) in $OUTPUT"
 
 # Apply the renaming
 if [ -f "$OUTPUT" ] && [ -s "$OUTPUT" ]; then
