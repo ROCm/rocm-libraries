@@ -8,7 +8,7 @@
 > `TIMELINE_RULES` and `STRUCTURAL_RULES` in `CMSValidator.py` are now empty
 > no-ops; validation is graph-native via `compare_graphs` /
 > `validate_edge_wait_coverage` / `cumulative_issue_cycles` in
-> `ScheduleCapture.py`. The forthcoming design doc (bead `2yg`) will absorb
+> `CMSValidator.py`. The forthcoming design doc (bead `2yg`) will absorb
 > any architecture-specific commentary that needs to live alongside the
 > live code. The multi-ISA / gfx1151 reactivation story is tracked in
 > bead `l6q`.
@@ -37,7 +37,7 @@
 ## Validation Gaps
 
 ### False Negatives (schedule appears valid but may fail)
-1. **Quad-cycle estimation is conservative**: graph-side `cumulative_issue_cycles` (in `Tensile/Components/ScheduleCapture.py`) models MFMA execution latency and type-switch penalties cycle-exactly but does not account for SWaitCnt counter pressure or other dynamic stalls. Real cycle counts may be higher, making some schedules pass validation that would violate timing in practice. (Bead `8nz` deleted the structural-side mirror `estimate_quad_cycles`; the graph helper is the single source of truth.)
+1. **Quad-cycle estimation is conservative**: graph-side `cumulative_issue_cycles` (in `Tensile/Components/CMSValidator.py`) models MFMA execution latency and type-switch penalties cycle-exactly but does not account for SWaitCnt counter pressure or other dynamic stalls. Real cycle counts may be higher, making some schedules pass validation that would violate timing in practice. (Bead `8nz` deleted the structural-side mirror `estimate_quad_cycles`; the graph helper is the single source of truth.)
 2. **SBarrier timing assumes instant synchronization**: The validator checks that an `s_barrier` exists between the required instructions but does not model barrier latency.
 3. **SWaitCnt counter values are not verified**: The validator trusts that `dscnt`/`vlcnt`/`vscnt` values in `SWaitCnt` instructions are correct — it does not count actual outstanding memory operations to verify.
 4. **VCC dataflow tracking is intentionally not provided.** The validator does not form VCC RAW edges, does not detect VCC clobbers (`OverriddenInputFailure`), and does not detect same-body VCC reorders (`OrderInvertedFailure`). This is a permanent design choice (decided 2026-05-07; bead `rocm-libraries-uraq` removed the prior `_VCCRule` workaround machinery — `_VCCRule`, `_is_vcc`, `_vcc_resource()`, `_VCC_RESOURCE`, and `_VCC_DST1_CARRY_OUT_CLASSES` are gone). Class of bug not caught: 64-bit ALU adds reordering across the VCC carry chain, VCC carry-out clobbered by an intervening compare, and any other VCC RAW dependency. **No replacement is planned.** VCC sentinels emitted by rocisa have no `regType`/`regIdx`, so `_GenericALURule`'s `_is_register` filter drops them from reads/writes — VCC operands flow through the dataflow graph as dataflow-invisible.
