@@ -40,7 +40,6 @@ set(DEFAULT_COMPONENTS
     mxdatagenerator
     rocroller
     origami
-    tensile
     # projects
     hipblas-common
     hipblaslt
@@ -50,8 +49,6 @@ set(DEFAULT_COMPONENTS
 
 set(AVAILABLE_COMPONENTS
     ${DEFAULT_COMPONENTS}
-    # shared
-    tensile
     # dnn
     hipdnn
     hipdnn-integration-tests
@@ -62,6 +59,8 @@ set(AVAILABLE_COMPONENTS
 )
 
 set(UNSUPPORTED_COMPONENTS
+    # shared
+    tensile
     # projects
     composablekernel
     hipblas
@@ -151,14 +150,6 @@ if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT origami
         PREFIX_PATH shared
         EXPECT_TARGET roc::origami
-    )
-endif()
-
-if("tensile" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    add_subdirectory_with_message(
-        COMPONENT tensile
-        PREFIX_PATH shared
-        EXPECT_TARGET TensileTests
     )
 endif()
 
