@@ -509,7 +509,7 @@ class StreamK(Component):
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")
         module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"), src1=int(depthU * tP["bpe"]), comment="StreamK tile start offset"))
         strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
-        module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, "StreamK tile start offset"))
+        module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
         # if kernel["CheckDimOverflow"] >=2:
         #     kStr += self.assert_eq(sgpr(tmpOffset+1),0)
