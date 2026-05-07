@@ -69,6 +69,19 @@ void EnginePlugin::resolveSymbols()
     _funcDestroyExecutionContext
         = _lib.getSymbol<decltype(_funcDestroyExecutionContext)>(funcNameDestroyExecutionContext);
 
+    const auto funcNameSerializeExecutionContext = "hipdnnEnginePluginSerializeExecutionContext";
+    tryAssignSymbol(_funcSerializeExecutionContext, funcNameSerializeExecutionContext);
+
+    const auto funcNameDestroySerializedExecutionContext
+        = "hipdnnEnginePluginDestroySerializedExecutionContext";
+    tryAssignSymbol(_funcDestroySerializedExecutionContext,
+                    funcNameDestroySerializedExecutionContext);
+
+    const auto funcNameCreateExecutionContextFromSerialized
+        = "hipdnnEnginePluginCreateExecutionContextFromSerialized";
+    tryAssignSymbol(_funcCreateExecutionContextFromSerialized,
+                    funcNameCreateExecutionContextFromSerialized);
+
     const auto funcNameGetWorkspaceSizeFromExecutionContext
         = "hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext";
     _funcGetWorkspaceSizeFromExecutionContext
@@ -246,6 +259,70 @@ hipdnnEnginePluginExecutionContext_t
                          handle,
                          engineConfig,
                          opGraph,
+                         &execContext);
+    return execContext;
+}
+
+bool EnginePlugin::supportsExecutionContextSerialization() const
+{
+    assert(_initialized);
+    return _funcSerializeExecutionContext != nullptr
+           && _funcDestroySerializedExecutionContext != nullptr
+           && _funcCreateExecutionContextFromSerialized != nullptr;
+}
+
+void EnginePlugin::serializeExecutionContext(hipdnnEnginePluginHandle_t handle,
+                                             hipdnnEnginePluginExecutionContext_t executionContext,
+                                             hipdnnPluginConstData_t* serializedContext) const
+{
+    assert(_initialized);
+    if(!supportsExecutionContextSerialization())
+    {
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              "Engine plugin does not support execution context serialization");
+    }
+
+    invokePluginFunction("serialize execution context",
+                         _funcSerializeExecutionContext,
+                         handle,
+                         executionContext,
+                         serializedContext);
+}
+
+void EnginePlugin::destroySerializedExecutionContext(
+    hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* serializedContext) const
+{
+    assert(_initialized);
+    if(!supportsExecutionContextSerialization())
+    {
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              "Engine plugin does not support execution context serialization");
+    }
+
+    invokePluginFunction("destroy serialized execution context",
+                         _funcDestroySerializedExecutionContext,
+                         handle,
+                         serializedContext);
+}
+
+hipdnnEnginePluginExecutionContext_t EnginePlugin::createExecutionContextFromSerialized(
+    hipdnnEnginePluginHandle_t handle,
+    const hipdnnPluginConstData_t* engineConfig,
+    const hipdnnPluginConstData_t* serializedContext) const
+{
+    assert(_initialized);
+    if(!supportsExecutionContextSerialization())
+    {
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              "Engine plugin does not support execution context serialization");
+    }
+
+    hipdnnEnginePluginExecutionContext_t execContext;
+    invokePluginFunction("create execution context from serialized data",
+                         _funcCreateExecutionContextFromSerialized,
+                         handle,
+                         engineConfig,
+                         serializedContext,
                          &execContext);
     return execContext;
 }

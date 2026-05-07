@@ -690,6 +690,25 @@ class Solution(collections.abc.Mapping):
       if state["DepthU"] % duUnit != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 support only DepthU multiple of 2 * MatrixInstK * LocalSplitU")
 
+      for tc in ('A', 'B'):
+        dtype = state["ProblemType"][f"DataType{tc}"]
+        tlu = state["ProblemType"].get(f"TLU{tc}", False)
+        if tlu:
+          if dtype.isBFloat16() or dtype.isHalf():
+            state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
+          else:
+            reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
+            return
+        elif dtype.isBFloat16() or dtype.isHalf():
+          state[f"_ABTilePair{tc}"] = "AB_B16"
+        elif dtype.is8bitFloat():
+          state[f"_ABTilePair{tc}"] = "AB_B8"
+        elif dtype.is6bitFloat() or dtype.isFloat4():
+          state[f"_ABTilePair{tc}"] = "AB_B4"
+        else:
+          reject(state, printRejectionReason, f"No subtile geometry for dtype {dtype}")
+          return
+
       bytesLoaded = state["NumThreads"] * 16
       if state["ProblemType"]["MXBlockA"]:
         numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
@@ -2484,11 +2503,14 @@ class Solution(collections.abc.Mapping):
         if state["DirectToLds%s"%tc]:
           bpeA = state["ProblemType"]["DataType%s"%tc].numBytes()
           # For DTL lds padding must be a multiple of the instruction load size (in bytes)
+          # Also, LBSPP must be less than or equal to GRVW*bpe*NumThreads (cannot handle LBSPP larger than m0 inc value)
           MinLdsBlockSizePerPad = int((state[f"GlobalReadVectorWidth%s"%tc] * bpeA) * state["WavefrontSize"])
+          MaxLdsBlockSizePerPad = int((state[f"GlobalReadVectorWidth%s"%tc] * bpeA) * state["NumThreads"])
           if state["UseGeneralizedNLCOne%s"%tc]:
             LdsBlockSizePerPad = MinLdsBlockSizePerPad
           else:
             LdsBlockSizePerPad = max(LdsBlockSizePerPad, MinLdsBlockSizePerPad)
+            LdsBlockSizePerPad = min(LdsBlockSizePerPad, MaxLdsBlockSizePerPad)
             LdsBlockSizePerPad = roundUpToNearestMultiple(LdsBlockSizePerPad, MinLdsBlockSizePerPad)
 
         return int(LdsBlockSizePerPad)
