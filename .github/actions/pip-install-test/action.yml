@@ -1,4 +1,4 @@
-name: "pip install + pytest"
+name: "Test pip install"
 description: "Build a Python package with pip install and run pytest in an isolated venv"
 
 inputs:
@@ -12,26 +12,48 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: pip install and pytest
+    - name: Create venv
+      shell: bash
+      run: |
+        VENV_DIR=$(mktemp -d)
+        echo "VENV_DIR=$VENV_DIR" >> "$GITHUB_ENV"
+
+    - name: pip install
       shell: bash
       env:
         CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
         CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
         CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
-        CMAKE_GENERATOR: Ninja
         LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
       run: |
-        VENV_DIR=$(mktemp -d)
-        python3 -m venv "$VENV_DIR"
         if [ -f "$VENV_DIR/bin/activate" ]; then
           source "$VENV_DIR/bin/activate"
         else
           source "$VENV_DIR/Scripts/activate"
         fi
+        export CMAKE_GENERATOR=Ninja
+        RC_PATH=$(command -v rc 2>/dev/null || command -v rc.exe 2>/dev/null || true)
+        if [ -n "$RC_PATH" ]; then
+          export CMAKE_ARGS="-DCMAKE_RC_COMPILER=$RC_PATH"
+        fi
         pip install pytest
         pip install ${{ inputs.package_path }}
+
+    - name: pytest
+      shell: bash
+      env:
+        LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+      run: |
+        if [ -f "$VENV_DIR/bin/activate" ]; then
+          source "$VENV_DIR/bin/activate"
+        else
+          source "$VENV_DIR/Scripts/activate"
+        fi
         TEST_DIR=$( cd ${{ inputs.package_path }}/${{ inputs.test_path }} && pwd )
         cd "$VENV_DIR"
         pytest "$TEST_DIR"
-        deactivate
-        rm -rf "$VENV_DIR"
+
+    - name: Cleanup venv
+      shell: bash
+      if: always()
+      run: rm -rf "$VENV_DIR"

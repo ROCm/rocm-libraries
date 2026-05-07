@@ -5,6 +5,10 @@ inputs:
   amdgpu_family:
     description: "GPU family for ROCm install (e.g. gfx1151)"
     required: true
+  extra_args:
+    description: "Additional arguments to pass to install_rocm_from_artifacts.py"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -28,5 +32,6 @@ runs:
           --latest-release \
           --amdgpu-family ${{ inputs.amdgpu_family }} \
           --output-dir B:/ROCm \
-          --base-only
+          --base-only \
+          ${{ inputs.extra_args }}
         echo "ROCM_PATH=B:/ROCm" >> "$GITHUB_ENV"
