@@ -1436,6 +1436,16 @@ class _VSwapRule:
 class _VCCRule:
     """Track VCC carry / borrow / cmp-out as a first-class resource.
 
+    REMOVAL TARGET — bead `rocm-libraries-uraq`. This rule and its
+    supporting helpers (`_is_vcc`, `_vcc_resource`, `_VCC_RESOURCE`,
+    `_VCC_DST1_CARRY_OUT_CLASSES`) are scheduled for deletion. q9j
+    (bind rocisa `getDstParams`/`getSrcParams` to Python) and dzl
+    (push implicit-operand metadata onto rocisa classes including
+    `regType="vcc"` for the VCC container) will provide a cleaner
+    replacement. Until both land, this workaround stays. See
+    `CMSValidator_LIMITATIONS.md` §"VCC dataflow tracking" for the
+    limitation that activates when this is removed.
+
     rocisa exposes VCC as an opaque sentinel class with no regType/regIdx,
     so the generic resolver filters it out of every rule's reads/writes.
     That leaves VAddCO/VAddCCO/VSubCo carry chains and VCmp* / SOrSaveExec*

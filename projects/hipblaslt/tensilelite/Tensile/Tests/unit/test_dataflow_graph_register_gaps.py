@@ -3206,6 +3206,12 @@ class TestVCCCarryChain:
         """Lower-half add (VAddCOU32) writes v100 and the carry-out VCC;
         upper-half add (VAddCCOU32) writes v101 and reads the carry-in VCC.
 
+        REMOVAL TARGET — bead `rocm-libraries-uraq`. This test pins the
+        contract for `_VCCRule`, which is itself slated for removal.
+        Delete this test when `_VCCRule` is deleted; the limitation that
+        replaces it (no VCC dataflow tracking until q9j+dzl land) is
+        documented in `CMSValidator_LIMITATIONS.md`.
+
         The two instructions touch DISJOINT vgprs (lo: v100, v50; hi: v101,
         v51), so without VCC tracking there is NO edge in the reference
         graph between them and the reorder is invisible. With the wx9.9
@@ -3245,6 +3251,15 @@ class TestVCCCarryChain:
         """Lock down the wx9.9 contract: `_is_vcc` recognizes VCC sentinels,
         `_vcc_resource()` is a singleton with regType="vcc"/regNum=2, and
         `_VCCRule` publishes VCC as the carry-out write of VAddCOU32 and
+
+        REMOVAL TARGET — bead `rocm-libraries-uraq`. This test pins the
+        primitives backing `_VCCRule` (`_is_vcc`, `_vcc_resource`,
+        `_VCC_RESOURCE`); delete it together with the rule. The
+        replacement (q9j-bound `getDstParams`/`getSrcParams` plus dzl's
+        `regType="vcc"` on the rocisa side) supersedes everything this
+        test pins.
+
+
         the carry-in read of VAddCCOU32.
         """
         from rocisa.container import VCC
