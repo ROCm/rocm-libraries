@@ -18,14 +18,9 @@ class GraphLoader:
     Handles JSON loading, validation, and tensor info extraction.
     """
 
-    def __init__(self, validator: Optional[GraphValidator] = None) -> None:
-        """Initialize loader with optional validator.
-
-        Args:
-            validator: GraphValidator instance for operation validation.
-                      If None, a default validator is created.
-        """
-        self._validator = validator or GraphValidator()
+    def __init__(self) -> None:
+        """Initialize loader."""
+        self._validator = GraphValidator()
 
     def load_json(self, path: Path) -> Dict[str, Any]:
         """Load and parse a graph JSON file.
