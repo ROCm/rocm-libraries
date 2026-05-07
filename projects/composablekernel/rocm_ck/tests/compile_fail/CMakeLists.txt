@@ -20,7 +20,8 @@ file(GLOB COMPILE_FAIL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 
 foreach(source ${COMPILE_FAIL_SOURCES})
     get_filename_component(test_name ${source} NAME_WE)
-    set(target_name "rocm_ck_compile_fail_${test_name}")
+    set(target_name "compile_fail_${test_name}")
+    set(ctest_name "rocm_ck_compile_fail_${test_name}")
 
     add_library(${target_name} OBJECT EXCLUDE_FROM_ALL ${source})
     target_link_libraries(${target_name} PRIVATE rocm_ck)
@@ -30,10 +31,10 @@ foreach(source ${COMPILE_FAIL_SOURCES})
     )
 
     add_test(
-        NAME ${target_name}
+        NAME ${ctest_name}
         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${target_name}
     )
-    set_tests_properties(${target_name} PROPERTIES
+    set_tests_properties(${ctest_name} PROPERTIES
         WILL_FAIL TRUE
         LABELS "ROCM_CK_COMPILE_FAIL"
     )
