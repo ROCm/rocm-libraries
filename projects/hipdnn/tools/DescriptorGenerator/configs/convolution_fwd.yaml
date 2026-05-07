@@ -24,6 +24,7 @@ operation:
     node_class: "ConvolutionFpropNode"
     attributes_class: "ConvFpropAttributes"
     attributes_include: "ConvolutionFpropAttributes"
+    attributes_filename: "ConvolutionFprop"
 
     inputs:
       - name: "x"
@@ -75,19 +76,16 @@ operation:
       fbs_field: "x_tensor_uid"
       attr_suffix: "X"
       required: true
-      frontend_getter: "get_x()"
 
     - name: "w"
       fbs_field: "w_tensor_uid"
       attr_suffix: "W"
       required: true
-      frontend_getter: "get_w()"
 
     - name: "y"
       fbs_field: "y_tensor_uid"
       attr_suffix: "Y"
       required: true
-      frontend_getter: "get_y()"
 
   data_fields:
     - name: "pre_padding"

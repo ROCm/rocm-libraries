@@ -227962,21 +227962,21 @@
     CUCount: null
     ClusterLocalRead: 0
     CodeObjectVersion: 4
-    ConvertAfterDS: 0
+    ConvertAfterDS: false
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 16
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprA: 0
-    DirectToVgprB: 0
+    DirectToVgprA: false
+    DirectToVgprB: false
     DirectToVgprSparseMetadata: false
     DtlPlusLdsBuf: -1
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: true
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
@@ -228107,12 +228107,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 936
     SolutionNameMin: Cijk_Alik_Bljk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x352x16_MI16x16x1_CMS_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM0p10_GRVWA2_GRVWB2_GSU1_GSUAMB_GSUC1_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA2_LPB2_LPM0_LRVW2_LWPMn1_MIAV0_MIWT8_11_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS10_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU32_SUM0_SUS64_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM16_WGMXCC4_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 32
     StaggerUMapping: 0
     StaggerUStride: 64
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0
     StoreVectorWidth: 4
@@ -228133,13 +228133,13 @@
     ThreadTileA: 32
     ThreadTileB: 11
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UsePLRPack: 0
@@ -228200,22 +228200,22 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprA: 0
-    DirectToVgprB: 0
+    DirectToVgprA: false
+    DirectToVgprB: false
     DirectToVgprSparseMetadata: false
     DtlPlusLdsBuf: -1
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: true
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: -1
@@ -228346,7 +228346,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 937
     SolutionNameMin: Cijk_Alik_Bljk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x64_MI16x16x1_CMS_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSUn1_GSUAMBSK_GSUC1_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_4_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD4_NTM0_NEPBS8_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG16_8_2_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -228374,13 +228374,13 @@
     ThreadTileA: 16
     ThreadTileB: 4
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 1
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
