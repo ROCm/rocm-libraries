@@ -33,7 +33,7 @@ runs:
           source "$VENV_DIR/Scripts/activate"
         fi
         export CMAKE_GENERATOR=Ninja
-        RC_PATH=$(command -v rc 2>/dev/null || command -v rc.exe 2>/dev/null || true)
+        RC_PATH=$(python3 -c "import shutil; p=shutil.which('rc') or shutil.which('rc.exe') or ''; print(p)" 2>/dev/null)
         if [ -n "$RC_PATH" ]; then
           export CMAKE_ARGS="-DCMAKE_RC_COMPILER=$RC_PATH"
         fi
