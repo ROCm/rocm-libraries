@@ -4,6 +4,7 @@
 #include "origami/types.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -38,10 +39,19 @@ double runtime_options::read_heuristics_variance_from_env() {
   return default_variance;
 }
 
+dim3_t runtime_options::read_gemm_pick_from_env() {
+  if (const char* env = std::getenv("ANALYTICAL_GEMM_PICK")) {
+    size_t m = 0, n = 0, k = 0;
+    if (std::sscanf(env, "%zux%zux%zu", &m, &n, &k) == 3) { return {m, n, k}; }
+  }
+  return {0, 0, 0};
+}
+
 void runtime_options::update_from_env() {
   debug_enabled       = read_debug_from_env();
   heuristics_enabled  = read_heuristics_from_env();
   heuristics_variance = read_heuristics_variance_from_env();
+  gemm_pick           = read_gemm_pick_from_env();
 }
 
 int datatype_to_bits(data_type_t type) {
