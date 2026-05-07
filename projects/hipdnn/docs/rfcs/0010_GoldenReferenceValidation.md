@@ -32,24 +32,14 @@
 
 ## Summary
 
-The integration test suite validates engine outputs by computing references at runtime via [`CpuReferenceGraphExecutor`](../../test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp) or [`GpuReferenceGraphExecutor`](../../../../dnn-providers/integration-tests/src/harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp). This creates several gaps:
+The integration test suite validates engine outputs by computing references at runtime. This creates several gaps:
 
 1. **Circular dependency risk**: If the reference executor has a bug, both sides produce the same wrong answer and the test passes
 2. **Coverage gap**: Operations not yet implemented in the reference executor cannot be tested (e.g., SDPA has no C++ reference kernel)
 3. **Non-determinism**: GPU reference results can vary across runs, making failure investigation harder
 4. **Slowness**: CPU reference execution for large tensors is the bottleneck in full-tier tests
 
-This RFC extends the existing golden reference pattern -- graph+tensor bundles loaded from disk and validated against engine outputs -- to cover all operation types and integrate with CI. It adds a third verification mode alongside the existing CPU and GPU reference modes:
-
-- **Golden reference** (new) -- compare against pre-computed, version-controlled reference data from disk
-
-A prior effort established this pattern and it is already partially working. The existing infrastructure includes graph+tensor JSON bundles at [`hipdnn_reference_data/BatchnormFwdInference/`](../../hipdnn_reference_data/BatchnormFwdInference/), CPU and GPU golden test runners ([`TestGoldenReferenceCpu`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp), [`TestGoldenReferenceGpu`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp)), and a Python generation framework ([`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/)). What's missing: only batchnorm has data; no CI integration; no formalized folder convention; the GPU runner has no tests; there is no coverage for convolution, matmul, SDPA, layernorm, RMS norm, reduction, or pointwise operations. This RFC fills those gaps.
-
-### Key Benefits
-- **Deterministic baselines**: Reference data is frozen from a known-good source. Unlike computed mode -- where both the reference executor and the engine can drift together -- golden mode compares against a locked baseline, so any engine change is caught
-- **Unblocks testing before C++ reference kernels exist**: Generate golden data from any stable source -- PyTorch, AITER, AOTriton, Perf & benchmark team tools, or any tool that can produce the bundle format (see [Reference Sources](#reference-sources))
-- **No C++ to add a test case**: Adding a test case to an existing operation/layout/datatype requires zero C++ -- drop the bundle in the folder. Adding a **new** operation/layout/datatype requires a one-time `INSTANTIATE_TEST_SUITE_P` (see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests))
-- **Faster execution**: Eliminates runtime reference computation for large tensors
+A prior effort established a golden reference pattern -- golden data bundles (graph JSON + tensor `.bin` files) loaded from disk and validated against engine outputs. It is already partially working for batchnorm. This RFC extends that pattern to all operation types, formalizes the folder convention, adds data integrity checks, and integrates with CI.
 
 ---
 
@@ -57,7 +47,7 @@ A prior effort established this pattern and it is already partially working. The
 
 ### Existing Infrastructure
 
-The core test-as-data infrastructure is already built and working for batchnorm. The table below summarizes each component:
+The core test-as-data infrastructure is already built and working for batchnorm. What's missing: only batchnorm has data; no CI integration; no formalized folder convention; the GPU runner has no tests; there is no coverage for convolution, matmul, SDPA, layernorm, RMS norm, reduction, or pointwise operations. The table below summarizes each component:
 
 | Component | File(s) | What it does |
 |-----------|---------|-------------|
@@ -899,20 +889,8 @@ Comparison testing can confirm that two implementations agree, not that either i
 
 ## Future Work
 
-1. **Per-operation tolerance configuration**: A structured configuration mapping `(operation_type, data_type) → (atol, rtol)` so the generic test runner doesn't need per-operation test classes.
-
-2. **Automatic test discovery**: Recursive scanning of `hipdnn_reference_data/` to auto-generate test instantiations, eliminating the need to manually write `INSTANTIATE_TEST_SUITE_P` for each operation/layout/datatype combination.
-
-3. **Cross-validation within `IntegrationGraphVerificationHarness`**: Add a golden mode to Pattern 1 (test-as-code) that loads golden data for the same graph built by `buildGraph()` and compares both computed and golden results in a single test.
-
-4. **C++ graph export**: A utility to export a graph built by `buildGraph()` in an existing test-as-code test to the golden data bundle format (`{Name}.json` + `{Name}.tensor{uid}.bin`). This would let teams convert existing computed tests into golden test cases without rewriting the graph in Python.
-
-5. **Bundle metadata sidecar**: Optional `{Name}.meta.json` alongside the bundle for per-operation statistics (min/max/mean/std per tensor), generator provenance (tool, version, timestamp), and other metadata. Keeps the graph JSON computation-only while enabling tooling and CI dashboards.
-
-6. **Bundle inspection tool**: A Python CLI (`inspect_bundle.py`) that reads golden data bundles and reports operation type, tensor metadata, and value statistics (min/max/mean/std). A `--validate` mode scans a directory tree and runs the same integrity checks from [Data Integrity](#data-integrity) (file size validation, NaN/Inf detection, variance check). Reuses the existing `reference_data_scripts/utilities/` framework.
-
-7. **Compression**: Optional zstd compression of binary blobs for full-tier golden data with large tensors.
-
-8. **Mathematical invariant checks**: Per-operation invariants (layernorm output mean ~0 / variance ~1, softmax rows sum to 1, batchnorm output statistics) that require no reference executor and catch bugs that comparison testing structurally cannot. Separate RFC.
-
-9. **Hand-verified micro cases**: At least one test case per operation family with expected outputs computed by hand from the mathematical definition, not by any executor. Separate RFC.
+1. **Per-operation tolerance configuration**: Structured `(operation_type, data_type) → (atol, rtol)` lookup so the generic runner doesn't need per-operation test classes.
+2. **Automatic test discovery**: Recursive scanning of `hipdnn_reference_data/` to auto-generate test instantiations, eliminating manual `INSTANTIATE_TEST_SUITE_P`.
+3. **C++ graph export**: Utility to export a graph from an existing test-as-code `buildGraph()` to the bundle format, enabling conversion of computed tests to golden tests.
+4. **Bundle inspection and validation tool**: CLI that reads bundles, reports tensor metadata and statistics, and validates integrity across a directory tree.
+5. **Mathematical invariant checks and hand-verified micro cases**: Per-operation invariants (e.g., softmax rows sum to 1) and hand-computed expected outputs that catch bugs comparison testing cannot. Separate RFC.
