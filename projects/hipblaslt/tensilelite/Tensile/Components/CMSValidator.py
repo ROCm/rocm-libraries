@@ -184,10 +184,6 @@ PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
 # The `_quad_cycle_gap_ok` / `_cvt_to_mfma_gap_ok` / `_mfma_pack_to_cvt_gap_ok`
 # helpers that consume them are defined later in this same file.
 
-# --- VGPRs ---
-VGPRS_PER_CONVERSION_GROUP = 8   # 8 VGPRs per conversion group in TF32 emulation
-
-
 # =============================================================================
 # ArchProfile — per-architecture quad-cycle and issue-cycle constants
 # =============================================================================
@@ -3693,51 +3689,6 @@ class Timeline:
                     i_combined += 1
             
             self.combined_timeline.extend(self._timelines[loop_name])
-
-
-def _compute_swap_register_pairs(vw: int, total_regs: int) -> list[tuple[int, int]]:
-    """Compute the (src_reg, dst_reg) pairs for each VSwapB32 instruction, in issue order.
-
-    Replicates the iteration logic of transposeLRVregs() in LocalRead.py.
-    Uses the same conversion tables from getTransposeIndex() (LocalRead.py:319-320).
-
-    The conversion tables map each register index within a block of size
-    MIInputPerThread(8) * VW to its transposed position. transposeLRVregs
-    iterates indices 1..totalRegs-2 (skipping first and last), and for each:
-      - Looks up the target position via the conversion table
-      - If neither position has been visited and they differ, emits a VSwapB32
-      - Marks both positions as visited
-
-    Args:
-        vw: The vector width (lrvwTile). Must be 2 or 4.
-        total_regs: Total number of registers being transposed within one block
-                    (VGPRS_PER_CONVERSION_GROUP * vw).
-
-    Returns:
-        List of (src_reg, dst_reg) tuples, one per swap, in the order they are issued.
-    """
-    if vw <= 1:
-        return []
-    _CONV_TABLE = {
-        2: [0, 8, 2, 10, 4, 12, 6, 14, 1, 9, 3, 11, 5, 13, 7, 15],
-        4: [0, 8, 16, 24, 4, 12, 20, 28, 1, 9, 17, 25, 5, 13, 21, 29,
-            2, 10, 18, 26, 6, 14, 22, 30, 3, 11, 19, 27, 7, 15, 23, 31],
-    }
-    conv = _CONV_TABLE[vw]
-    block_size = 8 * vw  # MIInputPerThread * lrvwTile
-    start, last = 0, total_regs - 1
-    done = [start, last]
-    pairs = []
-    for idx in range(start + 1, last):
-        block_idx = idx // block_size
-        new_idx = conv[idx % block_size] + block_idx * block_size
-        if idx in done or idx == new_idx:
-            done.append(idx)
-            continue
-        pairs.append((idx, new_idx))
-        done.append(idx)
-        done.append(new_idx)
-    return pairs
 
 
 def _failure_to_string(result: object) -> Optional[str]:
