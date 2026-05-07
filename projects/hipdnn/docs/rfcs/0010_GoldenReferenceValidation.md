@@ -277,35 +277,108 @@ The golden data format is **reference-source-agnostic**. The manifest records wh
 | Third-party engines | Other vendor libraries, other hipDNN plugins | `--external-reference <dir>` | Cross-engine validation, competitive benchmarking |
 | Other C++ implementations | Standalone C++ reference code, research prototypes | `--external-reference <dir>` | When a team has a verified implementation outside the test SDK |
 
-The first two (CPU/GPU ref) are built-in -- the generator calls them directly. Everything else goes through `--external-reference`, which reads pre-computed tensor files from a directory. The golden data format doesn't distinguish between them; only the manifest metadata records the origin.
+There are two generation paths — **built-in** (C++ does everything) and **external** (Python or another tool produces the outputs). Both produce the same golden data format. The sections below spell out the exact steps for each path and what each step reads and writes.
 
-### External Reference Pipeline
+### Built-in Reference Path (CPU or GPU)
 
-For operations where no C++ reference executor exists, **PyTorch (or any framework) can produce the truth instead**. This avoids writing and maintaining a C++ reference kernel for every operation -- PyTorch already has a correct, well-tested implementation.
+**When to use:** A C++ reference executor exists for the operation (conv, batchnorm, matmul, etc.).
+
+**Who creates what:**
+
+| What | Who creates it | How |
+|------|---------------|-----|
+| Graph | C++ `buildGraph()` | Test fixture code |
+| Input tensors | C++ `initializeBundle(seed)` | Random fill from seed |
+| Output tensors | C++ `CpuReferenceGraphExecutor` or `GpuReferenceGraphExecutor` | Executes the graph on the inputs |
+| Golden data (manifest + .bin files) | C++ `GoldenDataWriter` | Packages inputs + outputs + metadata |
+
+**Steps:**
 
 ```bash
-# 1. Export graph definitions from C++ (see Graph Export below)
+# Single command. C++ does everything:
+#   a) buildGraph()          → creates the graph
+#   b) initializeBundle(42)  → creates input tensors from seed
+#   c) executeCpuGraph()     → runs CPU ref on those inputs → produces output tensors
+#   d) GoldenDataWriter      → writes manifest.json + tensor_X.bin + tensor_W.bin + tensor_Y.bin
+./hipdnn_integration_tests \
+  --generate-golden \
+  --reference-executor cpu \
+  --golden-data-dir ./golden_data \
+  --golden-seed 42 \
+  --gtest_filter="*ConvFwd*Smoke*"
+```
+
+No external tools. No export step. C++ owns the graph, the inputs, and the outputs. The golden data directory contains everything needed for validation.
+
+### External Reference Path (Python / ONNX / third-party)
+
+**When to use:** No C++ reference executor exists for the operation, or you want an independent implementation to produce the truth.
+
+**Who creates what:**
+
+| What | Who creates it | How |
+|------|---------------|-----|
+| Graph | C++ `buildGraph()` | Test fixture code |
+| Graph definition (params, shapes) | C++ `--export-graph` | Exported for Python to read |
+| Input tensors | C++ `initializeBundle(seed)` | Random fill from seed, exported for Python to read |
+| Output tensors | **Python** (or other external tool) | Reads graph definition + input tensors from C++ export, runs computation |
+| Golden data (manifest + .bin files) | C++ `GoldenDataWriter` | Re-creates inputs from same seed, reads external outputs, packages both |
+
+**Critical constraint:** The external script must compute outputs from the **exact same inputs** that will be stored in the golden data. If it generates its own inputs, the golden data will pair C++ inputs with external outputs computed from different inputs — silently wrong.
+
+**Steps:**
+
+```bash
+# Step 1: C++ creates the graph, generates inputs, and exports BOTH.
+#
+#   READS:  nothing (builds graph from test fixture)
+#   WRITES: /tmp/graph_exports/SdpaFwd_Smoke/
+#             graph_def.json   ← operation params, tensor shapes, data types
+#             tensor_X.bin     ← input tensor (generated from seed 42)
+#             tensor_W.bin     ← input tensor (generated from seed 42)
+#
 ./hipdnn_integration_tests \
   --export-graph \
   --output-dir /tmp/graph_exports/ \
+  --golden-seed 42 \
   --gtest_filter="*SdpaFwd*Smoke*"
 
-# 2. Generate reference outputs with PyTorch (reads exported graph)
+# Step 2: Python reads the graph definition AND input tensors that C++ exported.
+#          It runs the computation on those inputs. It writes ONLY output tensors.
+#
+#   READS:  /tmp/graph_exports/SdpaFwd_Smoke/graph_def.json   ← knows what op to run
+#           /tmp/graph_exports/SdpaFwd_Smoke/tensor_X.bin      ← same inputs as C++
+#           /tmp/graph_exports/SdpaFwd_Smoke/tensor_W.bin      ← same inputs as C++
+#   WRITES: ./pytorch_outputs/tensor_Y.bin                     ← output tensor ONLY
+#
 python scripts/generate_reference.py \
   --graph-export /tmp/graph_exports/SdpaFwd_Smoke/ \
   --output-dir ./pytorch_outputs/
 
-# 3. Feed them into the golden data generator
+# Step 3: C++ packages the golden data.
+#          It re-creates the same inputs from the same seed (identical to Step 1),
+#          reads Python's output tensors, and writes the golden data directory.
+#
+#   READS:  ./pytorch_outputs/tensor_Y.bin   ← Python's output
+#   WRITES: ./golden_data/sdpa/fwd/a3f8c2e1/
+#             manifest.json                  ← metadata, tensor map, checksums
+#             tensor_X.bin                   ← input  (re-created from seed 42)
+#             tensor_W.bin                   ← input  (re-created from seed 42)
+#             tensor_Y.bin                   ← output (copied from Python's output)
+#
 ./hipdnn_integration_tests \
   --generate-golden \
   --external-reference ./pytorch_outputs/ \
   --golden-data-dir ./golden_data \
+  --golden-seed 42 \
   --gtest_filter="*SdpaFwd*Smoke*"
 ```
 
-#### What the Python script must produce
+**Why this is safe:** Step 1 and Step 3 use the same seed, so `initializeBundle(seed)` produces identical inputs. Step 1 exports those inputs for Python. Step 3 re-creates them internally and packages them with Python's outputs. The seed is the single source of input identity.
 
-The `--external-reference` directory must contain one raw binary file per output tensor, named to match the tensor name in the graph (e.g., `Y.bin`). The generator reads these files instead of running a C++ reference executor, then packages them into the standard golden data format (manifest + binary blobs + SHA-256).
+#### What the external script must produce
+
+The `--external-reference` directory must contain one raw binary file per **output** tensor, named to match the tensor name in the graph (e.g., `Y.bin`). The generator reads these files instead of running a C++ reference executor, then packages them with the inputs it generated into the standard golden data format (manifest + binary blobs + SHA-256). The script must **never** generate its own inputs — it reads them from the `--graph-export` directory.
 
 #### Where the scripts live
 
@@ -333,50 +406,64 @@ Two checks, each catching a different kind of mismatch:
 
 #### Graph Export
 
-Instead of the Python script independently defining operation parameters, it reads graph properties exported from `buildGraph()`. The exported graph is a **transient artifact** — it is consumed by the Python script during generation and discarded. It is not stored in the golden data directory.
+Instead of the Python script independently defining operation parameters or input data, it reads **everything** from the C++ export: graph properties (operation parameters, tensor shapes) and input tensors. The export is a **transient artifact** — consumed by the Python script during generation and discarded. It is not stored in the golden data directory.
 
-```bash
-# 1. Export the graph definition from C++ (transient, not stored)
-./hipdnn_integration_tests \
-  --export-graph \
-  --output-dir /tmp/graph_exports/ \
-  --gtest_filter="*SdpaFwd*Smoke*"
-
-# 2. Python reads the exported graph, extracts params, runs PyTorch
-python scripts/generate_reference.py \
-  --graph-export /tmp/graph_exports/SdpaFwd_Smoke/ \
-  --output-dir ./pytorch_outputs/
-
-# 3. Feed outputs into golden data generator
-./hipdnn_integration_tests \
-  --generate-golden \
-  --external-reference ./pytorch_outputs/ \
-  --golden-data-dir ./golden_data \
-  --gtest_filter="*SdpaFwd*Smoke*"
-```
-
-`buildGraph()` in C++ is the **single source of truth**. The Python script never independently defines parameters — it reads them from the export. The exact export format (FlatBuffers binary, JSON, or extending the manifest with a `graph_properties` section) is an implementation detail to decide when the first external reference script is written.
+`buildGraph()` in C++ is the **single source of truth** for both the computation definition and the inputs. The Python script never independently defines parameters or generates inputs — it reads both from the export. The exact export format (FlatBuffers binary, JSON, or extending the manifest with a `graph_properties` section) is an implementation detail to decide when the first external reference script is written.
 
 **Why the serialized graph is not stored in golden data.** The validation pipeline never reads it — it rebuilds the graph from `buildGraph()` and checks the fingerprint. Storing it would couple golden data to the FlatBuffers schema version: a schema upgrade would make every stored `graph.bin` unreadable, forcing regeneration even when the computation hasn't changed. The manifest and tensor files have no such coupling.
 
 #### Cross-Validation
 
-When a C++ reference executor IS available for an operation, a CI health check generates golden data from both sources and confirms they agree:
+When a C++ reference executor IS available for an operation, a CI health check generates golden data from both sources and compares the **output tensor values** directly.
+
+**Prerequisite: both executors must run on the same inputs.** Same constraint as the [External Reference Pipeline](#external-reference-pipeline) — if the two executors use different inputs, the comparison is meaningless.
+
+**How same-input is guaranteed:** The C++ generator creates golden data first (inputs from seed + outputs from CPU ref). Then the Python script reads the **saved input tensors** from the C++ golden data directory — it never generates its own inputs. Both executors now compute outputs from the exact same input values.
 
 ```bash
-# Generate from C++ CPU reference
+# Step 1: Generate golden data from C++ CPU reference (built-in path).
+#
+#   READS:  nothing (builds graph from test fixture, generates inputs from seed)
+#   WRITES: ./golden_cpu/sdpa/fwd/a3f8c2e1/
+#             manifest.json, tensor_X.bin, tensor_W.bin, tensor_Y.bin
+#
 ./hipdnn_integration_tests --generate-golden --reference-executor cpu \
   --golden-data-dir ./golden_cpu/ --gtest_filter="*SdpaFwd*Smoke*"
 
-# Generate from Python external reference
-./hipdnn_integration_tests --generate-golden --external-reference ./pytorch_outputs/ \
-  --golden-data-dir ./golden_ext/ --gtest_filter="*SdpaFwd*Smoke*"
+# Step 2: Export graph definition (so Python knows the operation parameters).
+#
+#   READS:  nothing (builds graph from test fixture)
+#   WRITES: /tmp/graph_exports/SdpaFwd_Smoke/graph_def.json
+#
+./hipdnn_integration_tests --export-graph \
+  --output-dir /tmp/graph_exports/ --gtest_filter="*SdpaFwd*Smoke*"
 
-# Compare the two sets of golden outputs
-python scripts/compare_golden_sets.py ./golden_cpu/ ./golden_ext/
+# Step 3: Python reads graph params from Step 2 AND input tensors from Step 1.
+#          It computes outputs from the SAME inputs the C++ ref used.
+#
+#   READS:  /tmp/graph_exports/SdpaFwd_Smoke/graph_def.json        ← op params
+#           ./golden_cpu/sdpa/fwd/a3f8c2e1/tensor_X.bin             ← C++ inputs
+#           ./golden_cpu/sdpa/fwd/a3f8c2e1/tensor_W.bin             ← C++ inputs
+#   WRITES: ./pytorch_outputs/tensor_Y.bin                          ← output ONLY
+#
+python scripts/generate_reference.py \
+  --graph-export /tmp/graph_exports/SdpaFwd_Smoke/ \
+  --inputs ./golden_cpu/sdpa/fwd/a3f8c2e1/ \
+  --output-dir ./pytorch_outputs/
+
+# Step 4: Compare C++ outputs vs Python outputs.
+#          Pure tensor value comparison — no fingerprint, no manifest.
+#
+#   READS:  ./golden_cpu/sdpa/fwd/a3f8c2e1/tensor_Y.bin   ← C++ output
+#           ./pytorch_outputs/tensor_Y.bin                  ← Python output
+#   WRITES: nothing (prints pass/fail)
+#
+python scripts/compare_golden_sets.py \
+  ./golden_cpu/sdpa/fwd/a3f8c2e1/ \
+  ./pytorch_outputs/
 ```
 
-If both produce the same outputs (within tolerance), the external reference is validated. If they disagree, investigation is needed before trusting either.
+Both executors ran the same computation (guaranteed by [Graph Export](#graph-export)) on the same inputs (Python read them from C++ golden data via `--inputs`). The only variable is the implementation. If outputs agree within tolerance, the external reference is validated. If they disagree, one of the two implementations has a bug.
 
 #### Summary
 
@@ -394,6 +481,8 @@ If both produce the same outputs (within tolerance), the external reference is v
 - [ ] External reference with missing output tensor file (e.g., `Y.bin` absent): **hard FAIL** naming the missing file
 - [ ] `reference_executor` field written to manifest for all three sources (`cpu`, `gpu`, `external`)
 - [ ] Generator validates reference outputs contain no NaN/Inf before writing
+- [ ] `--export-graph` exports both graph definition and input tensors (generated from `--golden-seed`)
+- [ ] External reference scripts read input tensors from the export directory, never generate their own
 
 ---
 
@@ -766,6 +855,8 @@ New CLI flags added to `main.cpp`:
 | `--golden-seed` | integer | 42 | Seed for golden data input generation |
 | `--force-regenerate` | flag | off | Overwrite existing golden data (without this, generator refuses to clobber) |
 | `--external-reference` | path | none | Directory with external reference outputs |
+| `--export-graph` | flag | off | Export graph definition and input tensors for external reference scripts |
+| `--output-dir` | path | none | Output directory for `--export-graph` |
 
 Environment variable fallbacks:
 - `HIPDNN_TEST_VERIFICATION_MODE`
@@ -792,7 +883,7 @@ expected_failures = [
 The `reference_executor_hash` field in the manifest (short git hash of the reference executor source) enables detection of stale golden data. When the current reference executor hash differs from the golden data's hash, the harness logs a warning. This is advisory -- it does not change pass/fail -- but provides a clear signal that regeneration may be needed.
 
 **Acceptance criteria**:
-- [ ] All 6 CLI flags parsed and stored in `TestConfig` singleton
+- [ ] All 8 CLI flags parsed and stored in `TestConfig` singleton
 - [ ] Environment variable fallbacks work when CLI flag is absent
 - [ ] Generator writes `reference_executor_hash` to manifest
 - [ ] `verifyGraphGolden()` logs a warning if hashes differ
