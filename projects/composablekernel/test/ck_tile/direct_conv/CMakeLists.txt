@@ -70,6 +70,24 @@ if(GPU_TARGETS MATCHES "gfx950")
         )
     endif()
 
+    add_gtest_executable(test_direct_conv_grouped_32c_fp16 test_grouped_32c_fp16.cpp)
+    if(TARGET test_direct_conv_grouped_32c_fp16)
+        target_compile_options(test_direct_conv_grouped_32c_fp16 PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
+    add_gtest_executable(test_direct_conv_grouped_32c_fp16_tile_conv test_grouped_32c_fp16_tile_conv.cpp)
+    if(TARGET test_direct_conv_grouped_32c_fp16_tile_conv)
+        target_compile_options(test_direct_conv_grouped_32c_fp16_tile_conv PRIVATE
+            -Wno-old-style-cast
+            -Wno-unused-parameter
+            -Wno-shadow
+        )
+    endif()
+
     add_gtest_executable(test_direct_conv_mfma test_mfma.cpp)
     if(TARGET test_direct_conv_mfma)
         target_compile_options(test_direct_conv_mfma PRIVATE
@@ -123,6 +141,7 @@ if(GPU_TARGETS MATCHES "gfx950")
         test_direct_conv_grouped_4c_fp16_tile_conv
         test_direct_conv_grouped_16c_fp16_tile_conv
         test_direct_conv_grouped_8c_fp16_tile_conv
+        test_direct_conv_grouped_32c_fp16_tile_conv
         test_direct_conv_mfma
         test_direct_conv_lds_bank_conflicts
         test_direct_conv_input_loader

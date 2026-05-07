@@ -183,3 +183,60 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<80, direc
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<81, direct_conv::Version::v2>, SIGNATURE>);
 // Padded no-swizzle fallback — Fprop index 83 (vector_size = 1)
 run_alg(run_direct_conv<direct_conv::DirectTileConvForward8CFp16Kernel<83, direct_conv::Version::v2>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Direct HIP convolution (streaming) 32c kernels — configs 2-3 are Fprop
+////////////////////////////////////////////////////////////////////////
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward32CFp16Kernel<2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectHipConvForward32CFp16Kernel<3>, SIGNATURE>);
+
+////////////////////////////////////////////////////////////////////////
+// Direct CK Tile convolution (streaming) 32c v2 kernels — Fprop configs
+////////////////////////////////////////////////////////////////////////
+// Group 0: no swizzle, direct DRAM epilogue — Fprop indices 8-15
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<8, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<9, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<10, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<11, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<12, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<13, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<14, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<15, direct_conv::Version::v2>, SIGNATURE>);
+// Group 1: no swizzle, LDS-staged epilogue — Fprop indices 24-31
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<24, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<25, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<26, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<27, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<28, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<29, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<30, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<31, direct_conv::Version::v2>, SIGNATURE>);
+// Group 2: XOR swizzle, direct DRAM epilogue — Fprop indices 40-47
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<40, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<41, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<42, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<43, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<44, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<45, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<46, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<47, direct_conv::Version::v2>, SIGNATURE>);
+// Group 3: XOR swizzle, LDS-staged epilogue — Fprop indices 56-63
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<56, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<57, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<58, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<59, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<60, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<61, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<62, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<63, direct_conv::Version::v2>, SIGNATURE>);
+// Group 4: Cyclic-shift swizzle — Fprop indices 64-65
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<64, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<65, direct_conv::Version::v2>, SIGNATURE>);
+// Padded CyclicShift configs — Fprop indices 73-77 (vector_size = 16, 8, 4, 2, 1)
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<73, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<74, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<75, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<76, direct_conv::Version::v2>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<77, direct_conv::Version::v2>, SIGNATURE>);
+// Padded no-swizzle fallback — Fprop index 79 (vector_size = 1)
+run_alg(run_direct_conv<direct_conv::DirectTileConvForward32CFp16Kernel<79, direct_conv::Version::v2>, SIGNATURE>);

@@ -50,6 +50,34 @@ struct WeightAccessor
     }
 };
 
+// -----------------------------------------------------------------------
+// WeightAccessor8 — register-resident filter weight buffer with fp16x8_t
+// (8 fp16 values) per filter position. Used by 32c kernel where the MFMA
+// B-operand is fp16x8_t (mfma_f32_16x16x32_f16).
+// -----------------------------------------------------------------------
+template <int KH, int KW>
+struct WeightAccessor8
+{
+    fp16x8_t weights[KH * KW];
+
+    static constexpr auto desc_ = ck_tile::make_naive_tensor_descriptor_packed(
+        ck_tile::make_tuple(ck_tile::number<KH>{}, ck_tile::number<KW>{}));
+
+    template <int R, int S>
+    __device__ __forceinline__ fp16x8_t get() const
+    {
+        constexpr auto coord = ck_tile::make_tensor_coordinate(
+            desc_, ck_tile::make_tuple(ck_tile::number<R>{}, ck_tile::number<S>{}));
+        return weights[coord.get_offset()];
+    }
+
+    template <int R, int S>
+    __device__ __forceinline__ fp16x8_t get_transposed() const
+    {
+        return get<KH - 1 - R, KW - 1 - S>();
+    }
+};
+
 // Shared weight load function for grouped convolution kernels.
 //
 // Loads weight data from global memory into LDS using async tile operations.

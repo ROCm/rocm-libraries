@@ -28,6 +28,10 @@
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_8c_fp16_hip_conv_kernel.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_8c_fp16_tile_conv_kernel.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_8c_fp16_tile_conv_kernel.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_32c_fp16_hip_conv_kernel.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_32c_fp16_hip_conv_kernel.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/direct_conv_fwd_32c_fp16_tile_conv_kernel.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/direct_conv_bwd_data_32c_fp16_tile_conv_kernel.hpp"
 #pragma clang diagnostic pop
 
 namespace ck_tile::builder::profiling {

@@ -65,4 +65,25 @@ struct Mfma16x16x32
     }
 };
 
+// MFMA functor for 32-channel kernel (mfma_f32_16x16x32_f16).
+//
+// Lane mapping (64-lane wave, single 16x16 matmul):
+//   lane_q  = lane % 16 -> output column (N dimension)
+//   lane_c8 = lane / 16 -> K-reduction group (0..3)
+//
+// Each lane provides 8 fp16 for A and B from its reduction group,
+// receives 4 fp32 for C. C[16x16] += A[16xK] * B[Kx16] where K=32.
+//
+// Unlike the 8c Toeplitz variant (Mfma16x16x32), the 32c kernel uses
+// full 32-channel reduction with explicit S-loop (INNER_KW = kw).
+// Each group's 32 channels are split across 2 waves (wave_half).
+struct Mfma16x16x32_32c
+{
+    using input_type = fp16x8_t;
+    __device__ fp32x4_t operator()(fp16x8_t weight, fp16x8_t input, fp32x4_t acc) const
+    {
+        return __builtin_amdgcn_mfma_f32_16x16x32_f16(weight, input, acc, 0, 0, 0);
+    }
+};
+
 } // namespace ck_tile::direct_conv
