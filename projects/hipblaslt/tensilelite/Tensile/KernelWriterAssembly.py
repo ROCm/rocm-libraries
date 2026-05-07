@@ -10548,7 +10548,10 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def localWriteSwapOffsets(self, kernel, internalPointerSwap, tP, prefetch=False):
     tc = tP["tensorChar"]
-    if not self.do["LocalWrite%s"%tc] or kernel["NoLdsWriteCode"]:
+    # NoLdsWriteCode is True for DirectToLds (DTL) kernels: there is no LDS write
+    # instruction emitted, but the LDS write address still needs to be swapped between
+    # the two LDS buffers, so do not early-return on NoLdsWriteCode here.
+    if not self.do["LocalWrite%s"%tc]:
       return Module("localWriteSwapOffsets (No local write%s)"%tc)
     needSwap = False if kernel["1LDSBuffer"] else True
     doMetadataCheck = kernel["ProblemType"]["Sparse"] and \
