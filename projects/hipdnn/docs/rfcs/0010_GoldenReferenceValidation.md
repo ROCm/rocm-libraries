@@ -17,7 +17,7 @@
 11. [Verification Modes](#verification-modes)
 12. [CLI and Configuration](#cli-and-configuration)
 13. [Harness Integration](#harness-integration)
-14. [Data Management with DVC](#data-management-with-dvc)
+14. [Data Management](#data-management)
 15. [CI Integration](#ci-integration)
 16. [Adding New Golden Reference Tests](#adding-new-golden-reference-tests)
 17. [Implementation Phases](#implementation-phases)
@@ -461,7 +461,7 @@ class JsonGoldenDataReader : public IGoldenDataReader { ... };
 
 #### Integrity Verification (SHA-256)
 
-Every golden file is integrity-checked before use. This catches partial DVC pulls, disk corruption, and storage-side bit flips:
+Every golden file is integrity-checked before use. This catches partial downloads, disk corruption, and storage-side bit flips:
 
 ```cpp
 void verifyGoldenIntegrity(const GoldenManifest& manifest,
@@ -479,7 +479,7 @@ void verifyGoldenIntegrity(const GoldenManifest& manifest,
             FAIL() << "Golden data integrity check failed for " << path
                    << "\n  Expected SHA-256: " << expectedHash
                    << "\n  Actual SHA-256:   " << actualHash
-                   << "\n  File may be corrupted. Run 'dvc pull' to re-fetch.";
+                   << "\n  File may be corrupted. Re-fetch golden data from storage.";
         }
     };
 
@@ -514,7 +514,7 @@ Strides are **not stored** in the manifest. `buildGraph()` produces strides from
 **Acceptance criteria** (for integrity):
 - [ ] Every `.bin` file has a `sha256` field in the manifest
 - [ ] `verifyGoldenIntegrity()` runs before any tensor comparison
-- [ ] Missing file: **hard FAIL** with file path and `dvc pull` suggestion
+- [ ] Missing file: **hard FAIL** with file path and suggestion to re-fetch from storage
 - [ ] Hash mismatch: **hard FAIL** with expected vs actual hash
 - [ ] Unit test: Corrupt a tensor file (truncate by 1 byte), verify clear failure message
 - [ ] Unit test: Delete a tensor file, verify clear failure message
@@ -807,7 +807,7 @@ protected:
                 if(mode == VerificationMode::GOLDEN)
                 {
                     FAIL() << "Golden data not found: " << goldenPath
-                           << "\nRun 'dvc pull' or generate with --generate-golden";
+                           << "\nFetch golden data from storage or generate with --generate-golden";
                 }
                 // BOTH mode: missing golden data is a warning, not a failure
                 HIPDNN_PLUGIN_LOG_WARN(
@@ -891,72 +891,84 @@ void generateGoldenData(graph::Graph& graph, unsigned int seed)
 
 ---
 
-## Data Management with DVC
+## Data Management
 
 ### Repository Layout
 
 ```
 integration-tests/
-  .dvc/
-    config                      # Remote storage configuration
-  golden_data.dvc               # DVC tracking file (committed to git)
   golden_data/
-    manifest.json               # Top-level manifest listing all golden test cases
     conv/
       fwd/
-        fp32/
-          smoke/
-            NCHW_1x16x16x16_1x16x3x3/
-              manifest.json
-              graph.bin
-              tensor_X.bin
-              tensor_W.bin
-              tensor_Y.bin
-            NHWC_2x32x32x32_2x32x3x3/
-              manifest.json
-              ...
-          full/
-            ...
-        fp16/
+        NCHW_1x16x16x16_1x16x3x3_fp32/
+          manifest.json
+          graph.bin
+          tensor_X.bin
+          tensor_W.bin
+          tensor_Y.bin
+        NHWC_2x32x32x32_2x32x3x3_fp16/
+          manifest.json
           ...
       bwd/
         ...
     batchnorm/
       ...
+    sdpa/
+      fwd/
+        B1_H8_S128_D64_fp16_fp32acc/
+          manifest.json
+          ...
 ```
 
-The directory names (`smoke/`, `full/`, etc.) follow the test naming convention already used in the codebase. Golden data doesn't require any particular naming -- it simply mirrors whatever the tests are called.
+Case directory names (e.g., `NCHW_1x16x16x16_1x16x3x3_fp32`) are derived from the GTest parameterized test name. The generator calls `::testing::UnitTest::GetInstance()->current_test_info()` to get the test name and uses it as the directory name. No separate naming convention to maintain — the directory structure mirrors the test names.
 
-The **top-level `manifest.json`** maps GTest names to golden data directories. This enables:
-- Detection of orphaned golden data (files on disk not in manifest)
-- Detection of missing golden data (entries in manifest not on disk)
-- CI health checks without loading every individual manifest
+**Path resolution.** `resolveGoldenPath()` maps the GTest name to a directory path by convention (`operation/direction/case`) and looks for `manifest.json` in the resolved directory. A CI health check script scans the directory tree against the test executable's test list to detect orphaned or missing golden data.
+
+**Test tiers are a selection concern.** The test framework selects which cases to run via `--gtest_filter`. If a smoke test and a full test use the same graph, they share the same golden data directory.
+
+**Mixed-precision support.** Data type is encoded in the case directory name (`_fp32`, `_fp16_fp32acc`) so mixed-precision operations (e.g., SDPA with fp16 input and fp32 accumulate) have a natural naming. The per-case `manifest.json` records the exact data type for each tensor.
 
 **Acceptance criteria**:
-- [ ] Top-level `manifest.json` maps test names to directories
-- [ ] `resolveGoldenPath()` looks up the current test name in the top-level manifest
-- [ ] Test name absent from manifest in golden mode: **hard FAIL** with suggestion to generate
-- [ ] Test name absent from manifest in both mode: **warning + skip golden check**
-- [ ] Generator updates top-level manifest when generating new golden data
+- [ ] `resolveGoldenPath()` maps GTest name to directory path by convention
+- [ ] Missing `manifest.json` in resolved directory in golden mode: **hard FAIL** with suggestion to generate
+- [ ] Missing `manifest.json` in resolved directory in both mode: **warning + skip golden check**
+- [ ] CI health check script detects orphaned golden data (directories not matching any test) and missing golden data (tests with no directory)
+- [ ] Mixed-precision case directory names encode all relevant data types
 
-### DVC Workflow
+### Storage Requirements
+
+Golden data is too large for git (a single test case with large tensors can be tens of megabytes). It needs external storage that satisfies three requirements:
+
+1. **CI-pullable**: CI jobs can fetch golden data before running tests
+2. **Versioned**: Golden data versions are tied to code versions (regenerating golden data after a `buildGraph()` change should be trackable)
+3. **Integrity-checked**: Partial or corrupted downloads are detected before comparison (SHA-256 in the manifest handles this regardless of storage tool)
+
+### Storage Options
+
+The choice of storage tool is an infrastructure decision, not an architectural one. The golden data format (manifest + binary blobs) is tool-agnostic. Any of the following work:
+
+| Option | Pros | Cons |
+|--------|------|------|
+| DVC | Data versioned alongside code via `.dvc` files, backend-agnostic (S3/Azure/GCS) | Third-party tool, learning curve, CI integration |
+| git-lfs | Built into git, no new tool | GitHub storage/bandwidth costs at scale |
+| S3/Azure + script | No new dependency, simple | No automatic version linkage to code |
+| CI artifact storage | Already in CI infrastructure | No cross-job versioning, harder to share |
+
+This RFC does not prescribe a specific tool. The examples below use DVC for concreteness, but the workflow is the same with any tool that can push/pull files to remote storage.
+
+### Example Workflow (DVC)
 
 ```bash
-# One-time setup
-cd integration-tests
-dvc init
-dvc remote add -d storage <remote-url>
-
 # Generate golden data (Steps 1-3)
 ./build/hipdnn_integration_tests \
   --generate-golden \
   --golden-data-dir ./golden_data \
-  --gtest_filter="*Smoke*"
+  --gtest_filter="*ConvFwd*"
 
 # Track and push
 dvc add golden_data/
 git add golden_data.dvc .gitignore
-git commit -m "Add conv fwd fp32 smoke golden data"
+git commit -m "Add conv fwd golden data"
 dvc push
 
 # On another machine or in CI (Steps 4-7)
@@ -966,21 +978,11 @@ dvc pull
   --golden-data-dir ./golden_data
 ```
 
-### CI Credential Strategy
-
-| Environment | Auth Method | Details |
-|-------------|-------------|---------|
-| GitHub Actions CI | OIDC federation | No long-lived secrets. GHA assumes an IAM role via OIDC. |
-| Developer workstation | `dvc remote modify --local` | Developer configures personal credentials locally; never committed to git. |
-| External contributors | Pre-built artifact | Golden data bundled into TheRock test artifacts. No DVC access needed. |
-
-The choice of remote backend (S3, Azure Blob, GCS) is an infrastructure decision outside the scope of this RFC. The DVC abstraction layer makes the backend swappable without code changes.
-
 **Acceptance criteria**:
-- [ ] CI pipeline: `dvc pull` step skipped entirely for `--verification-mode computed`
-- [ ] CI pipeline: `dvc pull` failure is **non-fatal warning** if `--verification-mode computed`
-- [ ] CI pipeline: `dvc pull` failure is **hard failure** if `--verification-mode golden`
-- [ ] Runbook: Step-by-step for setting up DVC credentials for each of the three environments
+- [ ] CI pipeline: golden data fetch step skipped entirely for `--verification-mode computed`
+- [ ] CI pipeline: golden data fetch failure is **non-fatal warning** if `--verification-mode computed`
+- [ ] CI pipeline: golden data fetch failure is **hard failure** if `--verification-mode golden`
+- [ ] Runbook: Step-by-step for setting up storage credentials for CI and developer workstations
 
 ---
 
@@ -990,7 +992,7 @@ The choice of remote backend (S3, Azure Blob, GCS) is an infrastructure decision
 
 | CI Stage | Verification Mode | Golden Data Required | Rationale |
 |----------|-------------------|---------------------|-----------|
-| Pre-submit (smoke) | `computed` | No | Fast feedback, no DVC dependency |
+| Pre-submit (smoke) | `computed` | No | Fast feedback, no external storage dependency |
 | Post-submit (full) | `both` | Yes | Cross-validates golden against computed |
 | Nightly | `golden` | Yes | Regression gate against locked baselines |
 | Weekly | `both` (all tiers) | Yes | Full cross-validation, staleness detection |
@@ -1002,9 +1004,9 @@ The choice of remote backend (S3, Azure Blob, GCS) is an infrastructure decision
 - name: Pull golden reference data
   if: inputs.verification_mode != 'computed'
   run: |
-    pip install dvc[s3]
+    # Tool-specific fetch command (e.g., dvc pull, aws s3 sync, etc.)
     cd dnn-providers/integration-tests
-    dvc pull
+    ./scripts/fetch_golden_data.sh
 
 - name: Run integration tests
   run: |
@@ -1014,7 +1016,7 @@ The choice of remote backend (S3, Azure Blob, GCS) is an infrastructure decision
       --gtest_filter=${{ inputs.gtest_filter }}
 ```
 
-Pre-submit jobs omit the DVC pull step entirely, keeping them fast and independent of remote storage availability.
+Pre-submit jobs omit the golden data fetch step entirely, keeping them fast and independent of remote storage availability.
 
 ---
 
@@ -1055,18 +1057,19 @@ protected:
 ### Step 3: Inspect the generated data
 
 ```bash
-cat golden_data/myop/fwd/fp32/smoke/NCHW_1x16x16/manifest.json | python -m json.tool
+cat golden_data/myop/fwd/NCHW_1x16x16_fp32/manifest.json | python -m json.tool
 ```
 
 Verify tensor shapes and value ranges match expectations.
 
-### Step 4: Version with DVC
+### Step 4: Push to storage
 
 ```bash
-dvc add golden_data/
-git add golden_data.dvc
-git commit -m "Add golden data for MyOperation smoke tests"
-dvc push
+# Push golden data to remote storage (tool-specific)
+# Example with DVC:
+dvc add golden_data/ && git add golden_data.dvc && dvc push
+# Example with S3:
+aws s3 sync golden_data/ s3://bucket/golden_data/
 ```
 
 ### Step 5: Validate with `both` mode (Steps 4-7 of the pipeline)
@@ -1112,19 +1115,19 @@ Both computed and golden validation must pass. This confirms the golden data is 
 
 ### Phase 2: Integration & Scale
 
-**What ships**: DVC pipeline, CI integration, manifest-based path resolution, staleness detection.
+**What ships**: Storage integration, CI integration, path resolution, staleness detection.
 
 **Scope**:
-1. Top-level manifest and `resolveGoldenPath()` implementation
+1. `resolveGoldenPath()` implementation (GTest name → directory path by convention)
 2. `reference_executor_hash` in metadata + staleness warnings
 3. `--external-reference` flag for ops without reference executors
-4. DVC setup and CI pipeline snippet
-5. DVC credential runbook
+4. Storage setup and CI pipeline snippet (tool chosen by infrastructure team)
+5. Storage credential runbook
 6. Golden data generated for at least 10 test cases across conv fwd/bwd/wrw, batchnorm, fp32/fp16
 
 **Definition of done**:
-- All acceptance criteria in Data Management with DVC, CLI and Configuration checked off
-- DVC round-trip documented and tested
+- All acceptance criteria in Data Management, CLI and Configuration checked off
+- Storage round-trip documented and tested (generate → push → pull → validate)
 - CI pipeline snippet reviewed by DevOps
 - Corrupted golden data always produces a clear diagnostic
 
@@ -1142,15 +1145,15 @@ Both computed and golden validation must pass. This confirms the golden data is 
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| DVC remote becomes unavailable | Golden-mode CI fails | Low | Compute-mode CI is independent of DVC; CI fallback to compute-only |
+| Remote storage becomes unavailable | Golden-mode CI fails | Low | Compute-mode CI is independent of storage; CI fallback to compute-only |
 | Tensor naming conventions diverge across op families | Name-based matching breaks | Medium | Lint rule: all test tensors must have non-empty, unique names within a graph |
 | Golden data regeneration cadence unclear | Stale data accumulates | Medium | `reference_executor_hash` provides signal; weekly `both`-mode CI catches drift |
-| Large golden data sets slow down CI | CI feedback loop degrades | Low | DVC caching, selective pull by test filter, compression (future) |
-| Team unfamiliar with DVC | Onboarding friction | Medium | Runbook in Phase 2, pair programming during first 3 onboardings |
+| Large golden data sets slow down CI | CI feedback loop degrades | Low | Storage caching, selective fetch by test filter, compression (future) |
+| Team unfamiliar with storage tool | Onboarding friction | Medium | Runbook in Phase 2, pair programming during first 3 onboardings |
 | Engine support check missing from golden path | Silent failures or crashes | High | Design bug identified in pen test. Fix: extract `prepareEngine()` shared method |
 | Shape/stride mismatch between golden data and runtime | Wrong comparison, subtle bugs | Medium | Dim validation at load time; hard FAIL on any mismatch |
 | NaN/Inf in golden data goes undetected | All comparisons pass vacuously | Low | Generator validates outputs contain no NaN/Inf before writing |
-| Partial DVC pull leaves truncated files | Integrity check catches it | Low | SHA-256 verification before any comparison |
+| Partial download leaves truncated files | Integrity check catches it | Low | SHA-256 verification before any comparison |
 | Reference executor bug frozen into golden data | Wrong truth accepted permanently | Medium | Cross-validation catches disagreements; future invariant checks provide code-independent anchors |
 | Generator crash leaves partial golden data | Orphaned files, missing manifest | Low | Atomic write protocol: generate into `.tmp` dir, rename on success |
 | CRLF line endings change SHA-256 on Windows | Integrity check fires on valid data | Low | `.gitattributes` forces LF for all golden data files; binary blobs are unaffected |
@@ -1191,9 +1194,9 @@ These are not flaws in the design — they are the boundary of what comparison t
 
 3. **Incremental generation**: Per-test-case generation that detects existing files and only generates missing ones, reducing regeneration overhead.
 
-4. **Golden data garbage collection**: A CI job that diffs the top-level manifest against the test executable's test list to detect and clean up orphaned golden data from removed test cases.
+4. **Golden data garbage collection**: A CI job that scans the golden data directory tree against the test executable's test list to detect and clean up orphaned golden data from removed test cases.
 
-5. **Mixed-precision and fused graph support**: The current directory layout does not cleanly handle mixed-precision operations or fused graphs (conv+bias+relu). The layout may need extension when these tests arrive.
+5. **Fused graph naming convention**: The directory layout handles mixed-precision via the case directory name (e.g., `_fp16_fp32acc`). Fused graphs (conv+bias+relu) need a naming convention for the operation directory level — either a compound name (`conv_bias_relu/`) or a generic `fused/` directory with descriptive case names. Decide when these tests arrive.
 
 6. **Compression**: Optional zstd compression of binary blobs for full-tier golden data with large tensors. The manifest would gain a `"compression": "zstd"` field.
 
