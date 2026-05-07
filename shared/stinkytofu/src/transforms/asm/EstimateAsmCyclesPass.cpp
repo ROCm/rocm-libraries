@@ -145,7 +145,7 @@ class AsmCycleEstimator {
                                           int bpr, int numWaves) {
         return currentCycle;
     }
-    int getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, int numLR) {
+    int getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, std::size_t numLR) {
         if (fifo.size() <= numLR) return currentCycle;
         int finalCycle = currentCycle;
         // pop finisned LR
@@ -576,15 +576,9 @@ class EstimateAsmCyclesPassImpl : public Pass {
         // 'sgprState' is a map<string, int64_t>
         // 'vgprState' is a vector<map<string, int64_t>>, one for each lane/thread
 
-        // Helper lambda to get or initialize a value
-        auto getOrDefault = [](const std::unordered_map<std::string, int64_t>& state,
-                               const std::string& key, int64_t def) {
-            auto it = state.find(key);
-            return it != state.end() ? it->second : def;
-        };
-
         // initial vgprSerial
-        for (int tid = 0; tid < getWaveFrontSize(arch_); tid++) {
+        const auto waveFrontSize = getWaveFrontSize(arch_);
+        for (uint32_t tid = 0; tid < waveFrontSize; tid++) {
             vgprState[tid][vgprSerial] = tid;
         }
 
@@ -603,7 +597,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             // Handle VGPR assignments (per-thread)
             else if (opcode.find("v_") != std::string::npos) {
                 // Simulate for each thread using type-safe dynamic casting
-                for (int tid = 0; tid < getWaveFrontSize(arch_); tid++) {
+                for (uint32_t tid = 0; tid < waveFrontSize; tid++) {
                     simulateInstructionTyped(inst, vgprState[tid], sgprState);
                 }
             }
@@ -692,11 +686,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
         std::queue<int> hwLRFIFO;
         std::queue<int> lgkmLRFIFO;
         std::deque<int> hwGRFIFO;
-        bool isEndOfLoop = false;
         int numPreviousLRs = 0;
-        bool isPreviousMFMA = false;
-        bool isPreviousVectorALU = false;
-        bool isPreviousScalarALU = false;
         int previousBarrierSignal = -11;  // gfx1250 barrier signal latency is 11 cycles
 
         // Find vgprLocalReadAddrA and vgprLocalReadAddrB names
@@ -779,7 +769,6 @@ class EstimateAsmCyclesPassImpl : public Pass {
                     const std::string& labelName = labelData->label;
                     auto pos = labelName.find("label_LoopBeginL");
                     if (pos != std::string::npos && pos == 0) {
-                        isEndOfLoop = true;
                         break;
                     }
                 }
@@ -791,7 +780,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (waitCntData != nullptr) {
                     int dlcnt = waitCntData->dlcnt;
                     int dscnt = waitCntData->dscnt;
-                    int numWaits = dlcnt + dscnt;
+                    std::size_t numWaits = static_cast<std::size_t>(dlcnt + dscnt);
                     cycles = asmCycleEstimator.getLocalReadCompletionCycle(cycles + 1, lgkmLRFIFO,
                                                                            numWaits);
                 } else if (tensorCntData != nullptr) {
@@ -799,8 +788,6 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 } else if (storeCntData != nullptr) {
                     cycles += inst->issueCycles;
                 } else {
-                    auto srcWaitCnt = inst->getSrcReg(0).getLiteralInt();
-                    // std::cout << "srcWaitCnt: " << srcWaitCnt << "\n";
                     // std::cout << "Estimate WaitCnt: " << inst->getHwInstDesc()->mnemonic << "\n";
                     // std::cout << "WaitCntData is nullptr\n";
                     cycles += inst->issueCycles;
@@ -846,30 +833,15 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
             // Set Flags
             if (isMatrixInstruction(*inst)) {
-                isPreviousMFMA = true;
                 numPreviousLRs = 0;
-                isPreviousVectorALU = false;
-                isPreviousScalarALU = false;
             } else if (isDSRead(*inst)) {
                 numPreviousLRs++;
-                isPreviousMFMA = false;
-                isPreviousVectorALU = false;
-                isPreviousScalarALU = false;
             } else if (isVectorALU(*inst)) {
-                isPreviousMFMA = false;
                 numPreviousLRs = 0;
-                isPreviousVectorALU = true;
-                isPreviousScalarALU = false;
             } else if (isScalarALU(*inst)) {
-                isPreviousMFMA = false;
                 numPreviousLRs = 0;
-                isPreviousVectorALU = false;
-                isPreviousScalarALU = true;
             } else {
                 numPreviousLRs = 0;
-                isPreviousMFMA = false;
-                isPreviousVectorALU = false;
-                isPreviousScalarALU = false;
             }
             // Accumulate issue cycles from each instruction
             // totalCycles += estimateInstructionCycles(inst, passCtx);
@@ -878,10 +850,10 @@ class EstimateAsmCyclesPassImpl : public Pass {
             if (!isLabel(*inst)) {
                 // inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));
                 if (auto* c = inst->getModifier<CommentData>()) {
-                    c->comment = "AsmCycles " + std::to_string(cycles);
+                    c->comment = "<This is " + std::to_string(cycles) + "-cycle>";
                 } else {
                     inst->addModifier<CommentData>(
-                        CommentData{"AsmCycles " + std::to_string(cycles)});
+                        CommentData{"<This is " + std::to_string(cycles) + "-cycle>"});
                 }
             }
             // std::cout << "cycles: " << cycles - totalCycles << std::endl;

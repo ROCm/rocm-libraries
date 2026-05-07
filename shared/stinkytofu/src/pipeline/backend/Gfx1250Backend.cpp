@@ -36,8 +36,8 @@
 #include "stinkytofu/pipeline/OptimizationPasses.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
-#include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
@@ -127,7 +127,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         pm.addPass(createCFGBuilderPass());
         pm.addPass(createInsertDelayAluPass());
     }
-    
+
     // Run math clock estimation pass to get the math clock estimation result
     pm.addPass(createEstimateAsmCyclesPass());
 

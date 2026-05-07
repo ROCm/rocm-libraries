@@ -5770,7 +5770,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       passOutputAfter = stModule.getPassResults()
       kernel["MathClocksUnrolledLoop"] = int(passOutputAfter.get("EstimateAsmCycles", 0))
       print2(f"StinkyTofu (1b) pipeline: {t1b_end - t1b_start:.4f}s")
-      print2(f"StinkyTofu pass results: EstimateAsmCycles={kernel["MathClocksUnrolledLoop"]}")
+      print2(f"StinkyTofu pass results: EstimateAsmCycles={kernel['MathClocksUnrolledLoop']}")
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
