@@ -229,7 +229,7 @@ typedef enum
 
     /**
      * @brief Per-execute UIDs of tensors whose shape/stride is being overridden
-     *        (RFC 0008 Phase 1, HIPDNN_TYPE_INT64).
+     *        (RFC 0008, HIPDNN_TYPE_INT64).
      *
      * Selector array: each entry identifies which tensor in the graph the
      * corresponding entries in OVERRIDE_LENGTHS / OVERRIDE_SHAPES /
@@ -240,7 +240,7 @@ typedef enum
 
     /**
      * @brief Per-execute override shapes, packed flat across all UIDs
-     *        (RFC 0008 Phase 1, HIPDNN_TYPE_INT64).
+     *        (RFC 0008, HIPDNN_TYPE_INT64).
      *
      * Concatenation of each tensor's shape vector in the order given by
      * OVERRIDE_UNIQUE_IDS. The per-tensor rank used to slice this flat
@@ -250,7 +250,7 @@ typedef enum
 
     /**
      * @brief Per-execute override strides, packed flat across all UIDs
-     *        (RFC 0008 Phase 1, HIPDNN_TYPE_INT64).
+     *        (RFC 0008, HIPDNN_TYPE_INT64).
      *
      * Concatenation of each tensor's stride vector in the order given by
      * OVERRIDE_UNIQUE_IDS. Sliced using OVERRIDE_LENGTHS like OVERRIDE_SHAPES.
@@ -259,7 +259,7 @@ typedef enum
 
     /**
      * @brief Per-UID rank of the override shape/stride vectors
-     *        (RFC 0008 Phase 1, HIPDNN_TYPE_INT64).
+     *        (RFC 0008, HIPDNN_TYPE_INT64).
      *
      * One entry per UID in OVERRIDE_UNIQUE_IDS, giving the rank used to slice
      * OVERRIDE_SHAPES / OVERRIDE_STRIDES at dispatch. Stored as int64_t in the

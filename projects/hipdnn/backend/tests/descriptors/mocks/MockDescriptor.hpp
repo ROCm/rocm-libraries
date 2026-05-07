@@ -245,4 +245,13 @@ ACTION_P(SetArg4ToInt64, value) // NOLINT
     *static_cast<int64_t*>(arg4) = value;
 }
 
+/// Action helper: program `MockGraphDescriptor::getAttribute()` to write a
+/// boolean attribute value into the user-provided buffer (arg4) and report
+/// `count == 1` via the inout count pointer (arg3). Mirrors `SetArg4ToInt64`.
+ACTION_P(SetArg4ToBool, value) // NOLINT
+{
+    *static_cast<bool*>(arg4) = value;
+    *arg3 = int64_t{1};
+}
+
 } // namespace hipdnn_backend

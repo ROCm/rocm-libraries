@@ -760,7 +760,7 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
 }
 
 // ============================================================================
-// RFC 0008 Phase 1: HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED
+// HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED (RFC 0008)
 // ============================================================================
 
 TEST_F(TestGraphDescriptor, IsDynamicShapeEnabledDefaultsToFalseWhenUnset)

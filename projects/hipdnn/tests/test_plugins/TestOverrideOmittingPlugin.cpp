@@ -1,11 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Fake plugin for RFC 0008 Phase 1: implements ONLY the standard execute
-// entry. Reports `apiVersionWithoutTweak()` (= "1.0.0" after PR1 baseline)
-// so the host's applicability filter excludes it for graphs that opt into
-// dynamic-shape overrides while still using it for non-override graphs.
-// Doubles as the binary-compat regression: a pre-Phase-1 plugin must
+// Fake plugin (RFC 0008): implements ONLY the standard execute entry.
+// Reports `apiVersionWithoutTweak()` (= "1.0.0") so the host's
+// applicability filter excludes it for graphs that opt into dynamic-shape
+// overrides while still using it for non-override graphs. Doubles as the
+// binary-compat regression: a plugin predating override-execute must
 // continue to serve non-override graphs unchanged.
 
 #include "TestPluginCommon.hpp"
@@ -33,9 +33,9 @@ public:
         return "1.0.0";
     }
 
-    /// Reports the baseline plugin SDK version ("1.0.0" after PR1) — below
-    /// `K_PHASE1_OVERRIDE_MIN_VERSION`, so this plugin is filtered OUT for any
-    /// graph whose `is_dynamic_shape_enabled` attribute is true.
+    /// Reports the baseline plugin SDK version ("1.0.0") — below
+    /// `K_OVERRIDE_EXECUTE_MIN_API_VERSION`, so this plugin is filtered OUT
+    /// for any graph whose `is_dynamic_shape_enabled` attribute is true.
     const char* getPluginApiVersion() const override
     {
         return apiVersionWithoutTweak();

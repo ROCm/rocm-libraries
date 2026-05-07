@@ -28,7 +28,7 @@ namespace hipdnn_frontend::detail
 /// rebuilds the frontend Graph representation. Tensors are shared across operations
 /// via UID-based lookup.
 ///
-/// `outIsDynamicShapeEnabled` corresponds to RFC 0008 Phase 1's
+/// `outIsDynamicShapeEnabled` corresponds to the
 /// `HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED` graph-level boolean.
 /// It is left as `std::nullopt` when the attribute is absent (legacy graphs)
 /// or set to the recovered value otherwise.
@@ -128,13 +128,12 @@ namespace hipdnn_frontend::detail
         outPreferredEngineId = preferredEngineId;
     }
 
-    // Query the RFC 0008 Phase 1 dynamic-shape opt-in flag (optional).
+    // Query the dynamic-shape opt-in flag (optional, RFC 0008).
     // GraphDescriptor returns the wire default (false) for legacy graphs that
     // never had the attribute set; we still surface it so callers can round-trip
-    // the flag through serialize/deserialize without losing user intent. The
-    // backend will succeed with elementCount==1 in both cases — there is no
-    // "absent" signal at this layer — so we always populate the optional when
-    // the call succeeds.
+    // the flag through serialize/deserialize without losing user intent. We
+    // populate the optional when the attribute is present and yields a value —
+    // i.e., when the backend call succeeds AND the returned elementCount is > 0.
     bool isDynamicShapeEnabled = false;
     int64_t dynamicFlagCount = 0;
     auto dynamicStatus

@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// RFC 0008 Phase 1 — unit coverage for the optional override-execute
-// surface on `EnginePlugin` (B.8). The full dlopen-based optional-symbol
+// Unit coverage for the optional override-execute surface on `EnginePlugin`
+// (RFC 0008 §B.8). The full dlopen-based optional-symbol
 // resolution path (`tryAssignSymbol`) is exercised end-to-end by Stream
 // C's frontend integration tests against the override-implementing,
 // override-omitting, and version-liar fake plugins. These unit tests

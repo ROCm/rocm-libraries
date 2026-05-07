@@ -1695,14 +1695,14 @@ TEST(TestEnginePluginResourceManager, ConstructorHandlesMultipleBadPlugins)
 }
 
 // =============================================================================
-// RFC 0008 Phase 1 (B.9) — applicability filter and dispatch-switch coverage.
+// RFC 0008 §B.9 — applicability filter and dispatch-switch coverage.
 //
 // These tests pin the host-side behavior of the override-aware execute path
 // without requiring real fake plugin .so files. They cover:
 //   - Test #2:  override-omitting plugin filtered out for override-flag graphs
 //               and included for non-override graphs.
-//   - Test #3:  version-liar plugin (advertises K_PHASE1_OVERRIDE_MIN_VERSION but
-//               does NOT export the override symbol) returns NOT_SUPPORTED at
+//   - Test #3:  version-liar plugin (advertises K_OVERRIDE_EXECUTE_MIN_API_VERSION
+//               but does NOT export the override symbol) returns NOT_SUPPORTED at
 //               dispatch time. RFC 0008 §4.6 safety net.
 //   - Test #6:  variant-pack lifetime safety — the dispatch wrapper consumes
 //               override vectors via const refs and does not retain pointers
@@ -1715,8 +1715,9 @@ TEST(TestEnginePluginResourceManager, ConstructorHandlesMultipleBadPlugins)
 //               override-flag graphs (no engine matches via the filter).
 //   - Test #18: variant-pack mutation safety — the wrapper reads the override
 //               vectors exactly once at dispatch time.
-//   - Test #19: positive-selection — plugin reporting K_PHASE1_OVERRIDE_MIN_VERSION
-//               is accepted by the filter for non-override graphs as well.
+//   - Test #19: positive-selection — plugin reporting
+//               K_OVERRIDE_EXECUTE_MIN_API_VERSION is accepted by the filter for
+//               non-override graphs as well.
 //
 // Tests #13/#20 (build-time `nm`-symbol checks) are out of scope for the C++
 // unit suite; they are addressed by Stream C's frontend integration tests
@@ -1727,17 +1728,9 @@ TEST(TestEnginePluginResourceManager, ConstructorHandlesMultipleBadPlugins)
 namespace
 {
 
-/// Action helper: program MockGraphDescriptor::getAttribute() to write a
-/// boolean override-flag value into the user-provided buffer. Mirrors the
-/// `SetArg4ToInt64` helper at the bottom of MockDescriptor.hpp.
-ACTION_P(SetArg4ToBool, value) // NOLINT
-{
-    *static_cast<bool*>(arg4) = value;
-    *arg3 = int64_t{1};
-}
-
 /// Programs `mockGraphDesc.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED, ...)`
-/// to report `flag`. Other attribute lookups remain unhandled (StrictMock
+/// to report `flag`. Uses the shared `SetArg4ToBool` action helper from
+/// `MockDescriptor.hpp`. Other attribute lookups remain unhandled (StrictMock
 /// would fail; NaggyMock will warn, which is the existing test convention).
 void programOverrideFlag(MockGraphDescriptor& mockGraphDesc, bool flag)
 {
@@ -1818,7 +1811,7 @@ TEST(TestEnginePluginResourceManager, ApplicabilityFilterIncludesBaselinePluginF
     EXPECT_EQ(engineIds[0], 100);
 }
 
-// Test #19: a plugin reporting exactly K_PHASE1_OVERRIDE_MIN_VERSION is included
+// Test #19: a plugin reporting exactly K_OVERRIDE_EXECUTE_MIN_API_VERSION is included
 // by the filter for both override-flag and non-override graphs.
 TEST(TestEnginePluginResourceManager, ApplicabilityFilterIncludesOverrideCapablePluginForBothGraphs)
 {
@@ -1832,7 +1825,7 @@ TEST(TestEnginePluginResourceManager, ApplicabilityFilterIncludesOverrideCapable
     EXPECT_CALL(*overridePlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100}));
     EXPECT_CALL(*overridePlugin, apiVersion())
-        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION));
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
     EXPECT_CALL(*overridePlugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
 
     MockGraphDescriptor regularGraph;
@@ -1858,7 +1851,7 @@ TEST(TestEnginePluginResourceManager, ApplicabilityFilterIncludesOverrideCapable
     EXPECT_EQ(overrideIds[0], 100);
 }
 
-// Test #9: two plugins, each at K_PHASE1_OVERRIDE_MIN_VERSION, both contribute
+// Test #9: two plugins, each at K_OVERRIDE_EXECUTE_MIN_API_VERSION, both contribute
 // engines for an override-flag graph (the filter does not short-circuit).
 TEST(TestEnginePluginResourceManager,
      ApplicabilityFilterIncludesAllOverrideCapablePluginsForOverrideGraph)
@@ -1873,14 +1866,14 @@ TEST(TestEnginePluginResourceManager,
         .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xaaaaaaaa)));
     EXPECT_CALL(*pluginA, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
     EXPECT_CALL(*pluginA, apiVersion())
-        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION));
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
     EXPECT_CALL(*pluginA, destroyHandle(hipdnnEnginePluginHandle_t(0xaaaaaaaa)));
 
     EXPECT_CALL(*pluginB, createHandle())
         .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xbbbbbbbb)));
     EXPECT_CALL(*pluginB, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{200}));
     EXPECT_CALL(*pluginB, apiVersion())
-        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION));
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
     EXPECT_CALL(*pluginB, destroyHandle(hipdnnEnginePluginHandle_t(0xbbbbbbbb)));
 
     MockGraphDescriptor mockGraphDesc;
@@ -1989,7 +1982,7 @@ DispatchHarness makeDispatchHarness(int64_t engineId,
 } // namespace
 
 // Test #3 / #20 (host portion): a plugin that lies about its API version
-// (reports K_PHASE1_OVERRIDE_MIN_VERSION but does NOT export the override symbol)
+// (reports K_OVERRIDE_EXECUTE_MIN_API_VERSION but does NOT export the override symbol)
 // must trigger the dispatch-time safety net per RFC 0008 §4.6: dispatch
 // returns NOT_SUPPORTED instead of silently routing through the legacy entry.
 TEST(TestEnginePluginResourceManager, DispatchSafetyNetRejectsVersionLiarPlugin)
@@ -2176,16 +2169,22 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToLegacyEntryWhenNoOverrides
         .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
     EXPECT_CALL(*h.mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
     EXPECT_CALL(*h.mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
+    // The dispatch reads each of the 4 override accessors exactly once up
+    // front, then short-circuits to the legacy path on detecting an empty
+    // unique-id list. Pin the accessor call counts to exactly 1 so a
+    // future regression that re-reads the variant-pack accessors (e.g. a
+    // reentrant override probe) is caught here. RFC 0008 plan T-rec3.
     EXPECT_CALL(*h.mockVariantPack, getOverrideUniqueIds())
+        .Times(1)
         .WillOnce(::testing::ReturnRef(emptyOverrides));
-    // Override shapes/strides/lengths are NOT inspected when uniqueIds is empty
-    // — but the existing dispatch reads them up front. Allow the calls but
-    // return refs to the empty vector.
     EXPECT_CALL(*h.mockVariantPack, getOverrideShapes())
+        .Times(1)
         .WillOnce(::testing::ReturnRef(emptyOverrides));
     EXPECT_CALL(*h.mockVariantPack, getOverrideStrides())
+        .Times(1)
         .WillOnce(::testing::ReturnRef(emptyOverrides));
     EXPECT_CALL(*h.mockVariantPack, getOverrideLengths())
+        .Times(1)
         .WillOnce(::testing::ReturnRef(emptyOverrides));
 
     EXPECT_CALL(*h.plugin,
@@ -2194,6 +2193,9 @@ TEST(TestEnginePluginResourceManager, DispatchRoutesToLegacyEntryWhenNoOverrides
                                reinterpret_cast<void*>(0x4000),
                                ::testing::NotNull(),
                                static_cast<uint32_t>(3)));
+    // Override-execute entry must NOT be reached, and the dispatch-time
+    // safety net (`hasOverrideExecute`) must NOT be queried at all when
+    // the variant pack carries no override tensors. Pinned via Times(0).
     EXPECT_CALL(*h.plugin, executeOpGraphWithOverrides(_, _, _, _, _, _, _, _, _, _)).Times(0);
     EXPECT_CALL(*h.plugin, hasOverrideExecute()).Times(0);
 
@@ -2236,4 +2238,60 @@ TEST(TestEnginePluginResourceManager, DispatchRejectsMismatchedOverrideLengths)
     ASSERT_THROW_HIPDNN_STATUS(
         resourceManager.executeOpGraph(h.executionPlanWrapper.get(), h.variantWrapper.get()),
         HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// `PluginBase::parsedApiVersion()` lazy-cache pinning (RFC 0008 plan T-missing #1).
+//
+// On a malformed `apiVersion()` string the parsed-version cache must engage to
+// `nullopt` and `apiVersion()` must NOT be re-invoked on subsequent reads
+// (otherwise a bad plugin would be re-parsed and re-logged in the dispatch hot
+// path). The post-PR1 implementation in `PluginCore.cpp` uses a
+// `std::optional<std::optional<Version>>` "computed yet?" sentinel; this test
+// pins both halves of that contract.
+// =============================================================================
+TEST(TestPluginBase, ParsedApiVersionCachesNulloptForMalformedString)
+{
+    const MockEnginePlugin plugin;
+
+    // Malformed version string — the parser will throw on first parse and the
+    // cache must engage to `nullopt`. After that the apiVersion() accessor must
+    // be queried EXACTLY ONCE total across both reads (the second read returns
+    // the cached nullopt sentinel without re-entering the plugin).
+    EXPECT_CALL(plugin, apiVersion())
+        .Times(1)
+        .WillOnce(::testing::Return(std::string_view{"not.a.version"}));
+
+    // First access — triggers parse, populates cache with engaged-outer +
+    // disengaged-inner (the "we tried, it failed" sentinel).
+    const auto& first = plugin.parsedApiVersion();
+    EXPECT_FALSE(first.has_value())
+        << "Malformed version string must yield disengaged inner optional.";
+
+    // Second access — must return the cached nullopt without re-invoking
+    // apiVersion() (enforced by Times(1) on the EXPECT_CALL above).
+    const auto& second = plugin.parsedApiVersion();
+    EXPECT_FALSE(second.has_value()) << "Subsequent reads must return cached nullopt.";
+
+    // Defensive: both calls must return the same cache slot (object identity).
+    EXPECT_EQ(&first, &second) << "Both reads must alias the same cache storage.";
+}
+
+// Companion: a well-formed version string caches the parsed `Version` on first
+// read and is not re-parsed on subsequent reads.
+TEST(TestPluginBase, ParsedApiVersionCachesParsedValueForWellFormedString)
+{
+    const MockEnginePlugin plugin;
+
+    EXPECT_CALL(plugin, apiVersion())
+        .Times(1)
+        .WillOnce(::testing::Return(hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION));
+
+    const auto& first = plugin.parsedApiVersion();
+    ASSERT_TRUE(first.has_value()) << "Well-formed version string must parse successfully.";
+
+    const auto& second = plugin.parsedApiVersion();
+    ASSERT_TRUE(second.has_value()) << "Subsequent reads must return cached parsed value.";
+
+    EXPECT_EQ(&first, &second) << "Both reads must alias the same cache storage.";
 }

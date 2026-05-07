@@ -8,9 +8,12 @@
 namespace hipdnn_plugin_sdk
 {
 
-// RFC 0008 Phase 1 (§4.5): minimum plugin SDK API version that supports the
-// override-execute entry point. Placeholder value; finalize before any
-// non-fake provider ships override execute.
-inline constexpr std::string_view K_PHASE1_OVERRIDE_MIN_VERSION = "1.1.0";
+// Minimum engine plugin C ABI version that advertises support for the
+// override-execute entry point (RFC 0008 §4.5). Override-execute is the
+// additive minor feature introduced in engine plugin API 1.1.0; see
+// `engine_api_version.h` for the canonical MAJOR.MINOR.PATCH macros. The
+// host's applicability filter rejects any plugin reporting an API version
+// strictly less than this when the graph opts into overridable shapes.
+inline constexpr std::string_view K_OVERRIDE_EXECUTE_MIN_API_VERSION = "1.1.0";
 
 } // namespace hipdnn_plugin_sdk

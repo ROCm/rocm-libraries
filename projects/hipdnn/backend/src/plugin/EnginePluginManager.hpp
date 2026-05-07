@@ -73,6 +73,16 @@ protected:
                                       + std::to_string(HIPDNN_ENGINE_API_VERSION_MAJOR) + ")\n"
                                       + "Expected API version: " HIPDNN_ENGINE_API_VERSION);
         }
+        if(pluginMajor == 0 && pluginMajor != HIPDNN_ENGINE_API_VERSION_MAJOR)
+        {
+            // Per-load (not per-dispatch) notice: this branch is the
+            // transitional shim above and will be removed at the next major
+            // bump. Logging once per loaded plugin is appropriate.
+            HIPDNN_BACKEND_LOG_INFO(
+                "Accepting legacy major-0 plugin '{}' under transitional shim; this will be "
+                "removed in the next major version.",
+                plugin.cachedName());
+        }
 
         auto engineIds = plugin.getAllEngineIds();
         for(const auto id : engineIds)

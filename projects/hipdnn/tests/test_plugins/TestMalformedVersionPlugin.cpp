@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Fake plugin for RFC 0008 Phase 1 post-review fix #1: reports a malformed
+// Fake plugin for RFC 0008 post-review fix #1: reports a malformed
 // API version string (does not match the required "MAJOR.MINOR.PATCH"
 // format). The host-side `Version{...}` parser would normally throw
 // `std::invalid_argument` from this string; this plugin exercises the

@@ -54,7 +54,7 @@ private:
     // Preferred engine ID, empty when unset.
     std::optional<int64_t> _preferredEngineId = std::nullopt;
 
-    // RFC 0008 Phase 1 opt-in flag for overridable tensor shapes. Defaults to false.
+    // Opt-in flag for overridable tensor shapes (RFC 0008). Defaults to false.
     // The schema field is `bool = false` so legacy graphs (and any graph that never
     // explicitly opted in) deserialize to false without emitting wire bytes.
     bool _isDynamicShapeEnabled = false;

@@ -25,30 +25,30 @@ TEST(TestVersion, PositiveVersion)
     EXPECT_GE(version.patch, 0);
 }
 
-// RFC 0008 Phase 1 — applicability filter prerequisites (B.8). These
-// tests anchor the constant `K_PHASE1_OVERRIDE_MIN_VERSION` and the strict
-// ordering relied on by `computeMinimumPluginApiVersion()` in
-// `EnginePluginResourceManager.cpp`.
+// Applicability filter prerequisites for the override-execute entry point
+// (RFC 0008 §B.8). These tests anchor the constant
+// `K_OVERRIDE_EXECUTE_MIN_API_VERSION` and the strict ordering relied on by
+// `computeMinimumPluginApiVersion()` in `EnginePluginResourceManager.cpp`.
 
-TEST(TestVersion, Phase1OverrideMinVersionParses)
+TEST(TestVersion, OverrideExecuteMinApiVersionParses)
 {
     // Brace-init avoids the most-vexing-parse: `Version(<name>)` would be
     // read as a redeclaration of `<name>` with type `Version`.
-    EXPECT_NO_THROW(Version{hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION});
-    const Version v{hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION};
+    EXPECT_NO_THROW(Version{hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION});
+    const Version v{hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
     EXPECT_EQ(v.major, 1);
     EXPECT_EQ(v.minor, 1);
     EXPECT_EQ(v.patch, 0);
 }
 
-TEST(TestVersion, BaselineVersionLessThanPhase1OverrideMinVersion)
+TEST(TestVersion, BaselineVersionLessThanOverrideExecuteMinApiVersion)
 {
-    // Override-omitting plugins (reporting "1.0.0" after PR1) must compare
-    // strictly less than `K_PHASE1_OVERRIDE_MIN_VERSION` so the applicability
+    // Override-omitting plugins (reporting "1.0.0") must compare strictly
+    // less than `K_OVERRIDE_EXECUTE_MIN_API_VERSION` so the applicability
     // filter excludes them from override-flag graphs (Test #2 prerequisite).
     const Version baseline{std::string_view{"1.0.0"}};
-    const Version phase1{hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION};
-    EXPECT_TRUE(baseline < phase1);
+    const Version overrideMin{hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
+    EXPECT_TRUE(baseline < overrideMin);
 }
 
 TEST(TestVersion, ZeroVersionLessThanBaseline)

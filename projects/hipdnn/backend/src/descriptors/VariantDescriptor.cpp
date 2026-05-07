@@ -7,6 +7,9 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 
+#include <numeric>
+#include <unordered_set>
+
 namespace hipdnn_backend
 {
 
@@ -18,6 +21,47 @@ void VariantDescriptor::finalize()
                 "Data pointers and unique ids don't match");
     THROW_IF_TRUE(
         _dataPointers.empty(), HIPDNN_STATUS_BAD_PARAM, "Data pointers and unique ids are empty");
+
+    // Validate the override-tensor invariants at finalize time so malformed
+    // variant packs are rejected before dispatch. The dispatch path keeps its
+    // own checks as defense-in-depth. Skip entirely when no overrides were
+    // supplied (legacy variant packs).
+    const bool hasAnyOverride = !_overrideUniqueIds.empty() || !_overrideLengths.empty()
+                                || !_overrideShapes.empty() || !_overrideStrides.empty();
+    if(hasAnyOverride)
+    {
+        THROW_IF_NE(_overrideUniqueIds.size(),
+                    _overrideLengths.size(),
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "VariantDescriptor::finalize() failed: OVERRIDE_UNIQUE_IDS and "
+                    "OVERRIDE_LENGTHS must have the same size");
+
+        // Sum of per-tensor ranks must equal the flat shape and stride lengths.
+        const auto rankSum = std::accumulate(
+            _overrideLengths.begin(), _overrideLengths.end(), static_cast<int64_t>(0));
+        THROW_IF_NE(static_cast<int64_t>(_overrideShapes.size()),
+                    rankSum,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "VariantDescriptor::finalize() failed: OVERRIDE_SHAPES total length does "
+                    "not match the sum of OVERRIDE_LENGTHS");
+        THROW_IF_NE(static_cast<int64_t>(_overrideStrides.size()),
+                    rankSum,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "VariantDescriptor::finalize() failed: OVERRIDE_STRIDES total length does "
+                    "not match the sum of OVERRIDE_LENGTHS");
+
+        // Each override unique-id must refer to a tensor that actually appears
+        // in the variant pack's UID list.
+        const std::unordered_set<int64_t> uniqueIdSet(_uniqueIds.begin(), _uniqueIds.end());
+        for(const auto overrideId : _overrideUniqueIds)
+        {
+            THROW_IF_TRUE(uniqueIdSet.find(overrideId) == uniqueIdSet.end(),
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "VariantDescriptor::finalize() failed: OVERRIDE_UNIQUE_IDS entry "
+                              + std::to_string(overrideId)
+                              + " is not present in VARIANT_PACK_UNIQUE_IDS");
+        }
+    }
 
     HipdnnBackendDescriptorImpl<VariantDescriptor>::finalize();
 }
@@ -273,6 +317,16 @@ std::string VariantDescriptor::toString() const
     str += ", numUniqueIds=" + std::to_string(_uniqueIds.size());
     str += _workspace != nullptr ? ", workspace=" + fmt::format("{:p}", _workspace)
                                  : ", workspace=null";
+    // Only emit override field counts when at least one is non-empty so
+    // legacy variant-pack log lines stay unchanged.
+    if(!_overrideUniqueIds.empty() || !_overrideLengths.empty() || !_overrideShapes.empty()
+       || !_overrideStrides.empty())
+    {
+        str += ", overrideUniqueIds=" + std::to_string(_overrideUniqueIds.size());
+        str += ", overrideLengths=" + std::to_string(_overrideLengths.size());
+        str += ", overrideShapes=" + std::to_string(_overrideShapes.size());
+        str += ", overrideStrides=" + std::to_string(_overrideStrides.size());
+    }
     str += "}";
     return str;
 }

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -55,8 +54,10 @@ struct EnginePluginShutdownRegistrar
 EnginePluginShutdownRegistrar gEngineShutdownRegistrar;
 
 /// Reads the boolean override-flag attribute from a graph descriptor via the
-/// public C-API getAttribute(). Defaults to false on any failure (the flag is
-/// optional; older graphs do not set it).
+/// public C-API getAttribute(). Defaults to false when the attribute is
+/// unsupported by the descriptor (older graph schemas predate the field). Any
+/// other failure is propagated so that real bugs (type mismatch, internal
+/// error) are not silently masked.
 bool readIsDynamicShapeEnabled(const GraphDescriptor& graphDesc)
 {
     bool flag = false;
@@ -69,10 +70,15 @@ bool readIsDynamicShapeEnabled(const GraphDescriptor& graphDesc)
                                &elementCount,
                                &flag);
     }
-    catch(const HipdnnException&)
+    catch(const HipdnnException& ex)
     {
-        // The optional flag was never set; treat as the default (false).
-        return false;
+        // Only swallow "attribute not supported" — anything else is a real
+        // error in the descriptor or its attribute machinery.
+        if(ex.getStatus() == HIPDNN_STATUS_NOT_SUPPORTED)
+        {
+            return false;
+        }
+        throw;
     }
     if(elementCount < 1)
     {
@@ -82,13 +88,11 @@ bool readIsDynamicShapeEnabled(const GraphDescriptor& graphDesc)
 }
 
 /// Computes the minimum plugin SDK API version required to serve a given
-/// graph. Graphs that opt in to RFC 0008 Phase 1 dynamic shapes require
-/// `K_PHASE1_OVERRIDE_MIN_VERSION`; all other graphs accept any plugin at or
-/// above the post-PR1 baseline `"1.0.0"`.
+/// graph. Graphs that opt in to overridable tensor shapes require
+/// `K_OVERRIDE_EXECUTE_MIN_API_VERSION`; all other graphs accept any plugin
+/// at or above the baseline `"1.0.0"`.
 ///
-/// Per RFC 0008 §4.5, the `"1.1.0"` constant is a placeholder that may be
-/// renamed before any non-fake provider implements override execute. The
-/// constant is centralized in `<hipdnn_plugin_sdk/PluginVersionConstants.hpp>`
+/// The constant is centralized in `<hipdnn_plugin_sdk/PluginVersionConstants.hpp>`
 /// so the version filter, fake plugins, and tests share a single source of
 /// truth.
 ///
@@ -99,12 +103,12 @@ const hipdnn_data_sdk::utilities::Version&
     computeMinimumPluginApiVersion(const GraphDescriptor& graphDesc)
 {
     static const hipdnn_data_sdk::utilities::Version s_sBaselineVersion{std::string_view{"1.0.0"}};
-    static const hipdnn_data_sdk::utilities::Version s_sPhase1OverrideMinVersion{
-        hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION};
+    static const hipdnn_data_sdk::utilities::Version s_sOverrideExecuteMinVersion{
+        hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
 
     if(readIsDynamicShapeEnabled(graphDesc))
     {
-        return s_sPhase1OverrideMinVersion;
+        return s_sOverrideExecuteMinVersion;
     }
     return s_sBaselineVersion;
 }
@@ -357,10 +361,10 @@ std::vector<int64_t>
 
     auto serializedGraphData = graphDesc->getSerializedGraph();
 
-    // RFC 0008 Phase 1 applicability filter: graphs that opt in to overridable
-    // tensor shapes require plugins exporting at least the override-execute
-    // SDK surface. Older plugins are silently skipped here so they remain
-    // usable for non-override graphs.
+    // Applicability filter: graphs that opt in to overridable tensor shapes
+    // require plugins exporting at least the override-execute SDK surface.
+    // Older plugins are silently skipped here so they remain usable for
+    // non-override graphs.
     const auto& requiredVersion = computeMinimumPluginApiVersion(*graphDesc);
 
     std::vector<int64_t> engineIds;
@@ -667,7 +671,7 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
         deviceBuffers.push_back(buffer);
     }
 
-    // RFC 0008 Phase 1 dispatch switch: if the variant pack carries override
+    // Override-execute dispatch switch: if the variant pack carries override
     // tensors, route through the override-aware execute entry; otherwise
     // preserve the existing dispatch path.
     const auto& overrideUniqueIds = variantPackDesc->getOverrideUniqueIds();
@@ -706,14 +710,24 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
         // D1 narrowing: variant-pack stores int64; SDK surface is uint32.
         // Each rank is bounded by structural tensor constants and cannot
         // legitimately exceed uint32 limits, but -Wconversion requires the
-        // explicit cast.
+        // explicit cast. The bounds check is release-safe (not assert) so a
+        // malformed user-supplied length cannot silently wrap into uint32.
         const auto numOverridesSize = overrideUniqueIds.size();
         std::vector<uint32_t> overrideLengthsU32;
         overrideLengthsU32.reserve(numOverridesSize);
-        for(const auto value : overrideLengths64)
+        for(size_t i = 0; i < overrideLengths64.size(); ++i)
         {
-            assert(value >= 0
-                   && static_cast<uint64_t>(value) <= std::numeric_limits<uint32_t>::max());
+            const auto value = overrideLengths64[i];
+            THROW_IF_TRUE(value < 0,
+                          HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
+                          "Override variant pack: OVERRIDE_LENGTHS for unique-id "
+                              + std::to_string(overrideUniqueIds[i]) + " is negative ("
+                              + std::to_string(value) + ")");
+            THROW_IF_TRUE(static_cast<uint64_t>(value) > std::numeric_limits<uint32_t>::max(),
+                          HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
+                          "Override variant pack: OVERRIDE_LENGTHS for unique-id "
+                              + std::to_string(overrideUniqueIds[i]) + " exceeds uint32 max ("
+                              + std::to_string(value) + ")");
             overrideLengthsU32.push_back(static_cast<uint32_t>(value));
         }
 

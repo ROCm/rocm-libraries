@@ -18,7 +18,7 @@ private:
     std::vector<int64_t> _uniqueIds;
     void* _workspace = nullptr;
 
-    // RFC 0008 Phase 1 per-execute override storage. These four vectors are populated
+    // Per-execute override storage (RFC 0008). These four vectors are populated
     // via the HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_* attributes and consumed at dispatch
     // time. They are intentionally NOT serialized: a variant pack is ephemeral
     // per-execute state, never written to a flatbuffer (RFC §11).
@@ -57,23 +57,23 @@ public:
     virtual const std::vector<const void*>& getDataPointers() const;
     virtual const std::vector<int64_t>& getTensorIds() const;
 
-    /// RFC 0008 Phase 1: per-execute override-tensor selectors. Empty when no
-    /// overrides were supplied. Throws if the descriptor is not finalized.
+    /// Per-execute override-tensor selectors. Empty when no overrides were
+    /// supplied. Throws if the descriptor is not finalized.
     virtual const std::vector<int64_t>& getOverrideUniqueIds() const;
 
-    /// RFC 0008 Phase 1: flat concatenation of override shape vectors in
-    /// getOverrideUniqueIds() order. Sliced via getOverrideLengths().
-    /// Throws if the descriptor is not finalized.
+    /// Flat concatenation of override shape vectors in getOverrideUniqueIds()
+    /// order. Sliced via getOverrideLengths(). Throws if the descriptor is
+    /// not finalized.
     virtual const std::vector<int64_t>& getOverrideShapes() const;
 
-    /// RFC 0008 Phase 1: flat concatenation of override stride vectors in
-    /// getOverrideUniqueIds() order. Sliced via getOverrideLengths().
-    /// Throws if the descriptor is not finalized.
+    /// Flat concatenation of override stride vectors in getOverrideUniqueIds()
+    /// order. Sliced via getOverrideLengths(). Throws if the descriptor is
+    /// not finalized.
     virtual const std::vector<int64_t>& getOverrideStrides() const;
 
-    /// RFC 0008 Phase 1: per-UID rank of the override shape/stride vectors.
-    /// Stored as int64_t in the variant pack (D1 contract); narrowed to
-    /// uint32_t at the SDK dispatch boundary. Throws if not finalized.
+    /// Per-UID rank of the override shape/stride vectors. Stored as int64_t
+    /// in the variant pack (D1 contract); narrowed to uint32_t at the SDK
+    /// dispatch boundary. Throws if not finalized.
     virtual const std::vector<int64_t>& getOverrideLengths() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();

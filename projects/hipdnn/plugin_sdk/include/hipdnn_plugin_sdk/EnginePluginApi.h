@@ -303,7 +303,7 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
                                      uint32_t num_device_buffers);
 
 /**
- * @brief Optional override-aware execute entry point (RFC 0008 Phase 1).
+ * @brief Optional override-aware execute entry point (RFC 0008 §4.5).
  *
  * Plugins that support per-execute tensor-shape overrides export this symbol
  * in addition to `hipdnnEnginePluginExecuteOpGraph`. Plugins that do not

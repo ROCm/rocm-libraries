@@ -20,7 +20,7 @@ namespace hipdnn_frontend::detail
 /// Assembles a GraphDescriptor from pre-built operation descriptors without
 /// setting a handle or finalizing. Unset data types are skipped.
 ///
-/// `isDynamicShapeEnabled` corresponds to RFC 0008 Phase 1's
+/// `isDynamicShapeEnabled` corresponds to the
 /// `HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED` graph-level boolean.
 /// When unset, the attribute is skipped (the backend default is `false`).
 inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescriptor>& operations,
@@ -94,7 +94,7 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
                                     "preferred engine ID on GraphDescriptor"));
     }
 
-    // Set dynamic-shape opt-in flag if specified (RFC 0008 Phase 1).
+    // Set dynamic-shape opt-in flag if specified (RFC 0008).
     // The backend default is `false`, so an unset optional skips the write.
     if(isDynamicShapeEnabled.has_value())
     {

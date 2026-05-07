@@ -1,10 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Fake plugin for RFC 0008 Phase 1, Test #9: a second override-implementing
-// plugin used to verify that the host's applicability filter and dispatch
-// switch handle multiple plugins serving the same override-flag graph
-// without short-circuiting after the first match. Behaves identically to
+// Fake plugin for RFC 0008 Test #9: a second override-implementing plugin
+// used to verify that the host's applicability filter and dispatch switch
+// handle multiple plugins serving the same override-flag graph without
+// short-circuiting after the first match. Behaves identically to
 // `TestOverrideImplementingPlugin` apart from a distinct engine id.
 
 #include "TestPluginCommon.hpp"
@@ -36,7 +36,7 @@ public:
 
     const char* getPluginApiVersion() const override
     {
-        return hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION.data();
+        return hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION.data();
     }
 
     int64_t getEngineId() const override

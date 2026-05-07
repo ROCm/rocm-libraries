@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 
 find_package(hip REQUIRED)
 
-# Pull in the RFC 0008 Phase 1 fake-plugin target name constants
+# Pull in the RFC 0008 override-execute fake-plugin target name constants
 # (Stream B → Stream C handoff per task B.6a).
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestPluginTargets.cmake")
 
@@ -95,12 +95,12 @@ add_test_plugin(${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME} TestKnobConstrain
 # test_incompatible_version_plugin is a plugin that returns an incompatible plugin API version
 add_test_plugin(${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME} TestIncompatibleVersionPlugin.cpp)
 
-# RFC 0008 Phase 1 fake plugins (target names are published in
+# RFC 0008 override-execute fake plugins (target names are published in
 # `cmake/TestPluginTargets.cmake` for Stream C consumption per B.6a).
 #
-# Override-implementing fake: reports `K_PHASE1_OVERRIDE_MIN_VERSION` and
-# exports the optional override-execute symbol — admitted by the version
-# filter, dispatched through the override path.
+# Override-implementing fake: reports `K_OVERRIDE_EXECUTE_MIN_API_VERSION`
+# and exports the optional override-execute symbol — admitted by the
+# version filter, dispatched through the override path.
 add_test_plugin(${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET} TestOverrideImplementingPlugin.cpp)
 
 # Override-omitting fake: reports the baseline "1.0.0" — filtered out for
@@ -108,8 +108,8 @@ add_test_plugin(${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET} TestOverrideI
 # regression).
 add_test_plugin(${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET} TestOverrideOmittingPlugin.cpp)
 
-# Version-liar fake: reports `K_PHASE1_OVERRIDE_MIN_VERSION` but does NOT
-# export the override symbol — exercises the dispatch-time
+# Version-liar fake: reports `K_OVERRIDE_EXECUTE_MIN_API_VERSION` but does
+# NOT export the override symbol — exercises the dispatch-time
 # `hasOverrideExecute()` safety net.
 add_test_plugin(${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET} TestVersionLiarPlugin.cpp)
 
@@ -117,10 +117,16 @@ add_test_plugin(${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET} TestVersionLiarPlugin.
 # coverage for multiple plugins serving the same override graph.
 add_test_plugin(${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET} TestSecondOverridePlugin.cpp)
 
-# Malformed-version fake (RFC 0008 Phase 1 post-review fix #1): exercises
-# the load-time `parsedApiVersion()` rejection so a bad version string is
-# never re-parsed in the dispatch hot path.
+# Malformed-version fake (RFC 0008 post-review fix #1): exercises the
+# load-time `parsedApiVersion()` rejection so a bad version string is never
+# re-parsed in the dispatch hot path.
 add_test_plugin(${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET} TestMalformedVersionPlugin.cpp)
+
+# Version-zero fake (RFC 0008 plan T-missing #2): reports a parseable but
+# too-low API version ("0.0.0") — exercises the parsed-but-too-low
+# rejection path independent of the malformed-version fake's unparseable
+# rejection path.
+add_test_plugin(${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET} TestVersionZeroPlugin.cpp)
 
 # Create the default plugin in test_plugins/default
 set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")
@@ -157,15 +163,7 @@ set(TEST_GOOD_HEURISTIC_PLUGIN_NAME "${TEST_GOOD_HEURISTIC_PLUGIN_NAME}" PARENT_
 set(TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME "${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME}" PARENT_SCOPE)
 set(TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME "${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME}" PARENT_SCOPE)
 
-# RFC 0008 Phase 1 fake-plugin target names (B.6a published constants
-# from cmake/TestPluginTargets.cmake).
-set(HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET
-    "${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET}" PARENT_SCOPE)
-set(HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET
-    "${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET}" PARENT_SCOPE)
-set(HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET
-    "${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET}" PARENT_SCOPE)
-set(HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET
-    "${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}" PARENT_SCOPE)
-set(HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET
-    "${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}" PARENT_SCOPE)
+# RFC 0008 override-execute fake-plugin target names (B.6a) are set with
+# `CACHE INTERNAL` in cmake/TestPluginTargets.cmake (included at the top of
+# this file), which already gives them global visibility — re-exporting
+# via PARENT_SCOPE here is redundant and was removed.

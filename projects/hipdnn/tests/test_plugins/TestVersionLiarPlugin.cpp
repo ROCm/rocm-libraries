@@ -1,10 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Fake plugin for RFC 0008 Phase 1, Test #3 / #20: reports an API version
-// >= K_PHASE1_OVERRIDE_MIN_VERSION (so the applicability version filter does
-// NOT skip it) but DOES NOT export the override-execute symbol. The host
-// must then catch the discrepancy at dispatch time via the
+// Fake plugin for RFC 0008 Test #3 / #20: reports an API version
+// >= K_OVERRIDE_EXECUTE_MIN_API_VERSION (so the applicability version filter
+// does NOT skip it) but DOES NOT export the override-execute symbol. The
+// host must then catch the discrepancy at dispatch time via the
 // `EnginePlugin::hasOverrideExecute()` safety net (RFC §4.6, §7.2) and
 // return `HIPDNN_STATUS_NOT_SUPPORTED` rather than crash on a missing
 // symbol.
@@ -36,12 +36,12 @@ public:
         return "1.0.0";
     }
 
-    /// Reports the centralized RFC 0008 §4.5 placeholder min version even
+    /// Reports the centralized RFC 0008 §4.5 minimum API version even
     /// though this plugin does NOT export the override-execute symbol.
     /// This intentional mismatch exercises the dispatch-time safety net.
     const char* getPluginApiVersion() const override
     {
-        return hipdnn_plugin_sdk::K_PHASE1_OVERRIDE_MIN_VERSION.data();
+        return hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION.data();
     }
 
     int64_t getEngineId() const override

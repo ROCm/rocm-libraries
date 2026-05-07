@@ -136,7 +136,7 @@ namespace hipdnn_frontend::graph
 #ifdef HIPDNN_ENABLE_SDPA
 /**
  * @struct OverrideEntry
- * @brief Per-tensor execute-time shape/stride override (RFC 0008 Phase 1).
+ * @brief Per-tensor execute-time shape/stride override (RFC 0008).
  *
  * Used as the value type of the map-keyed `Graph::execute()` override
  * overload. The map form is pure sugar over the parallel-array form
@@ -195,7 +195,7 @@ private:
 
     std::optional<int64_t> _preferredEngineId;
 
-    /// RFC 0008 Phase 1 dynamic-shape opt-in. The optional distinguishes
+    /// Dynamic-shape opt-in (RFC 0008). The optional distinguishes
     /// "user explicitly set a value" (round-trips through serialize) from
     /// "user never touched it" (omitted from the serialized form). The backend
     /// default is `false` for legacy graphs deserialized without the field.
@@ -1882,17 +1882,26 @@ private:
      * @brief RFC 0008 §4.2.1 input validation for the parallel-array
      *        execute overload.
      *
-     * Enforces the eight rules from RFC 0008 §4.2.1 in order. Each violation
+     * Enforces the eight rules from RFC 0008 §4.2.1. Each violation
      * returns `{ErrorCode::INVALID_VALUE, ...}` with a rule-specific message
      * before any backend call. The map-keyed overload lowers to the
      * parallel-array form before calling this helper, so map-overload
      * callers see identical errors.
      *
-     * Note: rule 4 ("max-shape exceeded") compares ALL declared dims for
-     * Phase 1 (no wildcards yet); RFC 0008 §4.2.1 r4 carves wildcards
-     * (`-1`) out for Phase 2. The Phase-1 phrasing is intentional — when
-     * Phase 2 lands and introduces wildcards, the test suite for rule 4
-     * will exercise the new carve-out.
+     * Evaluation order (intentionally non-numeric): rules 1, 5, 2, 3, 6, 7, 4, 8.
+     * Rationale: cheap structural checks first (1: array-length consistency,
+     * 5: duplicate UIDs), then per-entry checks against declared tensors
+     * (2: unknown UID, 3: rank mismatch, 6: positive dims, 7: positive strides),
+     * then the shape/stride consistency checks that depend on the declared
+     * tensor metadata loaded for rules 2/3 (4: max-shape exceeded, 8:
+     * stride-ordering preserved). Reading the rule-N tags inline therefore
+     * does NOT match source order — this header documents the actual sequence.
+     *
+     * Note: rule 4 ("max-shape exceeded") currently compares ALL declared
+     * dims (no wildcards yet); RFC 0008 §4.2.1 r4 carves wildcards (`-1`)
+     * out for a future revision. The "all-dims" phrasing is intentional —
+     * when wildcards are introduced, the test suite for rule 4 will
+     * exercise the new carve-out.
      */
     Error validateOverrideArguments(const std::vector<int64_t>& overrideUids,
                                     const std::vector<std::vector<int64_t>>& overrideShapes,
@@ -1957,8 +1966,8 @@ private:
                             + std::to_string(stride.size()) + " (RFC 0008 §4.2.1 rule 3)."};
             }
 
-            // Rule 6: positive dim values. Compare ALL dims (Phase 1 has no
-            // wildcards; Phase 2's `-1` sentinel will require carve-out).
+            // Rule 6: positive dim values. Compare ALL dims (no wildcards
+            // today; a future `-1` sentinel will require carve-out).
             for(size_t d = 0; d < shape.size(); ++d)
             {
                 if(shape[d] <= 0)
@@ -1982,9 +1991,9 @@ private:
                 }
             }
 
-            // Rule 4: max-shape exceeded. Phase 1: ALL dims compared. Phase 2
-            // will carve out wildcards (`-1`); the Phase-1 phrasing is "all
-            // dims" so a Phase-2 change to skip wildcards trips Test #17.
+            // Rule 4: max-shape exceeded. ALL dims compared today. A future
+            // revision will carve out wildcards (`-1`); the "all dims"
+            // phrasing means a change to skip wildcards trips Test #17.
             for(size_t d = 0; d < shape.size(); ++d)
             {
                 if(shape[d] > declaredDims[d])
@@ -1997,7 +2006,7 @@ private:
                 }
             }
 
-            // Rule 8: stride-ordering preserved (Phase 1 phrasing).
+            // Rule 8: stride-ordering preserved (D4 phrasing).
             // Element-strides imply an axis ordering by descending magnitude;
             // the override permutation must match the declared permutation.
             // A previous size-equality guard silently no-op'd this rule when
@@ -2036,7 +2045,7 @@ private:
                     return {ErrorCode::INVALID_VALUE,
                             "Override stride permutation for UID " + std::to_string(uid)
                                 + " does not match declared element-stride argsort "
-                                  "(RFC 0008 §4.2.1 rule 8 / D4 Phase-1 phrasing)."};
+                                  "(RFC 0008 §4.2.1 rule 8 / D4 phrasing)."};
                 }
             }
         }
@@ -2047,7 +2056,7 @@ private:
 public:
     /**
      * @brief Execute the graph with execute-time per-tensor shape/stride
-     *        overrides (RFC 0008 Phase 1, parallel-array form).
+     *        overrides (RFC 0008, parallel-array form).
      *
      * The graph must have opted in via `set_dynamic_shape_enabled(true)`
      * before this overload is called. If not, the call returns
@@ -2127,7 +2136,7 @@ public:
 
         HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name() << " with "
                                               << overrideUids.size()
-                                              << " override entries (RFC 0008 Phase 1).");
+                                              << " override entries (RFC 0008).");
 
         auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
@@ -2243,7 +2252,7 @@ public:
 
     /**
      * @brief Execute the graph with execute-time per-tensor shape/stride
-     *        overrides (RFC 0008 Phase 1, map-keyed convenience overload).
+     *        overrides (RFC 0008, map-keyed convenience overload).
      *
      * Pure sugar over the parallel-array overload (RFC 0008 §4.2): the map
      * is lowered to parallel arrays before any validation runs, so identical
@@ -2256,6 +2265,16 @@ public:
      * @param workspace Workspace pointer (may be nullptr if size is 0).
      * @param overrides Map from tensor UID to per-tensor OverrideEntry.
      * @return Same return semantics as the parallel-array overload.
+     *
+     * @code{.cpp}
+     * std::unordered_map<int64_t, void*> variantPack = {
+     *     {0, d_input}, {1, d_weights}, {2, d_output}
+     * };
+     * std::unordered_map<int64_t, OverrideEntry> overrides;
+     * overrides[0] = OverrideEntry{{1, 16, 56, 56}, {50176, 1, 896, 16}};
+     * overrides[2] = OverrideEntry{{1, 32, 56, 56}, {100352, 1, 1792, 32}};
+     * graph.execute(handle, variantPack, workspace, overrides);
+     * @endcode
      */
     Error execute(hipdnnHandle_t handle,
                   std::unordered_map<int64_t, void*>& variantPack,
@@ -3436,8 +3455,8 @@ public:
 
 #ifdef HIPDNN_ENABLE_SDPA
     /**
-     * @brief Opt this graph into RFC 0008 Phase 1 execute-time tensor-shape
-     *        overrides.
+     * @brief Opt this graph into execute-time tensor-shape overrides
+     *        (RFC 0008).
      *
      * Setting this flag at graph construction time declares "max-shape"
      * semantics for the per-tensor dims declared at build time: an
@@ -3457,23 +3476,19 @@ public:
      * @see is_dynamic_shape_enabled, execute (override overloads),
      *      RFC 0008 §4.1, §4.2
      */
-    // NOLINTBEGIN(readability-identifier-naming)
-    Graph& set_dynamic_shape_enabled(bool enabled)
-    // NOLINTEND(readability-identifier-naming)
+    Graph& set_dynamic_shape_enabled(bool enabled) // NOLINT(readability-identifier-naming)
     {
         _isDynamicShapeEnabled = enabled;
         return *this;
     }
 
     /**
-     * @brief Whether this graph has opted into RFC 0008 Phase 1 execute-time
-     *        tensor-shape overrides.
+     * @brief Whether this graph has opted into execute-time tensor-shape
+     *        overrides (RFC 0008).
      * @return The user-set value (true/false), or false if `set_dynamic_shape_enabled`
      *         was never called (matching the wire default for legacy graphs).
      */
-    // NOLINTBEGIN(readability-identifier-naming)
-    bool is_dynamic_shape_enabled() const
-    // NOLINTEND(readability-identifier-naming)
+    bool is_dynamic_shape_enabled() const // NOLINT(readability-identifier-naming)
     {
         return _isDynamicShapeEnabled.value_or(false);
     }

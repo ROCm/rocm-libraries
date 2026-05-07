@@ -1,15 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Frontend integration tests for RFC 0008 Phase 1 overridable tensor shapes
-// (validation path). Covers:
+// Frontend integration tests for overridable tensor shapes (RFC 0008,
+// validation path). Covers:
 //   * All 8 validation rules from RFC §4.2.1, exercised via BOTH the
 //     parallel-array overload AND the map-keyed convenience overload (RFC 0008
 //     plan Test #5: map-overload validation parity).
 //   * Test #14 — frontend pack/unpack round-trip of `is_dynamic_shape_enabled`.
 //   * Test #17 — rule 4 future-proof phrasing: "all dims compared" (not just
-//     "non-wildcard dims") so a Phase-2 wildcard carve-out trips this test.
-//   * Test #12 — rule 8 stride-ordering D4 Phase-1 phrasing.
+//     "non-wildcard dims") so a future wildcard carve-out trips this test.
+//   * Test #12 — rule 8 stride-ordering D4 phrasing.
 //   * RFC §7.1 "overrides without flag" rejection (Test C.6).
 //
 // All validation tests in this file run BEFORE any backend interaction and
@@ -20,7 +20,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
-#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include "OverrideTestUtils.hpp"
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginCommon.hpp>
@@ -37,61 +37,25 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {
 
-/// Build a minimal pointwise (RELU) graph with row-major NCHW packed strides
+/// Build a minimal pointwise (RELU) graph with the supplied declared strides
 /// and `set_dynamic_shape_enabled(true)`. This is the standard "valid graph
-/// to override against" used by every validation test below.
+/// to override against" used by every validation test below. Thin wrapper
+/// over the shared `buildPointwiseReluGraph` helper.
 std::shared_ptr<Graph> createOverridableGraph(const std::string& graphName,
                                               const std::vector<int64_t>& declaredDims,
                                               const std::vector<int64_t>& declaredStrides)
 {
-    auto graph = std::make_shared<Graph>();
-    graph->set_name(graphName)
-        .set_io_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT)
-        .set_dynamic_shape_enabled(true);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim(declaredDims)
-        .set_stride(declaredStrides)
-        .set_data_type(DataType::FLOAT);
-
-    PointwiseAttributes attrs;
-    attrs.set_name("relu_node");
-    attrs.set_mode(PointwiseMode::RELU_FWD);
-
-    auto y = graph->pointwise(x, attrs);
-    y->set_uid(2)
-        .set_dim(declaredDims)
-        .set_stride(declaredStrides)
-        .set_data_type(DataType::FLOAT)
-        .set_output(true);
-
-    return graph;
+    return hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
+        graphName, declaredDims, declaredStrides, /*dynamicShapeEnabled=*/true);
 }
 
-/// Compile the graph far enough that `execute()` can be invoked. Validation
-/// happens in `execute()`, so we need the plan stages to succeed first.
-void compileGraph(std::shared_ptr<Graph>& graph, [[maybe_unused]] hipdnnHandle_t handle)
-{
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    result = graph->build_operation_graph(handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    result = graph->create_execution_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    result = graph->check_support();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    result = graph->build_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-}
+// Bring the shared `compileGraph(graph, handle)` helper into the file's
+// anonymous namespace so existing call sites resolve unqualified.
+using hipdnn_tests::override_test_utils::compileGraph;
 
 /// Common fixture: load the override-implementing fake (so plan creation
 /// succeeds for an override-flag graph) and reset TLS state per test.
@@ -104,18 +68,11 @@ protected:
         ASSERT_EQ(hipInit(0), hipSuccess);
         int deviceId = 0;
         ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
-        // Risk #11: reset the TLS LastCallRecord across every fake plugin
-        // that may be loaded; only `OverrideImplementing` is loaded by this
-        // fixture but the others are silently skipped via dlsym lookup.
-        resetLastCallRecordIfLoaded(
-            hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
-            "OverrideImplementing");
-        resetLastCallRecordIfLoaded(
-            hipdnn_tests::plugin_constants::testOverrideOmittingPluginPath(), "OverrideOmitting");
-        resetLastCallRecordIfLoaded(hipdnn_tests::plugin_constants::testVersionLiarPluginPath(),
-                                    "VersionLiar");
-        resetLastCallRecordIfLoaded(hipdnn_tests::plugin_constants::testSecondOverridePluginPath(),
-                                    "SecondOverride");
+        // Risk #11: reset the TLS LastCallRecord across every override-execute
+        // fake plugin that may be loaded (see `OverrideTestUtils.hpp`); only
+        // `OverrideImplementing` is loaded by this fixture but the others
+        // are silently skipped via dlsym lookup.
+        hipdnn_tests::override_test_utils::resetAllOverrideFakePluginRecords();
 
         const std::array<const char*, 1> paths
             = {hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath().c_str()};
@@ -147,13 +104,16 @@ protected:
 
 /// Helper: invoke the parallel-array overload and assert validation rejects
 /// with `ErrorCode::INVALID_VALUE`. The override-implementing fake plugin
-/// must NOT have been called (fixture loads only that plugin).
+/// must NOT have been called (fixture loads only that plugin). When
+/// `expectedRuleSubstring` is non-empty, the returned error message must
+/// contain it (used to pin per-rule attribution per RFC 0008 plan T-rec2).
 void expectArrayRejected(std::shared_ptr<Graph>& graph,
                          [[maybe_unused]] hipdnnHandle_t handle,
                          std::unordered_map<int64_t, void*>& variantPack,
                          const std::vector<int64_t>& uids,
                          const std::vector<std::vector<int64_t>>& shapes,
-                         const std::vector<std::vector<int64_t>>& strides)
+                         const std::vector<std::vector<int64_t>>& strides,
+                         const std::string& expectedRuleSubstring = "")
 {
     const auto& implPath = hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath();
     resetLastCallRecordIfLoaded(implPath, "OverrideImplementing");
@@ -161,6 +121,11 @@ void expectArrayRejected(std::shared_ptr<Graph>& graph,
     // NOLINTNEXTLINE(readability-implicit-bool-conversion)
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
         << "Parallel-array overload should have rejected: " << result.err_msg;
+    if(!expectedRuleSubstring.empty())
+    {
+        EXPECT_NE(result.err_msg.find(expectedRuleSubstring), std::string::npos)
+            << "Rejection message must identify the failing rule explicitly: " << result.err_msg;
+    }
     const auto* record = getLastCallRecordIfLoaded(implPath, "OverrideImplementing");
     ASSERT_NE(record, nullptr);
     // NOLINTNEXTLINE(readability-implicit-bool-conversion)
@@ -247,7 +212,7 @@ TEST_F(IntegrationOverrideValidation, Rule2UnknownUidArrayForm)
     const std::vector<int64_t> uids = {999};
     const std::vector<std::vector<int64_t>> shapes = {dims};
     const std::vector<std::vector<int64_t>> strides = {packedStrides(dims)};
-    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
+    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides, "rule 2");
 }
 
 TEST_F(IntegrationOverrideValidation, Rule2UnknownUidMapForm)
@@ -281,7 +246,7 @@ TEST_F(IntegrationOverrideValidation, Rule3RankMismatchArrayForm)
     const std::vector<int64_t> uids = {1};
     const std::vector<std::vector<int64_t>> shapes = {{3, 4, 4}};
     const std::vector<std::vector<int64_t>> strides = {{16, 4, 1}};
-    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
+    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides, "rule 3");
 }
 
 TEST_F(IntegrationOverrideValidation, Rule3RankMismatchMapForm)
@@ -316,7 +281,7 @@ TEST_F(IntegrationOverrideValidation, Rule4MaxShapeExceededArrayForm)
     const std::vector<int64_t> uids = {1};
     const std::vector<std::vector<int64_t>> shapes = {{1, 3, 8, 4}};
     const std::vector<std::vector<int64_t>> strides = {{int64_t{3} * 8 * 4, int64_t{8} * 4, 4, 1}};
-    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
+    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides, "rule 4");
 }
 
 TEST_F(IntegrationOverrideValidation, Rule4MaxShapeExceededMapForm)
@@ -335,9 +300,9 @@ TEST_F(IntegrationOverrideValidation, Rule4MaxShapeExceededMapForm)
     expectMapRejected(graph, _handle, variantPack, overrides);
 }
 
-/// Test #17: future-proof phrasing of rule 4. Phase-1 compares ALL dims
-/// (no wildcards). When Phase 2 introduces wildcards (`-1`) and changes the
-/// rule to "for non-wildcard dimensions only", this test will break and
+/// Test #17: future-proof phrasing of rule 4. Today rule 4 compares ALL
+/// dims (no wildcards). When wildcards (`-1`) are introduced and the rule
+/// changes to "for non-wildcard dimensions only", this test will break and
 /// signal the test author to add wildcard-specific coverage. Until then, the
 /// test asserts every-dim comparison via two equivalent cases: one where the
 /// first axis exceeds and one where the last axis exceeds. Both must reject.
@@ -411,7 +376,7 @@ TEST_F(IntegrationOverrideValidation, Rule6NonPositiveDimArrayForm)
     const std::vector<int64_t> uids = {1};
     const std::vector<std::vector<int64_t>> shapes = {{1, 3, 0, 4}}; // zero is not positive
     const std::vector<std::vector<int64_t>> strides = {packedStrides(dims)};
-    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
+    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides, "rule 6");
 }
 
 TEST_F(IntegrationOverrideValidation, Rule6NonPositiveDimMapForm)
@@ -444,7 +409,7 @@ TEST_F(IntegrationOverrideValidation, Rule7NonPositiveStrideArrayForm)
     const std::vector<int64_t> uids = {1};
     const std::vector<std::vector<int64_t>> shapes = {dims};
     const std::vector<std::vector<int64_t>> strides = {{48, 16, 0, 1}}; // zero stride
-    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
+    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides, "rule 7");
 }
 
 TEST_F(IntegrationOverrideValidation, Rule7NonPositiveStrideMapForm)
@@ -464,7 +429,7 @@ TEST_F(IntegrationOverrideValidation, Rule7NonPositiveStrideMapForm)
 
 // ----------------------- Rule 8 — Stride-ordering preserved -----------------------
 
-/// Test #12 (RFC 0008 plan §6.5): D4 Phase-1 phrasing of rule 8. Declared
+/// Test #12 (RFC 0008 plan §6.5): D4 phrasing of rule 8. Declared
 /// strides `{H*W, W, 1}` (row-major NCHW packed) imply axis ordering
 /// argsort_descending = [N, C, H, W]. Override strides must produce the
 /// SAME argsort. Reject any override whose argsort differs.
@@ -486,7 +451,7 @@ TEST_F(IntegrationOverrideValidation, Rule8StrideOrderingMismatchArrayForm)
     // Declared argsort_descending(48,16,4,1) = {0,1,2,3}; override argsort
     // {1,4,16,48} = {3,2,1,0} — different argsort, must reject.
     const std::vector<std::vector<int64_t>> strides = {{1, 4, 16, 48}};
-    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
+    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides, "rule 8");
 }
 
 TEST_F(IntegrationOverrideValidation, Rule8StrideOrderingMismatchMapForm)
@@ -536,7 +501,7 @@ TEST_F(IntegrationOverrideValidation, Rule8StrideOrderingMatchAccepted)
 /// from its declared dims (a graph-construction issue) used to slip through
 /// rule 8 unchecked. The size-equality guard has been removed and replaced
 /// with an explicit rank-mismatch error so the inconsistency is surfaced
-/// instead of silently accepted (RFC 0008 Phase 1 post-review fix #4).
+/// instead of silently accepted (RFC 0008 post-review fix #4).
 TEST_F(IntegrationOverrideValidation, Rule8RankMismatchDeclaredStridesShorter)
 {
     // Build a graph where the input tensor's declared dims has rank 4 but
@@ -575,43 +540,67 @@ TEST_F(IntegrationOverrideValidation, Rule8RankMismatchDeclaredStridesShorter)
         .set_data_type(DataType::FLOAT)
         .set_output(true);
 
-    // Compile may fail at validate() because the tensor itself is malformed.
-    // If so, the malformed graph cannot reach `execute`, but the underlying
-    // bug (rule 8 silently no-op'ing on rank mismatch) is exactly what we
-    // want frontend validation to catch — at validate() OR at execute(). If
-    // validate accepts it, execute must reject it; both paths satisfy the
-    // post-review requirement.
-    const auto validateResult = graph->validate();
-    if(validateResult.code != ErrorCode::OK)
+    // Pre-validation may accept or reject the malformed declared-stride
+    // rank; either path is fine for the post-review requirement that the
+    // inconsistency must be *surfaced somewhere*. Drive the graph as far
+    // as possible without aborting. If the graph reaches override-execute,
+    // require the rule 8 diagnostic; if graph validation rejects first, the
+    // generic tensor shape/stride diagnostic is the expected earlier gate.
+    auto stageResult = graph->validate();
+    bool reachedOverrideExecuteValidation = false;
+    if(stageResult.code == ErrorCode::OK)
     {
-        // Validation already rejected the malformed declared-stride rank —
-        // also acceptable. The post-review requirement is that the rank
-        // inconsistency is surfaced *somewhere* and not silently ignored.
-        SUCCEED() << "validate() rejected up-front: " << validateResult.err_msg;
-        return;
+        stageResult = graph->build_operation_graph(_handle);
+    }
+    if(stageResult.code == ErrorCode::OK)
+    {
+        stageResult = graph->create_execution_plans();
+    }
+    if(stageResult.code == ErrorCode::OK)
+    {
+        stageResult = graph->check_support();
+    }
+    if(stageResult.code == ErrorCode::OK)
+    {
+        stageResult = graph->build_plans();
+    }
+    if(stageResult.code == ErrorCode::OK)
+    {
+        // All compile stages accepted the malformed graph — the rank
+        // inconsistency must then be surfaced at execute time. Override
+        // stride matches the declared DIM rank (4) so rule 3 passes,
+        // but its rank still differs from the declared STRIDE rank (3).
+        std::unordered_map<int64_t, void*> variantPack;
+        variantPack[1] = nullptr;
+        variantPack[2] = nullptr;
+
+        const std::vector<int64_t> uids = {1};
+        const std::vector<std::vector<int64_t>> shapes = {dims};
+        const std::vector<std::vector<int64_t>> strides = {packedRank4};
+        const auto& implPath = hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath();
+        resetLastCallRecordIfLoaded(implPath, "OverrideImplementing");
+        reachedOverrideExecuteValidation = true;
+        stageResult = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
+        const auto* record = getLastCallRecordIfLoaded(implPath, "OverrideImplementing");
+        ASSERT_NE(record, nullptr);
+        // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+        EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE)
+            << "Validation must reject before any backend call.";
     }
 
-    auto compileResult = graph->build_operation_graph(_handle);
-    ASSERT_EQ(compileResult.code, ErrorCode::OK) << compileResult.err_msg;
-    compileResult = graph->create_execution_plans();
-    ASSERT_EQ(compileResult.code, ErrorCode::OK) << compileResult.err_msg;
-    compileResult = graph->check_support();
-    ASSERT_EQ(compileResult.code, ErrorCode::OK) << compileResult.err_msg;
-    compileResult = graph->build_plans();
-    ASSERT_EQ(compileResult.code, ErrorCode::OK) << compileResult.err_msg;
-
-    std::unordered_map<int64_t, void*> variantPack;
-    variantPack[1] = nullptr;
-    variantPack[2] = nullptr;
-
-    // Override stride matches the declared DIM rank (4) so rule 3 passes,
-    // but its rank still differs from the declared STRIDE rank (3). Under
-    // the previous size-equality guard rule 8 silently no-op'd here; the
-    // fix now emits an explicit rank-mismatch error.
-    const std::vector<int64_t> uids = {1};
-    const std::vector<std::vector<int64_t>> shapes = {dims};
-    const std::vector<std::vector<int64_t>> strides = {packedRank4};
-    expectArrayRejected(graph, _handle, variantPack, uids, shapes, strides);
+    // Pin the gate: SOME stage must reject with a non-OK code. If the
+    // malformed graph reaches override-execute, the error message must call
+    // out rule 8 specifically (post-review fix #4 — the previous size-equality
+    // guard silently no-op'd this case). If graph validation catches it
+    // earlier, that is also correct and the rule 8 validation is unreachable.
+    EXPECT_NE(stageResult.code, ErrorCode::OK)
+        << "Rank-mismatched declared strides must be surfaced (no silent no-op): "
+        << stageResult.err_msg;
+    if(reachedOverrideExecuteValidation)
+    {
+        EXPECT_NE(stageResult.err_msg.find("rule 8"), std::string::npos)
+            << "Surfaced error must identify rule 8 as the failing rule: " << stageResult.err_msg;
+    }
 }
 
 // ============================================================================
@@ -628,18 +617,10 @@ protected:
         int deviceId = 0;
         ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
         // No suffixed fakes are loaded by this fixture (it uses
-        // test_good_plugin instead), so the resetters below are all
-        // silent no-ops via the dlsym lookup. Kept for consistency with
-        // the other override fixtures.
-        resetLastCallRecordIfLoaded(
-            hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
-            "OverrideImplementing");
-        resetLastCallRecordIfLoaded(
-            hipdnn_tests::plugin_constants::testOverrideOmittingPluginPath(), "OverrideOmitting");
-        resetLastCallRecordIfLoaded(hipdnn_tests::plugin_constants::testVersionLiarPluginPath(),
-                                    "VersionLiar");
-        resetLastCallRecordIfLoaded(hipdnn_tests::plugin_constants::testSecondOverridePluginPath(),
-                                    "SecondOverride");
+        // test_good_plugin instead), so the shared resetter is a silent
+        // no-op via the dlsym lookup. Kept for consistency with the other
+        // override fixtures.
+        hipdnn_tests::override_test_utils::resetAllOverrideFakePluginRecords();
 
         const std::array<const char*, 1> paths
             = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
@@ -826,6 +807,82 @@ TEST(IntegrationOverrideRoundTrip, DynamicShapeEnabledFlagSurvivesSerialization)
     EXPECT_TRUE(restored->is_dynamic_shape_enabled())
         << "Test #14: is_dynamic_shape_enabled must survive a "
            "serialize/deserialize round-trip.";
+
+    ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
+}
+
+/// RFC 0008 plan T-missing #3: end-to-end check that a graph with
+/// the default-false `is_dynamic_shape_enabled` (no `set_dynamic_shape_enabled`
+/// call at all) survives lowering through `build_operation_graph()` plus a
+/// full serialize/deserialize round-trip without flipping to true. The
+/// existing `DynamicShapeEnabledDefaultFalseSurvivesSerialization` test does
+/// NOT call `build_operation_graph()`, so it cannot detect a regression in
+/// the lowered backend descriptor's flag handling. This test pins that path:
+/// after `build_operation_graph()` runs (which exercises
+/// `assembleGraphDescriptor()`'s flag propagation), a serialize/deserialize
+/// of the resulting backend graph still observes the default-false flag.
+TEST(IntegrationOverrideRoundTrip, DynamicShapeEnabledDefaultFalseSurvivesBuildOperationGraph)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::array<const char*, 1> paths
+        = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
+    ASSERT_EQ(
+        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+        HIPDNN_STATUS_SUCCESS);
+    hipdnnHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    auto graph = std::make_shared<Graph>();
+    // Intentionally do NOT call set_dynamic_shape_enabled; the default is false.
+    graph->set_name("BuildOpGraph_DefaultFalse")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_dim(dims).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+    PointwiseAttributes attrs;
+    attrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph->pointwise(x, attrs);
+    y->set_uid(2)
+        .set_dim(dims)
+        .set_stride({48, 16, 4, 1})
+        .set_data_type(DataType::FLOAT)
+        .set_output(true);
+
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    EXPECT_FALSE(graph->is_dynamic_shape_enabled())
+        << "Pre-validate: default (unset) must read as false.";
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    EXPECT_FALSE(graph->is_dynamic_shape_enabled())
+        << "Post-validate: default-false must not flip to true during validation.";
+
+    // Critical step the existing default-false round-trip test omits: the
+    // backend lowering. `assembleGraphDescriptor()` is the path that
+    // propagates the flag into the backend graph descriptor; a regression
+    // there is invisible without this call.
+    result = graph->build_operation_graph(handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    EXPECT_FALSE(graph->is_dynamic_shape_enabled())
+        << "Post-build_operation_graph: default-false must survive backend "
+           "lowering (T-missing #3).";
+
+    auto [data, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    auto restored = std::make_shared<Graph>();
+    auto deserResult = restored->deserialize(nullptr, data);
+    ASSERT_EQ(deserResult.code, ErrorCode::OK) << deserResult.err_msg;
+
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    EXPECT_FALSE(restored->is_dynamic_shape_enabled())
+        << "T-missing #3: default-false must survive build_operation_graph + "
+           "serialize/deserialize end-to-end.";
 
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }

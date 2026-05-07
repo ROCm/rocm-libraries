@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Frontend integration tests for RFC 0008 Phase 1 overridable tensor shapes
-// (execute path). Covers:
+// Frontend integration tests for overridable tensor shapes (RFC 0008,
+// execute path). Covers:
 //   * The four-corner dispatch matrix from RFC §9.4 (graph flag × plugin
 //     capability) using the override-implementing and override-omitting
 //     fakes published by Stream B.
@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include "OverrideTestUtils.hpp"
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -64,68 +65,19 @@ struct SimpleTensorBundle
 };
 
 /// Build a minimal pointwise (RELU) graph; declared dims are the upper bound
-/// for any overrides supplied at execute time.
+/// for any overrides supplied at execute time. Thin wrapper over the shared
+/// `buildPointwiseReluGraph` helper that defaults strides to NCHW packed.
 std::shared_ptr<Graph> createSimplePointwiseGraph(const std::string& graphName,
                                                   const std::vector<int64_t>& declaredDims,
                                                   bool dynamicShapeEnabled)
 {
-    auto graph = std::make_shared<Graph>();
-    graph->set_name(graphName)
-        .set_io_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT);
-
-    // Standard NCHW packed strides for the declared dims.
-    const std::vector<int64_t> packedStrides = {declaredDims[1] * declaredDims[2] * declaredDims[3],
-                                                declaredDims[2] * declaredDims[3],
-                                                declaredDims[3],
-                                                1};
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim(declaredDims)
-        .set_stride(packedStrides)
-        .set_data_type(DataType::FLOAT);
-
-    PointwiseAttributes attrs;
-    attrs.set_name("relu_node");
-    attrs.set_mode(PointwiseMode::RELU_FWD);
-
-    auto y = graph->pointwise(x, attrs);
-    y->set_uid(2)
-        .set_dim(declaredDims)
-        .set_stride(packedStrides)
-        .set_data_type(DataType::FLOAT)
-        .set_output(true);
-
-    if(dynamicShapeEnabled)
-    {
-        graph->set_dynamic_shape_enabled(true);
-    }
-
-    return graph;
+    return hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
+        graphName, declaredDims, /*strides=*/{}, dynamicShapeEnabled);
 }
 
-/// Compile + execute helper: validate, build_operation_graph, create plans,
-/// check_support, build_plans. Asserts each step succeeds.
-void compileGraph(std::shared_ptr<Graph>& graph, [[maybe_unused]] hipdnnHandle_t handle)
-{
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->create_execution_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->check_support();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-}
+// Bring the shared `compileGraph(graph, handle)` helper into the file's
+// anonymous namespace so existing call sites resolve unqualified.
+using hipdnn_tests::override_test_utils::compileGraph;
 
 /// Common fixture: load a configurable set of fake plugins and create a handle.
 /// Per Risk #11, derived tests must reset the TLS LastCallRecord in their own
@@ -139,20 +91,11 @@ protected:
         ASSERT_EQ(hipInit(0), hipSuccess);
         int deviceId = 0;
         ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
-        // Reset the TLS LastCallRecord across every fake plugin that may be
-        // loaded. The helper dlopens the plugin path (refcount-bumping when
-        // the host already loaded it) so the suffixed C entry points are
-        // visible via `dlsym` (host loads with `RTLD_LOCAL`). Resetters for
-        // plugins not (yet) loaded are silently skipped (Risk #11).
-        resetLastCallRecordIfLoaded(
-            hipdnn_tests::plugin_constants::testOverrideImplementingPluginPath(),
-            "OverrideImplementing");
-        resetLastCallRecordIfLoaded(
-            hipdnn_tests::plugin_constants::testOverrideOmittingPluginPath(), "OverrideOmitting");
-        resetLastCallRecordIfLoaded(hipdnn_tests::plugin_constants::testVersionLiarPluginPath(),
-                                    "VersionLiar");
-        resetLastCallRecordIfLoaded(hipdnn_tests::plugin_constants::testSecondOverridePluginPath(),
-                                    "SecondOverride");
+        // Reset the TLS LastCallRecord across every override-execute fake
+        // plugin that may be loaded (see `OverrideTestUtils.hpp`).
+        // Resetters for plugins not (yet) loaded are silently skipped
+        // (Risk #11).
+        hipdnn_tests::override_test_utils::resetAllOverrideFakePluginRecords();
     }
 
     void TearDown() override
@@ -524,7 +467,7 @@ TEST_F(IntegrationOverrideExecuteEquivalence, MapAndParallelArrayProduceSameDisp
 // must perform the SAME guard so a user calling override-execute before
 // `build_plans()` (or `from_compiled_plan_binary()`) gets a clean
 // INVALID_VALUE diagnostic instead of dereferencing a null/invalid plan
-// descriptor (RFC 0008 Phase 1 post-review fix #3).
+// descriptor (RFC 0008 post-review fix #3).
 // ----------------------------------------------------------------------------
 
 class IntegrationOverrideExecutePlanGuard : public IntegrationOverrideExecuteBase

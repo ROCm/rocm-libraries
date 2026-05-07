@@ -23,8 +23,9 @@ TEST(TestVersion, PositiveVersion)
     EXPECT_GE(version.patch, 0);
 }
 
-// RFC 0008 Phase 1 — applicability filter prerequisites (B.8). The
-// constant-aware tests live alongside the host's applicability filter in
+// Applicability filter prerequisites for the override-execute entry point
+// (RFC 0008 §B.8). The constant-aware tests live alongside the host's
+// applicability filter in
 // `backend/tests/plugin/` so the plugin SDK test executable does not pull
 // in a `backend/src/` header (preserves the `plugin_sdk` → `data_sdk`
 // linkage boundary documented in `projects/hipdnn/CLAUDE.md`). Generic

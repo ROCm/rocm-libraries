@@ -91,7 +91,7 @@ void EnginePlugin::resolveSymbols()
     const auto funcNameExecuteOpGraph = "hipdnnEnginePluginExecuteOpGraph";
     _funcExecuteOpGraph = _lib.getSymbol<decltype(_funcExecuteOpGraph)>(funcNameExecuteOpGraph);
 
-    // Optional symbol per RFC 0008 Phase 1; absence simply means the plugin
+    // Optional symbol per RFC 0008 §4.5; absence simply means the plugin
     // opts out of override execute.
     if(!tryAssignSymbol(_funcExecuteOpGraphWithOverrides,
                         "hipdnnEnginePluginExecuteOpGraphWithOverrides"))

@@ -36,17 +36,23 @@ HIPDNN_MAP_TO_ID(KnobsPluginEngineB, -9);
 HIPDNN_MAP_TO_ID(KnobConstraintValidationPlugin, -10);
 HIPDNN_MAP_TO_ID(IncompatibleVersionPlugin, -11);
 
-// RFC 0008 Phase 1 fake plugins. Each receives a distinct id; the second
-// override-implementing fake intentionally differs from the first so
+// RFC 0008 override-execute fake plugins. Each receives a distinct id; the
+// second override-implementing fake intentionally differs from the first so
 // Test #9 can distinguish them in the applicable-engine set.
 HIPDNN_MAP_TO_ID(OverrideImplementingPlugin, -12);
 HIPDNN_MAP_TO_ID(OverrideOmittingPlugin, -13);
 HIPDNN_MAP_TO_ID(VersionLiarPlugin, -14);
 HIPDNN_MAP_TO_ID(SecondOverridePlugin, -15);
 
-// RFC 0008 Phase 1 post-review fix #1: malformed-version plugin used to
-// exercise the load-time `parsedApiVersion()` rejection path so a bad
-// version string never reaches the dispatch hot path. The id is unused at
-// runtime (the plugin should be filtered out at load), but the engine-id
-// map requires a unique entry per plugin class.
+// RFC 0008 post-review fix #1: malformed-version plugin used to exercise
+// the load-time `parsedApiVersion()` rejection path so a bad version
+// string never reaches the dispatch hot path. The id is unused at runtime
+// (the plugin should be filtered out at load), but the engine-id map
+// requires a unique entry per plugin class.
 HIPDNN_MAP_TO_ID(MalformedVersionPlugin, -16);
+
+// RFC 0008 plan T-missing #2: version-zero plugin reports a parseable but
+// too-low API version ("0.0.0"). Pins the "parsed-but-too-low" rejection
+// path as distinct from the malformed/unparseable rejection
+// (`MalformedVersionPlugin`).
+HIPDNN_MAP_TO_ID(VersionZeroPlugin, -17);

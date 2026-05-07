@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Frontend integration test for RFC 0008 Phase 1 post-review fix #1
+// Frontend integration test for RFC 0008 post-review fix #1
 // (backend dispatch hardening). A plugin that reports an unparseable
 // `apiVersion` string must be rejected at load time by the host's
 // `EnginePluginManager::validateBeforeAdding` (which forces population of
@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include "OverrideTestUtils.hpp"
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -40,38 +41,13 @@ namespace
 /// Build a minimal pointwise (RELU) graph for execute-path coverage. The
 /// graph is non-override (legacy) so it admits every plugin reporting at
 /// least the post-PR1 baseline `"1.0.0"` — the malformed plugin is the
-/// only one that should be filtered out, and only at load time.
+/// only one that should be filtered out, and only at load time. Thin
+/// wrapper over the shared `buildPointwiseReluGraph` helper.
 std::shared_ptr<Graph> createSimpleReluGraph(const std::string& graphName,
                                              const std::vector<int64_t>& dims)
 {
-    auto graph = std::make_shared<Graph>();
-    graph->set_name(graphName)
-        .set_io_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT);
-
-    const std::vector<int64_t> packedStrides
-        = {dims[1] * dims[2] * dims[3], dims[2] * dims[3], dims[3], 1};
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim(dims)
-        .set_stride(packedStrides)
-        .set_data_type(DataType::FLOAT);
-
-    PointwiseAttributes attrs;
-    attrs.set_name("relu_node");
-    attrs.set_mode(PointwiseMode::RELU_FWD);
-
-    auto y = graph->pointwise(x, attrs);
-    y->set_uid(2)
-        .set_dim(dims)
-        .set_stride(packedStrides)
-        .set_data_type(DataType::FLOAT)
-        .set_output(true);
-
-    return graph;
+    return hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
+        graphName, dims, /*strides=*/{}, /*dynamicShapeEnabled=*/false);
 }
 
 class IntegrationMalformedVersionPlugin : public ::testing::Test
@@ -126,21 +102,7 @@ TEST_F(IntegrationMalformedVersionPlugin, BadPluginLoadedAlongsideGoodPluginDoes
     yTensor.fillWithValue(0.0F);
 
     auto graph = createSimpleReluGraph("MalformedVersion_GoodAlongside", dims);
-
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->create_execution_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->check_support();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    hipdnn_tests::override_test_utils::compileGraph(graph, _handle);
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = xTensor.memory().deviceData();
@@ -150,7 +112,7 @@ TEST_F(IntegrationMalformedVersionPlugin, BadPluginLoadedAlongsideGoodPluginDoes
     // `Version{plugin->apiVersion()}` parse, the malformed plugin would
     // trip an `std::invalid_argument` here even though it never produced
     // any applicable engine.
-    result = graph->execute(_handle, variantPack, nullptr);
+    auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
 
@@ -169,5 +131,61 @@ TEST_F(IntegrationMalformedVersionPlugin, BadPluginLoadedAloneDoesNotCrashCreate
     // The malformed plugin is rejected at load time by `validateBeforeAdding`;
     // the rejection is caught by `loadPluginFromFile`'s `tryCatch` so the
     // backend handle still constructs successfully even with no usable plugin.
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+}
+
+/// RFC 0008 plan T-missing #2: the version-zero fake reports a
+/// parseable but too-low API version ("0.0.0"). Distinct from the malformed
+/// fake — `parsedApiVersion()` succeeds and caches the parsed value, but the
+/// version comparison against the post-PR1 baseline rejects it. Loading it
+/// alongside a well-formed plugin must not crash dispatch and must leave the
+/// well-formed plugin available to serve the graph (parsed-but-too-low
+/// rejection path is a quiet filter, not a fault).
+TEST_F(IntegrationMalformedVersionPlugin,
+       VersionZeroPluginLoadedAlongsideGoodPluginDoesNotCrashDispatch)
+{
+    const std::array<const char*, 2> paths
+        = {hipdnn_tests::plugin_constants::testVersionZeroPluginPath().c_str(),
+           hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
+
+    ASSERT_EQ(
+        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    Tensor<float> xTensor(dims);
+    Tensor<float> yTensor(dims);
+    xTensor.fillWithValue(1.0F);
+    yTensor.fillWithValue(0.0F);
+
+    auto graph = createSimpleReluGraph("VersionZero_GoodAlongside", dims);
+    hipdnn_tests::override_test_utils::compileGraph(graph, _handle);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = xTensor.memory().deviceData();
+    variantPack[2] = yTensor.memory().deviceData();
+
+    // Dispatch must succeed via the well-formed plugin; the version-zero
+    // plugin is filtered out at version-check time and contributes no
+    // applicable engines. Distinct code path from the malformed plugin
+    // (which throws inside `parsedApiVersion()`); this exercises the
+    // parsed-but-too-low rejection branch.
+    auto result = graph->execute(_handle, variantPack, nullptr);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+}
+
+/// Defensive companion: when only the version-zero plugin is loaded, the
+/// host still constructs cleanly. The plugin is admitted to load (parse
+/// succeeds) but produces no applicable engines because the version
+/// baseline filters it out.
+TEST_F(IntegrationMalformedVersionPlugin, VersionZeroPluginLoadedAloneDoesNotCrashCreate)
+{
+    const std::array<const char*, 1> paths
+        = {hipdnn_tests::plugin_constants::testVersionZeroPluginPath().c_str()};
+
+    ASSERT_EQ(
+        hipdnnSetEnginePluginPaths_ext(paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+        HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
 }

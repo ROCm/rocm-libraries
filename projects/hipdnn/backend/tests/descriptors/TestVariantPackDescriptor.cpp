@@ -274,11 +274,11 @@ TEST_F(TestVariantPackDescriptorWhenFinalized, InvalidGetAttributes)
 }
 
 // ============================================================================
-// RFC 0008 Phase 1: per-execute override tensor attributes (704-707)
+// Per-execute override tensor attributes 704-707 (RFC 0008)
 // ============================================================================
 
 /// Fixture that finalizes a VariantDescriptor with both base attributes and the
-/// RFC 0008 Phase 1 override attributes populated from the §4.3 worked example:
+/// override attributes populated from the RFC 0008 §4.3 worked example:
 ///   - Two override tensors (UID 1 with rank 4, UID 2 with rank 3).
 ///   - OVERRIDE_SHAPES is the flat concatenation [n,c,h,w | n,c,k] of the two
 ///     per-tensor shape vectors, sliced via OVERRIDE_LENGTHS = [4, 3].

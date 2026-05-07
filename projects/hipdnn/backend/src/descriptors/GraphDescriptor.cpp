@@ -54,8 +54,8 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     graph->intermediate_data_type = _intermediateDataType;
     graph->io_data_type = _ioDataType;
     graph->preferred_engine_id = _preferredEngineId;
-    // RFC 0008 Phase 1: schema field is `bool = false`; FlatBuffers omits wire bytes
-    // when the value equals the default, so legacy readers continue to see "false".
+    // Schema field is `bool = false`; FlatBuffers omits wire bytes when the
+    // value equals the default, so legacy readers continue to see "false".
     graph->is_dynamic_shape_enabled = _isDynamicShapeEnabled;
     graph->name = _name;
 
@@ -401,8 +401,8 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
     _preferredEngineId = graph->preferred_engine_id;
-    // RFC 0008 Phase 1: schema field is `bool = false`. Legacy graphs that predate the
-    // field deserialize to false via the FlatBuffers default; explicit `true` survives.
+    // Schema field is `bool = false`. Legacy graphs that predate the field
+    // deserialize to false via the FlatBuffers default; explicit `true` survives.
     _isDynamicShapeEnabled = graph->is_dynamic_shape_enabled;
     _name = graph->name;
 

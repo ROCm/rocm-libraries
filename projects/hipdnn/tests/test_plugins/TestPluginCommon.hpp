@@ -47,8 +47,9 @@ inline const char* apiVersionWithoutTweak()
 
 /**
  * @brief Identifies which execute entry point a fake plugin most recently
- *        serviced. Used by RFC 0008 Phase 1 dispatch tests to assert that
- *        the host selected the override-aware path versus the original path.
+ *        serviced. Used by override-execute dispatch tests (RFC 0008) to
+ *        assert that the host selected the override-aware path versus the
+ *        original path.
  */
 enum class TestPluginExecuteEntry : uint8_t
 {
@@ -67,7 +68,7 @@ inline constexpr std::size_t K_MAX_TEST_OVERRIDE_RANK = 8;
 
 /**
  * @brief Per-thread record of the most recent execute call observed by a
- *        fake test plugin (RFC 0008 Phase 1, design point D5).
+ *        fake test plugin (RFC 0008 design point D5).
  *
  * Each fake plugin maintains exactly one `thread_local` instance (defined
  * via `DEFINE_TEST_PLUGIN_LAST_CALL_STORAGE(<suffix>)`); tests inspect it
@@ -137,7 +138,7 @@ static_assert(std::is_trivially_destructible_v<TestPluginLastCallRecord>,
     /* NOLINTEND(readability-identifier-naming) */
 
 // Forward declarations of the per-plugin observation entry points emitted by
-// the four RFC 0008 Phase 1 fake plugins. Tests that load these plugins call
+// the four override-execute fake plugins (RFC 0008). Tests that load these plugins call
 // the suffixed accessor matching the plugin under test. The symbols are
 // defined inside each plugin's `.so` (not linked into the test binary), so
 // callers must resolve them via `dlsym` against the plugin's own dlopen
@@ -324,7 +325,7 @@ public:
     }
 
     /**
-     * @brief Override-aware execute hook (RFC 0008 Phase 1).
+     * @brief Override-aware execute hook (RFC 0008).
      *
      * Default implementation captures every override selector into the
      * calling thread's per-plugin `TestPluginLastCallRecord` (resolved via
@@ -480,7 +481,6 @@ public:
     }
 
     static hipdnnPluginStatus_t
-        // NOLINTNEXTLINE(readability-non-const-parameter)
         enginePluginGetAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
     {
         LOG_API_ENTRY("engineIds=" << static_cast<void*>(engineIds) << ", maxEngines=" << maxEngines
@@ -801,7 +801,7 @@ public:
 
     /**
      * @brief Shared C-API implementation for the optional override-aware
-     *        execute entry (RFC 0008 Phase 1). Plugins that opt in emit a
+     *        execute entry (RFC 0008 §4.5). Plugins that opt in emit a
      *        forwarder via `REGISTER_TEST_PLUGIN_OVERRIDE_API()`; plugins
      *        that opt out simply do not emit the symbol so the host's
      *        `tryAssignSymbol` resolution treats it as unsupported.
@@ -995,7 +995,7 @@ private:
 
 /**
  * Companion to `REGISTER_TEST_PLUGIN_API()`: emits ONLY the optional
- * `hipdnnEnginePluginExecuteOpGraphWithOverrides` symbol (RFC 0008 Phase 1).
+ * `hipdnnEnginePluginExecuteOpGraphWithOverrides` symbol (RFC 0008 §4.5).
  * Plugins that should appear to opt out (Test #3 / #20: TestVersionLiarPlugin
  * and TestOverrideOmittingPlugin) simply do not invoke this macro, so the
  * symbol is absent from the resulting `.so` and the host's `tryAssignSymbol`
