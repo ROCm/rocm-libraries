@@ -154,6 +154,12 @@ def expand_sweep(
     allowed_sink = _allow("sink")
     allowed_paged_kv = _allow("paged_kv")
 
+    # block_per_cu: int or list of ints to sweep
+    bpc_entry = trait_cfg.get("block_per_cu", {})
+    block_per_cu_values = bpc_entry.get("values", [-1])
+    if isinstance(block_per_cu_values, int):
+        block_per_cu_values = [block_per_cu_values]
+
     # Intersect requested dtypes with arch support
     arch_dtypes = set(ARCH_DTYPES.get(arch, ARCH_DTYPES.get("gfx950", [])))
     if allowed_dtypes is not None:
@@ -257,47 +263,49 @@ def expand_sweep(
                             m0, n0, k0, n1, k1, k0max, wave_m, warp_m, warp_k = (
                                 _tile_params(tile, hv, dtype)
                             )
-                            configs.append(
-                                FmhaKernelConfig(
-                                    family=family,
-                                    data_type=dtype,
-                                    mode=mode,
-                                    hdim_q=hq,
-                                    hdim_v=hv,
-                                    pipeline=spec.tag,
-                                    tile_m0=m0,
-                                    tile_n0=n0,
-                                    tile_k0=k0,
-                                    tile_n1=n1,
-                                    tile_k1=k1,
-                                    tile_k0max=k0max,
-                                    wave_m0=wave_m,
-                                    wave_n0=1,
-                                    wave_k0=1,
-                                    wave_m1=wave_m,
-                                    wave_n1=1,
-                                    wave_k1=1,
-                                    warp_m0=warp_m,
-                                    warp_n0=warp_m,
-                                    warp_k0=warp_k,
-                                    warp_m1=warp_m,
-                                    warp_n1=warp_m,
-                                    warp_k1=warp_k,
-                                    pad_s=_pad_val(spec.spad),
-                                    pad_sk=_pad_val(spec.skpad),
-                                    pad_d=_pad_val(spec.dpad),
-                                    pad_dv=_pad_val(spec.dvpad),
-                                    mask=mm,
-                                    bias=mb,
-                                    lse=lv,
-                                    dropout=dv,
-                                    logits=lgv,
-                                    sink=sv,
-                                    skip_min_seqlen_q=skv,
-                                    qscale=spec.qscale,
-                                    gfx_arch=arch,
+                            for bpc in block_per_cu_values:
+                                configs.append(
+                                    FmhaKernelConfig(
+                                        family=family,
+                                        data_type=dtype,
+                                        mode=mode,
+                                        hdim_q=hq,
+                                        hdim_v=hv,
+                                        pipeline=spec.tag,
+                                        tile_m0=m0,
+                                        tile_n0=n0,
+                                        tile_k0=k0,
+                                        tile_n1=n1,
+                                        tile_k1=k1,
+                                        tile_k0max=k0max,
+                                        wave_m0=wave_m,
+                                        wave_n0=1,
+                                        wave_k0=1,
+                                        wave_m1=wave_m,
+                                        wave_n1=1,
+                                        wave_k1=1,
+                                        warp_m0=warp_m,
+                                        warp_n0=warp_m,
+                                        warp_k0=warp_k,
+                                        warp_m1=warp_m,
+                                        warp_n1=warp_m,
+                                        warp_k1=warp_k,
+                                        pad_s=_pad_val(spec.spad),
+                                        pad_sk=_pad_val(spec.skpad),
+                                        pad_d=_pad_val(spec.dpad),
+                                        pad_dv=_pad_val(spec.dvpad),
+                                        mask=mm,
+                                        bias=mb,
+                                        lse=lv,
+                                        dropout=dv,
+                                        logits=lgv,
+                                        sink=sv,
+                                        skip_min_seqlen_q=skv,
+                                        qscale=spec.qscale,
+                                        block_per_cu=bpc,
+                                        gfx_arch=arch,
+                                    )
                                 )
-                            )
 
     elif variant == "splitkv":
         for dtype in dtypes:

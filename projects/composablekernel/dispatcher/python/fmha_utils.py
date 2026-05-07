@@ -279,6 +279,8 @@ class FmhaKernelConfig:
             parts.append("dbias=1")
         if self.dropout_variant and self.dropout_variant != "no":
             parts.append(f"drv={self.dropout_variant}")
+        if self.block_per_cu != -1:
+            parts.append(f"bpc={self.block_per_cu}")
         return "_".join(parts)
 
     def to_codegen_json(self) -> str:
