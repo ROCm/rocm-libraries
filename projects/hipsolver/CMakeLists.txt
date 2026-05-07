@@ -184,6 +184,7 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             -DBUILD_BENCHMARKS=OFF
             -DUSE_OPENMP=OFF
             -DUSE_THREAD=OFF
+            -DCMAKE_C_VISIBILITY_PRESET=hidden
         )
 
         # Only pass CMAKE_BUILD_TYPE for single-config generators (it is
