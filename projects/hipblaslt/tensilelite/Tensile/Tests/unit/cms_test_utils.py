@@ -153,12 +153,27 @@ def _make_mock_grinc(count: int) -> list:
     return items
 
 
+# Snapshot of (src_reg, dst_reg) pairs emitted by transposeLRVregs() in
+# LocalRead.py for TF32-emulation SwapPacks, indexed by lrvwTile (vw).
+# Originally derived by mirroring the validator helper
+# `_compute_swap_register_pairs`; captured here as a fixed test fixture so
+# the mock has no dependency on validator internals. The pairs come from the
+# kernel writer's behavior (LocalRead.transposeLRVregs / getTransposeIndex),
+# which the validator separately observes — both consume the same kernel
+# truth, they do not depend on each other.
+_MOCK_SWAP_PAIRS_BY_VW: dict[int, list[tuple[int, int]]] = {
+    2: [(1, 8), (3, 10), (5, 12), (7, 14)],
+    4: [(1, 8), (2, 16), (3, 24), (5, 12), (6, 20), (7, 28),
+        (10, 17), (11, 25), (14, 21), (15, 29), (19, 26), (23, 30)],
+}
+
+
 def _make_mock_swap_packs(count: int, lr_base: int = LRA_BASE, vw: int = 1) -> list:
     """Create mock VSwapB32 instructions for swap packs.
 
-    When vw > 1, uses the real interleaving pattern from
-    _compute_swap_register_pairs to determine which register pairs get
-    swapped. Each swap reads and writes two VGPRs within the LR space,
+    When vw > 1, uses a fixed snapshot of the (src, dst) pairs emitted by
+    LocalRead.transposeLRVregs() (the kernel writer's TF32-emulation swap
+    sequence). Each swap reads and writes two VGPRs within the LR space,
     offset by lr_base.
 
     When vw <= 1 (no swaps needed), returns empty list.
@@ -166,9 +181,7 @@ def _make_mock_swap_packs(count: int, lr_base: int = LRA_BASE, vw: int = 1) -> l
     from rocisa.instruction import VSwapB32
     if vw <= 1:
         return []
-    from Tensile.Components.CMSValidator import _compute_swap_register_pairs, VGPRS_PER_CONVERSION_GROUP
-    total_regs = VGPRS_PER_CONVERSION_GROUP * vw
-    swap_pairs = _compute_swap_register_pairs(vw, total_regs)
+    swap_pairs = _MOCK_SWAP_PAIRS_BY_VW.get(vw, [])
     items = []
     for i in range(min(count, len(swap_pairs))):
         reg_src, reg_dst = swap_pairs[i]
