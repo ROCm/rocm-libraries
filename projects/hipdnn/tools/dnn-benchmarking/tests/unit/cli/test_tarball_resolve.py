@@ -92,6 +92,7 @@ class TestExtractTarball:
         dnn_tmpdirs = list(Path(tempfile.gettempdir()).glob("dnn_benchmarking_*"))
         assert len(dnn_tmpdirs) == 0
 
+
 class TestResolveGraphFiles:
     """Tests for resolve_graph_files()."""
 
