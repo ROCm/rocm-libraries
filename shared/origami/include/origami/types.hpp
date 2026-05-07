@@ -311,6 +311,10 @@ struct runtime_options {
   /// Heuristics variance threshold (reads from ANALYTICAL_GEMM_HEURISTICS_VARIANCE env var)
   double heuristics_variance;
 
+  /// Force a specific MT size for solution selection (reads from ANALYTICAL_GEMM_PICK env var).
+  /// Format: "MxNxK" e.g. "128x128x64". When set, non-matching configs get max latency.
+  dim3_t gemm_pick{0, 0, 0};
+
   /**
    * @brief Constructor with explicit values (does not read from environment).
    */
@@ -344,6 +348,12 @@ struct runtime_options {
    * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.01 if not set
    */
   static double read_heuristics_variance_from_env();
+
+  /**
+   * @brief Read GEMM pick MT size from environment variable.
+   * @return dim3_t MT size from ANALYTICAL_GEMM_PICK, or {0,0,0} if not set
+   */
+  static dim3_t read_gemm_pick_from_env();
 
   /**
    * @brief Update runtime options from environment variables.
@@ -633,6 +643,9 @@ struct problem_t {
  * Contains all the parameters needed to describe various workgroup mapping parameters.
  */
 struct workgroup_mapping_t {
+  /// Split-K factor for K-Coherent reorder (0 or 1 = disabled).
+  std::size_t wgmxccsplitk = 0;
+
   /// Workgroup mapping chunk size.
   std::size_t wgmxccchunk = 0;
 
