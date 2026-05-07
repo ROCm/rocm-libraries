@@ -12,6 +12,9 @@ add_library(rocm_ck INTERFACE)
 target_include_directories(rocm_ck INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
+# rocm_ck requires C++20, but the CK library is still migrating from c++17
+# We should remove this once the library fully migrates to c++20.
+target_compile_features(rocm_ck INTERFACE cxx_std_20)
 
 # CK Tile headers — required for device code compilation
 if(NOT TARGET ck_tile_headers)

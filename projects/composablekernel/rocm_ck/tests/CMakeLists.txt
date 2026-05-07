@@ -22,7 +22,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/gtest.cmake)
 # ---------------------------------------------------------------------------
 function(add_rocm_ck_test test_name)
     add_executable(${test_name} ${ARGN})
-    target_compile_features(${test_name} PRIVATE cxx_std_20)
     target_link_libraries(${test_name} PRIVATE rocm_ck GTest::gtest_main)
     target_compile_options(${test_name} PRIVATE
         -Wno-global-constructors  # GTest registration macros
@@ -34,13 +33,14 @@ endfunction()
 # Smoke tests (fast, host-only, no GPU)
 # ---------------------------------------------------------------------------
 set(ROCM_CK_SMOKE_TESTS
-    unit_index_t
+    unit/unit_index_t.cpp
 )
 
 set(ROCM_CK_SMOKE_TARGETS)
-foreach(test_target ${ROCM_CK_SMOKE_TESTS})
-    set(target_name "rocm_ck_${test_target}")
-    add_rocm_ck_test(${target_name} unit/${test_target}.cpp)
+foreach(test_source ${ROCM_CK_SMOKE_TESTS})
+    get_filename_component(test_name ${test_source} NAME_WLE)
+    set(target_name "rocm_ck_${test_name}")
+    add_rocm_ck_test(${target_name} ${test_source})
     add_test(NAME ${target_name} COMMAND ${target_name})
     set_tests_properties(${target_name} PROPERTIES LABELS "ROCM_CK_SMOKE")
     list(APPEND ROCM_CK_SMOKE_TARGETS ${target_name})

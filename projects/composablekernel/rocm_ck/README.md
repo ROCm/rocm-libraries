@@ -86,14 +86,13 @@ constexpr Signature sig = {
 
 ```text
 rocm_ck/
-├── CMakeLists.txt            # INTERFACE library + ck_tile_headers target
-├── include/
-│   └── rocm_ck/
-│       └── index_t.hpp         # index_t, long_index_t (no CK deps)
+├── CMakeLists.txt        # INTERFACE library, C++20, ck_tile_headers target
+├── include/rocm_ck/      # Public headers — host-safe, no CK/HIP deps
+├── src/                  # (planned) Device bridge, kpack loading
 └── tests/
-    ├── CMakeLists.txt
-    └── unit/
-        └── test_index_t.cpp   # Verifies index types match ck_tile (ROCM_CK_SMOKE)
+    ├── CMakeLists.txt    # Test tiers: ROCM_CK_SMOKE, ROCM_CK_KERNEL
+    ├── unit/             # Fast host-only tests (< 1s, no GPU)
+    └── kernel/           # (planned) GPU kernel tests
 ```
 
 ## Build
