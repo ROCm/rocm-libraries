@@ -115,7 +115,7 @@ class ProviderEngineResult:
     cpu_build_time_ms: Optional[float] = None
     gpu_kernel_stats: Optional[BenchmarkStats] = None
     e2e_stats: Optional[BenchmarkStats] = None
-    elapsed_time_ms: Optional[float] = None
+    elapsed_time_ms: float = 0.0
     correctness: Optional[CorrectnessResult] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None

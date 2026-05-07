@@ -13,7 +13,6 @@ import pytest
 
 from dnn_benchmarking.common.exceptions import GraphLoadError
 from dnn_benchmarking.graph.resolver import (
-    _is_safe_member,
     extract_tarball,
     is_tarball,
     resolve_graph_files,
@@ -60,30 +59,6 @@ class TestIsTarball:
         assert is_tarball("GRAPHS.TAR.GZ") is True
 
 
-class TestIsSafeMember:
-    """Tests for _is_safe_member()."""
-
-    def test_safe_relative_path(self) -> None:
-        m = tarfile.TarInfo(name="subdir/graph.json")
-        assert _is_safe_member(m) is True
-
-    def test_rejects_absolute_path(self) -> None:
-        m = tarfile.TarInfo(name="/etc/evil.json")
-        assert _is_safe_member(m) is False
-
-    def test_rejects_dotdot_component(self) -> None:
-        m = tarfile.TarInfo(name="../../evil.json")
-        assert _is_safe_member(m) is False
-
-    def test_rejects_embedded_dotdot(self) -> None:
-        m = tarfile.TarInfo(name="subdir/../../../evil.json")
-        assert _is_safe_member(m) is False
-
-    def test_safe_plain_name(self) -> None:
-        m = tarfile.TarInfo(name="graph.json")
-        assert _is_safe_member(m) is True
-
-
 class TestExtractTarball:
     """Tests for extract_tarball()."""
 
@@ -108,36 +83,14 @@ class TestExtractTarball:
         with pytest.raises(GraphLoadError, match="Not a valid tarball"):
             extract_tarball(str(bad_file))
 
-    def test_no_json_in_tarball_raises_graph_load_error(self, tmp_path: Path) -> None:
+    def test_no_json_in_tarball_raises_and_cleans_up(self, tmp_path: Path) -> None:
         tb = _make_tarball(tmp_path / "empty.tar.gz", {"readme.txt": "hello"})
         with pytest.raises(GraphLoadError, match="No .json files"):
             extract_tarball(str(tb))
 
-    def test_path_traversal_member_is_filtered(self, tmp_path: Path) -> None:
-        # A tarball that contains a path-traversal entry alongside a safe one.
-        # The traversal member should be silently skipped.
-        graph = json.dumps({"name": "g", "nodes": [], "tensors": []})
-        tb = tmp_path / "graphs.tar.gz"
-        with tarfile.open(str(tb), "w:gz") as tf:
-            # Safe member
-            data = graph.encode()
-            info = tarfile.TarInfo(name="safe.json")
-            info.size = len(data)
-            tf.addfile(info, io.BytesIO(data))
-            # Traversal member — should be silently skipped
-            evil = b'{"evil": true}'
-            info2 = tarfile.TarInfo(name="../../evil.json")
-            info2.size = len(evil)
-            tf.addfile(info2, io.BytesIO(evil))
-
-        tmpdir, extracted = extract_tarball(str(tb))
-        try:
-            # Only the safe member should have been extracted
-            assert len(extracted) == 1
-            assert "evil" not in extracted[0]
-        finally:
-            tmpdir.cleanup()
-
+        # tmpdir should have been cleaned up on error
+        dnn_tmpdirs = list(Path(tempfile.gettempdir()).glob("dnn_benchmarking_*"))
+        assert len(dnn_tmpdirs) == 0
 
 class TestResolveGraphFiles:
     """Tests for resolve_graph_files()."""

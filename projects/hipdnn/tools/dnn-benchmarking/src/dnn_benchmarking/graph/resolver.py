@@ -4,7 +4,6 @@
 """Graph file resolution utilities: tarball extraction and glob expansion."""
 
 import glob as _glob
-import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -19,18 +18,6 @@ def is_tarball(path: str) -> bool:
     """Return True if path looks like a tarball by suffix."""
     p = path.lower()
     return any(p.endswith(s) for s in _TARBALL_SUFFIXES)
-
-
-def _is_safe_member(member: tarfile.TarInfo) -> bool:
-    """Return True if the member path is safe to extract.
-
-    Rejects paths that start with '/' (absolute) or contain '..' components,
-    which could otherwise escape the temporary extraction directory.
-    """
-    name = member.name.replace("\\", "/")
-    if name.startswith("/"):
-        return False
-    return ".." not in name.split("/")
 
 
 def extract_tarball(tarball_path: str) -> Tuple[tempfile.TemporaryDirectory, List[str]]:
@@ -54,16 +41,7 @@ def extract_tarball(tarball_path: str) -> Tuple[tempfile.TemporaryDirectory, Lis
     tmpdir = tempfile.TemporaryDirectory(prefix="dnn_benchmarking_")
     try:
         with tarfile.open(tarball_path) as tf:
-            all_members = tf.getmembers()
-            all_json = [m for m in all_members if m.name.endswith(".json")]
-            json_members = [m for m in all_json if _is_safe_member(m)]
-            skipped = len(all_json) - len(json_members)
-            if skipped > 0:
-                print(
-                    f"Warning: {tarball_path}: skipped {skipped} JSON member(s) with "
-                    "unsafe paths (absolute paths or '..' components)",
-                    file=sys.stderr,
-                )
+            json_members = [m for m in tf.getmembers() if m.name.endswith(".json")]
             if not json_members:
                 raise GraphLoadError(f"No .json files found in tarball: {tarball_path}")
             tf.extractall(path=tmpdir.name, members=json_members, filter="data")

@@ -506,7 +506,7 @@ class Reporter:
             )
             if timing is not None:
                 exec_s = timing.total_ms / 1000
-                wall_s = (pe.elapsed_time_ms / 1000) if pe.elapsed_time_ms else 0.0
+                wall_s = pe.elapsed_time_ms / 1000
                 return f"{label} (exec {exec_s:.2f}s, elapsed {wall_s:.2f}s)"
             return label
         if pe.status == "skipped":
