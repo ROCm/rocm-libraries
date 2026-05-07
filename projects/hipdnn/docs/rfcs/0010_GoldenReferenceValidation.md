@@ -95,7 +95,7 @@ Two pipelines share the same set of steps:
 
 **What exists today**: This step already works. Every test fixture (e.g., `IntegrationGpuConvForward.cpp`) implements `buildGraph()` which creates a `graph::Graph`, adds tensors with explicit **names** (e.g., `"x"`, `"w"`, `"y"`), creates operations, validates, and builds the operation graph.
 
-**What changes**: Nothing. The graph construction code is untouched.
+**What changes**: Nothing. The graph construction code is untouched. However, the golden data system creates a **new dependency** on `to_binary()` byte stability for fingerprint checking. See [Layer 1](#graph-level-correctness-closing-the-semantic-gap) for details and the Phase 2 plan to remove this dependency.
 
 **Design constraint**: Tensor names set in `buildGraph()` are the **identity contract** for golden data. They are how golden files map to runtime tensors. A tensor named `"x"` in the golden file must correspond to a tensor named `"x"` in the graph.
 
@@ -258,14 +258,21 @@ if(currentHash != manifest.graph.sha256)
 }
 ```
 
-**Why `to_binary()` is fragile:** `graph.to_binary()` delegates to the backend's `backendGetSerializedBinaryGraphExt()`. hipDNN does not control the serialization format. This means:
+**Determinism of `to_binary()`:** `graph.to_binary()` delegates to the backend's `backendGetSerializedBinaryGraphExt()`, which uses FlatBuffers internally (`Graph::Pack()` in `GraphDescriptor.cpp`). FlatBuffers does **not** formally guarantee deterministic serialization — the official docs state *"two different implementations may produce different binaries given the same input values, and this is perfectly valid."* However, in practice, the same binary running the same `buildGraph()` code produces identical bytes because `Graph::Pack()` (generated code) adds fields in a fixed order.
 
-- A backend update that changes the serializer (e.g., schema evolution, replacing the wire format) will change the hash for *every* graph, even if no graph logic changed. All golden data must be regenerated.
-- If the serializer iterates unordered structures internally, the same graph could produce different bytes across runs, causing false mismatches.
+**What can break the fingerprint without a real graph change:**
 
-Neither scenario indicates a real graph change. Both are artifacts of using a serialization API for change detection.
+| Cause | Likelihood | Impact |
+|-------|-----------|--------|
+| `buildGraph()` logic changed | Expected | Correct detection — regenerate golden data |
+| FlatBuffers library upgrade | Infrequent | All hashes change — one-time regeneration |
+| FlatBuffer schema evolution | Infrequent | All hashes change — one-time regeneration |
+| Compiler change affecting evaluation order | Rare | Possible byte-order change |
+| Backend replaces FlatBuffers entirely | Hypothetical | All hashes change — one-time regeneration |
 
-**Phase 1 (this RFC):** Use `to_binary()` hashing. It works today, catches real `buildGraph()` changes, and is simple to implement. When a backend serialization change invalidates all hashes, regenerate via `--generate-golden`. This is a known, accepted cost.
+The first row is what we *want* to catch. The remaining rows are false positives — the graph didn't change, but the bytes did. All are handled by regeneration via `--generate-golden`.
+
+**Phase 1 (this RFC):** Use `to_binary()` hashing. Nothing in the current test suite depends on `to_binary()` byte stability — this would be the first consumer. The practical determinism (same binary = same bytes) is sufficient. When a FlatBuffers upgrade or schema change invalidates hashes, regenerate. This is a known, accepted cost.
 
 **Phase 2 (future hardening):** Replace the byte-level hash with a **graph-property hash** that hipDNN controls:
 
@@ -279,7 +286,7 @@ std::string computeGraphFingerprint(const graph::Graph& graph) {
 }
 ```
 
-This eliminates the backend coupling entirely. The hash changes only when the graph's mathematical semantics change, not when the serialization format changes.
+This eliminates the backend coupling entirely. The hash changes only when the graph's mathematical semantics change — not when the serialization library, schema, or compiler changes.
 
 **Layer 2: Python reads the serialized graph** -- eliminates dual-spec
 
