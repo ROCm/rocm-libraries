@@ -27,11 +27,11 @@ namespace direct_conv {
 //   TC::Mfma::MakeAccTileDistribution()
 //   TC::TOTAL_SPATIAL, TC::BLOCK_W, TC::BLOCK_C8, TC::BLOCK_C4, TC::BLOCK_Q
 //   TC::INPUT_LDS_BUFFER_SIZE_C8, TC::INPUT_LDS_BUFFER_SIZE_FP16
-template <typename TC, auto cfg>
+template <typename TC, auto cfg, typename InputType = ck_tile::fp16x4_t>
 struct InputLoader
 {
     // Register type for MFMA input operand (matches read_from_lds parameter type).
-    using input_type = ck_tile::fp16x4_t;
+    using input_type = InputType;
 
     // Type aliases needed for temporary tile_window construction and MFMA reads.
     using InputDramWindowType = decltype(ck_tile::make_tile_window(
@@ -95,7 +95,8 @@ struct InputLoader
                            int dy,
                            int sx,
                            int sy,
-                           int c_per_group = TC::GROUP_SIZE)
+                           int c_per_group = TC::GROUP_SIZE,
+                           bool init_mfma_offsets = true)
                 : input_lds_ptr(input_lds),
                   padded_(c_per_group != TC::GROUP_SIZE)
     {
@@ -207,6 +208,7 @@ struct InputLoader
 
         // Precompute per-thread MFMA LDS read offsets for each kw slice.
         // Shared between padded and unpadded paths — LDS layout is identical.
+        if (init_mfma_offsets)
         {
             auto mfma_buf_tmp = MfmaBuf{
                 reinterpret_cast<_Float16*>(input_lds_ptr),
@@ -317,7 +319,7 @@ struct InputLoader
     // Read a given kw slice for this thread from LDS into registers.
     // Uses precomputed element offsets and direct memcpy load
     // (no buffer_view overhead).
-    __device__ __forceinline__ void read_from_lds(ck_tile::fp16x4_t& input_reg, int slice, int lds_buffer_index) const
+    __device__ __forceinline__ void read_from_lds(InputType& input_reg, int slice, int lds_buffer_index) const
     {
         const _Float16* base = reinterpret_cast<const _Float16*>(input_lds_ptr)
                                + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;

@@ -468,17 +468,10 @@ using BlockCoords = direct_conv::BlockCoords<cfg>;
 //   (lane_q, wave_group * GROUP_SIZE_8 + wave_half * (GROUP_SIZE_8/2) + lane_c8)
 // ===================================================================
 template <Config cfg>
-struct InputLoader32c : direct_conv::InputLoader<TileConstants<cfg>, cfg>
+struct InputLoader32c : direct_conv::InputLoader<TileConstants<cfg>, cfg, ck_tile::fp16x8_t>
 {
-    using base = direct_conv::InputLoader<TileConstants<cfg>, cfg>;
-
-    // Register type for MFMA input operand (matches read_from_lds parameter type).
-    using input_type = ck_tile::fp16x8_t;
-
+    using base = direct_conv::InputLoader<TileConstants<cfg>, cfg, ck_tile::fp16x8_t>;
     using TC = TileConstants<cfg>;
-
-    // Precomputed LDS read offset per kw slice (in fp16 elements).
-    ck_tile::index_t lds_offsets_32c[cfg.kw];
 
     template <typename BlockCoords_>
     __device__ InputLoader32c(const BlockCoords_& bc,
@@ -493,7 +486,7 @@ struct InputLoader32c : direct_conv::InputLoader<TileConstants<cfg>, cfg>
                                int sx,
                                int sy,
                                int c_per_group = TC::GROUP_SIZE)
-        : base(bc, input_lds, in, hi, wi, px, py, dx, dy, sx, sy, c_per_group)
+        : base(bc, input_lds, in, hi, wi, px, py, dx, dy, sx, sy, c_per_group, /*don't init MFMA offset in base*/false)
     {
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
         const int wave = static_cast<int>(threadIdx.x) / WAVE_SIZE;
@@ -514,7 +507,7 @@ struct InputLoader32c : direct_conv::InputLoader<TileConstants<cfg>, cfg>
             int spatial_pos = lane_q + s;
             if constexpr(TC::SWIZZLE_TYPE == SwizzleType::None)
             {
-                lds_offsets_32c[s] = spatial_pos * TC::BLOCK_C8 * 8 + c8_pos * 8;
+                base::mfma_lds_offsets[s] = spatial_pos * TC::BLOCK_C8 * 8 + c8_pos * 8;
             }
             else
             {
@@ -522,18 +515,9 @@ struct InputLoader32c : direct_conv::InputLoader<TileConstants<cfg>, cfg>
                 auto coord = ck_tile::make_tensor_coordinate(
                     lds_read_desc,
                     ck_tile::make_tuple(spatial_pos, c8_pos * 2, 0));
-                lds_offsets_32c[s] = coord.get_offset();
+                base::mfma_lds_offsets[s] = coord.get_offset();
             }
         }
-    }
-
-    // Read one kw slice from LDS into fp16x8_t register.
-    __device__ __forceinline__ void read_from_lds(
-        ck_tile::fp16x8_t& input_reg, int slice, int lds_buffer_index) const
-    {
-        const _Float16* base = reinterpret_cast<const _Float16*>(base::input_lds_ptr)
-                               + lds_buffer_index * TC::INPUT_LDS_BUFFER_SIZE_FP16;
-        __builtin_memcpy(&input_reg, base + lds_offsets_32c[slice], sizeof(input_reg));
     }
 };
 

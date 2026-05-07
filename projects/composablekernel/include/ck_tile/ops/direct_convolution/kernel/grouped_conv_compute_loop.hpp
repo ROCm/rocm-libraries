@@ -160,7 +160,7 @@ __device__ void grouped_conv_compute_loop(const _Float16* __restrict__ in,
                         // Read one input column strip from LDS into registers.
                         // Each thread reads input[n, y, q+S, :] into input_reg, where q is the horizontal offset of the tile.
                         // All input channes are read and distributed accross the threads in the block.
-                        // The register type is InputLoaderT::input_type (fp16x4_t for 4c/16c, fp16x8_t for 8c Toeplitz).
+                        // The register type is InputLoaderT::input_type (fp16x4_t for 4c/16c, fp16x8_t for 8c Toeplitz and 32c).
                         typename InputLoaderT::input_type input_reg;
                         il.read_from_lds(input_reg, S, toc);
 
