@@ -93,23 +93,24 @@ Two pipelines operate on the same golden data format:
 
 ### Golden Data Format
 
-Golden data uses the existing format already established by `LoadGraphAndTensors.hpp` and `Graph.save()`. Each test case is a set of files with a shared base name:
+Golden data uses the existing format already established by `LoadGraphAndTensors.hpp` and `Graph.save()`. The folder path identifies the operation, layout, and data type. The filename identifies the test variant (e.g., tensor size). Each test case is a set of files with a shared base name:
 
 ```
-{TestName}.json                    # Full graph definition (JSON)
-{TestName}.tensor{uid}.bin         # Raw binary tensor data, one file per tensor UID
+{Operation}/{Layout}/{DataType}/{TestName}.json              # Graph definition (operation, tensor metadata, parameters)
+{Operation}/{Layout}/{DataType}/{TestName}.tensor{uid}.bin   # Raw tensor data, one file per UID
 ```
 
-For example, the `Small` batchnorm test case in `nchw/fp32` consists of:
+For example, `BatchnormFwdInference/nchw/fp32/Small` is a batchnorm inference test with small tensors in NCHW layout at fp32 precision:
 
 ```
-Small.json
-Small.tensor0.bin    # x (input)
-Small.tensor1.bin    # mean (input)
-Small.tensor2.bin    # inv_variance (input)
-Small.tensor3.bin    # scale (input)
-Small.tensor4.bin    # bias (input)
-Small.tensor5.bin    # y (output)
+BatchnormFwdInference/nchw/fp32/
+  Small.json               # Graph: batchnorm inference, 6 tensors, fp32
+  Small.tensor0.bin         # x (input)
+  Small.tensor1.bin         # mean (input)
+  Small.tensor2.bin         # inv_variance (input)
+  Small.tensor3.bin         # scale (input)
+  Small.tensor4.bin         # bias (input)
+  Small.tensor5.bin         # y (output — golden reference)
 ```
 
 #### Graph JSON Structure
