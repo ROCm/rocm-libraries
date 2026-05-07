@@ -732,7 +732,7 @@ try
                   "hipfftHandle type not wide enough for pointer");
     // cppcheck-suppress AssignmentAddressToInteger
     hipfftHandle h = new hipfftHandle_t;
-    ROC_FFT_CHECK_INVALID_VALUE(h->info.alloc_with_err());
+    h->info.alloc();
     *plan = h;
     return HIPFFT_SUCCESS;
 }
@@ -1370,11 +1370,7 @@ catch(...)
 hipfftResult hipfftDestroy(hipfftHandle plan)
 try
 {
-    if(plan != nullptr)
-    {
-        delete plan;
-    }
-
+    delete plan;
     return HIPFFT_SUCCESS;
 }
 catch(...)
