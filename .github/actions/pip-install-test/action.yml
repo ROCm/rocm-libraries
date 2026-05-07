@@ -17,6 +17,7 @@ runs:
       env:
         CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
         CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
+        CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
       run: |
         VENV_DIR=$(mktemp -d)
         python3 -m venv "$VENV_DIR"
@@ -25,7 +26,10 @@ runs:
         else
           source "$VENV_DIR/Scripts/activate"
         fi
+        pip install pytest
         pip install ${{ inputs.package_path }}
-        pytest ${{ inputs.package_path }}/${{ inputs.test_path }}
+        TEST_DIR=$( cd ${{ inputs.package_path }}/${{ inputs.test_path }} && pwd )
+        cd "$VENV_DIR"
+        pytest "$TEST_DIR"
         deactivate
         rm -rf "$VENV_DIR"
