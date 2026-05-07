@@ -17,6 +17,10 @@ runs:
         path: TheRock
         sparse-checkout: build_tools
 
+    - name: Install ROCm dependencies
+      shell: bash
+      run: pip install boto3
+
     - name: Install ROCm
       shell: bash
       run: |

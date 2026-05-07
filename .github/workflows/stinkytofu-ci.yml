@@ -35,7 +35,6 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install -r shared/stinkytofu/requirements.txt
-          pip install boto3 nanobind
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm-linux
@@ -88,7 +87,6 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install -r shared/stinkytofu/requirements.txt
-          pip install boto3 nanobind
 
       - name: Install GTest
         run: vcpkg install gtest
