@@ -96,14 +96,14 @@ than expected. Worth a comment in dzl's design.
 | `_DSStoreRule` | **A** | `DSStoreInstruction::getDstParams()={}`, `getSrcParams()={dstAddr, src0, src1}` — exactly the rule's `reads = (lds_addr, src_data)` (modulo None-filter for src1). |
 | `_DTLBufferLoadRule` | **C** | `MUBUFReadInstruction::getDstParams()` will return `{nullptr}` when DTL — the validator can detect that, but the implicit `m0` read is **not** in `getSrcParams()`. m0 has to come from elsewhere. This is squarely dzl's "implicit operands" scope. |
 | `_BufferLoadRule` | **A** | `MUBUFReadInstruction::getDstParams()={dst}` (or `{nullptr}` for DTL — filterable), `getSrcParams()={vaddr, saddr, soffset}`. Matches `_BufferLoadRule` (note `vaddr` is also picked up — currently the validator only tracks `srd=saddr`; this would be a slight expansion of read coverage, possibly desired). |
-| `_MFMARule` | **B** | `MFMAInstruction::getDstParams()={acc}`, `getSrcParams()={a, b, acc2}`. Acc as a **read** (the read-modify-write semantic) is NOT expressed: the rule synthesizes `reads = (a, b, acc)` itself. Either the validator unions `dsts ∪ srcs ∪ {acc}` itself (B), or rocisa adds `is_accumulator` metadata (C — dzl scope per audit #10). Validator-side union is one line. |
+| `_MFMARule` | **A** | `MFMAInstruction::getDstParams()={acc}`, `getSrcParams()={a, b, acc2}`. **Correction (2026-05-07):** the initial "B" categorization assumed `acc` was the read register and the rule needed a validator-side union to add it. That's wrong. Per `mfma.hpp:76,96`: `acc` is the destination accumulator (write); `acc2` is the **source** accumulator (read), defaulting to `acc` for the in-place RMW case (the dominant case). The assembly form is `v_mfma_* dst_acc, src_a, src_b, src_acc[, neg]` where `src_acc = acc2`. The current validator's `reads = (a, b, acc)` synthesis is correct only when `acc2 == acc` (in-place); for the out-of-place case (`acc2 != acc`) it's silently wrong because the actual hardware read is from `acc2`. Once the binding lands, the validator just uses `getSrcParams()` and gets the correct register whether in-place or out-of-place — strictly more correct than today, no special-case. Pure A. |
 | `_NoDataflowRule` | **A** | `SBarrier`/`SNop`/`SWaitCnt`/`SSetPrior` all have empty or non-register `getParams()`; `getDstParams() = getSrcParams() = {}` falls out trivially because `_is_register` filters non-Containers. |
 | `_VSwapRule` | **A** | `VSwapB32` already overrides `getDstParams()` and `getSrcParams()` to return BOTH operands in BOTH lists (`common.hpp:5179-5194`). The symmetric semantic is **already encoded in C++**. Validator side becomes `reads = getSrcParams(); writes = getDstParams()` — no special-case. This is the strongest "A" item. |
 | `_VCCRule` | **B** | `VAddCOU32::getDstParams() = {dst, dst1}` where `dst1 = VCC` — naturally returns VCC in writes. `getSrcParams()` returns srcs which include the carry-in VCC for VAddCCOU32. So the partition is **already correct in C++**. Two ergonomic asks: (1) the VCC sentinel needs to expose a `regType="vcc"` shape so the byte-key resolver doesn't drop it (currently `_VCC_RESOURCE` workaround substitutes one); (2) Python needs to see the methods. Both addressable separately. The dispatch logic / `_VCC_DST1_CARRY_OUT_CLASSES` set deletes once both methods are bound. |
 | `_SCCRule` | **C** | The register partition (no_dst vs dst_then_srcs) is **already correct via getDstParams/getSrcParams** — `SCmpEQU32` has `dst=nullptr` so `getDstParams() = {}`, exactly the no_dst shape. But the SCC sentinel itself + the `_SCC_OPCODE_FLAGS` table (which opcodes touch SCC) is implicit-operand metadata that q9j can't carry. This is dzl + z48's scope. |
 | `_GenericALURule` | **A** | This is literally `writes = getDstParams(); reads = getSrcParams()` plus `_is_register` filtering. Pure A. |
 
-**Counts: A=6, B=2, C=2.**
+**Counts: A=7, B=1, C=2.** (Updated 2026-05-07: `_MFMARule` reclassified A→A; original A=6, B=2, C=2 was based on a misreading of MFMA's `acc`/`acc2` split. Per `mfma.hpp:76,96`, `acc2` is the source accumulator that the validator can read directly via `getSrcParams()`, no union needed.)
 
 ---
 
@@ -140,8 +140,15 @@ After this re-examination, q9j is a **vastly smaller** piece of work than the
      `getDstParams()[0]` / `getSrcParams()[i]`. The named extractors that
      survive (lds_offset, buffer_offset for identity-tuple purposes) become
      thin one-liners.
-   - `_MFMARule` and `_VCCRule` use the new accessors plus a small union
-     (acc=read+write for MFMA; VCC class needs to be filtered or substituted).
+   - `_MFMARule` uses the new accessors directly. **Correction
+     (2026-05-07):** the original draft said "plus a small union
+     (acc=read+write for MFMA)". That was wrong — `acc` is the destination
+     accumulator (write); `acc2` (which defaults to `acc` for the in-place
+     case but can differ) is the source accumulator (read). The validator
+     just reads `getSrcParams()` and gets `{a, b, acc2}` — the correct read
+     set, no union needed. See the §2 table for details.
+   - `_VCCRule` uses the new accessors plus a thin filter/substitution to
+     handle the `_VCC_RESOURCE` sentinel until VCC gets a proper `regType`.
 
 ### 3.2 What q9j explicitly does NOT need to do
 
@@ -150,9 +157,12 @@ These belong to dzl/z48, NOT q9j:
 - `_SCC_OPCODE_FLAGS` table and SCC sentinel (z48 + dzl)
 - `_VCC_RESOURCE` synthetic singleton (dzl)
 - DTL BufferLoad implicit-m0 reads (dzl)
-- MFMA acc-as-RAW special-case if we model it as implicit metadata rather
-  than a validator-side union (dzl, audit #10) — though the validator-side
-  one-line union is the cheaper option here
+
+**Removed (2026-05-07):** the original draft listed "MFMA acc-as-RAW
+special-case" as deferred-to-dzl. That was based on a misreading. MFMA's
+read accumulator is `acc2`, already returned by `getSrcParams()` — so the
+read-modify-write semantic is already expressible at the rocisa level
+without any new metadata or special-case. q9j subsumes it via Category A.
 
 ### 3.3 Estimated impact
 
@@ -194,16 +204,13 @@ For completeness, the things q9j **cannot** solve and dzl **must**:
   dataflow byte-key resolver without needing the `_VCC_RESOURCE` substitution
   hack).
 - A `RegisterContainer` for SCC (a `regType="scc"` factory).
-- Per-slot `is_accumulator: bool` on MFMA (or — equivalently — make
-  `getDstParams()` and `getSrcParams()` BOTH include `acc`, mirroring what
-  `VSwapB32` already does for symmetric R+W). The `VSwapB32` precedent is
-  the cleanest: MFMA's `getDstParams()` and `getSrcParams()` could both list
-  `acc`, and the asymmetric "a, b are read-only; acc is RW" maps to dual
-  membership without any new flag.
-
-The MFMA-mirror-VSwap idea is elegant enough that it could be promoted into
-q9j (it's a one-line C++ change in `mfma.hpp:200-214`), but logically it's
-dzl's scope per the original audit's #10.
+**Removed (2026-05-07):** the original draft proposed a "Per-slot
+`is_accumulator: bool` on MFMA" or a "MFMA-mirrors-VSwap" 1-line C++
+change to make `getDstParams()` and `getSrcParams()` both include `acc`.
+Both proposals are unnecessary — `acc2` already serves as the source
+accumulator and is already returned by `getSrcParams()`. The
+read-modify-write semantic is already expressible. No new MFMA-side
+metadata or C++ change needed.
 
 ---
 
