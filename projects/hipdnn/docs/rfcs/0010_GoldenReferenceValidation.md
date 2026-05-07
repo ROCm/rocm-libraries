@@ -7,7 +7,7 @@
 1. [Summary](#summary)
 2. [Design Overview](#design-overview)
    - [Existing Infrastructure](#existing-infrastructure)
-   - [The Graph IS the Key](#the-graph-is-the-key)
+   - [Self-Contained Bundles](#self-contained-bundles)
    - [Pipeline Overview](#pipeline-overview)
 3. [Detailed Design](#detailed-design)
    - [Golden Data Format](#golden-data-format)
@@ -67,18 +67,13 @@ The core test-as-data infrastructure is already built and working for batchnorm.
 | Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | **Build**: `Graph` + `TensorAttributes` define the computation. **Compute**: run PyTorch (or any reference) to produce outputs. **Write**: `Graph.save()` emits `{Name}.json` + `.tensor{uid}.bin` |
 | Golden data | [`hipdnn_reference_data/BatchnormFwdInference/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm bundles across nchw/{fp32,fp16,bfp16} and ncdhw/fp32, in `Small`, `Large`, `MIOpen` sizes |
 
-### The Graph IS the Key
+### Self-Contained Bundles
 
-The graph JSON serialization captures **every property that determines the computation**:
+A golden data bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained. The graph JSON carries the full computation definition -- operation type, all tensor metadata (dims, strides, data_type), all operation-specific parameters, and graph-level type configuration. The `.bin` files carry the raw tensor data (inputs and outputs). Together they are a complete test case. The bundle does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
 
-- All 18 operation types have complete JSON serializers (ConvFwd/Bwd/Wrw, BatchnormInf/Train/Bwd, Pointwise all modes, Matmul, Layernorm, RMSNorm, SDPA Fwd/Bwd, Reduction, BlockScaleDequantize/Quantize)
-- Per-tensor `data_type`, `dims`, `strides` are serialized
-- All operation-specific parameters (padding, stride, dilation, epsilon, momentum, etc.) are serialized
-- Graph-level `io_data_type`, `compute_data_type`, `intermediate_data_type` are serialized
+The graph JSON serialization covers all 18 operation types (ConvFwd/Bwd/Wrw, BatchnormInf/Train/Bwd, Pointwise all modes, Matmul, Layernorm, RMSNorm, SDPA Fwd/Bwd, Reduction, BlockScaleDequantize/Quantize). No separate manifest or metadata file is needed -- the graph JSON already contains everything the runner needs to execute and validate.
 
-Changing ANY computation-affecting property produces a different JSON. The saved graph JSON **IS** the unique key for the computation -- no separate fingerprint, manifest, or hash is needed. A golden data bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained: it does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
-
-This is the architectural difference from a test-as-code approach: the graph definition lives on disk, not in C++. The test runner is generic -- it loads whatever graph JSON it finds and validates it. To add a new test case, see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests) -- for an existing operation/layout/datatype it is just "drop the bundle in the folder," for a new combination it requires a one-time `INSTANTIATE_TEST_SUITE_P`.
+This is the architectural difference from a test-as-code approach: the graph definition lives on disk, not in C++. The test runner is generic -- it loads whatever bundle it finds and validates it. To add a new test case, see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests) -- for an existing operation/layout/datatype it is just "drop the bundle in the folder," for a new combination it requires a one-time `INSTANTIATE_TEST_SUITE_P`.
 
 ### Pipeline Overview
 
@@ -173,8 +168,6 @@ No separate manifest is needed. The graph JSON already contains:
 - **Operation parameters** (encoded in the node's input/output UIDs and attributes) -- all computation-determining parameters
 - **Graph-level types** (io_data_type, compute_data_type, intermediate_data_type) -- precision configuration
 - **Tensor UIDs** -- the key linking each `.bin` file to its role in the graph
-
-The tensor binary files are raw bytes with no encoding overhead. A `float32` tensor of shape `[2, 3, 4, 5]` is exactly `2*3*4*5*4 = 480` bytes. This avoids the 33% Base64 overhead that would be needed to embed tensor data in JSON.
 
 #### Tensor Identity
 
@@ -493,6 +486,8 @@ This catches truncated files (the most common corruption from partial downloads 
 `loadGraphAndTensors()` does not perform this check today. A truncated file silently produces garbage in the tail of the tensor. This must be added.
 
 A missing `.bin` file for a UID in the JSON already causes `fillTensorFromFile()` to throw, but the error message should be improved to name the UID and suggest the bundle may be incomplete.
+
+After loading, the loader should also verify that the number of `.bin` files on disk with the bundle's base name matches the number of tensor UIDs in the graph JSON. Extra `.bin` files (e.g., a stale `Small.tensor6.bin` left from a previous generation with a different tensor count) indicate a corrupted or partially-regenerated bundle and should produce a warning.
 
 #### Generation-Time Check: Output Validation (Python)
 
