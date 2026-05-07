@@ -25,8 +25,9 @@
 
 namespace rocm_ck {
 
-// acc_dtype is the accumulation type for the matrix multiply.
-// Defaults to FP32 — the universal safe choice across all input types.
+// Matrix multiplication: out = lhs x rhs.
+// acc_dtype is the accumulation type — defaults to FP32, the universal safe
+// choice across all input types.
 struct GemmOp
 {
     std::string_view lhs;
@@ -35,6 +36,7 @@ struct GemmOp
     DataType acc_dtype = DataType::FP32;
 };
 
+// Element-wise addition: out = lhs + rhs.
 struct AddOp
 {
     std::string_view lhs;
@@ -42,6 +44,7 @@ struct AddOp
     std::string_view out;
 };
 
+// Element-wise multiplication: out = lhs * rhs.
 struct MulOp
 {
     std::string_view lhs;
@@ -49,49 +52,50 @@ struct MulOp
     std::string_view out;
 };
 
-// out = max(0, in)
+// ReLU activation: out = max(0, in).
 struct ReluOp
 {
     std::string_view in;
     std::string_view out;
 };
 
-// out = in * sigmoid(1.702 * in)
+// Fast GELU approximation: out = in * sigmoid(1.702 * in).
 struct FastGeluOp
 {
     std::string_view in;
     std::string_view out;
 };
 
-// out = 0.5 * in * (1 + erf(in / sqrt(2)))
+// Exact GELU: out = 0.5 * in * (1 + erf(in / sqrt(2))).
 struct GeluOp
 {
     std::string_view in;
     std::string_view out;
 };
 
-// out = in * sigmoid(in)
+// SiLU (Swish) activation: out = in * sigmoid(in).
 struct SiluOp
 {
     std::string_view in;
     std::string_view out;
 };
 
-// out = 1 / (1 + exp(-in))
+// Sigmoid activation: out = 1 / (1 + exp(-in)).
 struct SigmoidOp
 {
     std::string_view in;
     std::string_view out;
 };
 
-// out[i] = exp(in[i]) / sum(exp(in)), reduction along last dimension
+// Softmax: out[i] = exp(in[i]) / sum(exp(in)), reduction along last dimension.
 struct SoftmaxOp
 {
     std::string_view in;
     std::string_view out;
 };
 
-// 'scale' names a Scalar parameter in the Signature, not a tensor.
+// Scalar multiply: out = in * scale.
+// 'scale' names a Scalar in the Signature, not a tensor.
 struct ScaleOp
 {
     std::string_view in;
@@ -99,25 +103,26 @@ struct ScaleOp
     std::string_view scale;
 };
 
-// Fused multi-head attention backward — a single CK Tile kernel, not
-// a chain of ops. Feature flags (mask, dropout, bias, deterministic)
-// belong in the Algorithm, not here.
+// Fused multi-head attention backward pass.
+// Implemented as a single CK Tile kernel, not a chain of ops.
+// Feature flags (mask, dropout, bias, deterministic) belong in the Algorithm.
 struct FmhaBwdOp
 {
-    std::string_view q;
-    std::string_view k;
-    std::string_view v;
+    std::string_view q;   // query
+    std::string_view k;   // key
+    std::string_view v;   // value
     std::string_view lse; // log-sum-exp from forward pass
-    std::string_view do_;
-    std::string_view d; // OGradDotO
+    std::string_view do_; // output gradient
+    std::string_view d;   // dot(output_grad, output)
 
-    std::string_view dq;
-    std::string_view dk;
-    std::string_view dv;
+    std::string_view dq; // query gradient
+    std::string_view dk; // key gradient
+    std::string_view dv; // value gradient
 
     DataType acc_dtype = DataType::FP32;
 };
 
+// The closed set of supported operators. std::monostate marks empty slots.
 using Op = std::variant<std::monostate,
                         GemmOp,
                         AddOp,

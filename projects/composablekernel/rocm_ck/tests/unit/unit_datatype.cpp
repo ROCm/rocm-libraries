@@ -61,7 +61,7 @@ INSTANTIATE_TEST_SUITE_P(
            DataTypeEntry{.dt = DataType::U16, .bits = 16, .name = "U16"},
            DataTypeEntry{.dt = DataType::U32, .bits = 32, .name = "U32"},
            DataTypeEntry{.dt = DataType::U64, .bits = 64, .name = "U64"}),
-    [](const TestParamInfo<DataTypeEntry>& info) { return std::string(info.param.name); });
+    [](const TestParamInfo<DataTypeEntry>& p) { return std::string(p.param.name); });
 
 // ============================================================================
 // constexpr validation

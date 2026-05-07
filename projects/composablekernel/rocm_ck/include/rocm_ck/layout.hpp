@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "rocm_ck/platform.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -27,7 +29,7 @@ constexpr const char* layoutName(Layout layout)
     case Layout::Col: return "Col";
     case Layout::Auto: return "Auto";
     }
-    return "???";
+    ROCM_CK_UNREACHABLE();
 }
 
 constexpr bool isValidLayoutForRank(Layout layout, int rank)
@@ -38,7 +40,7 @@ constexpr bool isValidLayoutForRank(Layout layout, int rank)
     case Layout::Col: return rank == 2;
     case Layout::Auto: return false;
     }
-    return false;
+    ROCM_CK_UNREACHABLE();
 }
 
 template <typename T, std::size_t N>
@@ -48,8 +50,9 @@ constexpr T leadingDimStride(Layout layout, const std::array<T, N>& strides)
     {
     case Layout::Row: return strides[0];
     case Layout::Col: return strides[1];
-    default: throw "leadingDimStride requires Row or Col layout";
+    case Layout::Auto: throw "leadingDimStride requires Row or Col layout";
     }
+    ROCM_CK_UNREACHABLE();
 }
 
 constexpr std::array<int, 2> layoutStrides(Layout layout, int rows, int cols)
@@ -58,8 +61,9 @@ constexpr std::array<int, 2> layoutStrides(Layout layout, int rows, int cols)
     {
     case Layout::Row: return {cols, 1};
     case Layout::Col: return {1, rows};
-    default: throw "layoutStrides requires Row or Col layout";
+    case Layout::Auto: throw "layoutStrides requires Row or Col layout";
     }
+    ROCM_CK_UNREACHABLE();
 }
 
 } // namespace rocm_ck

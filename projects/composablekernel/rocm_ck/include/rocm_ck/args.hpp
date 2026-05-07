@@ -36,6 +36,7 @@
 
 namespace rocm_ck {
 
+// When changing these, update the byte-size comments on TensorArg and Args fields.
 constexpr int kMaxRank    = 6;  // grouped 3D conv = GNCDHW = rank 6
 constexpr int kMaxTensors = 16; // FMHA backward uses ~12
 constexpr int kMaxScalars = 16; // FMHA with masking+dropout needs ~12
