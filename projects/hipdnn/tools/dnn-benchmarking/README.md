@@ -34,36 +34,11 @@ This script handles everything automatically:
 3. Builds hipDNN and the MIOpen provider (if not already installed, or with `--force-build`)
 4. Installs the hipDNN Python bindings from the hipDNN source tree
 
-### For ROCm/AMD GPUs (hipDNN benchmarking)
+### CUDA Setup
 
 ```bash
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install ROCm PyTorch nightly for your GPU architecture:
-#   MI200/MI210/MI250 (gfx90a) → gfx90X
-#   MI300X/MI300A     (gfx942) → gfx94X
-# See https://rocm.nightlies.amd.com/v2-staging for available architectures.
-pip install --pre torch --index-url https://rocm.nightlies.amd.com/v2-staging/gfx94X-dcgpu/
-
-# Install the package + PyPI deps (numpy, pytest, etc.)
+pip install torch --index-url https://download.pytorch.org/whl/cu124
 pip install -e .
-
-# Install hipDNN Python bindings (from your hipDNN build)
-cd /path/to/hipdnn/python && pip install -e . --no-deps && cd -
-```
-
-### For CUDA/NVIDIA GPUs (PyTorch CUDA benchmarking)
-
-```bash
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install CUDA torch + PyPI deps
-pip install -r requirements-cuda.txt
-pip install -e . --no-deps
 ```
 
 **Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately for hipDNN benchmarking.
