@@ -40,7 +40,7 @@ The integration test suite currently supports two verification modes. This RFC a
 - **Deterministic baselines and regression detection**: Reference data is frozen from an agreed-upon known-good source. Test outcomes depend only on the engine under test. Unlike computed mode -- where both the reference executor and the engine can drift together and the test still passes -- golden mode compares against a locked baseline, so any engine change is caught
 - **Unblocks testing before C++ reference kernels exist**: Generate golden data from any trusted source (see [Reference Sources](#reference-sources)) and start validating immediately -- the C++ reference kernel can follow later without delaying test coverage
 - **Faster execution**: Eliminates runtime reference computation for large tensors
-- **Data-driven test addition**: New test cases can be added by generating new golden data files without recompiling the test binary
+- **Data-driven parametrization**: New shape/size combinations for existing test fixtures can be added by generating new golden data files without writing new C++ code (new operations still require a `buildGraph()` implementation)
 
 ### How It Works
 
@@ -56,7 +56,24 @@ At its core, the golden reference feature follows these steps across two pipelin
 | 6 | `deserialize` | Load saved reference outputs from disk | -- | Y |
 | 7 | `validate` | Compare engine output to saved output | -- | Y |
 
-No reference executor runs in CI. The truth was computed once and frozen to disk. The graph is always rebuilt from `buildGraph()` in the test fixture -- the stored `graph.bin` is used only for fingerprint comparison, not for reloading the graph. The diagrams in [Pipeline Overview](#pipeline-overview) show both pipelines visually.
+No reference executor runs in CI. The truth was computed once and frozen to disk. The graph is always rebuilt from `buildGraph()` in the test fixture. A graph fingerprint (hash of graph properties) detects when the graph has changed since golden data was generated. The diagrams in [Pipeline Overview](#pipeline-overview) show both pipelines visually.
+
+### First Principle: Golden Data Is a Key-Value Store
+
+Golden data is fundamentally a **key-value store**:
+
+- **Key** = the graph identity (what computation are we testing?)
+- **Value** = the tensor data (what are the correct inputs and expected outputs?)
+
+If the key is wrong — the graph has changed since generation but the fingerprint didn't catch it — the tensor values are **meaningless**. The test compares engine output against stale data from a different computation. A pass is false confidence. A fail is a wild goose chase. Every downstream step (deserialize, execute, compare) assumes the key is valid.
+
+This is why the **graph fingerprint is the foundation** of the entire golden reference system. It must be correct, deterministic, and under our control. See [Graph Fingerprint](#layer-1-graph-fingerprint----catches-graph-drift-after-generation) for the design.
+
+### Why Golden Files Instead of On-the-Fly Reference
+
+Major DNN libraries (cuDNN, oneDNN/benchdnn, PyTorch/OpInfo) all compute reference outputs **on-the-fly at test time** using built-in reference kernels or external implementations (NumPy, PyTorch). None store golden files. On-the-fly computation avoids the graph identity problem entirely — there is nothing stored to go stale.
+
+hipDNN needs golden files because on-the-fly computation hits four walls described in [Problem Statement](#problem-statement): circular dependency with co-located references, coverage gaps for ops without C++ kernels, GPU non-determinism, and CPU reference slowness for large tensors. Golden files solve all four, but they introduce the key-value staleness problem that on-the-fly computation avoids. The graph fingerprint is the cost we pay for that trade-off.
 
 ---
 
@@ -95,7 +112,7 @@ Two pipelines share the same set of steps:
 
 **What exists today**: This step already works. Every test fixture (e.g., `IntegrationGpuConvForward.cpp`) implements `buildGraph()` which creates a `graph::Graph`, adds tensors with explicit **names** (e.g., `"x"`, `"w"`, `"y"`), creates operations, validates, and builds the operation graph.
 
-**What changes**: Nothing. The graph construction code is untouched. However, the golden data system creates a **new dependency** on `to_binary()` byte stability for fingerprint checking. See [Layer 1](#graph-level-correctness-closing-the-semantic-gap) for details and the Phase 2 plan to remove this dependency.
+**What changes**: Nothing. The graph construction code is untouched. The golden data system uses a [graph-property hash](#layer-1-graph-fingerprint----catches-graph-drift-after-generation) built from graph properties (tensor names, dims, types, operation parameters) to detect when `buildGraph()` has changed since golden data was generated.
 
 **Design constraint**: Tensor names set in `buildGraph()` are the **identity contract** for golden data. They are how golden files map to runtime tensors. A tensor named `"x"` in the golden file must correspond to a tensor named `"x"` in the graph.
 
@@ -241,52 +258,52 @@ Three layers of defense, each catching a different kind of mismatch:
 
 **Layer 1: Graph fingerprint** -- catches graph drift after generation
 
+The graph fingerprint is the **key** in the key-value store described in [First Principle](#first-principle-golden-data-is-a-key-value-store). If it fails, nothing else matters.
+
 **Goal:** Detect when `buildGraph()` has changed since golden data was generated, *before* loading any tensors or running any engine.
 
-**How it works:** At generation time, the harness serializes the graph and stores a SHA-256 hash in the manifest. At validation time, it serializes the current graph and compares hashes. If they differ, the test fails immediately.
+**Why not hash `to_binary()`?** The obvious approach is to hash the output of `graph.to_binary()`. This delegates to the backend's `backendGetSerializedBinaryGraphExt()`, which uses FlatBuffers internally. FlatBuffers does **not** guarantee deterministic serialization — the official docs state *"two different implementations may produce different binaries given the same input values, and this is perfectly valid."* In practice, the same binary produces identical bytes, but FlatBuffers library upgrades, schema changes, or compiler changes can silently break every fingerprint without a single graph actually changing. Since the fingerprint is the foundation of the entire system (see [First Principle](#first-principle-golden-data-is-a-key-value-store)), we cannot build it on a format we don't control.
+
+**Design: Graph-property hash.** Instead of hashing serialized bytes, hash the **graph properties that determine numerical output**:
 
 ```cpp
-// At golden validation time (step 4, before loading tensors)
-auto [currentGraphBin, err] = graph.to_binary();
-auto currentHash = computeSha256(currentGraphBin);
-if(currentHash != manifest.graph.sha256)
+std::string computeGraphFingerprint(const graph::Graph& graph) {
+    // Walk graph nodes in deterministic (sorted-by-name) order.
+    // For each node, collect:
+    //   - operation type (e.g., ConvFwd, Matmul, SDPA)
+    //   - operation parameters (padding, stride, dilation, etc.)
+    // For each tensor, collect:
+    //   - name, dims, data type
+    // Canonicalize into a deterministic string, then SHA-256.
+}
+```
+
+At validation time:
+
+```cpp
+auto currentFingerprint = computeGraphFingerprint(graph);
+if(currentFingerprint != manifest.graph_fingerprint)
 {
     FAIL() << "Graph definition has changed since golden data was generated."
-           << "\n  Golden graph hash: " << manifest.graph.sha256
-           << "\n  Current graph hash: " << currentHash
+           << "\n  Golden fingerprint: " << manifest.graph_fingerprint
+           << "\n  Current fingerprint: " << currentFingerprint
            << "\n  Regenerate golden data with --generate-golden";
 }
 ```
 
-**Determinism of `to_binary()`:** `graph.to_binary()` delegates to the backend's `backendGetSerializedBinaryGraphExt()`, which uses FlatBuffers internally (`Graph::Pack()` in `GraphDescriptor.cpp`). FlatBuffers does **not** formally guarantee deterministic serialization — the official docs state *"two different implementations may produce different binaries given the same input values, and this is perfectly valid."* However, in practice, the same binary running the same `buildGraph()` code produces identical bytes because `Graph::Pack()` (generated code) adds fields in a fixed order.
+**Why this is the right design:**
 
-**What can break the fingerprint without a real graph change:**
+| Property | `to_binary()` hash | Graph-property hash |
+|----------|-------------------|-------------------|
+| Deterministic by construction | No (FlatBuffers gives no guarantee) | Yes (we control sort order and canonicalization) |
+| Survives FlatBuffers upgrades | No (all hashes break) | Yes (no FlatBuffers dependency) |
+| Survives serialization format change | No | Yes |
+| Catches real `buildGraph()` changes | Yes | Yes |
+| Catches changes we care about only | No (false positives on format changes) | Yes (only mathematical semantics) |
 
-| Cause | Likelihood | Impact |
-|-------|-----------|--------|
-| `buildGraph()` logic changed | Expected | Correct detection — regenerate golden data |
-| FlatBuffers library upgrade | Infrequent | All hashes change — one-time regeneration |
-| FlatBuffer schema evolution | Infrequent | All hashes change — one-time regeneration |
-| Compiler change affecting evaluation order | Rare | Possible byte-order change |
-| Backend replaces FlatBuffers entirely | Hypothetical | All hashes change — one-time regeneration |
+The graph-property hash changes when — and only when — the computation changes. A FlatBuffers upgrade, a schema migration, or a backend swap does not affect it. This is the correct foundation for a system where every downstream step depends on the fingerprint being right.
 
-The first row is what we *want* to catch. The remaining rows are false positives — the graph didn't change, but the bytes did. All are handled by regeneration via `--generate-golden`.
-
-**Phase 1 (this RFC):** Use `to_binary()` hashing. Nothing in the current test suite depends on `to_binary()` byte stability — this would be the first consumer. The practical determinism (same binary = same bytes) is sufficient. When a FlatBuffers upgrade or schema change invalidates hashes, regenerate. This is a known, accepted cost.
-
-**Phase 2 (future hardening):** Replace the byte-level hash with a **graph-property hash** that hipDNN controls:
-
-```cpp
-// Hash what matters for golden data validity — no backend dependency
-std::string computeGraphFingerprint(const graph::Graph& graph) {
-    // Walk graph nodes in deterministic (sorted) order
-    // Collect: tensor names, dims, data types,
-    //          node types, operation parameters
-    // Canonicalize into a string, then SHA-256
-}
-```
-
-This eliminates the backend coupling entirely. The hash changes only when the graph's mathematical semantics change — not when the serialization library, schema, or compiler changes.
+**What if we miss a property?** If the hash omits a property that affects computation (e.g., a new convolution attribute), the fingerprint won't catch that change. But Step 7 (value comparison) will — the numerical output will differ. The fingerprint is the first gate, not the only one. Missing a property produces a confusing error message (numerical mismatch instead of "graph changed"), not a silent pass.
 
 **Layer 2: Python reads the serialized graph** -- eliminates dual-spec
 
@@ -522,7 +539,7 @@ Strides are **not stored** in the manifest. `buildGraph()` produces strides from
 
 **Before loading tensors, verify the graph hasn't changed** (graph fingerprint check):
 
-The first thing Step 4 does is serialize the current graph and compare its hash to the stored `graph.bin` hash in the manifest. If they differ, the graph definition has changed since golden data was generated -- the golden data may no longer correspond to the current graph. This is a hard FAIL with a message to regenerate.
+The first thing Step 4 does is compute the current graph's fingerprint (a hash of graph properties — tensor names, dims, types, operation parameters) and compare it to the fingerprint stored in the manifest. If they differ, the graph definition has changed since golden data was generated — the tensor data is stale and cannot be trusted. This is a hard FAIL with a message to regenerate. See [Layer 1](#layer-1-graph-fingerprint----catches-graph-drift-after-generation) for the full design.
 
 **What can go wrong** (from pen test):
 - Graph definition changed since generation → hard FAIL on graph fingerprint mismatch
