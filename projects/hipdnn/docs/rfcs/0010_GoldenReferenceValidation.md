@@ -97,7 +97,12 @@ Two pipelines share the same set of steps:
 
 **What changes**: Nothing. The graph construction code is untouched.
 
-**Determinism requirement:** `graph.to_binary()` must produce identical bytes for the same logical graph. If the serializer is non-deterministic (e.g., map iteration order varies between runs), the fingerprint check will report false mismatches. Mitigation: if this surfaces in practice, replace the byte-level hash with a semantic comparison.
+**Graph fingerprint assumption:** The fingerprint check (see [Layer 1](#graph-level-correctness-layers-1-2-3)) hashes the output of `graph.to_binary()`. This assumes the backend serializer produces identical bytes for the same logical graph across runs. `to_binary()` delegates to the backend's `backendGetSerializedBinaryGraphExt()` — hipDNN does not control the serialization format. Two scenarios can break the fingerprint without a real graph change:
+
+1. **Non-deterministic serialization** — the backend iterates unordered structures, producing different byte order across runs
+2. **Serialization format change** — the backend upgrades or replaces its wire format (e.g., schema evolution), changing bytes for all graphs
+
+Both trigger a one-time golden data regeneration via `--generate-golden`, which the pipeline already supports. If false mismatches become frequent, the byte-level hash can be replaced with a property-level comparison (node types, tensor names, dims, data types, operation parameters) that is format-agnostic.
 
 **Design constraint**: Tensor names set in `buildGraph()` are the **identity contract** for golden data. They are how golden files map to runtime tensors. A tensor named `"x"` in the golden file must correspond to a tensor named `"x"` in the graph.
 
