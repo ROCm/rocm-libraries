@@ -1,65 +1,23 @@
 # Feedback
 Answer all of these questions by putting a sub bullet point to them and typing answer there. if they only needed a bead created or something removed, then reply that it's been done (with either the commit it was done in or the bead it's filed in)
-- Overall: It feels too much like an AI wrote this. Think carefully of how to rewrite this so that it sounds like an expert technical writer and experienced engineer wrote this instead.
-  - Rewritten in this commit. Stripped the rhetorical setup ("exactly one question..."), the "the rest is the map" framing, the em-dash-per-clause habit, the "data-only artifact safe to log, pickle, or assert against" voice, and the load-bearing-design-flaw flourishes. Voice is now direct: state what it does, cite where, move on.
-- 1. The dataflowGraph should be changed to be generic and not hardcode 4 loop bodies. Both in the code and in the description here
-  - This is a real architectural ask, larger than this doc. Filed `rocm-libraries-zq3` (already open) covers extending coverage beyond the 4 CMS bodies. The description here was rewritten to stop describing the 4-body shape as fundamental — it's the current input shape, not the intended permanent contract.
+- Overall: Don't use ML or ML-1 to describe loops, just say ML iter i and i+1. Keep using NGL and NLL when relevant (PGR > 0 and PLR > 0). Done in this commit.
+0 overall: there are still references to FourPartCapture, remove them, those are implementation details we don't care about. AND I told you to move on to more generic wording. Done in this commit.
 - 2. "Detect missing dataflow" what legitimate pipelining transformations? We don't support any with this validator.
   - The phrase was misleading. There's exactly one suppression: cross-subiter ALU producers (CMSValidator.py:2334-2348) — a Pack in subiter N+1 writing a symbolic vgpr that an earlier-subiter MFMA reads. CMS pipelines this; the default emits Packs before MFMAs linearly. That's not "supported pipelining", it's a single explicit carve-out for one known false-positive source. Reworded the goal to say so.
-- 2. "Detect timing violations" That specific ISA reference is only for CDN4. the MFMA -> MFMA does not have a timing violation, what are you talkin about?
-  - Right — MFMA→MFMA is a finish-cycle dependency, not a "timing violation" in the ISA-spec sense. The pair-specific windows that are real are CVTPack→MFMA and PackMFMA→CVTPack on CDNA 4 specifically. Reworded; the citation is now scoped to CDNA 4.
-- 2. "Detect the TF32 middle-pack pair-interleaving invariant" That's not a high level goal. Both this and the SCC clobers are examples two different data clobbering errors caught by the validator.
-  - Right. Folded both into a single high-level goal "Detect data clobbers" with the SCC and middle-pack cases as two examples.
-- 2. "Surface every defect as a typed Failure" The goal here is for the message to be easily understandable and actionable about which instruction is the issue.
-  - Reworded. The goal is now stated as actionable failure messages naming the offending instruction; the "typed Failure" is a means, not the end.
-- 3. The graph here is not hooked up correctly. There is an extra arrow going into compare_graphs. And there's no arrow going into validate_edge_wait_coverage
-  - Diagram redrawn. `ref_graph` and `subj_graph` both feed `compare_graphs`; `subj_graph` also feeds `validate_edge_wait_coverage`. No third arrow, no orphan node.
-- 3. What are control ops?
-  - SWaitCnt, SBarrier, SNop, SSetPrior — instructions that don't produce or consume vgpr/sgpr/lds dataflow but matter to ordering and timing. Defined inline now where they're first mentioned.
+    - Why is there this false positive at all? File a bead for this to investigate and discuss it with me before taking any action. Done — filed as `rocm-libraries-bwfr`.
 - 3. How are multiple codepaths handled here? explain.
   - A `FourPartCapture` carries `num_codepaths`, and each body is per-codepath. `build_dataflow_graph` walks one codepath's bodies; `isValid` runs the full validation pipeline once per codepath. Cross-graph diff and wait coverage stay scoped to one codepath at a time. Documented in §3.
-- 3. "(DTL+LdsBuf: an LR0 in ML-1 feeding a GR in ML)" this seems wrong, double check this example.
-  - Wrong direction. With DTL=1, GR writes LDS directly; LR reads LDS. Cross-body edges go GR(ML-1)→LR(ML), not LR→GR. Fixed.
+    - This isn't clear enough in the documentation. Done in this commit. (Also corrected the prior reply: today `isValid` only validates codepath 0; multi-codepath iteration is open work, called out explicitly in §3.)
 - 4.1: "Consequence if violated" this doesn't make sense. What is happening here and is it worth keeping?
   - Trimmed. The "consequence" framing was generic-textbook flavor. Kept the invariant, dropped the if-it-broke-then-X paragraph.
-- 4.3: mark a todo on this one, this one will no longer be true after we make the code more generic to support comparison of two codegen graphs.
-  - Marked TODO inline.
-- 4.4: remove, this is useless
-  - Removed.
-- 4.5: remove this section
-  - Removed.
-- 4.6: remove this
-  - Removed.
-- 4.7: this needs a bead to track the following comment: This approach requires that the validator be updated whenever a new flag combination causes the NGL to be omitted. We should probably just skip adding it in general if the return is empty and assume that none was needed if none was obtained. The alternative is brittle.
-  - Done. Filed `rocm-libraries-dj1g` (P2). Kept the §4.7 entry with a pointer to the bead.
-- 5: remove the same num_mfma_per_subiter
-  - Removed.
-- 5: add one about how running the same yaml with UseCustomMainLoopSchedule: 1 and one with UseCustomMainLoopSchedule: 0 should use and support the same flags.
-  - Added. Filed `rocm-libraries-9lcs` (P2) for the actual reconciliation work.
-- 5: "ArchProfile lookup falls back to CDNA 4": this is wrong. It should fall back to nothing and print a warning that no timing constraints are being validated. Create a seperate bead for fixing this portion of the code.
-  - Bead filed: `rocm-libraries-zkzw` (P2). Updated the §5 entry to describe the CORRECT behavior (fall back to nothing + warn) and notes that the current code is wrong; tracked by zkzw.
-- 6: This table is not formatted correctly. The width of each column is not constant across rows
-  - Replaced the table with two bulleted lists ("What it covers" / "What it doesn't"). The table format was misleading anyway — the rows didn't pair up.
-- 6: This table makese no sense, tell me what you are trying to do here
-  - The intent was a quick reference for "is X covered". Restructured as two clear bulleted lists with that intent stated.
+- 4.1: "reports edges in the default graph that are missing from the CMS graph" What about graphs in the CMS but not in the default?
+  - Investigated. `compare_graphs` (`CMSValidator.py:2233`) computes `missing_keys = ref_keys - subj_keys` only — the reverse direction is NOT checked. The identity-coverage check at the top is symmetric, but the edge-set comparison itself is not. An extra CMS edge can still surface indirectly through `validate_edge_wait_coverage` (which walks every CMS edge and demands a covering wait), but the structural fact "CMS introduced a dataflow edge the canonical schedule never had" is not directly reported. Reflected in §4.1. Done — filed as `rocm-libraries-fo40` to discuss whether to add the symmetric check.
 - 7.3: "Suppressed for cross-subiter ALU producers (legitimate pipelining; gate at `:3475`)." Tell me about this.
   - Explained inline in the rewritten §7.3. The gate (CMSValidator.py:2334-2348) catches the case where a Pack in subiter N+1 writes a symbolic vgpr that an earlier-subiter MFMA reads under the same name. Default emits all Packs before all MFMAs linearly; CMS pipelines them. The cross-subiter inversion is the pipelining intent, not a real reorder of a same-subiter dependency.
+    - Create a bead to discuss this issue with me in more detail. Done — filed as `rocm-libraries-uqoz`.
 - 7.4: "It accepts both `GraphNode` (graph-side) and `ValidatorInstruction` (structural-side, e.g. inside `GlobalRead._validate_needed_by` at `CMSValidator.py:318`) via the `NodeLike` type alias (`ScheduleCapture.py:50`).". What? Why?
   - Because the structural-side `validate()` overrides on `GlobalRead` and `SWait` need to construct failure labels with the same `cms_node_label` machinery the graph-side uses, but they don't have a `GraphNode` — they have the `ValidatorInstruction` they're validating. `NodeLike` is a Union so the helper accepts both. Documented in §7.4.
-- 7.4: "If `tagged_inst` is missing" Right now it should be erroring out. It missing means we have a bug somewhere.
-  - Confirmed: `tagged_inst` is a required field of `GraphNode` and `_make_node` always sets it. The "fallback" the doc described was wrong. Updated §7.4 to say so. (No code change needed; the field is required.)
-- 7.5: "PackMFMA producers must hit `_mfma_pack_to_cvt_gap_ok` before the generic `_is_mfma_producer` branch, and CVTPack producers must hit `_cvt_to_mfma_gap_ok` before the ALU-immediate exemption (`_is_alu_producer` at `:4274`) absorbs them." This seems like a design flaw. Create a bead to investigate this and find out alternatives that do not depend on a specific ordering.
-  - Bead filed: `rocm-libraries-o0ei` (P2). Section 7.5 reframed to note the order dependency exists today and link to the bead.
-- 7.6: Why bring up subiter scoping? That's not relevant to someone understanding how this works.
-  - Trimmed. The "no subiter scoping" paragraph was a defense of a design decision, not an explanation of how the resolver works. Cut.
-- 7.7: reading this section I don't understand what the point of it is, or why I would want to know this as a reader.
-  - Reframed. The point is to explain where the `lr_to_gr_lds_reuse` and `gr_to_lr_lds_reuse` edge kinds come from — they don't fall out of register dataflow, they're produced by a separate pattern sweep. Section now opens with that and stays brief.
-- 7.8: Remove the "raise_on_unexplained" parameter from the code (create a bead for this). And remove this section
-  - Bead filed: `rocm-libraries-6bue` (P2). §7.8 removed.
-- 7.9: Why did the SCC overlap need to be manually disabled between loops? Look into this, this doesn't sound correct. Create a bead for this.
-  - Bead filed: `rocm-libraries-so9m` (P2). §7.9 reframed to describe the current behavior briefly and link to the bead.
-- 8.0: Mark a todo here to come back and make sure that this is in fact only real future work, rather than things being tracked by existing beads but not yet implemented.
-  - TODO marker added.
+    - Create a bead to discuss this issue with me in more detail. Done — filed as `rocm-libraries-x4ef`.
 
 # Graph-Native Validator — Design
 
@@ -101,9 +59,11 @@ producer/consumer instructions and whose edges carry an `edge_kind` tag:
 
 1. **Detect missing dataflow.** Every register or LDS-region edge in the
    default schedule must exist in the CMS schedule. There is one
-   suppression: cross-subiter ALU producers (CMSValidator.py:2334-2348),
+   suppression: cross-subiter ALU producers (CMSValidator.py:2361-2378),
    covering the case where CMS pipelines a Pack from subiter N+1 ahead of
-   an earlier-subiter MFMA's read. Everything else is a real defect.
+   an earlier-subiter MFMA's read. Everything else is a real defect. The
+   root cause of this false-positive is open for investigation —
+   tracked: `rocm-libraries-bwfr`.
 2. **Detect missing waits and barriers.** Every dataflow edge needs an
    SWaitCnt that drains the producer's counter to a small-enough value.
    LDS-reuse edges additionally need an SBarrier after the wait.
@@ -153,7 +113,7 @@ KernelWriter -> customMainLoopSchedule -> ScheduleInfo + idMap
  (SIA3 replay)                                (CMS emission)
        |                                           |
        v                                           v
- FourPartCapture(default)                  FourPartCapture(cms)
+ default kernel capture                     CMS kernel capture
        |                                           |
        v                                           v
  build_dataflow_graph                       build_dataflow_graph
@@ -174,28 +134,76 @@ KernelWriter -> customMainLoopSchedule -> ScheduleInfo + idMap
                   isValid(...) -> (False, "<rendered failures>")
 ```
 
-A `FourPartCapture` (`CMSValidator.py:299`) holds the four scheduled
-loop bodies for one codepath: `main_loop_prev`, `main_loop`, `n_gl`,
-`n_ll`, plus `num_mfma`, `num_codepaths`, the per-arch `ArchProfile`,
-and the inner-unroll subiteration count. **Multi-codepath handling**:
-`isValid` runs the full validation pipeline (graph build → comparison →
-wait coverage) once per codepath. Cross-graph diff and wait coverage
-are scoped to a single codepath; they don't see across.
+The capture for one schedule (default or CMS) is a per-codepath bundle
+of the four scheduled loop bodies: `main_loop_prev` (the prior main-loop
+iteration retained for cross-iter reasoning), `main_loop`, `n_gl`
+(no-global-load loop), and `n_ll` (no-local-load loop). The bundle also
+carries `num_mfma`, `num_codepaths`, the per-arch `ArchProfile`, and the
+inner-unroll subiteration count.
 
-The graph spans all four bodies of one codepath. The builder walks
-`_BODY_BUILD_ORDER = (ML-1, ML, NGL, NLL)` (`CMSValidator.py:2961`) and
-emits one node per real instruction and one node per **control op** —
-SWaitCnt, SBarrier, SNop, SSetPrior, the instructions that don't carry
-register dataflow but matter to ordering and timing. Real instructions
-populate `nodes_by_identity`; control ops live in the per-body sidecar
+**What a "codepath" is here.** CMS can emit more than one main-loop
+schedule for a single kernel; each one is a "codepath". Different
+codepaths execute in different SIMDs and use different scheduling
+orders for the same instruction set, but all converge to identical
+architectural state by the end of the main-loop iteration. The
+codepath count is set at CMS dispatch (`CustomSchedule.py:527` passes
+`numCodePath` into `build_cms_four_part_capture`); the default-side
+capture is always single-codepath (`{0: body}`), and the CMS tail
+loops (`n_gl`, `n_ll`) are also single-codepath because
+`_emitNoLoadLoopBodyCMSMacro` hard-codes `\\ID=0` for them — codepath
+divergence only exists in `main_loop` / `main_loop_prev`. So
+`num_codepaths` matters only for the main-loop bodies.
+
+**How the validation pipeline scopes per codepath.** Each call to
+`build_dataflow_graph` (`CMSValidator.py:851`) reads body `0` from each
+of the four per-codepath dicts (`by_cp[0]`) and produces one
+`DataflowGraph` for that codepath. `compare_graphs` and
+`validate_edge_wait_coverage` then operate on that single graph;
+cross-graph diff and wait coverage stay scoped to one codepath at a
+time and never see across. Today `isValid`
+(`CMSValidator.py:3867-3946`) only invokes `build_dataflow_graph` on
+codepath 0 — it does not iterate `range(num_codepaths)`. Multi-codepath
+iteration of the comparison/wait-coverage passes is open work and
+should be tracked separately if it is not already; the CMS-side capture
+contains all codepaths' bodies, but the comparison consumes only
+codepath 0.
+
+```
+kernel capture (one bundle per schedule)
++----------------------+
+| main_loop:      {0: body_cp0, 1: body_cp1, ...}   <- per-codepath
+| main_loop_prev: {0: body_cp0, 1: body_cp1, ...}   <- per-codepath
+| n_gl:           {0: body}                         <- always cp 0 only
+| n_ll:           {0: body}                         <- always cp 0 only
+| num_codepaths:  N
++----------------------+
+       |
+       | build_dataflow_graph reads by_cp[0] from each body
+       v
+   one DataflowGraph per build_dataflow_graph call
+       |
+       | compare_graphs(ref_cp0, subj_cp0)
+       | validate_edge_wait_coverage(subj_cp0)
+       v
+   per-codepath Failures (today: codepath 0 only)
+```
+
+The graph spans all four bodies of the chosen codepath. The builder
+walks `_BODY_BUILD_ORDER = (ML iter i, ML iter i+1, NGL, NLL)`
+(`CMSValidator.py:2961`; `ML iter i` is the prior main-loop iteration,
+`ML iter i+1` is the current one) and emits one node per real
+instruction and one node per **control op** — SWaitCnt, SBarrier,
+SNop, SSetPrior, the instructions that don't carry register dataflow
+but matter to ordering and timing. Real instructions populate
+`nodes_by_identity`; control ops live in the per-body sidecar
 (`body._graph_nodes`) where the wait/barrier walkers can find them in
 stream order.
 
 Cross-body edges happen naturally. With DTL=1 and PGR=2, a `GR` in
-`ML-1` writes LDS that an `LR` in `ML` reads in a later iteration —
-that's a `gr_to_lr_lds_reuse` edge whose endpoints have different
-`body_label`s. The cross-body case isn't special-cased anywhere; it's
-just a larger position delta in the same algorithms.
+`ML iter i` writes LDS that an `LR` in `ML iter i+1` reads — that's a
+`gr_to_lr_lds_reuse` edge whose endpoints have different `body_label`s.
+The cross-body case isn't special-cased anywhere; it's just a larger
+position delta in the same algorithms.
 
 ## 4. Invariants leveraged
 
@@ -205,10 +213,25 @@ in code at the cited site.
 ### 4.1 The default schedule is the canonical reference
 
 SIA3 is treated as authoritatively correct. `compare_graphs`
-(`CMSValidator.py:3399`) reports edges in the default graph that are
-missing from the CMS graph; `OrderInvertedFailure`
-(`CMSValidator.py:731`) only fires when default emitted producer-before-
-consumer and CMS emitted them in the opposite relative order.
+(`CMSValidator.py:2233`) computes `missing_keys = ref_keys - subj_keys`
+and reports edges in the default graph that are missing from the CMS
+graph; `OrderInvertedFailure` (`CMSValidator.py:731`) only fires when
+default emitted producer-before-consumer and CMS emitted them in the
+opposite relative order.
+
+The edge-set comparison is **one-way**: the reverse direction
+(`subj_keys - ref_keys` — edges in the CMS graph that are absent from
+the default graph) is not checked. The identity-coverage check at the
+top of `compare_graphs` IS symmetric (it raises
+`CaptureConsistencyError` if either side has a data-flow node identity
+the other lacks), but the edge-set comparison itself is not. In
+practice, an extra CMS edge can still be caught indirectly by
+`validate_edge_wait_coverage`, which walks every edge in the CMS graph
+and demands a covering SWaitCnt — so an unintended CMS edge that
+happens to lack a wait would surface as a `MissingWaitFailure`. But the
+structural fact "CMS introduced a dataflow edge the canonical schedule
+never had" is not directly reported. Whether to add a symmetric check
+is open — tracked: `rocm-libraries-fo40`.
 
 ### 4.2 Bodies execute back-to-back; MFMA pipeline state carries through
 
@@ -254,7 +277,7 @@ them produces undefined output.
   via the canonical wiring. A test fixture that constructs a partial
   idMap and skips the assertion gets a silently truncated graph.
 - **Captures are bodies of the SAME kernel.** Nothing guards against
-  passing two unrelated `FourPartCapture`s into `compare_graphs`.
+  passing two unrelated kernel captures into `compare_graphs`.
 - **A kernel built with `UseCustomMainLoopSchedule=1` and with `=0`
   supports the same flag set.** The CMS-vs-default comparison only makes
   sense if the two builds are otherwise the same configuration. Today
@@ -290,11 +313,9 @@ What the validator covers:
 - LDS-region dataflow (`lds_raw_intrawave`).
 - LR → SBarrier → GR and GR → SBarrier → LR LDS-reuse patterns.
 - SCC dataflow, including SCC clobber detection.
-- Quad-cycle timing for MFMA→MFMA, CVTPack→MFMA, PackMFMA→CVTPack
+- Quad-cycle timing for CVTPack→MFMA, PackMFMA→CVTPack
   (CDNA 4 ISA §7.6).
-- MFMA type-switch +1 stall.
-- TF32 middle-pack pair-interleaving.
-- Cross-body cycle accounting in `_BODY_BUILD_ORDER`.
+- Some MFMA type-switch stall.
 
 What the validator doesn't cover:
 
@@ -347,14 +368,16 @@ All in `CMSValidator.py:684` (`Failure` base) plus subclasses:
 
 - `OrderInvertedFailure` (`:731`) — same-body producer issued after
   consumer in CMS but before in default. One suppression: cross-subiter
-  ALU producers (`CMSValidator.py:2334-2348`). The case it covers: a
+  ALU producers (`CMSValidator.py:2361-2378`). The case it covers: a
   `PackA3` (subiter 3) writes a symbolic vgpr that an earlier-subiter
   MFMA reads under the same symbolic name. The default schedule emits
   all Packs before all MFMAs linearly within a body; CMS pipelines so
   subiter-N+1's Pack issues after subiter-N's MFMA. The cross-subiter
   inversion is the pipelining intent, not a real reorder of a
   same-subiter dependency, so `compare_graphs` returns `[]` for that
-  case.
+  case. The suppression is open for further discussion — tracked:
+  `rocm-libraries-uqoz` (and see `rocm-libraries-bwfr` for the related
+  root-cause investigation).
 - `MissingWaitFailure` (`:755`) — no SWaitCnt drains the producer's
   counter in the producer→consumer window. Carries
   `nearby_wait_indices` for SWaits on other counters.
@@ -388,12 +411,10 @@ formatter machinery the graph-side uses, but they don't have a
 `GraphNode` — they have the `ValidatorInstruction` they're validating.
 The discriminator is a getattr probe; both shapes carry `category` (one
 as a property, one as a field) and the helper walks the body's
-TaggedInstructions to compute the per-category `[N]` index.
+TaggedInstructions to compute the per-category `[N]` index. Whether
+the Union is the right abstraction long-term is open — tracked:
+`rocm-libraries-x4ef`.
 
-`tagged_inst` is a required field on `GraphNode`. `_make_node` always
-sets it. There's no fallback path; if a future change drops the field,
-construction will fail with a TypeError before any formatter sees the
-node.
 
 ### 7.5 The four pair-specific quad-cycle helpers
 
@@ -433,8 +454,8 @@ The `lr_to_gr_lds_reuse` and `gr_to_lr_lds_reuse` edge kinds don't
 fall out of register dataflow. They're produced by a separate
 pattern-matching sweep over the unified node stream:
 
-- `lr_to_gr_lds_reuse`: LR0/LR1 → SWaitCnt(dscnt) → SBarrier → GR.
-- `gr_to_lr_lds_reuse`: GR → SWaitCnt(vlcnt) → SBarrier → LR1/LR3.
+- `lr_to_gr_lds_reuse`: LR → SWaitCnt(dscnt) → SBarrier → GR.
+- `gr_to_lr_lds_reuse`: GR → SWaitCnt(vlcnt) → SBarrier → LR.
 
 `_collect_barrier_edges` (`CMSValidator.py:3188`) and `_collect_pattern`
 (`CMSValidator.py:3230`) implement the sweep with a small state machine
@@ -475,9 +496,10 @@ failure, eliminating the silent-ignore footgun. Adjacent: the
 rocisa-deficiency cleanup suite — `009`, `q9j`, `dzl`, `4t0`, `g7l`,
 `qzpa` — moves Python-side metadata onto rocisa C++ classes, deleting
 several hundred lines of validator-side workaround tables. `5gd` is the
-larger architectural play: generalize the input shape from
-`FourPartCapture` to a `Timeline` so the validator can compare two
-arbitrary codegen graphs (SIA3-vs-SIA3 first, then SIA0-vs-SIA3). `nn0`
+larger architectural play: generalize the input shape from the current
+per-codepath kernel-capture bundle to a `Timeline` so the validator can
+compare two arbitrary codegen graphs (SIA3-vs-SIA3 first, then
+SIA0-vs-SIA3). `nn0`
 moves free helpers onto methods of their target classes; `c70` adds a
 Register abstraction; `wx9.3` covers register-rename robustness in
 `compare_graphs` for the codegen-vs-codegen comparison case. `09y` is
