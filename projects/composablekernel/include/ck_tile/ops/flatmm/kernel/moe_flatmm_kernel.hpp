@@ -10,6 +10,9 @@
 #include "ck_tile/ops/gemm/kernel/gemm_tile_partitioner.hpp"
 #include "ck_tile/host.hpp"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+
 // #define disable_tile_gs
 
 namespace ck_tile {
@@ -483,13 +486,6 @@ struct MoeFlatmmKernel
 
         if constexpr(std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>)
         {
-            // if(kargs.N % TilePartitioner::NPerBlock != 0 && FlatmmPipeline::kPadN == false)
-            // {
-            //     std::cerr << "Can't support N that is not a multiple of NPerBlock"
-            //                  " without padding!"
-            //               << std::endl;
-            //     return false;
-            // }
             if(kargs.N % FlatmmPipeline::GetVectorSizeB() != 0)
             {
                 std::cerr << "N is not a multiple of vector load size for B tensor!" << std::endl;
@@ -1500,3 +1496,5 @@ struct MoeFlatmmKernel
 };
 
 } // namespace ck_tile
+
+#pragma clang diagnostic pop

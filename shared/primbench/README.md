@@ -1,6 +1,6 @@
 # primbench
 
-primbench is a single-header HIP benchmarking library.
+primbench is a single-header HIP and CUDA benchmarking library.
 
 ![primbench demo](./assets/primbench.gif)
 
@@ -12,17 +12,32 @@ primbench is a single-header HIP benchmarking library.
 - GPU cache clearing
 - Batching and stream blocking
 - Detailed JSON output
+- Linux and Windows support
 
 ## Dependencies
 
-primbench has the following dependencies:
-- HIP
-- AMD SMI (for querying live GPU statistics)
+### Required
+
+- HIP or CUDA
 - C++17 or later
+
+### Optional (recommended)
+
+For GPU temperature monitoring:
+- [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) (HIP only, not available on Windows; typically included with ROCm)
+- [NVML](https://developer.nvidia.com/management-library-nvml) (CUDA only; ships with NVIDIA drivers)
+
+These libraries allow primbench to keep the GPU within a stable temperature range, reducing benchmark noise and improving reproducibility.
+
+> [!IMPORTANT]
+> If AMD SMI (HIP) or NVML (CUDA) is not available, for example on Windows, or if you choose not to link against these libraries, you **must** disable GPU monitoring by compiling with:
+> ```
+> -DPRIMBENCH_NO_MONITORING
+> ```
 
 ## Example
 
-[`examples/copy_benchmark.cpp`](./examples/copy_benchmark.cpp) shows how to use primbench:
+The HIP benchmark [`examples/copy_benchmark.cpp`](./examples/copy_benchmark.cpp) demonstrates how primbench is used:
 
 ```cpp
 #include "primbench.hpp"
@@ -81,15 +96,15 @@ struct copy_benchmark : public primbench::benchmark_interface
         primbench::log("Allocating device memory");
         T* d_input;
         T* d_output;
-        PRIMBENCH_HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
-        PRIMBENCH_HIP_CHECK(hipMalloc(&d_output, items * sizeof(T)));
+        PRIMBENCH_CHECK(hipMalloc(&d_input, items * sizeof(T)));
+        PRIMBENCH_CHECK(hipMalloc(&d_output, items * sizeof(T)));
 
         primbench::log("Copying to device");
-        PRIMBENCH_HIP_CHECK(hipMemcpyAsync(d_input,
-                                           h_input.data(),
-                                           items * sizeof(T),
-                                           hipMemcpyHostToDevice,
-                                           stream));
+        PRIMBENCH_CHECK(hipMemcpyAsync(d_input,
+                                       h_input.data(),
+                                       items * sizeof(T),
+                                       hipMemcpyHostToDevice,
+                                       stream));
 
         dim3 grid(items / items_per_block);
         dim3 block(BlockSize);
@@ -107,8 +122,8 @@ struct copy_benchmark : public primbench::benchmark_interface
                     <<<grid, block, 0, stream>>>(d_input, d_output);
             });
 
-        PRIMBENCH_HIP_CHECK(hipFree(d_input));
-        PRIMBENCH_HIP_CHECK(hipFree(d_output));
+        PRIMBENCH_CHECK(hipFree(d_input));
+        PRIMBENCH_CHECK(hipFree(d_output));
     }
 };
 
@@ -123,29 +138,54 @@ int main(int argc, char* argv[])
 }
 ```
 
-The benchmark is compiled and run like so:
+It is compiled and run like so on Linux:
 
 ```bash
-hipcc -o copy_benchmark examples/copy_benchmark.cpp -I. -lamd_smi && ./copy_benchmark
+hipcc -o copy_benchmark examples/hip/copy_benchmark.cpp -I. -lamd_smi && ./copy_benchmark
+```
+
+And like so in PowerShell on Windows:
+```bash
+hipcc -o copy_benchmark.exe examples/hip/copy_benchmark.cpp -I. -DPRIMBENCH_NO_MONITORING -std=c++17 -g --offload-arch=$(amdgpu-arch) ; ./copy_benchmark.exe
+```
+
+Its equivalent CUDA benchmark is compiled and run like so on Linux:
+
+```bash
+nvcc -o copy_benchmark examples/cuda/copy_benchmark.cu -I. -lnvidia-ml && ./copy_benchmark
 ```
 
 It outputs this `results.json`:
 ```json
 {
     "context": {
-        "results_version": "2.0.0",
+        "results_version": "4.0.0",
         "general": {
             "algorithm": "copy",
             "specialization_count": 2,
-            "gpu_name": "AMD Instinct MI210",
-            "gpu_arch": "gfx90a",
-            "gpu_pci_bus_id": "0000:83:00.0",
             "library_build_type": "debug",
-            "temp_type": "edge",
+            "gpu": {
+                "name": "AMD Radeon RX 9070 XT",
+                "arch": "gfx1201",
+                "pci_bus_id": "0000:83:00.0"
+            },
+            "backend": {
+                "name": "hip",
+                "hip_version": "6.4.43482-0f2d60242",
+                "runtime_version": "6.4.43482",
+                "driver_version": "6.4.43482",
+                "compiler": {
+                    "name": "clang",
+                    "version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
+                }
+            },
+            "monitoring": {
+                "name": "amdsmi",
+                "version": "25.3.0"
+            },
+            "temperature_type": "edge",
             "host_name": "host",
-            "date": "2025-11-24T15:01:50+00:00",
-            "hip_version": "6.4.43482-0f2d60242",
-            "clang_version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
+            "date": "2025-11-24T15:01:50+00:00"
         },
         "settings": {
             "size": 134217728,
@@ -164,8 +204,6 @@ It outputs this `results.json`:
             "max_gpu_temp": 60,
             "max_warming_secs": 60,
             "max_cooling_secs": 60,
-            "output_hip_device_properties_context": false,
-            "output_amdsmi_context": false,
             "output_batches": false,
             "spaces_per_indent": 4,
             "stream_blocking_timeout_secs": 10
@@ -249,8 +287,8 @@ You can also pass `--help` to benchmarks to print the available options.
 | Option                                   | Description                                                                                                                                                                        |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--help`                                 | Display this help and exit.                                                                                                                                                        |
-| `--bytes`                                | Overrides the number of input bytes passed to `primbench::executor`. Optionally supports the suffixes KiB/MiB/GiB, e.g. `--bytes 256KiB`.                                          |
-| `--hot`                                  | Skip clearing the GPU cache between batch iterations. (default: false)                                                                                                             |
+| `--size`                                 | Input size. Benchmarks decide what this represents, but it is commonly the number of bytes or items. Supports the suffixes KiB/MiB/GiB, e.g. `--size 256KiB`. (default: 128MiB)    |
+| `--hot`                                  | Skip clearing the GPU cache between batch iterations.                                                                                                                              |
 | `--seed`                                 | Seed used for input generation. (default: 42)                                                                                                                                      |
 | `--json-out`                             | JSON path to write benchmark results to. (default: results.json)                                                                                                                   |
 | `--csv-out`                              | CSV path to write benchmark results to.                                                                                                                                            |
@@ -259,14 +297,12 @@ You can also pass `--help` to benchmarks to print the available options.
 | `--min-gpu-ms-per-batch`                 | Minimum duration of a batch in milliseconds (GPU time). (default: 10)                                                                                                              |
 | `--min-secs`                             | Minimum total benchmark duration in seconds (wall time). (default: 1)                                                                                                              |
 | `--noise-timeout-secs`                   | Maximum total benchmark duration in seconds before timing out a noisy run (wall time). (default: 10)                                                                               |
-| `--batch-window-size`                    | Number of batch times used in the noise (coefficient of variation) window to decide early stopping. (default: 10)                                                                  |
-| `--noise-tolerance-percent`              | Noise tolerance of batch times in percent, used to determine early benchmark stopping. (default: 1)                                                                                |
+| `--batch-window-size`                    | Number of batch times used in the noise (coefficient of variation) window to decide early benchmark stopping. (default: 10)                                                        |
+| `--noise-tolerance-percent`              | Noise tolerance of batch times in percent, used to determine whether a benchmark can be stopped early. (default: 1)                                                                |
 | `--min-gpu-temp`                         | Minimum GPU temperature in °C. Too low slows benchmarks; too high increases noise. (default: 50)                                                                                   |
 | `--max-gpu-temp`                         | Maximum GPU temperature in °C. Too low slows benchmarks; too high increases noise. (default: 60)                                                                                   |
 | `--max-warming-secs`                     | Maximum seconds allowed for GPU warming before an error is thrown. (default: 60)                                                                                                   |
 | `--max-cooling-secs`                     | Maximum seconds allowed for GPU cooling before an error is thrown. (default: 60)                                                                                                   |
-| `--output-hip-device-properties-context` | Output a `hip_device_properties` object in the context, containing GPU details.                                                                                                    |
-| `--output-amdsmi-context`                | Output an `amdsmi` object in the context, containing GPU details.                                                                                                                  |
 | `--output-batches`                       | Output a `batches` array for each specialization, containing per-batch details.                                                                                                    |
 | `--spaces-per-indent`                    | Number of spaces per indentation level in JSON output. Set to 0 for no indentation. (default: 4)                                                                                   |
 | `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous. (default: 10) |
@@ -344,13 +380,15 @@ Before benchmarking a specialization, primbench:
 
 primbench currently does not cool down the GPU *while* benchmarking a specialization, but this may be changed in the future.
 
-Temperatures are read via AMD SMI. Warming uses short GPU workloads; cooling waits until the GPU naturally drops back into range. If either process takes more than 60 seconds, primbench aborts (`--max-warming-secs`, `--max-cooling-secs`).
+Temperatures are read using AMD SMI/NVML. Warming uses short GPU workloads; cooling waits until the GPU naturally drops back into range. If either process takes more than 60 seconds, primbench aborts (`--max-warming-secs`, `--max-cooling-secs`).
 
 ### GPU Temperature Sensor Selection
 
-primbench supports multiple GPU temperature sensors exposed by AMD SMI, such as *edge* and *hotspot*. At startup, it probes the available sensors and selects the first one that successfully returns a reading. The chosen sensor type is cached and used consistently for warming, cooling, and reporting. If no supported sensor can be read, primbench terminates with an error.
+primbench supports multiple GPU temperature sensors exposed by AMD SMI, such as `edge` and `hotspot`. At startup, it probes the available sensors and selects the first one that successfully returns a reading. The chosen sensor type is cached and used consistently for warming, cooling, and reporting. If no supported sensor can be read, primbench terminates with an error.
 
-The selected temperature sensor type is recorded in the JSON output as `context.general.temp_type`.
+The selected temperature sensor type is recorded in the JSON output as `context.general.temperature_type`.
+
+primbench always uses the GPU temperature sensor called `gpu` for CUDA benchmarks.
 
 ### GPU Cache Clearing
 
@@ -410,7 +448,7 @@ The command below embeds the current branch and commit hash.
 If the repository is in a detached HEAD state (for example in CI or when checking out a specific commit), no branch is active and `BRANCH_NAME` is set to `DETACHED`.
 
 ```bash
-hipcc -o copy_benchmark examples/copy_benchmark.cpp \
+hipcc -o copy_benchmark examples/hip/copy_benchmark.cpp \
   -I. \
   -lamd_smi \
   -DBRANCH_NAME=\"$(git symbolic-ref -q --short HEAD || echo DETACHED)\" \

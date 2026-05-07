@@ -216,6 +216,7 @@ set( MIOpen_Source
     solver/conv/conv_hip_implicit_gemm_grouped_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_bwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp
+    solver/ck_impl_lib_loader.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_wrw_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_bwd_xdlops.cpp
@@ -234,7 +235,7 @@ set( MIOpen_Source
     solver/conv/conv_ocl_dir2D_bwdWrW_1x1.cpp
     solver/conv/conv_ocl_dir2D_bwdWrW_2.cpp
     solver/conv/conv_ocl_dir2D_bwdWrW_53.cpp
-    solver/conv/conv_ocl_dir2D11x11.cpp
+    solver/conv/conv_hip_dir2D11x11.cpp
     solver/conv/conv_ocl_dir2Dfwd.cpp
     solver/conv/conv_ocl_dir2Dfwd_exhaustive_search.cpp
     solver/conv/conv_ocl_dir2Dfwd1x1.cpp
@@ -318,9 +319,9 @@ set( MIOpen_Source
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source conv/heuristics/ai_heuristics.cpp)
-    list(APPEND MIOpen_Source conv/heuristics/metadata_3d.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/metadata_nd.cpp)
     list(APPEND MIOpen_Source conv/heuristics/ai_candidate_selection.cpp)
-    list(APPEND MIOpen_Source conv/heuristics/ai_conv_3d_kernel_tuning_utils.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/ai_conv_nd_kernel_tuning_utils.cpp)
     list(APPEND MIOpen_Source anyramdb.cpp)
 endif()
 
@@ -589,7 +590,8 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenConvBwdWrW_LxG_P53.cl
         kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
         kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
-        kernels/MIOpenConvFwd_LxL_11.cl
+        kernels/MIOpenConvFwd_LxL_11.cpp
+
         kernels/MIOpenConvFFT.cpp
         kernels/MIOpenRNNHiddenStateUpdate.cpp
         kernels/bugzilla_34765_detect.s
@@ -657,7 +659,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_dilation2.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride1.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride2.s
-        kernels/MIOpenConvBwdBias.cl
         kernels/MIOpenBatchNormActivInfer.cpp
         kernels/MIOpenCTCLoss.cpp
         kernels/MIOpenDropoutHIP.cpp
@@ -902,31 +903,26 @@ target_include_directories(MIOpen PUBLIC
 )
 
 if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
-        # the aliased target doesnt exist when we build CK inline as part of MIOPEN.  The aliased target only is not
-        # global when you build it so we dont have access to it.
-        set(MIOPEN_CK_LINK_FLAGS device_conv_operations hip::host)
-
-        # The include directories also dont propagate correctly when using the non aliased targets.
-        # Manually including them fixes this problem for inline builds.
-        target_include_directories(MIOpen SYSTEM PRIVATE
-            ${MIOPEN_CK_INCLUDE_DIR}
-            ${MIOPEN_CK_BUILD_INCLUDE_DIR}
-            ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
-    else()
-        # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
-        set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
-        
+    if(MIOPEN_BUILD_CK)
         if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
             add_definitions(-DCK_EXPERIMENTAL_BUILDER)
         endif()
     endif()
-    if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
-        target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)
-    endif()
-    if(GPU_TARGETS MATCHES "gfx950")
-        target_compile_definitions(MIOpen PRIVATE CK_USE_GFX95)
-    endif()
+
+    # Build per-GPU-target CK grouped conv shared libraries
+    add_subdirectory(ck_impl)
+endif()
+
+# Proxy target that bundles MIOpen linkage with build-order dependencies on the
+# CK plugin shared libraries (MIOpenCKGroupedConv_*.so).  Internal consumers
+# (tests, driver, speedtests) link this instead of MIOpen directly so that
+# building any single executable also builds the plugins it loads via dlopen.
+# When CK is disabled, CK_PLUGIN_TARGETS is empty and this is a plain
+# pass-through to MIOpen.
+add_library(MIOpen_with_plugins INTERFACE)
+target_link_libraries(MIOpen_with_plugins INTERFACE MIOpen)
+if(CK_PLUGIN_TARGETS)
+    add_dependencies(MIOpen_with_plugins ${CK_PLUGIN_TARGETS})
 endif()
 
 if(WIN32)
@@ -937,7 +933,7 @@ endif()
 target_include_directories(MIOpen SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE_DIR}>)
 # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
 #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2 ${MIOPEN_CK_LINK_FLAGS})
+target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)

@@ -57,7 +57,11 @@ static hipblasStatus_t hipblasDemandAlloc(rocblas_handle                   handl
                     status = hipblasConvertStatus(blas_status);
                 else
                 {
-                    status = func();
+                    blas_status = rocblas_set_device_memory_size(handle, size);
+                    if(blas_status != rocblas_status_success)
+                        status = hipblasConvertStatus(blas_status);
+                    else
+                        status = func();
                 }
             }
         }

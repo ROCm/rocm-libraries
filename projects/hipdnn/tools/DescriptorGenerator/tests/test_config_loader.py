@@ -229,7 +229,7 @@ class TestDataFieldParsing:
         )
         assert mode.type == "mode"
         assert mode.is_mode is True
-        assert mode.cpp_enum == "hipdnn_data_sdk::data_objects::ConvMode"
+        assert mode.cpp_enum == "hipdnn_flatbuffers_sdk::data_objects::ConvMode"
         assert mode.frontend_type == "ConvolutionMode"
         assert mode.backend_setter == "setConvMode"
         assert mode.backend_getter == "getConvMode"

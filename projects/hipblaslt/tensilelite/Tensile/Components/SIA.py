@@ -21,12 +21,12 @@
 ################################################################################
 
 from rocisa import countInstruction, countGlobalRead, countLocalWrite, \
-                   countDSStoreB128, countVMovB32
+                   countDSStoreB192, countDSStoreB128, countVMovB32
 from rocisa.base import Item
 from rocisa.code import Module, TextBlock
 from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 
-from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32
+from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
 
 from ..Common import roundUp, print2
 from ..Component import SIA
@@ -148,6 +148,19 @@ class SIA1(SIA):
               itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
               firstIter, lastLc, isNGLL)
 
+class SIA0(SIA):
+    kernel = {"ScheduleIterAlg": 0}
+    def __call__(self):
+        assert False
+
+    def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, globalReadIncBCode, isNGLL):
+        # Get schedule information
+        numGlobalReadInsPerIter, numLocalWriteModPerIter, numEmptyGlobalReadIncCode = getScheduleParams(kernel)
+        numLocalWritesPerSched = numLocalWriteModPerIter
+        itemsGRToSchedLater, lastLoadIter = noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode)
+        # Schedule local write
+        noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
+
 ################################################################################
 ################################################################################
 ###
@@ -229,16 +242,29 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     for iui in range(kernel["InnerUnroll"]):
         # ds_read[A][0]
         calculateLatencyLeft(writer.states.numReadsPerUnrollA, tensorParametersA["localReadInstruction"].blockWidth, tensorParametersA["localReadInstruction"].issueLatency)
+        # ds_read[MXSA][0]
+        if kernel["ProblemType"]["MXBlockA"]:
+            calculateLatencyLeft(writer.states.numReadsPerUnrollMXSA, tensorParametersA["MX"]["localReadInstruction"].blockWidth, tensorParametersA["MX"]["localReadInstruction"].issueLatency)
         # ds_read[M][0]
+        # ds_read[MXSB][0]
+        if kernel["ProblemType"]["MXBlockB"]:
+            calculateLatencyLeft(writer.states.numReadsPerUnrollMXSB, tensorParametersB["MX"]["localReadInstruction"].blockWidth, tensorParametersB["MX"]["localReadInstruction"].issueLatency)
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             calculateLatencyLeft(writer.states.numReadsPerUnrollMetadata, tPM["localReadInstruction"].blockWidth, tPM["localReadInstruction"].issueLatency)
         # ds_read[B][0]
         calculateLatencyLeft(writer.states.numReadsPerUnrollB, tensorParametersB["localReadInstruction"].blockWidth, tensorParametersB["localReadInstruction"].issueLatency)
+
         # ds_read[A][1:]
         calculateLatencyLeft((writer.states.numReadsPerIterA//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollA), tensorParametersA["localReadInstruction"].blockWidth, tensorParametersA["localReadInstruction"].issueLatency)
+        # ds_read[MXSA][1:]
+        if kernel["ProblemType"]["MXBlockA"]:
+          calculateLatencyLeft((writer.states.numReadsPerIterMXSA//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMXSA), tensorParametersA["MX"]["localReadInstruction"].blockWidth, tensorParametersA["MX"]["localReadInstruction"].issueLatency)
         # ds_read[M][1:]
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             calculateLatencyLeft((writer.states.numReadsPerIterMetadata//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMetadata), tPM["localReadInstruction"].blockWidth, tPM["localReadInstruction"].issueLatency)
+        # ds_read[MXSB][1:]
+        if kernel["ProblemType"]["MXBlockB"]:
+          calculateLatencyLeft((writer.states.numReadsPerIterMXSB//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMXSB), tensorParametersB["MX"]["localReadInstruction"].blockWidth, tensorParametersB["MX"]["localReadInstruction"].issueLatency)
         # get the latency before B[:1]
         if isLocalReadsOpt:
             tmpLatencyLeft = latencyLeft
@@ -267,12 +293,8 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
         # move syncPlrMfmaIndex one iteration ahead for doFullPackCodePrefetch and subIter
         writer.states.syncPlrMfmaIndex = max(0, writer.states.syncPlrMfmaIndex - numMfmaPerIter)
     elif writer.states.doPackPreSchedulingNextLoop:
-        # doPackPreSchedulingNextLoop only case (not doFullPackCodePrefetch), move syncPlrMfmaIndex to the top of 
+        # doPackPreSchedulingNextLoop only case (not doFullPackCodePrefetch), move syncPlrMfmaIndex to the top of
         writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR)
-
-    if kernel["ForceUnrollSubIter"]:
-        if ( kernel["ProblemType"]["DataType"].isComplex()):
-            writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
 
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
     if kernel["NoLdsWriteCode"]:
@@ -312,8 +334,12 @@ def getLocalWriteMFMAStart(writer, kernel, tensorParametersA, tensorParametersB,
             lookRange = 1 if subIter else kernel["LoopIters"] - writer.states.numItersPLR
             for u in range(lookRange):
                 doReadA = ((u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadA - writer.states.numItersPLR) and not kernel["DirectToVgprA"]) or subIter
+                doReadMXSA = (u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadMXSA - writer.states.numItersPLR)
                 doReadB = ((u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadB - writer.states.numItersPLR) and not kernel["DirectToVgprB"]) or subIter
+                doReadMXSB = (u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadMXSB - writer.states.numItersPLR)
                 doReadM = ((u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadMetadata - writer.states.numItersPLR))
+                doReadMXSA = doReadMXSA and kernel["ProblemType"]["MXBlockA"] and (not kernel["DirectToVgprMXSA"])
+                doReadMXSB = doReadMXSB and kernel["ProblemType"]["MXBlockB"] and (not kernel["DirectToVgprMXSB"])
                 doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
 
                 def calculateLatencyLeft(numReads, localReadBlockWidth, localReadLatency):
@@ -329,16 +355,29 @@ def getLocalWriteMFMAStart(writer, kernel, tensorParametersA, tensorParametersB,
                 for iui in range(kernel["InnerUnroll"]):
                     # ds_read[A][0]
                     calculateLatencyLeft(writer.states.numReadsPerUnrollA * doReadA, tensorParametersA["localReadInstruction"].blockWidth, tensorParametersA["localReadInstruction"].issueLatency)
+                    # ds_read[MXSA][0]
+                    if doReadMXSA:
+                        calculateLatencyLeft(writer.states.numReadsPerUnrollMXSA * doReadMXSA, tensorParametersA["MX"]["localReadInstruction"].blockWidth, tensorParametersA["MX"]["localReadInstruction"].issueLatency)
                     # ds_read[M][0]
                     if doReadM:
                         calculateLatencyLeft(writer.states.numReadsPerUnrollMetadata * doReadM, tPM["localReadInstruction"].blockWidth, tPM["localReadInstruction"].issueLatency)
+                    # ds_read[MXSB][0]
+                    if doReadMXSB:
+                        calculateLatencyLeft(writer.states.numReadsPerUnrollMXSB * doReadMXSB, tensorParametersB["MX"]["localReadInstruction"].blockWidth, tensorParametersB["MX"]["localReadInstruction"].issueLatency)
                     # ds_read[B][0]
                     calculateLatencyLeft(writer.states.numReadsPerUnrollB * doReadB, tensorParametersB["localReadInstruction"].blockWidth, tensorParametersB["localReadInstruction"].issueLatency)
+
                     # ds_read[A][1:]
                     calculateLatencyLeft((writer.states.numReadsPerIterA//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollA) * doReadA, tensorParametersA["localReadInstruction"].blockWidth, tensorParametersA["localReadInstruction"].issueLatency)
+                    # ds_read[MXSA][1:]
+                    if doReadMXSA:
+                        calculateLatencyLeft((writer.states.numReadsPerIterMXSA//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMXSA) * doReadMXSA, tensorParametersA["MX"]["localReadInstruction"].blockWidth, tensorParametersA["MX"]["localReadInstruction"].issueLatency)
                     # ds_read[M][1:]
                     if doReadM:
                         calculateLatencyLeft((writer.states.numReadsPerIterMetadata//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMetadata) * doReadM, tPM["localReadInstruction"].blockWidth, tPM["localReadInstruction"].issueLatency)
+                    # ds_read[MXSB][1:]
+                    if doReadMXSB:
+                        calculateLatencyLeft((writer.states.numReadsPerIterMXSB//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMXSB) * doReadMXSB, tensorParametersB["MX"]["localReadInstruction"].blockWidth, tensorParametersB["MX"]["localReadInstruction"].issueLatency)
                     # ds_read[B][1:]
                     calculateLatencyLeft((writer.states.numReadsPerIterB//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollB) * doReadB, tensorParametersB["localReadInstruction"].blockWidth, tensorParametersB["localReadInstruction"].issueLatency)
             lwStartMfmaIndex = numMfmaForCurrentLoopLR
@@ -461,14 +500,77 @@ def fixLocalWriteEndMfmaIndex(writer, kernel, tPA, tPB, globalReadIncACode, glob
 ################################################################################
 ################################################################################
 
+def _splitTdmLoad(grACode):
+    """Split globalReadA into (non-TDM items module, TDM-load-only module)."""
+    tdmLoadMod = Module("deferredTdmLoad")
+    nonTdmMod = Module()
+    grAItems = grACode.items() if hasattr(grACode, 'items') else []
+    for item in grAItems:
+        hasTdm = isinstance(item, TensorLoadToLds) or \
+                 (hasattr(item, 'flatitems') and any(isinstance(f, TensorLoadToLds) for f in item.flatitems()))
+        if hasTdm:
+            tdmLoadMod.add(item)
+        else:
+            nonTdmMod.add(item)
+    return nonTdmMod, tdmLoadMod
+
+
 def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
-    # put everything in the header:
-    writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadA)
-    writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
-    writer.codes.unrollLoopHeader.add(globalReadIncACode)
-    writer.codes.unrollLoopHeader.add(globalReadIncBCode)
+    # For TDM+SIA0: defer tensor_load_to_lds to after the LDS swap to avoid writing
+    # into the LDS buffer still being read by ds_loads
+    tdmDeferLoad = kernel["enableTDMA"] and kernel["enableTDMB"]
+    localWriteEndIter = kernel["LoopIters"] - writer.states.numItersPLR - 1
+    tdmLoadIter = min(localWriteEndIter + 1, kernel["LoopIters"] - 1)
+
+    if kernel["PrefetchGlobalRead"] == 2:
+        imod = writer.codes.perIterGlobalRead[0].add(Module())
+        imod.addComment1("Global Read IncA")
+        imod.add(globalReadIncACode)
+        imod.addComment1("Global Read IncB")
+        imod.add(globalReadIncBCode)
+        if tdmDeferLoad:
+            imod.addComment1("Global Read A")
+            imod.add(writer.codes.dtlsM0UpdateA)
+            nonTdmMod, tdmLoadMod = _splitTdmLoad(writer.codes.globalReadA)
+            imod.add(nonTdmMod)
+            imod.addComment1("Global Read MXSA")
+            imod.add(writer.codes.dtlsM0UpdateMXSA)
+            imod.add(writer.codes.globalReadMXSA)
+            imod.addComment1("Global Read MXSB")
+            imod.add(writer.codes.dtlsM0UpdateMXSB)
+            imod.add(writer.codes.globalReadMXSB)
+            imod.addComment1("Global Read B")
+            imod.add(writer.codes.dtlsM0UpdateB)
+            imod.add(writer.codes.globalReadB)
+            if tdmLoadMod.itemsSize() > 0:
+                deferMod = writer.codes.perIterGlobalRead[tdmLoadIter].add(Module())
+                deferMod.addComment1("Global Read A (TDM deferred after LDS swap)")
+                deferMod.add(tdmLoadMod)
+        else:
+            imod.addComment1("Global Read A")
+            imod.add(writer.codes.dtlsM0UpdateA)
+            imod.add(writer.codes.globalReadA)
+            imod.addComment1("Global Read MXSA")
+            imod.add(writer.codes.dtlsM0UpdateMXSA)
+            imod.add(writer.codes.globalReadMXSA)
+            imod.addComment1("Global Read MXSB")
+            imod.add(writer.codes.dtlsM0UpdateMXSB)
+            imod.add(writer.codes.globalReadMXSB)
+            imod.addComment1("Global Read B")
+            imod.add(writer.codes.dtlsM0UpdateB)
+            imod.add(writer.codes.globalReadB)
+    else:
+        # put everything in the header (original behavior for PGR=0/1):
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadA)
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSA)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA)
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSB)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
+        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
+        writer.codes.unrollLoopHeader.add(globalReadIncACode)
+        writer.codes.unrollLoopHeader.add(globalReadIncBCode)
     # Dummy
     itemsGRToSchedLater = []
     lastLoadIter = 0
@@ -476,6 +578,8 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
 
 def prepareGRInstToSched(writer, kernel, isNGLL):
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadA.header)
+    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA.header)
+    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadB.header)
 
     # Add all loads from middle as individual schedulable items
@@ -486,9 +590,13 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
     elif kernel["PrefetchGlobalRead"] >= 2:
         itemsGRToSched =  []
         itemsGRToSchedLater = list(writer.codes.globalReadA.middle.items()) + \
+                         list(writer.codes.globalReadMXSA.middle.items()) + \
+                         list(writer.codes.globalReadMXSB.middle.items()) + \
                          list(writer.codes.globalReadB.middle.items())
     else:
         itemsGRToSched =  list(writer.codes.globalReadA.middle.items()) + \
+                        list(writer.codes.globalReadMXSA.middle.items()) + \
+                        list(writer.codes.globalReadMXSB.middle.items()) + \
                         list(writer.codes.globalReadB.middle.items())
         itemsGRToSchedLater = []
 
@@ -614,6 +722,10 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
     # insert dtlsM0UpdateACode dtlsM0UpdateBCode code
     if writer.codes.globalReadA.middle.items():
         writer.codes.globalReadA.middle.getItem(0).add(writer.codes.dtlsM0UpdateA, 0)
+    if writer.codes.globalReadMXSA.middle.items():
+        writer.codes.globalReadMXSA.middle.getItem(0).add(writer.codes.dtlsM0UpdateMXSA, 0)
+    if writer.codes.globalReadMXSB.middle.items():
+        writer.codes.globalReadMXSB.middle.getItem(0).add(writer.codes.dtlsM0UpdateMXSB, 0)
     if writer.codes.globalReadB.middle.items():
         writer.codes.globalReadB.middle.getItem(0).add(writer.codes.dtlsM0UpdateB, 0)
 
@@ -640,6 +752,8 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
     assert not itemsGRToSched # should have scheduled everything already, itemsGRToSched should be empty
 
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadA.footer)
+    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSA.footer)
+    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSB.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadB.footer)
     return lastLoadIter
 
@@ -663,34 +777,76 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
             "1wait for global read"))
         imod.addComment1("local write A")
         imod.add(writer.codes.localWriteA)
+        imod.addComment1("local write MXSA")
+        imod.add(writer.codes.localWriteMXSA)
+        imod.addComment1("local write MXSB")
+        imod.add(writer.codes.localWriteMXSB)
         imod.addComment1("local write B")
         imod.add(writer.codes.localWriteB)
+
+        if kernel["PrefetchGlobalRead"] == 2 and writer.codes.perIterLocalWriteCodeNGLL is not None: # TODO: check condition
+            # do we need a module here? That would prevent these from being scheduled
+            imod = writer.codes.perIterLocalWriteCodeNGLL[localWriteEndIter][1].add(Module())
+            imod.add(
+                writer._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, \
+                "1wait for global read"))
+            imod.addComment1("local write A")
+            imod.add(writer.codes.localWriteA)
+            imod.addComment1("local write MXSA")
+            imod.add(writer.codes.localWriteMXSA)
+            imod.addComment1("local write MXSB")
+            imod.add(writer.codes.localWriteMXSB)
+            imod.addComment1("local write B")
+            imod.add(writer.codes.localWriteB)
 
 def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
     #################
     # create a plan #
     #################
-    itemsLWToSched = list(writer.codes.localWriteA.items()) + list(writer.codes.localWriteB.items())
+    itemsLWToSched = list(writer.codes.localWriteA.items()) + \
+                     list(writer.codes.localWriteMXSA.items()) + \
+                     list(writer.codes.localWriteMXSB.items()) + \
+                     list(writer.codes.localWriteB.items())
     numDummy = 0
     insertDummyTop = False
     if kernel["PrefetchGlobalRead"] >= 2:
         # PrefetchGlobalRead + DirectToLds/DirectToVgpr case, need to add dummy list to insert global read
-        lenA = len(list(writer.codes.globalReadA.middle.items()))
-        lenB = len(list(writer.codes.globalReadB.middle.items()))
-        lenAFooter = len(list(writer.codes.globalReadA.footer.items()))
-        lenBFooter = len(list(writer.codes.globalReadB.footer.items()))
+        lenA    = len(list(writer.codes.globalReadA.middle.items()))
+        lenMXSA = len(list(writer.codes.globalReadMXSA.middle.items()))
+        lenMXSB = len(list(writer.codes.globalReadMXSB.middle.items()))
+        lenB    = len(list(writer.codes.globalReadB.middle.items()))
+
+        lenAFooter    = len(list(writer.codes.globalReadA.footer.items()))
+        lenMXSAFooter = len(list(writer.codes.globalReadMXSA.footer.items()))
+        lenMXSBFooter = len(list(writer.codes.globalReadMXSB.footer.items()))
+        lenBFooter    = len(list(writer.codes.globalReadB.footer.items()))
+
         # A/B swap check for DTV. NGLL case, no swap
         swapped = writer.isSwapGlobalReadOrderForDtvOrDtl(kernel) and (not isNGLL)
         insertDummyTop = True
         if swapped:
           # swap A and B (SwapGlobalReadOrder case, the actual content is swapped (B is in globalReadACode). Need adjustment)
           lenA, lenB = lenB, lenA
+          lenMXSA, lenMXSB = lenMXSB, lenMXSA
+
         if kernel["DirectToLdsA"] or kernel["DirectToVgprA"]:
             if kernel["DirectToLdsA"]:
               # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
               lenA -= lenAFooter
             numDummy += lenA
             insertDummyTop = (not swapped)
+        if kernel["ProblemType"]["MXBlockA"] and (kernel["DirectToLdsMXSA"] or kernel["DirectToVgprMXSA"]):
+            if kernel["DirectToLdsMXSA"]:
+              # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
+              lenMXSA -= lenMXSAFooter
+            numDummy += lenMXSA
+            insertDummyTop = (not swapped)
+        if kernel["ProblemType"]["MXBlockB"] and (kernel["DirectToLdsMXSB"] or kernel["DirectToVgprMXSB"]):
+            if kernel["DirectToLdsMXSB"]:
+              # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
+              lenMXSB -= lenMXSBFooter
+            numDummy += lenMXSB
+            insertDummyTop = swapped
         if kernel["DirectToLdsB"] or kernel["DirectToVgprB"]:
             if kernel["DirectToLdsB"]:
               # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
@@ -760,7 +916,13 @@ def assignLWSchedIndexDefault(writer, kernel, numLocalWritesPerSched, localWrite
     return startIter
 
 def getReadsToWait(writer, kernel):
-    readsToWait = len(list(writer.codes.localWriteA.items())) + len(list(writer.codes.localWriteB.items()))
+    lwAcnt = len(list(writer.codes.localWriteA.items())) + \
+             countDSStoreB192(writer.codes.localWriteA)
+    lwBcnt = len(list(writer.codes.localWriteB.items())) + \
+             countDSStoreB192(writer.codes.localWriteB)
+    lwMXAcnt = len(list(writer.codes.localWriteMXSA.items()))
+    lwMXBcnt = len(list(writer.codes.localWriteMXSB.items()))
+    readsToWait = lwAcnt + lwBcnt + lwMXAcnt + lwMXBcnt
     readsToWaitNGLL = readsToWait
     return readsToWait, readsToWaitNGLL
 
@@ -852,8 +1014,13 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             # this happens in some transpose cases.  Here the first write needs to wait
                             # for the associated global read to finish, then the remaining writes can flow
                             # TODO - can schedule these writes across iters, should figure this out above
-                            readsToWait = readsToWait - 1
-                            readsToWaitNGLL = readsToWaitNGLL - 1
+                            # A ds_store_b128 + ds_store_b64 pair (counted as one B192-equivalent by
+                            # countDSStoreB192) corresponds to 2 physical VMEM loads. Each extra physical
+                            # load beyond the first must also decrement readsToWait so that the generated
+                            # s_wait_loadcnt value correctly tracks the outstanding load count.
+                            numPhysLoads = 1 + countDSStoreB192(item)
+                            readsToWait = readsToWait - numPhysLoads
+                            readsToWaitNGLL = readsToWaitNGLL - numPhysLoads
                             imodList.append(SWaitCnt(vlcnt=readsToWait, \
                                 comment="wait for global read before writing to local"))
                             imodNGLLList.append(SWaitCnt(vlcnt=readsToWaitNGLL, \
@@ -864,8 +1031,11 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             if hasHolder:
                                 readsToWaitAdjust = readsToWait
                                 if kernel["NoLdsWriteCode"]:
-                                    # DirectToLds for both A and B case, use  the number of global read for both A and B as vlcnt (only for PGR=1)
-                                    readsToWaitAdjust = len(list(writer.codes.globalReadA.middle.items())) + len(list(writer.codes.globalReadB.middle.items()))
+                                    # DirectToLds for both A and B case, use  the number of global read for both A and B as vmcnt (only for PGR=1)
+                                    readsToWaitAdjust = len(list(writer.codes.globalReadA.middle.items())) + \
+                                                        len(list(writer.codes.globalReadMXSA.middle.items())) + \
+                                                        len(list(writer.codes.globalReadMXSB.middle.items())) + \
+                                                        len(list(writer.codes.globalReadB.middle.items()))
                                 for wc in wcList:
                                     replaceHolder(wc, (readsToWaitAdjust))
                 if itemsLWToSchedIndexForSplitDS in additionalIndexList:
@@ -904,7 +1074,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             itemGR = itemsGRToSchedLater[0]
                             readsInc = countGlobalRead(itemGR)
                             reads = reads + readsInc
-                            if reads > readCnt:
+                            if reads > readCnt * readsInc:
                                 break
                             if kernel["ExpertSchedulingMode"] > 0:
                                 imodList.append(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))

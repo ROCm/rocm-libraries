@@ -6771,7 +6771,7 @@ void host_gtsv_interleaved_batch_lu(rocsparse_int m,
 #endif
         for(rocsparse_int j = 0; j < batch_count; j++)
         {
-            if(p[batch_count * i + j] <= i) // no pivoting occured, sum up result
+            if(p[batch_count * i + j] <= i) // no pivoting occurred, sum up result
             {
                 T temp = static_cast<T>(0);
                 for(rocsparse_int s = start[j]; s < i; s++)

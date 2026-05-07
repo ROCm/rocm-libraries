@@ -6,6 +6,21 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ## (Unreleased) hipSOLVER
 
 ### Added
+
+* Added compatibility-only functions
+  * geev
+    * hipsolverDnXgeev_bufferSize
+    * hipsolverDnXgeev
+  * syevBatched
+    * hipsolverDnXsyevBatched_bufferSize
+    * hipsolverDnXsyevBatched
+  * syevd
+    * hipsolverDnXsyevd_bufferSize
+    * hipsolverDnXsyevd
+  * sytrs
+    * hipsolverDnXsytrs_bufferSize
+    * hipsolverDnXsytrs
+
 ### Changed
 ### Removed
 ### Optimized

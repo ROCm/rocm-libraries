@@ -84,6 +84,8 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
   c_equal_d: [false, true]
+  batch_mode: [0, 1]
+  batch_count: [1, 3]
 
 # FP16 I/O + FP32 compute: full-matrix probe for internal FP32 accumulation (rocBLAS-style near-max A, ±2 pairs in B).
 # Mirrors matmul_integer_exact_* matrix_size / category / batch / gpu_arch; NN only (probe does not support transposes).
@@ -674,7 +676,7 @@ Tests:
   #bias_vector: [0, 1]
   bias_type: bf16_r
   unit_check: 1
-  gpu_arch: '950'
+  gpu_arch: '(950|1250)'
 
 - name: matmul_f8_bf8_dst_bf16
   category: pre_checkin
@@ -691,7 +693,7 @@ Tests:
   #bias_vector: [0, 1]
   bias_type: bf16_r
   unit_check: 1
-  gpu_arch: '950'
+  gpu_arch: '(950|1250)'
 
 - name: matmul_f8_dst_bf16
   category: pre_checkin
@@ -708,7 +710,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: [f32_r, bf16_r]
   unit_check: 1
-  gpu_arch: '950'
+  gpu_arch: '(950|1250)'
 
 - name: matmul_f8_bf8_dst_f16
   category: pre_checkin
@@ -725,7 +727,7 @@ Tests:
   #bias_vector: [0, 1]
   bias_type: bf16_r
   unit_check: 1
-  gpu_arch: '950'
+  gpu_arch: '(950|1250)'
 
 - name: matmul_bf16_fp32dst
   category: quick
@@ -738,7 +740,20 @@ Tests:
     - { M:  512, N:  512, K:  512 }
     - { M:  960, N: 1024, K: 1024 }
     - { M: 1024, N: 1024, K: 1024 }
-  gpu_arch: '9(0a|42)'
+  gpu_arch: '(90a|942|1250)'
+
+- name: matmul_bf16_fp32dst_edge
+  category: quick
+  function:
+    matmul: *hpa_half_bf16_fp32dst_precision
+  transA_transB: *deepbench_transA_transB_range
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:  1, N:  1, K:  1 }
+    - { M:  127, N:  127, K:  127 }
+    - { M:  128, N:  128, K:  128 }
+  gpu_arch: '1250'
 
 - name: matmul_small2
   category: pre_checkin
@@ -986,7 +1001,6 @@ Tests:
   category: pre_checkin
   function:
     matmul: *hpa_half_precisions_fp_16_32_dst
-  matrix_size:
   M: [128, 129]
   N: [128, 129]
   K: [128, 129]
@@ -1236,7 +1250,7 @@ Tests:
   bias_type: bf16_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 - name: matmul_f8_bf8_dst_fp16_gfx12
   category: pre_checkin
@@ -1253,7 +1267,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 - name: matmul_f8_bf8_dst_bf16_gfx12
   category: pre_checkin
@@ -1270,7 +1284,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: bf16_r
   unit_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 #scale ab vector//no solution
 #  scaleA: [2]
@@ -1293,7 +1307,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 - name: matmul_real_1b_dst_f8_SCDNotInt_gfx12
   category: pre_checkin
@@ -1312,7 +1326,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 - name: matmul_one_real_precisions_1b_gfx12
   category: quick
@@ -1322,7 +1336,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: [ 0.0, 1.0 ]
   beta: [ 0.0, 2.0 ]
-  gpu_arch: '120[0-1]'
+  gpu_arch: '(120[0-1]|1250)'
 
 - name: matmul_one_integer_precisions_i8_gfx12
   category: quick
@@ -2101,7 +2115,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch: '9(42|50)'
+  gpu_arch: '(9(42|50)|1250)'
 
 - name: matmul_gemm_f32_fast_bf16
   category: pre_checkin
@@ -2118,6 +2132,17 @@ Tests:
   norm_check: 1
   unit_check: 0
   gpu_arch: '950'
+
+- name: matmul_one_double
+  category: quick
+  function:
+    matmul: *double_precision
+  matrix_size: *one_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  unit_check: 1
+  gpu_arch: '1250'
 
 - name: matmul_gemm_double
   category: pre_checkin

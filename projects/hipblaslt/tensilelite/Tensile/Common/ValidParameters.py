@@ -83,7 +83,10 @@ def makeValidWorkGroups():
     return validWorkGroups
 
 def makeValidWMMA():
-    return [[16, 16, 16, 1]]
+    return [[16, 16, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]]
+
+def makeValidSWMMAC():
+    return [[16, 16, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1]]
 
 @lru_cache
 def makeValidMFMA():
@@ -158,7 +161,7 @@ def makeValidSMFMA():
     validSMFMA["F8B8N"] = validSMFMA["F8N"]
     validSMFMA["B8F8N"] = validSMFMA["F8N"]
     validSMFMA["_format9"] = []
-    for SMFMA in [validSMFMA["H"], validSMFMA["B"], validSMFMA["4xi8"], validSMFMA["F8N"]]:
+    for SMFMA in [validSMFMA["H"], validSMFMA["B"], validSMFMA["4xi8"], validSMFMA["F8N"], makeValidSWMMAC()]:
         for MI in SMFMA:
             for bm in range(int(math.log(MI[3], 2)) + 1):
                 for tt0 in range(1, validTT + 1):
@@ -174,6 +177,7 @@ def makeValidSMFMA():
 def makeValidMatrixInstructions():
     mfma = makeValidMFMA()
     smfma = makeValidSMFMA()
+    wmma = makeValidWMMA()
     validMatrixInstructions = (
         [[], [-1]]
         + mfma["H"]
@@ -185,6 +189,7 @@ def makeValidMatrixInstructions():
         + smfma["H"]
         + smfma["B"]
         + smfma["4xi8"]
+        + wmma
     )
     return validMatrixInstructions + mfma["_format9"] + smfma["_format9"]
 
@@ -345,6 +350,8 @@ validParameters = { # we need to make sure this matches develop
     # Assembly only
     "DirectToVgprA": [False, True],
     "DirectToVgprB": [False, True],
+    "DirectToVgprMXSA": [False, True],
+    "DirectToVgprMXSB": [False, True],
     "DirectToVgprSparseMetadata": [False, True],
     # B address interleave (restricted): non-contiguous tile columns for TN/NN-like B (TLUB == False),
     # with runtime G chosen as the largest power-of-two factor of (N/MT1), capped by LVCB.
@@ -454,7 +461,7 @@ validParameters = { # we need to make sure this matches develop
     #   (since C matrix is always coalesced in Free0 index direction and this assertion guarantees the index element multiple)
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16],
+    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32],
     # Kernel generator will assume that the FreeIndex[1] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[1] is usually letter "J"
@@ -462,7 +469,7 @@ validParameters = { # we need to make sure this matches develop
     # Optimizations enabled by AssertFree1ElementMultiple>1:
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16],
+    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32],
     # Address-interleave restriction:
     # If >0, require tiles1=(Free1Size / MT1) to have lowbit(tiles1)>1 (i.e. G>1).
     # This matches the kernel's initBInterleaveG logic:
@@ -612,14 +619,14 @@ validParameters = { # we need to make sure this matches develop
     "MaxOccupancy": list(
         range(1, 40 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
-    "MaxLDS": [-1, 65536, 163840],
+    "MaxLDS": [-1, 65536, 163840, 327680],
     "WorkGroup": makeValidWorkGroups(),  # ( wg0 x wg1 x LocalSplitU ) dimensions of the workgroup which will operate on a tile and share lds
     # ThreadTile: ( tt0 x tt1 ) dimensions of the C tile that each thread works on,
     # TT=4 and VW=4 means a thread will work on a tight 4x4 tile of C, where VW=1 means the tile will work on 16 spread out values
     # Generally, the VW determines the consecutive a WI will work on, then it will skip ahead SG0*VW elements to get to the next row of VGPR inputs
     "ThreadTile": validThreadTiles,
     "MacroTile": validMacroTiles,  # MT0 = wg0*tt0, MT1 = wg1*tt1
-    "WavefrontSize": [32, 64],
+    "WavefrontSize": [-1, 32, 64],  # -1 = auto-detect from ISA archCaps["HasWave32"]
     # MatrixInstruction: (M x N x K x B)
     # XDLOPS tile definition, only valid for gfx908, gfx90a
     # MxNxKxB specifies matrix instruction variants
@@ -761,8 +768,8 @@ validParameters = { # we need to make sure this matches develop
     # NOTE: for input bpe=32, max GRVW is 4  (to fit dwordx4) (FP32), min GRVW is 1 (dword)
     #                 bpe=16, max GRVW is 8  (to fit dwordx4) (FP16), min GRVW is 2 (dword)
     #                 bpe=8,  max GRVW is 16 (to fit dwordx4) (INT8), min GRVW is 4 (dword)
-    "GlobalReadVectorWidthA": [-2, -1, 1, 2, 3, 4, 6, 8, 16],
-    "GlobalReadVectorWidthB": [-2, -1, 1, 2, 3, 4, 6, 8, 16],
+    "GlobalReadVectorWidthA": [-2, -1, 1, 2, 3, 4, 6, 8, 16, 32],
+    "GlobalReadVectorWidthB": [-2, -1, 1, 2, 3, 4, 6, 8, 16, 32],
     # Controls desired width (#elements) for loads from LDS -> VGPR.
     # -1 : Set LocalReadVectorWidth =  VectorWidth
     #  1 cannot be used for half type.
@@ -772,7 +779,9 @@ validParameters = { # we need to make sure this matches develop
     # NOTE: for input bpe=32, max LRVW is 4  (to fit ds_read_b128) (FP32)
     #                 bpe=16, max LRVW is 8  (to fit ds_read_b128) (FP16)
     #                 bpe=8,  max LRVW is 16 (to fit ds_read_b128) (INT8)
-    "LocalReadVectorWidth": [-1, 1, 2, 4, 8, 16],
+    "LocalReadVectorWidth": [-1, 1, 2, 4, 8, 16, 32],
+    "LocalReadVectorWidthA": [-1, 1, 2, 4, 8, 16, 32],
+    "LocalReadVectorWidthB": [-1, 1, 2, 4, 8, 16, 32],
     # threads should read/write/operate on this many contiguous elements from the C matrix.
     # If VW=4 then thread0 will process 4 consec C elements, then thread1 next 4, etc.
     # If the ThreadTile is > VectorWidth then thread0 will next operate on the 4 elements in C at (4*NumThreads)
@@ -819,14 +828,18 @@ validParameters = { # we need to make sure this matches develop
     # -1 means use same padding as the VectorWidth if TLU=0 else 0.  (Padding only helps when transpose is required)
     # With MatrixInstruciton: -1 means max(GRVW,MIInput) if TLU=0
     "LdsPadA": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadMXSA": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
     "LdsPadB": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadMXSB": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
     "LdsPadMetadata": [-1, 0, 1, 2, 3, 4, 8],
     # Padding boundary for LDS. defines block-size for pad insertion. for every 'LdsBlockSizePerPad' bytes, LDS padding (pad value from LdsPad parameter)
     # is added (readOffset aware of the pad and adjusts offset value based on this parameter value).
     # Only support LdsBlockSizePerPad >= unrollDepth * BPE
     # 0 means disable LdsBlockSizePerPad
     "LdsBlockSizePerPadA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadMXSA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     "LdsBlockSizePerPadB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadMXSB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     "LdsBlockSizePerPadMetadata": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     # Transpose LDS format. Local store in coalesced dimension , same as optimized global fetch dimension . applicable only in TLU=0 case for miSIMD(s)
     # -1 : keep LDS layout same as global fetch dimension for both A and B
@@ -845,7 +858,9 @@ validParameters = { # we need to make sure this matches develop
     "NonTemporalD": list(range(0, 8)),
     "NonTemporalC": list(range(0, 8)),
     "NonTemporalA": list(range(0, 8)),
+    "NonTemporalMXSA": list(range(0,8)),
     "NonTemporalB": list(range(0, 8)),
+    "NonTemporalMXSB": list(range(0,8)),
     "NonTemporalWS": list(range(0, 8)),
     "NonTemporalMetadata": list(range(0, 8)),
     "NonTemporal": list(range(-1, 8)),
@@ -916,6 +931,9 @@ validParameters = { # we need to make sure this matches develop
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
     "AdaptiveGemm": [0, 1],
+    # 0  : MB and MBSK generate different assembly code
+    # 1  : MB and MBSK generate same assembly code
+    "AdaptiveGemmGSUA": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
     "ExtraLatencyForLR":          list(range(0,17,2)) + list(range(-80,0,10)),
@@ -938,7 +956,13 @@ validParameters = { # we need to make sure this matches develop
     #  0: Do prefetch for local read only
     #  1: Do prefetch for pack code
     # CMS (UseCustomMainLoopSchedule) case, this is internally set and setting it from yaml will not change CMS config
-    "UsePLRPack": [0,1]
+    "UsePLRPack": [0,1],
+    # Enable tensor data mover for VM -> LDS
+    # 0: Disable
+    # 1: Use TDM for A
+    # 2: Use TDM for B
+    # 3: Use TDM for both A and B
+    "TDMInst": [0, 1, 2, 3]
 }
 
 newMIValidParameters = {

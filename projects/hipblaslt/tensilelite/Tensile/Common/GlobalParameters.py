@@ -178,6 +178,8 @@ globalParameters["DataInitTypeScaleC"] = 2
 globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
+globalParameters["DataInitTypeMXSA"] = 1
+globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -306,6 +308,44 @@ globalParameters["DisableAsmComments"] = False  # Set to True to disable assembl
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
+# StinkyTofu optimization level
+# None: Disable StinkyTofu feature (set null in yaml file)
+# 0: No optimization
+# 1: Basic optimization
+# 2: Full optimization
+globalParameters["StinkyTofuOptLevel"] = 0
+
+# StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
+# 0: Silent (default)
+# 1: Pass names + AnalysisManager cache activity to stdout
+# 2: Initial IR + IR after each pass to per-PM files:
+#    kernel-OuterPM-{before,after}_passes.txt     (outer PM)
+#    <groupName>-{before,after}_passes.txt        (single-region adapter)
+#    <group1>+<group2>-{before,after}_passes.txt  (multi-region adapter)
+#    wholeKernel-{before,after}_passes.txt        (whole-kernel adapter)
+globalParameters["StinkyTofuDebugLevel"] = 0
+
+# StinkyTofu selective pass IR dump (applies per-PM, same file naming as DebugLevel 2)
+# Comma-separated pass names to print IR before/after (case-sensitive)
+# e.g. "CFG Builder" or "RedundantMovEliminationPass, StinkyDAGSchedulerPass"
+# Unmatched pass names are silently ignored
+globalParameters["StinkyTofuPrintBeforePass"] = ""
+globalParameters["StinkyTofuPrintAfterPass"] = ""
+
+# StinkyTofu internal pass debug logging & instruction-order snapshot (global — applies to all PMs)
+# Comma-separated pass names (case-sensitive) to:
+#   1. Enable PASS_DEBUG output for the listed passes
+#   2. Record before/after instruction order JSON when StinkyTofuPassOrderSnapshotJson is set
+# e.g. "StinkyDAGSchedulerPass"
+# Unmatched pass names are silently ignored
+globalParameters["StinkyTofuDebugPass"] = ""
+
+# Before/after instruction-order JSON for tools/stinkytofu-analysis (empty = disabled).
+# When set, PassManager records snapshots for passes listed in StinkyTofuDebugPass
+# (defaults to StinkyDAGSchedulerPass only when StinkyTofuDebugPass is empty).
+# Note: multiple kernels may overwrite the same file unless you use a unique path per build.
+globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -341,10 +381,14 @@ defaultBenchmarkCommonParameters = [
     {"InnerUnroll": [1]},
     {"KernelLanguage": ["Assembly"]},
     {"LdsPadA": [-1]},
+    {"LdsPadMXSA": [ 0 ] },
     {"LdsPadB": [-1]},
+    {"LdsPadMXSB": [ 0 ] },
     {"LdsPadMetadata": [0]},
     {"LdsBlockSizePerPadA": [-1]},
+    {"LdsBlockSizePerPadMXSA": [ 0 ] },
     {"LdsBlockSizePerPadB": [-1]},
+    {"LdsBlockSizePerPadMXSB": [ 0 ] },
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
@@ -357,6 +401,8 @@ defaultBenchmarkCommonParameters = [
     {"GlobalReadVectorWidthA": [-1]},
     {"GlobalReadVectorWidthB": [-1]},
     {"LocalReadVectorWidth": [-1]},
+    {"LocalReadVectorWidthA": [-1]},
+    {"LocalReadVectorWidthB": [-1]},
     {"WaveSeparateGlobalReadA": [0]},
     {"WaveSeparateGlobalReadB": [0]},
     {"WaveSeparateGlobalReadMetadata": [0]},
@@ -377,6 +423,8 @@ defaultBenchmarkCommonParameters = [
     {"BufferStore": [True]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
+    {"DirectToVgprMXSA": [False]},
+    {"DirectToVgprMXSB": [False]},
     {"DirectToVgprSparseMetadata": [False]},
     # Restricted address remap features (default off unless explicitly enabled in the solution config):
     {"BAddrInterleave": [False]},
@@ -412,7 +460,7 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupMappingXCC": [1]},
     {"WorkGroupMappingXCCGroup": [-1]},
     {"ThreadTile": [[4, 4]]},
-    {"WavefrontSize": [64]},
+    {"WavefrontSize": [-1]},
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
     {"DepthU": [-1]},
@@ -420,7 +468,9 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporalD": [0]},
     {"NonTemporalC": [0]},
     {"NonTemporalA": [0]},
+    {"NonTemporalMXSA": [ 0 ] },
     {"NonTemporalB": [0]},
+    {"NonTemporalMXSB": [ 0 ] },
     {"NonTemporalWS": [0]},
     {"NonTemporalMetadata": [0]},
     {"NonTemporal": [-1]},
@@ -452,6 +502,7 @@ defaultBenchmarkCommonParameters = [
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
+    {"AdaptiveGemmGSUA": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
@@ -459,7 +510,8 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
     {"MinGRIncPerMfma": [-1]},
-    {"UsePLRPack": [0]}
+    {"UsePLRPack": [0]},
+    {"TDMInst": [0]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter

@@ -65,15 +65,16 @@ std::tuple<T1, T1, T1> make_unit_stride(const std::tuple<T1, T1, T1>& whole_leng
 // of the given dimensions.
 
 template <typename Tfloat, typename Tsize>
-static void impose_hermitian_symmetry_interleaved_1D(std::vector<hostbuf>&     vals,
-                                                     const std::vector<Tsize>& length,
-                                                     const std::vector<Tsize>& istride,
-                                                     const Tsize               idist,
-                                                     const Tsize               nbatch)
+static void impose_hermitian_symmetry_interleaved_1D(std::vector<hostbuf>&      vals,
+                                                     const std::vector<size_t>& ioffset,
+                                                     const std::vector<Tsize>&  length,
+                                                     const std::vector<Tsize>&  istride,
+                                                     const Tsize                idist,
+                                                     const Tsize                nbatch)
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ibatch * idist;
+        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ioffset[0] + ibatch * idist;
 
         data[0].y = 0.0;
 
@@ -86,6 +87,7 @@ static void impose_hermitian_symmetry_interleaved_1D(std::vector<hostbuf>&     v
 
 template <typename Tfloat, typename Tsize>
 static void impose_hermitian_symmetry_planar_1D(std::vector<hostbuf>&     vals,
+                                                const std::vector<Tsize>& ioffset,
                                                 const std::vector<Tsize>& length,
                                                 const std::vector<Tsize>& istride,
                                                 const Tsize               idist,
@@ -93,7 +95,7 @@ static void impose_hermitian_symmetry_planar_1D(std::vector<hostbuf>&     vals,
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data_imag = ((Tfloat*)vals[1].data()) + ibatch * idist;
+        auto data_imag = ((Tfloat*)vals[1].data()) + ioffset[1] + ibatch * idist;
 
         data_imag[0] = 0.0;
 
@@ -106,6 +108,7 @@ static void impose_hermitian_symmetry_planar_1D(std::vector<hostbuf>&     vals,
 
 template <typename Tfloat, typename Tsize>
 static void impose_hermitian_symmetry_interleaved_2D(std::vector<hostbuf>&     vals,
+                                                     const std::vector<Tsize>& ioffset,
                                                      const std::vector<Tsize>& length,
                                                      const std::vector<Tsize>& istride,
                                                      const Tsize               idist,
@@ -113,7 +116,7 @@ static void impose_hermitian_symmetry_interleaved_2D(std::vector<hostbuf>&     v
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ibatch * idist;
+        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ioffset[0] + ibatch * idist;
 
         data[0].imag(0.0);
 
@@ -150,6 +153,7 @@ static void impose_hermitian_symmetry_interleaved_2D(std::vector<hostbuf>&     v
 
 template <typename Tfloat, typename Tsize>
 static void impose_hermitian_symmetry_planar_2D(std::vector<hostbuf>&     vals,
+                                                const std::vector<Tsize>& ioffset,
                                                 const std::vector<Tsize>& length,
                                                 const std::vector<Tsize>& istride,
                                                 const Tsize               idist,
@@ -157,8 +161,8 @@ static void impose_hermitian_symmetry_planar_2D(std::vector<hostbuf>&     vals,
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data_real = ((Tfloat*)vals[0].data()) + ibatch * idist;
-        auto data_imag = ((Tfloat*)vals[1].data()) + ibatch * idist;
+        auto data_real = ((Tfloat*)vals[0].data()) + +ioffset[0] + ibatch * idist;
+        auto data_imag = ((Tfloat*)vals[1].data()) + +ioffset[1] + ibatch * idist;
 
         data_imag[0] = 0.0;
 
@@ -198,6 +202,7 @@ static void impose_hermitian_symmetry_planar_2D(std::vector<hostbuf>&     vals,
 
 template <typename Tfloat, typename Tsize>
 static void impose_hermitian_symmetry_interleaved_3D(std::vector<hostbuf>&     vals,
+                                                     const std::vector<Tsize>& ioffset,
                                                      const std::vector<Tsize>& length,
                                                      const std::vector<Tsize>& istride,
                                                      const Tsize               idist,
@@ -205,7 +210,7 @@ static void impose_hermitian_symmetry_interleaved_3D(std::vector<hostbuf>&     v
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ibatch * idist;
+        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ioffset[0] + ibatch * idist;
 
         data[0].imag(0.0);
 
@@ -341,6 +346,7 @@ static void impose_hermitian_symmetry_interleaved_3D(std::vector<hostbuf>&     v
 
 template <typename Tfloat, typename Tsize>
 static void impose_hermitian_symmetry_planar_3D(std::vector<hostbuf>&     vals,
+                                                const std::vector<Tsize>& ioffset,
                                                 const std::vector<Tsize>& length,
                                                 const std::vector<Tsize>& istride,
                                                 const Tsize               idist,
@@ -348,8 +354,8 @@ static void impose_hermitian_symmetry_planar_3D(std::vector<hostbuf>&     vals,
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data_real = ((Tfloat*)vals[0].data()) + ibatch * idist;
-        auto data_imag = ((Tfloat*)vals[1].data()) + ibatch * idist;
+        auto data_real = ((Tfloat*)vals[0].data()) + ioffset[0] + ibatch * idist;
+        auto data_imag = ((Tfloat*)vals[1].data()) + ioffset[1] + ibatch * idist;
 
         data_imag[0] = 0.0;
 
@@ -505,17 +511,18 @@ static void impose_hermitian_symmetry_planar_3D(std::vector<hostbuf>&     vals,
 }
 
 template <typename Tfloat, typename Tint1>
-static void generate_random_interleaved_data(std::vector<hostbuf>& input,
-                                             const Tint1&          whole_length,
-                                             const Tint1&          whole_stride,
-                                             const size_t          idist,
-                                             const size_t          nbatch,
-                                             const Tint1           field_lower,
-                                             const size_t          field_lower_batch,
-                                             const Tint1           field_contig_stride,
-                                             const size_t          field_contig_dist)
+static void generate_random_interleaved_data(std::vector<hostbuf>&      input,
+                                             const std::vector<size_t>& ioffset,
+                                             const Tint1&               whole_length,
+                                             const Tint1&               whole_stride,
+                                             const size_t               idist,
+                                             const size_t               nbatch,
+                                             const Tint1                field_lower,
+                                             const size_t               field_lower_batch,
+                                             const Tint1                field_contig_stride,
+                                             const size_t               field_contig_dist)
 {
-    auto   idata      = (rocfft_complex<Tfloat>*)input[0].data();
+    auto   idata      = (rocfft_complex<Tfloat>*)input[0].data() + ioffset[0];
     size_t i_base     = 0;
     auto   partitions = partition_rowmajor(whole_length);
     for(unsigned int b = 0; b < nbatch; b++, i_base += idist)
@@ -546,13 +553,14 @@ static void generate_random_interleaved_data(std::vector<hostbuf>& input,
 }
 
 template <typename Tfloat, typename Tint1>
-static void generate_interleaved_data(std::vector<hostbuf>& input,
-                                      const Tint1&          whole_length,
-                                      const Tint1&          whole_stride,
-                                      const size_t          idist,
-                                      const size_t          nbatch)
+static void generate_interleaved_data(std::vector<hostbuf>&      input,
+                                      const std::vector<size_t>& ioffset,
+                                      const Tint1&               whole_length,
+                                      const Tint1&               whole_stride,
+                                      const size_t               idist,
+                                      const size_t               nbatch)
 {
-    auto   idata       = (rocfft_complex<Tfloat>*)input[0].data();
+    auto   idata       = (rocfft_complex<Tfloat>*)input[0].data() + ioffset[0];
     size_t i_base      = 0;
     auto   partitions  = partition_rowmajor(whole_length);
     auto   unit_stride = make_unit_stride(whole_length);
@@ -583,18 +591,19 @@ static void generate_interleaved_data(std::vector<hostbuf>& input,
 }
 
 template <typename Tfloat, typename Tint1>
-static void generate_random_planar_data(std::vector<hostbuf>& input,
-                                        const Tint1&          whole_length,
-                                        const Tint1&          whole_stride,
-                                        const size_t          idist,
-                                        const size_t          nbatch,
-                                        const Tint1           field_lower,
-                                        const size_t          field_lower_batch,
-                                        const Tint1           field_contig_stride,
-                                        const size_t          field_contig_dist)
+static void generate_random_planar_data(std::vector<hostbuf>&      input,
+                                        const std::vector<size_t>& ioffset,
+                                        const Tint1&               whole_length,
+                                        const Tint1&               whole_stride,
+                                        const size_t               idist,
+                                        const size_t               nbatch,
+                                        const Tint1                field_lower,
+                                        const size_t               field_lower_batch,
+                                        const Tint1                field_contig_stride,
+                                        const size_t               field_contig_dist)
 {
-    auto   ireal      = (Tfloat*)input[0].data();
-    auto   iimag      = (Tfloat*)input[1].data();
+    auto   ireal      = (Tfloat*)input[0].data() + ioffset[0];
+    auto   iimag      = (Tfloat*)input[1].data() + ioffset[1];
     size_t i_base     = 0;
     auto   partitions = partition_rowmajor(whole_length);
     for(unsigned int b = 0; b < nbatch; b++, i_base += idist)
@@ -624,15 +633,16 @@ static void generate_random_planar_data(std::vector<hostbuf>& input,
 }
 
 template <typename Tfloat, typename Tint1>
-static void generate_planar_data(std::vector<hostbuf>& input,
-                                 const Tint1&          whole_length,
-                                 const Tint1&          whole_stride,
-                                 const size_t          idist,
-                                 const size_t          nbatch)
+static void generate_planar_data(std::vector<hostbuf>&      input,
+                                 const std::vector<size_t>& ioffset,
+                                 const Tint1&               whole_length,
+                                 const Tint1&               whole_stride,
+                                 const size_t               idist,
+                                 const size_t               nbatch)
 {
 
-    auto   ireal       = (Tfloat*)input[0].data();
-    auto   iimag       = (Tfloat*)input[1].data();
+    auto   ireal       = (Tfloat*)input[0].data() + ioffset[0];
+    auto   iimag       = (Tfloat*)input[1].data() + ioffset[1];
     size_t i_base      = 0;
     auto   partitions  = partition_rowmajor(whole_length);
     auto   unit_stride = make_unit_stride(whole_length);
@@ -662,17 +672,18 @@ static void generate_planar_data(std::vector<hostbuf>& input,
 }
 
 template <typename Tfloat, typename Tint1>
-static void generate_random_real_data(std::vector<hostbuf>& input,
-                                      const Tint1&          whole_length,
-                                      const Tint1&          whole_stride,
-                                      const size_t          idist,
-                                      const size_t          nbatch,
-                                      const Tint1           field_lower,
-                                      const size_t          field_lower_batch,
-                                      const Tint1           field_contig_stride,
-                                      const size_t          field_contig_dist)
+static void generate_random_real_data(std::vector<hostbuf>&      input,
+                                      const std::vector<size_t>& ioffset,
+                                      const Tint1&               whole_length,
+                                      const Tint1&               whole_stride,
+                                      const size_t               idist,
+                                      const size_t               nbatch,
+                                      const Tint1                field_lower,
+                                      const size_t               field_lower_batch,
+                                      const Tint1                field_contig_stride,
+                                      const size_t               field_contig_dist)
 {
-    auto   idata      = (Tfloat*)input[0].data();
+    auto   idata      = (Tfloat*)input[0].data() + ioffset[0];
     size_t i_base     = 0;
     auto   partitions = partition_rowmajor(whole_length);
     for(unsigned int b = 0; b < nbatch; b++, i_base += idist)
@@ -700,14 +711,15 @@ static void generate_random_real_data(std::vector<hostbuf>& input,
 }
 
 template <typename Tfloat, typename Tint1>
-static void generate_real_data(std::vector<hostbuf>& input,
-                               const Tint1&          whole_length,
-                               const Tint1&          whole_stride,
-                               const size_t          idist,
-                               const size_t          nbatch)
+static void generate_real_data(std::vector<hostbuf>&      input,
+                               const std::vector<size_t>& ioffset,
+                               const Tint1&               whole_length,
+                               const Tint1&               whole_stride,
+                               const size_t               idist,
+                               const size_t               nbatch)
 {
 
-    auto   idata       = (Tfloat*)input[0].data();
+    auto   idata       = (Tfloat*)input[0].data() + ioffset[0];
     size_t i_base      = 0;
     auto   partitions  = partition_rowmajor(whole_length);
     auto   unit_stride = make_unit_stride(whole_length);
@@ -733,22 +745,26 @@ static void generate_real_data(std::vector<hostbuf>& input,
 }
 
 template <typename Tfloat, typename Tsize>
-static void impose_hermitian_symmetry_interleaved(std::vector<hostbuf>&     vals,
-                                                  const std::vector<Tsize>& length,
-                                                  const std::vector<Tsize>& istride,
-                                                  const Tsize               idist,
-                                                  const Tsize               nbatch)
+static void impose_hermitian_symmetry_interleaved(std::vector<hostbuf>&      vals,
+                                                  const std::vector<size_t>& ioffset,
+                                                  const std::vector<Tsize>&  length,
+                                                  const std::vector<Tsize>&  istride,
+                                                  const Tsize                idist,
+                                                  const Tsize                nbatch)
 {
     switch(length.size())
     {
     case 1:
-        impose_hermitian_symmetry_interleaved_1D<Tfloat>(vals, length, istride, idist, nbatch);
+        impose_hermitian_symmetry_interleaved_1D<Tfloat>(
+            vals, ioffset, length, istride, idist, nbatch);
         break;
     case 2:
-        impose_hermitian_symmetry_interleaved_2D<Tfloat>(vals, length, istride, idist, nbatch);
+        impose_hermitian_symmetry_interleaved_2D<Tfloat>(
+            vals, ioffset, length, istride, idist, nbatch);
         break;
     case 3:
-        impose_hermitian_symmetry_interleaved_3D<Tfloat>(vals, length, istride, idist, nbatch);
+        impose_hermitian_symmetry_interleaved_3D<Tfloat>(
+            vals, ioffset, length, istride, idist, nbatch);
         break;
     default:
         throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
@@ -756,22 +772,23 @@ static void impose_hermitian_symmetry_interleaved(std::vector<hostbuf>&     vals
 }
 
 template <typename Tfloat, typename Tsize>
-static void impose_hermitian_symmetry_planar(std::vector<hostbuf>&     vals,
-                                             const std::vector<Tsize>& length,
-                                             const std::vector<Tsize>& istride,
-                                             const Tsize               idist,
-                                             const Tsize               nbatch)
+static void impose_hermitian_symmetry_planar(std::vector<hostbuf>&      vals,
+                                             const std::vector<size_t>& ioffset,
+                                             const std::vector<Tsize>&  length,
+                                             const std::vector<Tsize>&  istride,
+                                             const Tsize                idist,
+                                             const Tsize                nbatch)
 {
     switch(length.size())
     {
     case 1:
-        impose_hermitian_symmetry_planar_1D<Tfloat>(vals, length, istride, idist, nbatch);
+        impose_hermitian_symmetry_planar_1D<Tfloat>(vals, ioffset, length, istride, idist, nbatch);
         break;
     case 2:
-        impose_hermitian_symmetry_planar_2D<Tfloat>(vals, length, istride, idist, nbatch);
+        impose_hermitian_symmetry_planar_2D<Tfloat>(vals, ioffset, length, istride, idist, nbatch);
         break;
     case 3:
-        impose_hermitian_symmetry_planar_3D<Tfloat>(vals, length, istride, idist, nbatch);
+        impose_hermitian_symmetry_planar_3D<Tfloat>(vals, ioffset, length, istride, idist, nbatch);
         break;
     default:
         throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");

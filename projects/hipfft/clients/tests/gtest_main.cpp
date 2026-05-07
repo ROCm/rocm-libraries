@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -98,7 +98,7 @@ bool use_fftw_wisdom = false;
 bool fftw_compare = true;
 
 // Cache the last cpu fft that was requested
-last_cpu_fft_cache last_cpu_fft_data;
+reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
 
 // Multi-process library to use
 fft_params::fft_mp_lib mp_lib = fft_params::fft_mp_lib_none;
@@ -473,17 +473,16 @@ int main(int argc, char* argv[])
         ->default_val(0);
     non_token->add_option("--ioffset", manual_params.ioffset, "Input offset");
     non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
-    non_token->add_option("--isize", manual_params.isize, "Logical size of input buffer");
-    non_token->add_option("--osize", manual_params.osize, "Logical size of output buffer");
-    non_token->add_option(
-        "--scalefactor", manual_params.scale_factor, "Scale factor to apply to output");
+    app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
+    app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.
-    non_token->add_option("-g, --inputGen",
-                          manual_params.igen,
-                          "Input data generation:\n0) PRNG sequence (device)\n"
-                          "1) PRNG sequence (host)\n"
-                          "2) linearly-spaced sequence (device)\n"
-                          "3) linearly-spaced sequence (host)");
+    app.add_option("-g, --inputGen",
+                   manual_params.igen,
+                   "Input data generation:\n0) PRNG sequence (device)\n"
+                   "1) PRNG sequence (host)\n"
+                   "2) linearly-spaced sequence (device)\n"
+                   "3) linearly-spaced sequence (host)");
+    app.add_option("--scalefactor", manual_params.scale_factor, "Scale factor to apply to output");
     const auto* opt_version = app.add_flag(
         "--version",
         "Print queryable version information from the hipfft library's backend (and return)");
