@@ -49,8 +49,9 @@ add_custom_target(asm_kernel_codegen
 # Ensure codegen runs before compiling the implementation
 add_dependencies(hip_kernel_provider_impl asm_kernel_codegen)
 
-# Add generated headers to include directories
-target_include_directories(hip_kernel_provider_impl PRIVATE
+# Add generated headers to include directories (PUBLIC so tests get the include path
+# when linking against hip_kernel_provider_impl via hip_kernel_provider_private)
+target_include_directories(hip_kernel_provider_impl PUBLIC
     ${ASM_CODEGEN_OUTPUT_DIR}
 )
 
