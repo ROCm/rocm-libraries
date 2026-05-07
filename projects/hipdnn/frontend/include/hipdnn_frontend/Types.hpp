@@ -872,47 +872,54 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
     }
 }
 
-/// @brief Convert backend behavior note to frontend behavior note
-inline std::pair<BehaviorNote, Error> fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
+/// @brief Convert backend behavior note to frontend behavior note.
+/// @return Empty optional when the backend provides a note this frontend does not know.
+inline std::optional<BehaviorNote> fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
 {
     switch(note)
     {
     case HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION:
-        return {BehaviorNote::RUNTIME_COMPILATION, {}};
+        return BehaviorNote::RUNTIME_COMPILATION;
     case HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM:
-        return {BehaviorNote::REQUIRES_LAYOUT_TRANSFORM, {}};
+        return BehaviorNote::REQUIRES_LAYOUT_TRANSFORM;
     case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE:
-        return {BehaviorNote::SUPPORTS_GRAPH_CAPTURE, {}};
+        return BehaviorNote::SUPPORTS_GRAPH_CAPTURE;
     case HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY:
-        return {BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY, {}};
+        return BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY;
     case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
-        return {BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION, {}};
+        return BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
     default:
-        return {BehaviorNote::RUNTIME_COMPILATION,
-                {ErrorCode::HIPDNN_BACKEND_ERROR,
-                 "Unknown hipdnnBackendBehaviorNote_t value: "
-                     + std::to_string(static_cast<int>(note))}};
+        return std::nullopt;
     }
 }
 
-/// @brief Convert frontend behavior note to backend behavior note
-inline hipdnnBackendBehaviorNote_t toBackendType(const BehaviorNote& note)
+/// @brief Convert BehaviorNote to a human-readable string
+/// @param note The behavior note to convert
+/// @return A C-string representation of the behavior note
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const BehaviorNote& note)
 {
     switch(note)
     {
     case BehaviorNote::RUNTIME_COMPILATION:
-        return HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
+        return "RUNTIME_COMPILATION";
     case BehaviorNote::REQUIRES_LAYOUT_TRANSFORM:
-        return HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM;
+        return "REQUIRES_LAYOUT_TRANSFORM";
     case BehaviorNote::SUPPORTS_GRAPH_CAPTURE:
-        return HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE;
+        return "SUPPORTS_GRAPH_CAPTURE";
     case BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY:
-        return HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY;
+        return "EXTERNAL_LIBRARY_DEPENDENCY";
     case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
-        return HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+        return "SUPPORTS_EXECUTION_PLAN_SERIALIZATION";
     default:
-        return HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT;
+        return "unknown";
     }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const BehaviorNote& note)
+{
+    os << to_string(note);
+    return os;
 }
 
 /**

@@ -298,6 +298,49 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesReturnsNotes)
     EXPECT_EQ(notes[2], HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 }
 
+TEST_F(TestEngineDescriptor, GetBehaviorNotesNullOutputReturnsCount)
+{
+    serializeEngineDetailsWithBehaviorNotes(
+        0,
+        {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+         static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY)});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    int64_t noteCount = -1;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 2, &noteCount, nullptr));
+    ASSERT_EQ(noteCount, 2);
+}
+
+TEST_F(TestEngineDescriptor, GetBehaviorNotesZeroRequestedWithOutputReturnsCount)
+{
+    serializeEngineDetailsWithBehaviorNotes(
+        0,
+        {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+         static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY)});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT;
+    int64_t noteCount = -1;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, &noteCount, &note));
+    ASSERT_EQ(noteCount, 2);
+    EXPECT_EQ(note, HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT);
+}
+
+TEST_F(TestEngineDescriptor, GetBehaviorNotesCountQueryRequiresElementCount)
+{
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, nullptr, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
 TEST_F(TestEngineDescriptor, GetBehaviorNotesInvalidType)
 {
     auto engine = getEngineDescriptor();

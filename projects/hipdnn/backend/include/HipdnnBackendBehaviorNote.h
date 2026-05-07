@@ -8,7 +8,7 @@
  * @brief Behavior note values for engine metadata.
  */
 
-// This file's definitions are duplicated by hipdnn_data_sdk/BehaviorNote.h.
+// This file's definitions are duplicated by hipdnn_plugin_sdk/BehaviorNote.h.
 // Please ensure any updates are synced between the two files.
 
 // NOLINTBEGIN

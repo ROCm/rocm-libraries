@@ -69,7 +69,7 @@ cuDNN frontend supports broader note behavior, including candidate filtering thr
 
 ### 4.1 Public Types
 
-Add one backend public enum, duplicated in the data SDK for plugin use, for example:
+Add one backend public enum, duplicated in the plugin SDK for plugin use, for example:
 
 ```cpp
 typedef enum
@@ -83,12 +83,12 @@ typedef enum
 } hipdnnBackendBehaviorNote_t;
 ```
 
-The backend and data SDK definitions should use the same `HIPDNN_BEHAVIOR_NOTE_TYPES_DEFINED` include guard, matching the existing callback-type pattern. This keeps backend public headers self-contained and avoids adding a backend package dependency on the data SDK, while still letting plugin SDK users obtain the same numeric values through the plugin/data SDK dependency path.
+The backend and plugin SDK definitions should use the same `HIPDNN_BEHAVIOR_NOTE_TYPES_DEFINED` include guard, matching the existing callback-type pattern. This keeps backend public headers self-contained and avoids adding a backend package dependency on the plugin SDK, while still letting plugin SDK users obtain the same numeric values through the plugin SDK dependency path.
 
 The values must remain synchronized between:
 
 - `backend/include/HipdnnBackendBehaviorNote.h`
-- `data_sdk/include/hipdnn_data_sdk/BehaviorNote.h`
+- `plugin_sdk/include/hipdnn_plugin_sdk/BehaviorNote.h`
 
 Add one frontend wrapper enum:
 
@@ -212,17 +212,13 @@ Bind:
 
 - Add the backend public `hipdnnBackendBehaviorNote_t` values.
 - Guard the definition with `HIPDNN_BEHAVIOR_NOTE_TYPES_DEFINED`.
-- Add a comment noting the definition is duplicated by the data SDK header and must stay synced.
-
-`data_sdk/include/hipdnn_data_sdk/BehaviorNote.h`
-
-- Add the same `hipdnnBackendBehaviorNote_t` values for plugin/data SDK users.
-- Guard the definition with `HIPDNN_BEHAVIOR_NOTE_TYPES_DEFINED`.
-- Add a reciprocal comment noting the definition is duplicated by the backend header and must stay synced.
+- Add a comment noting the definition is duplicated by the plugin SDK header and must stay synced.
 
 `plugin_sdk/include/hipdnn_plugin_sdk/BehaviorNote.h`
 
-- Add a compatibility include for `<hipdnn_data_sdk/BehaviorNote.h>`.
+- Add the same `hipdnnBackendBehaviorNote_t` values for plugin SDK users.
+- Guard the definition with `HIPDNN_BEHAVIOR_NOTE_TYPES_DEFINED`.
+- Add a reciprocal comment noting the definition is duplicated by the backend header and must stay synced.
 
 `plugin_sdk/include/hipdnn_plugin_sdk/PluginApiDataTypes.h`
 
@@ -290,7 +286,7 @@ Plugin implementations
 
 ### 8.2 Implementation Order
 
-1. Add the duplicated guarded `hipdnnBackendBehaviorNote_t` definitions, plugin SDK compatibility include, and string conversion.
+1. Add the duplicated guarded `hipdnnBackendBehaviorNote_t` definitions and string conversion.
 2. Append `behavior_notes` to `EngineDetails` and update wrappers.
 3. Update plugin/sample metadata creation.
 4. Implement `EngineDescriptor` behavior-note query.

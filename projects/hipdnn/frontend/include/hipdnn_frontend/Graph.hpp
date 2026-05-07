@@ -69,6 +69,7 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
@@ -1059,6 +1060,13 @@ public:
                                                          nullptr),
             "Failed to get behavior note count from engine descriptor.");
 
+        if(noteCount < 0)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Backend returned a negative behavior note count: "
+                        + std::to_string(noteCount)};
+        }
+
         if(noteCount == 0)
         {
             return {ErrorCode::OK, ""};
@@ -1077,9 +1085,15 @@ public:
         notes.reserve(backendNotes.size());
         for(auto note : backendNotes)
         {
-            auto [frontendNote, error] = fromHipdnnBehaviorNote(note);
-            HIPDNN_CHECK_ERROR(error);
-            notes.push_back(frontendNote);
+            auto frontendNote = fromHipdnnBehaviorNote(note);
+            if(!frontendNote.has_value())
+            {
+                HIPDNN_FE_LOG_WARN("Skipping unknown hipdnnBackendBehaviorNote_t value: "
+                                   << static_cast<int>(note));
+                continue;
+            }
+
+            notes.push_back(frontendNote.value());
         }
 
         return {ErrorCode::OK, ""};
