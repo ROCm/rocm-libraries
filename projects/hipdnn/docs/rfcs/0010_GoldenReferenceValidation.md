@@ -71,12 +71,6 @@ The integration test suite currently validates engine outputs by computing refer
 
 A prior effort established a golden reference pattern in the MIOpen plugin's test suite ([`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp)) using serialized graph+tensor JSON files loaded from `hipdnn_reference_data/`. This RFC builds on that pattern, extends it for broader use, and integrates it into the shared integration test harness so it works across all plugins (MIOpen, Fusilli, and future ones) without plugin-specific code.
 
-### Who This Serves
-
-- **Test author**: Can add golden data for a new op without writing a reference kernel. Clear error messages when something goes wrong.
-- **CI pipeline**: Deterministic pass/fail with no flaky skips. No runtime reference computation slowing down feedback.
-- **Developer**: Can trust test results, understand failures at a glance, and run locally without needing remote storage credentials.
-
 ---
 
 ## Pipeline Overview
