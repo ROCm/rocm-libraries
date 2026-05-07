@@ -255,17 +255,25 @@ raises `CaptureWiringError` if any TaggedInstruction has `inst=None`.
 > codegen graphs (`5gd`), neither side is canonical and this needs
 > rephrasing.
 
-### 4.7 Capture-body presence matches `kernel_emits_n_gl` / `kernel_emits_n_ll`
+### 4.7 Capture-body presence — single source of truth (resolved)
 
-Today, `assert_capture_body_consistency` (`CMSValidator.py:4901`) checks
-the captured-body presence against a Python-side predicate derived from
-kernel config. The predicate enumerates the flag combinations under
-which `KernelWriter.kernelBody` skips emitting NGL or NLL. This is
-brittle: every new flag combination requires the predicate to be
-updated, and drift produces silent body-skipping.
+Resolved by `rocm-libraries-dj1g`. The Python-side predicates that
+re-derived NGL/NLL emission from kernel config and the consistency
+assertion that cross-checked captured-body presence against them were
+deleted.
 
-Tracked: `rocm-libraries-dj1g` (drop the predicate; trust the capture
-pipeline; treat absent bodies as "the kernel didn't emit it").
+Today: the default-side capture pipeline observes whether the kernel
+actually emitted each body. The CMS-side `build_cms_four_part_capture`
+takes the default-side capture as a parameter and mirrors its body
+shape by construction, so the two captures' n_gl/n_ll presence sets
+are guaranteed equal at the point `compare_graphs` runs — no
+verification needed.
+
+The expansion is deferred from `customMainLoopSchedule` (which runs
+before the default-side capture exists) to `KernelWriter.kernelBody`
+(which runs after), with the inputs stashed on the writer as
+`_pending_cms_capture_inputs` (a `CmsCaptureInputs` dataclass) in
+between.
 
 ## 5. Assumptions made
 

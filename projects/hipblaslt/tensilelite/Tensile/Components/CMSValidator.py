@@ -924,9 +924,11 @@ def build_dataflow_graph(four_part_capture):
     An entirely-omitted body (key 0 absent from the body's dict) is
     treated as "this body was not emitted by either scheduler", NOT as
     an error. PGR/SuppressNoLoadLoop combinations that legitimately do
-    not emit NGL or NLL (see `kernel_emits_n_gl` / `kernel_emits_n_ll`)
-    leave the corresponding dict empty; the loop below skips that body
-    cleanly and the validator runs against the remaining bodies.
+    not emit NGL or NLL leave the corresponding dict empty (the capture
+    pipeline observes whether the kernel actually emitted the body, and
+    the CMS-side capture mirrors that shape — see rocm-libraries-dj1g);
+    the loop below skips absent bodies cleanly and the validator runs
+    against the remaining bodies.
 
     The empty-instruction-list guard above (`{0: empty_body}`) is
     deliberately distinct from the absent-key path: a present-but-empty

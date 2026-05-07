@@ -49,9 +49,6 @@ from Tensile.Components.ScheduleCapture import (
     evaluate_guard,
     expand_cms_macro,
     build_cms_four_part_capture,
-    kernel_emits_n_gl,
-    kernel_emits_n_ll,
-    assert_capture_body_consistency,
     CaptureConsistencyError,
     CaptureEmptyBodyError,
 )
@@ -174,6 +171,29 @@ def _make_body(num_mfma: int) -> LoopBodyCapture:
     for i in range(num_mfma):
         b.append(inst=f"mfma_{i}", category="MFMA", subiter=0, mfma_index=i)
     return b.finalize()
+
+
+def _make_default_for_cms_test(*, has_n_gl: bool = True, has_n_ll: bool = True,
+                                num_mfma: int = 1) -> FourPartCapture:
+    """Minimal default-side FourPartCapture used to drive the shape of a
+    standalone `build_cms_four_part_capture` call in unit tests.
+
+    `build_cms_four_part_capture` inspects only `default_capture.n_gl` /
+    `.n_ll` truthiness to decide whether to expand the corresponding CMS
+    body. This stub provides bodies populated by `_make_body` (so the
+    empty-body guard is not the failure mode under test) and toggles
+    presence via the `has_n_gl` / `has_n_ll` flags.
+    """
+    body = _make_body(num_mfma)
+    return FourPartCapture(
+        main_loop={0: body},
+        main_loop_prev={0: clone_loop_body(body)},
+        n_gl={0: clone_loop_body(body)} if has_n_gl else {},
+        n_ll={0: clone_loop_body(body)} if has_n_ll else {},
+        num_mfma=num_mfma,
+        num_codepaths=1,
+        source="default-test-fixture",
+    )
 
 
 def _make_capture(
@@ -615,7 +635,8 @@ class TestBuildCmsFourPartCapture:
         }
         cap = build_cms_four_part_capture(
             _FakeMacro(items), num_codepaths=1, tag_by_origin_id=tag_map,
-            sync_class=_FakeSWaitCnt, snop_class=_FakeSNop, mfma_classes=(_FakeMFMA,))
+            sync_class=_FakeSWaitCnt, snop_class=_FakeSNop, mfma_classes=(_FakeMFMA,),
+            default_capture=_make_default_for_cms_test())
 
         assert cap.source == "cms"
         assert cap.num_codepaths == 1
@@ -654,7 +675,8 @@ class TestBuildCmsFourPartCapture:
         tag_map = {id(cp0): "LRA0", id(cp1): "LRA0"}
         cap = build_cms_four_part_capture(
             _FakeMacro(items), num_codepaths=2, tag_by_origin_id=tag_map,
-            sync_class=_FakeSWaitCnt, snop_class=_FakeSNop, mfma_classes=(_FakeMFMA,))
+            sync_class=_FakeSWaitCnt, snop_class=_FakeSNop, mfma_classes=(_FakeMFMA,),
+            default_capture=_make_default_for_cms_test())
         assert set(cap.main_loop.keys()) == {0, 1}
         assert cap.main_loop[0].instructions[0].wrapped.rocisa_inst is cp0
         assert cap.main_loop[1].instructions[0].wrapped.rocisa_inst is cp1
@@ -1200,115 +1222,18 @@ class TestDataflowGraphIntegration:
 
 
 # =============================================================================
-# PGR/PLR Phase C (rocm-libraries-kzf): predicate + dict-omission encoding
+# Capture-side body presence: dict-omission encoding
 # =============================================================================
 # These tests pin the capture-side honesty contract: omit n_gl/n_ll dict keys
-# when the kernel-config predicate says the body wasn't emitted by either
-# scheduler, rather than synthesizing an empty `LoopBodyCapture(instructions=[])`
-# (which used to defeat `build_dataflow_graph`'s structural-absence guard and
-# trip the empty-body error).
-#
-# Predicate truth table (mirrors KernelWriter.py:5118 and :5141-5142):
-#   PGR=0, *      -> n_gl=absent, n_ll=absent
-#   PGR=1, SNLL=F -> n_gl=absent, n_ll=present
-#   PGR=1, SNLL=T -> n_gl=absent, n_ll=absent
-#   PGR>=2, SNLL=F-> n_gl=present, n_ll=present
-#   PGR>=2, SNLL=T-> n_gl=present, n_ll=absent
-
-
-class TestKernelEmitsPredicates:
-    """Unit-level coverage for `kernel_emits_n_gl` / `kernel_emits_n_ll`.
-
-    These predicates are the single source of truth that gates body
-    construction at both the default-side capture (KernelWriter.py:5187+)
-    and the CMS-side macro expansion (CustomSchedule.py:515+); they must
-    exactly match the production gates at KernelWriter.py:5118 and
-    KernelWriter.py:5141-5142.
-    """
-
-    @pytest.mark.parametrize("pgr,snll,expected_n_gl,expected_n_ll", [
-        (0, False, False, False),
-        (0, True,  False, False),
-        (1, False, False, True),
-        (1, True,  False, False),
-        (2, False, True,  True),
-        (2, True,  True,  False),
-        (3, False, True,  True),
-        (3, True,  True,  False),
-        (4, False, True,  True),
-    ])
-    def test_predicate_matrix(self, pgr, snll, expected_n_gl, expected_n_ll):
-        kernel = {"PrefetchGlobalRead": pgr, "SuppressNoLoadLoop": snll}
-        assert kernel_emits_n_gl(kernel) is expected_n_gl
-        assert kernel_emits_n_ll(kernel) is expected_n_ll
-
-
-class TestAssertCaptureBodyConsistency:
-    """Pin `assert_capture_body_consistency`: it must raise
-    `CaptureConsistencyError` when the captured body presence diverges
-    from the kernel-config predicates, and pass quietly when they agree.
-    """
-
-    def _make_minimal_capture(self, n_gl_present, n_ll_present):
-        """Construct a minimal FourPartCapture for consistency-checking.
-
-        Bodies are non-empty so the empty-body guard in
-        `build_dataflow_graph` is not the failure mode under test."""
-        body = _make_body(num_mfma=1)
-        return FourPartCapture(
-            main_loop={0: body},
-            main_loop_prev={0: clone_loop_body(body)},
-            n_gl={0: clone_loop_body(body)} if n_gl_present else {},
-            n_ll={0: clone_loop_body(body)} if n_ll_present else {},
-            num_mfma=1,
-            num_codepaths=1,
-            source="test-fixture",
-            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
-        )
-
-    def test_passes_when_pgr0_and_both_absent(self):
-        kernel = {"PrefetchGlobalRead": 0, "SuppressNoLoadLoop": False}
-        cap = self._make_minimal_capture(n_gl_present=False, n_ll_present=False)
-        assert_capture_body_consistency(cap, kernel)  # no raise
-
-    def test_passes_when_pgr2_and_both_present(self):
-        kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
-        cap = self._make_minimal_capture(n_gl_present=True, n_ll_present=True)
-        assert_capture_body_consistency(cap, kernel)  # no raise
-
-    def test_passes_when_pgr1_only_n_ll_present(self):
-        kernel = {"PrefetchGlobalRead": 1, "SuppressNoLoadLoop": False}
-        cap = self._make_minimal_capture(n_gl_present=False, n_ll_present=True)
-        assert_capture_body_consistency(cap, kernel)  # no raise
-
-    def test_passes_when_pgr2_snll_only_n_gl_present(self):
-        kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": True}
-        cap = self._make_minimal_capture(n_gl_present=True, n_ll_present=False)
-        assert_capture_body_consistency(cap, kernel)  # no raise
-
-    def test_raises_when_n_gl_phantom(self):
-        """PGR=1 says n_gl absent; presence of n_gl key must raise."""
-        kernel = {"PrefetchGlobalRead": 1, "SuppressNoLoadLoop": False}
-        cap = self._make_minimal_capture(n_gl_present=True, n_ll_present=True)
-        with pytest.raises(CaptureConsistencyError) as excinfo:
-            assert_capture_body_consistency(cap, kernel)
-        msg = str(excinfo.value)
-        assert "n_gl" in msg
-        assert "PGR=1" in msg
-
-    def test_raises_when_n_ll_missing(self):
-        """PGR=2 SNLL=False says n_ll present; absence must raise."""
-        kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
-        cap = self._make_minimal_capture(n_gl_present=True, n_ll_present=False)
-        with pytest.raises(CaptureConsistencyError) as excinfo:
-            assert_capture_body_consistency(cap, kernel)
-        msg = str(excinfo.value)
-        assert "n_ll" in msg
-
-    def test_passes_on_none_capture(self):
-        """`None` capture is the no-CMS path and must be accepted silently."""
-        kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
-        assert_capture_body_consistency(None, kernel)  # no raise
+# when the kernel did not emit the corresponding body, rather than synthesizing
+# an empty `LoopBodyCapture(instructions=[])` (which used to defeat
+# `build_dataflow_graph`'s structural-absence guard and trip the empty-body
+# error). The capture pipeline is the single source of truth for body presence;
+# the CMS-side capture mirrors the default-side capture's body shape by
+# construction (see rocm-libraries-dj1g — the legacy kernel-config emission
+# predicates and the body-presence cross-check helper were deleted because
+# they re-derived emission from kernel config and were brittle under flag-
+# combination drift).
 
 
 class TestBuildDataflowGraphAbsentBodies:
@@ -1378,21 +1303,22 @@ class TestBuildDataflowGraphAbsentBodies:
             build_dataflow_graph(cap)
 
 
-class TestBuildCmsFourPartCaptureEmitFlags:
-    """Pin the new `emit_n_gl` / `emit_n_ll` kwargs on
+class TestBuildCmsFourPartCaptureMirrorsDefaultShape:
+    """Pin the `default_capture`-driven shape contract on
     `build_cms_four_part_capture`.
 
-    Production callers in `CustomSchedule.py` derive both flags from the
-    Phase C predicates so the CMS-side capture leaves n_gl/n_ll empty
-    under PGR/SuppressNoLoadLoop combinations that legitimately suppress
-    those bodies. Direct test fixtures keep the historical default
-    (both flags True) to preserve test behavior.
+    Production callers in `KernelWriter.kernelBody` pass the just-built
+    default-side `FourPartCapture` so the CMS-side capture leaves
+    n_gl/n_ll empty under combinations that legitimately suppress those
+    bodies. By construction, both captures' n_gl/n_ll presence sets
+    match — there is no separate Python-side predicate.
     """
 
-    def _build(self, **kwargs):
+    def _build(self, *, has_n_gl=True, has_n_ll=True):
         # Use a minimal macro shape so we don't need full mfma_code wiring.
         # The macro doesn't need to expand to anything — we're checking
-        # the dict-presence-vs-emit-flag plumbing, not body content.
+        # the dict-presence plumbing driven by default_capture shape, not
+        # body content.
         from rocisa.code import Module
         from rocisa.instruction import SWaitCnt, SNop
         macro = Module()
@@ -1403,28 +1329,29 @@ class TestBuildCmsFourPartCaptureEmitFlags:
             sync_class=SWaitCnt,
             snop_class=SNop,
             mfma_classes=(),
-            **kwargs,
+            default_capture=_make_default_for_cms_test(
+                has_n_gl=has_n_gl, has_n_ll=has_n_ll),
         )
 
-    def test_default_kwargs_populate_both(self):
+    def test_default_with_both_bodies_populates_both(self):
         cap = self._build()
         assert 0 in cap.n_gl
         assert 0 in cap.n_ll
 
-    def test_emit_n_gl_false_omits_key(self):
-        cap = self._build(emit_n_gl=False)
+    def test_default_without_n_gl_omits_n_gl_key(self):
+        cap = self._build(has_n_gl=False)
         assert 0 not in cap.n_gl
         assert cap.n_gl == {}
         assert 0 in cap.n_ll  # n_ll unaffected
 
-    def test_emit_n_ll_false_omits_key(self):
-        cap = self._build(emit_n_ll=False)
+    def test_default_without_n_ll_omits_n_ll_key(self):
+        cap = self._build(has_n_ll=False)
         assert 0 in cap.n_gl  # n_gl unaffected
         assert 0 not in cap.n_ll
         assert cap.n_ll == {}
 
-    def test_both_false_omits_both_keys(self):
-        cap = self._build(emit_n_gl=False, emit_n_ll=False)
+    def test_default_without_either_omits_both_keys(self):
+        cap = self._build(has_n_gl=False, has_n_ll=False)
         assert cap.n_gl == {}
         assert cap.n_ll == {}
 
@@ -1494,25 +1421,15 @@ class TestPgrPlrCaptureMatrixEndToEnd:
 class TestMultiBodyOverwriteBehaviorPin:
     """Pin the current single-slot overwrite behavior for multi-NGLL/NLL
     paths (PGR>=3, needSecondNGLL, isDTV NLL odd-even, tailloopInNll).
-    Phase C explicitly does NOT fix this — `default_n_gl = finalized` at
-    KernelWriter.py:3723 unconditionally overwrites; only the last
-    invocation survives. The predicate collapses these to the same
-    "n_gl present" answer.
+    `default_n_gl = finalized` at KernelWriter.py:3723 unconditionally
+    overwrites; only the last invocation survives. The capture pipeline
+    therefore gives a 1-bit "n_gl present?" answer for any PGR>=2.
 
     These tests freeze the 1-bit answer so a future fix that switches
     `default_n_gl` from a single `LoopBodyCapture` slot to a
     list-of-bodies-per-NGLL-index will be recognized as a behavior
     change requiring test updates rather than silently regressing.
     """
-
-    def test_predicate_collapses_pgr2_and_pgr3_to_same_answer(self):
-        """The predicate is a 1-bit "n_gl present?" answer; PGR=2 and
-        PGR=3 both map to True even though PGR=3's production loop emits
-        NGLL twice (KernelWriter.py:5118 `range(PGR-1, 0, -1)`)."""
-        kernel_pgr2 = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
-        kernel_pgr3 = {"PrefetchGlobalRead": 3, "SuppressNoLoadLoop": False}
-        assert kernel_emits_n_gl(kernel_pgr2) is True
-        assert kernel_emits_n_gl(kernel_pgr3) is True
 
     def test_default_n_gl_is_single_slot_not_list(self):
         """`CaptureContext.default_n_gl` is a single `LoopBodyCapture`

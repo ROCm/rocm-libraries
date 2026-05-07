@@ -638,6 +638,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Per-kernel capture lifecycle. See ScheduleCapture.CaptureContext.
     from Tensile.Components.ScheduleCapture import CaptureContext
     self._capture_context = CaptureContext()
+    # Stash for deferred CMS-side FourPartCapture expansion. Set by
+    # customMainLoopSchedule; consumed in kernelBody after the
+    # default-side capture exists. See rocm-libraries-dj1g.
+    self._pending_cms_capture_inputs = None
 
   ##############################################################################
   # makeSchedule:  Schedule work into interations.
@@ -6003,8 +6007,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # per-edge wait-coverage (validate_edge_wait_coverage).
     if getattr(self.states, "_captureDefaultSchedule", False):
       from Tensile.Components.ScheduleCapture import (
-        FourPartCapture, clone_loop_body,
-        kernel_emits_n_gl, kernel_emits_n_ll, assert_capture_body_consistency,
+        FourPartCapture, clone_loop_body, build_cms_four_part_capture,
       )
       from Tensile.Components.CMSValidator import (
         _resolve_arch_profile_for_isa, build_dataflow_graph, compare_graphs,
@@ -6018,38 +6021,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       try:
         ctx = self._capture_context
         main = ctx.default_main
-        # PGR/PLR Phase C (rocm-libraries-kzf): omit n_gl/n_ll dict keys
-        # when the corresponding body wasn't emitted by the production
-        # path (PGR<2 -> no NGLL; PGR=0 or SuppressNoLoadLoop -> no NLL).
-        # `build_dataflow_graph` handles the absent-key path by skipping
-        # that body. Synthesizing `LoopBodyCapture(instructions=[])` here
-        # would defeat that absence-detection and trip the empty-body
-        # guard at ScheduleCapture.py:2901-2905, producing the
-        # CaptureEmptyBodyError false positive on PGR=0 / SNLL kernels.
-        emit_n_gl = kernel_emits_n_gl(kernel)
-        emit_n_ll = kernel_emits_n_ll(kernel)
-        # Capture-vs-predicate consistency check: the shadow capture
-        # driver in noLoadLoop (KernelWriter.py:3703-3725) must populate
-        # exactly the bodies the predicate says will be emitted. A
-        # mismatch indicates either a production-gate change that wasn't
-        # mirrored in the predicates, or a capture-pipeline bug.
-        assert (ctx.default_n_gl is not None) == emit_n_gl, (
-          f"default_n_gl populated={ctx.default_n_gl is not None} but "
-          f"kernel_emits_n_gl(kernel)={emit_n_gl} "
-          f"(PGR={kernel['PrefetchGlobalRead']!r}). "
-          f"Predicate at ScheduleCapture.py:kernel_emits_n_gl is out of "
-          f"sync with the production gate at KernelWriter.py:5118."
-        )
-        assert (ctx.default_n_ll is not None) == emit_n_ll, (
-          f"default_n_ll populated={ctx.default_n_ll is not None} but "
-          f"kernel_emits_n_ll(kernel)={emit_n_ll} "
-          f"(PGR={kernel['PrefetchGlobalRead']!r}, "
-          f"SuppressNoLoadLoop={kernel.get('SuppressNoLoadLoop')!r}). "
-          f"Predicate at ScheduleCapture.py:kernel_emits_n_ll is out of "
-          f"sync with the production gate at KernelWriter.py:5141-5142."
-        )
-        n_gl_dict = {0: ctx.default_n_gl} if emit_n_gl else {}
-        n_ll_dict = {0: ctx.default_n_ll} if emit_n_ll else {}
+        # rocm-libraries-dj1g: trust the capture pipeline. The shadow
+        # capture driver in noLoadLoop (KernelWriter.py:3703-3725)
+        # populates ctx.default_n_gl / ctx.default_n_ll only when the
+        # production path actually emitted the corresponding body. We
+        # forward that presence directly into the FourPartCapture dict
+        # — no separate Python-side predicate, no consistency check.
+        # `build_dataflow_graph` skips absent-key bodies cleanly; a
+        # present-but-empty body still trips the empty-body guard
+        # (real capture-pipeline data loss bug).
+        n_gl_dict = {0: ctx.default_n_gl} if ctx.default_n_gl is not None else {}
+        n_ll_dict = {0: ctx.default_n_ll} if ctx.default_n_ll is not None else {}
         if main is not None:
           num_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
           # Resolve the per-arch quad-cycle profile from the kernel's ISA
@@ -6075,21 +6057,30 @@ class KernelWriter(metaclass=abc.ABCMeta):
             num_mfma_per_subiter=self.states.numMfmaPerIter,
             arch_profile=arch_profile,
           )
-          # Sanity-check default-side capture matches the predicates.
-          # This also fires if the dict-omission encoding above ever
-          # diverges from the predicates (defense-in-depth).
-          assert_capture_body_consistency(ctx.default, kernel)
+          # Deferred CMS expansion: customMainLoopSchedule stashed the
+          # macro + walker inputs but did not expand, because the
+          # default-side capture didn't exist yet. Now that ctx.default
+          # is built, expand the CMS macro driven by the default-side
+          # body shape — guaranteeing the two captures have matching
+          # n_gl/n_ll presence by construction.
+          pending = getattr(self, "_pending_cms_capture_inputs", None)
+          if pending is not None:
+            ctx.cms = build_cms_four_part_capture(
+              macro=pending.macro,
+              num_codepaths=pending.num_codepaths,
+              tag_by_origin_id=pending.tag_by_origin_id,
+              sync_class=pending.sync_class,
+              snop_class=pending.snop_class,
+              mfma_classes=pending.mfma_classes,
+              num_mfma_per_subiter=pending.num_mfma_per_subiter,
+              default_capture=ctx.default,
+            )
+            self._pending_cms_capture_inputs = None
           # CMS-side capture must use the same profile so both graphs
           # compare apples-to-apples through the per-arch helpers.
           if ctx.cms is not None:
             ctx.cms.arch_profile = arch_profile
           if ctx.cms is not None:
-            # CMS-side body presence must also match the predicates.
-            # CustomSchedule.py passes emit_n_gl / emit_n_ll derived
-            # from the same predicates, so this is a tight loop check;
-            # if the CMS-side caller is ever updated and forgets to
-            # forward the kwargs, this raises immediately.
-            assert_capture_body_consistency(ctx.cms, kernel)
             kernel_label = (
               f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}"
             )
@@ -6917,6 +6908,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Per-kernel capture lifecycle. See ScheduleCapture.CaptureContext.
     from Tensile.Components.ScheduleCapture import CaptureContext
     self._capture_context = CaptureContext()
+    # Stash for deferred CMS-side FourPartCapture expansion. Set by
+    # customMainLoopSchedule; consumed in kernelBody after the
+    # default-side capture exists. See rocm-libraries-dj1g.
+    self._pending_cms_capture_inputs = None
 
     # external classes
     if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):

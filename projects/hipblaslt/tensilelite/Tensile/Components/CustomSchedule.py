@@ -512,10 +512,22 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
     module.add(macro)
 
-    # Build the CMS-side FourPartCapture and stash it on the writer for the
-    # default-side capture path (Phase 4) and the comparison rule (Phase 6) to
-    # consume. The macro walker reads tag_by_origin_id (populated above) and
-    # falls back to isinstance checks against sync_class / snop_class /
+    # Stash the inputs needed to expand the CMS-side FourPartCapture; the
+    # actual expansion is deferred until the default-side capture is
+    # available (see KernelWriter.kernelBody, where ctx.default is built
+    # from main + ctx.default_n_gl/_n_ll, then the deferred CMS expansion
+    # runs and mirrors that body shape by construction).
+    #
+    # Why deferred: customMainLoopSchedule runs before noLoadLoop populates
+    # ctx.default_n_gl / ctx.default_n_ll, so the default-side capture
+    # doesn't exist yet. Building the CMS capture here would require
+    # re-deriving body presence from kernel config (PGR/SuppressNoLoadLoop)
+    # — exactly the predicate-shaped duplication that rocm-libraries-dj1g
+    # eliminated. By deferring, the CMS expander observes the default-side
+    # capture as the single source of truth.
+    #
+    # The macro walker reads tag_by_origin_id (populated above) and falls
+    # back to isinstance checks against sync_class / snop_class /
     # mfma_classes for instructions added directly to the macro (MFMAs at
     # mfmaCode[miIndex], deepcopied SWaitCnts from nllvmcntHandling).
     mfma_classes = (MFMAInstruction, SMFMAInstruction)
@@ -524,8 +536,8 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         mfma_classes = mfma_classes + (MXMFMAInstruction,)
     except ImportError:
         pass
-    writer._last_cms_capture = scap.build_cms_four_part_capture(
-        macro,
+    writer._pending_cms_capture_inputs = scap.CmsCaptureInputs(
+        macro=macro,
         num_codepaths=numCodePath,
         tag_by_origin_id=tag_by_origin_id,
         sync_class=SWaitCnt,
@@ -537,14 +549,6 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         # (Upstream Tensile naming uses "Iter" but this is the inner unroll
         # subiteration count.)
         num_mfma_per_subiter=getattr(writer.states, 'numMfmaPerIter', 0),
-        # Mirror the production NGLL/NLL emission gates (KernelWriter.py:5118
-        # and :5141-5142) so the CMS-side capture leaves n_gl/n_ll empty
-        # when the default-side scheduler will not emit them. Without this,
-        # PGR=1 / SuppressNoLoadLoop kernels build a phantom CMS-side body
-        # the default side cannot match, and either compare_graphs reports
-        # bogus failures or assert_capture_body_consistency raises.
-        emit_n_gl=scap.kernel_emits_n_gl(kernel),
-        emit_n_ll=scap.kernel_emits_n_ll(kernel),
     )
     writer._last_opt1_for_capture = opt1_for_capture
 
