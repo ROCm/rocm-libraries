@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
@@ -370,6 +371,8 @@ protected:
             return static_cast<float>(matmul::getTolerance<T>());
         if(dynamic_cast<const fe::ReductionNode*>(&node) != nullptr)
             return static_cast<float>(reduction::getTolerance<T>());
+        if(dynamic_cast<const fe::RMSNormNode*>(&node) != nullptr)
+            return static_cast<float>(rmsnorm::getTolerance<T>());
 
         ADD_FAILURE() << "toleranceForNodeTyped: unsupported node type";
         return 0.0f;
