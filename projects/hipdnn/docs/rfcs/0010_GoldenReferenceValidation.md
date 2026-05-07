@@ -49,7 +49,7 @@ A prior effort established this pattern and it is already partially working. The
 ### Key Benefits
 - **Deterministic baselines**: Reference data is frozen from a known-good source. Unlike computed mode -- where both the reference executor and the engine can drift together -- golden mode compares against a locked baseline, so any engine change is caught
 - **Unblocks testing before C++ reference kernels exist**: Generate golden data from any stable source -- PyTorch, AITER, AOTriton, Perf & benchmark team tools, or any tool that can produce the bundle format (see [Reference Sources](#reference-sources))
-- **Minimal C++ to add a test case**: Adding a test case to an existing operation/layout/datatype requires zero C++ -- drop the bundle in the folder. Adding a **new** operation/layout/datatype requires a one-time `INSTANTIATE_TEST_SUITE_P` (see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests))
+- **No C++ to add a test case**: Adding a test case to an existing operation/layout/datatype requires zero C++ -- drop the bundle in the folder. Adding a **new** operation/layout/datatype requires a one-time `INSTANTIATE_TEST_SUITE_P` (see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests))
 - **Faster execution**: Eliminates runtime reference computation for large tensors
 
 ---
@@ -62,11 +62,11 @@ The core test-as-data infrastructure is already built and working for batchnorm.
 
 | Component | File(s) | What it does |
 |-----------|---------|-------------|
-| Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | `loadGraphAndTensors()` reads `{Name}.json` + `{Name}.tensor{uid}.bin`, deserializes via FlatBuffers JSON parser. Returns `GraphAndTensorMap` with `extractAndClearOutputTensorData()`, `validateTensors()`, `hostBufferMap()`, `deviceBuffers()` |
-| CPU golden runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | gtest fixture parameterized by path. Loads graph+tensors, runs `CpuReferenceGraphExecutor`, validates. `getGoldenReferenceParams()` discovers `.json` files |
-| GPU golden runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same pattern but executes via `hipdnnEnginePluginExecuteOpGraphImpl` on GPU (defined but not yet exercised in tests) |
-| Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | `Graph` (save/load JSON+bins), `TensorAttributes` (tensor I/O), `DTypeConverter`, per-operation node classes (e.g., `BatchnormInference`). Generator scripts use these to produce bundles |
-| Golden data | [`hipdnn_reference_data/BatchnormFwdInference/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 test cases across nchw/{fp32,fp16,bfp16} and ncdhw/fp32 with `Small`, `Large`, and `MIOpen` sizes |
+| Core loader | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Loads a bundle (`{Name}.json` + `.tensor{uid}.bin`) from disk. Returns `GraphAndTensorMap` — extract golden outputs, validate results, get host/device buffer maps |
+| CPU golden runner | [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | gtest fixture. Loads bundle → runs CPU ref → validates against golden outputs. Auto-discovers `.json` files via `getGoldenReferenceParams()` |
+| GPU golden runner | [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | Same as CPU runner but executes on GPU via MIOpen engine plugin. Defined but no tests yet |
+| Python framework | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Build graphs, create tensors, run PyTorch ops, write bundles. Classes: `Graph`, `TensorAttributes`, `DTypeConverter`, per-op nodes |
+| Golden data | [`hipdnn_reference_data/BatchnormFwdInference/`](../../hipdnn_reference_data/BatchnormFwdInference/) | 6 batchnorm test cases — nchw/{fp32,fp16,bfp16}, ncdhw/fp32 — `Small`, `Large`, `MIOpen` sizes |
 
 ### The Graph IS the Key
 
@@ -79,7 +79,7 @@ The graph JSON serialization captures **every property that determines the compu
 
 Changing ANY computation-affecting property produces a different JSON. The saved graph JSON **IS** the unique key for the computation -- no separate fingerprint, manifest, or hash is needed. A golden data bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-contained: it does not reference any C++ code, any `buildGraph()` function, or any test fixture. If the computation changes, generate a new bundle.
 
-This is the architectural difference from a test-as-code approach: the graph definition lives on disk, not in C++. The test runner is generic -- it loads whatever graph JSON it finds and validates it. **To add a new test, you export the graph to the bundle format and drop it into the tests folder. No new C++ code is needed.** The runner discovers it automatically via `getGoldenReferenceParams()`.
+This is the architectural difference from a test-as-code approach: the graph definition lives on disk, not in C++. The test runner is generic -- it loads whatever graph JSON it finds and validates it. To add a new test case, see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests) -- for an existing operation/layout/datatype it is just "drop the bundle in the folder," for a new combination it requires a one-time `INSTANTIATE_TEST_SUITE_P`.
 
 ### Pipeline Overview
 
