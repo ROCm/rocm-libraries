@@ -200,6 +200,7 @@ namespace GEMMTests
             }
 
             m_kernelOptions->scaleSkipPermlane = gemm.scaleSkipPermlane;
+            m_kernelOptions->ldsSwizzleMode    = gemm.ldsSwizzleMode;
 
             // Host data
             using PackedTypeA = typename PackedTypeOf<TA>::type;
@@ -420,34 +421,34 @@ namespace GEMMTests
                                                   ? std::vector<size_t>({(size_t)0, (size_t)1})
                                                   : std::vector<size_t>({});
 
-            bool pretileA = !gemm.pretileA.empty();
-            if(pretileA)
-                AssertFatal(gemm.pretileA.size() == 2,
-                            "pretileA must have size 2 (MxK tile dimensions).",
-                            ShowValue(gemm.pretileA.size()));
-            auto stridesA   = pretileA ? std::vector<size_t>{}
-                                       : (gemm.transA == "N" ? oneStridesN : oneStridesT);
+            auto stridesA   = gemm.transA == "N" ? oneStridesN : oneStridesT;
             auto tagTensorA = command->addOperation(
                 rocRoller::Operations::Tensor(2, dataTypeA, {}, stridesA)); // A
             auto loadInputA = tagTensorA;
-            if(pretileA)
+            if(not gemm.pretileA.empty())
+            {
+                AssertFatal(gemm.pretileA.size() == 2,
+                            "pretileA must have size 2 (MxK tile dimensions).",
+                            ShowValue(gemm.pretileA.size()));
+
                 loadInputA = command->addOperation(
                     rocRoller::Operations::SubTileTranspose(loadInputA, gemm.pretileA, true));
+            }
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputA));
 
-            bool pretileB = !gemm.pretileB.empty();
-            if(pretileB)
-                AssertFatal(gemm.pretileB.size() == 2,
-                            "pretileB must have size 2 (KxN tile dimensions).",
-                            ShowValue(gemm.pretileB.size()));
-            auto stridesB   = pretileB ? std::vector<size_t>{}
-                                       : (gemm.transB == "N" ? oneStridesN : oneStridesT);
+            auto stridesB   = gemm.transB == "N" ? oneStridesN : oneStridesT;
             auto tagTensorB = command->addOperation(
                 rocRoller::Operations::Tensor(2, dataTypeB, {}, stridesB)); // B
             auto loadInputB = tagTensorB;
-            if(pretileB)
+            if(not gemm.pretileB.empty())
+            {
+                AssertFatal(gemm.pretileB.size() == 2,
+                            "pretileB must have size 2 (KxN tile dimensions).",
+                            ShowValue(gemm.pretileB.size()));
+
                 loadInputB = command->addOperation(
                     rocRoller::Operations::SubTileTranspose(loadInputB, gemm.pretileB));
+            }
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(loadInputB));
 
             auto mulInputA = tagLoadA;
@@ -460,11 +461,7 @@ namespace GEMMTests
             {
                 bool scalePreTiledA  = !gemm.scalePretileA.empty();
                 tagTensorScaleA      = command->addOperation(rocRoller::Operations::Tensor(
-                    2,
-                    gemm.scaleTypeA,
-                    {},
-                    scalePreTiledA ? std::vector<size_t>{}
-                                        : (gemm.transA == "N" ? oneStridesN : oneStridesT)));
+                    2, gemm.scaleTypeA, {}, gemm.transA == "N" ? oneStridesN : oneStridesT));
                 auto scaleLoadInputA = *tagTensorScaleA;
                 if(scalePreTiledA)
                 {
@@ -503,11 +500,7 @@ namespace GEMMTests
             {
                 bool scalePreTiledB  = !gemm.scalePretileB.empty();
                 tagTensorScaleB      = command->addOperation(rocRoller::Operations::Tensor(
-                    2,
-                    gemm.scaleTypeB,
-                    {},
-                    scalePreTiledB ? std::vector<size_t>{}
-                                        : (gemm.transB == "N" ? oneStridesN : oneStridesT)));
+                    2, gemm.scaleTypeB, {}, gemm.transB == "N" ? oneStridesN : oneStridesT));
                 auto scaleLoadInputB = *tagTensorScaleB;
                 if(scalePreTiledB)
                 {
@@ -805,32 +798,6 @@ namespace GEMMTests
 
             CommandArguments commandArgs = command->createArguments();
 
-            // When pretileA is set, use the same tensor descriptor as the client: explicit
-            // strides for the pre-tiled layout (see DataParallelGEMMSolution.hpp).
-            if(!gemm.pretileA.empty() && gemm.pretileA.size() == 2)
-            {
-                AssertFatal(gemm.transA == "T", "Pre-tiling A only supported for TransposeType::T");
-                auto const tileM = gemm.pretileA[0];
-                auto const tileK = gemm.pretileA[1];
-                descA            = TensorDescriptor(dataTypeA,
-                                         {static_cast<size_t>(M), static_cast<size_t>(K)},
-                                         {static_cast<size_t>((K / tileK) * tileM * tileK),
-                                          static_cast<size_t>(tileM * tileK)});
-            }
-
-            // When pretileB is set, use the same tensor descriptor as the client: explicit
-            // strides for the pre-tiled layout (see DataParallelGEMMSolution.hpp).
-            if(!gemm.pretileB.empty() && gemm.pretileB.size() == 2)
-            {
-                AssertFatal(gemm.transB == "N", "Pre-tiling B only supported for TransposeType::N");
-                auto const tileK = gemm.pretileB[0];
-                auto const tileN = gemm.pretileB[1];
-                descB            = TensorDescriptor(dataTypeB,
-                                         {static_cast<size_t>(K), static_cast<size_t>(N)},
-                                         {static_cast<size_t>(tileK * tileN),
-                                          static_cast<size_t>((K / tileK) * tileK * tileN)});
-            }
-
             setCommandTensorArg(commandArgs, tagTensorA, descA, deviceA.get());
             setCommandTensorArg(commandArgs, tagTensorB, descB, deviceB.get());
             setCommandTensorArg(commandArgs, tagTensorC, descC, deviceC.get());
@@ -842,26 +809,10 @@ namespace GEMMTests
                             fmt::format("K: {} must be a multiple of the scale block size: {}",
                                         K,
                                         gemm.scaleBlockSize));
-                TensorDescriptor descAScale;
-                if(!gemm.scalePretileA.empty())
-                {
-                    auto const M_scale = M;
-                    auto const K_scale = K / gemm.scaleBlockSize;
-                    auto const tileM   = gemm.scalePretileA[0];
-                    auto const tileK   = gemm.scalePretileA[1];
-                    descAScale         = TensorDescriptor(
-                        gemm.scaleTypeA,
-                        {static_cast<size_t>(M_scale), static_cast<size_t>(K_scale)},
-                        {static_cast<size_t>((K_scale / tileK) * tileM * tileK),
-                         static_cast<size_t>(tileM * tileK)});
-                }
-                else
-                {
-                    descAScale = TensorDescriptor(
-                        gemm.scaleTypeA,
-                        {static_cast<size_t>(M), size_t(K / gemm.scaleBlockSize)},
-                        gemm.transA);
-                }
+                TensorDescriptor descAScale
+                    = TensorDescriptor(gemm.scaleTypeA,
+                                       {static_cast<size_t>(M), size_t(K / gemm.scaleBlockSize)},
+                                       gemm.transA);
                 setCommandTensorArg(
                     commandArgs, tagTensorScaleA.value(), descAScale, deviceScaleA.get());
             }
@@ -876,26 +827,10 @@ namespace GEMMTests
                             fmt::format("K: {} must be a multiple of the scale block size: {}",
                                         K,
                                         gemm.scaleBlockSize));
-                TensorDescriptor descBScale;
-                if(!gemm.scalePretileB.empty())
-                {
-                    auto const K_scale = K / gemm.scaleBlockSize;
-                    auto const N_scale = N;
-                    auto const tileK   = gemm.scalePretileB[0];
-                    auto const tileN   = gemm.scalePretileB[1];
-                    descBScale         = TensorDescriptor(
-                        gemm.scaleTypeB,
-                        {static_cast<size_t>(K_scale), static_cast<size_t>(N_scale)},
-                        {static_cast<size_t>(tileK * tileN),
-                         static_cast<size_t>((K_scale / tileK) * tileK * tileN)});
-                }
-                else
-                {
-                    descBScale = TensorDescriptor(
-                        gemm.scaleTypeB,
-                        {size_t(K / gemm.scaleBlockSize), static_cast<size_t>(N)},
-                        gemm.transB);
-                }
+                TensorDescriptor descBScale
+                    = TensorDescriptor(gemm.scaleTypeB,
+                                       {size_t(K / gemm.scaleBlockSize), static_cast<size_t>(N)},
+                                       gemm.transB);
                 setCommandTensorArg(
                     commandArgs, tagTensorScaleB.value(), descBScale, deviceScaleB.get());
             }

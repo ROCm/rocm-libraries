@@ -38,6 +38,7 @@
 #include <hip/hip_fp16.h>
 // clang-format on
 
+#include <hiptensor/hiptensor.h>
 #include <hiptensor/hiptensor_types.h>
 
 #include "hip_device.hpp"
@@ -50,6 +51,7 @@ typedef enum hiptensorOperationType_t
     HIPTENSOR_ELEMENTWISE_BINARY  = 2,
     HIPTENSOR_ELEMENTWISE_TRINARY = 3,
     HIPTENSOR_REDUCTION           = 4,
+    HIPTENSOR_CONTRACTION_TRINARY = 5,
 } hiptensorOperationType_t;
 
 struct hiptensorOperationDescriptor
@@ -78,6 +80,10 @@ struct hiptensorOperationDescriptor
 
     hiptensorTensorDescriptor_t mDescD;
     std::vector<int32_t>        mModeD;
+    hiptensorOperator_t         mOpD;
+
+    hiptensorTensorDescriptor_t mDescE;
+    std::vector<int32_t>        mModeE;
 
     hiptensorOperator_t mOpAC;
     hiptensorOperator_t mOpABC;
@@ -118,6 +124,7 @@ struct hiptensorPlan
     std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescB;
     std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescC;
     std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescD;
+    std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescE;
     std::unique_ptr<hiptensorOperationDescriptor> mOwnedOpDesc;
     std::unique_ptr<hiptensorPlanPreference>      mOwnedPref;
 };
@@ -206,11 +213,11 @@ namespace hiptensor
     static constexpr auto HipTensorDataType_v = HipTensorDataType<T>::value;
 
     // Get data size in bytes from id
-    uint32_t hiptensorDataTypeSize(hiptensorDataType_t id);
+    HIPTENSOR_EXPORT uint32_t hiptensorDataTypeSize(hiptensorDataType_t id);
 
     // Convert hiptensorDataType_t to hiptensorComputeDescriptor_t
-    hiptensorComputeDescriptor_t convertToComputeType(hiptensorDataType_t hipType);
-    std::optional<hiptensorDataType_t>
+    HIPTENSOR_EXPORT hiptensorComputeDescriptor_t convertToComputeType(hiptensorDataType_t hipType);
+    HIPTENSOR_EXPORT                              std::optional<hiptensorDataType_t>
         convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType);
 
     // Read a single value from void pointer, casted to T
@@ -220,14 +227,15 @@ namespace hiptensor
     template <typename T>
     T readVal(void const* value, hiptensorComputeDescriptor_t id);
 
-    void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
+    HIPTENSOR_EXPORT void
+        writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
 
-    std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
-    std::string hipTypeToString(hiptensorDataType_t hipType);
-    std::string opTypeToString(hiptensorOperator_t opType);
-    std::string algoTypeToString(hiptensorAlgo_t algoType);
-    std::string logLevelToString(hiptensorLogLevel_t);
-    std::string workSizePrefToString(hiptensorWorksizePreference_t workSize);
+    HIPTENSOR_EXPORT std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
+    HIPTENSOR_EXPORT std::string hipTypeToString(hiptensorDataType_t hipType);
+    HIPTENSOR_EXPORT std::string opTypeToString(hiptensorOperator_t opType);
+    HIPTENSOR_EXPORT std::string algoTypeToString(hiptensorAlgo_t algoType);
+    HIPTENSOR_EXPORT std::string logLevelToString(hiptensorLogLevel_t);
+    HIPTENSOR_EXPORT std::string workSizePrefToString(hiptensorWorksizePreference_t workSize);
 } // namespace hiptensor
 
 bool operator==(hiptensorDataType_t hipType, hiptensorComputeDescriptor_t computeType);

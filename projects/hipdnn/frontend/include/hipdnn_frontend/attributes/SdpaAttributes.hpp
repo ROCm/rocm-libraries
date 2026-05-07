@@ -14,7 +14,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
@@ -33,13 +32,23 @@ namespace hipdnn_frontend::graph
  * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
  * @endcode
  *
+ * **Tensor Shapes (BHSD ordering):**
+ * - **Q** (query): `(B, H, S_q, D)` — batch, heads, query sequence length, head dimension
+ * - **K** (key): `(B, H_k, S_kv, D)` — batch, key heads, key/value sequence length, head dimension
+ * - **V** (value): `(B, H_v, S_kv, D_v)` — batch, value heads, key/value sequence length, value head dimension
+ * - **O** (output): `(B, H, S_q, D_v)` — batch, heads, query sequence length, value head dimension
+ * - **Stats** (optional): `(B, H, S_q, 1)` — softmax statistics (when generate_stats is true)
+ *
+ * Memory layout is controlled via strides. Use `TensorLayout::BHSD` for row-major or
+ * `TensorLayout::BSHD` for sequence-major layout.
+ *
  * **Required inputs:**
- * - Q: Query tensor [B, H, S_q, D]
- * - K: Key tensor [B, H, S_kv, D]
- * - V: Value tensor [B, H, S_kv, D]
+ * - Q: Query tensor
+ * - K: Key tensor (num_heads must divide evenly into Q's num_heads for GQA/MQA)
+ * - V: Value tensor (seq_kv must match K)
  *
  * **Outputs:**
- * - O: Attention output tensor [B, H, S_q, D]
+ * - O: Attention output tensor
  * - Stats: Softmax statistics (optional, when generate_stats is set)
  *
  * **Optional features:**
@@ -603,6 +612,12 @@ public:
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_dropout_probability(float probability)
+    {
+        dropout_probability = probability;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_attn_scale_value(float value)
     {
         attn_scale_value = value;
@@ -645,185 +660,6 @@ public:
     {
         implementation = value;
         return *this;
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::SdpaAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        const auto optUid
-            = [](const std::shared_ptr<TensorAttributes>& t) -> flatbuffers::Optional<int64_t> {
-            return t ? flatbuffers::Optional<int64_t>(t->get_uid()) : flatbuffers::nullopt;
-        };
-
-        return hipdnn_data_sdk::data_objects::CreateSdpaAttributes(builder,
-                                                                   get_q()->get_uid(),
-                                                                   get_k()->get_uid(),
-                                                                   get_v()->get_uid(),
-                                                                   get_o()->get_uid(),
-                                                                   optUid(get_bias()),
-                                                                   optUid(get_attn_scale()),
-                                                                   optUid(get_seq_len_q()),
-                                                                   optUid(get_seq_len_kv()),
-                                                                   optUid(get_seed()),
-                                                                   optUid(get_offset()),
-                                                                   optUid(get_dropout_mask()),
-                                                                   optUid(get_dropout_scale()),
-                                                                   optUid(get_page_table_k()),
-                                                                   optUid(get_page_table_v()),
-                                                                   optUid(get_block_mask()),
-                                                                   optUid(get_sink_token()),
-                                                                   optUid(get_descale_q()),
-                                                                   optUid(get_descale_k()),
-                                                                   optUid(get_descale_v()),
-                                                                   optUid(get_descale_s()),
-                                                                   optUid(get_scale_s()),
-                                                                   optUid(get_scale_o()),
-                                                                   optUid(get_stats()),
-                                                                   optUid(get_max()),
-                                                                   optUid(get_sum_exp()),
-                                                                   optUid(get_rng_dump()),
-                                                                   optUid(get_amax_s()),
-                                                                   optUid(get_amax_o()),
-                                                                   generate_stats,
-                                                                   alibi_mask,
-                                                                   padding_mask,
-                                                                   causal_mask,
-                                                                   causal_mask_bottom_right,
-                                                                   dropout_probability,
-                                                                   attn_scale_value,
-                                                                   left_bound,
-                                                                   right_bound,
-                                                                   max_seq_len_kv,
-                                                                   toSdkType(diagonal_alignment),
-                                                                   toSdkType(mma_core_mode),
-                                                                   toSdkType(implementation));
-    }
-
-    static SdpaAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::SdpaAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        SdpaAttributes attr;
-
-        attr.set_q(tensorMap.at(fb->q_tensor_uid()));
-        attr.set_k(tensorMap.at(fb->k_tensor_uid()));
-        attr.set_v(tensorMap.at(fb->v_tensor_uid()));
-        attr.set_o(tensorMap.at(fb->o_tensor_uid()));
-
-        if(fb->attn_mask_tensor_uid().has_value())
-        {
-            attr.set_bias(tensorMap.at(fb->attn_mask_tensor_uid().value()));
-        }
-        if(fb->scale_tensor_uid().has_value())
-        {
-            attr.set_attn_scale(tensorMap.at(fb->scale_tensor_uid().value()));
-        }
-        if(fb->seq_len_q_tensor_uid().has_value())
-        {
-            attr.set_seq_len_q(tensorMap.at(fb->seq_len_q_tensor_uid().value()));
-        }
-        if(fb->seq_len_kv_tensor_uid().has_value())
-        {
-            attr.set_seq_len_kv(tensorMap.at(fb->seq_len_kv_tensor_uid().value()));
-        }
-        if(fb->seed_tensor_uid().has_value())
-        {
-            attr.set_seed(tensorMap.at(fb->seed_tensor_uid().value()));
-        }
-        if(fb->offset_tensor_uid().has_value())
-        {
-            attr.set_offset(tensorMap.at(fb->offset_tensor_uid().value()));
-        }
-        if(fb->dropout_mask_tensor_uid().has_value())
-        {
-            attr.set_dropout_mask(tensorMap.at(fb->dropout_mask_tensor_uid().value()));
-        }
-        if(fb->dropout_scale_tensor_uid().has_value())
-        {
-            attr.set_dropout_scale(tensorMap.at(fb->dropout_scale_tensor_uid().value()));
-        }
-        if(fb->page_table_k_tensor_uid().has_value())
-        {
-            attr.set_page_table_k(tensorMap.at(fb->page_table_k_tensor_uid().value()));
-        }
-        if(fb->page_table_v_tensor_uid().has_value())
-        {
-            attr.set_page_table_v(tensorMap.at(fb->page_table_v_tensor_uid().value()));
-        }
-        if(fb->block_mask_tensor_uid().has_value())
-        {
-            attr.set_block_mask(tensorMap.at(fb->block_mask_tensor_uid().value()));
-        }
-        if(fb->sink_token_tensor_uid().has_value())
-        {
-            attr.set_sink_token(tensorMap.at(fb->sink_token_tensor_uid().value()));
-        }
-        if(fb->descale_q_tensor_uid().has_value())
-        {
-            attr.set_descale_q(tensorMap.at(fb->descale_q_tensor_uid().value()));
-        }
-        if(fb->descale_k_tensor_uid().has_value())
-        {
-            attr.set_descale_k(tensorMap.at(fb->descale_k_tensor_uid().value()));
-        }
-        if(fb->descale_v_tensor_uid().has_value())
-        {
-            attr.set_descale_v(tensorMap.at(fb->descale_v_tensor_uid().value()));
-        }
-        if(fb->descale_s_tensor_uid().has_value())
-        {
-            attr.set_descale_s(tensorMap.at(fb->descale_s_tensor_uid().value()));
-        }
-        if(fb->scale_s_tensor_uid().has_value())
-        {
-            attr.set_scale_s(tensorMap.at(fb->scale_s_tensor_uid().value()));
-        }
-        if(fb->scale_o_tensor_uid().has_value())
-        {
-            attr.set_scale_o(tensorMap.at(fb->scale_o_tensor_uid().value()));
-        }
-        if(fb->stats_tensor_uid().has_value())
-        {
-            attr.set_stats(tensorMap.at(fb->stats_tensor_uid().value()));
-        }
-        if(fb->max_tensor_uid().has_value())
-        {
-            attr.set_max(tensorMap.at(fb->max_tensor_uid().value()));
-        }
-        if(fb->sum_exp_tensor_uid().has_value())
-        {
-            attr.set_sum_exp(tensorMap.at(fb->sum_exp_tensor_uid().value()));
-        }
-        if(fb->rng_dump_tensor_uid().has_value())
-        {
-            attr.set_rng_dump(tensorMap.at(fb->rng_dump_tensor_uid().value()));
-        }
-        if(fb->amax_s_tensor_uid().has_value())
-        {
-            attr.set_amax_s(tensorMap.at(fb->amax_s_tensor_uid().value()));
-        }
-        if(fb->amax_o_tensor_uid().has_value())
-        {
-            attr.set_amax_o(tensorMap.at(fb->amax_o_tensor_uid().value()));
-        }
-
-        attr.generate_stats = fb->generate_stats();
-        attr.alibi_mask = fb->alibi_mask();
-        attr.padding_mask = fb->padding_mask();
-        attr.causal_mask = fb->causal_mask();
-        attr.causal_mask_bottom_right = fb->causal_mask_bottom_right();
-
-        attr.dropout_probability = fb->dropout_probability();
-        attr.attn_scale_value = fb->attn_scale_value();
-        attr.left_bound = fb->left_bound();
-        attr.right_bound = fb->right_bound();
-        attr.max_seq_len_kv = fb->max_seq_len_kv();
-
-        attr.diagonal_alignment = fromSdkType(fb->diagonal_alignment());
-        attr.mma_core_mode = fromSdkType(fb->mma_core_mode());
-        attr.implementation = fromSdkType(fb->implementation());
-
-        return attr;
     }
 };
 

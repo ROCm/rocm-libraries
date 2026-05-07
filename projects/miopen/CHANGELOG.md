@@ -2,12 +2,44 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
-## MIOpen 3.5.1 for ROCm 7.13.0
+
+## MIOpen 3.6.0 for ROCm 7.13.0
 ### Added
 * Added `MIOPEN_LOG_BUFFER_SIZE` option: when set to non-zero, dumps recent MIOpen logs to file on error.
+* [Conv] Added `ConvDepthwiseFwd3D` solver for optimizing specific 3D depthwise convolutions.
+* [Conv] Added NHWC layout support for Winograd convolution solvers.
+* [Conv] Added regular GEMM solver support for Conv3D forward and backward-data with 1x1x1 filters.
+* [Conv] Added configurable problem size threshold (`MIOPEN_CONV_DIRECT_MAX_SIZE`) for direct solver.
+* [Softmax] Added tuning support via Generic Search.
+
+### Changed
+* [Conv] Improved default kernel selection for Composable Kernel (CK) convolution solvers with ranked shortlists.
+* [Conv] Split CK grouped convolution kernels into per-architecture runtime-loaded dynamic libraries.
+
+### Optimized
+* Optimized transpose operations with tiled and vectorized variants for NCHW/NHWC conversions.
+* [BatchNorm] Optimized batchnorm reduction using warp shuffle intrinsics.
+* [Conv] Added heuristic filtering of slow GEMM solver configurations during tuning.
+
+### Deprecated
+* [Conv] Deprecated CK non-grouped convolution forward and backward solvers.
+* Deprecated `miopenConvolutionBackwardBias`: the underlying OpenCL kernel (`MIOpenConvBwdBias.cl`) has been removed. The function now returns `miopenStatusNotImplemented` and will be removed in a future release.
+
+### Removed
+* Removed GraphAPI experimental feature and related code
+
+### Resolved issues
+* [Conv] Fixed Winograd Fury grouped convolution correctness on gfx12 when G > 1.
+* [Conv] Fixed bf16 WrW convolution precision loss in inter-batch accumulation.
+* [Conv] Fixed GPU memory fault in Winograd v3.0 WrW solver for large tensor shapes.
+* Fixed BF16 `abs` function precision error caused by unnecessary cast through FP16.
+* Fixed pooling kernel runtime compilation failure.
+* Fixed gfx1151 inline assembly compilation errors in batchnorm kernels.
+* Fixed use-after-free in HIPOCProgram binary loading.
 
 ## MIOpen 3.5.1 for ROCm 7.12.0
 ### Added
+* [Conv] Enabled gfx1103 (Phoenix).
 * [Conv] Enabled CK wrw and bwd solvers with split-k disabled in deterministic mode.
 * [Conv] Added `ConvDepthwiseFwd2D` solver for optimizing specific depthwise convolutions.
 

@@ -375,13 +375,13 @@ struct NodeMetaData
     size_t                  iDist = 0, oDist = 0;
     size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
-    int                     direction    = -1;
-    rocfft_result_placement placement    = rocfft_placement_inplace;
-    rocfft_precision        precision    = rocfft_precision_single;
-    rocfft_array_type       inArrayType  = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType = rocfft_array_type_unset;
-    hipDeviceProp_t         deviceProp   = {};
-    bool                    rootIsC2C;
+    int                     direction         = -1;
+    rocfft_result_placement placement         = rocfft_placement_inplace;
+    rocfft_precision        precision         = rocfft_precision_single;
+    rocfft_array_type       inArrayType       = rocfft_array_type_unset;
+    rocfft_array_type       outArrayType      = rocfft_array_type_unset;
+    rocfft_transform_type   rootTransformType = rocfft_transform_type_complex_forward;
+    hipDeviceProp_t         deviceProp        = {};
     BufferPtr               input_buffer, output_buffer;
 
     // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
@@ -399,6 +399,13 @@ struct NodeMetaData
             throw std::invalid_argument("Unknown io data label given to "
                                         + ROCFFT_CURRENT_FUNCTION);
         }
+    };
+
+    inline bool is_using_default_contiguous_layout_for(io_data_label io) const
+    {
+        return layout_for(io)
+               == data_layout_t::default_full_layout(
+                   io == io_data_label::INPUT ? length : outputLength, batch);
     };
 
     explicit NodeMetaData(TreeNode* refNode);
@@ -710,7 +717,7 @@ public:
     // Check node scheme to see if partial pass is enabled
     bool isPartialPassEnabled() const
     {
-        return (scheme == CS_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
+        return (scheme == CS_3D_PP || scheme == CS_REAL_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
                 || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC);
     }
 
@@ -752,7 +759,7 @@ public:
     void RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& newNode);
 
     // Get root node of plan
-    TreeNode* GetPlanRoot();
+    const TreeNode* GetPlanRoot() const;
     // If 'this' is a leaf, return it.  Otherwise, return the first
     // leaf node under 'this' in the execution sequence.
     TreeNode* GetFirstLeaf();
@@ -762,7 +769,14 @@ public:
     // Return ancestor node of 'this' that is real-even (1D/2D/3D), or
     // nullptr if there is no such ancestor
     TreeNode* GetRealEvenAncestor();
-    bool      IsRootPlanC2CTransform();
+
+    // Return true if the root plan is C2C, R2C, or C2R
+    bool IsRootPlanC2CTransform() const;
+    bool IsRootPlanR2CTransform() const;
+    bool IsRootPlanC2RTransform() const;
+
+    // Return the transform type of the root plan
+    rocfft_transform_type GetRootPlanTransformType() const;
 
     // Return ancestor node of 'this' that is partial-pass, or
     // nullptr if there is no such ancestor
@@ -810,7 +824,7 @@ public:
                                 : FMKey(length[0], length[1], precision, scheme);
     }
 
-    // Partial pass parent nodes, e.g., CS_3D_PP, have
+    // Partial pass parent nodes, e.g., CS_3D_PP or CS_REAL_3D_PP, have
     // two kernels associated with them. The key for
     // querying the function pool is different from the
     // the standard kernel key.
@@ -827,6 +841,7 @@ public:
                        pp_parent_node->length[1],
                        pp_parent_node->length[2],
                        precision,
+                       GetRootPlanTransformType(),
                        pp_parent_node->scheme);
     }
 
@@ -1081,7 +1096,7 @@ struct MultiPlanItem
     virtual void ExecuteAsync(const rocfft_plan                       plan,
                               void*                                   in_buffer[],
                               void*                                   out_buffer[],
-                              rocfft_execution_info                   info,
+                              const rocfft_execution_info_internal&   info,
                               size_t                                  multiPlanIdx,
                               const std::map<int, device_callback_t>& callbacks)
         = 0;
@@ -1094,9 +1109,9 @@ struct MultiPlanItem
 
     // Get work buffer requirements for this item.  Only ExecPlans
     // should need this, as data movement shouldn't need temp buffers.
-    virtual size_t WorkBufBytes(size_t base_type_size) const
+    virtual void WorkBufBytesPerDevice(size_t               base_type_size,
+                                       std::vector<size_t>& workBufBytes) const
     {
-        return 0;
     }
 
     // Print a description of this item to the plan log
@@ -1174,11 +1189,11 @@ struct CommPointToPoint : public MultiPlanItem
         }
     }
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
@@ -1272,11 +1287,11 @@ struct CommScatter : public MultiPlanItem
         ops.emplace_back(std::move(op));
     }
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
@@ -1377,11 +1392,11 @@ struct CommGather : public MultiPlanItem
         ops.emplace_back(std::move(op));
     }
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
@@ -1477,11 +1492,11 @@ struct CommAllToAll : public MultiPlanItem
     CommStatus  comm_status = COMM_SUCCESS;
     std::string error_message;
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx,
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
                       const std::map<int, device_callback_t>&) override;
 
     void Wait() override;
@@ -1558,7 +1573,7 @@ struct ExecPlan : public MultiPlanItem
     void ExecuteAsync(const rocfft_plan                       plan,
                       void*                                   in_buffer[],
                       void*                                   out_buffer[],
-                      rocfft_execution_info                   info,
+                      const rocfft_execution_info_internal&   info,
                       size_t                                  multiPlanIdx,
                       const std::map<int, device_callback_t>& callbacks) override;
 
@@ -1615,11 +1630,13 @@ struct ExecPlan : public MultiPlanItem
     // OB_IN refers to iStride, OB_OUT refers to oStride
     std::map<OperatingBuffer, bool> isUnitStride;
 
-    size_t WorkBufBytes(size_t base_type_size) const override
+    void WorkBufBytesPerDevice(size_t               base_type_size,
+                               std::vector<size_t>& workBufBytes) const override
     {
         // base type is the size of one real, work buf counts in
         // complex numbers
-        return workBufSize * 2 * base_type_size;
+        workBufBytes[location.device]
+            = std::max(workBufSize * 2 * base_type_size, workBufBytes[location.device]);
     }
 
     // for callbacks, work out which nodes of the plan are loading data
@@ -1634,6 +1651,12 @@ struct ExecPlan : public MultiPlanItem
     bool ExecutesOnRank(int comm_rank) const override
     {
         return location.comm_rank == comm_rank;
+    }
+
+    // accessor for plan-local stream
+    hipStream_t get_local_stream() const
+    {
+        return stream;
     }
 
 private:

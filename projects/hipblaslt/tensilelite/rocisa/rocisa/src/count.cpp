@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/vector.h>
+#include <typeindex>
 
 namespace nb = nanobind;
 
@@ -43,18 +44,30 @@ namespace rocisa
 
     // Use typeid for exact match, use dynamic_pointer_cast for inheritance match
     template <typename T>
-    int countX(const std::shared_ptr<Item>& item)
+    int countX(const std::shared_ptr<Item>& item,
+                const std::unordered_map<std::type_index, int>& weights = {})
     {
         if(auto ptr = std::dynamic_pointer_cast<Module>(item))
         {
             int count = 0;
             for(const auto& i : ptr->itemList)
             {
-                count += countX<T>(i);
+                count += countX<T>(i, weights);
             }
             return count;
         }
-        return static_cast<int>(std::dynamic_pointer_cast<const T>(item) != nullptr);
+
+        if (!std::dynamic_pointer_cast<const T>(item)) {
+            return 0;
+        }
+
+        if (!weights.empty()) {
+            const auto& itemRef = *item;
+            auto it = weights.find(typeid(itemRef));
+            if (it != weights.end())
+                return it->second;
+        }
+        return 1;
     }
 
     int countInstruction(const std::shared_ptr<Item>& item)
@@ -82,10 +95,31 @@ namespace rocisa
         return countX<LocalWriteInstruction>(item);
     }
 
+    // "countWeighted" functions apply type-based weights to count instructions accurately.
+    int countWeightedLocalRead(const std::shared_ptr<Item>& item)
+    {
+        return countX<LocalReadInstruction>(item, {
+            {typeid(DSLoadB192), 2}, // DSLoadB192 is composed by two instructions
+        });
+    }
+
+    int countWeightedLocalWrite(const std::shared_ptr<Item>& item)
+    {
+        return countX<LocalWriteInstruction>(item, {
+            {typeid(DSStoreB192), 2}, // DSStoreB192 is composed by two instructions
+            {typeid(DSStoreB256), 2}, // DSStoreB256 is composed by two instructions
+        });
+    }
+
     // Exact types
     int countDSStoreB128(const std::shared_ptr<Item>& item)
     {
         return item->countExactType(typeid(DSStoreB128));
+    }
+
+    int countDSStoreB192(const std::shared_ptr<Item>& item)
+    {
+        return item->countExactType(typeid(DSStoreB192));
     }
 
     int countDSStoreB256(const std::shared_ptr<Item>& item)
@@ -111,7 +145,8 @@ namespace rocisa
             }
         }
         else if(std::dynamic_pointer_cast<MFMAInstruction>(item)
-                || std::dynamic_pointer_cast<SMFMAInstruction>(item))
+                || std::dynamic_pointer_cast<SMFMAInstruction>(item)
+                || std::dynamic_pointer_cast<MXMFMAInstruction>(item))
         {
             mfmaList.push_back(item);
         }
@@ -158,8 +193,11 @@ void init_count(nb::module_ m)
     m.def("countSMemLoad", &rocisa::countSMemLoad);
     m.def("countLocalRead", &rocisa::countLocalRead);
     m.def("countLocalWrite", &rocisa::countLocalWrite);
+    m.def("countWeightedLocalRead", &rocisa::countWeightedLocalRead);
+    m.def("countWeightedLocalWrite", &rocisa::countWeightedLocalWrite);
 
     m.def("countDSStoreB128", &rocisa::countDSStoreB128);
+    m.def("countDSStoreB192", &rocisa::countDSStoreB192);
     m.def("countDSStoreB256", &rocisa::countDSStoreB256);
     m.def("countVMovB32", &rocisa::countVMovB32);
 

@@ -8,15 +8,21 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_public_frontend_tests
     main.cpp
+    IntegrationBatchnormBackwardDescriptorLifting.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
+    IntegrationBatchnormDescriptorLifting.cpp
     IntegrationBatchnormDescriptorLowering.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
+    IntegrationBatchnormInferenceDescriptorLifting.cpp
     IntegrationBatchnormInferenceDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLifting.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
+    IntegrationBlockScaleDequantizeDescriptorLifting.cpp
     IntegrationBlockScaleDequantizeDescriptorLowering.cpp
     IntegrationBlockScaleQuantize.cpp
+    IntegrationBlockScaleQuantizeDescriptorLifting.cpp
     IntegrationBlockScaleQuantizeDescriptorLowering.cpp
     IntegrationConvForward.cpp
     IntegrationConvFpropDescriptorLifting.cpp
@@ -24,21 +30,36 @@ add_executable(
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionDgradDescriptorLifting.cpp
+    IntegrationConvolutionWgradDescriptorLifting.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationCustomOpDescriptorLifting.cpp
+    IntegrationCustomOpDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationGraphKnobSettingsDescriptorLowering.cpp
+    IntegrationGraphKnobsDescriptorLifting.cpp
     IntegrationGraphLifting.cpp
+    IntegrationGraphSupportCheck.cpp
+    IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
+    IntegrationMatmulDescriptorLifting.cpp
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationReductionDescriptorLifting.cpp
+    IntegrationReductionDescriptorLowering.cpp
+    IntegrationRMSNormDescriptorLifting.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSetPluginPathsExt.cpp
-    IntegrationSdpaFpropDescriptorLowering.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdDescriptorLowering.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaBwdLifting.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaFwdDescriptorLifting.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationSdpaFwdDescriptorLowering.cpp>
 )
 
 target_compile_options(hipdnn_public_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -50,6 +71,7 @@ target_link_libraries(
     hipdnn_test_sdk
     hipdnn_backend
     hip::host
+    ${CMAKE_DL_LIBS}
 )
 
 target_include_directories(hipdnn_public_frontend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})

@@ -44,6 +44,135 @@ protected:
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
   }
 
+  // Run an end-to-end unary pointwise op with a uniform input fill, and check
+  // the output matches the uniform expected value. Used to give each unary op
+  // its own minimal smoke test without copy-pasting the full graph boilerplate.
+  void runUnaryPointwiseTest(const char *graphName,
+                             hipdnn_frontend::PointwiseMode_t mode,
+                             float inputValue, float expectedValue) {
+    const int64_t M = 4;
+    const int64_t N = 8;
+    const int64_t inputUID = 0;
+    const int64_t outputUID = 1;
+
+    PinnedTensor<float> inputTensor({M, N});
+    PinnedTensor<float> outputTensor({M, N});
+    inputTensor.fillWithValue(inputValue);
+    outputTensor.fillWithValue(-100.0f);
+
+    PinnedTensor<float> expectedOutput({M, N});
+    expectedOutput.fillWithValue(expectedValue);
+
+    auto graph = std::make_shared<graph::Graph>();
+    graph->set_name(graphName);
+    graph->set_io_data_type(DataType_t::FLOAT)
+        .set_intermediate_data_type(DataType_t::FLOAT)
+        .set_compute_data_type(DataType_t::FLOAT);
+
+    auto inputAttr = std::make_shared<graph::TensorAttributes>(
+        graph::makeTensorAttributes("input", DataType_t::FLOAT, inputTensor));
+    inputAttr->set_uid(inputUID);
+
+    graph::PointwiseAttributes pwAttr;
+    pwAttr.set_name(graphName).set_mode(mode);
+
+    auto outputAttr = graph->pointwise(inputAttr, pwAttr);
+    outputAttr->set_uid(outputUID);
+    outputAttr->set_dim(outputTensor.dims())
+        .set_stride(outputTensor.strides())
+        .set_output(true);
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    result = graph->build_operation_graph(handle);
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    result = graph->create_execution_plans();
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    result = graph->check_support();
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    result = graph->build_plans();
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+
+    std::unordered_map<int64_t, void *> variantPack;
+    variantPack[inputUID] = inputTensor.memory().deviceData();
+    variantPack[outputUID] = outputTensor.memory().deviceData();
+
+    result = graph->execute(handle, variantPack, nullptr);
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    outputTensor.memory().markDeviceModified();
+
+    CpuFpReferenceValidation<float> validator(1e-5f, 1e-5f);
+    EXPECT_TRUE(validator.allClose(expectedOutput, outputTensor));
+  }
+
+  // Run an end-to-end binary pointwise op with uniform input fills, and check
+  // the output matches the uniform expected value.
+  void runBinaryPointwiseTest(const char *graphName,
+                              hipdnn_frontend::PointwiseMode_t mode,
+                              float in0Value, float in1Value,
+                              float expectedValue) {
+    const int64_t M = 4;
+    const int64_t N = 8;
+    const int64_t in0UID = 0;
+    const int64_t in1UID = 1;
+    const int64_t outputUID = 2;
+
+    PinnedTensor<float> in0Tensor({M, N});
+    PinnedTensor<float> in1Tensor({M, N});
+    PinnedTensor<float> outputTensor({M, N});
+    in0Tensor.fillWithValue(in0Value);
+    in1Tensor.fillWithValue(in1Value);
+    outputTensor.fillWithValue(-100.0f);
+
+    PinnedTensor<float> expectedOutput({M, N});
+    expectedOutput.fillWithValue(expectedValue);
+
+    auto graph = std::make_shared<graph::Graph>();
+    graph->set_name(graphName);
+    graph->set_io_data_type(DataType_t::FLOAT)
+        .set_intermediate_data_type(DataType_t::FLOAT)
+        .set_compute_data_type(DataType_t::FLOAT);
+
+    auto in0Attr = std::make_shared<graph::TensorAttributes>(
+        graph::makeTensorAttributes("in0", DataType_t::FLOAT, in0Tensor));
+    in0Attr->set_uid(in0UID);
+    auto in1Attr = std::make_shared<graph::TensorAttributes>(
+        graph::makeTensorAttributes("in1", DataType_t::FLOAT, in1Tensor));
+    in1Attr->set_uid(in1UID);
+
+    graph::PointwiseAttributes pwAttr;
+    pwAttr.set_name(graphName).set_mode(mode);
+
+    auto outputAttr = graph->pointwise(in0Attr, in1Attr, pwAttr);
+    outputAttr->set_uid(outputUID);
+    outputAttr->set_dim(outputTensor.dims())
+        .set_stride(outputTensor.strides())
+        .set_output(true);
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    result = graph->build_operation_graph(handle);
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    result = graph->create_execution_plans();
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    result = graph->check_support();
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    result = graph->build_plans();
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+
+    std::unordered_map<int64_t, void *> variantPack;
+    variantPack[in0UID] = in0Tensor.memory().deviceData();
+    variantPack[in1UID] = in1Tensor.memory().deviceData();
+    variantPack[outputUID] = outputTensor.memory().deviceData();
+
+    result = graph->execute(handle, variantPack, nullptr);
+    ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+    outputTensor.memory().markDeviceModified();
+
+    CpuFpReferenceValidation<float> validator(1e-5f, 1e-5f);
+    EXPECT_TRUE(validator.allClose(expectedOutput, outputTensor));
+  }
+
   hipStream_t stream = nullptr;
   hipdnnHandle_t handle;
 };
@@ -51,156 +180,81 @@ protected:
 // Test: Standalone pointwise ReLU forward (unary)
 // Graph: input[4,8] -> pointwise(RELU_FWD) -> output[4,8]
 TEST_F(PointwiseIntegrationTest, SimpleReluFwd) {
-  // Dimensions.
-  const int64_t M = 4;
-  const int64_t N = 8;
-
-  // UIDs.
-  const int64_t inputUID = 0;
-  const int64_t outputUID = 1;
-
-  // Initialize tensors.
-  PinnedTensor<float> inputTensor({M, N});
-  PinnedTensor<float> outputTensor({M, N});
-  inputTensor.fillWithValue(-3.0f);
-  outputTensor.fillWithValue(-100.0f);
-
-  // Expected output: ReLU clamps negatives to 0.
-  PinnedTensor<float> expectedOutput({M, N});
-  expectedOutput.fillWithValue(0.0f);
-
-  // Create graph.
-  auto graph = std::make_shared<graph::Graph>();
-  graph->set_name("simple_relu_fwd_test");
-  graph->set_io_data_type(DataType_t::FLOAT)
-      .set_intermediate_data_type(DataType_t::FLOAT)
-      .set_compute_data_type(DataType_t::FLOAT);
-
-  // Create tensor attributes.
-  auto inputAttr = std::make_shared<graph::TensorAttributes>(
-      graph::makeTensorAttributes("input", DataType_t::FLOAT, inputTensor));
-  inputAttr->set_uid(inputUID);
-
-  // Create pointwise ReLU attributes.
-  graph::PointwiseAttributes reluAttr;
-  reluAttr.set_name("relu").set_mode(PointwiseMode_t::RELU_FWD);
-
-  // Create pointwise node (unary).
-  auto outputAttr = graph->pointwise(inputAttr, reluAttr);
-  outputAttr->set_uid(outputUID);
-  outputAttr->set_dim(outputTensor.dims())
-      .set_stride(outputTensor.strides())
-      .set_output(true);
-
-  // Build + validate + build plans for graph.
-  auto result = graph->validate();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->build_operation_graph(handle);
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->create_execution_plans();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->check_support();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  result = graph->build_plans();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-
-  // Create variant pack.
-  std::unordered_map<int64_t, void *> variantPack;
-  variantPack[inputUID] = inputTensor.memory().deviceData();
-  variantPack[outputUID] = outputTensor.memory().deviceData();
-
-  // Execute graph.
-  result = graph->execute(handle, variantPack, nullptr);
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-  outputTensor.memory().markDeviceModified();
-
-  // Check results.
-  CpuFpReferenceValidation<float> validator(1e-6f, 1e-6f);
-  EXPECT_TRUE(validator.allClose(expectedOutput, outputTensor));
+  // ReLU clamps negatives to 0.
+  runUnaryPointwiseTest("simple_relu_fwd_test", PointwiseMode_t::RELU_FWD,
+                        -3.0f, 0.0f);
 }
 
 // Test: Standalone pointwise ADD (binary)
 // Graph: in0[4,8] + in1[4,8] -> output[4,8]
 TEST_F(PointwiseIntegrationTest, SimpleAdd) {
-  // Dimensions.
-  const int64_t M = 4;
-  const int64_t N = 8;
+  runBinaryPointwiseTest("simple_add_test", PointwiseMode_t::ADD, 3.0f, 5.0f,
+                         8.0f);
+}
 
-  // UIDs.
-  const int64_t in0UID = 0;
-  const int64_t in1UID = 1;
-  const int64_t outputUID = 2;
+// Smoke tests for the remaining unary fusilli pointwise operators. Each test
+// picks an input value where the expected output is exact (or near-exact) so
+// the assertion uses a tight tolerance.
+TEST_F(PointwiseIntegrationTest, SimpleAbs) {
+  runUnaryPointwiseTest("simple_abs", PointwiseMode_t::ABS, -3.0f, 3.0f);
+}
 
-  // Initialize tensors.
-  PinnedTensor<float> in0Tensor({M, N});
-  PinnedTensor<float> in1Tensor({M, N});
-  PinnedTensor<float> outputTensor({M, N});
-  in0Tensor.fillWithValue(3.0f);
-  in1Tensor.fillWithValue(5.0f);
-  outputTensor.fillWithValue(-100.0f);
+TEST_F(PointwiseIntegrationTest, SimpleCeil) {
+  runUnaryPointwiseTest("simple_ceil", PointwiseMode_t::CEIL, 2.3f, 3.0f);
+}
 
-  // Expected output: 3.0 + 5.0 = 8.0.
-  PinnedTensor<float> expectedOutput({M, N});
-  expectedOutput.fillWithValue(8.0f);
+TEST_F(PointwiseIntegrationTest, SimpleErf) {
+  // erf(0) = 0.
+  runUnaryPointwiseTest("simple_erf", PointwiseMode_t::ERF, 0.0f, 0.0f);
+}
 
-  // Create graph.
-  auto graph = std::make_shared<graph::Graph>();
-  graph->set_name("simple_add_test");
-  graph->set_io_data_type(DataType_t::FLOAT)
-      .set_intermediate_data_type(DataType_t::FLOAT)
-      .set_compute_data_type(DataType_t::FLOAT);
+TEST_F(PointwiseIntegrationTest, SimpleExp) {
+  // exp(0) = 1.
+  runUnaryPointwiseTest("simple_exp", PointwiseMode_t::EXP, 0.0f, 1.0f);
+}
 
-  // Create tensor attributes.
-  auto in0Attr = std::make_shared<graph::TensorAttributes>(
-      graph::makeTensorAttributes("in0", DataType_t::FLOAT, in0Tensor));
-  in0Attr->set_uid(in0UID);
-  auto in1Attr = std::make_shared<graph::TensorAttributes>(
-      graph::makeTensorAttributes("in1", DataType_t::FLOAT, in1Tensor));
-  in1Attr->set_uid(in1UID);
+TEST_F(PointwiseIntegrationTest, SimpleFloor) {
+  runUnaryPointwiseTest("simple_floor", PointwiseMode_t::FLOOR, 2.7f, 2.0f);
+}
 
-  // Create pointwise ADD attributes.
-  graph::PointwiseAttributes addAttr;
-  addAttr.set_name("add").set_mode(PointwiseMode_t::ADD);
+TEST_F(PointwiseIntegrationTest, SimpleNeg) {
+  runUnaryPointwiseTest("simple_neg", PointwiseMode_t::NEG, 4.0f, -4.0f);
+}
 
-  // Create pointwise node (binary).
-  auto outputAttr = graph->pointwise(in0Attr, in1Attr, addAttr);
-  outputAttr->set_uid(outputUID);
-  outputAttr->set_dim(outputTensor.dims())
-      .set_stride(outputTensor.strides())
-      .set_output(true);
+TEST_F(PointwiseIntegrationTest, SimpleReciprocal) {
+  runUnaryPointwiseTest("simple_reciprocal", PointwiseMode_t::RECIPROCAL, 4.0f,
+                        0.25f);
+}
 
-  // Build + validate + build plans for graph.
-  auto result = graph->validate();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+TEST_F(PointwiseIntegrationTest, SimpleSigmoidFwd) {
+  // sigmoid(0) = 0.5.
+  runUnaryPointwiseTest("simple_sigmoid_fwd", PointwiseMode_t::SIGMOID_FWD,
+                        0.0f, 0.5f);
+}
 
-  result = graph->build_operation_graph(handle);
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+TEST_F(PointwiseIntegrationTest, SimpleTanhFwd) {
+  // tanh(0) = 0.
+  runUnaryPointwiseTest("simple_tanh_fwd", PointwiseMode_t::TANH_FWD, 0.0f,
+                        0.0f);
+}
 
-  result = graph->create_execution_plans();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+// Smoke tests for the remaining binary fusilli pointwise operators.
+TEST_F(PointwiseIntegrationTest, SimpleDiv) {
+  runBinaryPointwiseTest("simple_div", PointwiseMode_t::DIV, 8.0f, 4.0f, 2.0f);
+}
 
-  result = graph->check_support();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+TEST_F(PointwiseIntegrationTest, SimpleMax) {
+  runBinaryPointwiseTest("simple_max", PointwiseMode_t::MAX, 3.0f, 5.0f, 5.0f);
+}
 
-  result = graph->build_plans();
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
+TEST_F(PointwiseIntegrationTest, SimpleMin) {
+  runBinaryPointwiseTest("simple_min", PointwiseMode_t::MIN, 3.0f, 5.0f, 3.0f);
+}
 
-  // Create variant pack.
-  std::unordered_map<int64_t, void *> variantPack;
-  variantPack[in0UID] = in0Tensor.memory().deviceData();
-  variantPack[in1UID] = in1Tensor.memory().deviceData();
-  variantPack[outputUID] = outputTensor.memory().deviceData();
+TEST_F(PointwiseIntegrationTest, SimpleMul) {
+  runBinaryPointwiseTest("simple_mul", PointwiseMode_t::MUL, 3.0f, 5.0f, 15.0f);
+}
 
-  // Execute graph.
-  result = graph->execute(handle, variantPack, nullptr);
-  ASSERT_EQ(result.code, error_code_t::OK) << result.err_msg;
-  outputTensor.memory().markDeviceModified();
-
-  // Check results.
-  CpuFpReferenceValidation<float> validator(1e-6f, 1e-6f);
-  EXPECT_TRUE(validator.allClose(expectedOutput, outputTensor));
+TEST_F(PointwiseIntegrationTest, SimpleSub) {
+  runBinaryPointwiseTest("simple_sub", PointwiseMode_t::SUB, 8.0f, 3.0f, 5.0f);
 }

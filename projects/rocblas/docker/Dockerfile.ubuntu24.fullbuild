@@ -1,0 +1,161 @@
+# syntax=docker/dockerfile:1
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# ============================================================================
+# Common base image with all dependencies
+# ============================================================================
+FROM ubuntu:24.04 AS base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HIP_PLATFORM=amd
+
+RUN apt-get update && apt-get install -y \
+    git \
+    gdb \
+    gfortran \
+    git-lfs \
+    ninja-build \
+    cmake \
+    g++ \
+    pkg-config \
+    xxd \
+    patchelf \
+    automake \
+    python3-venv \
+    python3-dev \
+    libegl1-mesa-dev \
+    texinfo \
+    bison \
+    flex \
+    curl \
+    unzip \
+    libtool \
+    python3-pip \
+    vim \
+    rsync \
+    ca-certificates \
+    wget \
+    libopenblas-dev \
+    libgtest-dev \
+    libzstd-dev \
+    doxygen \
+    clang-format-18 \
+    clang-tidy-20 \
+    llvm-20 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use update-alternatives to set default versions
+RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+RUN update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
+
+# Set up update-alternatives for all LLVM tools
+RUN for tool in /usr/bin/llvm*-20; do \
+        if [ -f "$tool" ]; then \
+            base=$(basename "$tool" -20); \
+            update-alternatives --install "/usr/bin/$base" "$base" "$tool" 100; \
+            echo "Set alternative for $base -> $tool"; \
+        fi \
+    done
+
+# ============================================================================
+# Build from source stage - clones and builds TheRock
+#
+# Example build command for default source build (default branch, gfx94X):
+# docker build -f Dockerfile.ubuntu24.fullbuild -t rocblas:fullbuild .
+#
+# Example build command for overriding ASIC and git hash:
+# docker build -f Dockerfile.ubuntu24.fullbuild --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_HASH=abc123def456 -t rocblas:custom_source_build .
+#
+# Build mode options:
+# - THEROCK_BUILD_MODE can be: Preset, Debug, or Release (default)
+# - When using "Preset", specify the preset with THEROCK_BUILD_PRESET
+# - When using "Debug" or "Release", standard CMake build types are used
+#
+# Note: When THEROCK_BUILD_MODE=Preset, the THEROCK_BUILD_PRESET value is used.
+#       When THEROCK_BUILD_MODE=Debug/Release, THEROCK_BUILD_PRESET is ignored.
+#
+# Build parallelism:
+# - BUILD_JOBS controls the number of parallel build jobs
+# - Default is 0, which means use all available CPU cores
+#
+# Example build command for Debug build with 4 cores:
+# docker build -f Dockerfile.ubuntu24.fullbuild --build-arg THEROCK_BUILD_MODE=Debug --build-arg BUILD_JOBS=4 -t rocblas:debug .
+#
+# Example build command with custom TheRock preset:
+# docker build -f Dockerfile.ubuntu24.fullbuild --build-arg THEROCK_BUILD_MODE=Preset --build-arg THEROCK_BUILD_PRESET=linux-debug-package -t rocblas:custom-preset .
+# ============================================================================
+FROM base AS install_therock_fullbuild
+
+ARG THEROCK_ASIC=gfx94X
+ARG THEROCK_GIT_HASH=default
+ARG THEROCK_BUILD_MODE=Release
+ARG THEROCK_BUILD_PRESET=linux-release-package
+ARG BUILD_JOBS=0
+
+RUN git config --global user.email "docker@build.local" && \
+    git config --global user.name "Docker Build"
+
+RUN git clone https://github.com/ROCm/TheRock.git
+
+WORKDIR /TheRock
+
+RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
+        echo "Checking out specific hash: $THEROCK_GIT_HASH"; \
+        git fetch; \
+        git checkout $THEROCK_GIT_HASH; \
+    else \
+        echo "Using default branch"; \
+    fi
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
+
+RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
+    git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
+    python ./build_tools/fetch_sources.py
+
+RUN mkdir build
+WORKDIR /TheRock/build
+
+RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
+        echo "Building with TheRock preset: $THEROCK_BUILD_PRESET"; \
+        cmake .. \
+            --preset=$THEROCK_BUILD_PRESET \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+            -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
+    else \
+        echo "Building with CMake build type: $THEROCK_BUILD_MODE"; \
+        cmake .. \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=$THEROCK_BUILD_MODE \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+            -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
+    fi
+
+RUN if [ "$BUILD_JOBS" = "0" ]; then \
+        cmake --build .; \
+    else \
+        echo "Building with $BUILD_JOBS parallel jobs"; \
+        cmake --build . -j$BUILD_JOBS; \
+    fi && \
+    cmake --install .
+
+# ============================================================================
+# rocblas development environment with ROCm built from source
+#
+# Build with:
+#   docker build -f Dockerfile.ubuntu24.fullbuild -t rocblas:fullbuild .
+# ============================================================================
+FROM base AS fullbuild
+
+COPY --from=install_therock_fullbuild /opt/rocm /opt/rocm
+
+ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
+ENV CMAKE_GENERATOR="Ninja"
+ENV LD_LIBRARY_PATH="/opt/rocm/lib"
+
+WORKDIR /workspace

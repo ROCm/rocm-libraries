@@ -1,0 +1,117 @@
+# Build directories
+build/
+build*/
+cmake-build-*/
+out/
+bin/
+lib/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+!CMakeLists.txt
+
+# Generated files (only in build directories)
+# Note: Source .inc and .pattern files are NOT ignored (e.g., LogicalInstructionDefs.inc, *.pattern)
+build/**/*.inc
+build*/**/*.inc
+*.generated.*
+*_generated.*
+
+# Compiled Object files
+*.o
+*.obj
+*.slo
+*.lo
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.la
+*.lai
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+*.x
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Test artifacts
+Testing/
+CTestTestfile.cmake
+*.gcda
+*.gcno
+*.gcov
+
+# IDE and Editor files
+.vscode/
+.vs/
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+.DS_Store
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Python (if any Python scripts are used)
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Documentation build artifacts
+docs/_build/
+docs/html/
+docs/latex/
+
+# Package managers
+node_modules/
+.npm
+
+# OS-specific
+Thumbs.db
+Desktop.ini
+.directory
+
+# Backup files
+*~
+*.orig
+*.rej
+
+# Core dumps
+core.*
+vgcore.*
+
+# Profiling
+*.prof
+gmon.out
+perf.data*

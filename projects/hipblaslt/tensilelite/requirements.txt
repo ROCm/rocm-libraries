@@ -6,3 +6,6 @@ simplejson
 ujson
 orjson
 yappi
+tox
+invoke
+numpy

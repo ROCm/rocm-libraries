@@ -128,6 +128,23 @@ namespace TensileLite
             m_validatedSolution = false;
             m_errorInSolution   = false;
             m_executedSolution  = false;
+
+            // MXFP4 data can depend on the selected solution (e.g. MI-based preSwizzle when
+            // enabled). prepareCPUInputs runs in preProblem before preSolution, so the initial
+            // SolveCPU may not match GPU inputs refreshed in DataInitialization::preSolution.
+            // Re-run the CPU reference after that refresh (CPU "current" buffers are synced there
+            // when the MX path runs).
+            if(!m_enabled || m_problem == nullptr || m_referenceInputs == nullptr
+               || solution == nullptr)
+                return;
+
+            if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
+            {
+                if(!isMXFP4Problem(*gemm))
+                    return;
+                ScopedTimer timer("cpu_reference_gemm_per_solution");
+                SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
+            }
         }
 
         bool ReferenceValidator::needMoreRunsInSolution() const
@@ -375,7 +392,8 @@ namespace TensileLite
 
             auto k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
             bool isTF32 = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
-            bool isTF32x1 = (problem.computeInputType() == rocisa::DataType::BFloat16
+            bool isTF32x1 = (problem.computeInputTypeA() == rocisa::DataType::BFloat16
+                && problem.computeInputTypeB() == rocisa::DataType::BFloat16
                 && problem.computeType() == rocisa::DataType::Float
                 && problem.a().dataType() == rocisa::DataType::Float
                 && problem.b().dataType() == rocisa::DataType::Float);
@@ -466,11 +484,13 @@ namespace TensileLite
                     refPtr = reference.scaleAlphaVec;
                     resPtr = result.scaleAlphaVec;
                 }
+                break;
                 case ContractionProblemGemm::TENSOR::Synchronizer:
                 {
                     refPtr = reference.Synchronizer;
                     resPtr = result.Synchronizer;
                 }
+                break;
                 case ContractionProblemGemm::TENSOR::AMAXD:
                 {
                     refPtr = reference.amaxD;
@@ -546,9 +566,17 @@ namespace TensileLite
 
             if(m_printTensorA)
             {
-                auto a = problem.a();
                 m_reporter->logTensor(
                     LogLevel::Verbose, "A", reference.a, problem.a(), reference.a);
+                if(problem.a().dataType() == rocisa::DataType::Float4
+                   && problem.mxBlockA() > 0)
+                {
+                    m_reporter->logTensor(LogLevel::Verbose,
+                                          "MXSA",
+                                          reference.mxsa,
+                                          problem.mxsa(),
+                                          reference.mxsa);
+                }
                 if(problem.sparse() && problem.sparse() != 2)
                 {
                     m_reporter->logTensor(LogLevel::Verbose,
@@ -561,9 +589,17 @@ namespace TensileLite
 
             if(m_printTensorB)
             {
-                auto b = problem.b();
                 m_reporter->logTensor(
                     LogLevel::Verbose, "B", reference.b, problem.b(), reference.b);
+                if(problem.b().dataType() == rocisa::DataType::Float4
+                   && problem.mxBlockB() > 0)
+                {
+                    m_reporter->logTensor(LogLevel::Verbose,
+                                          "MXSB",
+                                          reference.mxsb,
+                                          problem.mxsb(),
+                                          reference.mxsb);
+                }
                 if(problem.sparse() && problem.sparse() == 2)
                 {
                     m_reporter->logTensor(LogLevel::Verbose,

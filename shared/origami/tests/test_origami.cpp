@@ -90,6 +90,13 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
                                             1.8,
                                             1,
                                             std::make_tuple(0, 0.008, 0));
+      } else if (gpu_arch == 1250) {
+        hardware_slow                    = make_hardware(950);
+        hardware_slow.arch               = origami::hardware_t::architecture_t::gfx1250;
+        hardware_slow.compute_clock_ghz  = 1.4;
+        hardware_fast                    = make_hardware(950);
+        hardware_fast.arch               = origami::hardware_t::architecture_t::gfx1250;
+        hardware_fast.compute_clock_ghz  = 1.8;
       }
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
@@ -118,6 +125,8 @@ TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
         REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx942);
       } else if (gpu_arch == 950) {
         REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx950);
+      } else if (gpu_arch == 1250) {
+        REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx1250);
       }
     }
   }
@@ -178,6 +187,7 @@ TEST_CASE("Origami: best_macro_tile_size", "[origami]") {
 
 TEST_CASE("Origami: best_macro_tile_size mxfp4", "[origami]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch != 950) continue;  // mxfp4 only supported on gfx950 for now
     DYNAMIC_SECTION("gfx" << gpu_arch << " - rank configs by latency") {
       auto hardware = make_hardware(gpu_arch);
       hardware.lds_capacity = 400000;
@@ -201,7 +211,6 @@ TEST_CASE("Origami: best_macro_tile_size mxfp4", "[origami]") {
       auto results = origami::rank_configs(problem, hardware, configs);
 
       REQUIRE(results.size() == configs.size());
-      // Results should be ranked, so latencies should be in ascending order (best first)
       REQUIRE(results[0].config.mt.m == 256);
       REQUIRE(results[1].config.mt.m == 128);
       REQUIRE(results[2].config.mt.m == 64);
@@ -402,7 +411,7 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         invalid_configs.push_back(make_config(256, 256, 128, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(128, 128, 256, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(64, 64, 512, 32, 32, 8, false, 1, 6, 0, 0));
-      } else if (gpu_arch == 950) {
+      } else if (gpu_arch == 950 || gpu_arch == 1250) {
         invalid_configs.push_back(make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(128, 128, 512, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(256, 256, 512, 32, 32, 8, false, 1, 6, 0, 0));
@@ -548,6 +557,7 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
 
 TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast returns positive latency") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(2048, 2048, 2048);
@@ -576,6 +586,7 @@ TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
 
 TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - compute_total_latency uses Formocast in simulation mode") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(2048, 2048, 2048);
@@ -614,6 +625,7 @@ TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formo
 
 TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles various problem sizes") {
       auto hardware = make_hardware(gpu_arch);
       
@@ -650,6 +662,7 @@ TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]
 
 TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles different tile sizes") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(4096, 4096, 4096);

@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -63,7 +64,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto dxAttr = graph->conv_dgrad(dyAttr, wAttr, convAttributes);
     dxAttr->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> dyTensor(dyAttr->get_dim(), layout);
@@ -115,10 +116,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto dxValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
             absoluteTolerance, relativeTolerance);
 
-        bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";
+        bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
+                                                                                "dx",
+                                                                                dxValidator,
+                                                                                dxRefTensor,
+                                                                                dxTensor,
+                                                                                absoluteTolerance,
+                                                                                relativeTolerance);
 
         validationPassed = dxValid;
     }

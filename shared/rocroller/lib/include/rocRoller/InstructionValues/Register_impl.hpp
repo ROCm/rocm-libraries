@@ -68,6 +68,7 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
@@ -104,6 +105,7 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
@@ -125,6 +127,7 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
@@ -195,6 +198,7 @@ namespace rocRoller
             {
             case Type::M0:
             case Type::SCC:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
@@ -241,6 +245,8 @@ namespace rocRoller
                 return "VCC_LO";
             case Type::VCC_HI:
                 return "VCC_HI";
+            case Type::EXECZ:
+                return "EXECZ";
             case Type::EXEC:
                 return "EXEC";
             case Type::EXEC_LO:
@@ -540,9 +546,9 @@ namespace rocRoller
             return m_regType == Type::SCC;
         }
 
-        inline constexpr bool Value::isExec() const
+        inline constexpr bool Value::isEXECZ() const
         {
-            return m_regType == Type::EXEC;
+            return m_regType == Type::EXECZ;
         }
 
         inline ValuePtr Value::placeholder() const
@@ -637,6 +643,9 @@ namespace rocRoller
                 return;
             case Type::VCC_HI:
                 os << "vcc_hi";
+                return;
+            case Type::EXECZ:
+                os << "execz";
                 return;
             case Type::EXEC:
                 os << "exec";
@@ -743,6 +752,7 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:

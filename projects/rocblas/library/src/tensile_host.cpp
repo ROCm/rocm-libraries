@@ -239,6 +239,10 @@ namespace
         {
             return Tensile::LazyLoadingInit::gfx900;
         }
+        else if(deviceString.find("gfx90c") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx90c;
+        }
         else if(deviceString.find("gfx906") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx906;
@@ -698,6 +702,23 @@ namespace
 
         static int determine_tensile_base_path(std::string& base_path)
         {
+            // called once from initialize so logging check here to keep clutter down
+            const char* str_layer_mode = getenv("ROCBLAS_LAYER");
+            if(str_layer_mode)
+            {
+                rocblas_layer_mode layer_mode
+                    = static_cast<rocblas_layer_mode>(strtol(str_layer_mode, 0, 0));
+
+                if(layer_mode & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal))
+                {
+                    char buf[256];
+                    rocblas_get_version_string(buf, 256);
+
+                    // logs trace differently to rocblas_cerr as no handle here
+                    rocblas_cerr << "rocBLAS initialize,version," << buf << std::endl;
+                }
+            }
+
             const char* env = getenv("ROCBLAS_TENSILE_LIBPATH");
             if(env)
             {
@@ -795,10 +816,26 @@ namespace
             std::string processor = rocblas_internal_get_arch_name(deviceId);
 
             static std::string base_path;
-            static int         determined_path = determine_tensile_base_path(base_path);
+            static int         determined_path{determine_tensile_base_path(base_path)};
 
             path = base_path;
-            if(TestPath(path + "/" + processor))
+            // Probe subdirectories from most-specific to least-specific so that shard
+            // overlays compose correctly regardless of how TheRock splits arch builds:
+            //   1. library/<arch>-<xnack>/  – split single-xnack-variant shard
+            //   2. library/<arch>/          – combined xnack or no-xnack single-arch shard
+            //   3. library/                 – flat multi-arch build (no subdir)
+            bool        found_subdir = false;
+            std::string xnack_mode   = rocblas_internal_get_xnack_mode();
+            if(!xnack_mode.empty())
+            {
+                std::string processor_xnack = processor + "-" + xnack_mode;
+                if(TestPath(path + "/" + processor_xnack))
+                {
+                    path += "/" + processor_xnack;
+                    found_subdir = true;
+                }
+            }
+            if(!found_subdir && TestPath(path + "/" + processor))
                 path += "/" + processor;
 
 #ifdef TENSILE_YAML

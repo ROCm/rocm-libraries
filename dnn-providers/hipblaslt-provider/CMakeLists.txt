@@ -4,13 +4,15 @@
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(HIPBLASLT_PLUGIN "0.0.1")
-project(hipblaslt-provider VERSION ${HIPBLASLT_PLUGIN} LANGUAGES CXX)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+dnn_provider_setup_version(hipblaslt_provider ${CMAKE_CURRENT_LIST_DIR})
+
+project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 
 if(NOT WIN32)
     # Only set if not already specified by user
@@ -32,12 +34,15 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip
-     ${HIP_DIR}/cmake
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
 )
 
 option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
-option(ENABLE_CLANG_FORMAT "Enable clang-format targets" ON)
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+if(NOT ENABLE_CLANG_FORMAT)
+    message(WARNING "Clang-Format checks are disabled. CI requires passing clang-format checks.")
+endif()
 
 list(
     PREPEND
@@ -61,6 +66,7 @@ list(
     -Wunreachable-code # Warn about unreachable code
     -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
     -Wswitch-default # Warn if a switch statement does not have a default case
+    -Wno-ignored-attributes # disable warning about unused declspec(dllexport)
 )
 
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
@@ -74,6 +80,10 @@ if(NOT TARGET hipdnn_data_sdk)
     find_package(hipdnn_data_sdk CONFIG REQUIRED)
 endif()
 
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+endif()
+
 if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
@@ -81,10 +91,23 @@ endif()
 # Setup testing dependencies, tests & clang format
 include(Dependencies)
 if (NOT HIPDNN_SKIP_TESTS)
+    fetch_gtest_dependency()
+    set(SKIP_TEST_NAME_VALIDATION ON)
     include(Tests)
 endif()
-if (ENABLE_CLANG_FORMAT)
-    include(ClangCheck)
+# TODO: Remove this clang-format probe once TheRock's ml-libs/CMakeLists.txt passes
+# -DENABLE_CLANG_FORMAT=OFF for hipblasltprovider (as it already does for miopenprovider).
+# The common ClangCheck.cmake calls findAndCheckClangFormat() which FATAL_ERRORs when
+# clang-format is missing. TheRock's build container does not provide clang-format, so we
+# probe for it here and skip the include if absent. Other providers (miopen, hip-kernel,
+# integration-tests) rely on TheRock passing -DENABLE_CLANG_FORMAT=OFF instead.
+if(ENABLE_CLANG_FORMAT)
+    find_program(_HIPBLASLT_CLANG_FORMAT_PROBE NAMES clang-format-18 clang-format)
+    if(_HIPBLASLT_CLANG_FORMAT_PROBE)
+        include(ClangCheck)
+    else()
+        message(WARNING "ENABLE_CLANG_FORMAT=ON but clang-format not found; skipping format targets")
+    endif()
 endif()
 
 if(WIN32)
@@ -118,15 +141,20 @@ add_library(
     HipblasltMatrixLayout.cpp
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_plugin_sdk hip::host)
+dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
+target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 add_library(hipblaslt_plugin SHARED HipblasltPluginPublic.cpp)
 target_link_libraries(hipblaslt_plugin PRIVATE hipblaslt_plugin_private)
-target_link_libraries(
-    hipblaslt_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
-) # Hide symbols from linked static libs
+
+if(NOT WIN32)
+    target_link_libraries(
+        hipblaslt_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
+    ) # Hide symbols from linked static libs
+endif()
+
 target_compile_options(hipblaslt_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
     hipblaslt_plugin
@@ -150,7 +178,7 @@ if(NOT HIPDNN_SKIP_TESTS)
 
     # For standalone builds we need to install the ctest files
     if(NOT ROCM_LIBS_SUPERBUILD)
-        install_hipblaslt_plugin_ctest_files()
+        install_provider_ctest_files("hipblaslt_plugin")
     endif()
 endif()
 

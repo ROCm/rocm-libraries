@@ -6,10 +6,10 @@
 #include <functional>
 #include <variant>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
@@ -24,13 +24,13 @@ struct BatchnormFwdInferenceWithVarianceParams
 {
     BatchnormFwdInferenceWithVarianceParams() = default;
     BatchnormFwdInferenceWithVarianceParams(
-        const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& biasAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& meanAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& varianceAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& yAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& biasAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& meanAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& varianceAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& epsilonAttributes)
         : xTensor(unpackTensorAttributes(xAttributes))
         , yTensor(unpackTensorAttributes(yAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
@@ -41,13 +41,13 @@ struct BatchnormFwdInferenceWithVarianceParams
     {
     }
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT yTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT scaleTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT biasTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT meanTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT varianceTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT xTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT yTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT scaleTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT biasTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT meanTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT varianceTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
 };
 
 template <typename XDataType,
@@ -61,6 +61,11 @@ public:
     BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVarianceParams&& params)
         : _params(std::move(params))
     {
+    }
+
+    std::vector<int64_t> getOutputTensorIds() const override
+    {
+        return {_params.yTensor.uid};
     }
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
@@ -83,7 +88,7 @@ public:
         auto shallowVarianceTensor = createShallowTensor<MeanVarianceDataType>(
             _params.varianceTensor, variantPack.at(_params.varianceTensor.uid));
 
-        const double epsilonVal = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        const double epsilonVal = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
             _params.epsilonTensor, "Epsilon");
 
         utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
@@ -99,11 +104,11 @@ private:
     BatchnormFwdInferenceWithVarianceParams _params;
 };
 
-template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
+template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormFwdInferenceWithVariancePlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -114,8 +119,9 @@ public:
     using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         if(node.compute_data_type() != ComputeDataTypeEnum)
@@ -146,14 +152,14 @@ public:
             tensorMap, nodeAttributes->variance_tensor_uid(), MeanVarianceDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap,
                           nodeAttributes->epsilon_tensor_uid(),
-                          hipdnn_data_sdk::data_objects::DataType::DOUBLE);
+                          hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
 
         return true;
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-                      const hipdnn_data_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
         if(nodeAttributes == nullptr)

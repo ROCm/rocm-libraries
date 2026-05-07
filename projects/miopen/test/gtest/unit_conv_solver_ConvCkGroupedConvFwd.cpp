@@ -115,17 +115,17 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
     };
 }
 
-auto GetTestParams(miopenDataType_t datatype)
+auto GetTestParams(miopenDataType_t /*datatype*/)
 {
-// Solution is only applicable to devices that default to 64-lane wavefronts
+// Solution requires 64-lane wavefronts and depends on the CK dynamic library
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    Gpu supportedDevices =
-        Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif
     auto params = miopen::unit_tests::UnitTestConvSolverParams(supportedDevices);
     params.Tunable(5);
+    params.UsesCKDynamicLib();
 
     return params;
 }

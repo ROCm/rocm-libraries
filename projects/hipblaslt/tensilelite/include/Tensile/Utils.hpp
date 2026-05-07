@@ -35,6 +35,10 @@
 #include <type_traits>
 #include <vector>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
 
@@ -196,6 +200,40 @@ namespace TensileLite
         return concatenate(std::forward<Ts>(vals)...);
     }
 
+    inline size_t multiplyElementSize(size_t element, float elementSize)
+    {
+        if (elementSize >= 1.0f)
+        {
+            return element * size_t(elementSize);
+        }
+        else if (elementSize == 0.5)
+        {
+            return element >> 1;
+        } else if (elementSize == 0.75)
+        {
+            return (element * 3) >> 2;
+        }
+
+        throw std::runtime_error("Unsupported elementSize");
+    }
+
+    inline size_t divideElementSize(size_t element, float elementSize)
+    {
+        if (elementSize >= 1.0f)
+        {
+            return element / size_t(elementSize);
+        }
+        else if (elementSize == 0.5)
+        {
+            return element << 1;
+        } else if (elementSize == 0.75)
+        {
+            return (element << 2 ) / 3;
+        }
+
+        throw std::runtime_error("Unsupported elementSize");
+    }
+
     class StreamRead
     {
     public:
@@ -283,3 +321,5 @@ namespace TensileLite
 /**
  * @}
  */
+
+TENSILE_HIDDEN_END

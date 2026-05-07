@@ -31,6 +31,7 @@ if __name__ == "__main__":
     exit(1)
 
 import collections
+import copy
 import itertools
 import os
 import re
@@ -61,7 +62,7 @@ from .Common import (
 from .KernelWriterAssembly import KernelWriterAssembly
 from .KernelWriterBase import KernelWriterBase
 from .KernelWriterSource import KernelWriterSource
-from .SolutionLibrary import MasterSolutionLibrary
+from .SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
 from .SolutionStructs import Solution
 from .TensileCreateLib.KernelFileContext import KernelFileContextManager
 from .TensileCreateLib.ParseArguments import parseArguments
@@ -71,6 +72,35 @@ from .Utilities.toFile import toFile
 
 TENSILE_MANIFEST_FILENAME = "TensileManifest.txt"
 TENSILE_LIBRARY_DIR = "library"
+
+
+def libraryDir(outputPath: Union[str, Path], archs: List[str]) -> Path:
+    """Return the library output directory for the given target architectures.
+
+    Expects archs in dash-form (colons already replaced with dashes, e.g. "gfx90a-xnack-").
+
+    The routing key is the number of distinct *base* architectures (stripping xnack
+    variants), not the raw count of arch strings. xnack variants of one arch (e.g.
+    gfx90a-xnack+ and gfx90a-xnack-) are a single-family shard, not multi-arch.
+
+    Single base arch, single xnack variant → library/<arch>/      e.g. library/gfx90a-xnack-/
+    Single base arch, multiple xnack variants → library/<base>/   e.g. library/gfx90a/
+    Multiple distinct base archs → library/                        (flat, multi-arch build)
+
+    The runtime probes most-specific to least-specific (tensile_host.cpp):
+      library/<base>-<xnack>/ → library/<base>/ → library/
+    """
+    path = Path(outputPath)
+    if not archs:
+        return path / TENSILE_LIBRARY_DIR
+    base_archs = {a.split("-xnack")[0] for a in archs}
+    if len(base_archs) > 1:
+        return path / TENSILE_LIBRARY_DIR
+    base_arch = next(iter(base_archs))
+    if len(archs) == 1:
+        return path / TENSILE_LIBRARY_DIR / archs[0]
+    return path / TENSILE_LIBRARY_DIR / base_arch
+
 
 ProcessedKernelResult = Tuple[int, str, str, str, Optional[str]]
 ProcessedKernelLookup = Dict[str, List[ProcessedKernelResult]]
@@ -463,6 +493,7 @@ def writeKernels(
     kernelWriterAssembly: KernelWriterAssembly,
     errorTolerant: bool = False,
     removeTemporaries: bool = True,
+    libraryPath: Optional[Path] = None,
 ):
     start = time.time()
 
@@ -534,7 +565,7 @@ def writeKernels(
     codeObjectFiles = []
     if not globalParameters["GenerateSourcesAndExit"]:
         codeObjectFiles += SourceCommands.buildSourceCodeObjectFiles(
-            cxxCompiler, kernelFiles, outputPath, removeTemporaries
+            cxxCompiler, kernelFiles, outputPath, removeTemporaries, libraryPath=libraryPath
         )
         codeObjectFiles += AssemblyCommands.buildAssemblyCodeObjectFiles(
             bundler,
@@ -542,6 +573,7 @@ def writeKernels(
             kernelWriterAssembly,
             outputPath,
             removeTemporaries,
+            libraryPath=libraryPath,
         )
 
     stop = time.time()
@@ -752,6 +784,7 @@ def buildObjectFilePaths(
     sourceLibFiles,
     asmLibFiles,
     masterLibraries,
+    requestedArchs=None,
 ):
     solutionPaths = []
     sourceKernelPaths = []
@@ -776,8 +809,14 @@ def buildObjectFilePaths(
     for asmKernelFile in asmKernelFiles:
         asmKernelPaths += [os.path.join(asmKernelDir, asmKernelFile)]
 
-    # Build full paths for source and asm library files
-    libDir = os.path.join(prefixDir, "library")
+    # Build full paths for source and asm library files.
+    # For single-arch builds, all library outputs go to library/<arch>/ so that
+    # shard overlays compose additively without last-writer-wins conflicts.
+    libDir = (
+        str(libraryDir(prefixDir, requestedArchs))
+        if requestedArchs
+        else os.path.join(prefixDir, "library")
+    )
 
     libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
     if not globalParameters["SeparateArchitectures"] and not globalParameters["LazyLibraryLoading"]:
@@ -986,6 +1025,58 @@ def applyNaming(masterLibraries: Dict[str, MasterSolutionLibrary]) -> None:
                 sol.originalSolution["codeObjectFile"] = name
 
 
+def _renameFallbackPlaceholders(node, arch: str) -> None:
+    """Walk a library tree, appending "_<arch>" to fallback PlaceholderLibrary names."""
+    if node is None:
+        return
+    if isinstance(node, PlaceholderLibrary):
+        if "fallback" in node.filenamePrefix and not node.filenamePrefix.endswith("_" + arch):
+            node.filenamePrefix = node.filenamePrefix + "_" + arch
+        return
+    rows = getattr(node, "rows", None)
+    if rows:
+        for row in rows:
+            _renameFallbackPlaceholders(row.get("library"), arch)
+    mapping = getattr(node, "mapping", None)
+    if mapping:
+        for child in mapping.values():
+            _renameFallbackPlaceholders(child, arch)
+
+
+def renameFallbacksPerArch(masterLibraries: Dict[str, MasterSolutionLibrary]) -> None:
+    """Make fallback lazy library filenames arch-specific.
+
+    After addFallback() and applyNaming(), each per-arch master holds a lazy
+    entry whose key (and matching PlaceholderLibrary.filenamePrefix in the
+    master's library tree) ends in "_fallback". The serializer writes one
+    "*_fallback.dat" per unique key, so without per-arch suffixes every
+    arch's master points at the same shared file. That file's contents
+    differ across builds (solution.name strings are not stable across
+    Tensile encoding revisions), so two single-arch shard installs landing
+    in the same prefix overlay-clobber each other and break runtime symbol
+    lookup. Append "_<arch>" so each per-arch master references its own
+    per-arch fallback file.
+
+    Note: addFallback() aliases the same MasterSolutionLibrary across
+    multiple arch keys when an arch lacks tuned logic, and insert() shares
+    PlaceholderLibrary refs across arch masters via library.merge(). Deep
+    copy each per-arch master so the rename does not leak between arches.
+    """
+    for arch in list(masterLibraries.keys()):
+        master = copy.deepcopy(masterLibraries[arch])
+        masterLibraries[arch] = master
+
+        renamed = {}
+        for name, lib in master.lazyLibraries.items():
+            if "fallback" in name and not name.endswith("_" + arch):
+                renamed[name + "_" + arch] = lib
+            else:
+                renamed[name] = lib
+        master.lazyLibraries = renamed
+
+        _renameFallbackPlaceholders(master.library, arch)
+
+
 def makeSolutions(
     masterLibraries: dict, separate: bool
 ):  # -> Generator[Solution]:# is breaking tensile
@@ -1053,9 +1144,13 @@ def generateLogicData(
     libraries = parseLibraryLogicFiles(logicFiles)
     logicList = libraries if not printLevel else Utils.tqdm(libraries, desc="Processing logic data")
     masterLibraries = makeMasterLibraries(logicList, separate)
+    fallbackAdded = False
     if separate and "fallback" in masterLibraries:
         addFallback(masterLibraries)
+        fallbackAdded = True
     applyNaming(masterLibraries)
+    if fallbackAdded:
+        renameFallbacksPerArch(masterLibraries)
     for lib in masterLibraries.values():
         lib.version = version
 
@@ -1385,14 +1480,14 @@ def TensileCreateLibrary():
         if globalParameters["AsmCaps"][arch]["SupportedISA"]
     ]
 
-    _, requestedArchs = splitArchs()
-    if all(a.split(":")[0] not in supportedArchs for a in requestedArchs):
+    requestedArchs, cmdlineArchs = splitArchs()
+    if all(a.split(":")[0] not in supportedArchs for a in cmdlineArchs):
         printExit(
             f"No requested architecture is supported by ROCm {globalParameters['HipClangVersion']}\n  Requested {', '.join(requestedArchs)}\n  Supported {', '.join(supportedArchs)}"
         )
 
-    manifestFile = Path(outputPath) / TENSILE_LIBRARY_DIR / TENSILE_MANIFEST_FILENAME
-    manifestFile.parent.mkdir(exist_ok=True)
+    manifestFile = libraryDir(outputPath, requestedArchs) / TENSILE_MANIFEST_FILENAME
+    manifestFile.parent.mkdir(parents=True, exist_ok=True)
 
     if args["VerifyManifest"]:
         if verifyManifest(manifestFile):
@@ -1466,6 +1561,7 @@ def TensileCreateLibrary():
         sourceLibFiles,
         asmLibFiles,
         masterLibraries,
+        requestedArchs,
     )
 
     toFile(Path(manifestFile), libMetadataPaths + sourceLibPaths + asmLibPaths)
@@ -1490,6 +1586,7 @@ def TensileCreateLibrary():
         kernelWriterSource,
         kernelWriterAssembly,
         removeTemporaries=removeTemporaries,
+        libraryPath=libraryDir(outputPath, requestedArchs),
     )
 
     sanityCheck(
@@ -1502,8 +1599,8 @@ def TensileCreateLibrary():
     tPrint(2, f"codeObjectFiles: {codeObjectFiles}")
     tPrint(2, f"sourceLibPaths + asmLibPaths: {sourceLibPaths + asmLibPaths}")
 
-    newLibraryDir = Path(outputPath) / "library"
-    newLibraryDir.mkdir(exist_ok=True)
+    newLibraryDir = libraryDir(outputPath, requestedArchs)
+    newLibraryDir.mkdir(parents=True, exist_ok=True)
 
     masterFileList = generateMasterFileList(masterLibraries, supportedArchs, lazyLoading)
 
