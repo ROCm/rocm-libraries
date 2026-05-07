@@ -65,6 +65,16 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_Config9_Groups16_NoPad)
     ASSERT_TRUE((RunFprop<9>(1, 8, 8, 16, 4, 4, 3, 3, 0, 0)));
 }
 
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_Config9_Groups16_Pad2)
+{
+    ASSERT_TRUE((RunFprop<9>(1, 8, 8, 16, 4, 4, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_Config9_Groups16_Pad3)
+{
+    ASSERT_TRUE((RunFprop<9>(1, 8, 8, 16, 4, 4, 3, 3, 3, 3)));
+}
+
 // --- Fprop: groups=32, configs 7-9 compatible (8x8 input, out_w=8) ---
 
 TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_Config7_Groups32)
@@ -143,6 +153,16 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_Config4_Groups16_Pad1)
 TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_Config4_Groups16_NoPad)
 {
     ASSERT_TRUE((RunDgrad<4>(1, 8, 8, 16, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_Config4_Groups16_Pad2)
+{
+    ASSERT_TRUE((RunDgrad<4>(1, 8, 8, 16, 4, 4, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_Config4_Groups16_Pad3)
+{
+    ASSERT_TRUE((RunDgrad<4>(1, 8, 8, 16, 4, 4, 3, 3, 3, 3)));
 }
 
 // --- Dgrad: groups=32, configs 2-4 compatible (8x8 input, out_w=8) ---
@@ -368,6 +388,16 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_Config29_Groups16_NoP
     ASSERT_TRUE((RunFprop<29>(1, 4, 4, 16, 4, 4, 3, 3, 0, 0)));
 }
 
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_Config25_Groups32_Pad2)
+{
+    ASSERT_TRUE((RunFprop<25>(1, 32, 32, 32, 4, 4, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_Config25_Groups32_Pad3)
+{
+    ASSERT_TRUE((RunFprop<25>(1, 32, 32, 32, 4, 4, 3, 3, 3, 3)));
+}
+
 // --- Fprop XOR: groups=32, 8x8 input (out_w=8), configs 27 compatible ---
 
 TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Fprop_V3_XOR_Config27_Groups32)
@@ -429,6 +459,16 @@ TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_Config24_Groups16_Pad
 TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_Config24_Groups16_NoPad)
 {
     ASSERT_TRUE((RunDgrad<24>(1, 4, 4, 16, 4, 4, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_Config20_Groups32_Pad2)
+{
+    ASSERT_TRUE((RunDgrad<20>(1, 32, 32, 32, 4, 4, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvTestV3, Dgrad_V3_XOR_Config20_Groups32_Pad3)
+{
+    ASSERT_TRUE((RunDgrad<20>(1, 32, 32, 32, 4, 4, 3, 3, 3, 3)));
 }
 
 // --- Dgrad XOR: groups=32, 8x8 input, config 22 compatible ---
@@ -729,4 +769,36 @@ TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_Vec2_C2_K4)
 TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_Vec2_C4_K2)
 {
     ASSERT_TRUE((RunDgrad<44>(1, 34, 34, 32, 4, 2, 3, 3, 1, 1)));
+}
+
+// --- Padded-channel spatial padding tests (pad=2, pad=3) ---
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C3_K3_Pad2)
+{
+    ASSERT_TRUE((RunFprop<47>(1, 34, 34, 32, 3, 3, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C3_K3_Pad3)
+{
+    ASSERT_TRUE((RunFprop<47>(1, 34, 34, 32, 3, 3, 3, 3, 3, 3)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C3_K2_Pad2)
+{
+    ASSERT_TRUE((RunFprop<51>(4, 16, 16, 32, 3, 2, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Fprop_C3_K2_Pad3)
+{
+    ASSERT_TRUE((RunFprop<51>(4, 16, 16, 32, 3, 2, 3, 3, 3, 3)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C3_K2_Pad2)
+{
+    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 3, 2, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped4cFp16TileConvV3PaddedTest, Dgrad_C3_K2_Pad3)
+{
+    ASSERT_TRUE((RunDgrad<45>(1, 34, 34, 32, 3, 2, 3, 3, 3, 3)));
 }

@@ -248,8 +248,16 @@ TEST_F(InputLoaderTest, Vec1_C3_px1) { run_and_verify<CFG_VEC1>(3, 1); }
 TEST_F(InputLoaderTest, Vec1_C1_px1) { run_and_verify<CFG_VEC1>(1, 1); }
 TEST_F(InputLoaderTest, Vec2_C2_px1) { run_and_verify<CFG_VEC2>(2, 1); }
 
+// Padded path with spatial padding (px = 2, 3).
+TEST_F(InputLoaderTest, Vec1_C3_px2) { run_and_verify<CFG_VEC1>(3, 2); }
+TEST_F(InputLoaderTest, Vec1_C3_px3) { run_and_verify<CFG_VEC1>(3, 3); }
+TEST_F(InputLoaderTest, Vec1_C1_px2) { run_and_verify<CFG_VEC1>(1, 2); }
+TEST_F(InputLoaderTest, Vec2_C2_px2) { run_and_verify<CFG_VEC2>(2, 2); }
+
 // Unpadded with spatial padding.
 TEST_F(InputLoaderTest, Unpadded_C4_px1) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE, 1); }
+TEST_F(InputLoaderTest, Unpadded_C4_px2) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE, 2); }
+TEST_F(InputLoaderTest, Unpadded_C4_px3) { run_and_verify<CFG_UNPADDED>(GROUP_SIZE, 3); }
 
 // C != K tests: verify InputLoader works correctly when BlockCoords has C_in != C_out.
 // The InputLoader should only depend on c_per_group (C_in), not k_per_group (C_out).
@@ -422,6 +430,13 @@ TEST_F(InputLoader16cTest, Vec4_C12)     { run_and_verify<CFG_16C_VEC4>(12); }
 TEST_F(InputLoader16cTest, Vec1_C12_px1) { run_and_verify<CFG_16C_VEC1>(12, 1); }
 TEST_F(InputLoader16cTest, Vec1_C9_px1)  { run_and_verify<CFG_16C_VEC1>(9, 1); }
 
+// Spatial padding px = 2, 3.
+TEST_F(InputLoader16cTest, Unpadded_C16_px2) { run_and_verify<CFG_16C_UNPADDED>(16, 2); }
+TEST_F(InputLoader16cTest, Unpadded_C16_px3) { run_and_verify<CFG_16C_UNPADDED>(16, 3); }
+TEST_F(InputLoader16cTest, Vec1_C12_px2) { run_and_verify<CFG_16C_VEC1>(12, 2); }
+TEST_F(InputLoader16cTest, Vec1_C12_px3) { run_and_verify<CFG_16C_VEC1>(12, 3); }
+TEST_F(InputLoader16cTest, Vec1_C9_px2)  { run_and_verify<CFG_16C_VEC1>(9, 2); }
+
 // C != K for 16c
 TEST_F(InputLoader16cTest, Vec1_C9_K16)  { run_and_verify<CFG_16C_VEC1>(9, 0, 16); }
 TEST_F(InputLoader16cTest, Vec1_C12_K9)  { run_and_verify<CFG_16C_VEC1>(12, 0, 9); }
@@ -583,6 +598,13 @@ TEST_F(InputLoader8cTest, Vec1_C5)     { run_and_verify<CFG_8C_VEC1>(5); }
 TEST_F(InputLoader8cTest, Vec4_C4)     { run_and_verify<CFG_8C_VEC4>(4); }
 TEST_F(InputLoader8cTest, Vec1_C6_px1) { run_and_verify<CFG_8C_VEC1>(6, 1); }
 TEST_F(InputLoader8cTest, Vec1_C5_px1) { run_and_verify<CFG_8C_VEC1>(5, 1); }
+
+// Spatial padding px = 2, 3.
+TEST_F(InputLoader8cTest, Unpadded_C8_px2) { run_and_verify<CFG_8C_UNPADDED>(8, 2); }
+TEST_F(InputLoader8cTest, Unpadded_C8_px3) { run_and_verify<CFG_8C_UNPADDED>(8, 3); }
+TEST_F(InputLoader8cTest, Vec1_C6_px2) { run_and_verify<CFG_8C_VEC1>(6, 2); }
+TEST_F(InputLoader8cTest, Vec1_C6_px3) { run_and_verify<CFG_8C_VEC1>(6, 3); }
+TEST_F(InputLoader8cTest, Vec1_C5_px2) { run_and_verify<CFG_8C_VEC1>(5, 2); }
 
 // C != K for 8c
 TEST_F(InputLoader8cTest, Vec1_C5_K8) { run_and_verify<CFG_8C_VEC1>(5, 0, 8); }

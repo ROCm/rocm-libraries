@@ -53,6 +53,16 @@ TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Fprop_Config17_Groups1_NoPad)
     ASSERT_TRUE((RunFprop<17>(1, 8, 8, 1, 8, 8, 3, 3, 0, 0)));
 }
 
+TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Fprop_Config17_Groups1_Pad2)
+{
+    ASSERT_TRUE((RunFprop<17>(1, 8, 8, 1, 8, 8, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Fprop_Config17_Groups1_Pad3)
+{
+    ASSERT_TRUE((RunFprop<17>(1, 8, 8, 1, 8, 8, 3, 3, 3, 3)));
+}
+
 TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Fprop_Config17_Groups16)
 {
     ASSERT_TRUE((RunFprop<17>(1, 8, 8, 16, 8, 8, 3, 3, 1, 1)));
@@ -92,6 +102,16 @@ TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Dgrad_Config8_Groups1_Pad1)
 TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Dgrad_Config8_Groups1_NoPad)
 {
     ASSERT_TRUE((RunDgrad<8>(1, 8, 8, 1, 8, 8, 3, 3, 0, 0)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Dgrad_Config8_Groups1_Pad2)
+{
+    ASSERT_TRUE((RunDgrad<8>(1, 8, 8, 1, 8, 8, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Dgrad_Config8_Groups1_Pad3)
+{
+    ASSERT_TRUE((RunDgrad<8>(1, 8, 8, 1, 8, 8, 3, 3, 3, 3)));
 }
 
 TEST_F(DirectConvGrouped8cFp16TileConvV2Test, Dgrad_Config8_Groups16)
@@ -312,4 +332,26 @@ TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C6_K6_LargerSpatial)
 TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Dgrad_C6_K6_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<77>(4, 16, 16, 8, 6, 6, 3, 3, 1, 1)));
+}
+
+// --- Padded-channel spatial padding tests (pad=2, pad=3) ---
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C6_K6_Pad2)
+{
+    ASSERT_TRUE((RunFprop<80>(1, 8, 8, 8, 6, 6, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Fprop_C6_K6_Pad3)
+{
+    ASSERT_TRUE((RunFprop<80>(1, 8, 8, 8, 6, 6, 3, 3, 3, 3)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Dgrad_C5_K5_Pad2)
+{
+    ASSERT_TRUE((RunDgrad<78>(1, 8, 8, 8, 5, 5, 3, 3, 2, 2)));
+}
+
+TEST_F(DirectConvGrouped8cFp16TileConvV2PaddedTest, Dgrad_C5_K5_Pad3)
+{
+    ASSERT_TRUE((RunDgrad<78>(1, 8, 8, 8, 5, 5, 3, 3, 3, 3)));
 }
