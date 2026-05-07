@@ -22,6 +22,23 @@
 
 find_package(GTest REQUIRED)
 
+# Tests need access to unprefixed LAPACK for their own use
+# They should link to system LAPACK, not the prefixed internal version used by libhipsolver
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+if(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
+    find_package(LAPACK 3.7 REQUIRED CONFIG)
+else()
+    find_package(LAPACK 3.7 REQUIRED)
+endif()
+
+if(NOT LAPACK_LIBRARIES)
+    set(LAPACK_LIBRARIES
+        ${LAPACK_blas_LIBRARIES}
+        ${LAPACK_lapack_LIBRARIES}
+    )
+endif()
+
 if(BUILD_HIPBLAS_TESTS)
   if(NOT TARGET hipblas)
     if(CUSTOM_HIPBLAS)

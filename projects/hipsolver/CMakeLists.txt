@@ -257,23 +257,6 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
         endif()
 
         add_dependencies(lapack_libraries hipsolver-static-lapack)
-
-        # Clients (tests/benchmarks) need access to unprefixed LAPACK for their own use
-        # They should link to system LAPACK, not our prefixed internal version
-        set(THREADS_PREFER_PTHREAD_FLAG ON)
-        find_package(Threads REQUIRED)
-        if(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
-            find_package(LAPACK 3.7 REQUIRED CONFIG)
-        else()
-            find_package(LAPACK 3.7 REQUIRED)
-        endif()
-
-        if(NOT LAPACK_LIBRARIES)
-            set(LAPACK_LIBRARIES
-                ${LAPACK_blas_LIBRARIES}
-                ${LAPACK_lapack_LIBRARIES}
-            )
-        endif()
     else() # NOT HIPSOLVER_INTERNAL_LAPACK_BUILD
         # Some CPU side functionality is provided by external lapack
         # Linking lapack library requires fortran flags
