@@ -11,16 +11,16 @@ namespace miopen_plugin
 
 MiopenPointwisePlan::MiopenPointwisePlan(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& attributes,
-    const std::unordered_map<int64_t,
-                             const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
     : _input(miopen_utils::createTensor(tensorMap, attributes.in_0_tensor_uid()))
     , _output(miopen_utils::createTensor(tensorMap, attributes.out_0_tensor_uid()))
     , _activation(attributes)
 {
 }
 
-size_t MiopenPointwisePlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnMiopenHandle& handle) const
+size_t
+    MiopenPointwisePlan::getWorkspaceSize([[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     return 0;
 }
@@ -36,7 +36,7 @@ void MiopenPointwisePlan::execute(const HipdnnMiopenHandle& handle,
         = miopen_utils::findDeviceBuffer(_output.uid(), deviceBuffers, numDeviceBuffers);
 
     float alpha = 1.0f;
-    float beta  = 0.0f;
+    float beta = 0.0f;
 
     THROW_ON_MIOPEN_FAILURE(miopenActivationForward(handle.miopenHandle,
                                                     _activation.activationDescriptor(),

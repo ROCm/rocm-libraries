@@ -33,8 +33,8 @@ void checkPointwiseModeSupported(const PointwiseAttributes& attrs)
 
 void checkPointwiseTensorsSupported(
     const PointwiseAttributes& attrs,
-    const std::unordered_map<int64_t,
-                             const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
 {
     const auto& inputTensor
         = miopen_utils::findTensorAttributes(tensorMap, attrs.in_0_tensor_uid());

@@ -17,13 +17,12 @@ namespace pointwise_applicability
 
 bool isSupported(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph);
 
-void checkPointwiseModeSupported(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs);
+void checkPointwiseModeSupported(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs);
 
 void checkPointwiseTensorsSupported(
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& attrs,
-    const std::unordered_map<int64_t,
-                             const hipdnn_data_sdk::data_objects::TensorAttributes*>& tensorMap);
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
 } // namespace pointwise_applicability
 

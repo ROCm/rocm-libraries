@@ -21,8 +21,7 @@ class MiopenPointwisePlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 public:
     MiopenPointwisePlan(
         const hipdnn_data_sdk::data_objects::PointwiseAttributes& attributes,
-        const std::unordered_map<int64_t,
-                                 const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     MiopenPointwisePlan(const MiopenPointwisePlan&) = delete;

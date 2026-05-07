@@ -32,8 +32,7 @@ std::vector<PointwiseTestCase> getPointwiseTestCases()
 }
 
 template <typename DataType>
-class PointwiseReluForward
-    : public IntegrationGraphVerificationHarness<DataType, PointwiseTestCase>
+class PointwiseReluForward : public IntegrationGraphVerificationHarness<DataType, PointwiseTestCase>
 {
 protected:
     void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
