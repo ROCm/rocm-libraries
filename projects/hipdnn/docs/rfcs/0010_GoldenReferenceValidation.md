@@ -66,7 +66,7 @@ Golden data is a **key-value store**:
 
 If the key is wrong — the graph has changed since generation but the fingerprint didn't catch it — every downstream step (deserialize, execute, compare) operates on stale data from a different computation. A pass is false confidence. A fail is a wild goose chase.
 
-The graph fingerprint must be correct, deterministic, and under our control. `computeGraphIdentity()` produces both the fingerprint (SHA-256 hash for identity) and a human-readable label (for directory naming). See [Graph Fingerprint](#graph-fingerprint----catches-graph-drift-after-generation) for the design.
+The graph fingerprint must be correct, deterministic, and under our control. See [Graph Fingerprint](#graph-fingerprint----catches-graph-drift-after-generation) for the design.
 
 ---
 
@@ -105,7 +105,7 @@ Two pipelines share the same set of steps:
 
 **What exists today**: This step already works. Every test fixture (e.g., `IntegrationGpuConvForward.cpp`) implements `buildGraph()` which creates a `graph::Graph`, adds tensors with explicit **names** (e.g., `"x"`, `"w"`, `"y"`), creates operations, validates, and builds the operation graph.
 
-**What changes**: Nothing. The graph construction code is untouched. The golden data system uses `computeGraphIdentity()` to build a [graph-property hash](#graph-fingerprint----catches-graph-drift-after-generation) from graph properties (tensor names, dims, types, operation parameters) to detect when `buildGraph()` has changed since golden data was generated.
+**What changes**: Nothing. The graph construction code is untouched. The golden data system uses a [graph-property hash](#graph-fingerprint----catches-graph-drift-after-generation) built from graph properties (tensor names, dims, types, operation parameters) to detect when `buildGraph()` has changed since golden data was generated.
 
 **Design constraint**: Tensor names set in `buildGraph()` are the **identity contract** for golden data. They are how golden files map to runtime tensors. A tensor named `"x"` in the golden file must correspond to a tensor named `"x"` in the graph.
 
@@ -260,40 +260,28 @@ The graph fingerprint is the **key** in the key-value store described in [Golden
 **Design: Graph-property hash.** Instead of hashing serialized bytes, hash the **graph properties that determine numerical output**:
 
 ```cpp
-struct GraphIdentity {
-    std::string fingerprint;  // SHA-256 hex string
-    std::string label;        // Human-readable, e.g. "NCHW_1x16x16x16_fp32"
-};
-
-GraphIdentity computeGraphIdentity(const graph::Graph& graph) {
+std::string computeGraphFingerprint(const graph::Graph& graph) {
     // Walk graph nodes in deterministic (sorted-by-name) order.
     // For each node, collect:
     //   - operation type (e.g., ConvFwd, Matmul, SDPA)
     //   - operation parameters (padding, stride, dilation, etc.)
     // For each tensor, collect:
     //   - name, dims, data type
-    //
-    // From the collected properties:
-    //   1. Format a human-readable label from the primary input tensor:
-    //      layout name (TensorLayout.name) + dims + data type
-    //      e.g. "NCHW_1x16x16x16_fp32"
-    //   2. Canonicalize all properties into a deterministic string, then SHA-256.
-    //
-    // Return both: the label for directory naming, the hash for identity.
+    // Canonicalize into a deterministic string, then SHA-256.
 }
 ```
 
-**Reuses existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order and builds a tensor-UID map. `computeGraphIdentity()` reuses this graph walk and per-node key pattern. **What it adds**: tensor names, dims, and operation parameters (padding, stride, dilation) to the per-node collection, then composes into a single graph-level SHA-256 and a human-readable label.
+**Reuses existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order and builds a tensor-UID map. `computeGraphFingerprint()` reuses this graph walk and per-node key pattern. **What it adds**: tensor names, dims, and operation parameters (padding, stride, dilation) to the per-node collection, then composes into a single graph-level SHA-256.
 
 At validation time:
 
 ```cpp
-auto identity = computeGraphIdentity(graph);
-if(identity.fingerprint != manifest.graph_fingerprint)
+auto fingerprint = computeGraphFingerprint(graph);
+if(fingerprint != manifest.graph_fingerprint)
 {
     FAIL() << "Graph definition has changed since golden data was generated."
            << "\n  Golden fingerprint: " << manifest.graph_fingerprint
-           << "\n  Current fingerprint: " << identity.fingerprint
+           << "\n  Current fingerprint: " << fingerprint
            << "\n  Regenerate golden data with --generate-golden";
 }
 ```
@@ -390,7 +378,7 @@ If both produce the same outputs (within tolerance), the external reference is v
 Golden data uses a **manifest + binary blobs** format. Each test case produces a directory:
 
 ```
-NCHW_1x16x16x16_fp32_a3f8c2e1/
+a3f8c2e1/
   manifest.json          # Metadata, tensor map, checksums
   tensor_X.bin           # Raw binary tensor data (input)
   tensor_W.bin           # Raw binary tensor data (input)
@@ -808,7 +796,7 @@ protected:
 
         if(mode == VerificationMode::GOLDEN || mode == VerificationMode::BOTH)
         {
-            auto goldenPath = resolveGoldenPath(graph);
+            auto goldenPath = resolveGoldenPath();
             if(!std::filesystem::exists(goldenPath / "manifest.json"))
             {
                 if(mode == VerificationMode::GOLDEN)
@@ -854,7 +842,7 @@ private:
 ```cpp
 void generateGoldenData(graph::Graph& graph, unsigned int seed)
 {
-    auto goldenDir = resolveGoldenPath(graph);
+    auto goldenDir = resolveGoldenPath();
 
     // Overwrite protection: refuse to clobber existing golden data
     if(std::filesystem::exists(goldenDir / "manifest.json")
@@ -907,12 +895,12 @@ integration-tests/
   golden_data/
     conv/
       fwd/
-        NCHW_1x16x16x16_fp32_a3f8c2e1/
+        a3f8c2e1/
           manifest.json
           tensor_X.bin
           tensor_W.bin
           tensor_Y.bin
-        NHWC_2x32x64x64_fp16_b7d4e9f0/
+        b7d4e9f0/
           manifest.json
           ...
       bwd/
@@ -921,19 +909,19 @@ integration-tests/
       ...
     sdpa/
       fwd/
-        NCHW_1x8x128x64_fp16_c5a1b3d2/
+        c5a1b3d2/
           manifest.json
           ...
 ```
 
-The case directory name combines a human-readable label with a short fingerprint hash: `<label>_<short_hash>`. The label is derived from the primary input tensor's properties (layout name, dims, data type) by `computeGraphIdentity()` — the same function that computes the fingerprint. The short hash suffix guarantees uniqueness when two graphs share the same label (e.g., same input shape but different operation parameters).
+The case directory name is a short prefix of the graph fingerprint. The fingerprint uniquely identifies the graph configuration. The per-case `manifest.json` contains the full fingerprint and all graph properties in human-readable form for inspection.
 
-**Path resolution.** `resolveGoldenPath()` calls `computeGraphIdentity(graph)` and looks up `golden_data/<operation>/<direction>/<label>_<short_hash>/manifest.json`. A CI health check script scans the directory tree against the test executable's test list to detect orphaned or missing golden data.
+**Path resolution.** `resolveGoldenPath()` computes the graph fingerprint and looks up `golden_data/<operation>/<direction>/<short_hash>/manifest.json`. A CI health check script scans the directory tree against the test executable's test list to detect orphaned or missing golden data.
 
 **Test tiers are a selection concern.** The test framework selects which cases to run via `--gtest_filter`. If a smoke test and a full test use the same graph, they share the same golden data directory.
 
 **Acceptance criteria**:
-- [ ] `resolveGoldenPath(graph)` uses `computeGraphIdentity()` to resolve directory as `<label>_<short_hash>`
+- [ ] `resolveGoldenPath()` uses graph fingerprint to resolve directory
 - [ ] Missing `manifest.json` in resolved directory in golden mode: **hard FAIL** with suggestion to generate
 - [ ] Missing `manifest.json` in resolved directory in both mode: **warning + skip golden check**
 - [ ] CI health check script detects orphaned golden data (directories not matching any test) and missing golden data (tests with no directory)
@@ -1060,7 +1048,7 @@ protected:
 ### Step 3: Inspect the generated data
 
 ```bash
-cat golden_data/myop/fwd/NCHW_1x16x16x16_fp32_a3f8c2e1/manifest.json | python -m json.tool
+cat golden_data/myop/fwd/a3f8c2e1/manifest.json | python -m json.tool
 ```
 
 Verify tensor shapes and value ranges match expectations.
@@ -1121,7 +1109,7 @@ Both computed and golden validation must pass. This confirms the golden data is 
 **What ships**: Storage integration, CI integration, path resolution, staleness detection.
 
 **Scope**:
-1. `resolveGoldenPath()` implementation (graph identity → directory path)
+1. `resolveGoldenPath()` implementation (fingerprint → directory path)
 2. `reference_executor_hash` in metadata + staleness warnings
 3. `--external-reference` flag for ops without reference executors
 4. Storage setup and CI pipeline snippet (tool chosen by infrastructure team)
