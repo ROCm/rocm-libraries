@@ -511,7 +511,64 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
     EXPECT_EQ(v, nullptr);
 }
 
-TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 10); }
+TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 12); }
+
+// _cmask_br and _swa share the compiled spec with _cmask. findVariant() matches
+// by spec features alone, so it returns _cmask first for any has_mask=true
+// query — the new variants are reachable only via name lookup.
+TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_CMaskBR)
+{
+    constexpr auto k =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br");
+    EXPECT_TRUE(k.has_mask);
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_SWA)
+{
+    constexpr auto k =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_swa");
+    EXPECT_TRUE(k.has_mask);
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMaskBR_SharesSpecWithCMask)
+{
+    constexpr auto k_cmask =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_cmask");
+    constexpr auto k_br =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br");
+
+    EXPECT_EQ(k_br.dtype, k_cmask.dtype);
+    EXPECT_EQ(k_br.hdim_q, k_cmask.hdim_q);
+    EXPECT_EQ(k_br.hdim_v, k_cmask.hdim_v);
+    EXPECT_EQ(k_br.mode, k_cmask.mode);
+    EXPECT_EQ(k_br.has_mask, k_cmask.has_mask);
+    EXPECT_EQ(k_br.pad_hdim_q, k_cmask.pad_hdim_q);
+    EXPECT_EQ(k_br.pad_hdim_v, k_cmask.pad_hdim_v);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_SWA_SharesSpecWithCMask)
+{
+    constexpr auto k_cmask =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_cmask");
+    constexpr auto k_swa =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_swa");
+
+    EXPECT_EQ(k_swa.dtype, k_cmask.dtype);
+    EXPECT_EQ(k_swa.hdim_q, k_cmask.hdim_q);
+    EXPECT_EQ(k_swa.hdim_v, k_cmask.hdim_v);
+    EXPECT_EQ(k_swa.mode, k_cmask.mode);
+    EXPECT_EQ(k_swa.has_mask, k_cmask.has_mask);
+    EXPECT_EQ(k_swa.pad_hdim_q, k_cmask.pad_hdim_q);
+    EXPECT_EQ(k_swa.pad_hdim_v, k_cmask.pad_hdim_v);
+}
 
 // ============================================================================
 // Registry: ConvertDQ findVariant

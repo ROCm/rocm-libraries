@@ -46,6 +46,8 @@ set(DQDKDV_VARIANTS
     fmha_bwd_dqdkdv_fp16_d128_batch
     fmha_bwd_dqdkdv_bf16_d128_batch
     fmha_bwd_dqdkdv_fp16_d128_batch_cmask
+    fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br
+    fmha_bwd_dqdkdv_fp16_d128_batch_swa
     fmha_bwd_dqdkdv_fp16_d128_batch_det
     fmha_bwd_dqdkdv_fp16_d128_group
     fmha_bwd_dqdkdv_fp16_d128_batch_ebias

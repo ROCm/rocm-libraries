@@ -401,6 +401,18 @@ TEST(FmhaBwdDqDkDv, RequiredTensorsWithDropout)
     EXPECT_EQ(S::requiredTensors(k), 12);
 }
 
+TEST(FmhaBwdDqDkDv, RequiredTensorsWithMask)
+{
+    // Mask only adds scalar slots (window sizes + mask_type), not tensor slots.
+    // Guardrail: a regression that accidentally bumped requiredTensors when
+    // has_mask is enabled would over-allocate tensor entries.
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    EXPECT_EQ(S::requiredTensors(k), 9);
+}
+
 TEST(FmhaBwdDqDkDv, RequiredScalarsPlain)
 {
     constexpr auto k =

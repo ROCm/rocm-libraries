@@ -104,6 +104,30 @@ VARIANTS = [
         "has_mask": True,
         "block_size": 256,
     },
+    # _cmask_br and _swa share the compiled spec with _cmask. They are packed
+    # under distinct names so the loader can select mask geometry by variant
+    # name; the actual top-left/bottom-right/sliding-window selection happens
+    # at runtime via the WINDOW_SIZE_LEFT/RIGHT and MASK_TYPE scalar slots.
+    {
+        "name": "fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mode": "batch",
+        "has_mask": True,
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_fp16_d128_batch_swa",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mode": "batch",
+        "has_mask": True,
+        "block_size": 256,
+    },
     {
         "name": "fmha_bwd_dqdkdv_fp16_d128_batch_det",
         "family": "dqdkdv",

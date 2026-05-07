@@ -34,7 +34,7 @@ ninja -C build
 ./build/kpack_rocm_ck_fmha_bwd build/kernels.kpack
 ```
 
-## Variant Surface (19 kernels)
+## Variant Surface (21 kernels)
 
 ### OGradDotO (5 variants)
 
@@ -46,14 +46,16 @@ ninja -C build
 | `fp16_d128_group`      | FP16 | 128 | group | padded  | Group mode axis |
 | `fp16_d128_batch_npad` | FP16 | 128 | batch | none    | No-padding axis |
 
-### DqDkDv (10 variants)
+### DqDkDv (12 variants)
 
 | Variant | dtype | hdim | mode  | features | Notes |
 |---------|-------|------|-------|----------|-------|
-| `fp16_d128_batch`             | FP16 | 128 | batch | plain                | Baseline (numerically verified) |
-| `bf16_d128_batch`             | BF16 | 128 | batch | plain                | dtype axis (numerically verified) |
-| `fp16_d128_batch_cmask`       | FP16 | 128 | batch | causal mask          | Compilation proof |
-| `fp16_d128_batch_det`         | FP16 | 128 | batch | deterministic        | Compilation proof (host runner does not yet invoke the OGradDotO -> DqDkDv -> ConvertDQ pipeline end-to-end) |
+| `fp16_d128_batch`             | FP16 | 128 | batch | plain                       | Baseline (numerically verified) |
+| `bf16_d128_batch`             | BF16 | 128 | batch | plain                       | dtype axis (numerically verified) |
+| `fp16_d128_batch_cmask`       | FP16 | 128 | batch | causal mask (top-left)      | Compilation proof; mask geometry via runtime scalars |
+| `fp16_d128_batch_cmask_br`    | FP16 | 128 | batch | causal mask (bottom-right)  | Compilation proof; same compiled spec as `_cmask`; mask geometry via runtime scalars |
+| `fp16_d128_batch_swa`         | FP16 | 128 | batch | sliding-window attention    | Compilation proof; same compiled spec as `_cmask`; window sizes via runtime scalars |
+| `fp16_d128_batch_det`         | FP16 | 128 | batch | deterministic               | Compilation proof (host runner does not yet invoke the OGradDotO -> DqDkDv -> ConvertDQ pipeline end-to-end) |
 | `fp16_d128_group`             | FP16 | 128 | group | plain                | Compilation proof (group-mode host runner not implemented; runtime path skipped) |
 | `fp16_d128_batch_ebias`       | FP16 | 128 | batch | elementwise bias     | Compilation proof |
 | `fp16_d128_batch_alibi`       | FP16 | 128 | batch | ALiBi bias           | Compilation proof |
@@ -140,7 +142,7 @@ include/rocm_ck/ops/fmha_bwd/
 examples/06_rocm_ck_fmha_bwd/
   rocm_fmha_bwd_registry.hpp            -- 3 variant arrays + 3 findVariant() overloads
   fmha_bwd_ograd_dot_o_*.hip            -- 5 OGradDotO variant instantiations
-  fmha_bwd_dqdkdv_*.hip                 -- 10 DqDkDv variant instantiations
+  fmha_bwd_dqdkdv_*.hip                 -- 12 DqDkDv variant instantiations
   fmha_bwd_convert_dq_*.hip             -- 4 ConvertDQ variant instantiations
   main.cpp                              -- 3-kernel pipeline runner + CPU reference
   CMakeLists.txt                        -- Build: compile .hip -> .hsaco, pack, build host exe

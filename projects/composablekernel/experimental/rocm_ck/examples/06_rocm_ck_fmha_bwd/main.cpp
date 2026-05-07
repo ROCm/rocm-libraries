@@ -33,6 +33,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <numeric>
+#include <string_view>
 #include <vector>
 
 // Namespace aliases for named slot constants.
@@ -863,11 +864,37 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     assert(batch > 0);
     args.scalars[DKV::BATCH_SIZE].i32 = static_cast<int32_t>(batch);
 
+    // Mask geometry is variant-specific. The compiled spec is identical for
+    // _cmask, _cmask_br, and _swa — geometry is selected at runtime via the
+    // WINDOW_SIZE_LEFT/RIGHT and MASK_TYPE scalar slots.
+    // GenericAttentionMaskEnum: 0=NO_MASK, 1=MASK_FROM_TOP_LEFT,
+    //                           2=MASK_FROM_BOTTOM_RIGHT, 3=MASK_GENERIC.
+    // Use ends_with (not find) so a future variant whose name merely contains
+    // "_swa" or "_cmask_br" as a non-suffix substring won't be misclassified.
     if(variant.spec.has_mask)
     {
-        args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = -1; // full left context
-        args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 0;  // standard causal
-        args.scalars[DKV::MASK_TYPE].i32         = 1;  // MASK_FROM_TOP_LEFT
+        const std::string_view name(variant.name);
+        if(name.ends_with("_swa"))
+        {
+            // Sliding-window attention with both-side limits.
+            args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = 64;
+            args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 64;
+            args.scalars[DKV::MASK_TYPE].i32         = 3; // MASK_GENERIC
+        }
+        else if(name.ends_with("_cmask_br"))
+        {
+            // Bottom-right causal: unlimited left, no future tokens.
+            args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = -1;
+            args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 0;
+            args.scalars[DKV::MASK_TYPE].i32         = 2; // MASK_FROM_BOTTOM_RIGHT
+        }
+        else
+        {
+            // Default: top-left causal (preserves _cmask and _cmask_det).
+            args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = -1;
+            args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 0;
+            args.scalars[DKV::MASK_TYPE].i32         = 1; // MASK_FROM_TOP_LEFT
+        }
     }
 
     // Optional feature slot population -- see DEFERRED (NV-3) note at the
