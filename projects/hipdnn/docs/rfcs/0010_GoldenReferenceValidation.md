@@ -6,10 +6,9 @@
 ## Table of Contents
 1. [Summary](#summary)
 2. [Design Overview](#design-overview)
+3. [Detailed Design](#detailed-design)
    - [Existing Infrastructure](#existing-infrastructure)
    - [Self-Contained Bundles](#self-contained-bundles)
-   - [Pipeline Overview](#pipeline-overview)
-3. [Detailed Design](#detailed-design)
    - [Golden Data Format](#golden-data-format)
    - [Generic Test Runner](#generic-test-runner)
    - [Generation Pipeline (Python)](#generation-pipeline-python)
@@ -45,6 +44,26 @@ A prior effort established a golden reference pattern -- golden data bundles (gr
 
 ## Design Overview
 
+Golden reference validation uses two pipelines that share a common data format -- the **golden data bundle** (`{Name}.json` + `{Name}.tensor{uid}.bin`). A bundle is a self-contained test case: the graph JSON defines the computation, the `.bin` files carry the tensor data (inputs and expected outputs). No C++ code, `buildGraph()` function, or test fixture is referenced. The test runner is generic -- it loads whatever bundle it finds and validates it.
+
+**Generation (run once, any tool):**
+1. Define graph and create input tensors
+2. Run a reference source (PyTorch, CPU ref, etc.) to produce outputs
+3. Write the bundle
+
+**Validation (C++, every CI run):**
+1. Load bundle from disk, extract golden outputs
+2. Execute engine under test
+3. Compare engine output to golden output — PASS or FAIL
+
+![Generation Pipeline](images/generation_pipeline.png)
+
+![Validation Pipeline](images/validation_pipeline.png)
+
+---
+
+## Detailed Design
+
 ### Existing Infrastructure
 
 The core test-as-data infrastructure is already built and working for batchnorm. What's missing: only batchnorm has data; no CI integration; no formalized folder convention; the GPU runner has no tests; there is no coverage for convolution, matmul, SDPA, layernorm, RMS norm, reduction, or pointwise operations. The table below summarizes each component:
@@ -64,32 +83,6 @@ A golden data bundle (`{Name}.json` + `{Name}.tensor{uid}.bin`) is self-containe
 The graph JSON serialization covers all 18 operation types (ConvFwd/Bwd/Wrw, BatchnormInf/Train/Bwd, Pointwise all modes, Matmul, Layernorm, RMSNorm, SDPA Fwd/Bwd, Reduction, BlockScaleDequantize/Quantize). No separate manifest or metadata file is needed -- the graph JSON already contains everything the runner needs to execute and validate.
 
 This is the architectural difference from a test-as-code approach: the graph definition lives on disk, not in C++. The test runner is generic -- it loads whatever bundle it finds and validates it. To add a new test case, see [Adding New Golden Reference Tests](#adding-new-golden-reference-tests) -- for an existing operation/layout/datatype it is just "drop the bundle in the folder," for a new combination it requires a one-time `INSTANTIATE_TEST_SUITE_P`.
-
-### Pipeline Overview
-
-Two pipelines operate on the same golden data format:
-
-**Generation (run once, any tool):**
-1. Define graph and create input tensors (operation, parameters, random or real-workload inputs)
-2. Run a reference source (PyTorch, CPU ref, GPU ref, AITER, AOTriton, etc.) to produce outputs
-3. Write the bundle: `{Name}.json` + `{Name}.tensor{uid}.bin`
-
-**Validation (C++, every CI run):**
-1. Load bundle from disk into `GraphAndTensorMap`, extract golden outputs
-2. Execute engine under test (CPU ref or GPU plugin)
-3. Compare engine output to golden output — PASS or FAIL
-
-#### Generation Pipeline (runs once, produces golden data)
-
-![Generation Pipeline](images/generation_pipeline.png)
-
-#### Validation Pipeline (runs every CI)
-
-![Validation Pipeline](images/validation_pipeline.png)
-
----
-
-## Detailed Design
 
 ### Golden Data Format
 
