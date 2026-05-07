@@ -38,6 +38,7 @@ namespace rocisa
                 InstType::INST_I32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_abs_i32");
+            writes_scc = true;
         }
 
         SAbsI32(const SAbsI32& other)
@@ -178,6 +179,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_add_i32");
+            writes_scc = true;
         }
 
         SAddI32(const SAddI32& other)
@@ -206,6 +208,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_add_u32");
+            writes_scc = true;
         }
 
         SAddU32(const SAddU32& other)
@@ -234,6 +237,8 @@ namespace rocisa
                                 comment)
         {
             setInst("s_addc_u32");
+            reads_scc  = true;
+            writes_scc = true;
         }
 
         SAddCU32(const SAddCU32& other)
@@ -450,6 +455,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_sub_i32");
+            writes_scc = true;
         }
 
         SSubI32(const SSubI32& other)
@@ -478,6 +484,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_sub_u32");
+            writes_scc = true;
         }
 
         SSubU32(const SSubU32& other)
@@ -506,6 +513,8 @@ namespace rocisa
                                 comment)
         {
             setInst("s_subb_u32");
+            reads_scc  = true;
+            writes_scc = true;
         }
 
         SSubBU32(const SSubBU32& other)
@@ -534,6 +543,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cselect_b32");
+            reads_scc = true;
         }
 
         SCSelectB32(const SCSelectB32& other)
@@ -590,6 +600,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_and_b32");
+            writes_scc = true;
         }
 
         SAndB32(const SAndB32& other)
@@ -618,6 +629,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_and_b64");
+            writes_scc = true;
         }
 
         SAndB64(const SAndB64& other)
@@ -646,6 +658,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_andn2_b32");
+            writes_scc = true;
         }
 
         SAndN2B32(const SAndN2B32& other)
@@ -674,6 +687,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_or_b32");
+            writes_scc = true;
         }
 
         SOrB32(const SOrB32& other)
@@ -702,6 +716,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_xor_b32");
+            writes_scc = true;
         }
 
         SXorB32(const SXorB32& other)
@@ -806,6 +821,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_lshl_b32");
+            writes_scc = true;
         }
 
         SLShiftLeftB32(const SLShiftLeftB32& other)
@@ -834,6 +850,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_lshr_b32");
+            writes_scc = true;
         }
 
         SLShiftRightB32(const SLShiftRightB32& other)
@@ -862,6 +879,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_lshl_b64");
+            writes_scc = true;
         }
 
         SLShiftLeftB64(const SLShiftLeftB64& other)
@@ -890,6 +908,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_lshr_b64");
+            writes_scc = true;
         }
 
         SLShiftRightB64(const SLShiftRightB64& other)
@@ -918,6 +937,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_ashr_i32");
+            writes_scc = true;
         }
 
         SAShiftRightI32(const SAShiftRightI32& other)
@@ -974,6 +994,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_lshl2_add_u32");
+            writes_scc = true;
         }
 
         SLShiftLeft2AddU32(const SLShiftLeft2AddU32& other)
@@ -1126,6 +1147,7 @@ namespace rocisa
                 InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_cmov_b32");
+            reads_scc = true;
         }
 
         SCMovB32(const SCMovB32& other)
@@ -1344,6 +1366,7 @@ namespace rocisa
                 InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_and_saveexec_b32");
+            writes_scc = true;
         }
 
         SAndSaveExecB32(const SAndSaveExecB32& other)
@@ -1366,6 +1389,7 @@ namespace rocisa
                 InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_and_saveexec_b64");
+            writes_scc = true;
         }
 
         SAndSaveExecB64(const SAndSaveExecB64& other)
@@ -1388,6 +1412,7 @@ namespace rocisa
                 InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_or_saveexec_b32");
+            writes_scc = true;
         }
 
         SOrSaveExecB32(const SOrSaveExecB32& other)
@@ -1410,6 +1435,7 @@ namespace rocisa
                 InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_or_saveexec_b64");
+            writes_scc = true;
         }
 
         SOrSaveExecB64(const SOrSaveExecB64& other)

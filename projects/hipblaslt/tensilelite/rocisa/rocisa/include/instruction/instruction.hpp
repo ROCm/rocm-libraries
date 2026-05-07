@@ -122,6 +122,13 @@ namespace rocisa
         std::string      comment;
         std::string      instStr;
         bool             outputInlineAsm;
+        // Implicit-operand metadata (bead rocm-libraries-dzl). SCC is the
+        // single-bit hardware status register implicitly read/written by
+        // most SALU compare/arithmetic ops; SCC dataflow is invisible from
+        // dst/srcs alone. Concrete SCC-touching subclasses set these to
+        // true in their constructor; everything else stays false.
+        bool             reads_scc;
+        bool             writes_scc;
         std::shared_ptr<MemTokenData> m_memToken;
 
         Instruction(InstType instType, const std::string& comment = "")
@@ -129,6 +136,8 @@ namespace rocisa
             , comment(comment)
             , instStr("")
             , outputInlineAsm(false)
+            , reads_scc(false)
+            , writes_scc(false)
         {
         }
 
@@ -138,6 +147,8 @@ namespace rocisa
             , comment(other.comment)
             , instStr(other.instStr)
             , outputInlineAsm(other.outputInlineAsm)
+            , reads_scc(other.reads_scc)
+            , writes_scc(other.writes_scc)
             , m_memToken(other.m_memToken
                              ? std::make_shared<MemTokenData>(*other.m_memToken)
                              : nullptr)
@@ -604,4 +615,40 @@ namespace rocisa
             return formatWithComment(name + getArgStr());
         }
     };
+
+    // Implicit-operand resource singletons (bead rocm-libraries-dzl).
+    //
+    // SCC is the single-bit hardware status register, implicitly written by
+    // most SALU compare/arithmetic ops and read by SCondBranchSCC*/SCSelect/
+    // SCMov. m0 is the LDS-destination address register implicitly read by
+    // DirectToLds buffer loads. Neither is expressible as an explicit
+    // operand in dst/srcs, so the validator needs a stable RegisterContainer
+    // singleton to attach to reads/writes when modeling dataflow.
+    //
+    // Each factory returns the same shared instance on every call; equality
+    // and hashing across producer-write and consumer-read containers stays
+    // stable because they are literally the same Python object.
+    inline std::shared_ptr<RegisterContainer>& _scc_resource_singleton()
+    {
+        static std::shared_ptr<RegisterContainer> instance =
+            std::make_shared<RegisterContainer>("scc", std::nullopt, 0, 1.f);
+        return instance;
+    }
+
+    inline std::shared_ptr<RegisterContainer> scc_resource()
+    {
+        return _scc_resource_singleton();
+    }
+
+    inline std::shared_ptr<RegisterContainer>& _m0_resource_singleton()
+    {
+        static std::shared_ptr<RegisterContainer> instance =
+            std::make_shared<RegisterContainer>("m", std::nullopt, 0, 1.f);
+        return instance;
+    }
+
+    inline std::shared_ptr<RegisterContainer> m0_resource()
+    {
+        return _m0_resource_singleton();
+    }
 } // namespace rocisa

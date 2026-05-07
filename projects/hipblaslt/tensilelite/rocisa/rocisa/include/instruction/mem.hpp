@@ -291,6 +291,13 @@ namespace rocisa
         std::shared_ptr<Container>    saddr;
         InstructionInput              soffset;
         std::optional<MUBUFModifiers> mubuf;
+        // Implicit-operand metadata (bead rocm-libraries-dzl).
+        // True when this load targets LDS via DirectToLds (dst == nullptr,
+        // mubuf->lds == true). DTL loads implicitly read m0 for the LDS
+        // destination. Set in the constructor based on the mubuf modifier
+        // so the validator can route DTL loads through the same handling
+        // as the non-DTL case but with an extra m0 read.
+        bool                          is_dtl;
 
         MUBUFReadInstruction(InstType                          instType,
                              const std::shared_ptr<Container>& dst,
@@ -304,6 +311,7 @@ namespace rocisa
             , saddr(saddr)
             , soffset(soffset)
             , mubuf(mubuf)
+            , is_dtl(mubuf.has_value() && mubuf->lds)
         {
             instStr = "buffer_load_";
         }
@@ -314,6 +322,7 @@ namespace rocisa
             , saddr(other.saddr ? other.saddr->clone() : nullptr)
             , soffset(copyInstructionInput(other.soffset))
             , mubuf(other.mubuf)
+            , is_dtl(other.is_dtl)
         {
         }
 

@@ -187,6 +187,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_eq_i32");
+            writes_scc = true;
         }
 
         SCmpEQI32(const SCmpEQI32& other)
@@ -214,6 +215,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_eq_u32");
+            writes_scc = true;
         }
 
         SCmpEQU32(const SCmpEQU32& other)
@@ -241,6 +243,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_eq_u64");
+            writes_scc = true;
         }
 
         SCmpEQU64(const SCmpEQU64& other)
@@ -268,6 +271,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_ge_i32");
+            writes_scc = true;
         }
 
         SCmpGeI32(const SCmpGeI32& other)
@@ -295,6 +299,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_ge_u32");
+            writes_scc = true;
         }
 
         SCmpGeU32(const SCmpGeU32& other)
@@ -322,6 +327,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_gt_i32");
+            writes_scc = true;
         }
 
         SCmpGtI32(const SCmpGtI32& other)
@@ -349,6 +355,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_gt_u32");
+            writes_scc = true;
         }
 
         SCmpGtU32(const SCmpGtU32& other)
@@ -376,6 +383,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_le_i32");
+            writes_scc = true;
         }
 
         SCmpLeI32(const SCmpLeI32& other)
@@ -403,6 +411,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_le_u32");
+            writes_scc = true;
         }
 
         SCmpLeU32(const SCmpLeU32& other)
@@ -430,6 +439,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_lg_u32");
+            writes_scc = true;
         }
 
         SCmpLgU32(const SCmpLgU32& other)
@@ -511,6 +521,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_lt_i32");
+            writes_scc = true;
         }
 
         SCmpLtI32(const SCmpLtI32& other)
@@ -538,6 +549,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmp_lt_u32");
+            writes_scc = true;
         }
 
         SCmpLtU32(const SCmpLtU32& other)
@@ -565,6 +577,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_bitcmp1_b32");
+            writes_scc = true;
         }
 
         SBitcmp1B32(const SBitcmp1B32& other)
@@ -592,6 +605,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmpk_eq_u32");
+            writes_scc = true;
         }
 
         SCmpKEQU32(const SCmpKEQU32& other)
@@ -619,6 +633,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmpk_ge_u32");
+            writes_scc = true;
         }
 
         SCmpKGeU32(const SCmpKGeU32& other)
@@ -646,6 +661,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmpk_gt_u32");
+            writes_scc = true;
         }
 
         SCmpKGtU32(const SCmpKGtU32& other)
@@ -673,6 +689,7 @@ namespace rocisa
                                 comment)
         {
             setInst("s_cmpk_lg_u32");
+            writes_scc = true;
         }
 
         SCmpKLGU32(const SCmpKLGU32& other)

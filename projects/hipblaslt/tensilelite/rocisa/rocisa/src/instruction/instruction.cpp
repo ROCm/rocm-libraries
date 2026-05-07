@@ -90,6 +90,12 @@ void init_inst(nb::module_ m)
         .def_rw("instType", &rocisa::Instruction::instType)
         .def_rw("comment", &rocisa::Instruction::comment)
         .def_rw("memToken", &rocisa::Instruction::m_memToken)
+        // Implicit-operand metadata (bead rocm-libraries-dzl). Concrete
+        // SCC-touching SALU subclasses set these to true in their
+        // constructors; everything else defaults to false. Exposed
+        // read-write so test fixtures and special cases can override.
+        .def_rw("reads_scc", &rocisa::Instruction::reads_scc)
+        .def_rw("writes_scc", &rocisa::Instruction::writes_scc)
         .def("setMemToken", &rocisa::Instruction::setMemToken)
         .def("getMemToken", &rocisa::Instruction::getMemToken)
         .def("setInlineAsm", &rocisa::Instruction::setInlineAsm)
@@ -106,6 +112,15 @@ void init_inst(nb::module_ m)
             throw std::runtime_error("Pickling not supported for Instruction");
             return nullptr;
         });
+
+    // Implicit-operand resource singletons (bead rocm-libraries-dzl).
+    // SCC: single-bit hardware status register (regType="scc").
+    // m0:  LDS-destination address register (regType="m", regIdx=0).
+    m_inst.def("scc_resource", &rocisa::scc_resource,
+               "Singleton RegisterContainer modeling the SCC implicit operand.");
+    m_inst.def("m0_resource", &rocisa::m0_resource,
+               "Singleton RegisterContainer modeling the m0 register "
+               "(implicitly read by DirectToLds buffer loads).");
 
     nb::class_<rocisa::CompositeInstruction, rocisa::Instruction>(m_inst, "CompositeInstruction")
         .def(nb::init<rocisa::InstType,

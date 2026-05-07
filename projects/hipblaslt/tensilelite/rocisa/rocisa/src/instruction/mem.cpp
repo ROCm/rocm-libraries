@@ -246,6 +246,11 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("soffset"),
              nb::arg("mubuf")   = std::nullopt,
              nb::arg("comment") = "")
+        // Implicit-operand metadata (bead rocm-libraries-dzl). True when
+        // this load is DirectToLds (dst=None, mubuf->lds=True). DTL loads
+        // implicitly read m0 for the LDS destination; the validator uses
+        // this flag to add an m0_resource() read.
+        .def_rw("is_dtl", &rocisa::MUBUFReadInstruction::is_dtl)
         .def("getParams", &rocisa::MUBUFReadInstruction::getParams)
         .def("__str__", &rocisa::MUBUFReadInstruction::toString);
 

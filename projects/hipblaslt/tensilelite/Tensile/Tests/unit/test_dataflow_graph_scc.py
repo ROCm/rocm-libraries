@@ -22,26 +22,28 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""SCC sentinel + _SCCRule edge formation.
+"""SCC singleton + _SCCRule edge formation.
 
 Verify that build_dataflow_graph emits SCC RAW edges between SCC
-producers and SCC consumers AFTER the rule attaches the SCC sentinel
-to per-opcode reads/writes.
+producers and SCC consumers AFTER the rule attaches the SCC singleton
+(`rocisa.instruction.scc_resource()`) to per-opcode reads/writes.
 
 NO failure-wiring assertions live here. These tests only assert that
 the edge SHAPE is correct; the SCC clobber diagnostic in
 `diagnose_missing_edge` is built on top of these edges and covered
 elsewhere.
 
-Per-opcode flag-table coverage is also exercised here so any future
-addition / removal in `_SCC_OPCODE_FLAGS` is caught by a unit test
-before it hits integration.
+Per-opcode flag coverage is exercised by querying the rocisa-supplied
+`reads_scc` / `writes_scc` flags directly on instances of the canonical
+SCC-touching classes — any flag drift in the rocisa C++ class
+constructors is caught by these tests.
 """
 
 from rocisa.container import sgpr
 from rocisa.instruction import (
     SAddU32, SAddCU32, SSubU32, SSubBU32,
     SBitcmp1B32, SCmpEQU32, SCmpLgU32, SCSelectB32,
+    scc_resource,
 )
 
 from Tensile.Components.ScheduleCapture import (
@@ -49,8 +51,6 @@ from Tensile.Components.ScheduleCapture import (
     SLOT_KIND_MFMA,
     SlotKey,
     TaggedInstruction,
-    _SCC_OPCODE_FLAGS,
-    _get_scc_sentinel,
     _populate_wrapper,
     WrappedInstruction,
 )
@@ -125,12 +125,12 @@ class TestSCCSentinel:
         """Repeated calls return the same object — required so
         _NUMERIC_REG_FACTORIES['scc'] yields a stable hashable container
         that the per-byte latest-writer map can dedup on."""
-        a = _get_scc_sentinel()
-        b = _get_scc_sentinel()
+        a = scc_resource()
+        b = scc_resource()
         assert a is b
 
     def test_sentinel_shape(self):
-        s = _get_scc_sentinel()
+        s = scc_resource()
         assert s.regType == "scc"
         assert s.regIdx == 0
         assert s.regNum == 1
@@ -138,8 +138,8 @@ class TestSCCSentinel:
     def test_sentinel_equals_and_hashes(self):
         """The container must be usable as a dict key — _byte_keys_for_resource
         keys it as ('scc', 0) and the resolver dedups by (writer, write_res)."""
-        a = _get_scc_sentinel()
-        b = _get_scc_sentinel()
+        a = scc_resource()
+        b = scc_resource()
         assert a == b
         assert hash(a) == hash(b)
 
@@ -227,13 +227,37 @@ class TestSCCRuleExtract:
         assert len(sgpr_writes) == 1 and sgpr_writes[0].regIdx == 100
         assert sgpr_reads == [50, 51]
 
-    def test_table_covers_all_five_canonical_opcodes(self):
-        """Minimum 5-opcode coverage. Pin it."""
-        for cls in ("SCmpEQU32", "SAddU32", "SSubU32",
-                    "SAddCU32", "SSubBU32", "SCSelectB32"):
-            assert cls in _SCC_OPCODE_FLAGS, (
-                f"{cls} missing from _SCC_OPCODE_FLAGS"
-            )
+    def test_rocisa_flags_cover_all_five_canonical_opcodes(self):
+        """Minimum 5-opcode coverage — exercise the rocisa-supplied
+        `reads_scc` / `writes_scc` flags directly so we catch C++ flag
+        drift, not just validator-side rule drift."""
+        from rocisa.container import sgpr as _sgpr
+        from rocisa.instruction import (
+            SCmpEQU32 as _SCmpEQU32,
+            SAddU32 as _SAddU32,
+            SSubU32 as _SSubU32,
+            SAddCU32 as _SAddCU32,
+            SSubBU32 as _SSubBU32,
+            SCSelectB32 as _SCSelectB32,
+        )
+        # SCmpEQU32: writes only.
+        i = _SCmpEQU32(_sgpr(0, 1), _sgpr(1, 1))
+        assert i.writes_scc and not i.reads_scc
+        # SAddU32: writes only.
+        i = _SAddU32(dst=_sgpr(0, 1), src0=_sgpr(1, 1), src1=_sgpr(2, 1))
+        assert i.writes_scc and not i.reads_scc
+        # SSubU32: writes only.
+        i = _SSubU32(dst=_sgpr(0, 1), src0=_sgpr(1, 1), src1=_sgpr(2, 1))
+        assert i.writes_scc and not i.reads_scc
+        # SAddCU32: read + write (carry chain).
+        i = _SAddCU32(dst=_sgpr(0, 1), src0=_sgpr(1, 1), src1=_sgpr(2, 1))
+        assert i.reads_scc and i.writes_scc
+        # SSubBU32: read + write (borrow chain).
+        i = _SSubBU32(dst=_sgpr(0, 1), src0=_sgpr(1, 1), src1=_sgpr(2, 1))
+        assert i.reads_scc and i.writes_scc
+        # SCSelectB32: reads only.
+        i = _SCSelectB32(dst=_sgpr(0, 1), src0=_sgpr(1, 1), src1=_sgpr(2, 1))
+        assert i.reads_scc and not i.writes_scc
 
     def test_sbitcmp1b32_writes_scc_does_not_read(self):
         """Defense-in-depth: SBitcmp1B32 has the same dst=nullptr shape

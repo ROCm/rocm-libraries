@@ -90,6 +90,7 @@ namespace rocisa
             : BranchInstruction(labelName, comment)
         {
             setInst("s_cbranch_scc0");
+            reads_scc = true;
         }
 
         SCBranchSCC0(const SCBranchSCC0& other)
@@ -109,6 +110,7 @@ namespace rocisa
             : BranchInstruction(labelName, comment)
         {
             setInst("s_cbranch_scc1");
+            reads_scc = true;
         }
 
         SCBranchSCC1(const SCBranchSCC1& other)
