@@ -68,7 +68,7 @@ jobs:
       - name: Set Linux targets for build and test
         id: configure_linux
         run: |
-          echo 'package_targets=[{"amdgpu_family": "gfx94X", "test_machine": "linux-gfx942-2gpu-core42-ossci-rocm"}, {"amdgpu_family": "gfx950", "test_machine": ""}]' >> "$GITHUB_OUTPUT"
+          echo 'package_targets=[{"amdgpu_family": "gfx94X-dcgpu", "test_machine": "linux-gfx942-2gpu-core42-ossci-rocm"}, {"amdgpu_family": "gfx950-dcgpu", "test_machine": ""}]' >> "$GITHUB_OUTPUT"
 
       - name: Fetch Windows targets for build and test
         env:
