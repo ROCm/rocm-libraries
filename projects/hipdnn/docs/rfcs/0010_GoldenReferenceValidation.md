@@ -85,8 +85,6 @@ Two pipelines share the same set of steps:
 
 ![Validation Pipeline](images/validation_pipeline.png)
 
-The graph fingerprint check is the **first gate**. Before loading any tensors or running any engine, the harness serializes the current graph and compares its hash to the stored `graph.bin`. If the hash differs, the golden data may no longer match the graph the engine will execute, so the test fails immediately and asks the developer to regenerate. This check is conservative -- it may reject golden data that is still technically valid (e.g., when only internal UIDs changed but tensor names and shapes are the same). That is by design: a false failure is cheap (just regenerate), while a false pass is dangerous.
-
 ---
 
 ## Step 1: construct -- Build the Graph
