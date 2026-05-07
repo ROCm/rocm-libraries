@@ -359,7 +359,6 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     writer._last_id_map = idMap
     writer._last_mfma_code = mfmaCode
 
-    status, message = cmsv.isValid(opt1, cmsv.ValidationContext(kernel=kernel, id_map=idMap, mfma_code=mfmaCode))
     # create the case str (TN, NT, TT, or NN)
     if isTN(kernel):
         case_str = "TN"
@@ -371,7 +370,18 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         case_str = "NN"
     else:
         case_str = "Unknown"
-    assert status is True, f"CMS validation failed for kernel {kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']} {case_str}: {message}"
+    # isValid raises ValidationError on failure; trap it here only to
+    # re-raise with kernel-shape context attached. A pre-existing silent
+    # bool-drop here would have been a defect, and now the contract makes
+    # that drop impossible.
+    try:
+        cmsv.isValid(opt1, cmsv.ValidationContext(kernel=kernel, id_map=idMap, mfma_code=mfmaCode))
+    except cmsv.ValidationError as exc:
+        raise AssertionError(
+            f"CMS validation failed for kernel "
+            f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']} "
+            f"{case_str}: {exc}"
+        ) from exc
 
     # Snapshot opt1 BEFORE scheduleInst() mutates opt1.optSchedule[key][cp][i] = ph
     # at line ~422 below. The capture machinery and any future rules that want

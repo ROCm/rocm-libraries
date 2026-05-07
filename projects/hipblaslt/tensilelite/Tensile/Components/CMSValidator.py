@@ -1900,6 +1900,36 @@ class Failure:
         raise NotImplementedError("subclasses must implement _format_canonical()")
 
 
+class ValidationError(Exception):
+    """Raised by ``isValid`` on the first validation failure.
+
+    Carries the typed ``Failure`` describing the problem; ``str(exc)``
+    delegates to ``failure.format()`` so the formatted message is the
+    natural rendering. Callers that want structured access read
+    ``exc.failure``.
+
+    The exception model replaces the old ``tuple[bool, str]`` return
+    contract: ignoring a failure is no longer possible without an
+    explicit ``try/except ValidationError`` at the call site.
+
+    A ``message`` may be supplied directly (without a Failure) for
+    legacy non-typed failure sites that build prose strings; in that
+    case ``failure`` is None and ``str(exc)`` returns the prose.
+    """
+
+    def __init__(self, failure: 'Optional[Failure]' = None, message: Optional[str] = None):
+        if failure is None and message is None:
+            raise ValueError("ValidationError requires either a failure or a message")
+        self.failure = failure
+        self._message = message
+        super().__init__(message if message is not None else (failure.format() if failure is not None else ""))
+
+    def __str__(self) -> str:
+        if self.failure is not None:
+            return self.failure.format()
+        return self._message or ""
+
+
 # ----------------------------------------------------------------------------
 # 1. OrderInvertedFailure — cross-graph reorder detection.
 #    Subject reverses the producer/consumer order that the default schedule
@@ -3834,19 +3864,27 @@ class ValidationContext:
         return self.kernel.get("Use64bShadowLimit", True)
 
 
-def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple[bool, str]:
-    """
-    Return True if all the validation rules pass, False otherwise.
-    If validation fails, a string containing the reason is returned.
+def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> None:
+    """Validate the schedule. Returns ``None`` on success.
 
-    Note 1: If True is returned, this is not proof that this schedule
-    is valid. It may be a false negative.
+    Raises ``ValidationError`` on the first validation failure. The
+    exception carries the typed ``Failure`` describing what went wrong;
+    ``str(exc)`` yields the formatted human-readable message.
 
-    Note 2: if False is returned, this is not proof that the schedule
+    Callers that want to handle failures gracefully wrap the call in
+    ``try/except ValidationError``. Callers that do not catch propagate
+    the exception upward — making it impossible to silently ignore a
+    validation failure (the previous ``tuple[bool, str]`` contract
+    allowed a caller to drop the bool check and miss real defects).
+
+    Note 1: A successful return (no exception) is not proof that the
+    schedule is valid. It may be a false negative.
+
+    Note 2: A raised ``ValidationError`` is not proof that the schedule
     is invalid. It may be a false positive.
 
-    Rule dispatch uses the concern-based framework: active_concerns()
-    determines which ValidationConcern values apply to this kernel,
+    Rule dispatch uses the concern-based framework: ``active_concerns()``
+    determines which ``ValidationConcern`` values apply to this kernel,
     and only rules whose concerns intersect are executed.
     """
     kernel = context.kernel
@@ -3890,10 +3928,10 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
                 f.format()
                 for f in graph_failures
             )
-            return False, (
+            raise ValidationError(message=(
                 f"Dataflow graph comparison failed: "
                 f"{len(graph_failures)} edge difference(s):\n  {summary}"
-            )
+            ))
         wait_failures = validate_edge_wait_coverage(
             subj_graph, raise_on_unexplained=False,
         )
@@ -3902,12 +3940,12 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> tuple
                 f.format()
                 for f in wait_failures
             )
-            return False, (
+            raise ValidationError(message=(
                 f"Wait-coverage validation failed: "
                 f"{len(wait_failures)} failure(s):\n  {summary}"
-            )
+            ))
 
-    return True, ""
+    return None
 
 
 def findValidPositions(
@@ -3949,9 +3987,14 @@ def findValidPositions(
         for cp in range(num_code_paths):
             scheduleInfo.optSchedule[inst_name][cp][inst_issue_idx] = candidate
 
-        valid, _ = isValid(scheduleInfo, context)
-        if valid:
-            valid_indices.append(candidate)
+        # findValidPositions probes a search space; an invalid candidate
+        # is normal here (it just means "skip this index"), so we trap
+        # the ValidationError rather than letting it propagate.
+        try:
+            isValid(scheduleInfo, context)
+        except ValidationError:
+            continue
+        valid_indices.append(candidate)
 
     # Restore original values.
     for cp in range(num_code_paths):
