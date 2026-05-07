@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -188,7 +188,7 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *
 *  <table>
 *  <caption id="sddmm_algorithms">Algorithms</caption>
-*  <tr><th>CSR/CSC Algorithms                <th>Deterministic  <th>Preprocessing  <th>Notes
+*  <tr><th>Algorithms                        <th>Deterministic  <th>Preprocessing  <th>Notes
 *  <tr><td>rocsparse_sddmm_alg_default</td>  <td>Yes</td>       <td>No</td>        <td>Uses the sparsity pattern of matrix C to perform a limited set of dot products. </td>
 *  <tr><td>rocsparse_sddmm_alg_dense</td>    <td>Yes</td>       <td>No</td>        <td>Explicitly converts the matrix C into a dense matrix to perform a dense matrix multiply and add. </td>
 *  </table>
@@ -218,7 +218,9 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  </table>
 *
 *  \note
-*  The only sparse matrix format currently supported is \ref rocsparse_format_csr.
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_csr,
+*  \ref rocsparse_format_csc, \ref rocsparse_format_coo, \ref rocsparse_format_coo_aos,
+*  and \ref rocsparse_format_ell.
 *
 *  \note \p opA == \ref rocsparse_operation_conjugate_transpose is not supported.
 *  \note \p opB == \ref rocsparse_operation_conjugate_transpose is not supported.

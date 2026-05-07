@@ -58,10 +58,6 @@ jobs:
         working-directory: shared/stinkytofu
         run: invoke build
 
-      - name: Build (GCC)
-        working-directory: shared/stinkytofu
-        run: invoke build --gcc --build-dir build_gcc --clean
-
       - name: Debug stinkytofu-opt
         working-directory: shared/stinkytofu/build
         run: |
@@ -71,6 +67,10 @@ jobs:
       - name: Test
         working-directory: shared/stinkytofu/build
         run: ctest --output-on-failure
+
+      - name: Build (GCC)
+        working-directory: shared/stinkytofu
+        run: invoke build --gcc --build-dir build_gcc --clean
 
       - name: Build rocisa
         working-directory: projects/hipblaslt/tensilelite/rocisa
