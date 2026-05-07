@@ -87,11 +87,13 @@ class TestFinalizeWiring:
     def test_well_formed_capture_returns_loopbody(self):
         """Positive: a well-formed capture (every TaggedInstruction has inst
         non-None, no SMEM/flat/store) finalize()s without raising."""
-        from dataflow_fixtures import _FakeLR, _vrange
+        from rocisa.instruction import DSLoadB128
+        from rocisa.container import vgpr, DSModifiers
 
         b = LoopBodyCaptureBuilder()
-        b.append(inst=_FakeLR(dst=_vrange(8, 4), lds_offset=64),
-                 category="LRA0", subiter=0, mfma_index=0)
+        inst = DSLoadB128(dst=vgpr(8, 4), src=vgpr(0, 1),
+                          ds=DSModifiers(offset=64))
+        b.append(inst=inst, category="LRA0", subiter=0, mfma_index=0)
         result = b.finalize()
         assert isinstance(result, LoopBodyCapture)
         assert len(result.instructions) == 1
@@ -233,15 +235,11 @@ class TestIdMapCompleteness:
         from Tensile.Components.ScheduleCapture import (
             BODY_LABEL_ML, TaggedInstruction, SlotKey, WrappedInstruction,
         )
-        from dataclasses import dataclass
-
-        @dataclass
-        class _FakeSNop:
-            pass
+        from rocisa.instruction import SNop
 
         snops = [
             TaggedInstruction(
-                wrapped=WrappedInstruction(_FakeSNop()), category="SNOP",
+                wrapped=WrappedInstruction(SNop(waitState=0)), category="SNOP",
                 slot=SlotKey(0, SLOT_KIND_MFMA, i, 0),
             )
             for i in range(5)

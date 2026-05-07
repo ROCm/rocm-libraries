@@ -524,12 +524,22 @@ def _swait_drains(swait_node: GraphNode, counter: str) -> Optional[int]:
     inst = swait_node.rocisa_inst
     if inst is None:
         return None
+    # Production lumps SWaitCnt and SBarrier into the same "SYNC" category
+    # (see _class_tag_from_category), so this helper is sometimes called
+    # with an SBarrier node — those have no counter fields and contribute
+    # nothing to drain semantics. Skip them.
+    if not isinstance(inst, SWaitCnt):
+        return None
+    # Direct attribute access: every SWaitCnt rocisa instance carries
+    # dscnt/vlcnt/vscnt as bound C++ fields. (Pre-vvcm this was wrapped
+    # in `getattr(..., -1)` to tolerate the `_FakeSWait` test impostor;
+    # tests now build real SWaitCnt instances.)
     if counter == "dscnt":
-        v = getattr(inst, "dscnt", -1)
+        v = inst.dscnt
     elif counter == "vlcnt":
-        v = getattr(inst, "vlcnt", -1)
+        v = inst.vlcnt
     elif counter == "vscnt":
-        v = getattr(inst, "vscnt", -1)
+        v = inst.vscnt
     else:
         return None
     if v is None or v < 0:
@@ -820,20 +830,15 @@ def _min_issue_quad_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = Non
     if rocisa_inst is None:
         return base
     if _is_snop(rocisa_inst):
-        # Test-fixture path: _FakeSNop exposes `wait_state` directly.
-        wait_state = getattr(rocisa_inst, "wait_state", None)
-        if wait_state is not None:
-            return base + int(wait_state)
-        # Production rocisa path: SNop stores wait_state as the first param
-        # (matches CMSValidator.py:1058-1060: `snop.getParams()[0]`).
-        get_params = getattr(rocisa_inst, "getParams", None)
-        if callable(get_params):
-            try:
-                params = get_params()
-                if params:
-                    return base + int(params[0])
-            except Exception:
-                pass
+        # SNop stores wait_state as the first param of getParams()
+        # (matches CMSValidator.py SNop branches: `snop.getParams()[0]`).
+        # Tests build real SNop instances too, so this is the only path.
+        try:
+            params = rocisa_inst.getParams()
+            if params:
+                return base + int(params[0])
+        except Exception:
+            pass
         return base
     return base
 
@@ -1325,12 +1330,9 @@ def _mfma_finish_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) 
     family) but does NOT expose that field as a readable Python attribute via
     the nanobind binding. The rendered assembly string IS canonical and
     stable — every MFMA family renders as `..._<M>x<N>x<K>_<dtype>...`. We
-    discriminate the 4x4 family by parsing for the `_4x4x` substring.
-
-    Test fixtures (`_FakeMFMA`) expose a `variant` Python attribute directly
-    (default `[32, 32]` for standard MFMAs; tests pass `[4, 4, 4, ...]` to
-    model PackMFMAs). The attribute path is checked first so fixtures don't
-    have to roundtrip through `str()`.
+    discriminate the 4x4 family by parsing for the `_4x4x` substring. Test
+    fixtures (`make_mfma`) build real `MFMAInstruction` instances too, so
+    they take the same render path.
 
     `profile` defaults to the CDNA 4 arch profile so the historical call
     sites (which pass only the rocisa instance) keep returning identical
@@ -1346,19 +1348,9 @@ def _mfma_finish_cycles_for(rocisa_inst, profile: Optional[ArchProfile] = None) 
     p = profile
     if rocisa_inst is None:
         return p.standard_mfma_finish_cycles
-    # Fast path: test fixtures expose `variant` directly.
-    variant = getattr(rocisa_inst, "variant", None)
-    if variant is not None:
-        try:
-            m, n = variant[0], variant[1]
-        except (IndexError, TypeError):
-            m = n = None
-        if m == 4 and n == 4:
-            return p.mfma_4x4_finish_cycles
-        if m is not None:
-            return p.standard_mfma_finish_cycles
-    # Production rocisa MFMAInstruction does not expose `variant` as an
-    # attribute — discriminate by parsing the rendered assembly form.
+    # Discriminate by parsing the rendered assembly form. Real
+    # MFMAInstruction does not expose `variant` as an attribute via
+    # nanobind, but every MFMA family renders as `..._<M>x<N>x<K>_<dtype>...`.
     try:
         rendered = str(rocisa_inst)
     except Exception:

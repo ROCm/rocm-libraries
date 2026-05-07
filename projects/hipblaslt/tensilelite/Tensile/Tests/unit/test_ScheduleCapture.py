@@ -166,10 +166,24 @@ class TestLoopBodyCaptureBuilder:
 # =============================================================================
 
 def _make_body(num_mfma: int) -> LoopBodyCapture:
-    """Build a LoopBodyCapture with `num_mfma` MFMA-tagged entries."""
+    """Build a LoopBodyCapture with `num_mfma` MFMA-tagged entries.
+
+    Uses real `rocisa.MFMAInstruction` instances rather than opaque
+    string tokens so the post-vvcm dispatch (which assumes every wrapped
+    instruction carries the rocisa SCC/DTL flag attributes) finds them.
+    """
+    from rocisa.instruction import MFMAInstruction
+    from rocisa.container import vgpr
+    from rocisa.enum import InstType
     b = LoopBodyCaptureBuilder()
     for i in range(num_mfma):
-        b.append(inst=f"mfma_{i}", category="MFMA", subiter=0, mfma_index=i)
+        acc = vgpr(i * 16, 16)
+        inst = MFMAInstruction(
+            instType=InstType.INST_F32, accType=InstType.INST_F32,
+            variant=[32, 32, 0, 1], mfma1k=False,
+            acc=acc, a=vgpr(64, 2), b=vgpr(72, 2), acc2=acc,
+        )
+        b.append(inst=inst, category="MFMA", subiter=0, mfma_index=i)
     return b.finalize()
 
 
@@ -401,6 +415,18 @@ class TestEvaluateGuard:
 
 # Minimal stand-in classes for the macro AST so the walker can be tested
 # without requiring a built rocisa Macro object.
+#
+# KEPT (post-vvcm rocm-libraries-vvcm): these `_Fake*` classes mock the
+# rocisa Macro AST (ValueIf / ValueElseIf / ValueEndif / TextBlock /
+# Macro). They are NOT rocisa instruction impostors — they don't pass
+# through `_populate_wrapper` or any operand-rule dispatch. The walker
+# (`expand_cms_macro`) detects them via `type(item).__name__` for the
+# AST nodes and via injected (`mfma_classes`, `sync_class`, `snop_class`)
+# parameters for the instruction stand-ins. Replacing them with real
+# rocisa Macro instances would require building a full asmpass / rocIsa
+# context per test (~ 1000 lines of setup), and the walker contract
+# doesn't depend on rocisa specifics — only on the AST class names and
+# the injectable instruction class tuples.
 
 class _FakeValueIf:
     def __init__(self, value):

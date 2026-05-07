@@ -802,19 +802,16 @@ def assert_idmap_completeness(idmap, capture):
 #   2. Discover what registers the instruction reads/writes (for edges)
 #
 # Detection by class-name string keeps this module free of hard rocisa
-# imports — tests use _Fake* stand-ins; production passes real rocisa
-# classes. The class name is the same in both worlds.
+# imports — both tests and production wire real rocisa instances.
 
 # Class names (as returned by type(inst).__name__) recognized by the builder.
 _LR_CLASS_NAMES = {
-    "_FakeLR",
     # Real rocisa LR classes: DSLoadB32 / DSLoadB64 / DSLoadB128 / DSLoadB256
     "DSLoadB32", "DSLoadB64", "DSLoadB128", "DSLoadB256",
     # Generic class umbrella (for isinstance fallback if needed)
     "DSLoadInstruction",
 }
 _LW_CLASS_NAMES = {
-    "_FakeLW",
     "DSStoreB8", "DSStoreB16", "DSStoreB32", "DSStoreB64", "DSStoreB128",
     # Wider DSStore variants from rocisa/include/instruction/mem.hpp. All
     # are subclasses of DSStoreInstruction with the same Python ctor
@@ -838,7 +835,6 @@ _LW_CLASS_NAMES = {
     "DSStoreInstruction",
 }
 _GR_CLASS_NAMES = {
-    "_FakeGR",
     # rocisa BufferLoad classes
     "BufferLoadB32", "BufferLoadB64", "BufferLoadB128",
     "GlobalLoadB32", "GlobalLoadB64", "GlobalLoadB128",
@@ -846,19 +842,15 @@ _GR_CLASS_NAMES = {
     "GlobalReadInstruction",
 }
 _MFMA_CLASS_NAMES = {
-    "_FakeMFMA",
     "MFMAInstruction",
 }
 _SWAIT_CLASS_NAMES = {
-    "_FakeSWait",
     "SWaitCnt",
 }
 _SBARRIER_CLASS_NAMES = {
-    "_FakeSBarrier",
     "SBarrier",
 }
 _SNOP_CLASS_NAMES = {
-    "_FakeSNop",
     "SNop",
 }
 # SSetPrior (s_setprio) — sets the wave priority. Pure scheduling-control
@@ -1193,9 +1185,10 @@ class _BufferLoadRule:
         reads, writes = _operands_via_accessors(inst)
         # DTL-mode loads (dst=None, mubuf->lds=True) implicitly read m0.
         # `is_dtl` is set in the rocisa MUBUFReadInstruction constructor
-        # from `mubuf->lds`. Synthetic test fixtures (`_FakeGR`) lack
-        # the attribute and the flag stays False.
-        if getattr(inst, "is_dtl", False):
+        # from `mubuf->lds`. All instances reaching this point are real
+        # rocisa BufferLoad subclasses (test fixtures construct real
+        # BufferLoadB128 too).
+        if inst.is_dtl:
             from rocisa.instruction import m0_resource
             reads = reads + (m0_resource(),)
         return reads, writes
@@ -1237,11 +1230,10 @@ class _NoDataflowRule:
     (`getParams() -> {prior}`); it has no register reads or writes.
 
     Real rocisa: `getDstParams() = getSrcParams() = {}` for all four;
-    `_operands_via_accessors` would return `((), ())` correctly. We
-    keep the explicit empty return below because some `_FakeSWait` /
-    `_FakeSBarrier` / `_FakeSNop` ad-hoc fixtures in non-graph tests
-    omit the new accessors entirely, and short-circuiting here means
-    we don't depend on them.
+    `_operands_via_accessors` would return `((), ())` correctly. The
+    explicit empty return below short-circuits the accessor lookup so
+    this rule remains well-defined for any class-name-only stand-ins
+    that may surface in ad-hoc tests.
     """
     def applies(self, inst, category=None):
         return (
@@ -1360,10 +1352,12 @@ class _SCCRule:
         # SCmp*/SBitcmp1B32 false-write quirk handled below). The flag
         # check is sufficient for current rocisa; the no-dst SCC opcodes
         # (SCmp*/SCBranchSCC*/SBitcmp1B32) all have one of the flags set.
-        # `getattr` here (not direct access) because every instruction —
-        # including the synthetic `_Fake*` test fixtures that don't carry
-        # SCC flags at all — passes through this dispatch.
-        return getattr(inst, "reads_scc", False) or getattr(inst, "writes_scc", False)
+        # Direct attribute access: every rocisa Instruction-derived class
+        # carries reads_scc/writes_scc as bound C++ fields. Non-rocisa
+        # opaque stand-ins (e.g. capture-pipeline bookkeeping tests that
+        # wrap plain strings) are filtered out by `_populate_wrapper`'s
+        # rocisa-shape gate before this rule's `applies()` is reached.
+        return inst.reads_scc or inst.writes_scc
 
     def extract(self, inst, category=None):
         from rocisa.instruction import scc_resource
@@ -1479,10 +1473,8 @@ class _GenericALURule:
     """
     def applies(self, inst, category=None):
         # Only real rocisa Instruction-derived objects expose the
-        # getDstParams/getSrcParams pair. Synthetic _FakeInstBase
-        # subclasses in test fixtures that need this fallback implement
-        # the pair too (`Tensile/Tests/unit/dataflow_fixtures.py`); ad-hoc
-        # fakes that don't fall through to the empty (reads, writes)
+        # getDstParams/getSrcParams pair. Ad-hoc test stand-ins that
+        # don't expose the pair fall through to the empty (reads, writes)
         # default and rely on their own bespoke rules (e.g. _FakePackRule
         # injected by tests via using_pack_rule()).
         return hasattr(inst, "getSrcParams") and hasattr(inst, "getDstParams")
@@ -1523,6 +1515,17 @@ def _populate_wrapper(wrapper, category=None) -> None:
     Idempotent: rules are pure functions of (inst, category).
     """
     inst = wrapper._rocisa_inst
+    # Rocisa-shape gate: the operand rules (notably _SCCRule) do direct
+    # attribute access on rocisa-bound flags like reads_scc / writes_scc.
+    # Capture-pipeline tests sometimes wrap opaque tokens (plain strings,
+    # tag-only stand-ins) that exercise the LoopBodyCaptureBuilder /
+    # macro-walker bookkeeping without ever forming a dataflow edge.
+    # Skip rule dispatch for any inst that doesn't expose the rocisa-
+    # universal SCC flag pair (every real Instruction subclass has them).
+    if not (hasattr(inst, "reads_scc") and hasattr(inst, "writes_scc")):
+        wrapper.reads = ()
+        wrapper.writes = ()
+        return
     for rule in _OPERAND_RULES:
         if rule.applies(inst, category):
             reads, writes = rule.extract(inst, category)

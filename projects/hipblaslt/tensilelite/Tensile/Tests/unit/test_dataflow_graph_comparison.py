@@ -427,11 +427,10 @@ class TestRenderStringIdentity:
         assert isinstance(ident[1], int)    # loop_index
         assert isinstance(ident[2], str)    # render-string
         # The render contains a vgpr reference and the LDS offset.
-        # Synthetic fixtures construct RegisterContainer with regType="v"
-        # and a symbolic RegName (e.g. "v8"), so the render is something
-        # like `v[vgprv8:vgprv8+3]`.
+        # `make_lr` builds a real `rocisa.DSLoadB128`, which renders as
+        # `ds_read_b128 v[8:11], v0 offset:64`.
         assert "v[" in ident[2]
-        assert "lds[64]" in ident[2]
+        assert "offset:64" in ident[2]
 
     def test_comment_differences_dont_change_identity(self):
         """Two instructions with identical operations but different

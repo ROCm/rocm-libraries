@@ -82,10 +82,31 @@ from test_dataflow_graph_register_gaps import _wrap
 class _FakePack:
     """Stand-in for a Pack-style ALU instruction. Reads scratch_in and
     src; writes dst. dst==scratch_out lets the same scratch vgpr appear
-    on both the write side and on a later instruction's read side."""
+    on both the write side and on a later instruction's read side.
+
+    KEPT (post-vvcm): the real rocisa Pack classes (VCvtPkF32toBF16 etc.)
+    have a fixed (dst, src0, src1) shape with no concept of a "scratch"
+    operand — this fake's `scratch_in` slot makes the phantom-edge test
+    fixture self-documenting in a way the real class cannot. The fake is
+    paired with `_FakePackRule` so it never reaches the production
+    operand-rule registry.
+
+    `reads_scc` / `writes_scc` / `is_dtl` are declared as class-level
+    `False` so the production dispatch's direct attribute access (post-
+    vvcm) finds them — without these flags, `_SCCRule.applies` and
+    `_BufferLoadRule.extract` would raise `AttributeError` on this
+    stand-in.
+    """
     dst: RegisterContainer
     src: Optional[RegisterContainer] = None
     scratch_in: Optional[RegisterContainer] = None
+
+    # Hardcoded rocisa-shape flags — _FakePack is never SCC-relevant, never
+    # DTL. Required so post-vvcm direct attribute access in dispatch
+    # doesn't AttributeError on this ad-hoc test impostor.
+    reads_scc: bool = False
+    writes_scc: bool = False
+    is_dtl: bool = False
 
     def __str__(self):
         parts = [f"dst={self.dst}"]

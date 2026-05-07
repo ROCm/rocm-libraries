@@ -22,23 +22,20 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Synthetic LoopBodyCapture builders for dataflow-graph unit tests.
+"""LoopBodyCapture builders for dataflow-graph unit tests.
 
 Bypasses the production category-resolution path (emit_instructions +
-tag_by_origin_id + the MFMA fall-through in expand_cms_macro). Constructors
-take `category` as an explicit parameter and stuff the result directly into
-a fully-built TaggedInstruction.
+tag_by_origin_id + the MFMA fall-through in expand_cms_macro). Each
+factory takes `category` as an explicit parameter and stuffs the result
+directly into a fully-built TaggedInstruction wrapping a real rocisa
+instruction instance.
 
-Why bypass: the dataflow graph builder, barrier collectors, and comparison
-classifier depend on TaggedInstruction.category being correctly set. They
-don't depend on category-resolution correctness, which is exercised in
-test_ScheduleCapture.py and the integration tests.
-
-Stand-in instruction shapes are ducktyped — only the attributes the graph
-builder actually reads need to exist.
+Why bypass: the dataflow graph builder, barrier collectors, and
+comparison classifier depend on TaggedInstruction.category being
+correctly set. They don't depend on category-resolution correctness,
+which is exercised in test_ScheduleCapture.py and the integration tests.
 """
 
-from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from rocisa.container import RegisterContainer, RegName, vgpr, sgpr
@@ -52,166 +49,6 @@ from Tensile.Components.ScheduleCapture import (
     WrappedInstruction,
     _populate_wrapper,
 )
-
-
-# =============================================================================
-# Stand-in instruction classes
-# =============================================================================
-# These mimic the rocisa instruction class hierarchy enough for the graph
-# builder to dispatch on `type(inst).__name__`. Real rocisa classes are
-# C++-bound and a pain to construct in tests; these stubs are pure Python.
-
-
-@dataclass
-class _FakeInstBase:
-    """Common base; nothing here — subclass marker only for isinstance()."""
-
-
-@dataclass
-class _FakeLR(_FakeInstBase):
-    """Stand-in for a DSLoad (LR) instruction.
-
-    Mirrors the real rocisa shape: `getDstParams() = {dst}` and
-    `getSrcParams() = {}` (the LDS-address vgpr lives on real rocisa
-    DSLoad as `getSrcParams()[0]`; the fake omits it since no test
-    fixture exercises LDS-address dataflow).
-    """
-    dst: RegisterContainer       # vgpr range written
-    lds_offset: int              # immediate LDS offset
-
-    def __str__(self):
-        return f"ds_read {self.dst}, lds[{self.lds_offset}]"
-
-    def getDstParams(self):
-        return [self.dst]
-
-    def getSrcParams(self):
-        return []
-
-
-@dataclass
-class _FakeLW(_FakeInstBase):
-    """Stand-in for a DSStore (LW) instruction.
-
-    Mirrors real rocisa: `getDstParams() = {}` (LDS write has no
-    register dst) and `getSrcParams() = {src}` (data; the fake omits
-    the LDS-address vgpr that real DSStore exposes).
-    """
-    src: RegisterContainer
-    lds_offset: int
-
-    def __str__(self):
-        return f"ds_write lds[{self.lds_offset}], {self.src}"
-
-    def getDstParams(self):
-        return []
-
-    def getSrcParams(self):
-        return [self.src]
-
-
-@dataclass
-class _FakeGR(_FakeInstBase):
-    """Stand-in for a BufferLoad (GR) instruction.
-
-    Mirrors real rocisa: `getDstParams() = {dst}` and `getSrcParams() =
-    {srd}` (vaddr/soffset omitted; the fake's `srd` fills the saddr
-    role that the validator's `_BufferLoadRule` reads).
-    """
-    dst: RegisterContainer
-    srd: RegisterContainer       # sgpr SRD
-    immediate_offset: int
-
-    def __str__(self):
-        return f"buffer_load {self.dst}, {self.srd}, off={self.immediate_offset}"
-
-    def getDstParams(self):
-        return [self.dst]
-
-    def getSrcParams(self):
-        return [self.srd]
-
-
-@dataclass
-class _FakeMFMA(_FakeInstBase):
-    """Stand-in for an MFMA instruction.
-
-    `variant` mirrors `rocisa.MFMAInstruction.variant` (a small int list whose
-    first two entries are the matrix shape M and N). Default `[32, 32]` represents
-    the standard MFMA family; pass `[4, 4, 4, ...]` to model a 4x4 PackMFMA so
-    the finish-cycle classifier in ScheduleCapture identifies it as the 1-quad-
-    cycle Pack flavor instead of the standard 3-quad-cycle MFMA.
-
-    Mirrors real rocisa: `getDstParams() = {acc}` (write to c_dst) and
-    `getSrcParams() = {a, b, acc2}` where `acc2` defaults to `acc` for
-    in-place RMW (matches `MFMAInstruction::getSrcParams()` in
-    `rocisa/include/instruction/mfma.hpp`). The fake collapses the
-    in-place case directly: `getSrcParams() = (a_src, b_src, c_dst)`.
-    """
-    c_dst: RegisterContainer
-    a_src: RegisterContainer
-    b_src: RegisterContainer
-    variant: list = field(default_factory=lambda: [32, 32])
-
-    def __str__(self):
-        return f"v_mfma {self.c_dst}, {self.a_src}, {self.b_src}, {self.c_dst}"
-
-    def getDstParams(self):
-        return [self.c_dst]
-
-    def getSrcParams(self):
-        return [self.a_src, self.b_src, self.c_dst]
-
-
-@dataclass
-class _FakeSWait(_FakeInstBase):
-    """Stand-in for SWaitCnt. Field names match rocisa.SWaitCnt."""
-    dscnt: int = -1
-    vlcnt: int = -1
-    vscnt: int = -1
-
-    def __str__(self):
-        return f"s_waitcnt(dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt})"
-
-    def getDstParams(self):
-        return []
-
-    def getSrcParams(self):
-        return []
-
-
-@dataclass
-class _FakeSBarrier(_FakeInstBase):
-    """Stand-in for SBarrier — no fields, only its presence matters."""
-
-    def __str__(self):
-        return "s_barrier"
-
-    def getDstParams(self):
-        return []
-
-    def getSrcParams(self):
-        return []
-
-
-@dataclass
-class _FakeSNop(_FakeInstBase):
-    """Stand-in for SNop. `wait_state` mirrors the rocisa.SNop constructor's
-    `waitState` argument, exposed as the attribute name that
-    `_min_issue_quad_cycles_for` reads on the test-fixture path
-    (ScheduleCapture.py: SNop branch). `_is_snop` matches by class-name
-    `_FakeSNop`, registered in `_SNOP_CLASS_NAMES` (ScheduleCapture.py:1314).
-    """
-    wait_state: int = 0
-
-    def __str__(self):
-        return f"s_nop {self.wait_state}"
-
-    def getDstParams(self):
-        return []
-
-    def getSrcParams(self):
-        return []
 
 
 # =============================================================================
@@ -231,6 +68,21 @@ def _srange(start: int, count: int = 1) -> RegisterContainer:
     return RegisterContainer("s", RegName(f"s{start}", []), start, count)
 
 
+# A high-numbered placeholder vgpr index used for LDS-address operands on
+# real `rocisa.DSLoad*` / `DSStore*` instances. Tests don't exercise
+# LDS-address dataflow (the LR/LW edge model uses LDS slot offsets, not
+# vgpr identity for the address), so wiring every fixture to the same
+# placeholder index is safe — the only constraint is that it must not
+# collide with vgpr ranges tests use as MFMA / pack / scratch operands.
+_LDS_ADDR_PLACEHOLDER_VGPR = 255
+
+# Placeholder vgpr index for BufferLoad's vaddr operand. Same rationale as
+# `_LDS_ADDR_PLACEHOLDER_VGPR`: tests use the GR's `dst` for dataflow,
+# not its vaddr; a single distinct placeholder index keeps the vaddr from
+# colliding with test data ranges.
+_BUFFER_LOAD_VADDR_PLACEHOLDER_VGPR = 254
+
+
 # =============================================================================
 # TaggedInstruction builders
 # =============================================================================
@@ -243,7 +95,21 @@ def _srange(start: int, count: int = 1) -> RegisterContainer:
 
 def make_lr(dst_vgpr_start: int, dst_vgpr_count: int, lds_offset: int, slot: int,
             *, category: str = "LRA0", sequence: int = 0) -> TaggedInstruction:
-    inst = _FakeLR(dst=_vrange(dst_vgpr_start, dst_vgpr_count), lds_offset=lds_offset)
+    """Build a TaggedInstruction wrapping a real `rocisa.DSLoadB128`.
+
+    The B128 width is chosen as a stable canonical LR class — `_DSLoadRule`
+    routes every `DSLoadB*` variant identically, and tests don't depend on
+    the concrete word size. The LDS-address vgpr (rocisa's `src` argument)
+    is sourced from a per-call placeholder vgpr; tests don't exercise
+    LDS-address dataflow.
+    """
+    from rocisa.instruction import DSLoadB128
+    from rocisa.container import DSModifiers
+    inst = DSLoadB128(
+        dst=vgpr(dst_vgpr_start, dst_vgpr_count),
+        src=vgpr(_LDS_ADDR_PLACEHOLDER_VGPR, 1),
+        ds=DSModifiers(offset=lds_offset),
+    )
     return TaggedInstruction(
         wrapped=WrappedInstruction(inst),
         category=category,
@@ -254,7 +120,19 @@ def make_lr(dst_vgpr_start: int, dst_vgpr_count: int, lds_offset: int, slot: int
 
 def make_lw(src_vgpr_start: int, src_vgpr_count: int, lds_offset: int, slot: int,
             *, category: str = "LWA", sequence: int = 0) -> TaggedInstruction:
-    inst = _FakeLW(src=_vrange(src_vgpr_start, src_vgpr_count), lds_offset=lds_offset)
+    """Build a TaggedInstruction wrapping a real `rocisa.DSStoreB128`.
+
+    Real DSStore exposes the LDS-address vgpr in `getSrcParams()`. The
+    address is sourced from a per-call placeholder vgpr; tests don't
+    exercise LDS-address dataflow.
+    """
+    from rocisa.instruction import DSStoreB128
+    from rocisa.container import DSModifiers
+    inst = DSStoreB128(
+        dstAddr=vgpr(_LDS_ADDR_PLACEHOLDER_VGPR, 1),
+        src=vgpr(src_vgpr_start, src_vgpr_count),
+        ds=DSModifiers(offset=lds_offset),
+    )
     return TaggedInstruction(
         wrapped=WrappedInstruction(inst),
         category=category,
@@ -266,10 +144,21 @@ def make_lw(src_vgpr_start: int, src_vgpr_count: int, lds_offset: int, slot: int
 def make_gr(dst_vgpr_start: int, dst_vgpr_count: int,
             srd_sgpr_start: int, immediate_offset: int, slot: int,
             *, category: str = "GRA", sequence: int = 0) -> TaggedInstruction:
-    inst = _FakeGR(
-        dst=_vrange(dst_vgpr_start, dst_vgpr_count),
-        srd=_srange(srd_sgpr_start, 4),
-        immediate_offset=immediate_offset,
+    """Build a TaggedInstruction wrapping a real `rocisa.BufferLoadB128`.
+
+    Real BufferLoad exposes vaddr (vgpr) AND saddr (sgpr SRD) in
+    `getSrcParams()`. The vaddr is sourced from a per-call placeholder
+    vgpr; tests don't exercise vaddr dataflow.
+    """
+    from rocisa.instruction import BufferLoadB128
+    from rocisa.container import MUBUFModifiers
+    mubuf = MUBUFModifiers(offen=True, offset12=immediate_offset)
+    inst = BufferLoadB128(
+        dst=vgpr(dst_vgpr_start, dst_vgpr_count),
+        vaddr=vgpr(_BUFFER_LOAD_VADDR_PLACEHOLDER_VGPR, 1),
+        saddr=sgpr(srd_sgpr_start, 4),
+        soffset=0,
+        mubuf=mubuf,
     )
     return TaggedInstruction(
         wrapped=WrappedInstruction(inst),
@@ -285,13 +174,13 @@ def make_dtl_buffer_load(vaddr_vgpr_start: int, srd_sgpr_start: int,
                          immediate_offset: int = 0) -> TaggedInstruction:
     """Build a real DTL-mode BufferLoadB128 wrapped in a TaggedInstruction.
 
-    Unlike `make_gr` (which uses the synthetic `_FakeGR` that always has a
-    vgpr `dst`), this factory constructs an actual `rocisa.instruction
-    .BufferLoadB128` with `dst=None` and `MUBUFModifiers(lds=True)`. That
-    is the structural signal `_is_dtl_buffer_load` checks for, so the
-    `_DTLBufferLoadRule` claims it and publishes `reads=(m0, srd)` —
-    enabling the dataflow graph to form an edge from any prior m0 setter
-    (SMovB32 / SAddU32) to this load.
+    Unlike `make_gr` (which builds a non-DTL `BufferLoadB128` with a vgpr
+    `dst`), this factory constructs the DTL flavor: `dst=None` and
+    `MUBUFModifiers(lds=True)`. The rocisa C++ constructor sets
+    `is_dtl=True` from `mubuf->lds`, which `_BufferLoadRule` reads to
+    publish the implicit m0 read alongside the saddr — enabling the
+    dataflow graph to form an edge from any prior m0 setter (SMovB32 /
+    SAddU32) to this load.
 
     Use this in any test that needs DTL-aware m0 tracking. Use `make_gr`
     for plain (non-DTL) BufferLoad tests where the load writes a vgpr dst.
@@ -320,11 +209,34 @@ def make_mfma(c_dst_start: int, a_src_start: int, b_src_start: int, slot: int,
               *, c_dst_count: int = 4, a_src_count: int = 2, b_src_count: int = 2,
               category: str = "MFMA", sequence: int = 0,
               variant: Optional[list] = None) -> TaggedInstruction:
-    inst = _FakeMFMA(
-        c_dst=_vrange(c_dst_start, c_dst_count),
-        a_src=_vrange(a_src_start, a_src_count),
-        b_src=_vrange(b_src_start, b_src_count),
-        variant=list(variant) if variant is not None else [32, 32],
+    """Build a TaggedInstruction wrapping a real `rocisa.MFMAInstruction`.
+
+    `variant` mirrors `rocisa.MFMAInstruction.variant` ([M, N, K, blk]).
+    Default `[32, 32, 0, 1]` renders as `v_wmma_..._32x32x0_...` — the
+    standard MFMA family for finish-cycle classification. Pass
+    `[4, 4, 4, 16]` to model a 4x4 PackMFMA so `_mfma_finish_cycles_for`
+    identifies it as the 1-quad-cycle Pack flavor via the `_4x4x`
+    substring in the rendered assembly.
+
+    `acc2 == acc` (the in-place RMW shape) is the dominant production
+    case and matches the prior `_FakeMFMA` (a, b, acc) source synthesis.
+    """
+    from rocisa.instruction import MFMAInstruction
+    from rocisa.enum import InstType
+    full_variant = list(variant) if variant is not None else [32, 32, 0, 1]
+    # Pad short test variants to MFMAInstruction's expected [M, N, K, blk].
+    while len(full_variant) < 4:
+        full_variant.append(0 if len(full_variant) < 3 else 1)
+    acc = vgpr(c_dst_start, c_dst_count)
+    inst = MFMAInstruction(
+        instType=InstType.INST_F32,
+        accType=InstType.INST_F32,
+        variant=full_variant,
+        mfma1k=False,
+        acc=acc,
+        a=vgpr(a_src_start, a_src_count),
+        b=vgpr(b_src_start, b_src_count),
+        acc2=acc,
     )
     return TaggedInstruction(
         wrapped=WrappedInstruction(inst),
@@ -336,7 +248,9 @@ def make_mfma(c_dst_start: int, a_src_start: int, b_src_start: int, slot: int,
 
 def make_swait(slot: int, *, dscnt: int = -1, vlcnt: int = -1, vscnt: int = -1,
                sequence: int = 0) -> TaggedInstruction:
-    inst = _FakeSWait(dscnt=dscnt, vlcnt=vlcnt, vscnt=vscnt)
+    """Build a TaggedInstruction wrapping a real `rocisa.SWaitCnt`."""
+    from rocisa.instruction import SWaitCnt
+    inst = SWaitCnt(vlcnt=vlcnt, vscnt=vscnt, dscnt=dscnt)
     return TaggedInstruction(
         wrapped=WrappedInstruction(inst),
         category="SYNC",
@@ -346,7 +260,9 @@ def make_swait(slot: int, *, dscnt: int = -1, vlcnt: int = -1, vscnt: int = -1,
 
 
 def make_sbarrier(slot: int, *, sequence: int = 0) -> TaggedInstruction:
-    inst = _FakeSBarrier()
+    """Build a TaggedInstruction wrapping a real `rocisa.SBarrier`."""
+    from rocisa.instruction import SBarrier
+    inst = SBarrier()
     return TaggedInstruction(
         wrapped=WrappedInstruction(inst),
         category="BARRIER",
@@ -357,15 +273,16 @@ def make_sbarrier(slot: int, *, sequence: int = 0) -> TaggedInstruction:
 
 def make_snop(slot: int, *, wait_state: int = 0,
               sequence: int = 0) -> TaggedInstruction:
-    """Build a TaggedInstruction wrapping `_FakeSNop` with `wait_state`.
+    """Build a TaggedInstruction wrapping `rocisa.SNop(waitState=...)`.
 
     `wait_state` controls the additional quad-cycle issue cost added by
     `_min_issue_quad_cycles_for` (returns `1 + wait_state` for SNop).
-    Mirrors `rocisa.SNop(waitState=...)`. See `cumulative_issue_cycles`
-    walk in ScheduleCapture.py — the SNop's per-instruction cost is read
-    inline (SNop instances are not graph nodes).
+    See `cumulative_issue_cycles` walk in ScheduleCapture.py — the SNop's
+    per-instruction cost is read inline (SNop instances are not graph
+    nodes).
     """
-    inst = _FakeSNop(wait_state=wait_state)
+    from rocisa.instruction import SNop
+    inst = SNop(waitState=wait_state)
     return TaggedInstruction(
         wrapped=WrappedInstruction(inst),
         category="SNOP",

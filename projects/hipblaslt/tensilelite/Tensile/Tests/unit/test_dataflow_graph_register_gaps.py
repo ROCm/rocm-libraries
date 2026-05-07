@@ -159,8 +159,8 @@ _FIXTURE_GAP_XFAIL_REASON = (
     "Detection requires a test-fixture extension that wx9.4.4 did NOT "
     "deliver. The production `_GenericALURule` correctly publishes the "
     "writer's reads/writes (e.g. m0, vgpr dsts), but: "
-    "(a) DTLm0Tracking uses dataflow_fixtures.make_gr / _FakeGR which "
-    "synthesizes a NON-DTL BufferLoad (has a vgpr dst) — so no instruction "
+    "(a) DTLm0Tracking uses dataflow_fixtures.make_gr (real BufferLoadB128 "
+    "with mubuf.lds=False) — so no instruction "
     "in the fixture reads m0, and the m0 setter has no consumer to form "
     "an edge with. Needs a real (lds=True) BufferLoadB128 in the fixture. "
     "(b) VSwapPair / VCCCarryChain reorder two ALU instructions whose "
@@ -1265,13 +1265,14 @@ class TestMFMAQuadCycleGap:
         _is_mfma rocisa shape) to the MFMA branch.
 
         Test isolates the dispatch decision: synthesize a TaggedInstruction
-        whose category is "PackA0" with an underlying _FakeMFMA, then assert
-        `_is_mfma_producer` claims it and `_is_alu_producer` does NOT."""
+        whose category is "PackA0" with an underlying real MFMAInstruction,
+        then assert `_is_mfma_producer` claims it and `_is_alu_producer`
+        does NOT."""
         from Tensile.Components.CMSValidator import (
             _is_alu_producer, _is_mfma_producer, _is_mfma_pack_producer,
         )
-        # _FakeMFMA — no getParams(), but _is_mfma() returns True for it
-        # (its class name is in _MFMA_CLASS_NAMES).
+        # Real MFMAInstruction — `_is_mfma` returns True via class-name
+        # membership in `_MFMA_CLASS_NAMES`.
         pack_mfma_tagged = make_mfma(
             c_dst_start=0, a_src_start=8, b_src_start=12, slot=2,
             category="PackA0", variant=[4, 4, 4, 16],
@@ -1540,9 +1541,11 @@ class TestMFMAQuadCycleGap:
                               a_count, b_start, b_count, slot, sequence,
                               category):
         """Build a real rocisa MFMAInstruction (4x4 PackMFMA family) wrapped
-        in a TaggedInstruction. Uses the rocisa class instead of `_FakeMFMA`
-        so the producer has `getParams()` and the per-byte resolver claims
-        it via `_GenericALURule` (Pack-categorized MFMAs are excluded from
+        in a TaggedInstruction. Calls the rocisa constructor directly (rather
+        than `make_mfma`) to keep the variant/category combination explicit
+        in the test, so the producer has `getParams()` and the per-byte
+        resolver claims it via `_GenericALURule` (Pack-categorized MFMAs
+        are excluded from
         `_MFMARule` per ScheduleCapture.py:1980-1984). The rendered form
         contains the `_4x4x` substring so `_mfma_finish_cycles_for` returns
         `_QUAD_CYCLES_MFMA_4X4_FINISH == 1` — matching the production
@@ -1573,10 +1576,10 @@ class TestMFMAQuadCycleGap:
         `_mfma_finish_cycles_for(4x4) == 1` as the threshold and
         false-passed the edge.
 
-        Uses a real rocisa MFMAInstruction (not _FakeMFMA) so the
-        Pack-categorized producer has `getParams()` and `_GenericALURule`
-        publishes (writes=(acc,), reads=(a,b,acc)) — required for the
-        per-byte resolver to form the PackMFMA->CVT edge."""
+        Uses a real rocisa MFMAInstruction so the Pack-categorized
+        producer has `getParams()` and `_GenericALURule` publishes
+        (writes=(acc,), reads=(a,b,acc)) — required for the per-byte
+        resolver to form the PackMFMA->CVT edge."""
         cvt = VCvtPkF32toBF16(dst=vgpr(40, 1),
                               src0=vgpr(0, 1), src1=vgpr(1, 1))
         cap = make_capture(BODY_LABEL_ML, [
