@@ -41,6 +41,7 @@ from Tensile.Toolchain.Validators import validateToolchain
 
 from .ParseArguments import parseArguments
 from .KnownBugs import KnownBugKey, is_known_bug, load_known_bugs
+from .ValidChipId import _validateChipId
 from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
 from .ValidWorkGroupMappingXCC import _validateWorkGroupMappingXCC, reset_reported_failures
@@ -78,15 +79,18 @@ def _runChecks(
         if "Experimental" in file.parts:
             continue
 
+        rel = file.relative_to(logicPath)
         solutions = []
         data = readYAML(file)
         problemType = data[4]
         if check.OnlyCustomKernels and hasCustomKernel(file):
-            print2(f">> {file.relative_to(logicPath)}")
+            print2(f">> {rel}")
             solutions = data[5]  # Solutions are the 5th index
         elif check.All:
-            print2(f">> {file.relative_to(logicPath)}")
+            print2(f">> {rel}")
             solutions = data[5]  # Solutions are the 5th index
+
+        chip_id_valid = _validateChipId(file, rel) if solutions else True
 
         for list_idx, s in enumerate(solutions):
             s, isCustom = handleCustomKernel(s, isaInfoMap)
@@ -94,7 +98,6 @@ def _runChecks(
                 continue
 
             s["ProblemType"] = problemType
-            rel = file.relative_to(logicPath)
             sol_index = int(s.get("SolutionIndex", list_idx))
 
             if known_bugs and is_known_bug(known_bugs, rel, sol_index):
@@ -105,6 +108,7 @@ def _runChecks(
 
             if all(
                 [
+                    chip_id_valid,
                     _validateMatrixInstruction(s, isaInfoMap, rel),
                     _validateWorkGroup(s, rel),
                     _validateWorkGroupMappingXCC(s, rel),

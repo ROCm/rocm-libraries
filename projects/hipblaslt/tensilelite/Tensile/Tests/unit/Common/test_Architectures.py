@@ -45,6 +45,12 @@ VALID_LOGIC_FILE_CONTENT = """- {MinimumRequiredVersion: 4.33.0}
 - [Device 75a2]
 """
 
+VALID_LOGIC_FILE_CONTENT_WITH_SCALAR_VERSION = """- MinimumRequiredVersion: 4.33.0
+- gfx950 
+- gfx950
+- [Device 75a2]
+"""
+
 VALID_LOGIC_FILE_WITH_CU = """- {MinimumRequiredVersion: 4.33.0}
 - aquavanjaram
 - {Architecture: gfx942, CUCount: 228}
@@ -96,6 +102,15 @@ def mock_logic_file_invalid_device():
 
 def test_extractArchInfo_success(mock_logic_file):
     result = _extractArchInfo("dummy.yaml")
+    assert isinstance(result, ArchInfo)
+    assert result.Name == "gfx950"
+    assert result.Gfx == "gfx950"
+    assert result.DeviceIds == {"id=75a2"}
+    assert result.CUCount is None
+
+def test_extractArchInfo_with_scalar_version():
+    with patch("builtins.open", mock_open(read_data=VALID_LOGIC_FILE_CONTENT_WITH_SCALAR_VERSION)):
+        result = _extractArchInfo("dummy.yaml")
     assert isinstance(result, ArchInfo)
     assert result.Name == "gfx950"
     assert result.Gfx == "gfx950"
