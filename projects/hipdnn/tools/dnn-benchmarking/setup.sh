@@ -130,7 +130,8 @@ if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
     cmake -S "$MIOPEN_PROVIDER_DIR" -B "$MIOPEN_BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DCMAKE_PREFIX_PATH="$INSTALL_DIR"
+        -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
+        -DMIOPENPROVIDER_SKIP_TESTS=ON
     cmake --build "$MIOPEN_BUILD_DIR"
     cmake --install "$MIOPEN_BUILD_DIR"
     echo ""
