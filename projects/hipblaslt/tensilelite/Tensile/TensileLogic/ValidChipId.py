@@ -82,35 +82,39 @@ class _ChipIdDir(NamedTuple):
     chipId: Optional[str]
     hasChipIdDir: bool
     isValidFormat: bool
+    dirName: Optional[str] = None
 
 
 def _chipIdDirFromPath(gfx: str, filepath: Path) -> _ChipIdDir:
+    """Walk the file's ancestors from nearest to farthest and return the first
+    component that looks like a chip-ID directory (or the bare gfx directory).
+    Iterating in reverse and stopping at the first match prevents an outer
+    ``gfx950`` segment (e.g. an enclosing logic-root or CI workspace path) from
+    overwriting a real ``gfx950_id<chip>`` variant nearer the file.
+    """
     base_pattern = re.compile(rf"^{re.escape(gfx)}$")
     chip_id_pattern = re.compile(rf"^{re.escape(gfx)}_id([0-9a-fA-F]+)$")
     malformed_chip_id_pattern = re.compile(rf"^{re.escape(gfx)}_([0-9a-fA-F]+)$")
-    chip_id_dir = _ChipIdDir(chipId=None, hasChipIdDir=False, isValidFormat=True)
-    for part in filepath.parts[:-1]:
-        if base_pattern.match(part):
-            chip_id_dir = _ChipIdDir(chipId=None, hasChipIdDir=False, isValidFormat=True)
-            continue
-
+    for part in reversed(filepath.parts[:-1]):
         match = chip_id_pattern.match(part)
         if match:
-            chip_id_dir = _ChipIdDir(
+            return _ChipIdDir(
                 chipId=_chipIdKey(match.group(1)),
                 hasChipIdDir=True,
                 isValidFormat=True,
+                dirName=part,
             )
-            continue
-
         match = malformed_chip_id_pattern.match(part)
         if match:
-            chip_id_dir = _ChipIdDir(
+            return _ChipIdDir(
                 chipId=_chipIdKey(match.group(1)),
                 hasChipIdDir=True,
                 isValidFormat=False,
+                dirName=part,
             )
-    return chip_id_dir
+        if base_pattern.match(part):
+            return _ChipIdDir(chipId=None, hasChipIdDir=False, isValidFormat=True, dirName=part)
+    return _ChipIdDir(chipId=None, hasChipIdDir=False, isValidFormat=True)
 
 
 def _reportChipIdFailure(filepath: Path, detail: str) -> None:
@@ -137,7 +141,9 @@ def _validateChipIdPlacement(gfx: str, device_ids: Set[str], filepath: Path) -> 
         return None
 
     if not chip_id_dir.isValidFormat:
-        return f"chip-ID directory must use {gfx}_id<chip> format"
+        return (
+            f"chip-ID directory '{chip_id_dir.dirName}' must use {gfx}_id<chip> format"
+        )
 
     if chip_id_dir.chipId not in source_ids:
         return f"{gfx}_id directory uses non-source chip ID {chip_id_dir.chipId}"
@@ -182,15 +188,18 @@ def _validateChipId(filepath: Path, display_path: Optional[Path] = None) -> bool
             return False
 
         for device_id in arch_info.DeviceIds:
-            _verifyPredicate(device_id, arch_info.Gfx)
+            _verifyPredicate(device_id.lower(), arch_info.Gfx)
 
         device_ids = {_chipIdKey(_chipIdValue(device_id)) for device_id in arch_info.DeviceIds}
-        placement_error = _validateChipIdPlacement(arch_info.Gfx, device_ids, filepath)
+        # Walk the logic-root-relative path so that ancestor directories outside
+        # the logic root (e.g. CI workspaces containing 'gfx950') cannot
+        # masquerade as chip-ID directories.
+        placement_error = _validateChipIdPlacement(arch_info.Gfx, device_ids, display_path)
         if placement_error:
             _reportChipIdFailure(display_path, placement_error)
             return False
 
         return True
-    except Exception as e:
-        _reportChipIdFailure(display_path, f"ValidChipId failed: {e}")
+    except (LogicFileError, ValueError) as e:
+        _reportChipIdFailure(display_path, f"ValidChipId failed ({type(e).__name__}): {e}")
         return False
