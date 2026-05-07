@@ -27,10 +27,15 @@ What this file is:
     helpers, magic-number division, argument loader, DS init).
 
 What it does (real):
-    - None.
+    - ``ArgumentLoader`` — kernel-argument offset accumulator.
+      ``getOffset`` / ``setOffset`` / ``resetOffset`` are real;
+      ``loadKernArg`` / ``loadAllKernArg`` advance ``kernArgOffset``
+      byte-for-byte the same way ``functions/argument.cpp`` does, but
+      return ``None`` instead of an emitted ``SLoadB*`` ``Item`` —
+      real emission is unblocked when ``ir_adaptor.instruction``
+      graduates from dummies.
 
 Not yet done (dummy):
-    - ``ArgumentLoader``
     - Branch helpers: ``BranchIfZero``, ``BranchIfNotZero``
     - Cast helper: ``VSaturateCastInt``
     - Math helpers: vector / scalar divide-and-remainder /
@@ -49,12 +54,75 @@ logicalIR correspondence:
 
 from __future__ import annotations
 
-from ._dummy import make_dummy_class, make_dummy_func
+from ._dummy import make_dummy_func
 
 _P = "rocisa.functions"
 
 
-ArgumentLoader = make_dummy_class(f"{_P}.ArgumentLoader")
+class ArgumentLoader:
+    """Workaround port of ``rocisa::ArgumentLoader``.
+
+    Mirrors the offset-bookkeeping half of ``rocisa::ArgumentLoader``
+    (see ``rocisa/include/functions/argument.hpp``). Tensile reads
+    ``getOffset()`` directly to compute SGPR-offset immediates (e.g.
+    ``KernelWriterAssembly.py:2351,2452,2454``); a stale value here
+    would silently produce wrong ``s_load_b*`` immediates.
+
+    Instruction-emission half is stubbed: ``loadKernArg`` and
+    ``loadAllKernArg`` advance ``kernArgOffset`` exactly like the C++
+    but return ``None`` instead of a real ``SLoadB{32,64,128,256,512}``
+    ``Item`` / ``Module``. Tensile feeds the return through
+    ``module.add(...)`` which dummy-swallows ``None`` for now; emission
+    becomes real once ``ir_adaptor.instruction`` is real.
+
+    Keep parity with ``functions/argument.hpp`` if you ever touch this.
+    """
+
+    __slots__ = ("_kernArgOffset",)
+
+    def __init__(self) -> None:
+        self._kernArgOffset: int = 0
+
+    def resetOffset(self) -> None:
+        self._kernArgOffset = 0
+
+    def setOffset(self, offset: int) -> None:
+        self._kernArgOffset = int(offset)
+
+    def getOffset(self) -> int:
+        return self._kernArgOffset
+
+    def loadKernArg(self, dst, srcAddr, sgprOffset=None, dword: int = 1,
+                    writeSgpr: bool = True):
+        """Advance ``kernArgOffset`` and return ``None`` (stub emission).
+
+        Mirrors ``functions/argument.hpp:60-121``. The C++ does
+        ``kernArgOffset += sgprOffset ? 0 : dword * 4`` *outside* the
+        ``if(writeSgpr)`` branch, so ``writeSgpr=False`` still advances
+        the offset (used to skip unused parms). Real emission would
+        produce an ``SLoadB{32,64,128,256,512}`` (writeSgpr=True) or a
+        ``TextBlock("Move offset by N\\n")`` (writeSgpr=False); both
+        deferred until ``ir_adaptor.instruction`` is real.
+        """
+        if sgprOffset is None:
+            self._kernArgOffset += int(dword) * 4
+        return None
+
+    def loadAllKernArg(self, sgprStartIndex: int, srcAddr, numSgprToLoad: int,
+                       numSgprPreload: int = 0):
+        """Advance ``kernArgOffset`` and return ``None`` (stub emission).
+
+        Mirrors ``functions/argument.hpp:126-199``. The C++ greedily
+        loads in chunks of ``i ∈ {16,8,4,2,1}`` SGPRs, advancing
+        ``kernArgOffset`` by ``i * 4`` per chunk plus ``numSgprPreload
+        * 4`` up front; the *total* advancement is exactly
+        ``numSgprToLoad * 4`` regardless of how the chunks partition.
+        We collapse the loop to a single byte-equivalent add since the
+        emitted ``Module`` is unused while ``instruction.py`` is dummy.
+        """
+        self._kernArgOffset += int(numSgprToLoad) * 4
+        return None
+
 
 BranchIfZero = make_dummy_func(f"{_P}.BranchIfZero")
 BranchIfNotZero = make_dummy_func(f"{_P}.BranchIfNotZero")
