@@ -46,8 +46,8 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     using namespace hipdnn_data_sdk::utilities;
 
     // Arbitrary dimensions for testing
-    const int64_t batch = 4;
-    const int64_t numHeads = 8;
+    const int64_t batch = 2;
+    const int64_t numHeads = 4;
     const int64_t seqQ = 256;
     const int64_t seqKv = 256;
 

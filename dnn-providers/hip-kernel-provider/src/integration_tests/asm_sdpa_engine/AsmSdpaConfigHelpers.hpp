@@ -91,7 +91,7 @@ std::vector<GraphTestCase>
     testCases.reserve(configMap.size());
     for(const auto& [key, config] : configMap)
     {
-        testCases.push_back(configToCompatibleGraph(config));
+        testCases.push_back(configToCompatibleGraphTestCase(config));
     }
     return testCases;
 }

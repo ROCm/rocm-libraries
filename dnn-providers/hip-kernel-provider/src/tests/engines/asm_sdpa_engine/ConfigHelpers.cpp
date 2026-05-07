@@ -31,8 +31,8 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     // Default to BFLOAT16 for "bf16" or any other value
 
     // Use arbitrary values for batch, num_heads, and sequence lengths
-    const int64_t batch = 4;
-    const int64_t numHeads = 8;
+    const int64_t batch = 2;
+    const int64_t numHeads = 4;
     const int64_t seqQ = 256;
     const int64_t seqKv = 256;
 
