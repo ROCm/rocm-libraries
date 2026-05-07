@@ -41,9 +41,14 @@ This script handles everything automatically:
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install ROCm torch (from ROCm nightly index), then the package + PyPI deps.
-pip install -r requirements-rocm.txt
-pip install -e . --no-deps
+# Install ROCm PyTorch nightly for your GPU architecture:
+#   MI200/MI210/MI250 (gfx90a) → gfx90X
+#   MI300X/MI300A     (gfx942) → gfx94X
+# See https://rocm.nightlies.amd.com/v2-staging for available architectures.
+pip install --pre torch --index-url https://rocm.nightlies.amd.com/v2-staging/gfx94X-dcgpu/
+
+# Install the package + PyPI deps (numpy, pytest, etc.)
+pip install -e .
 
 # Install hipDNN Python bindings (from your hipDNN build)
 cd /path/to/hipdnn/python && pip install -e . --no-deps && cd -
