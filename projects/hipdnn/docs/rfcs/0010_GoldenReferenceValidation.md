@@ -283,7 +283,7 @@ GraphIdentity computeGraphIdentity(const graph::Graph& graph) {
 }
 ```
 
-**Existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order and builds a tensor-UID map. `computeGraphIdentity()` extends this pattern: add tensor names, dims, and operation parameters (padding, stride, dilation) to the per-node collection, then compose into a single graph-level hash.
+**Reuses existing infrastructure.** The test SDK already has per-node signature keys for all 14 operation types (`ConvolutionFwdSignatureKey`, `MatmulSignatureKey`, `SdpaFwdSignatureKey`, etc. in `test_sdk/.../cpu_graph_executor/detail/`). Each key extracts the operation type and data types from a node and implements `hashSelf()`. `CpuReferenceGraphExecutor` already walks nodes in topological order and builds a tensor-UID map. `computeGraphIdentity()` reuses this graph walk and per-node key pattern. **What it adds**: tensor names, dims, and operation parameters (padding, stride, dilation) to the per-node collection, then composes into a single graph-level SHA-256 and a human-readable label.
 
 At validation time:
 
@@ -314,18 +314,18 @@ The graph-property hash changes when — and only when — the computation chang
 
 #### Graph Export -- eliminates dual-spec
 
-Instead of the Python script independently defining operation parameters, it reads the serialized graph exported from `buildGraph()`:
+Instead of the Python script independently defining operation parameters, it reads graph properties exported from `buildGraph()`. The exported graph is a **transient artifact** — it is consumed by the Python script during generation and discarded. It is not stored in the golden data directory.
 
 ```bash
-# 1. Export the graph definition from C++
+# 1. Export the graph definition from C++ (transient, not stored)
 ./hipdnn_integration_tests \
   --export-graph \
-  --golden-data-dir ./graph_exports/ \
+  --output-dir /tmp/graph_exports/ \
   --gtest_filter="*SdpaFwd*Smoke*"
 
 # 2. Python reads the exported graph, extracts params, runs PyTorch
 python scripts/generate_reference.py \
-  --graph-file ./graph_exports/SdpaFwd_Smoke_B1_H8/graph.bin \
+  --graph-export /tmp/graph_exports/SdpaFwd_Smoke/ \
   --output-dir ./pytorch_outputs/
 
 # 3. Feed outputs into golden data generator
@@ -336,9 +336,9 @@ python scripts/generate_reference.py \
   --gtest_filter="*SdpaFwd*Smoke*"
 ```
 
-The Python script extracts operation type, tensor shapes, data types, and operation-specific parameters (padding, stride, dilation, etc.) from the flatbuffer. `buildGraph()` in C++ is the **single source of truth**. The Python script never independently defines parameters -- it reads them.
+`buildGraph()` in C++ is the **single source of truth**. The Python script never independently defines parameters — it reads them from the export. The exact export format (FlatBuffers binary, JSON, or extending the manifest with a `graph_properties` section) is an implementation detail to decide when the first external reference script is written.
 
-This requires a Python flatbuffer reader for the graph schema, which is additional work but eliminates an entire class of bugs (parameter mismatch between C++ and Python).
+**Why the serialized graph is not stored in golden data.** The validation pipeline never reads it — it rebuilds the graph from `buildGraph()` and checks the fingerprint. Storing it would couple golden data to the FlatBuffers schema version: a schema upgrade would make every stored `graph.bin` unreadable, forcing regeneration even when the computation hasn't changed. The manifest and tensor files have no such coupling.
 
 #### Cross-Validation -- catches implementation bugs
 
@@ -392,7 +392,6 @@ Golden data uses a **manifest + binary blobs** format. Each test case produces a
 ```
 NCHW_1x16x16x16_fp32_a3f8c2e1/
   manifest.json          # Metadata, tensor map, checksums
-  graph.bin              # Serialized flatbuffer graph
   tensor_X.bin           # Raw binary tensor data (input)
   tensor_W.bin           # Raw binary tensor data (input)
   tensor_Y.bin           # Raw binary tensor data (reference output)
@@ -413,10 +412,7 @@ NCHW_1x16x16x16_fp32_a3f8c2e1/
     "operation": "conv_fwd",
     "seed": 42
   },
-  "graph": {
-    "file": "graph.bin",
-    "sha256": "e3b0c44298fc1c14..."
-  },
+  "graph_fingerprint": "a3f8c2e1d4b7...",
   "inputs": {
     "X": {
       "file": "tensor_X.bin",
@@ -495,7 +491,6 @@ void verifyGoldenIntegrity(const GoldenManifest& manifest,
         }
     };
 
-    verifyFile(manifest.graph.file, manifest.graph.sha256);
     for(const auto& [name, info] : manifest.inputs)
         verifyFile(info.file, info.sha256);
     for(const auto& [name, info] : manifest.outputs)
@@ -914,7 +909,6 @@ integration-tests/
       fwd/
         NCHW_1x16x16x16_fp32_a3f8c2e1/
           manifest.json
-          graph.bin
           tensor_X.bin
           tensor_W.bin
           tensor_Y.bin

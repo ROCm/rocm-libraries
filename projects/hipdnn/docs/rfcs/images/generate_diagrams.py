@@ -139,7 +139,7 @@ def make_generation():
     texts = [
         ["Step 1: construct", "buildGraph()"],
         ["Step 2: execute-reference", "Run trusted reference", "(CPU / GPU / PyTorch)"],
-        ["Step 3: serialize", "Save inputs + outputs", "(includes graph.bin)"],
+        ["Step 3: serialize", "Save inputs + outputs", "(manifest + tensor blobs)"],
     ]
     rects = []
     for i, lines in enumerate(texts):
@@ -246,9 +246,9 @@ def make_graph_correctness():
     r1 = box(d, top_cx, r1_cy, ["graph.to_binary()"], min_w=220)
     arr_down(d, top_cx, r0[3], r1[1])
 
-    # Row 2: graph.bin
+    # Row 2: graph export (transient)
     r2_cy = r1[3] + gap + 20
-    r2 = box(d, top_cx, r2_cy, ["graph.bin"], fill=GRAY, min_w=180)
+    r2 = box(d, top_cx, r2_cy, ["graph export (transient)"], fill=GRAY, min_w=220)
     arr_down(d, top_cx, r1[3], r2[1])
 
     # 4 columns: well spaced
@@ -256,7 +256,7 @@ def make_graph_correctness():
     branch_y = r2[3] + 25  # horizontal bar
     col_top = branch_y + gap  # where column boxes start
 
-    # Horizontal bar from graph.bin
+    # Horizontal bar from graph export
     d.line([(top_cx, r2[3]), (top_cx, branch_y)], fill=BLACK, width=LINE_W)
     d.line([(cols[0], branch_y), (cols[-1], branch_y)], fill=BLACK, width=LINE_W)
     for cx in cols:
@@ -277,7 +277,7 @@ def make_graph_correctness():
     arr_down(d, cols[1], c2a[3], c2b[1])
 
     # Column 3: Python
-    c3a = box(d, cols[2], col_top + 28, ["Python reads", "graph.bin (Graph Export)", "extracts params"],
+    c3a = box(d, cols[2], col_top + 28, ["Python reads", "graph export (Graph Export)", "extracts params"],
               font=FONT_SM, min_w=180)
     c3b_cy = c3a[3] + gap
     c3b = box(d, cols[2], c3b_cy, ["Runs PyTorch"], font=FONT_SM, min_w=150)
