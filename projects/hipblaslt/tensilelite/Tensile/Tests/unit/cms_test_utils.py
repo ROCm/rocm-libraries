@@ -153,46 +153,6 @@ def _make_mock_grinc(count: int) -> list:
     return items
 
 
-# Snapshot of (src_reg, dst_reg) pairs emitted by transposeLRVregs() in
-# LocalRead.py for TF32-emulation SwapPacks, indexed by lrvwTile (vw).
-# Originally derived by mirroring the validator helper
-# `_compute_swap_register_pairs`; captured here as a fixed test fixture so
-# the mock has no dependency on validator internals. The pairs come from the
-# kernel writer's behavior (LocalRead.transposeLRVregs / getTransposeIndex),
-# which the validator separately observes — both consume the same kernel
-# truth, they do not depend on each other.
-_MOCK_SWAP_PAIRS_BY_VW: dict[int, list[tuple[int, int]]] = {
-    2: [(1, 8), (3, 10), (5, 12), (7, 14)],
-    4: [(1, 8), (2, 16), (3, 24), (5, 12), (6, 20), (7, 28),
-        (10, 17), (11, 25), (14, 21), (15, 29), (19, 26), (23, 30)],
-}
-
-
-def _make_mock_swap_packs(count: int, lr_base: int = LRA_BASE, vw: int = 1) -> list:
-    """Create mock VSwapB32 instructions for swap packs.
-
-    When vw > 1, uses a fixed snapshot of the (src, dst) pairs emitted by
-    LocalRead.transposeLRVregs() (the kernel writer's TF32-emulation swap
-    sequence). Each swap reads and writes two VGPRs within the LR space,
-    offset by lr_base.
-
-    When vw <= 1 (no swaps needed), returns empty list.
-    """
-    from rocisa.instruction import VSwapB32
-    if vw <= 1:
-        return []
-    swap_pairs = _MOCK_SWAP_PAIRS_BY_VW.get(vw, [])
-    items = []
-    for i in range(min(count, len(swap_pairs))):
-        reg_src, reg_dst = swap_pairs[i]
-        items.append(VSwapB32(dst=vgpr(lr_base + reg_dst, 1),
-                              src=vgpr(lr_base + reg_src, 1)))
-    # If count > len(swap_pairs), pad with identity swaps (shouldn't happen in practice)
-    while len(items) < count:
-        items.append(VSwapB32(dst=vgpr(lr_base, 1), src=vgpr(lr_base + 1, 1)))
-    return items
-
-
 def _make_mock_swap(count: int) -> list:
     """Mock LRSA/LRSB pointer-flip ops as VXorB32 (the rocisa class CMS
     actually emits for LR-side swap operations)."""
@@ -419,27 +379,15 @@ def make_mock_id_map(schedule_info, kernel=None) -> dict:
             lr_base = LRA_BASE if is_a else LRB_BASE
             pack_dst_base = PACK_A_DST_BASE if is_a else PACK_B_DST_BASE
             if is_4x4_tf32 or is_tf32:
-                # Compute number of leading SwapPacks based on VW and TLUA/TLUB
-                n_swaps = 0
-                if kernel:
-                    tlu_key = "TLUA" if is_a else "TLUB"
-                    needs_transpose = kernel.get("ProblemType", {}).get(tlu_key, False)
-                    if needs_transpose:
-                        vw = kernel.get("VectorWidthA" if is_a else "VectorWidthB", 1)
-                        if vw > 1:
-                            n_swaps = 4 * (vw - 1)
-                vw_for_swap = kernel.get("VectorWidthA" if is_a else "VectorWidthB", 1) if kernel else 1
-                swap_items = _make_mock_swap_packs(n_swaps, lr_base=lr_base, vw=vw_for_swap)
-                remaining = count - n_swaps
                 if is_4x4_tf32:
-                    pack_items = _make_mock_packs_tf32_4x4(remaining,
+                    pack_items = _make_mock_packs_tf32_4x4(count,
                                                            pack_dst_base=pack_dst_base,
                                                            lr_base=lr_base)
                 else:
-                    pack_items = _make_mock_packs_tf32(remaining,
+                    pack_items = _make_mock_packs_tf32(count,
                                                        pack_dst_base=pack_dst_base,
                                                        lr_base=lr_base)
-                id_map[key] = swap_items + pack_items
+                id_map[key] = pack_items
             else:
                 # Find corresponding LR count for element_idx mapping
                 lr_name = key.replace("Pack", "LR")
