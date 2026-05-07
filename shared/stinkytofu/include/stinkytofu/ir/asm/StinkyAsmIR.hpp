@@ -29,6 +29,7 @@
 #include <optional>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
@@ -44,12 +45,13 @@ namespace stinkytofu {
 #include "hardware/gfxIsa.inc"
 
 // Represents a single assembly instruction.
-struct StinkyInstruction : public IRBase {
+struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     friend class IRBase;
     friend class AsmIRBuilder;
     friend class DefUseChainUpdater;
     friend class DefUseChainBuilder;
 
+    const HwInstDesc* hwInstDesc;
     int issueCycles;
     int latencyCycles;
 
@@ -62,8 +64,6 @@ struct StinkyInstruction : public IRBase {
     // instructions that DEFINE the values USED by this instruction
     // (producers of this instruction's operands).
     std::vector<StinkyInstruction*> sources;
-
-    const HwInstDesc* hwInstDesc;
 
     // Modifiers are extra bits/fields in the instruction encoding that
     // tweak how the operation is performed, without needing a completely
@@ -258,7 +258,7 @@ struct StinkyInstruction : public IRBase {
 
 /// Builder for assembly-level IR.
 /// In passes, create StinkyInstruction only through this builder.
-class AsmIRBuilder : public IRBuilder {
+class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
    public:
     const GfxArchID arch;
 
@@ -309,9 +309,9 @@ class AsmIRBuilder : public IRBuilder {
     AsmIRBuilder(BasicBlock& bb, GfxArchID arch) : IRBuilder(bb), arch(arch) {}
 };
 
-const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
-const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
-uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
 
 // Processing StinkyTofu IR.
 class StinkyInstPass : public Pass {};
@@ -337,12 +337,20 @@ inline bool isMUBUFStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_MUBUFStore);
 }
 
+inline bool isMUBUFAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_MUBUFAtomic);
+}
+
 inline bool isFLATLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATLoad);
 }
 
 inline bool isFLATStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATStore);
+}
+
+inline bool isFLATAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_FLATAtomic);
 }
 
 inline bool isGLOBALLoad(const StinkyInstruction& inst) {
@@ -379,8 +387,7 @@ inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_SMemAtomic) || inst.is(InstFlag::IF_MUBUFAtomic) ||
-           inst.is(InstFlag::IF_FLATAtomic);
+    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst);
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
@@ -397,6 +404,10 @@ inline bool isDSRead(const StinkyInstruction& inst) {
 
 inline bool isDSWrite(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_DSStore);
+}
+
+inline bool isDSAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_DSAtomic);
 }
 
 inline bool isBarrier(const StinkyInstruction& inst) {
@@ -534,6 +545,18 @@ inline bool isTranscendental(const StinkyInstruction& inst) {
 /// Excludes: control flow, memory operations, waitcnt, barrier, delay_alu
 inline bool isScalarALU(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SALU);
+}
+
+/// Check if instruction is an XDL WMMA/SWMMAC instruction.
+/// Excludes FP32-input WMMA (v_wmma_f32_16x16x4_f32).
+inline bool isXDLWMMA(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_WMMA_XDL);
+}
+
+/// Check if instruction is a 64-bit transcendental.
+/// Includes v_rcp_f64, v_rsq_f64, v_sqrt_f64.
+inline bool isTrans64(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_Trans64);
 }
 
 }  // namespace stinkytofu

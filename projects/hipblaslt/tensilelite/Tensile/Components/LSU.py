@@ -594,7 +594,8 @@ class LSUOn(LSU):
 
         noGSUBranch = (kernel["GlobalSplitU"] == 0 and kernel["StreamK"] != 3)
         module = Module("localSplitUGlobalWrite")
-        module.add(writer.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch))
+        storeModule, _ = writer.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch)
+        module.add(storeModule)
         writer.cleanupGlobalWrite(kernel)
         writer.vgprPool.checkIn(self.accVgprLdsReduction)
         return module

@@ -556,26 +556,28 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
-        /// \todo: fix the handle.Write() calls below because they generate
-        /// temporary objects that may get destroyed before the
-        /// miopenRNNForwardInference call happens
+        auto hx_dev = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+        auto cx_dev = nocx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initCell);
+        auto hy_dev = nohy ? miopen::Allocator::ManageDataPtr{} : handle.Write(hy);
+        auto cy_dev = nocy ? miopen::Allocator::ManageDataPtr{} : handle.Write(cy);
+
         miopenRNNForwardInference(&handle,
                                   rnnDesc,
                                   seqLength,
                                   inputDescs.data(),
                                   input_dev.get(),
                                   &hiddenDesc,
-                                  ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                  hx_dev.get(),
                                   &hiddenDesc,
-                                  ((nocx) ? nullptr : handle.Write(initCell).get()),
+                                  cx_dev.get(),
                                   &weightDesc,
                                   weights_dev.get(),
                                   outputDescs.data(),
                                   output_dev.get(),
                                   &hiddenDesc,
-                                  ((nohy) ? nullptr : handle.Write(hy).get()),
+                                  hy_dev.get(),
                                   &hiddenDesc,
-                                  ((nocy) ? nullptr : handle.Write(cy).get()),
+                                  cy_dev.get(),
                                   wspace.ptr(),
                                   wspace.size());
 
@@ -920,15 +922,18 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
+        auto hx_dev = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+        auto cx_dev = nocx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initCell);
+
         miopenRNNForwardTraining(&handle,
                                  rnnDesc,
                                  seqLength,
                                  inputDescs.data(),
                                  input_dev.get(),
                                  &hiddenDesc,
-                                 ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                 hx_dev.get(),
                                  &hiddenDesc,
-                                 ((nocx) ? nullptr : handle.Write(initCell).get()),
+                                 cx_dev.get(),
                                  &weightDesc,
                                  weights_dev.get(),
                                  outputDescs.data(),
@@ -1252,6 +1257,11 @@ verify_backward_data_lstm<T>::gpu() const
     std::vector<T> dcx(initHidden.size());
     auto dcx_dev = handle.Write(dcx);
 
+    auto dhy_dev = nodhy ? miopen::Allocator::ManageDataPtr{} : handle.Write(dhy);
+    auto dcy_dev = nodcy ? miopen::Allocator::ManageDataPtr{} : handle.Write(dcy);
+    auto hx_dev  = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+    auto cx_dev  = nocx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initCell);
+
     miopenRNNBackwardData(&handle,
                           rnnDesc,
                           seqLength,
@@ -1260,15 +1270,15 @@ verify_backward_data_lstm<T>::gpu() const
                           outputDescs.data(),
                           dyin_dev.get(),
                           &hiddenDesc,
-                          ((nodhy) ? nullptr : handle.Write(dhy).get()),
+                          dhy_dev.get(),
                           &hiddenDesc,
-                          ((nodcy) ? nullptr : handle.Write(dcy).get()),
+                          dcy_dev.get(),
                           &weightDesc,
                           weights_dev.get(),
                           &hiddenDesc,
-                          ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                          hx_dev.get(),
                           &hiddenDesc,
-                          ((nocx) ? nullptr : handle.Write(initCell).get()),
+                          cx_dev.get(),
                           inputDescs.data(),
                           dx_dev.get(),
                           &hiddenDesc,
@@ -1428,6 +1438,7 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
     hlens[1] = batch_seq[0];
     hlens[2] = hiddenSize;
     miopen::TensorDescriptor hiddenDesc(miopen::deref(rnnDesc).dataType, hlens);
+    auto hx_dev    = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
     auto dy_dev    = handle.Write(dy);
     auto input_dev = handle.Write(input);
 
@@ -1437,7 +1448,7 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
                              inputDescs.data(),
                              input_dev.get(),
                              &hiddenDesc,
-                             ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                             hx_dev.get(),
                              outputDescs.data(),
                              dy_dev.get(),
                              &weightDesc,

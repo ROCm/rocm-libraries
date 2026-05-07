@@ -135,6 +135,9 @@ typedef enum
     /** @brief Device properties for this plan */
     HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP = 307,
 
+    /** @brief UIDs of tensors required by this plan */
+    HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT = 308,
+
     /** @} */
 
     /**

@@ -172,6 +172,15 @@
       "monorepo_source_of_truth": true
     },
     {
+      "name": "stinkytofu",
+      "url": "ROCm/rocm-libraries",
+      "branch": "develop",
+      "category": "shared",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
       "name": "rocsolver",
       "url": "ROCm/rocSOLVER",
       "branch": "develop",
@@ -246,6 +255,24 @@
     {
       "name": "hip-kernel-provider",
       "url": "ROCm/hip-kernel-provider",
+      "branch": "develop",
+      "category": "dnn-providers",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "integration-tests",
+      "url": "ROCm/integration-tests",
+      "branch": "develop",
+      "category": "dnn-providers",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "fusilli-provider",
+      "url": "ROCm/fusilli-provider",
       "branch": "develop",
       "category": "dnn-providers",
       "auto_subtree_pull": false,

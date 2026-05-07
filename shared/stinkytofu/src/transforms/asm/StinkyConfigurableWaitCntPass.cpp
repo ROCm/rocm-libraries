@@ -23,7 +23,6 @@ using namespace stinkytofu;
 
 constexpr int WAIT_COMPLETE = 0;
 constexpr int WAIT_IGNORE = -1;
-constexpr int MAX_WAITCNT = 255;
 
 // Note: BarrierWaitPolicy, DependencyTrackingPolicy, and WaitCntConfig
 // are now defined in StinkyConfigurableWaitCntPass.hpp
@@ -1144,9 +1143,7 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
 
                 // Compute entry state from predecessors
                 MemoryOperationState entryState;
-                bool hasValidPredecessor = false;
                 bool hasNonBackEdgePred = false;
-                int validPredCount = 0;
 
                 // First, check if we have any non-back-edge predecessors
                 for (BasicBlock* pred : bb->getPredecessors()) {
@@ -1190,9 +1187,6 @@ class StinkyConfigurableWaitCntPass : public StinkyInstPass {
 
                     auto predStateIt = blockStates.find(pred);
                     if (predStateIt != blockStates.end() && predStateIt->second.processed) {
-                        validPredCount++;
-                        hasValidPredecessor = true;
-
                         // Collect ALL exit states from this predecessor (per-path tracking)
                         for (const auto& exitState : predStateIt->second.exitStates) {
                             predecessorStates.push_back(exitState);
