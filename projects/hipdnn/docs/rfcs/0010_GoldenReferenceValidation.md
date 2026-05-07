@@ -70,16 +70,14 @@ This is the architectural difference from a test-as-code approach: the graph def
 Two pipelines operate on the same golden data format:
 
 **Generation (run once, any tool):**
-1. Define the graph (tensors, operation, parameters)
-2. Create input tensors (random or from a real workload)
-3. Run a reference source (PyTorch, CPU ref, GPU ref, AITER, AOTriton, etc.) to produce outputs
-4. Write the bundle: `{Name}.json` + `{Name}.tensor{uid}.bin`
+1. Define graph and create input tensors (operation, parameters, random or real-workload inputs)
+2. Run a reference source (PyTorch, CPU ref, GPU ref, AITER, AOTriton, etc.) to produce outputs
+3. Write the bundle: `{Name}.json` + `{Name}.tensor{uid}.bin`
 
 **Validation (C++, every CI run):**
-1. `loadGraphAndTensors(path)` reads JSON + tensor bins into `GraphAndTensorMap`
-2. `extractAndClearOutputTensorData()` separates reference outputs, zeros the output slots
-3. Execute engine under test (CPU ref or GPU plugin)
-4. `validateTensors(referenceOutputs, atol, rtol)` compares engine output to reference
+1. Load bundle from disk into `GraphAndTensorMap`, extract golden outputs
+2. Execute engine under test (CPU ref or GPU plugin)
+3. Compare engine output to golden output — PASS or FAIL
 
 #### Generation Pipeline (runs once, produces golden data)
 
