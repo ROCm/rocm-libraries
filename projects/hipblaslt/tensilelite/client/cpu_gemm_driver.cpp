@@ -309,30 +309,37 @@ int runGemm(size_t         m,
     // For mixed-precision MAC validation (storage type wider than compute-input
     // type, e.g. Half storage + F8 compute), the test driver needs values that
     // are NOT on the F8 grid - otherwise the quantization step has nothing to
-    // do and the bug being tested for can't be reproduced. We give B such
-    // values when storage(B) is wider than computeInputB.
-    size_t                          seed = 42;
-    std::mt19937                    gen(seed);
-    std::uniform_int_distribution<> binary_distribution(0, 1);
+    // do and the bug being tested for can't be reproduced. We give an operand
+    // such values when its storage type is wider than its computeInput type.
+    size_t                                seed = 42;
+    std::mt19937                          gen(seed);
+    std::uniform_int_distribution<>       binary_distribution(0, 1);
+    std::uniform_real_distribution<float> realDist(-1.0f, 1.0f);
 
     auto randomGen = [&]() { return binary_distribution(gen) ? 1.0f : -1.0f; };
 
-    std::generate(a.begin(), a.end(), [&]() { return static_cast<InputAT>(randomGen()); });
-    std::generate(c.begin(), c.end(), [&]() { return static_cast<float>(randomGen()); });
+    auto initOperand = [&](auto& vec, bool quantizes) {
+        using T = typename std::decay_t<decltype(vec)>::value_type;
+        if(quantizes)
+        {
+            // Values representable in storage but not on the compute-input grid -
+            // for storage=Half/compute=F8N, values like 0.7 that Half holds
+            // exactly but F8N rounds to 0.625 or 0.75.
+            std::generate(vec.begin(), vec.end(),
+                          [&]() { return static_cast<T>(realDist(gen)); });
+        }
+        else
+        {
+            std::generate(vec.begin(), vec.end(),
+                          [&]() { return static_cast<T>(randomGen()); });
+        }
+    };
 
+    bool quantizesA = (sizeof(InputAT) > 1) && (computeInputA != dtypeEnumA);
     bool quantizesB = (sizeof(InputBT) > 1) && (computeInputB != dtypeEnumB);
-    if(quantizesB)
-    {
-        // Generate B values that are representable in storage(B) but not on the
-        // computeInputB grid - for B=Half/computeInputB=F8N, this means values
-        // like 0.7 that Half holds exactly but F8N rounds to 0.625 or 0.75.
-        std::uniform_real_distribution<float> realDist(-1.0f, 1.0f);
-        std::generate(b.begin(), b.end(), [&]() { return static_cast<InputBT>(realDist(gen)); });
-    }
-    else
-    {
-        std::generate(b.begin(), b.end(), [&]() { return static_cast<InputBT>(randomGen()); });
-    }
+    initOperand(a, quantizesA);
+    initOperand(b, quantizesB);
+    std::generate(c.begin(), c.end(), [&]() { return static_cast<float>(randomGen()); });
 
     // Optional feature buffers
     std::vector<float> biasVec;

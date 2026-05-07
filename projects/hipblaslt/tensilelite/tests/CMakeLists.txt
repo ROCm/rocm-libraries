@@ -269,5 +269,14 @@ if(NOT WIN32)
         add_cpu_gemm_test(${PATH}_f8_x_h_macF8
             ARGS ${F16_SIZES} --typeA f8 --typeB f16 --computeInputB f8 --validate ${PATH_FLAGS}
         )
+        # Mirror cases - A is the wider operand and gets quantized to F8 at
+        # the MAC. Exercises the symmetric A-side quantization path on both
+        # the test driver init and the GEMM implementations.
+        add_cpu_gemm_test(${PATH}_h_x_f8fnuz_macF8N
+            ARGS ${F16_SIZES} --typeA f16 --typeB f8fnuz --computeInputA f8fnuz --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_h_x_f8_macF8
+            ARGS ${F16_SIZES} --typeA f16 --typeB f8 --computeInputA f8 --validate ${PATH_FLAGS}
+        )
     endforeach()
 endif()
