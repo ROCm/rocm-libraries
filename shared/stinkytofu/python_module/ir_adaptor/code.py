@@ -27,7 +27,13 @@ What this file is:
     ``ValueSet``, ...).
 
 What it does (real):
-    - None.
+    - ``SrdUpperValue(isa)`` — workaround port of
+      ``rocisa::SrdUpperValue``. Returns a stub matching the
+      ``BitfieldUnion`` interface (``.desc()`` / ``.getValue()``); for
+      gfx1250 the SRD upper 32 bits are zero by ``staticInit`` (see
+      ``rocisa/include/code.hpp:1174-1260``), so the stub returns 0
+      byte-for-byte. Other ISAs fall through to the same stub today.
+      TODO: dispatch on ``IsaVersion`` when extending beyond gfx1250.
 
 Not yet done (dummy):
     - Container nodes: ``Module``, ``KernelBody``, ``Label``,
@@ -35,7 +41,6 @@ Not yet done (dummy):
       ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``, ``ValueSet``,
       ``RegSet``, ``BitfieldUnion``, ``SignatureCodeMeta``,
       ``SignatureBase``.
-    - ``SrdUpperValue`` (function).
 
 logicalIR correspondence:
     ``StinkyAsmModule`` is the closest analogue at the *module* level
@@ -45,7 +50,7 @@ logicalIR correspondence:
 
 from __future__ import annotations
 
-from ._dummy import make_dummy_class, make_dummy_func
+from ._dummy import make_dummy_class
 
 _P = "rocisa.code"
 
@@ -65,4 +70,45 @@ SignatureCodeMeta = make_dummy_class(f"{_P}.SignatureCodeMeta")
 SignatureBase = make_dummy_class(f"{_P}.SignatureBase")
 KernelBody = make_dummy_class(f"{_P}.KernelBody")
 
-SrdUpperValue = make_dummy_func(f"{_P}.SrdUpperValue")
+class _Gfx1250SrdUpperStub:
+    """Workaround port of ``rocisa::SrdUpperValue125X::staticInit()`` for
+    gfx1250.
+
+    The gfx1250 SRD upper 32 bits are zero (see
+    ``rocisa/include/code.hpp:1174-1260``); the bitfield layout
+    (``num_records_upper`` / ``stride`` / ``oob_select`` / ...) is
+    gfx125X-specific and unrelated to gfx12XX. The stub returns 0 to
+    match the C++ default and reproduces the C++ ``desc()`` text format
+    so KernelWriter's ``addComment2`` prints byte-for-byte equivalent
+    output.
+
+    TODO: replace with a real ``BitfieldUnion`` family when extending
+    beyond gfx1250 — at that point ``SrdUpperValue`` should dispatch on
+    ``IsaVersion`` (major / minor) like ``rocisa::SrdUpperValue`` does
+    in ``rocisa/src/code.cpp:56``.
+    """
+
+    def getValue(self) -> int:
+        return 0
+
+    def desc(self) -> str:
+        return (
+            "hex: 0\n"
+            "num_records_upper (6b): 0\n"
+            "reserved (6b): 0\n"
+            "stride (14b): 0\n"
+            "stride_scale (2b): 0\n"
+            "swizzle_enable (1b): 0\n"
+            "oob_select (1b): 0\n"
+            "type (2b): 0"
+        )
+
+
+def SrdUpperValue(isa):  # noqa: N802 (matches rocisa public API)
+    """Factory matching ``rocisa::SrdUpperValue(IsaVersion)``.
+
+    Today every ISA gets the gfx1250 stub. Once we extend beyond
+    gfx1250, branch on ``isa.major / isa.minor`` here just like
+    ``rocisa/src/code.cpp:56-77``.
+    """
+    return _Gfx1250SrdUpperStub()
