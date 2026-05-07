@@ -40,6 +40,7 @@ set(DEFAULT_COMPONENTS
     mxdatagenerator
     rocroller
     origami
+    tensile
     # projects
     hipblas-common
     hipblaslt
