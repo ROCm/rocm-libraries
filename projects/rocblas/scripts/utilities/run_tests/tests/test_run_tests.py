@@ -4,6 +4,7 @@ Run with:  pytest scripts/utilities/tests/
 """
 import os
 import sys
+from typing import Optional, Sequence
 
 import pytest
 
@@ -34,9 +35,9 @@ def _write_log(path: str, content: str) -> None:
 
 
 def _gtest_log(
-    total: int = None,
-    passed: tuple = (),
-    failed: tuple = (),
+    total: Optional[int] = None,
+    passed: Sequence[str] = (),
+    failed: Sequence[str] = (),
     summary: bool = False,
 ) -> str:
     """Build a realistic GTest output string."""
@@ -200,6 +201,7 @@ class TestArchiveLog:
         log = tmp_path / "job.txt"
         _write_log(str(log), "content")
         archived = _archive_log(str(log))
+        assert archived is not None
         assert archived == str(log) + ".prev"
         assert os.path.exists(archived)
         assert not os.path.exists(str(log))
@@ -209,6 +211,7 @@ class TestArchiveLog:
         _write_log(str(log) + ".prev", "old")  # .prev already occupied
         _write_log(str(log), "new")
         archived = _archive_log(str(log))
+        assert archived is not None
         assert archived == str(log) + ".prev.1"
         assert os.path.exists(archived)
 
@@ -228,6 +231,7 @@ class TestArchiveLog:
         log = tmp_path / "job.txt"
         _write_log(str(log), "hello world")
         archived = _archive_log(str(log))
+        assert archived is not None
         with open(archived) as f:
             assert f.read() == "hello world"
 
@@ -264,7 +268,7 @@ class TestCumulativeResumeChain:
         ))
 
         new_passed, new_failed = _parse_completed_tests(str(log))
-        _, _fail, partial_total, _ = _parse_test_counts(str(log))
+        _, _, partial_total, _ = _parse_test_counts(str(log))
 
         new_excluded = new_passed | (new_failed if skip_failed else set())
         all_excluded = prev_excluded | new_excluded
@@ -777,14 +781,18 @@ class TestRecoverInterruptedJobs:
 class TestResultDetermination:
     """Verify the pass/fail/incomplete logic that _run_one applies after a job
     finishes.  We replicate the decision directly rather than launching a real
-    subprocess, since the logic only depends on exit_code and log content."""
+    subprocess, since the logic only depends on exit_code, log content, and the
+    known_total / offset values preserved in the JobRecord."""
 
-    def _determine_result(self, exit_code: int, log_content: str, tmp_path) -> str:
+    def _determine_result(self, exit_code: int, log_content: str, tmp_path,
+                          known_total: int = 0, offset: int = 0) -> str:
         """Mirror the result logic in _run_one."""
         log = tmp_path / "job.txt"
         _write_log(str(log), log_content)
-        _, failed_count, _, _ = _parse_test_counts(str(log))
+        _passed, failed_count, _total, _ = _parse_test_counts(str(log))
         if exit_code == 0:
+            if _passed == 0 and _total == 0 and known_total > 0 and offset < known_total:
+                return "incomplete"
             return "pass"
         elif failed_count > 0:
             return "fail"
@@ -830,3 +838,118 @@ class TestResultDetermination:
         """exit_code=0 always means pass, even if the log is empty."""
         result = self._determine_result(0, "", tmp_path)
         assert result == "pass"
+
+    # ------------------------------------------------------------------
+    # False-pass detection: exit_code=0 but GTest ran 0 tests
+    # ------------------------------------------------------------------
+
+    def test_zero_tests_with_remaining_is_incomplete(self, tmp_path):
+        """exit_code=0 with 0 tests run and offset < known_total is a false
+        pass — the exclusion filter silently swallowed remaining tests."""
+        result = self._determine_result(
+            0, "[==========] Running 0 tests from 0 test suites.\n[  PASSED  ] 0 tests.\n",
+            tmp_path, known_total=4354, offset=707,
+        )
+        assert result == "incomplete"
+
+    def test_zero_tests_offset_equals_total_is_pass(self, tmp_path):
+        """exit_code=0 with 0 tests run is a genuine pass when offset covers
+        the full known total (every test already passed in previous runs)."""
+        result = self._determine_result(
+            0, "[==========] Running 0 tests from 0 test suites.\n[  PASSED  ] 0 tests.\n",
+            tmp_path, known_total=707, offset=707,
+        )
+        assert result == "pass"
+
+    def test_zero_tests_no_known_total_is_pass(self, tmp_path):
+        """When known_total is 0 (never seen a non-zero run), we cannot detect
+        a false pass — default to pass to avoid false negatives."""
+        result = self._determine_result(
+            0, "[==========] Running 0 tests from 0 test suites.\n[  PASSED  ] 0 tests.\n",
+            tmp_path, known_total=0, offset=0,
+        )
+        assert result == "pass"
+
+    def test_zero_tests_offset_exceeds_total_is_pass(self, tmp_path):
+        """Defensive: if offset somehow exceeds known_total (stale estimate),
+        do not mark incomplete — assume the job completed normally."""
+        result = self._determine_result(
+            0, "[==========] Running 0 tests from 0 test suites.\n[  PASSED  ] 0 tests.\n",
+            tmp_path, known_total=100, offset=105,
+        )
+        assert result == "pass"
+
+    def test_nonzero_tests_exit0_not_affected_by_false_pass_check(self, tmp_path):
+        """When GTest actually ran tests and exit_code=0, false-pass logic
+        must not interfere — result is always pass."""
+        result = self._determine_result(
+            0, _gtest_log(total=50, passed=tuple(f"t{i}" for i in range(50)), summary=True),
+            tmp_path, known_total=500, offset=450,
+        )
+        assert result == "pass"
+
+
+# ---------------------------------------------------------------------------
+# tests_total refresh behaviour (poll thread logic)
+# ---------------------------------------------------------------------------
+
+def _apply_total_update(rec: JobRecord, current_total: int) -> None:
+    """Replicate the poll thread's tests_total update logic."""
+    offset = rec.tests_passed_offset
+    if current_total > 0:
+        rec.tests_total = current_total + offset
+
+
+class TestTotalRefresh:
+    """Verify that tests_total is always updated from the current run's
+    GTest header, and that a 0-test run leaves the last known value intact."""
+
+    def test_total_set_on_first_run(self):
+        """When tests_total is 0 and GTest reports N tests, total is set."""
+        rec = JobRecord(status="running", result="unknown", pid=None,
+                        start_time=None, end_time=None, exit_code=None,
+                        tests_passed_offset=0)
+        _apply_total_update(rec, current_total=1474)
+        assert rec.tests_total == 1474
+
+    def test_total_updated_even_when_nonzero(self):
+        """Stale tests_total from a prior run is replaced on the next run.
+        This is the her_batched / hpmv_strided_batched fix."""
+        rec = JobRecord(status="running", result="unknown", pid=None,
+                        start_time=None, end_time=None, exit_code=None,
+                        tests_passed_offset=122, tests_total=621)
+        _apply_total_update(rec, current_total=548)
+        assert rec.tests_total == 548 + 122  # = 670, not stale 621
+
+    def test_zero_test_run_preserves_last_known_total(self):
+        """When GTest runs 0 tests (all filtered out), the previous
+        tests_total is preserved so false-pass detection can use it."""
+        rec = JobRecord(status="running", result="unknown", pid=None,
+                        start_time=None, end_time=None, exit_code=None,
+                        tests_passed_offset=707, tests_total=4354)
+        _apply_total_update(rec, current_total=0)
+        assert rec.tests_total == 4354  # unchanged
+
+    def test_total_includes_offset(self):
+        """tests_total accounts for already-excluded (passed) tests so it
+        represents the original unfiltered job size."""
+        rec = JobRecord(status="running", result="unknown", pid=None,
+                        start_time=None, end_time=None, exit_code=None,
+                        tests_passed_offset=122, tests_total=0)
+        _apply_total_update(rec, current_total=548)
+        assert rec.tests_total == 670  # 548 remaining + 122 already done
+
+    def test_successive_runs_always_use_current_count(self):
+        """Across multiple resume cycles, tests_total tracks the shrinking
+        remaining count + offset rather than sticking to the first value."""
+        rec = JobRecord(status="running", result="unknown", pid=None,
+                        start_time=None, end_time=None, exit_code=None,
+                        tests_passed_offset=0, tests_total=0)
+        _apply_total_update(rec, current_total=1474)   # run 1: all tests
+        assert rec.tests_total == 1474
+        rec.tests_passed_offset = 250
+        _apply_total_update(rec, current_total=1224)   # run 2: 250 excluded
+        assert rec.tests_total == 1224 + 250           # = 1474 (consistent)
+        rec.tests_passed_offset = 500
+        _apply_total_update(rec, current_total=974)    # run 3: 500 excluded
+        assert rec.tests_total == 974 + 500            # = 1474 (still consistent)

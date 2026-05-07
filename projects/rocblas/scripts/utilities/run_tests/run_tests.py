@@ -78,6 +78,7 @@ import json
 import os
 import signal
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -723,9 +724,12 @@ class JobRunner:
                         rec.tests_passed = current_passed + offset
                         rec.tests_failed = current_failed
                         rec.current_test = cur_test
-                        # Only set total if not already known; derive as
-                        # filtered_count + excluded_count ≈ original total.
-                        if rec.tests_total == 0 and current_total > 0:
+                        # Always refresh total from the current run's header so
+                        # stale values from previous (differently-filtered) runs
+                        # don't persist.  Only update when GTest reports a count;
+                        # a 0-test run leaves the last known value intact so that
+                        # false-pass detection can still compare against it.
+                        if current_total > 0:
                             rec.tests_total = current_total + offset
                     updated = True
             if updated:
@@ -756,7 +760,9 @@ class JobRunner:
             rec.prev_log = None                        # consumed
             prev_excluded: set = set(rec.excluded_tests)  # accumulated across all runs
             prev_passed_offset: int = rec.tests_passed_offset
-            rec.tests_total = 0                        # reset so poll thread reads fresh count
+            # tests_total is NOT reset here: the poll thread updates it whenever
+            # GTest reports a non-zero count, preserving the last known value
+            # across 0-test runs so false-pass detection can use it.
             prev_failed_offset: int = rec.tests_failed_offset
 
         # For completed-but-failed jobs, rec.prev_log is None but the log file
@@ -802,7 +808,21 @@ class JobRunner:
                 "",
             ]
 
-        cmd = [self._state.executable, f"--gtest_filter={gtest_filter}"]
+        # ARG_MAX on Linux is ~128 KiB; use a file-based filter when the inline
+        # form would grow too large (accumulated exclusion lists can hit thousands
+        # of test names).  GTest supports --gtest_filter=@<file> for this.
+        _FILTER_FILE_THRESHOLD = 32768
+        filter_file: Optional[str] = None
+        if len(gtest_filter) > _FILTER_FILE_THRESHOLD:
+            fd, filter_file = tempfile.mkstemp(
+                prefix=f"{spec.job_id}.", suffix=".filter",
+                dir=os.path.dirname(spec.log_file),
+            )
+            with os.fdopen(fd, "w") as fh:
+                fh.write(gtest_filter)
+            cmd = [self._state.executable, f"--gtest_filter=@{filter_file}"]
+        else:
+            cmd = [self._state.executable, f"--gtest_filter={gtest_filter}"]
 
         # Compute best estimate of the original (unfiltered) test count.
         # partial_total is what GTest ran under the *previous* exclusion set,
@@ -844,11 +864,26 @@ class JobRunner:
         finally:
             with _active_procs_lock:
                 _active_procs.pop(spec.job_id, None)
+            if filter_file:
+                try:
+                    os.unlink(filter_file)
+                except OSError:
+                    pass
 
         end = time.time()
         _passed, _failed, _total, _ = _parse_test_counts(spec.log_file)
+        with self._state_lock:
+            _known_total = rec.tests_total
+            _offset      = rec.tests_passed_offset
         if exit_code == 0:
-            result = "pass"
+            # Guard against false pass: GTest exits 0 when ALL remaining tests
+            # are excluded by the filter, even if many tests were never run.
+            # Detect this by comparing the known total against the exclusion
+            # offset — if the offset doesn't cover the full job, mark incomplete.
+            if _passed == 0 and _total == 0 and _known_total > 0 and _offset < _known_total:
+                result = "incomplete"
+            else:
+                result = "pass"
         elif _failed > 0:
             result = "fail"
         else:
@@ -867,7 +902,7 @@ class JobRunner:
             offset = rec.tests_passed_offset
             rec.tests_passed = _passed + offset
             rec.tests_failed = _failed
-            if rec.tests_total == 0 and _total:
+            if _total > 0:
                 rec.tests_total = _total + offset
         save_state(self._state, self._state_path, self._state_lock)
 
