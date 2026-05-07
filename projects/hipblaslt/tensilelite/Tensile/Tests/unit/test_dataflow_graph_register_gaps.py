@@ -3077,9 +3077,9 @@ class TestCumulativeIssueCycles:
 # =============================================================================
 # `incrementSrd` (KernelWriterAssembly.py:8910) writes Srd{tc}+0/+1 with
 # SAddU32/SAddCU32. The next BufferLoad in this iteration reads Srd{tc} via
-# constructor param 2 (_inst_buffer_srd at ScheduleCapture.py:1267). If the
-# SAddU32 is reordered after the BufferLoad, the load reads stale SRD and
-# fetches wrong memory.
+# `getSrcParams()[1]` (saddr; see `_BufferLoadRule.extract` in
+# `ScheduleCapture.py`). If the SAddU32 is reordered after the BufferLoad,
+# the load reads stale SRD and fetches wrong memory.
 
 
 class TestGRIncSRDChain:

@@ -998,102 +998,42 @@ def _reg_signature(reg) -> tuple:
             name_sig)
 
 
-def _get_param(inst, idx, default=None):
-    """Read positional constructor param `idx` from a rocisa instruction.
-
-    Real rocisa instances expose constructor args via getParams() (an
-    InstructionInputVector) rather than as named attributes. This helper
-    bridges the synthetic-fixture and real-rocisa shapes.
-    """
-    if not hasattr(inst, "getParams"):
-        return default
-    try:
-        params = inst.getParams()
-    except Exception:
-        return default
-    try:
-        return params[idx]
-    except (IndexError, TypeError):
-        return default
-
-
+# Per-shape positional `getParams()` extractors removed in q9j: each
+# rule now reads `inst.getSrcParams()` / `inst.getDstParams()` directly
+# (rocisa nanobind-bound in the same bead) and filters through
+# `_is_register`. Two minimal helpers survive solely for the DTL rule
+# (see `_DTLBufferLoadRule` — dzl's scope to dismantle):
 def _inst_dst(inst):
-    """Return the destination register for LR/LW/GR — try named attr first,
-    then positional constructor param 0 (matches DSLoad*/BufferLoad*/
-    GlobalLoad*/DSStore* constructors)."""
-    dst = getattr(inst, "dst", None)
-    if dst is not None:
-        return dst
-    return _get_param(inst, 0)
+    """First entry of `inst.getDstParams()`, or None if the dst slot
+    is empty / the instruction has no Python-bound accessor.
 
-
-def _inst_lds_offset(inst):
-    """Return the LDS offset for LR/LW. Synthetic fixture exposes
-    `lds_offset`; real rocisa stores it inside DSModifiers (the 3rd
-    constructor arg for DSLoad*). For the identity tuple we use
-    str(modifier) so two LDS-ops with identical offsets get equal sigs."""
-    off = getattr(inst, "lds_offset", None)
-    if off is not None:
-        return off
-    ds_mods = _get_param(inst, 2)
-    if ds_mods is None:
+    Retained ONLY for `_is_dtl_buffer_load`, which uses the structural
+    `dst is None` signal to detect DTL-mode BufferLoads. Folded into
+    dzl's implicit-operand work."""
+    if not hasattr(inst, "getDstParams"):
         return None
-    return str(ds_mods)
+    try:
+        dsts = inst.getDstParams()
+    except Exception:
+        return None
+    return dsts[0] if dsts else None
 
 
 def _inst_buffer_srd(inst):
-    """Return the SRD sgpr for a BufferLoad — synthetic 'srd' attr or
-    constructor param 2 (saddr)."""
+    """SRD sgpr of a BufferLoad — `getSrcParams()[1]` (real rocisa
+    `MUBUFReadInstruction::getSrcParams() = {vaddr, saddr, soffset}`)
+    or the fake-fixture `srd` attr. Retained ONLY for
+    `_DTLBufferLoadRule`."""
     srd = getattr(inst, "srd", None)
     if srd is not None:
         return srd
-    return _get_param(inst, 2)
-
-
-def _inst_buffer_offset(inst):
-    """Return the immediate offset for a BufferLoad — synthetic
-    'immediate_offset' attr or constructor param 3 (soffset)."""
-    off = getattr(inst, "immediate_offset", None)
-    if off is not None:
-        return off
-    return _get_param(inst, 3)
-
-
-def _inst_mfma_acc(inst):
-    """Return MFMA accumulator/c_dst register. Synthetic uses 'c_dst';
-    real rocisa MFMA's getParams() returns [acc, a, b, acc_or_d, comment]
-    — acc is at index 0, NOT 4 (the param-list contains the input/output
-    registers, not the full constructor args)."""
-    for attr in ("c_dst", "acc"):
-        v = getattr(inst, attr, None)
-        if v is not None:
-            return v
-    return _get_param(inst, 0)
-
-
-def _inst_mfma_a(inst):
-    for attr in ("a_src", "a"):
-        v = getattr(inst, attr, None)
-        if v is not None:
-            return v
-    return _get_param(inst, 1)
-
-
-def _inst_mfma_b(inst):
-    for attr in ("b_src", "b"):
-        v = getattr(inst, attr, None)
-        if v is not None:
-            return v
-    return _get_param(inst, 2)
-
-
-def _inst_dsstore_src(inst):
-    """LW (DSStore) source — synthetic 'src' or constructor param 1
-    (DSStore signature is (dst_lds, src_vgpr, ds_mods, comment))."""
-    src = getattr(inst, "src", None)
-    if src is not None:
-        return src
-    return _get_param(inst, 1)
+    if not hasattr(inst, "getSrcParams"):
+        return None
+    try:
+        srcs = inst.getSrcParams()
+    except Exception:
+        return None
+    return srcs[1] if len(srcs) > 1 else None
 
 
 _COMMENT_STRIP_RE = None  # lazy-compiled
@@ -1242,35 +1182,65 @@ def _is_register(x) -> bool:
     return x is not None and hasattr(x, "regType") and hasattr(x, "regIdx")
 
 
-class _DSLoadRule:
-    """DSLoadB* — dst (vgpr) and the LDS-address vgpr (`LocalReadAddr{tc}`).
+# -----------------------------------------------------------------------------
+# Operand-rule helpers
+# -----------------------------------------------------------------------------
+# Most rules below collapse to "read getSrcParams(), write getDstParams(),
+# filter through _is_register". The rocisa C++ side encodes per-shape
+# semantics directly (see Q9J_SCOPE_REASSESSMENT.md §2):
+#
+#   * DSLoadInstruction::getDstParams = {dst}, getSrcParams = {srcs}
+#   * DSStoreInstruction::getDstParams = {}, getSrcParams = {dstAddr, src0, src1}
+#   * MUBUFReadInstruction::getDstParams = {dst}, getSrcParams = {vaddr, saddr, soffset}
+#   * MFMAInstruction::getDstParams = {acc}, getSrcParams = {a, b, acc2}
+#     (acc2 defaults to acc for in-place RMW — matches the validator's
+#      prior `reads = (a, b, acc)` synthesis for that case, and is
+#      strictly more correct for the out-of-place case.)
+#   * VSwapB32::getDstParams = getSrcParams = {dst, src} — symmetric R+W
+#     already encoded in C++ (rocisa/include/instruction/common.hpp:5179-5194).
+#
+# Synthetic test fixtures (`_Fake*` in `Tensile/Tests/unit/dataflow_fixtures.py`)
+# implement matching `getDstParams` / `getSrcParams` methods so the rules
+# can call them uniformly on real and fake instructions.
 
-    Real rocisa: getParams() is `[dst, src_lds_addr, ds_modifiers, ...]`.
-    Synthetic _FakeLR: only exposes `dst`, no LDS-address vgpr in the fake.
+
+def _operands_via_accessors(inst):
+    """Return `(reads, writes)` from `inst.getSrcParams()` /
+    `inst.getDstParams()` filtered through `_is_register`.
+
+    The single-source-of-truth pattern shared by `_DSLoadRule`,
+    `_DSStoreRule`, `_BufferLoadRule`, `_MFMARule`, `_VSwapRule`, and
+    `_GenericALURule`. Returns `((), ())` if the instance lacks either
+    accessor (e.g. a stray non-rocisa duck-typed object).
+    """
+    if not (hasattr(inst, "getSrcParams") and hasattr(inst, "getDstParams")):
+        return (), ()
+    try:
+        srcs = inst.getSrcParams()
+        dsts = inst.getDstParams()
+    except Exception:
+        return (), ()
+    reads = tuple(r for r in srcs if _is_register(r))
+    writes = tuple(w for w in dsts if _is_register(w))
+    return reads, writes
+
+
+class _DSLoadRule:
+    """DSLoadB* — `getDstParams() = {dst}`, `getSrcParams() = {src_lds_addr, ...}`.
+    Both filtered through `_is_register` (modifiers/None drop out).
     """
     def applies(self, inst, category=None): return _is_lr(inst)
     def extract(self, inst, category=None):
-        dst = _inst_dst(inst)
-        lds_addr = _get_param(inst, 1)  # None for fakes (no getParams)
-        writes = (dst,) if dst is not None else ()
-        reads = (lds_addr,) if _is_register(lds_addr) else ()
-        return reads, writes
+        return _operands_via_accessors(inst)
 
 
 class _DSStoreRule:
-    """DSStoreB* — reads the LDS-address vgpr (slot 0) and the data src
-    vgpr (slot 1). Writes nothing register-wise (the bytes go to LDS;
-    register-side dataflow has no write).
-
-    Real rocisa: getParams() is `[dstAddr, src_data, ds_modifiers, comment]`.
-    Synthetic _FakeLW: only exposes `src` for data; no LDS-address vgpr.
+    """DSStoreB* — `getDstParams() = {}` (LDS write has no register dst);
+    `getSrcParams() = {dstAddr, src0, src1}` (None src1 filtered out).
     """
     def applies(self, inst, category=None): return _is_lw(inst)
     def extract(self, inst, category=None):
-        lds_addr = _get_param(inst, 0)
-        src_data = _inst_dsstore_src(inst)
-        reads = tuple(r for r in (lds_addr, src_data) if _is_register(r))
-        return reads, ()
+        return _operands_via_accessors(inst)
 
 
 class _DTLBufferLoadRule:
@@ -1288,19 +1258,27 @@ class _DTLBufferLoadRule:
 
 
 class _BufferLoadRule:
-    """Non-DTL BufferLoad — writes dst, reads SRD."""
+    """Non-DTL BufferLoad — `getDstParams() = {dst}`,
+    `getSrcParams() = {vaddr, saddr, soffset}`. Reads pick up vaddr
+    AND saddr (SRD) as registers; soffset filters out as an int.
+    Slight coverage expansion over the prior srd-only model — see
+    `Q9J_SCOPE_REASSESSMENT.md` §2 row `_BufferLoadRule`.
+    """
     def applies(self, inst, category=None):
         return _is_gr(inst) and not _is_dtl_buffer_load(inst)
     def extract(self, inst, category=None):
-        dst = _inst_dst(inst)
-        srd = _inst_buffer_srd(inst)
-        writes = (dst,) if dst is not None else ()
-        reads = (srd,) if _is_register(srd) else ()
-        return reads, writes
+        return _operands_via_accessors(inst)
 
 
 class _MFMARule:
-    """MFMA — accumulator is read-modify-write; a/b are reads.
+    """MFMA — `getDstParams() = {acc}`, `getSrcParams() = {a, b, acc2}`.
+
+    `acc2` defaults to `acc` for the in-place RMW case (the dominant
+    shape), so the rule's reads include `acc` automatically — matches
+    the prior `(a, b, acc)` synthesis. For the out-of-place case
+    (`acc2 != acc`) the new accessor returns the actual hardware-read
+    register, which the prior synthesis got wrong (it assumed acc was
+    always the read). See `Q9J_SCOPE_REASSESSMENT.md` §2 row `_MFMARule`.
 
     Excludes Pack-categorized MFMAInstructions (TF32 emulation pattern):
     those are syntactically MFMAInstruction but semantically Pack
@@ -1319,18 +1297,21 @@ class _MFMARule:
         return True
 
     def extract(self, inst, category=None):
-        a = _inst_mfma_a(inst)
-        b = _inst_mfma_b(inst)
-        acc = _inst_mfma_acc(inst)
-        reads = tuple(r for r in (a, b, acc) if r is not None)
-        writes = (acc,) if acc is not None else ()
-        return reads, writes
+        return _operands_via_accessors(inst)
 
 
 class _NoDataflowRule:
     """SWaitCnt / SBarrier / SNop / SSetPrior — pure scheduling control;
     no register dataflow. SSetPrior takes only an `int prior`
-    (`getParams() -> {prior}`); it has no register reads or writes."""
+    (`getParams() -> {prior}`); it has no register reads or writes.
+
+    Real rocisa: `getDstParams() = getSrcParams() = {}` for all four;
+    `_operands_via_accessors` would return `((), ())` correctly. We
+    keep the explicit empty return below because some `_FakeSWait` /
+    `_FakeSBarrier` / `_FakeSNop` ad-hoc fixtures in non-graph tests
+    omit the new accessors entirely, and short-circuiting here means
+    we don't depend on them.
+    """
     def applies(self, inst, category=None):
         return (
             _is_swait(inst)
@@ -1345,33 +1326,35 @@ class _NoDataflowRule:
 class _VSwapRule:
     """VSwapB32 (and any v_swap_* variant) — symmetric R+W on both operands.
 
-    `v_swap_b32 dst, src` exchanges the two registers: BOTH are read AND
-    BOTH are written. Modelling this with the asymmetric
-    `_GenericALURule` shape (`writes=(params[0],)`, `reads=params[1:]`)
-    drops one of the four edge classes. Concretely, given:
+    The symmetric semantic is **already encoded in C++**:
+    `VSwapB32::getDstParams()` and `VSwapB32::getSrcParams()` BOTH return
+    the two operands (`rocisa/include/instruction/common.hpp:5179-5194`),
+    so the validator's `_operands_via_accessors` path produces
+    `reads = writes = (op0, op1)` for free.
+
+    Why symmetric R+W matters: `v_swap_b32 dst, src` exchanges the two
+    registers — BOTH are read AND BOTH are written. Modelling this with
+    the asymmetric `_GenericALURule` shape (`writes=(dst,)`,
+    `reads=(src,)`) drops one of the four edge classes. Concretely:
 
         sw1: VSwap(v0, v1)   # ref position
         sw2: VSwap(v1, v2)
 
-    under the asymmetric model sw1 publishes write=v0/read=v1 and sw2
-    publishes write=v1/read=v2 — they share v1 only as
-    sw1.read + sw2.write, which is a WAR edge sw1->sw2. Reverse the pair
-    and the edge becomes RAW sw2->sw1: the SUBJECT graph gains a NEW
-    edge that REF lacks. Because `compare_graphs`
-    (ScheduleCapture.py:~2598, `missing = ref - subj`) is one-directional,
-    the reorder is invisible.
+    Asymmetric: sw1 publishes write=v0/read=v1, sw2 publishes
+    write=v1/read=v2 — they share v1 only as sw1.read + sw2.write, which
+    is a WAR edge sw1->sw2. Reverse the pair and the edge becomes RAW
+    sw2->sw1: the SUBJECT graph gains a NEW edge that REF lacks. Because
+    `compare_graphs` (ScheduleCapture.py: `missing = ref - subj`) is
+    one-directional, the reorder is invisible.
 
-    Symmetric model: `reads = writes = (regs...)`. Now BOTH orderings of
-    the pair carry both a WAR edge (sw_first.read + sw_second.write on
-    the shared reg) AND a WAW edge (both write the shared reg) AND a
-    RAW edge (sw_first.write + sw_second.read). Swapping the pair flips
-    which instruction is producer/consumer on each of those edges, so
+    Symmetric: BOTH orderings carry WAR + WAW + RAW edges on the shared
+    register. Swapping the pair flips producer/consumer on each edge, so
     the edge KEY (producer.identity, consumer.identity, register, kind)
     differs between REF and SUBJ — `missing = ref - subj` finds at least
     one such key and `compare_graphs` flags the reorder.
 
     Order: MUST come before `_GenericALURule` so VSwap is claimed by this
-    rule and not the asymmetric fallback.
+    rule (its dst/src appear in BOTH lists) and not the asymmetric fallback.
     """
     def applies(self, inst, category=None):
         # Match rocisa VSwapB32 today and any future v_swap_* width
@@ -1381,17 +1364,7 @@ class _VSwapRule:
         return type(inst).__name__.startswith("VSwap")
 
     def extract(self, inst, category=None):
-        try:
-            params = list(inst.getParams())
-        except Exception:
-            return (), ()
-        # First two positional params are the swapped operands. Filter
-        # non-registers defensively (modifiers, comments) — a well-formed
-        # VSwap will have two register params, but we don't want a stray
-        # int/None to crash the rule.
-        regs = tuple(p for p in params[:2] if _is_register(p))
-        # Symmetric: both operands are read AND both are written.
-        return regs, regs
+        return _operands_via_accessors(inst)
 
 
 # =============================================================================
@@ -1653,23 +1626,17 @@ class _GenericALURule:
       precedents.
     """
     def applies(self, inst, category=None):
-        # Only real rocisa CommonInstruction-shaped objects expose
-        # getParams(). Synthetic _FakeInstBase subclasses in test fixtures
-        # do not — they fall through to the empty (reads, writes) default
-        # and rely on their own bespoke rules (e.g. _FakePackRule injected
-        # by tests via using_pack_rule()).
-        return hasattr(inst, "getParams")
+        # Only real rocisa Instruction-derived objects expose the
+        # getDstParams/getSrcParams pair. Synthetic _FakeInstBase
+        # subclasses in test fixtures that need this fallback implement
+        # the pair too (`Tensile/Tests/unit/dataflow_fixtures.py`); ad-hoc
+        # fakes that don't fall through to the empty (reads, writes)
+        # default and rely on their own bespoke rules (e.g. _FakePackRule
+        # injected by tests via using_pack_rule()).
+        return hasattr(inst, "getSrcParams") and hasattr(inst, "getDstParams")
 
     def extract(self, inst, category=None):
-        try:
-            params = list(inst.getParams())
-        except Exception:
-            return (), ()
-        if not params:
-            return (), ()
-        writes = (params[0],) if _is_register(params[0]) else ()
-        reads = tuple(p for p in params[1:] if _is_register(p))
-        return reads, writes
+        return _operands_via_accessors(inst)
 
 
 # Order matters: more specific rules first; _GenericALURule is the

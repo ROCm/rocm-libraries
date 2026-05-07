@@ -94,6 +94,8 @@ void init_inst(nb::module_ m)
         .def("getMemToken", &rocisa::Instruction::getMemToken)
         .def("setInlineAsm", &rocisa::Instruction::setInlineAsm)
         .def("getParams", &rocisa::Instruction::getParams)
+        .def("getDstParams", &rocisa::Instruction::getDstParams)
+        .def("getSrcParams", &rocisa::Instruction::getSrcParams)
         .def("__str__", &rocisa::Instruction::toString)
         .def("__deepcopy__",
              [](const rocisa::Instruction& self, const nb::dict&) {
@@ -114,6 +116,8 @@ void init_inst(nb::module_ m)
         .def_rw("srcs", &rocisa::CompositeInstruction::srcs)
         .def("getInstructions", &rocisa::CompositeInstruction::getInstructions)
         .def("getParams", &rocisa::CompositeInstruction::getParams)
+        .def("getDstParams", &rocisa::CompositeInstruction::getDstParams)
+        .def("getSrcParams", &rocisa::CompositeInstruction::getSrcParams)
         .def("__str__", &rocisa::CompositeInstruction::toString);
 
     nb::class_<rocisa::CommonInstruction, rocisa::Instruction>(m_inst, "CommonInstruction")
@@ -142,6 +146,8 @@ void init_inst(nb::module_ m)
                  self.srcs[idx] = src;
              })
         .def("getParams", &rocisa::CommonInstruction::getParams)
+        .def("getDstParams", &rocisa::CommonInstruction::getDstParams)
+        .def("getSrcParams", &rocisa::CommonInstruction::getSrcParams)
         .def("__str__", &rocisa::CommonInstruction::toString);
 
     nb::class_<rocisa::MacroInstruction, rocisa::Instruction>(m_inst, "MacroInstruction")
@@ -158,6 +164,8 @@ void init_inst(nb::module_ m)
                  self.args[idx] = arg;
              })
         .def("getParams", &rocisa::MacroInstruction::getParams)
+        .def("getDstParams", &rocisa::MacroInstruction::getDstParams)
+        .def("getSrcParams", &rocisa::MacroInstruction::getSrcParams)
         .def("__str__", &rocisa::MacroInstruction::toString);
 
     // Instructions

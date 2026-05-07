@@ -69,33 +69,67 @@ class _FakeInstBase:
 
 @dataclass
 class _FakeLR(_FakeInstBase):
-    """Stand-in for a DSLoad (LR) instruction."""
+    """Stand-in for a DSLoad (LR) instruction.
+
+    Mirrors the real rocisa shape: `getDstParams() = {dst}` and
+    `getSrcParams() = {}` (the LDS-address vgpr lives on real rocisa
+    DSLoad as `getSrcParams()[0]`; the fake omits it since no test
+    fixture exercises LDS-address dataflow).
+    """
     dst: RegisterContainer       # vgpr range written
     lds_offset: int              # immediate LDS offset
 
     def __str__(self):
         return f"ds_read {self.dst}, lds[{self.lds_offset}]"
 
+    def getDstParams(self):
+        return [self.dst]
+
+    def getSrcParams(self):
+        return []
+
 
 @dataclass
 class _FakeLW(_FakeInstBase):
-    """Stand-in for a DSStore (LW) instruction."""
+    """Stand-in for a DSStore (LW) instruction.
+
+    Mirrors real rocisa: `getDstParams() = {}` (LDS write has no
+    register dst) and `getSrcParams() = {src}` (data; the fake omits
+    the LDS-address vgpr that real DSStore exposes).
+    """
     src: RegisterContainer
     lds_offset: int
 
     def __str__(self):
         return f"ds_write lds[{self.lds_offset}], {self.src}"
 
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.src]
+
 
 @dataclass
 class _FakeGR(_FakeInstBase):
-    """Stand-in for a BufferLoad (GR) instruction."""
+    """Stand-in for a BufferLoad (GR) instruction.
+
+    Mirrors real rocisa: `getDstParams() = {dst}` and `getSrcParams() =
+    {srd}` (vaddr/soffset omitted; the fake's `srd` fills the saddr
+    role that the validator's `_BufferLoadRule` reads).
+    """
     dst: RegisterContainer
     srd: RegisterContainer       # sgpr SRD
     immediate_offset: int
 
     def __str__(self):
         return f"buffer_load {self.dst}, {self.srd}, off={self.immediate_offset}"
+
+    def getDstParams(self):
+        return [self.dst]
+
+    def getSrcParams(self):
+        return [self.srd]
 
 
 @dataclass
@@ -107,6 +141,12 @@ class _FakeMFMA(_FakeInstBase):
     the standard MFMA family; pass `[4, 4, 4, ...]` to model a 4x4 PackMFMA so
     the finish-cycle classifier in ScheduleCapture identifies it as the 1-quad-
     cycle Pack flavor instead of the standard 3-quad-cycle MFMA.
+
+    Mirrors real rocisa: `getDstParams() = {acc}` (write to c_dst) and
+    `getSrcParams() = {a, b, acc2}` where `acc2` defaults to `acc` for
+    in-place RMW (matches `MFMAInstruction::getSrcParams()` in
+    `rocisa/include/instruction/mfma.hpp`). The fake collapses the
+    in-place case directly: `getSrcParams() = (a_src, b_src, c_dst)`.
     """
     c_dst: RegisterContainer
     a_src: RegisterContainer
@@ -115,6 +155,12 @@ class _FakeMFMA(_FakeInstBase):
 
     def __str__(self):
         return f"v_mfma {self.c_dst}, {self.a_src}, {self.b_src}, {self.c_dst}"
+
+    def getDstParams(self):
+        return [self.c_dst]
+
+    def getSrcParams(self):
+        return [self.a_src, self.b_src, self.c_dst]
 
 
 @dataclass
@@ -127,6 +173,12 @@ class _FakeSWait(_FakeInstBase):
     def __str__(self):
         return f"s_waitcnt(dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt})"
 
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
 
 @dataclass
 class _FakeSBarrier(_FakeInstBase):
@@ -134,6 +186,12 @@ class _FakeSBarrier(_FakeInstBase):
 
     def __str__(self):
         return "s_barrier"
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
 
 
 @dataclass
@@ -148,6 +206,12 @@ class _FakeSNop(_FakeInstBase):
 
     def __str__(self):
         return f"s_nop {self.wait_state}"
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
 
 
 # =============================================================================
