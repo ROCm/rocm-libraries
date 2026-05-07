@@ -84,7 +84,7 @@ static float run_single_kernel(const FmhaInvocation& invocation)
     if(g_dispatcher)
     {
         sc.time_kernel_ = true;
-        sc.cold_niters_  = 10;
+        sc.cold_niters_ = 10;
         sc.nrepeat_     = 50;
     }
     return kernels.front()->run(invocation, sc);
@@ -892,26 +892,26 @@ int fmha_dispatcher_run_splitkv(const void* q_host,
         if(perm == 1)
         {
             // BHSD group: [1, head, total_tokens, dim]
-            args.stride_q          = hdim_q;
-            args.stride_k          = hdim_q;
-            args.stride_v          = hdim_v;
-            args.stride_o          = hdim_v;
-            args.nhead_stride_q    = static_cast<int64_t>(seqlen_q) * hdim_q;
-            args.nhead_stride_k    = static_cast<int64_t>(seqlen_k) * hdim_q;
-            args.nhead_stride_v    = static_cast<int64_t>(seqlen_k) * hdim_v;
-            args.nhead_stride_o    = static_cast<int64_t>(seqlen_q) * hdim_v;
+            args.stride_q       = hdim_q;
+            args.stride_k       = hdim_q;
+            args.stride_v       = hdim_v;
+            args.stride_o       = hdim_v;
+            args.nhead_stride_q = static_cast<int64_t>(seqlen_q) * hdim_q;
+            args.nhead_stride_k = static_cast<int64_t>(seqlen_k) * hdim_q;
+            args.nhead_stride_v = static_cast<int64_t>(seqlen_k) * hdim_v;
+            args.nhead_stride_o = static_cast<int64_t>(seqlen_q) * hdim_v;
         }
         else
         {
             // BSHD group: [total_tokens, nhead, hdim]
-            args.stride_q          = nhead_q * hdim_q;
-            args.stride_k          = nhead_k * hdim_q;
-            args.stride_v          = nhead_k * hdim_v;
-            args.stride_o          = nhead_q * hdim_v;
-            args.nhead_stride_q    = hdim_q;
-            args.nhead_stride_k    = hdim_q;
-            args.nhead_stride_v    = hdim_v;
-            args.nhead_stride_o    = hdim_v;
+            args.stride_q       = nhead_q * hdim_q;
+            args.stride_k       = nhead_k * hdim_q;
+            args.stride_v       = nhead_k * hdim_v;
+            args.stride_o       = nhead_q * hdim_v;
+            args.nhead_stride_q = hdim_q;
+            args.nhead_stride_k = hdim_q;
+            args.nhead_stride_v = hdim_v;
+            args.nhead_stride_o = hdim_v;
         }
         args.stride_bias          = 0;
         args.stride_o_acc         = hdim_v;
