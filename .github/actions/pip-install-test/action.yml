@@ -16,6 +16,7 @@ runs:
       shell: bash
       run: |
         VENV_DIR=$(mktemp -d)
+        python3 -m venv "$VENV_DIR"
         echo "VENV_DIR=$VENV_DIR" >> "$GITHUB_ENV"
 
     - name: pip install
