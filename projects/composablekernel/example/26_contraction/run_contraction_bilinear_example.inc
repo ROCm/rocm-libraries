@@ -132,13 +132,6 @@ int run_contraction_bilinear_example(int argc, char* argv[])
     DeviceMem d_device_buf(sizeof(DDataType) * d_ms_ns.mDesc.GetElementSpaceSize());
     DeviceMem e_device_buf(sizeof(EDataType) * e_ms_ns_device_result.mDesc.GetElementSpaceSize());
 
-    a_device_buf.ToDevice(a_ms_ks.mData.data());
-    b_device_buf.ToDevice(b_ns_ks.mData.data());
-    d_device_buf.ToDevice(d_ms_ns.mData.data());
-
-    // set zero
-    e_device_buf.SetZero();
-
     auto a_element_op   = AElementOp{};
     auto b_element_op   = BElementOp{};
     auto cde_element_op = CDEElementOp{alpha, beta};
@@ -168,6 +161,13 @@ int run_contraction_bilinear_example(int argc, char* argv[])
 
         return 0;
     }
+
+    a_device_buf.ToDevice(a_ms_ks.mData.data());
+    b_device_buf.ToDevice(b_ns_ks.mData.data());
+    d_device_buf.ToDevice(d_ms_ns.mData.data());
+
+    // set zero
+    e_device_buf.SetZero();
 
     float ave_time = invoker.Run(argument, StreamConfig{nullptr, time_kernel});
 

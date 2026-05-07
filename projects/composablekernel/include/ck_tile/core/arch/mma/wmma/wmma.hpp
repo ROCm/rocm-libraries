@@ -29,6 +29,7 @@ enum struct WmmaCtrlFlags : bool
 // Include the architecture-specific WMMA implementations and traits
 #include "wmma_gfx11.hpp"
 #include "wmma_gfx12.hpp"
+#include "wmma_gfx13.hpp"
 #include "wmma_selector.hpp"
 #include "wmma_traits.hpp"
 #include "wmma_transforms.hpp"

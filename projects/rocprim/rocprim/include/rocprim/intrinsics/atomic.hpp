@@ -179,7 +179,7 @@ namespace detail
         ROCPRIM_ATOMIC_LOAD("ds_read_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_LOAD_GLOBAL(ptr) \
         ROCPRIM_ATOMIC_LOAD("global_load_dwordx4", "off sc1", "s_waitcnt vmcnt(0)", ptr)
-#elif ROCPRIM_TARGET_RDNA4
+#elif ROCPRIM_TARGET_RDNA4 || ROCPRIM_TARGET_RDNA5
     #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
         ROCPRIM_ATOMIC_LOAD("flat_load_b128", "scope:SCOPE_DEV", "s_wait_loadcnt_dscnt 0x0", ptr)
     #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
@@ -296,7 +296,7 @@ namespace detail
         ROCPRIM_ATOMIC_STORE("ds_write_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_STORE_GLOBAL(ptr) \
         ROCPRIM_ATOMIC_STORE("global_store_dwordx4", "off sc1", "s_waitcnt vmcnt(0)", ptr)
-#elif ROCPRIM_TARGET_RDNA4
+#elif ROCPRIM_TARGET_RDNA4 || ROCPRIM_TARGET_RDNA5
     #define ROCPRIM_ATOMIC_STORE_FLAT(ptr) \
         ROCPRIM_ATOMIC_STORE("flat_store_b128", "scope:SCOPE_DEV", "s_wait_storecnt_dscnt 0x0", ptr)
     #define ROCPRIM_ATOMIC_STORE_SHARED(ptr) \

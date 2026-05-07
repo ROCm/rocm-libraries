@@ -31,6 +31,12 @@ Three principles guide the design toward that unification:
 - [CK Builder testing design](include/ck_tile/builder/testing/README.md)
 - [CK Builder reflection design](include/ck_tile/builder/reflect/README.md)
 
+## Design descriptions
+
+- [CK Builder design description](include/ck_tile/builder/README.md)
+- [CK Builder factory design](include/ck_tile/builder/factory/README.md)
+- [CK Builder testing design](include/ck_tile/builder/testing/README.md)
+
 ## Directory Structure
 
 - `include/ck_tile/builder/`

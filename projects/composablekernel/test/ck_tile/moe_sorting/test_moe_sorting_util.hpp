@@ -7,6 +7,7 @@
 #include <numeric>
 #include <cassert>
 #include <cstdlib>
+#include <cinttypes>
 #include <iostream>
 #include <time.h>
 #include <unordered_set>

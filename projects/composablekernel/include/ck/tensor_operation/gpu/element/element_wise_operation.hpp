@@ -37,7 +37,13 @@ struct AddReluAdd
     static constexpr const char* name = "AddReluAdd";
 
     template <typename Y, typename X0, typename X1, typename X2>
-    __host__ __device__ constexpr void operator()(Y&, const X0&, const X1&, const X2&) const;
+    __host__ __device__ constexpr void
+    operator()(Y& y, const X0& x0, const X1& x1, const X2& x2) const
+    {
+        float a = type_convert<float>(x0) + type_convert<float>(x1);
+        float b = a > 0 ? a : 0;
+        y       = type_convert<Y>(b + type_convert<float>(x2));
+    }
 
     template <>
     __host__ __device__ constexpr void operator()<half_t, half_t, half_t, half_t>(
@@ -215,13 +221,27 @@ struct AddMultiply
 
 // C = A * B
 // E = C x D0 + D1
-struct MultiplyAdd
+template <bool Clamp = false>
+struct MultiplyAddImpl
 {
     static constexpr const char* name = "MultiplyAdd";
 
     template <typename E, typename C, typename D0, typename D1>
-    __host__ __device__ void operator()(E& e, const C& c, const D0& d0, const D1& d1) const;
-
+    __host__ __device__ void operator()(E& e, const C& c, const D0& d0, const D1& d1) const
+    {
+        float tmp = type_convert<float>(c) * type_convert<float>(d0) + type_convert<float>(d1);
+        if constexpr(Clamp && is_integral<E>::value && (is_same_v<E, bhalf_t> == false))
+        {
+            float tmp_clamp = math::clamp(tmp,
+                                          ck::type_convert<float>(NumericLimits<E>::Min()),
+                                          ck::type_convert<float>(NumericLimits<E>::Max()));
+            e               = type_convert<E>(tmp_clamp);
+        }
+        else
+        {
+            e = type_convert<E>(tmp);
+        }
+    }
     template <>
     __host__ __device__ void operator()<half_t, half_t, half_t, half_t>(half_t& e,
                                                                         const half_t& c,
@@ -268,6 +288,82 @@ struct MultiplyAdd
     {
         const float y = c * d0 + d1;
         e             = y;
+    }
+    template <>
+    __host__ __device__ void operator()<float, half_t, float, float>(float& e,
+                                                                     const half_t& c,
+                                                                     const float& d0,
+                                                                     const float& d1) const
+    {
+        const float y = c * d0 + d1;
+        e             = y;
+    }
+    template <>
+    __host__ __device__ void operator()<float, int8_t, float, float>(float& e,
+                                                                     const int8_t& c,
+                                                                     const float& d0,
+                                                                     const float& d1) const
+    {
+        const float y = c * d0 + d1;
+        e             = y;
+    }
+    template <>
+    __host__ __device__ void operator()<bhalf_t, bhalf_t, bhalf_t, bhalf_t>(bhalf_t& e,
+                                                                            const bhalf_t& c,
+                                                                            const bhalf_t& d0,
+                                                                            const bhalf_t& d1) const
+    {
+        const float y = type_convert<float>(c) * type_convert<float>(d0) + type_convert<float>(d1);
+        e             = type_convert<bhalf_t>(y);
+    }
+
+    template <>
+    __host__ __device__ void operator()<float, float, float, float>(float& e,
+                                                                    const float& c,
+                                                                    const float& d0,
+                                                                    const float& d1) const
+    {
+        const float y = (c * d0) + d1;
+        e             = y;
+    }
+
+    template <>
+    __host__ __device__ void operator()<half_t, half_t, bhalf_t, bhalf_t>(half_t& e,
+                                                                          const half_t& c,
+                                                                          const bhalf_t& d0,
+                                                                          const bhalf_t& d1) const
+    {
+        const half_t y = c * type_convert<half_t>(d0) + type_convert<half_t>(d1);
+        e              = y;
+    }
+};
+
+using MultiplyAdd      = MultiplyAddImpl<false>;
+using MultiplyAddClamp = MultiplyAddImpl<true>;
+
+// C = A * B
+// E = C + D0 * D1
+template <bool Clamp = false>
+struct MultiplyAddRev
+{
+    template <typename E, typename C, typename D0, typename D1>
+    __host__ __device__ void operator()(E& e, const C& c, const D0& d0, const D1& d1) const
+    {
+        MultiplyAddImpl<Clamp>{}.operator()(e, d0, d1, c);
+    }
+};
+
+// C = A * B
+// E = Relu(C + D0 * D1)
+template <bool Clamp = false>
+struct MultiplyAddRevRelu
+{
+    template <typename E, typename C, typename D0, typename D1>
+    __host__ __device__ void operator()(E& e, const C& c, const D0& d0, const D1& d1) const
+    {
+        E tmp;
+        MultiplyAddImpl<Clamp>{}.operator()(tmp, d0, d1, c);
+        Relu{}.operator()(e, tmp);
     }
 };
 
@@ -347,6 +443,31 @@ struct MultiplyAddFastGelu
         FastGelu{}.template operator()<float, float>(x1_f, x0_f);
 
         e = ck::type_convert<ck::bhalf_t>(x1_f);
+    }
+};
+
+template <bool Clamp = false>
+struct MultiplyAddRelu
+{
+    template <typename E, typename C, typename D0, typename D1>
+    __host__ __device__ constexpr void
+    operator()(E& e, const C& c, const D0& d0, const D1& d1) const
+    {
+        E tmp;
+        MultiplyAddImpl<Clamp>{}.operator()(tmp, c, d0, d1);
+        Relu{}.operator()(e, tmp);
+    }
+};
+
+struct MultiplyAddHardTanh
+{
+    template <typename E, typename C, typename D0, typename D1>
+    __host__ __device__ constexpr void
+    operator()(E& e, const C& c, const D0& d0, const D1& d1) const
+    {
+        E tmp;
+        MultiplyAddImpl<true>{}.operator()(tmp, c, d0, d1);
+        HardTanh{}.operator()(e, tmp);
     }
 };
 

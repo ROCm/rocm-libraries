@@ -27,7 +27,7 @@ fi
 
 python3 "$SCRIPT_DIR/dependency-parser/main.py" parse "$BUILD_NINJA_FILE" --workspace-root "$GIT_ROOT"
 
-# Path to enhanced_dependency_mapping.json in the same directory
+# Path to enhanced_dependency_mapping.json in the same directory 
 JSON_FILE="$BUILD_DIR/enhanced_dependency_mapping.json"
 
 # Check if the JSON file exists

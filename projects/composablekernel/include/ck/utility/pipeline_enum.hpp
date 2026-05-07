@@ -19,6 +19,7 @@ enum struct PipelineVersion
     v2, ///< Version 2 pipeline
     // v3 is only used in the Stream-K implementation.
     v4,          ///< Version 4 pipeline
+    v5,          // this is added for gfx13 for asynchronous memory copy
     weight_only, ///< Weight-only specialized pipeline
 };
 
@@ -33,6 +34,7 @@ inline std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os,
     case ck::PipelineVersion::v1: os << "PipelineVersion::v1"; break;
     case ck::PipelineVersion::v2: os << "PipelineVersion::v2"; break;
     case ck::PipelineVersion::v4: os << "PipelineVersion::v4"; break;
+    case ck::PipelineVersion::v5: os << "PipelineVersion::v5"; break;
     case ck::PipelineVersion::weight_only: os << "PipelineVersion::weight_only"; break;
     default: os << "";
     }

@@ -28,6 +28,7 @@ struct BatchedTransposeLdsPipeline
     CK_TILE_DEVICE void operator()(const InputTileWindow& input_window,
                                    OutputTileWindow& output_window)
     {
+#if CK_TILE_ENABLE_TR_LOAD_FEATURE
         __shared__ char smem[GetSmemSize()];
         auto input_tile_window =
             make_tile_window(input_window, Policy::template MakeInputDistribution<Problem>());
@@ -61,6 +62,10 @@ struct BatchedTransposeLdsPipeline
         auto y = load_tile_transpose(load_from_lds_window);
 
         store_tile(output_tile_window, y);
+#else
+        ignore = input_window;
+        ignore = output_window;
+#endif
     }
 };
 

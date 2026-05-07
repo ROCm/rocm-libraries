@@ -28,7 +28,7 @@ using DeviceGemmV2Instance =
         ADataType,   BDataType,  CDataType,  AccDataType,  CShuffleDataType, 
         PassThrough, PassThrough, PassThrough, GemmDefault, 
         64,
-        32, 32, 
+        32, 32,
         256, 8, 8,
         16,   16,
         2,    2,

@@ -6,8 +6,14 @@ add_custom_target(example_gemm_mx)
 add_example_executable(example_gemm_mx_fp8 gemm_mx_fp8.cpp)
 add_example_dependencies(example_gemm_mx example_gemm_mx_fp8)
 
+add_example_executable(example_gemm_mx_fp8_v1 gemm_mx_fp8_v1.cpp)
+add_example_dependencies(example_gemm_mx example_gemm_mx_fp8_v1)
+
 add_example_executable(example_gemm_mx_bf8 gemm_mx_bf8.cpp)
 add_example_dependencies(example_gemm_mx example_gemm_mx_bf8)
+
+add_example_executable(example_gemm_mx_fp8_bpreshuffle gemm_mx_fp8_bpreshuffle.cpp)
+add_example_dependencies(example_gemm_mx example_gemm_mx_fp8_bpreshuffle)
 
 # TODO: Fix RRR
 # add_example_executable(example_gemm_mx_fp8_bf8 gemm_mx_fp8_bf8.cpp)
@@ -63,6 +69,8 @@ example_compile_options(example_moe_gemm2_xdl_mx_fp4_bpreshuffle PRIVATE ${FP4_M
 set(FP8_MXGEMM_OPTIONS)
 list(APPEND FP8_MXGEMM_OPTIONS "SHELL: -mllvm -greedy-reverse-local-assignment=1")
 example_compile_options(example_gemm_mx_fp8 PRIVATE ${FP8_MXGEMM_OPTIONS})
+example_compile_options(example_gemm_mx_fp8_v1 PRIVATE ${FP8_MXGEMM_OPTIONS})
+example_compile_options(example_gemm_mx_fp8_bpreshuffle PRIVATE ${FP8_MXGEMM_OPTIONS})
 example_compile_options(example_gemm_mx_bf8 PRIVATE ${FP8_MXGEMM_OPTIONS})
 
 set(FP6_MXGEMM_OPTIONS)

@@ -1066,6 +1066,26 @@ CK_TILE_DEVICE double tanh<double>(double x)
     return ::tanh(x);
 };
 
+template <>
+inline __device__ fp16_t tanh<fp16_t>(fp16_t x)
+{
+#if defined(__gfx125__)
+    return __builtin_amdgcn_tanhh(x);
+#else
+    return type_convert<fp16_t>(::tanhf(type_convert<float>(x)));
+#endif
+};
+
+template <>
+inline __device__ bf16_t tanh<bf16_t>(bf16_t x)
+{
+#if defined(CK_TILE_SUPPORT_BF16_TRANS_INSTS)
+    return bit_cast<bf16_t>(__builtin_amdgcn_tanh_bf16(bit_cast<__bf16>(x)));
+#else
+    return type_convert<bf16_t>(::tanhf(type_convert<float>(x)));
+#endif
+};
+
 template <typename T>
 CK_TILE_DEVICE T acos(T x)
 {

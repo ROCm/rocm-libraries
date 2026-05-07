@@ -27,6 +27,15 @@ namespace ck_tile {
 template <typename Tensor>
 void permute_vectors_i4x4_b(Tensor& tensor)
 {
+    // This transform requires 8 elements are continous in one threads, gfx13 wmma native layout
+    // can't match this requirements. so, disable it for now, and please see PassThroughPack8 for
+    // detail.
+    if(is_gfx13_supported())
+    {
+        return;
+    }
+
+    static_assert(CK_TILE_USE_PK4_LAYOUT_SHUFFLE);
     auto tensor_row_buf = tensor.data();
     for(size_t idx = 0; idx < tensor.size(); idx += 4)
     {

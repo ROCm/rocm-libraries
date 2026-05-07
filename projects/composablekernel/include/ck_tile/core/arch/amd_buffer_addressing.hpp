@@ -7,6 +7,8 @@
 
 #if !CK_TILE_USE_BUFFER_ADDRESSING_BUILTIN
 
+#include "ck_tile/core/arch/amd_tdm_descriptor.hpp"
+#include "ck_tile/core/arch/amd_wave_read_first_lane.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/integral_constant.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
@@ -30,75 +32,16 @@
 using as3_uint32_ptr = uint32_t __attribute__((address_space(3)))*;
 
 namespace ck_tile {
-
-// amd_wave_read_first_lane is the SGPR function from AMD GPU device to load 1 or a series of the
-// memory to the SGPR registers.
-__device__ inline uint32_t amd_wave_read_first_lane(uint16_t v)
+union buffer_resource
 {
-    return __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(v));
-}
+    CK_TILE_DEVICE constexpr buffer_resource() : content{} {}
 
-__device__ inline uint32_t amd_wave_read_first_lane(uint8_t v)
-{
-    return __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(v));
-}
-
-__device__ inline uint32_t amd_wave_read_first_lane(uint32_t value)
-{
-    return __builtin_amdgcn_readfirstlane(value);
-}
-
-__device__ inline int32_t amd_wave_read_first_lane(int32_t value)
-{
-    return __builtin_amdgcn_readfirstlane(value);
-}
-
-template <typename Object, std::enable_if_t<std::is_trivially_copyable_v<Object>, int> = 0>
-__device__ inline auto amd_wave_read_first_lane(const Object& obj)
-{
-    constexpr size_t ObjectSize = sizeof(Object);
-    constexpr size_t SGPR_size  = 4;
-    constexpr size_t NumFull    = ObjectSize / SGPR_size;
-    constexpr size_t Tail       = ObjectSize % SGPR_size;
-
-    const unsigned char* src = reinterpret_cast<const unsigned char*>(&obj);
-    alignas(Object) unsigned char dst[ObjectSize];
-
-    static_for<0, NumFull, 1>{}([&](auto Ic) {
-        constexpr size_t offset = Ic * SGPR_size;
-        uint32_t read_src;
-        __builtin_memcpy(&read_src, src + offset, SGPR_size);
-        read_src = __builtin_amdgcn_readfirstlane(read_src);
-        __builtin_memcpy(dst + offset, &read_src, SGPR_size);
-    });
-
-    if constexpr(Tail != 0)
-    {
-        constexpr size_t offset = NumFull * SGPR_size;
-        uint32_t tail_loc       = 0;
-        __builtin_memcpy(&tail_loc, src + offset, Tail);
-        tail_loc = __builtin_amdgcn_readfirstlane(tail_loc);
-        __builtin_memcpy(dst + offset, &tail_loc, Tail);
-    }
-    Object out;
-    __builtin_memcpy(&out, dst, ObjectSize);
-    return out;
-}
-
-// Overload for host to return the same value
-template <typename T>
-__host__ inline T amd_wave_read_first_lane(T v)
-{
-    return v;
-}
-
-// 128 bit SGPRs to supply buffer resource in buffer instructions
-// https://rocm-documentation.readthedocs.io/en/latest/GCN_ISA_Manuals/testdocbook.html#vector-memory-buffer-instructions
-struct __attribute__((packed)) buffer_resource
-{
-    const void* ptr;
-    uint32_t range;
-    uint32_t config;
+    // 128 bit SGPRs to supply buffer resource in buffer instructions
+    // https://rocm-documentation.readthedocs.io/en/latest/GCN_ISA_Manuals/testdocbook.html#vector-memory-buffer-instructions
+    int32x4_t content;
+    array<void*, 2> address;
+    array<uint32_t, 4> range;
+    array<uint32_t, 4> config;
 };
 
 template <typename ForceSGPR = std::false_type>
@@ -106,13 +49,25 @@ CK_TILE_DEVICE int32x4_t make_wave_buffer_resource(const void* ptr,
                                                    uint32_t size = 0xffffffff,
                                                    ForceSGPR     = {})
 {
-    buffer_resource res{ptr, size, CK_TILE_BUFFER_RESOURCE_3RD_DWORD};
-    int32x4_t r = __builtin_bit_cast(int32x4_t, res);
+    buffer_resource res;
+#if defined(__gfx125__) || defined(__gfx13__)
+    res.address[0] = const_cast<void*>(ptr);
+    res.range[1] |= (size & 0x7f) << 25;
+    res.range[2] = (size >> 7) & 0xffffffff;
+#else
+    res.address[0] = const_cast<void*>(ptr);
+    res.range[2]   = size;
+#endif
+    res.config[3] = CK_TILE_BUFFER_RESOURCE_3RD_DWORD;
+
     if constexpr(std::is_same_v<ForceSGPR, std::true_type>)
     {
-        r = amd_wave_read_first_lane(r);
+        return amd_wave_read_first_lane(res.content);
     }
-    return r;
+    else
+    {
+        return res.content;
+    }
 }
 
 namespace impl {
@@ -185,6 +140,18 @@ struct buffer_load<16, pre_nop>
         index_t s_offset                 = i_offset;
         reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b128(
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        if constexpr(pre_nop)
+            asm volatile("s_nop 4\n"
+                         "buffer_load_dwordx4 %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
+        else
+            asm volatile("buffer_load_dwordx4 %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -219,6 +186,18 @@ struct buffer_load<8, pre_nop>
         index_t s_offset                 = i_offset;
         reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b64(
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        if constexpr(pre_nop)
+            asm volatile("s_nop 4\n"
+                         "buffer_load_dwordx2 %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
+        else
+            asm volatile("buffer_load_dwordx2 %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -249,11 +228,22 @@ struct buffer_load<4, pre_nop>
     {
         static_assert(sizeof(T) == 4);
         using mbuf_t = typename impl::buffer_load_trait<4, T>::payload_t;
-
 #if HAS_RAW_BUFFER_BUILTINS
         index_t s_offset                 = i_offset;
         reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b32(
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        if constexpr(pre_nop)
+            asm volatile("s_nop 4\n"
+                         "buffer_load_dword %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
+        else
+            asm volatile("buffer_load_dword %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -284,11 +274,22 @@ struct buffer_load<2, pre_nop>
     {
         static_assert(sizeof(T) == 4); // subdword is buggy, use dword buf and convert manually
         using mbuf_t = typename impl::buffer_load_trait<2, T>::payload_t;
-
 #if HAS_RAW_BUFFER_BUILTINS
         index_t s_offset                 = i_offset;
         reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b16(
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        if constexpr(pre_nop)
+            asm volatile("s_nop 4\n"
+                         "buffer_load_ushort %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
+        else
+            asm volatile("buffer_load_ushort %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -323,6 +324,18 @@ struct buffer_load<1, pre_nop>
         index_t s_offset                 = i_offset;
         reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b16(
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        if constexpr(pre_nop)
+            asm volatile("s_nop 4\n"
+                         "buffer_load_ubyte %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
+        else
+            asm volatile("buffer_load_ubyte %0, %1, %2, null offen offset:%3"
+                         : "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset)
+                         : "memory");
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -373,9 +386,37 @@ struct buffer_load_if<16, pre_nop>
                                    bool_constant<pre_nop> = {})
     {
         static_assert(sizeof(T) == 16);
-        auto saved_exec = __builtin_amdgcn_read_exec();
-        using mbuf_t    = typename impl::buffer_load_trait<16, T>::payload_t;
+        using mbuf_t = typename impl::buffer_load_trait<16, T>::payload_t;
         static_assert(sizeof(mbuf_t) == sizeof(T));
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        if constexpr(pre_nop)
+        {
+            asm volatile("s_nop 4\n"
+                         "s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_dwordx4 %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag)
+                         : "memory");
+        }
+        else
+        {
+            asm volatile("s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_dwordx4 %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), // 2
+                           "s"(res),      // 3
+                           "n"(i_offset), // 4
+                           "v"(flag)      // 5
+                         : "memory");
+        }
+#else
+        auto saved_exec = __builtin_amdgcn_read_exec();
+
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
@@ -391,6 +432,7 @@ struct buffer_load_if<16, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+#endif
     }
 };
 
@@ -407,8 +449,35 @@ struct buffer_load_if<8, pre_nop>
                                    bool_constant<pre_nop> = {})
     {
         static_assert(sizeof(T) == 8);
+        using mbuf_t = typename impl::buffer_load_trait<8, T>::payload_t;
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        if constexpr(pre_nop)
+        {
+            asm volatile("s_nop 4\n"
+                         "s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_dwordx2 %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag)
+                         : "memory");
+        }
+        else
+        {
+            asm volatile("s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_dwordx2 %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value))
+                         : "v"(v_offset), // 2
+                           "s"(res),      // 3
+                           "n"(i_offset), // 4
+                           "v"(flag)      // 5
+                         : "memory");
+        }
+#else
         auto saved_exec = __builtin_amdgcn_read_exec();
-        using mbuf_t    = typename impl::buffer_load_trait<8, T>::payload_t;
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
@@ -424,6 +493,7 @@ struct buffer_load_if<8, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+#endif
     }
 };
 
@@ -440,8 +510,35 @@ struct buffer_load_if<4, pre_nop>
                                    bool_constant<pre_nop> = {})
     {
         static_assert(sizeof(T) == 4);
+        using mbuf_t = typename impl::buffer_load_trait<4, T>::payload_t;
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        if constexpr(pre_nop)
+        {
+            asm volatile("s_nop 4\n"
+                         "s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_dword %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value)) // 1
+                         : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag)
+                         : "memory");
+        }
+        else
+        {
+            asm volatile("s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_dword %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value)) // 1
+                         : "v"(v_offset),                                            // 2
+                           "s"(res),                                                 // 3
+                           "n"(i_offset),                                            // 4
+                           "v"(flag)                                                 // 5
+                         : "memory");
+        }
+#else
         auto saved_exec = __builtin_amdgcn_read_exec();
-        using mbuf_t    = typename impl::buffer_load_trait<4, T>::payload_t;
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
@@ -457,6 +554,7 @@ struct buffer_load_if<4, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+#endif
     }
 };
 
@@ -473,8 +571,35 @@ struct buffer_load_if<2, pre_nop>
                                    bool_constant<pre_nop> = {})
     {
         static_assert(sizeof(T) == 4);
+        using mbuf_t = typename impl::buffer_load_trait<2, T>::payload_t;
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        if constexpr(pre_nop)
+        {
+            asm volatile("s_nop 4\n"
+                         "s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_ushort %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value)) // 1
+                         : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag)
+                         : "memory");
+        }
+        else
+        {
+            asm volatile("s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_ushort %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value)) // 1
+                         : "v"(v_offset),                                            // 2
+                           "s"(res),                                                 // 3
+                           "n"(i_offset),                                            // 4
+                           "v"(flag)                                                 // 5
+                         : "memory");
+        }
+#else
         auto saved_exec = __builtin_amdgcn_read_exec();
-        using mbuf_t    = typename impl::buffer_load_trait<2, T>::payload_t;
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
@@ -490,6 +615,7 @@ struct buffer_load_if<2, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+#endif
     }
 };
 
@@ -506,6 +632,34 @@ struct buffer_load_if<1, pre_nop>
                                    bool_constant<pre_nop> = {})
     {
         static_assert(sizeof(T) == 4);
+        using mbuf_t = typename impl::buffer_load_trait<1, T>::payload_t;
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        if constexpr(pre_nop)
+        {
+            asm volatile("s_nop 4\n"
+                         "s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_ubyte %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value)) // 1
+                         : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag)
+                         : "memory");
+        }
+        else
+        {
+            asm volatile("s_mov_b32 %0, exec_lo\n"
+                         "v_cmpx_le_u32 1, %5\n"
+                         "buffer_load_ubyte %1, %2, %3, null offen offset:%4\n"
+                         "s_mov_b32 exec_lo, %0"
+                         : "=&s"(saved_exec), "+v"(reinterpret_cast<mbuf_t&>(value)) // 1
+                         : "v"(v_offset),                                            // 2
+                           "s"(res),                                                 // 3
+                           "n"(i_offset),                                            // 4
+                           "v"(flag)                                                 // 5
+                         : "memory");
+        }
+#else
         auto saved_exec = __builtin_amdgcn_read_exec();
         using mbuf_t    = typename impl::buffer_load_trait<1, T>::payload_t;
         if constexpr(pre_nop)
@@ -523,6 +677,7 @@ struct buffer_load_if<1, pre_nop>
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
                          : "memory");
+#endif
     }
 };
 #endif
@@ -546,6 +701,11 @@ struct buffer_store<16>
         index_t s_offset = i_offset;
         __builtin_amdgcn_raw_buffer_store_b128(
             bit_cast<mbuf_t>(value), cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        asm volatile("buffer_store_dwordx4 %0, %1, %2, null offen offset:%3"
+                     :
+                     : "v"(bit_cast<mbuf_t>(value)), "v"(v_offset), "s"(res), "n"(i_offset)
+                     : "memory");
 #else
         asm volatile("buffer_store_dwordx4 %0, %1, %2, 0 offen offset:%3"
                      :
@@ -572,6 +732,11 @@ struct buffer_store<8>
         index_t s_offset = i_offset;
         __builtin_amdgcn_raw_buffer_store_b64(
             bit_cast<mbuf_t>(value), cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        asm volatile("buffer_store_dwordx2 %0, %1, %2, null offen offset:%3"
+                     :
+                     : "v"(bit_cast<mbuf_t>(value)), "v"(v_offset), "s"(res), "n"(i_offset)
+                     : "memory");
 #else
         asm volatile("buffer_store_dwordx2 %0, %1, %2, 0 offen offset:%3"
                      :
@@ -598,6 +763,11 @@ struct buffer_store<4>
         index_t s_offset = i_offset;
         __builtin_amdgcn_raw_buffer_store_b32(
             bit_cast<mbuf_t>(value), cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        asm volatile("buffer_store_dword %0, %1, %2, null offen offset:%3"
+                     :
+                     : "v"(bit_cast<mbuf_t>(value)), "v"(v_offset), "s"(res), "n"(i_offset)
+                     : "memory");
 #else
         asm volatile("buffer_store_dword %0, %1, %2, 0 offen offset:%3"
                      :
@@ -624,6 +794,11 @@ struct buffer_store<2>
         index_t s_offset = i_offset;
         __builtin_amdgcn_raw_buffer_store_b16(
             bit_cast<mbuf_t>(value), cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        asm volatile("buffer_store_short %0, %1, %2, null offen offset:%3"
+                     :
+                     : "v"(bit_cast<mbuf_t>(value)), "v"(v_offset), "s"(res), "n"(i_offset)
+                     : "memory");
 #else
         asm volatile("buffer_store_short %0, %1, %2, 0 offen offset:%3"
                      :
@@ -650,6 +825,11 @@ struct buffer_store<1>
         index_t s_offset = i_offset;
         __builtin_amdgcn_raw_buffer_store_b8(
             bit_cast<mbuf_t>(value), cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+#elif defined(__gfx12__) || defined(__gfx13__)
+        asm volatile("buffer_store_byte %0, %1, %2, null offen offset:%3"
+                     :
+                     : "v"(bit_cast<mbuf_t>(value)), "v"(v_offset), "s"(res), "n"(i_offset)
+                     : "memory");
 #else
         asm volatile("buffer_store_byte %0, %1, %2, 0 offen offset:%3"
                      :
@@ -690,8 +870,22 @@ struct buffer_store_if<16>
                                    index_t flag = 1)
     {
         static_assert(sizeof(T) == 16);
+        using mbuf_t = fp32x4_t;
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        asm volatile("s_mov_b32 %0, exec_lo\n"
+                     "v_cmpx_le_u32 1, %5\n"
+                     "buffer_store_dwordx4 %1, %2, %3, null offen offset:%4\n"
+                     "s_mov_b32 exec_lo, %0"
+                     : "=&s"(saved_exec)             // 0
+                     : "v"(bit_cast<mbuf_t>(value)), // 1
+                       "v"(v_offset),                // 2
+                       "s"(res),                     // 3
+                       "n"(i_offset),                // 4
+                       "v"(flag)                     // 5
+                     : "memory");
+#else
         auto save_exec = __builtin_amdgcn_read_exec();
-        using mbuf_t   = fp32x4_t;
         asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                      "buffer_store_dwordx4 %0, %1, %2, 0 offen offset:%3\n"
                      "s_mov_b64 exec %5"
@@ -703,6 +897,7 @@ struct buffer_store_if<16>
                        "v"(flag),
                        "s"(save_exec)
                      : "memory");
+#endif
     }
 };
 
@@ -718,9 +913,23 @@ struct buffer_store_if<8>
                                    index_t flag = 1)
     {
         static_assert(sizeof(T) == 8);
-        auto save_exec = __builtin_amdgcn_read_exec();
-        // TODO: ugly. rocm-6.0/6.1 seems neet bit_cast to same base type to avoid scratch
         using mbuf_t = ext_vector_t<typename T::value_type, T::size()>;
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        asm volatile("s_mov_b32 %0, exec_lo\n"
+                     "v_cmpx_le_u32 1, %5\n"
+                     "buffer_store_dwordx2 %1, %2, %3, null offen offset:%4\n"
+                     "s_mov_b32 exec_lo, %0"
+                     : "=&s"(saved_exec)             // 0
+                     : "v"(bit_cast<mbuf_t>(value)), // 1
+                       "v"(v_offset),                // 2
+                       "s"(res),                     // 3
+                       "n"(i_offset),                // 4
+                       "v"(flag)                     // 5
+                     : "memory");
+#else
+        auto saved_exec = __builtin_amdgcn_read_exec();
+        // TODO: ugly. rocm-6.0/6.1 seems neet bit_cast to same base type to avoid scratch
         asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                      "buffer_store_dwordx2 %0, %1, %2, 0 offen offset:%3\n"
                      "s_mov_b64 exec %5"
@@ -732,6 +941,7 @@ struct buffer_store_if<8>
                        "v"(flag),
                        "s"(save_exec)
                      : "memory");
+#endif
     }
 };
 
@@ -747,8 +957,22 @@ struct buffer_store_if<4>
                                    index_t flag = 1)
     {
         static_assert(sizeof(T) == 4);
+        using mbuf_t = float;
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        asm volatile("s_mov_b32 %0, exec_lo\n"
+                     "v_cmpx_le_u32 1, %5\n"
+                     "buffer_store_dword %1, %2, %3, null offen offset:%4\n"
+                     "s_mov_b32 exec_lo, %0"
+                     : "=&s"(saved_exec)             // 0
+                     : "v"(bit_cast<mbuf_t>(value)), // 1
+                       "v"(v_offset),                // 2
+                       "s"(res),                     // 3
+                       "n"(i_offset),                // 4
+                       "v"(flag)                     // 5
+                     : "memory");
+#else
         auto save_exec = __builtin_amdgcn_read_exec();
-        using mbuf_t   = float;
         asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                      "buffer_store_dword %0, %1, %2, 0 offen offset:%3\n"
                      "s_mov_b64 exec %5"
@@ -760,6 +984,7 @@ struct buffer_store_if<4>
                        "v"(flag),
                        "s"(save_exec)
                      : "memory");
+#endif
     }
 };
 
@@ -775,8 +1000,22 @@ struct buffer_store_if<2>
                                    index_t flag = 1)
     {
         static_assert(sizeof(T) == 2);
+        using mbuf_t = short;
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        asm volatile("s_mov_b32 %0, exec_lo\n"
+                     "v_cmpx_le_u32 1, %5\n"
+                     "buffer_store_short %1, %2, %3, null offen offset:%4\n"
+                     "s_mov_b32 exec_lo, %0"
+                     : "=&s"(saved_exec)             // 0
+                     : "v"(bit_cast<mbuf_t>(value)), // 1
+                       "v"(v_offset),                // 2
+                       "s"(res),                     // 3
+                       "n"(i_offset),                // 4
+                       "v"(flag)                     // 5
+                     : "memory");
+#else
         auto save_exec = __builtin_amdgcn_read_exec();
-        using mbuf_t   = short;
         asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                      "buffer_store_short %0, %1, %2, 0 offen offset:%3\n"
                      "s_mov_b64 exec %5"
@@ -788,6 +1027,7 @@ struct buffer_store_if<2>
                        "v"(flag),
                        "s"(save_exec)
                      : "memory");
+#endif
     }
 };
 
@@ -803,8 +1043,22 @@ struct buffer_store_if<1>
                                    index_t flag = 1)
     {
         static_assert(sizeof(T) == 4);
+        using mbuf_t = float;
+#if(defined(__gfx12__) || defined(__gfx13__))
+        unsigned saved_exec;
+        asm volatile("s_mov_b32 %0, exec_lo\n"
+                     "v_cmpx_le_u32 1, %5\n"
+                     "buffer_store_byte %1, %2, %3, null offen offset:%4\n"
+                     "s_mov_b32 exec_lo, %0"
+                     : "=&s"(saved_exec)             // 0
+                     : "v"(bit_cast<mbuf_t>(value)), // 1
+                       "v"(v_offset),                // 2
+                       "s"(res),                     // 3
+                       "n"(i_offset),                // 4
+                       "v"(flag)                     // 5
+                     : "memory");
+#else
         auto save_exec = __builtin_amdgcn_read_exec();
-        using mbuf_t   = float;
         asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                      "buffer_store_byte %0, %1, %2, 0 offen offset:%3\n"
                      "s_mov_b64 exec %5"
@@ -816,13 +1070,18 @@ struct buffer_store_if<1>
                        "v"(flag),
                        "s"(save_exec)
                      : "memory");
+#endif
     }
 };
 #endif
 
 CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0)
 {
+#if defined(__gfx13__)
+    asm volatile("s_wait_loadcnt %0" : : "n"(cnt) : "memory");
+#else
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
+#endif
 }
 
 CK_TILE_DEVICE void lds_load_fence(index_t cnt = 0)
@@ -1064,13 +1323,21 @@ CK_TILE_DEVICE void insert_dummy_dep(Tx& bx, Ty&... by)
 template <typename... T>
 CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0, T&... o)
 {
+#if defined(__gfx13__)
+    asm volatile("s_wait_loadcnt %0" : : "n"(cnt) : "memory");
+#else
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
+#endif
     impl::insert_dummy_dep(o...);
 }
 
 CK_TILE_DEVICE void buffer_store_fence(index_t cnt = 0)
 {
+#if defined(__gfx13__)
+    asm volatile("s_wait_loadcnt %0" : : "n"(cnt) : "memory");
+#else
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
+#endif
 }
 
 CK_TILE_DEVICE auto async_load_fence_raw(index_t cnt = 0)
@@ -1320,6 +1587,38 @@ llvm_amdgcn_raw_buffer_store_fp32x4(fp32x4_t vdata,
                                     index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4f32");
 
 // buffer atomic-add fp16
+#if defined(__gfx13__)
+CK_TILE_DEVICE_EXTERN fp16x2_t llvm_amdgcn_raw_buffer_atomic_add_fp16x2(
+    fp16x2_t vdata,
+    int32x4_t rsrc,
+    index_t voffset,
+    index_t soffset,
+    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.v2f16.v4i32");
+
+// buffer atomic-add bf16
+// TODO: Replace with bf16x2_t, but llvm builins only accept cktile_bf16x2_t now.
+CK_TILE_DEVICE_EXTERN bf16x2_t llvm_amdgcn_raw_buffer_atomic_add_bf16x2(
+    bf16x2_t vdata,
+    int32x4_t rsrc,
+    index_t voffset,
+    index_t soffset,
+    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.v2bf16.v4i32");
+
+// buffer atomic-add i32
+CK_TILE_DEVICE_EXTERN int32_t llvm_amdgcn_raw_buffer_atomic_add_i32(
+    int32_t vdata,
+    int32x4_t rsrc,
+    index_t voffset,
+    index_t soffset,
+    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.add.i32.v4i32");
+
+CK_TILE_DEVICE_EXTERN float llvm_amdgcn_raw_buffer_atomic_add_fp32(
+    float vdata,
+    int32x4_t rsrc,
+    index_t voffset,
+    index_t soffset,
+    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.f32.v4i32");
+#else
 CK_TILE_DEVICE_EXTERN fp16x2_t llvm_amdgcn_raw_buffer_atomic_add_fp16x2(
     fp16x2_t vdata,
     int32x4_t rsrc,
@@ -1344,13 +1643,13 @@ CK_TILE_DEVICE_EXTERN int32_t llvm_amdgcn_raw_buffer_atomic_add_i32(
     index_t soffset,
     index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.add.i32");
 
-// buffer atomic-add fp32
 CK_TILE_DEVICE_EXTERN float llvm_amdgcn_raw_buffer_atomic_add_fp32(
     float vdata,
     int32x4_t rsrc,
     index_t voffset,
     index_t soffset,
     index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.f32");
+#endif
 
 // buffer atomic-max fp64
 CK_TILE_DEVICE_EXTERN double
@@ -3060,6 +3359,70 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
 #undef __LDS_ADDR
 }
 #endif
+
+template <amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
+          typename DataType,
+          index_t TensorRank,
+          bool IsGatherMode = false>
+CK_TILE_DEVICE void
+amd_tdm_load(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor)
+{
+#if CK_TILE_ENABLE_TDM_FEATURE
+    static constexpr auto I0 = number<0>{};
+    static constexpr auto I1 = number<1>{};
+    static constexpr auto I2 = number<2>{};
+    static constexpr auto I3 = number<3>{};
+    if constexpr(TensorRank == 2 && !IsGatherMode)
+    {
+        auto tdm_desc_grp = descriptor.getResourceDescriptorGroup2();
+        __builtin_amdgcn_tensor_load_to_lds_d2(
+            tdm_desc_grp.get(I0), tdm_desc_grp.get(I1), static_cast<index_t>(coherence));
+    }
+    else
+    {
+        auto tdm_desc_grp = descriptor.getResourceDescriptorGroup4();
+        __builtin_amdgcn_tensor_load_to_lds(tdm_desc_grp.get(I0),
+                                            tdm_desc_grp.get(I1),
+                                            tdm_desc_grp.get(I2),
+                                            tdm_desc_grp.get(I3),
+                                            static_cast<index_t>(coherence));
+    }
+#else
+    ignore = descriptor;
+#endif
+}
+
+template <amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
+          typename DataType,
+          index_t TensorRank,
+          bool IsGatherMode = false>
+CK_TILE_DEVICE void
+amd_tdm_store(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor)
+{
+#if CK_TILE_ENABLE_TDM_FEATURE
+    static constexpr auto I0 = number<0>{};
+    static constexpr auto I1 = number<1>{};
+    static constexpr auto I2 = number<2>{};
+    static constexpr auto I3 = number<3>{};
+    if constexpr(TensorRank == 2 && !IsGatherMode)
+    {
+        auto tdm_desc_grp = descriptor.getResourceDescriptorGroup2();
+        __builtin_amdgcn_tensor_store_from_lds_d2(
+            tdm_desc_grp.get(I0), tdm_desc_grp.get(I1), static_cast<index_t>(coherence));
+    }
+    else
+    {
+        auto tdm_desc_grp = descriptor.getResourceDescriptorGroup4();
+        __builtin_amdgcn_tensor_store_from_lds(tdm_desc_grp.get(I0),
+                                               tdm_desc_grp.get(I1),
+                                               tdm_desc_grp.get(I2),
+                                               tdm_desc_grp.get(I3),
+                                               static_cast<index_t>(coherence));
+    }
+#else
+    ignore = descriptor;
+#endif
+}
 
 } // namespace ck_tile
 

@@ -40,7 +40,7 @@ bool run_test(bool time_kernels)
 
 int main(int argc, char* argv[])
 {
-    if(!ck::is_gfx12_supported())
+    if(!ck::is_gfx12_supported() && !ck::is_gfx13_supported())
     {
         std::cout << "This feature is not supported by current HW, skipping tests." << std::endl;
         return 0;

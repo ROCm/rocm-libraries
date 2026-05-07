@@ -112,7 +112,7 @@ namespace rocwmma
                     });
                 }
             }
-            else if constexpr((bool)ROCWMMA_ARCH_GFX12)
+            else if constexpr((bool)ROCWMMA_ARCH_GFX12 || (bool)ROCWMMA_ARCH_GFX13)
             {
                 if constexpr(MmaDim == 16u && AccMaxVW == 8u)
                 {
@@ -185,7 +185,7 @@ namespace rocwmma
                     return interleave_combine<interleave_idx0, interleave_idx1>(result);
                 }
             }
-            else if constexpr((bool)ROCWMMA_ARCH_GFX12)
+            else if constexpr((bool)ROCWMMA_ARCH_GFX12 || (bool)ROCWMMA_ARCH_GFX13)
             {
                 if constexpr(MmaDim == 16u && AccMaxVW == 8u)
                 {
@@ -271,7 +271,7 @@ namespace rocwmma
                     });
                 }
             }
-            else if constexpr((bool)ROCWMMA_ARCH_GFX12)
+            else if constexpr((bool)ROCWMMA_ARCH_GFX12 || (bool)ROCWMMA_ARCH_GFX13)
             {
                 if constexpr(MmaDim == 16u && AccMaxVW == 8u)
                 {
@@ -340,7 +340,7 @@ namespace rocwmma
                     return interleave_combine<interleave_idx0, interleave_idx1>(result);
                 }
             }
-            else if constexpr((bool)ROCWMMA_ARCH_GFX12)
+            else if constexpr((bool)ROCWMMA_ARCH_GFX12 || (bool)ROCWMMA_ARCH_GFX13)
             {
                 if constexpr(MmaDim == 16u && AccMaxVW == 8u)
                 {

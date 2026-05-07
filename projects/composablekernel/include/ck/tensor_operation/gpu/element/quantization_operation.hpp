@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <limits>
 #include "ck/utility/data_type.hpp"
 // #include "ck/utility/get_id.hpp"
 
@@ -49,6 +50,154 @@ struct Activation_Mul_Clamp
         y      = ck::type_convert<int8_t>(y_fp32);
     }
 
+    __host__ __device__ constexpr void operator()(int8_t& y, const float& x) const
+    {
+
+        float y_fp32 = x;
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32, -128.f, 127.f);
+        y      = ck::type_convert<int8_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(int8_t& y, const half_t& x) const
+    {
+
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32, -128.f, 127.f);
+        y      = ck::type_convert<int8_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(f8_t& y, const int32_t& x) const
+    {
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<f8_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<f8_t>::Max()));
+        y      = ck::type_convert<f8_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(f8_t& y, const float& x) const
+    {
+        float y_fp32 = x;
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<f8_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<f8_t>::Max()));
+        y      = ck::type_convert<f8_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(f8_t& y, const half_t& x) const
+    {
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<f8_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<f8_t>::Max()));
+        y      = ck::type_convert<f8_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(bf8_t& y, const int32_t& x) const
+    {
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<bf8_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<bf8_t>::Max()));
+        y      = ck::type_convert<bf8_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(bf8_t& y, const float& x) const
+    {
+        float y_fp32 = x;
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<bf8_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<bf8_t>::Max()));
+        y      = ck::type_convert<bf8_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(bf8_t& y, half_t& x) const
+    {
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<bf8_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<bf8_t>::Max()));
+        y      = ck::type_convert<bf8_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(half_t& y, const int32_t& x) const
+    {
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<half_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<half_t>::Max()));
+        y      = ck::type_convert<half_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(half_t& y, const float& x) const
+    {
+        float y_fp32 = x;
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<half_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<half_t>::Max()));
+        y      = ck::type_convert<half_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(half_t& y, const ck::half_t& x) const
+    {
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<half_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<half_t>::Max()));
+        y      = ck::type_convert<half_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(bhalf_t& y, const int32_t& x) const
+    {
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             std::numeric_limits<float>::lowest(),
+                             std::numeric_limits<float>::max());
+        y      = ck::type_convert<bhalf_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(bhalf_t& y, const float& x) const
+    {
+        float y_fp32 = x;
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             std::numeric_limits<float>::lowest(),
+                             std::numeric_limits<float>::max());
+        y      = ck::type_convert<bhalf_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(bhalf_t& y, const half_t& x) const
+    {
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             std::numeric_limits<float>::lowest(),
+                             std::numeric_limits<float>::max());
+        y      = ck::type_convert<bhalf_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(bhalf_t& y, const bhalf_t& x) const
+    {
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             std::numeric_limits<float>::lowest(),
+                             std::numeric_limits<float>::max());
+        y      = ck::type_convert<bhalf_t>(y_fp32);
+    }
+
     __device__ constexpr void operator()(int32_t& y, const int32_t& x) const
     {
         // CAUSION - We might type_convert to int8 in threadwise copy
@@ -65,6 +214,29 @@ struct Activation_Mul_Clamp
         activationOp_(y, x);
         y = math::clamp(requantScale_ * y, -128.f, 127.f);
     }
+#ifdef CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4
+    __host__ __device__ constexpr void operator()(int4_t& y, const float& x) const
+    {
+
+        float y_fp32 = x;
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<int4_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<int4_t>::Max()));
+        y      = ck::type_convert<int4_t>(y_fp32);
+    }
+
+    __host__ __device__ constexpr void operator()(int4_t& y, const half_t& x) const
+    {
+
+        float y_fp32 = ck::type_convert<float>(x);
+        activationOp_(y_fp32, y_fp32);
+        y_fp32 = math::clamp(requantScale_ * y_fp32,
+                             type_convert<float>(ck::NumericLimits<int4_t>::Lowest()),
+                             type_convert<float>(ck::NumericLimits<int4_t>::Max()));
+        y      = ck::type_convert<int4_t>(y_fp32);
+    }
+#endif
 
     float requantScale_;
     Activation activationOp_;

@@ -22,7 +22,7 @@ namespace s_prefetch_op_util {
 // Enable scalar prefetch in hardware (required on gfx12 before using s_prefetch)
 __device__ __forceinline__ void enable_scalar_prefetch()
 {
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx13__)
     // SCALAR_PREFETCH_EN is bit 24 in MODE register (hwreg 1)
     // Set 1 bit at offset 24 to value 1
     __builtin_amdgcn_s_setreg(1 | (24 << 6), 1); // Set bit to 1
@@ -36,7 +36,7 @@ struct SPrefetchDataOp
     __device__ __forceinline__ void operator()(const T CK_CONSTANT_ADDRESS_SPACE* addr,
                                                unsigned int num_cachelines) const
     {
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx13__)
         assert(num_cachelines > 0 && num_cachelines <= 32);
         __builtin_amdgcn_s_prefetch_data(addr, num_cachelines - 1); // we need to pass 0..31
 #else
@@ -54,7 +54,7 @@ struct SBufferPrefetchDataOp
     __device__ __forceinline__ void operator()(const T CK_CONSTANT_ADDRESS_SPACE* addr,
                                                unsigned int num_cachelines) const
     {
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx13__)
         __amdgpu_buffer_rsrc_t buf_res = make_wave_buffer_resource_new(addr, NUM_SCALARS);
         assert(num_cachelines > 0 && num_cachelines <= 32);
         __builtin_amdgcn_s_buffer_prefetch_data(buf_res, 0, num_cachelines - 1);

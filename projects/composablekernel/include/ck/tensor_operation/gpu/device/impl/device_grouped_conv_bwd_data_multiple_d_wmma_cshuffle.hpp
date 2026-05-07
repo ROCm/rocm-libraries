@@ -577,7 +577,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
         }
 
         // check device
-        if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
+        if(ck::is_gfx11_supported() || ck::is_gfx12_supported() || ck::is_gfx13_supported())
         {
             if constexpr(!(is_same_v<AccDataType, float> || is_same_v<AccDataType, int32_t>))
             {
@@ -588,7 +588,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
         {
             return false;
         }
-
+        if(!is_xdl_wmma_k_supported<ADataType, KPerBlock>())
+        {
+            return false;
+        }
         const index_t ConvK = arg.b_g_k_c_xs_lengths_[1];
         const index_t ConvC = arg.b_g_k_c_xs_lengths_[2];
 

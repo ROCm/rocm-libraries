@@ -46,48 +46,6 @@ static constexpr inline auto is_row_major(Layout layout_)
                                                  ck_tile::tensor_layout::gemm::RowMajor>>{};
 }
 
-// mfma_type, 0:32x32, 1:16x16
-template <typename FlatmmConfig, typename T>
-auto shuffle_b_v0(const ck_tile::HostTensor<T>& t)
-{
-    assert(t.get_lengths().size() == 2);
-    int n_ = t.get_lengths()[1];
-    int k_ = t.get_lengths()[0];
-
-    constexpr int MaxVecSize     = 16 / sizeof(T);
-    constexpr int KLane          = ck_tile::get_warp_size() / FlatmmConfig::N_Warp_Tile;
-    constexpr int ItemsPerAccess = std::min(MaxVecSize, FlatmmConfig::K_Warp_Tile / KLane);
-
-    ck_tile::HostTensor<T> t_view({n_ / FlatmmConfig::N_Warp_Tile,
-                                   FlatmmConfig::N_Warp_Tile,
-                                   k_ / ItemsPerAccess,
-                                   ItemsPerAccess});
-    std::copy(t.begin(), t.end(), t_view.begin());
-    return ck_tile::reference_permute(t_view, {0, 2, 1, 3});
-}
-
-template <typename FlatmmConfig, typename T>
-auto shuffle_b_v1(const ck_tile::HostTensor<T>& t)
-{
-    assert(t.get_lengths().size() == 2);
-    int n_ = t.get_lengths()[1];
-    int k_ = t.get_lengths()[0];
-
-    constexpr int MaxVecSize     = 16 / sizeof(T);
-    constexpr int KLane          = ck_tile::get_warp_size() / FlatmmConfig::N_Warp_Tile;
-    constexpr int ItemsPerAccess = std::min(MaxVecSize, FlatmmConfig::K_Warp_Tile / KLane);
-    constexpr int NRepeat = FlatmmConfig::N_Tile / FlatmmConfig::N_Warp_Tile / FlatmmConfig::N_Warp;
-
-    ck_tile::HostTensor<T> t_view({n_ / FlatmmConfig::N_Tile,
-                                   FlatmmConfig::N_Warp,
-                                   FlatmmConfig::N_Warp_Tile,
-                                   NRepeat,
-                                   k_ / ItemsPerAccess,
-                                   ItemsPerAccess});
-    std::copy(t.begin(), t.end(), t_view.begin());
-    return ck_tile::reference_permute(t_view, {0, 3, 1, 4, 2, 5});
-}
-
 template <typename ADataType, typename BDataType, typename AccDataType, typename CDataType>
 auto calculate_rtol_atol(const ck_tile::index_t K,
                          const ck_tile::index_t kbatch,
@@ -146,6 +104,11 @@ float flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
                                            ELayout,
                                            FlatmmConfig::NumWaveGroups>;
 
+    // clamp vector load size of gfx12 & gfx13
+    constexpr ck_tile::index_t VectorLoadSize = ck_tile::min(
+        static_cast<ck_tile::index_t>(FlatmmConfig::M_Warp_Tile * FlatmmConfig::K_Warp_Tile *
+                                      sizeof(ADataType) / 32),
+        16);
     using CodegenGemmTraits = ck_tile::TileGemmUniversalTraits<FlatmmConfig::kPadM,
                                                                FlatmmConfig::kPadN,
                                                                FlatmmConfig::kPadK,
@@ -157,7 +120,8 @@ float flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
                                                                FlatmmConfig::UseStructuredSparsity,
                                                                persistent,
                                                                FlatmmConfig::NumWaveGroups,
-                                                               true>;
+                                                               true,
+                                                               VectorLoadSize>;
 
     using GemmPipelineProblem =
         ck_tile::GemmPipelineProblem<ADataType, BDataType, AccDataType, CodegenFlatmmShape, Traits>;
@@ -171,19 +135,15 @@ float flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
     const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
     float ave_time{0};
 
-    const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
-        constexpr bool has_hot_loop_v = has_hot_loop_.value;
-        constexpr auto tail_number_v  = tail_number_.value;
-        constexpr auto scheduler      = FlatmmConfig::Scheduler;
+    const auto Run = [&](const auto, const auto) {
+        constexpr auto scheduler = FlatmmConfig::Scheduler;
 
         using CodegenPipelineProblem = ck_tile::FlatmmPipelineProblem<ADataType,
                                                                       BDataType,
                                                                       AccDataType,
                                                                       CodegenFlatmmShape,
                                                                       CodegenGemmTraits,
-                                                                      scheduler,
-                                                                      has_hot_loop_v,
-                                                                      tail_number_v>;
+                                                                      scheduler>;
 
         using CodegenFlatmmPipeline =
             ck_tile::FlatmmPipelineAGmemBGmemCRegV1<CodegenPipelineProblem>;
@@ -216,8 +176,8 @@ float flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
 
         auto kargs = Kernel::MakeKernelArgs(args);
 
-        const dim3 grids      = Kernel::GridSize(kargs);
-        constexpr dim3 blocks = Kernel::BlockSize();
+        const dim3 grids  = Kernel::GridSize(kargs);
+        const dim3 blocks = Kernel::BlockSize();
 
         if(!Kernel::IsSupportedArgument(kargs))
         {
@@ -485,6 +445,9 @@ int main(int argc, char* argv[])
 
     try
     {
+#if CK_TILE_USE_WMMA
+        return !run_flatmm_example<FlatmmConfig16_Wmma>(argc, argv);
+#else
         int warp_tile = arg_parser.get_int("warp_tile");
         if(warp_tile == 0)
         {
@@ -502,6 +465,7 @@ int main(int argc, char* argv[])
         {
             return !run_flatmm_example<FlatmmConfig32_950>(argc, argv);
         }
+#endif
     }
     catch(const std::runtime_error& e)
     {

@@ -105,7 +105,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
         const ComputePtrOffsetOfG compute_ptr_offset_of_groups,
         const ComputePtrOffsetOfN compute_ptr_offset_of_n)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<>())
     {
         // offset base pointer for each work-group
@@ -1538,7 +1538,14 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         {
             return false;
         }
-
+        if(!is_xdl_wmma_k_supported<AComputeDataType, KPerBlock>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<BComputeDataType, KPerBlock>())
+        {
+            return false;
+        }
         // check ConvolutionForwardSpecialization
         if constexpr(ConvForwardSpecialization ==
                      ConvolutionForwardSpecialization::Filter1x1Stride1Pad0)

@@ -56,7 +56,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const ComputePtrOffset compute_ptr_offset_of_groups,
         const ComputePtrOffset compute_ptr_offset_of_n)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -875,6 +875,14 @@ struct DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor
                                       BComputeDataType,
                                       Wave32MaxMNPerXDL,
                                       Wave32MaxMNPerXDL>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<AComputeDataType, KPerBlock, AK1>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<BComputeDataType, KPerBlock, BK1>())
         {
             return false;
         }

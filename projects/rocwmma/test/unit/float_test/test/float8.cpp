@@ -43,6 +43,7 @@ using __hip_fp8_storage_t = uint8_t;
 #define ROCWMMA_ARCH_GFX942 0 // For this test, assume not on GFX942
 #define ROCWMMA_ARCH_GFX950 0 // For this test, assume not on GFX950
 #define ROCWMMA_ARCH_GFX12 0 // For this test, assume not on GFX12
+#define ROCWMMA_ARCH_GFX13 0 // For this test, assume not on GFX13
 #define ROCWMMA_ARCH_HOST 1 // Assume we are on host
 
 // Basic type_traits mock

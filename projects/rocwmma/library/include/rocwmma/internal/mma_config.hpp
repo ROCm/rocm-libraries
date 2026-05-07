@@ -157,7 +157,7 @@ namespace rocwmma
         // Ensure to use padded tiles if necessary
         using IOTile = IOTile<FragM, FragN, FragK, InputTA>;
 
-        // Gfx9 uses MFMA, gfx11/12 uses WMMA
+        // Gfx9 uses MFMA, gfx11/12/13 uses WMMA
         using Mma = conditional_t<(bool)ROCWMMA_ARCH_GFX9,
                                   Mfma<IOTile::BlockM,
                                        IOTile::BlockN,

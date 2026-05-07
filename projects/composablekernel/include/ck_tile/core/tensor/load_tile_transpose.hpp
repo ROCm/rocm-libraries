@@ -50,6 +50,7 @@ constexpr bool is_sequence_suffix_v = is_sequence_suffix<Suffix, Sequence>::valu
 template <typename DataType>
 struct DefaultTranspose
 {
+#if defined(__gfx950__)
     template <index_t LaneGroupSize, index_t NumBitType>
     struct Quad
     {
@@ -105,6 +106,122 @@ struct DefaultTranspose
 
     template <index_t LaneGroupSize>
     using QuadOutputEncoding = typename Quad<LaneGroupSize, NumBitsDataType>::OutputEncoding;
+#else // now this branch just for gfx1250
+    template <index_t LaneGroupSize>
+    struct Quad16
+    {
+#if defined(__gfx125__)
+        static_assert(LaneGroupSize == 16, "LaneGroupSize must be 16");
+
+        using InputEncoding =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<8>, sequence<LaneGroupSize / 16, 2, 8>>,
+                                       tuple<sequence<2, 2, 1>>,
+                                       tuple<sequence<0, 1, 0>>,
+                                       sequence<2>,
+                                       sequence<2>>;
+
+        using OutputEncoding =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<LaneGroupSize>, sequence<8>>,
+                                       tuple<sequence<1>>,
+                                       tuple<sequence<0>>,
+                                       sequence<2>,
+                                       sequence<0>>;
+#else // gfx13
+        static_assert(LaneGroupSize == 32 || LaneGroupSize == 64, "LaneGroupSize must be 32 or 64");
+        using InputEncoding = tile_distribution_encoding<sequence<>,
+                                                         tuple<sequence<2, 2, 4>, sequence<2, 8>>,
+                                                         tuple<sequence<1, 1, 2, 1>>,
+                                                         tuple<sequence<0, 1, 0, 2>>,
+                                                         sequence<2>,
+                                                         sequence<1>>;
+
+        using OutputEncoding = tile_distribution_encoding<sequence<>,
+                                                          tuple<sequence<16>, sequence<4, 2, 2>>,
+                                                          tuple<sequence<1, 2>>,
+                                                          tuple<sequence<0, 1>>,
+                                                          sequence<2, 2>,
+                                                          sequence<0, 2>>;
+#endif
+    };
+
+    template <index_t LaneGroupSize>
+    struct Quad8
+    {
+#if defined(__gfx125__)
+        static_assert(LaneGroupSize == 16, "LaneGroupSize must be 16");
+        using InputEncoding =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<2, 4>, sequence<LaneGroupSize / 16, 2, 8>>,
+                                       tuple<sequence<2, 1, 2, 1>>,
+                                       tuple<sequence<0, 0, 1, 1>>,
+                                       sequence<2>,
+                                       sequence<2>>;
+
+        using OutputEncoding =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<LaneGroupSize>, sequence<8>>,
+                                       tuple<sequence<1>>,
+                                       tuple<sequence<0>>,
+                                       sequence<2>,
+                                       sequence<0>>;
+#else // gfx13
+        static_assert(LaneGroupSize == 32 || LaneGroupSize == 64, "LaneGroupSize must be 32 or 64");
+        using InputEncoding =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<2, 8>, sequence<LaneGroupSize / 32, 2, 8>>,
+                                       tuple<sequence<1, 2, 1>>,
+                                       tuple<sequence<0, 1, 1>>,
+                                       sequence<2, 2>,
+                                       sequence<0, 2>>;
+
+        using OutputEncoding =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<16>, sequence<LaneGroupSize / 32 * 2, 2, 4>>,
+                                       tuple<sequence<1, 2>>,
+                                       tuple<sequence<0, 1>>,
+                                       sequence<2, 2>,
+                                       sequence<0, 2>>;
+#endif
+    };
+
+    // Select based on data size
+    template <index_t LaneGroupSize>
+    using QuadInputEncoding = std::conditional_t<sizeof(DataType) == 2,
+                                                 typename Quad16<LaneGroupSize>::InputEncoding,
+                                                 typename Quad8<LaneGroupSize>::InputEncoding>;
+
+    template <index_t LaneGroupSize>
+    using QuadOutputEncoding = std::conditional_t<sizeof(DataType) == 2,
+                                                  typename Quad16<LaneGroupSize>::OutputEncoding,
+                                                  typename Quad8<LaneGroupSize>::OutputEncoding>;
+#endif
+
+    /**
+     * @brief Get the number of elements read by the DS_READ_TR hardware instruction.
+     *
+     * This is derived from QuadInputEncoding's YS dimension length, which directly
+     * corresponds to the transpose instruction's vector size:
+     *   - gfx950 fp16 (LGS=64/32/16): 4  elements (DS_READ_TR16_B64)
+     *   - gfx13  fp16 (LGS=32):       8  elements (DS_LOAD_TR16_B128)
+     *   - gfx125 fp16 (LGS=16):       8  elements (DS_LOAD_TR16_B128)
+     *   - gfx950 int8 (LGS=64/32/16): 8  elements (DS_READ_TR8_B64)
+     *   - gfx13  int8 (LGS=32):       8  elements (DS_LOAD_TR8_B64)
+     *   - gfx125 int8 (LGS=16):       8  elements (DS_LOAD_TR8_B64)
+     */
+    template <index_t LaneGroupSize>
+    static constexpr index_t GetTransposeVecSize()
+    {
+        using QIE               = QuadInputEncoding<LaneGroupSize>;
+        constexpr auto ys_major = QIE::ys_to_rhs_major_;
+        constexpr auto ys_minor = QIE::ys_to_rhs_minor_;
+        // ys_to_rhs_major_ is 1-indexed (1 = X dim 0, 2 = X dim 1, ...)
+        constexpr index_t xdim = ys_major[number<ys_major.size() - 1>{}] - 1; // convert to 0-based
+        constexpr index_t hidx = ys_minor[number<ys_minor.size() - 1>{}];
+        constexpr auto hs      = QIE::hs_lengthss_;
+        return hs[number<xdim>{}][number<hidx>{}];
+    }
 
     // Always swap last two dimensions
     static constexpr auto transpose_dims = sequence<1, 0>{};
@@ -163,8 +280,6 @@ struct DefaultTranspose
         static constexpr auto quad_ys_major  = QuadEncoding::ys_to_rhs_major_;
         static constexpr auto quad_ys_minor  = QuadEncoding::ys_to_rhs_minor_;
 
-        static_assert(quad_ys_major.size() == 1 && quad_ys_minor.size() == 1,
-                      "YS->RHS mapping must be single dimension");
         static_assert(quad_ys_major.back() == 2 && quad_ys_minor.back() == quad_hs[I1].size() - 1,
                       "YS->RHS mapping must be the last dimension");
         static constexpr bool ys_mapping_valid =
@@ -177,6 +292,7 @@ struct DefaultTranspose
     template <typename InDstrEncode, bool ReverseDirection = false>
     struct ValidationTraits
     {
+#if defined(__gfx950__)
         static constexpr bool value =
             ValidationTraitsImpl<InDstrEncode, ReverseDirection, 64>::value ||
             ValidationTraitsImpl<InDstrEncode, ReverseDirection, 32>::value ||
@@ -186,6 +302,20 @@ struct DefaultTranspose
             : ValidationTraitsImpl<InDstrEncode, ReverseDirection, 32>::value ? 32
             : ValidationTraitsImpl<InDstrEncode, ReverseDirection, 16>::value ? 16
                                                                               : 0;
+#elif defined(__gfx125__)
+        static constexpr bool value =
+            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 16>::value;
+        static constexpr index_t LaneGroupSize =
+            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 16>::value ? 16 : 0;
+#else // gfx13
+        static constexpr bool value =
+            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 32>::value ||
+            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 64>::value;
+        static constexpr index_t LaneGroupSize =
+            ValidationTraitsImpl<InDstrEncode, ReverseDirection, 32>::value   ? 32
+            : ValidationTraitsImpl<InDstrEncode, ReverseDirection, 64>::value ? 64
+                                                                              : 0;
+#endif
     };
 };
 template <typename TileDistribution_, typename DataType_, typename Policy>
@@ -315,14 +445,25 @@ struct TransposeTileDistributionTraits
         },
         number<input_ps_to_rhss_minor.size()>{});
 
-    static constexpr auto outer_input_ys_to_rhs_major = input_ys_to_rhs_major.pop_back();
+    static constexpr auto outer_input_ys_to_rhs_major = input_ys_to_rhs_major.extract(
+        typename arithmetic_sequence_gen<0,
+                                         input_ys_to_rhs_major.size() -
+                                             QuadInputEncoding::ys_to_rhs_major_.size(),
+                                         1>::type{});
 
     // for major because of dst_out_hs_lengthss is reversed, this index also need to be reversed
     static constexpr auto dst_ys_to_rhs_major =
-        outer_input_ys_to_rhs_major.transform(swap_one_and_two).push_back(number<2>{});
+        outer_input_ys_to_rhs_major.transform(swap_one_and_two)
+            .push_back(QuadOutputEncoding::ys_to_rhs_major_);
 
-    static constexpr auto dst_ys_to_rhs_minor = input_ys_to_rhs_minor.pop_back().push_back(
-        number<(quad_output_ys_minor_offset + quad_output_ys_to_rhs_minor)[I0]>{});
+    static constexpr auto outer_input_ys_to_rhs_minor = input_ys_to_rhs_minor.extract(
+        typename arithmetic_sequence_gen<0,
+                                         input_ys_to_rhs_minor.size() -
+                                             QuadInputEncoding::ys_to_rhs_minor_.size(),
+                                         1>::type{});
+
+    static constexpr auto dst_ys_to_rhs_minor = outer_input_ys_to_rhs_minor.push_back(
+        quad_output_ys_minor_offset + QuadOutputEncoding::ys_to_rhs_minor_);
 
     using TransposedDstrEncode =
         tile_distribution_encoding<typename InDstrEncode::RsLengths,
@@ -430,18 +571,15 @@ CK_TILE_DEVICE void load_tile_transpose_with_offset(
     constexpr auto y_in_desc  = input_distr.get_ys_to_d_descriptor();
     constexpr auto y_out_desc = output_distr.get_ys_to_d_descriptor();
 
-    constexpr index_t NDimYIn  = input_distr.get_num_of_dimension_y();
-    constexpr index_t NDimYOut = output_distr.get_num_of_dimension_y();
+    constexpr index_t NDimYIn = input_distr.get_num_of_dimension_y();
 
-    constexpr auto y_in_lengths  = to_sequence(y_in_desc.get_lengths());
-    constexpr auto y_out_lengths = to_sequence(y_out_desc.get_lengths());
+    constexpr auto y_in_lengths = to_sequence(y_in_desc.get_lengths());
 
     constexpr auto y_in_element_space_size  = y_in_desc.get_element_space_size();
     constexpr auto y_out_element_space_size = y_out_desc.get_element_space_size();
     static_assert(y_in_element_space_size == y_out_element_space_size,
                   "the element space size is not the same!");
-    static_assert(y_in_lengths[NDimYIn - 1] == y_out_lengths[NDimYOut - 1],
-                  "the vector length is not the same!");
+
     constexpr index_t vecLoadSize = y_in_lengths[NDimYIn - 1];
     constexpr index_t num_of_access =
         reduce_on_sequence(y_in_lengths, multiplies<>{}, number<1>{}) / vecLoadSize;

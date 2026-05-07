@@ -19,7 +19,8 @@ ConvParam::ConvParam(ck::index_t n_dim,
                      const std::vector<ck::index_t>& strides,
                      const std::vector<ck::index_t>& dilations,
                      const std::vector<ck::index_t>& left_pads,
-                     const std::vector<ck::index_t>& right_pads)
+                     const std::vector<ck::index_t>& right_pads,
+                     bool transposed)
     : num_dim_spatial_(static_cast<ck::long_index_t>(n_dim)),
       G_(static_cast<ck::long_index_t>(group_count)),
       N_(static_cast<ck::long_index_t>(n_batch)),
@@ -45,24 +46,47 @@ ConvParam::ConvParam(ck::index_t n_dim,
                                "parameter size is different from number of declared dimensions!"));
     }
 
-    for(ck::index_t i = 0; i < num_dim_spatial_; ++i)
+    if(transposed == false)
     {
-        filter_spatial_lengths_[i] = static_cast<ck::long_index_t>(filters_len[i]);
-        input_spatial_lengths_[i]  = static_cast<ck::long_index_t>(input_len[i]);
-        conv_filter_strides_[i]    = static_cast<ck::long_index_t>(strides[i]);
-        conv_filter_dilations_[i]  = static_cast<ck::long_index_t>(dilations[i]);
-        input_left_pads_[i]        = static_cast<ck::long_index_t>(left_pads[i]);
-        input_right_pads_[i]       = static_cast<ck::long_index_t>(right_pads[i]);
+        for(ck::index_t i = 0; i < num_dim_spatial_; ++i)
+        {
+            filter_spatial_lengths_[i] = static_cast<ck::long_index_t>(filters_len[i]);
+            input_spatial_lengths_[i]  = static_cast<ck::long_index_t>(input_len[i]);
+            conv_filter_strides_[i]    = static_cast<ck::long_index_t>(strides[i]);
+            conv_filter_dilations_[i]  = static_cast<ck::long_index_t>(dilations[i]);
+            input_left_pads_[i]        = static_cast<ck::long_index_t>(left_pads[i]);
+            input_right_pads_[i]       = static_cast<ck::long_index_t>(right_pads[i]);
 
-        // XEff = (X - 1) * conv_dilation_w + 1;
-        // Wo = (Wi + in_left_pad_w + in_right_pad_w - XEff) / conv_stride_w + 1;
-        const ck::long_index_t x_eff =
-            (filter_spatial_lengths_[i] - 1) * conv_filter_dilations_[i] + 1;
+            // XEff = (X - 1) * conv_dilation_w + 1;
+            // Wo = (Wi + in_left_pad_w + in_right_pad_w - XEff) / conv_stride_w + 1;
+            const ck::long_index_t x_eff =
+                (filter_spatial_lengths_[i] - 1) * conv_filter_dilations_[i] + 1;
 
-        output_spatial_lengths_[i] =
-            (input_spatial_lengths_[i] + input_left_pads_[i] + input_right_pads_[i] - x_eff) /
-                conv_filter_strides_[i] +
-            1;
+            output_spatial_lengths_[i] =
+                (input_spatial_lengths_[i] + input_left_pads_[i] + input_right_pads_[i] - x_eff) /
+                    conv_filter_strides_[i] +
+                1;
+        }
+    }
+    else
+    {
+        for(ck::index_t i = 0; i < num_dim_spatial_; ++i)
+        {
+            filter_spatial_lengths_[i] = static_cast<ck::long_index_t>(filters_len[i]);
+            input_spatial_lengths_[i]  = static_cast<ck::long_index_t>(input_len[i]);
+            conv_filter_strides_[i]    = static_cast<ck::long_index_t>(strides[i]);
+            conv_filter_dilations_[i]  = static_cast<ck::long_index_t>(dilations[i]);
+            input_left_pads_[i]        = static_cast<ck::long_index_t>(left_pads[i]);
+            input_right_pads_[i]       = static_cast<ck::long_index_t>(right_pads[i]);
+
+            assert(conv_filter_dilations_[i] == 1);
+            assert(filter_spatial_lengths_[i] >= conv_filter_strides_[i]);
+
+            const ck::long_index_t x_eff = filter_spatial_lengths_[i] - conv_filter_strides_[i];
+
+            output_spatial_lengths_[i] = input_spatial_lengths_[i] * conv_filter_strides_[i] +
+                                         x_eff - input_left_pads_[i] - input_right_pads_[i];
+        }
     }
 }
 
@@ -76,7 +100,8 @@ ConvParam::ConvParam(ck::long_index_t n_dim,
                      const std::vector<ck::long_index_t>& strides,
                      const std::vector<ck::long_index_t>& dilations,
                      const std::vector<ck::long_index_t>& left_pads,
-                     const std::vector<ck::long_index_t>& right_pads)
+                     const std::vector<ck::long_index_t>& right_pads,
+                     bool transposed)
     : num_dim_spatial_(n_dim),
       G_(group_count),
       N_(n_batch),
@@ -102,17 +127,33 @@ ConvParam::ConvParam(ck::long_index_t n_dim,
                                "parameter size is different from number of declared dimensions!"));
     }
 
-    for(ck::index_t i = 0; i < num_dim_spatial_; ++i)
+    if(transposed == false)
     {
-        // XEff = (X - 1) * conv_dilation_w + 1;
-        // Wo = (Wi + in_left_pad_w + in_right_pad_w - XEff) / conv_stride_w + 1;
-        const ck::long_index_t x_eff =
-            (filter_spatial_lengths_[i] - 1) * conv_filter_dilations_[i] + 1;
+        for(ck::index_t i = 0; i < num_dim_spatial_; ++i)
+        {
+            // XEff = (X - 1) * conv_dilation_w + 1;
+            // Wo = (Wi + in_left_pad_w + in_right_pad_w - XEff) / conv_stride_w + 1;
+            const ck::long_index_t x_eff =
+                (filter_spatial_lengths_[i] - 1) * conv_filter_dilations_[i] + 1;
 
-        output_spatial_lengths_[i] =
-            (input_spatial_lengths_[i] + input_left_pads_[i] + input_right_pads_[i] - x_eff) /
-                conv_filter_strides_[i] +
-            1;
+            output_spatial_lengths_[i] =
+                (input_spatial_lengths_[i] + input_left_pads_[i] + input_right_pads_[i] - x_eff) /
+                    conv_filter_strides_[i] +
+                1;
+        }
+    }
+    else
+    {
+        for(ck::index_t i = 0; i < num_dim_spatial_; ++i)
+        {
+            assert(conv_filter_dilations_[i] == 1);
+            assert(filter_spatial_lengths_[i] >= conv_filter_strides_[i]);
+
+            const ck::long_index_t x_eff = filter_spatial_lengths_[i] - conv_filter_strides_[i];
+
+            output_spatial_lengths_[i] = input_spatial_lengths_[i] * conv_filter_strides_[i] +
+                                         x_eff - input_left_pads_[i] - input_right_pads_[i];
+        }
     }
 }
 

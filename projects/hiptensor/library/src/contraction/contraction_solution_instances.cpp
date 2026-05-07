@@ -111,6 +111,7 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::Bilinear,
                                           ck::half_t>());
 
+<<<<<<< HEAD
         registerSolutions(enumerateContractionSolutions<6,
                                                         6,
                                                         6,
@@ -123,6 +124,8 @@ namespace hiptensor
                                                         CkBilinearUnary,
                                                         ck::half_t>());
 
+=======
+>>>>>>> gfx1310
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,
@@ -317,6 +320,7 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::Scale,
                                           ck::bhalf_t>());
 
+<<<<<<< HEAD
         registerSolutions(enumerateContractionSolutions<6,
                                                         6,
                                                         6,
@@ -329,6 +333,8 @@ namespace hiptensor
                                                         ck::tensor_operation::element_wise::Scale,
                                                         ck::bhalf_t>());
 
+=======
+>>>>>>> gfx1310
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,
@@ -368,6 +374,7 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::Scale,
                                           ck::half_t>());
 
+<<<<<<< HEAD
         registerSolutions(enumerateContractionSolutions<6,
                                                         6,
                                                         6,
@@ -380,6 +387,8 @@ namespace hiptensor
                                                         ck::tensor_operation::element_wise::Scale,
                                                         ck::half_t>());
 
+=======
+>>>>>>> gfx1310
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,

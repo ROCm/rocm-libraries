@@ -46,7 +46,7 @@ struct TileConfig
     static constexpr ck_tile::index_t NWave      = NWave_;
     static constexpr ck_tile::index_t MPerXdl    = MPerXdl_;
     static constexpr ck_tile::index_t NPerXdl    = NPerXdl_;
-    static constexpr ck_tile::index_t KPerXdl    = KPerXdl_;
+    static constexpr ck_tile::index_t KPerXdl = ck_tile::get_k_warp_tile<MfmaDataType, MPerXdl>();
 };
 
 // Helper to construct SimpleCShuffleEpilogueProblem from TileConfig

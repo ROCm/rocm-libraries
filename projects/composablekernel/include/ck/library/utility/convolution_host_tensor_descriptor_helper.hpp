@@ -305,6 +305,58 @@ make_weight_host_tensor_descriptor_g_k_c_xs_packed(const ck::utils::conv::ConvPa
         WeiLayout{});
 }
 
+template <typename DsLayout>
+HostTensorDescriptor
+make_scalebias_host_tensor_descriptor(const ck::utils::conv::ConvParam& conv_param,
+                                      ck::index_t ds_length)
+{
+    switch(conv_param.num_dim_spatial_)
+    {
+    case 1:
+        return HostTensorDescriptor(
+            {conv_param.G_, conv_param.N_, ds_length, conv_param.output_spatial_lengths_[0]},
+            {
+                ds_length, // g
+                0,         // k
+                1,         // c
+                0          // x
+            },
+            ck::tensor_layout::convolution::GNKW{});
+    case 2:
+        return HostTensorDescriptor({conv_param.G_,
+                                     conv_param.N_,
+                                     ds_length,
+                                     conv_param.output_spatial_lengths_[0],
+                                     conv_param.output_spatial_lengths_[1]},
+                                    {
+                                        ds_length, // g
+                                        0,         // n
+                                        1,         // k
+                                        0,         // ho
+                                        0          // wo
+                                    },
+                                    ck::tensor_layout::convolution::GNKHW{});
+    case 3:
+        return HostTensorDescriptor({conv_param.G_,
+                                     conv_param.N_,
+                                     ds_length,
+                                     conv_param.output_spatial_lengths_[0],
+                                     conv_param.output_spatial_lengths_[1],
+                                     conv_param.output_spatial_lengths_[2]},
+                                    {
+                                        ds_length, // g
+                                        0,         // n
+                                        1,         // k
+                                        0,         // z
+                                        0,         // y
+                                        0          // x
+                                    },
+                                    ck::tensor_layout::convolution::GNKDHW{});
+    }
+
+    throw std::runtime_error("unsuppored # dim spatial");
+}
+
 // make tensor descriptor for packed output tensor, and order the dimension in the order of GNKHW
 // regardless of physical layout
 template <typename OutLayout>

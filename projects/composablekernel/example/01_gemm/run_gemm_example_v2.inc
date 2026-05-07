@@ -3,6 +3,25 @@
 
 #pragma once
 
+template <typename DataType>
+void dump_tensor(Tensor<DataType> mat)
+{
+    std::cout << "mat [ " << std::endl;
+
+    auto len = mat.GetLengths();
+    for(uint32_t i = 0; i < len[0]; i++)
+    {
+        std::cout << "    [";
+        for(uint32_t j = 0; j < len[1]; j++)
+        {
+            std::vector<std::size_t> idx({i, j});
+            std::cout << ck::type_convert<float>(mat(idx)) << ", ";
+        }
+        std::cout << "]" << std::endl;
+    }
+    std::cout << "]" << std::endl;
+}
+
 template <typename ProblemType>
 bool run_gemm(const ProblemType& problem_size, const ExecutionConfig& config)
 {
@@ -76,8 +95,10 @@ bool run_gemm(const ProblemType& problem_size, const ExecutionConfig& config)
         b_k_n.GenerateTensorValue(GeneratorTensor_1<BDataType>{1});
         break;
     default:
-        a_m_k.GenerateTensorValue(GeneratorTensor_3<ADataType>{0.0, 1.0});
-        b_k_n.GenerateTensorValue(GeneratorTensor_3<BDataType>{-0.5, 0.5});
+        a_m_k.GenerateTensorValue(GeneratorTensor_Sequential<ADataType, 0>{});
+        b_k_n.GenerateTensorValue(GeneratorTensor_Sequential<BDataType, 1>{});
+        // a_m_k.GenerateTensorValue(GeneratorTensor_3<ADataType>{0.0, 1.0});
+        // b_k_n.GenerateTensorValue(GeneratorTensor_3<BDataType>{-0.5, 0.5});
     }
 
     Tensor<CDataType> c_m_n_host_result(f_host_tensor_descriptor(M, N, StrideC, CLayout{}));
@@ -107,6 +128,9 @@ bool run_gemm(const ProblemType& problem_size, const ExecutionConfig& config)
     b_k_n_device_buf.ToDevice(b_k_n.mData.data());
 #endif
     DeviceMem workspace;
+
+    // dump_tensor(a_m_k);
+    // dump_tensor(b_k_n);
 
     auto a_element_op = AElementOp{};
     auto b_element_op = BElementOp{};

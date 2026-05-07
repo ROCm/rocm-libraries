@@ -698,7 +698,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffle
     static bool IsSupportedArgument(const Argument& arg)
     {
         // check device
-        if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
+        if(ck::is_gfx11_supported() || ck::is_gfx12_supported() || ck::is_gfx13_supported())
         {
             if constexpr(!(is_same_v<AccDataType, float> || is_same_v<AccDataType, int32_t>))
             {
@@ -709,7 +709,10 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffle
         {
             return false;
         }
-
+        if(!is_xdl_wmma_k_supported<ADataType, KPerBlock>())
+        {
+            return false;
+        }
         // TODO: Add support for split_k > 1
         if(arg.k_batch_ != 1)
         {

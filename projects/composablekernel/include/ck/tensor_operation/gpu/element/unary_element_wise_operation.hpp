@@ -93,7 +93,7 @@ __device__ inline f8x4_t i4_to_f8x4(int q)
 
 __device__ inline f8x8_t i4_to_fp8x8(int q)
 {
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx13__)
     uint32_t fp8x4_0;
     uint32_t fp8x4_1;
     // todo: replace amd_assemble_cvt_f32_i4 with __builtin_amdgcn_cvt_off_f32_i4
@@ -401,6 +401,12 @@ struct PassThrough
     }
 
     template <>
+    __host__ __device__ void operator()<int32_t, float>(int32_t& y, const float& x) const
+    {
+        y = static_cast<int32_t>(x);
+    }
+
+    template <>
     __host__ __device__ void operator()<bhalf_t, bhalf_t>(bhalf_t& y, const bhalf_t& x) const
     {
         y = x;
@@ -473,6 +479,30 @@ struct PassThrough
     }
 
     template <>
+    __host__ __device__ void operator()<uint8_t, int32_t>(uint8_t& y, const int32_t& x) const
+    {
+        y = type_convert<uint8_t>(x);
+    }
+
+    template <>
+    __host__ __device__ void operator()<int32_t, uint8_t>(int32_t& y, const uint8_t& x) const
+    {
+        y = type_convert<int32_t>(x);
+    }
+
+    template <>
+    __host__ __device__ void operator()<uint8_t, float>(uint8_t& y, const float& x) const
+    {
+        y = type_convert<uint8_t>(x);
+    }
+
+    template <>
+    __host__ __device__ void operator()<float, uint8_t>(float& y, const uint8_t& x) const
+    {
+        y = type_convert<float>(x);
+    }
+
+    template <>
     __host__ __device__ void operator()<int8_t, float>(int8_t& y, const float& x) const
     {
         y = type_convert<int8_t>(x);
@@ -494,6 +524,18 @@ struct PassThrough
     __host__ __device__ void operator()<int4_t, int>(int4_t& y, const int& x) const
     {
         y = type_convert<int4_t>(x);
+    }
+
+    template <>
+    __host__ __device__ void operator()<int, int4_t>(int& y, const int4_t& x) const
+    {
+        y = type_convert<int>(x);
+    }
+
+    template <>
+    __host__ __device__ void operator()<float, int4_t>(float& y, const int4_t& x) const
+    {
+        y = type_convert<float>(x);
     }
 #endif
 
@@ -553,6 +595,18 @@ struct PassThrough
 
     template <>
     __host__ __device__ void operator()<bf8_t, half_t>(bf8_t& y, const half_t& x) const
+    {
+        y = type_convert<bf8_t>(x);
+    }
+
+    template <>
+    __host__ __device__ void operator()<f8_t, bf8_t>(f8_t& y, const bf8_t& x) const
+    {
+        y = type_convert<f8_t>(x);
+    }
+
+    template <>
+    __host__ __device__ void operator()<bf8_t, f8_t>(bf8_t& y, const f8_t& x) const
     {
         y = type_convert<bf8_t>(x);
     }
@@ -628,16 +682,29 @@ struct ConvertF8RNE
     }
 };
 
-struct Scale
+// E = C * scale
+template <bool Clamp = false>
+struct ScaleImpl
 {
     static constexpr const char* name = "Scale";
-
-    __host__ __device__ Scale(float scale = 1.f) : scale_(scale) {}
+    __host__ __device__ ScaleImpl(float scale = 1.f) : scale_(scale) {}
 
     template <typename Y, typename X>
     __host__ __device__ void operator()(Y& y, const X& x) const
     {
-        y = type_convert<Y>(type_convert<float>(x) * scale_);
+        float y_0 = type_convert<float>(x) * scale_;
+        // TODO: replace bhalf with native type and remove the addtional check.
+        if constexpr(Clamp && ck::is_integral<Y>::value && (is_same_v<Y, bhalf_t> == false))
+        {
+            float y_1 = math::clamp(y_0,
+                                    ck::type_convert<float>(NumericLimits<Y>::Min()),
+                                    ck::type_convert<float>(NumericLimits<Y>::Max()));
+            y         = type_convert<Y>(y_1);
+        }
+        else
+        {
+            y = type_convert<Y>(y_0);
+        }
     }
 
     template <>
@@ -666,14 +733,11 @@ struct Scale
         y = scale_ * x;
     };
 
-    template <>
-    __host__ __device__ void operator()<int8_t, int8_t>(int8_t& y, const int8_t& x) const
-    {
-        y = type_convert<int8_t>(scale_ * type_convert<float>(x));
-    };
-
     float scale_;
 };
+
+using Scale      = ScaleImpl<false>;
+using ScaleClamp = ScaleImpl<true>;
 
 struct ScaleAndResetNaNToMinusInfinity
 {
@@ -916,6 +980,22 @@ struct Relu
     }
 
     template <>
+    __host__ __device__ void operator()(bf8_t& y, const bf8_t& x) const
+    {
+        float x_f32 = type_convert<float>(x);
+        float y_f32 = x_f32 > 0 ? x_f32 : 0;
+        y           = type_convert<bf8_t>(y_f32);
+    }
+
+    template <>
+    __host__ __device__ void operator()(f8_t& y, const f8_t& x) const
+    {
+        float x_f32 = type_convert<float>(x);
+        float y_f32 = x_f32 > 0 ? x_f32 : 0;
+        y           = type_convert<f8_t>(y_f32);
+    }
+
+    template <>
     __host__ __device__ void operator()<bhalf_t, float>(bhalf_t& y, const float& x) const
     {
         float y_f32 = x > 0 ? x : 0;
@@ -967,6 +1047,13 @@ struct FastGelu
     template <>
     __device__ void operator()<float, float>(float& y, const float& x) const
     {
+#if defined(__gfx125__) || defined(__gfx13__)
+        const float c1 = 0.035677f;
+        const float c2 = 0.797885f;
+        const float u  = x * (c1 * x * x + c2);
+
+        y = 0.5f * x * (1.f + __builtin_amdgcn_tanhf(u));
+#else
         // const float u   = 2.f * x * (0.035677f * x * x + 0.797885f);
         const float c1  = -2.0 * 0.035677f;
         const float c2  = -2.0 * 0.797885f;
@@ -974,6 +1061,7 @@ struct FastGelu
         const float emu = __ocml_exp_f32(u);
 
         y = x * math::rcp(1.f + emu);
+#endif
     }
 
     template <>
@@ -989,11 +1077,20 @@ struct FastGelu
     template <>
     __device__ void operator()<half_t, half_t>(half_t& y, const half_t& x) const
     {
+#if defined(__gfx125__) || defined(__gfx13__)
+        const half_t c1 = type_convert<half_t>(0.035677f);
+        const half_t c2 = type_convert<half_t>(0.797885f);
+        const half_t u  = x * (c1 * x * x + c2);
+
+        y = type_convert<half_t>(0.5f) * x *
+            (type_convert<half_t>(1.f) + __builtin_amdgcn_tanhh(u));
+#else
         float y_f;
 
         this->operator()<float, float>(y_f, type_convert<float>(x));
 
         y = type_convert<half_t>(y_f);
+#endif
     }
 
     template <>
@@ -1009,11 +1106,19 @@ struct FastGelu
     template <>
     __device__ void operator()<half_t, float>(half_t& y, const float& x) const
     {
+#if defined(__gfx125__) || defined(__gfx13__)
+        const float c1 = 0.035677f;
+        const float c2 = 0.797885f;
+        const float u  = x * (c1 * x * x + c2);
+
+        y = type_convert<half_t>(0.5f * x * (1.f + __builtin_amdgcn_tanhf(u)));
+#else
         float y_f;
 
         this->operator()<float, float>(y_f, x);
 
         y = type_convert<half_t>(y_f);
+#endif
     }
 
     template <>
@@ -1029,21 +1134,38 @@ struct FastGelu
     template <>
     __device__ void operator()<bhalf_t, float>(bhalf_t& y, const float& x) const
     {
+#if defined(__gfx125__) || defined(__gfx13__)
+        const float c1 = 0.035677f;
+        const float c2 = 0.797885f;
+        const float u  = x * (c1 * x * x + c2);
+
+        y = type_convert<bhalf_t>(0.5f * x * (1.f + __builtin_amdgcn_tanhf(u)));
+#else
         float y_f;
 
         this->operator()<float, float>(y_f, x);
 
         y = type_convert<bhalf_t>(y_f);
+#endif
     }
 
     template <>
     __device__ void operator()<bhalf_t, bhalf_t>(bhalf_t& y, const bhalf_t& x) const
     {
+#if defined(CK_SUPPORT_BF16_TRANS_INSTS)
+        const bhalf_t c1 = type_convert<bhalf_t>(0.035677f);
+        const bhalf_t c2 = type_convert<bhalf_t>(0.797885f);
+        const bhalf_t u  = x * (c1 * x * x + c2);
+
+        y = type_convert<bhalf_t>(0.5f) * x *
+            (type_convert<bhalf_t>(1.f) + __builtin_amdgcn_tanh_bf16(u));
+#else
         float y_f;
 
         this->operator()<float, float>(y_f, type_convert<float>(x));
 
         y = type_convert<bhalf_t>(y_f);
+#endif
     }
 
     template <>
@@ -1651,6 +1773,70 @@ struct LeakyRelu
     };
 
     const float alpha_;
+};
+
+// E = clamp(C, -1, 1)
+struct HardTanh
+{
+    template <typename T>
+    __host__ __device__ void operator()(T& y, const T& x) const
+    {
+        static_assert(is_same<T, float>::value || is_same<T, double>::value ||
+                          is_same<T, half_t>::value || is_same<T, int32_t>::value ||
+                          is_same<T, int8_t>::value,
+                      "Data type is not supported by this operation!");
+        y = math::min(T(1), math::max(T(-1), x));
+    }
+
+    template <>
+    __host__ __device__ void operator()(bhalf_t& y, const bhalf_t& x) const
+    {
+        float x_f32 = type_convert<float>(x);
+        y           = type_convert<bhalf_t>(math::min(1.0f, math::max(-1.0f, x_f32)));
+    }
+
+    template <>
+    __host__ __device__ void operator()(bf8_t& y, const bf8_t& x) const
+    {
+        float x_f32 = type_convert<float>(x);
+        y           = type_convert<bf8_t>(math::min(1.0f, math::max(-1.0f, x_f32)));
+    }
+
+    template <>
+    __host__ __device__ void operator()(f8_t& y, const f8_t& x) const
+    {
+        float x_f32 = type_convert<float>(x);
+        y           = type_convert<f8_t>(math::min(1.0f, math::max(-1.0f, x_f32)));
+    }
+};
+
+// E = relu(C * scale)
+template <bool Clamp = false>
+struct ScaleRelu
+{
+    ScaleRelu(float scale = 1.0f) : scale_(scale){};
+    template <typename Y, typename X>
+    __host__ __device__ void operator()(Y& y, const X& x) const
+    {
+        Y tmp;
+        ScaleImpl<Clamp>{scale_}.operator()(tmp, x);
+        Relu{}.operator()(y, tmp);
+    }
+    float scale_;
+};
+
+// E = hardtanh(C * scale)
+struct ScaleHardTanh
+{
+    ScaleHardTanh(float scale = 1.0f) : scale_(scale){};
+    template <typename Y, typename X>
+    __host__ __device__ void operator()(Y& y, const X& x) const
+    {
+        Y tmp;
+        ScaleImpl<true>{scale_}.operator()(tmp, x);
+        HardTanh{}.operator()(y, tmp);
+    }
+    float scale_;
 };
 
 struct Elu

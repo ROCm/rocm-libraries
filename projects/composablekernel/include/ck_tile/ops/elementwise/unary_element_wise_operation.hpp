@@ -183,13 +183,14 @@ CK_TILE_DEVICE bf16x4_t i4_to_bhalf4(int q)
  *
  * @note `int q` contains 4 bytes, each byte represents 2 int4.
  * @note This function assumes pk_int4_t has a bias of 8, meaning 0b0000 is converted to fp8(-8)
- * @note The output ordering differs from input ordering. For example, when input is 0x76543210,
- *       the output sequence will be fp8(7, 3, 6, 2, 5, 1, 4, 0). Therefore, the input tensor
- *       must be preprocessed with permute_vectors_i4x4_b on the host side before using this
- * function.
+ * @note The output ordering differs from input ordering. if IsInputPermuated is true. For example,
+ *       when input is 0x76543210, the output sequence will be fp8(7, 3, 6, 2, 5, 1, 4, 0).
+ *       Therefore, the input tensor must be preprocessed with permute_vectors_i4x4_b on the host
+ * side before using this function.
  *
  * @see permute_vectors_i4x4_b
  */
+template <bool IsInputPermuted>
 CK_TILE_DEVICE fp8x8_t amd_assembly_i4_to_fp8x8(int a)
 {
 #if CK_TILE_USE_OCP_FP8
@@ -236,14 +237,25 @@ CK_TILE_DEVICE fp8x8_t amd_assembly_i4_to_fp8x8(int a)
     sign      = a >> 1;
     final_sel = (sign & 0x04040404) | 0x03020100;
 
-    tmp_pos           = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
-    tmp_neg           = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
-    tmp_res_odd       = __builtin_amdgcn_perm(tmp_neg, tmp_pos, final_sel);
-    auto tmp_res_low  = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x06040200);
-    auto tmp_res_high = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x07050301);
+    tmp_pos     = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
+    tmp_neg     = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    tmp_res_odd = __builtin_amdgcn_perm(tmp_neg, tmp_pos, final_sel);
 
-    return bit_cast<fp8x8_t>((static_cast<uint64_t>(tmp_res_high) << 32) | tmp_res_low);
+    if constexpr(IsInputPermuted)
+    {
+        auto tmp_res_low  = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x06040200);
+        auto tmp_res_high = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x07050301);
+        return bit_cast<fp8x8_t>((static_cast<uint64_t>(tmp_res_high) << 32) | tmp_res_low);
+    }
+    else
+    {
+        static_assert(CK_TILE_USE_PK4_LAYOUT_SHUFFLE);
+        auto tmp_res_low  = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x01050004);
+        auto tmp_res_high = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x03070206);
+        return bit_cast<fp8x8_t>((static_cast<uint64_t>(tmp_res_high) << 32) | tmp_res_low);
+    }
 }
+
 #else
 CK_TILE_DEVICE fp8x4_t i4_to_fp8x4(int q)
 {
@@ -280,13 +292,14 @@ CK_TILE_DEVICE float amd_assembly_bf8_to_fp32(uint32_t src)
  *
  * @note `int q` contains 4 bytes, each byte represents 2 int4.
  * @note This function assumes pk_int4_t has a bias of 8, meaning 0b0000 is converted to bf8(-8)
- * @note The output ordering differs from input ordering. For example, when input is 0x76543210,
- *       the output sequence will be bf8(7, 3, 6, 2, 5, 1, 4, 0). Therefore, the input tensor
- *       must be preprocessed with permute_vectors_i4x4_b on the host side before using this
- * function.
+ * @note The output ordering differs from input ordering. if IsInputPermuated is true. For example,
+ *       when input is 0x76543210, the output sequence will be fp8(7, 3, 6, 2, 5, 1, 4, 0).
+ *       Therefore, the input tensor must be preprocessed with permute_vectors_i4x4_b on the host
+ * side before using this function.
  *
  * @see permute_vectors_i4x4_b
  */
+template <bool IsInputPermuted>
 CK_TILE_DEVICE bf8x8_t amd_assembly_i4_to_bf8x8(uint32_t a)
 {
 #if CK_TILE_USE_OCP_FP8
@@ -335,13 +348,22 @@ CK_TILE_DEVICE bf8x8_t amd_assembly_i4_to_bf8x8(uint32_t a)
     sign      = a >> 1;
     final_sel = (sign & 0x04040404) | 0x03020100;
 
-    tmp_pos           = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
-    tmp_neg           = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
-    tmp_res_odd       = __builtin_amdgcn_perm(tmp_neg, tmp_pos, final_sel);
-    auto tmp_res_low  = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x06040200);
-    auto tmp_res_high = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x07050301);
-
-    return bit_cast<bf8x8_t>((static_cast<uint64_t>(tmp_res_high) << 32) | tmp_res_low);
+    tmp_pos     = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
+    tmp_neg     = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    tmp_res_odd = __builtin_amdgcn_perm(tmp_neg, tmp_pos, final_sel);
+    if constexpr(IsInputPermuted)
+    {
+        auto tmp_res_low  = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x06040200);
+        auto tmp_res_high = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x07050301);
+        return bit_cast<bf8x8_t>((static_cast<uint64_t>(tmp_res_high) << 32) | tmp_res_low);
+    }
+    else
+    {
+        static_assert(CK_TILE_USE_PK4_LAYOUT_SHUFFLE);
+        auto tmp_res_low  = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x01050004);
+        auto tmp_res_high = __builtin_amdgcn_perm(tmp_res_odd, tmp_res_even, 0x03070206);
+        return bit_cast<bf8x8_t>((static_cast<uint64_t>(tmp_res_high) << 32) | tmp_res_low);
+    }
 }
 #else
 CK_TILE_DEVICE bf8x4_t i4_to_bf8x4(int q)
@@ -616,26 +638,69 @@ CK_TILE_HOST_DEVICE fp16x8_t fp4x4_to_fp16x8_scale(const pk_fp4x4_t& src, const 
 struct PassThroughPack8
 {
     static constexpr const char* name = "PassThroughPack8";
-
+#if defined(__gfx13__)
+    static constexpr bool IsInputPermuted = false;
+#else
+    static constexpr bool IsInputPermuted = true;
+#endif
     template <typename Y, typename X>
     CK_TILE_HOST_DEVICE void operator()(Y& y, const X& x) const;
 
-    CK_TILE_HOST_DEVICE constexpr void operator()(fp16x8_t& y, const pk_int4x4_t& x) const
+    CK_TILE_HOST_DEVICE void operator()(fp16x8_t& y, const pk_int4x4_t& x) const
     {
-        y.lo = i4_to_half4(bit_cast<int>(x));
-        y.hi = i4_to_half4(bit_cast<int>(x) >> 8);
+        if constexpr(IsInputPermuted)
+        {
+            y.lo = i4_to_half4(bit_cast<int>(x));
+            y.hi = i4_to_half4(bit_cast<int>(x) >> 8);
+        }
+        else
+        {
+            // TODO: fma_from_tensor has better perforamnce but it requires special permute in host.
+            static_assert(CK_TILE_USE_PK4_LAYOUT_SHUFFLE);
+            auto lo = i4_to_half4(bit_cast<int>(x));
+            auto hi = i4_to_half4(bit_cast<int>(x) >> 8);
+
+            int32x4_t ret;
+            ret[0] = __builtin_amdgcn_perm(
+                bit_cast<uint32_t>(lo.lo), bit_cast<uint32_t>(lo.hi), 0x05040100);
+            ret[1] = __builtin_amdgcn_perm(
+                bit_cast<uint32_t>(hi.lo), bit_cast<uint32_t>(hi.hi), 0x05040100);
+            ret[2] = __builtin_amdgcn_perm(
+                bit_cast<uint32_t>(lo.lo), bit_cast<uint32_t>(lo.hi), 0x07060302);
+            ret[3] = __builtin_amdgcn_perm(
+                bit_cast<uint32_t>(hi.lo), bit_cast<uint32_t>(hi.hi), 0x07060302);
+            y = bit_cast<fp16x8_t>(ret);
+        }
     }
 
-    CK_TILE_HOST_DEVICE constexpr void operator()(bf16x8_t& y, const pk_int4x4_t& x) const
+    CK_TILE_HOST_DEVICE void operator()(bf16x8_t& y, const pk_int4x4_t& x) const
     {
-        y.lo = i4_to_bhalf4(bit_cast<int>(x));
-        y.hi = i4_to_bhalf4(bit_cast<int>(x) >> 8);
+        if constexpr(IsInputPermuted)
+        {
+            y.lo = i4_to_bhalf4(bit_cast<int>(x));
+            y.hi = i4_to_bhalf4(bit_cast<int>(x) >> 8);
+        }
+        else
+        {
+            auto lo = i4_to_bhalf4(bit_cast<int>(x));
+            auto hi = i4_to_bhalf4(bit_cast<int>(x) >> 8);
+            int32x4_t ret;
+            ret[0] = __builtin_amdgcn_perm(
+                bit_cast<uint32_t>(lo.lo), bit_cast<uint32_t>(lo.hi), 0x05040100);
+            ret[1] = __builtin_amdgcn_perm(
+                bit_cast<uint32_t>(hi.lo), bit_cast<uint32_t>(hi.hi), 0x05040100);
+            ret[2] = __builtin_amdgcn_perm(
+                bit_cast<uint32_t>(lo.lo), bit_cast<uint32_t>(lo.hi), 0x07060302);
+            ret[3] = __builtin_amdgcn_perm(
+                bit_cast<uint32_t>(hi.lo), bit_cast<uint32_t>(hi.hi), 0x07060302);
+            y = bit_cast<bf16x8_t>(ret);
+        }
     }
 
     CK_TILE_HOST_DEVICE constexpr void operator()(fp8x8_t& y, const pk_int4x4_t& x) const
     {
 #if !CONSTEXPR_LOOKUP_TABLE_FOR_FP8
-        y = amd_assembly_i4_to_fp8x8(bit_cast<uint32_t>(x));
+        y = amd_assembly_i4_to_fp8x8<IsInputPermuted>(bit_cast<uint32_t>(x));
 #else
         y.lo = i4_to_fp8x4(bit_cast<int>(x));
         y.hi = i4_to_fp8x4(bit_cast<int>(x) >> 8);
@@ -645,7 +710,7 @@ struct PassThroughPack8
     CK_TILE_HOST_DEVICE constexpr void operator()(bf8x8_t& y, const pk_int4x4_t& x) const
     {
 #if !CONSTEXPR_LOOKUP_TABLE_FOR_BF8
-        y = amd_assembly_i4_to_bf8x8(bit_cast<uint32_t>(x));
+        y = amd_assembly_i4_to_bf8x8<IsInputPermuted>(bit_cast<uint32_t>(x));
 #else
         y.lo = i4_to_bf8x4(bit_cast<int>(x));
         y.hi = i4_to_bf8x4(bit_cast<int>(x) >> 8);
@@ -674,6 +739,27 @@ struct PassThroughPack8
         y[7] = x3[1];
     }
 
+    CK_TILE_HOST_DEVICE constexpr void operator()(bf8x8_t& y, const pk_fp4x4_t& x) const
+    {
+        pk_fp4_t f0 = pk_fp4_t{x[0]};
+        pk_fp4_t f1 = pk_fp4_t{x[1]};
+        pk_fp4_t f2 = pk_fp4_t{x[2]};
+        pk_fp4_t f3 = pk_fp4_t{x[3]};
+
+        bf8x2_t x0 = f0.to_bf8x2();
+        bf8x2_t x1 = f1.to_bf8x2();
+        bf8x2_t x2 = f2.to_bf8x2();
+        bf8x2_t x3 = f3.to_bf8x2();
+
+        y[0] = x0[0];
+        y[1] = x0[1];
+        y[2] = x1[0];
+        y[3] = x1[1];
+        y[4] = x2[0];
+        y[5] = x2[1];
+        y[6] = x3[0];
+        y[7] = x3[1];
+    }
     constexpr const static bool is_pack8_invocable = true;
 };
 
@@ -1093,118 +1179,65 @@ struct FastGelu
 {
     static constexpr const char* name = "FastGelu";
 
-    template <typename Y, typename X>
-    CK_TILE_HOST void operator()(Y& y, const X& x) const;
-
-    template <typename Y, typename X>
-    CK_TILE_DEVICE void operator()(Y& y, const X& x) const;
-
-    template <>
-    CK_TILE_HOST void operator()<float, float>(float& y, const float& x) const
-    {
-        // const float u   = -2.f * x * (0.035677f * x * x + 0.797885f);
-        const float c1  = -2.0 * 0.035677f;
-        const float c2  = -2.0 * 0.797885f;
-        const float u   = x * (c1 * x * x + c2);
-        const float emu = exp(u);
-        y               = x / (1.f + emu);
-    }
-
     // device code, use lower precision "__ocml_exp_f32" and "rcp"
-    template <>
-    CK_TILE_DEVICE void operator()<float, float>(float& y, const float& x) const
+    template <typename Y, typename X>
+    CK_TILE_HOST_DEVICE void operator()(Y& y, const X& x) const
     {
+        const float x_f = type_convert<float>(x);
+#if defined(__gfx125__) || defined(__gfx13__)
+        const float c1 = 0.035677f;
+        const float c2 = 0.797885f;
+        const float u  = x_f * (c1 * x_f * x_f + c2);
+
+        y = type_convert<Y>(0.5f * x_f * (1.f + __builtin_amdgcn_tanhf(u)));
+#elif defined(__HIP_DEVICE_COMPILE__)
         // const float u   = 2.f * x * (0.035677f * x * x + 0.797885f);
         const float c1  = -2.0 * 0.035677f;
         const float c2  = -2.0 * 0.797885f;
-        const float u   = x * (c1 * x * x + c2);
+        const float u   = x_f * (c1 * x_f * x_f + c2);
         const float emu = __ocml_exp_f32(u);
 
-        y = x * ck_tile::rcp(1.f + emu);
+        y = type_convert<Y>(x_f * ck_tile::rcp(1.f + emu));
+#else
+        // const float u   = -2.f * x * (0.035677f * x * x + 0.797885f);
+        const float c1  = -2.0 * 0.035677f;
+        const float c2  = -2.0 * 0.797885f;
+        const float u   = x_f * (c1 * x_f * x_f + c2);
+        const float emu = exp(u);
+        y               = x_f / (1.f + emu);
+#endif
     }
 
     template <>
-    CK_TILE_HOST void operator()<ck_tile::fp16_t, ck_tile::fp16_t>(ck_tile::fp16_t& y,
-                                                                   const ck_tile::fp16_t& x) const
+    CK_TILE_HOST_DEVICE void
+    operator()<ck_tile::fp16_t, ck_tile::fp16_t>(ck_tile::fp16_t& y, const ck_tile::fp16_t& x) const
     {
-        float y_f;
+#if defined(__gfx125__) || defined(__gfx13__)
+        const ck_tile::fp16_t c1 = type_convert<ck_tile::fp16_t>(0.035677f);
+        const ck_tile::fp16_t c2 = type_convert<ck_tile::fp16_t>(0.797885f);
+        const ck_tile::fp16_t u  = x * (c1 * x * x + c2);
 
-        this->operator()<float, float>(y_f, type_convert<float>(x));
-
-        y = type_convert<ck_tile::fp16_t>(y_f);
+        y = type_convert<ck_tile::fp16_t>(0.5f) * x *
+            (type_convert<ck_tile::fp16_t>(1.f) + __builtin_amdgcn_tanhh(u));
+#else
+        this->operator()(y, type_convert<float>(x));
+#endif
     }
 
     template <>
-    CK_TILE_DEVICE void operator()<ck_tile::fp16_t, ck_tile::fp16_t>(ck_tile::fp16_t& y,
-                                                                     const ck_tile::fp16_t& x) const
+    CK_TILE_HOST_DEVICE void
+    operator()<ck_tile::bf16_t, ck_tile::bf16_t>(ck_tile::bf16_t& y, const ck_tile::bf16_t& x) const
     {
-        float y_f;
+#if defined(CK_TILE_SUPPORT_BF16_TRANS_INSTS)
+        const ck_tile::bf16_t c1 = type_convert<ck_tile::bf16_t>(0.035677f);
+        const ck_tile::bf16_t c2 = type_convert<ck_tile::bf16_t>(0.797885f);
+        const ck_tile::bf16_t u  = x * (c1 * x * x + c2);
 
-        this->operator()<float, float>(y_f, type_convert<float>(x));
-
-        y = type_convert<ck_tile::fp16_t>(y_f);
-    }
-
-    template <>
-    CK_TILE_HOST void operator()<ck_tile::fp16_t, float>(ck_tile::fp16_t& y, const float& x) const
-    {
-        float y_f;
-
-        this->operator()<float, float>(y_f, x);
-
-        y = type_convert<ck_tile::fp16_t>(y_f);
-    }
-
-    template <>
-    CK_TILE_DEVICE void operator()<ck_tile::fp16_t, float>(ck_tile::fp16_t& y, const float& x) const
-    {
-        float y_f;
-
-        this->operator()<float, float>(y_f, x);
-
-        y = type_convert<ck_tile::fp16_t>(y_f);
-    }
-
-    template <>
-    CK_TILE_HOST void operator()<ck_tile::bf16_t, float>(ck_tile::bf16_t& y, const float& x) const
-    {
-        float y_f;
-
-        this->operator()<float, float>(y_f, x);
-
-        y = type_convert<ck_tile::bf16_t>(y_f);
-    }
-
-    template <>
-    CK_TILE_DEVICE void operator()<ck_tile::bf16_t, float>(ck_tile::bf16_t& y, const float& x) const
-    {
-        float y_f;
-
-        this->operator()<float, float>(y_f, x);
-
-        y = type_convert<ck_tile::bf16_t>(y_f);
-    }
-
-    template <>
-    CK_TILE_DEVICE void operator()<ck_tile::bf16_t, ck_tile::bf16_t>(ck_tile::bf16_t& y,
-                                                                     const ck_tile::bf16_t& x) const
-    {
-        float y_f;
-
-        this->operator()<float, float>(y_f, type_convert<float>(x));
-
-        y = type_convert<ck_tile::bf16_t>(y_f);
-    }
-
-    template <>
-    CK_TILE_HOST void operator()<ck_tile::bf16_t, ck_tile::bf16_t>(ck_tile::bf16_t& y,
-                                                                   const ck_tile::bf16_t& x) const
-    {
-        float y_f;
-
-        this->operator()<float, float>(y_f, type_convert<float>(x));
-
-        y = type_convert<ck_tile::bf16_t>(y_f);
+        y = type_convert<ck_tile::bf16_t>(0.5f) * x *
+            (type_convert<ck_tile::bf16_t>(1.f) + __builtin_amdgcn_tanh_bf16(u));
+#else
+        this->operator()(y, type_convert<float>(x));
+#endif
     }
 };
 
@@ -1442,17 +1475,17 @@ struct SiluAsm
 
 struct TanH
 {
-    static constexpr const char* name = "TanH";
 
-    template <typename T>
-    CK_TILE_HOST_DEVICE void operator()(T& y, const T& x) const
+    template <typename Y, typename X>
+    CK_TILE_HOST_DEVICE void operator()(Y& y, const X& x) const
     {
-        static_assert(std::is_same_v<T, float> || std::is_same_v<T, double> ||
-                          std::is_same_v<T, ck_tile::fp16_t> || std::is_same_v<T, int8_t> ||
-                          std::is_same_v<T, int32_t>,
+        static_assert(std::is_same_v<X, float> || std::is_same_v<X, double> ||
+                          std::is_same_v<X, ck_tile::fp16_t> ||
+                          std::is_same_v<X, ck_tile::bf16_t> || std::is_same_v<X, int8_t> ||
+                          std::is_same_v<X, int32_t>,
                       "Data type is not supported by this operation!");
 
-        y = ck_tile::tanh(x);
+        y = type_convert<Y>(ck_tile::tanh(x));
     };
 };
 

@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "ck/utility/env.hpp"
 #include "ck/utility/data_type.hpp"
 #include "ck/utility/span.hpp"
 #include "ck/utility/type_convert.hpp"
@@ -788,22 +789,54 @@ struct Tensor
     explicit Tensor(const Tensor<FromT>& other) : Tensor(other.template CopyAsType<T>())
     {
     }
-    void savetxt(std::string file_name, std::string dtype = "float")
+    void savetxt(std::string file_name, std::string dtype = "float", int line_length = 1)
     {
         std::ofstream file(file_name);
 
+        int i = 0;
         if(file.is_open())
         {
             for(auto& itm : mData)
             {
-                if(dtype == "float")
-                    file << ck::type_convert<float>(itm) << std::endl;
-                else if(dtype == "int")
-                    file << ck::type_convert<int>(itm) << std::endl;
+                // TODO: type_convert don't support f4x2_pk_t, f8_t, bf8_t to int for now.
+                if constexpr(is_same_v<T, pk_i4_t>)
+                {
+                    auto itm_f2 = ck::type_convert<float2_t>(itm);
+                    file << itm_f2[0];
+                    i++;
+                    file << ((i % line_length == 0) ? "\n" : ", ");
+                    file << itm_f2[1];
+                    i++;
+                    file << ((i % line_length == 0) ? "\n" : ", ");
+                }
+                else if constexpr(is_same_v<T, f4x2_pk_t>)
+                {
+                    file << ck::type_convert<float>(f4_t(itm.unpack(Number<0>{})));
+                    i++;
+                    file << ((i % line_length == 0) ? "\n" : ", ");
+                    file << ck::type_convert<float>(f4_t(itm.unpack(Number<1>{})));
+                    i++;
+                    file << ((i % line_length == 0) ? "\n" : ", ");
+                }
+                else if constexpr(is_same_v<T, f8_t> || is_same_v<T, bf8_t>)
+                {
+                    file << ck::type_convert<float>(itm);
+                    i++;
+                    file << ((i % line_length == 0) ? "\n" : ", ");
+                }
                 else
-                    // TODO: we didn't implement operator<< for all custom
-                    // data types, here fall back to float in case compile error
-                    file << ck::type_convert<float>(itm) << std::endl;
+                {
+                    if(dtype == "float")
+                        file << ck::type_convert<float>(itm);
+                    else if(dtype == "int")
+                        file << ck::type_convert<int>(itm);
+                    else
+                        // TODO: we didn't implement operator<< for all custom
+                        // data types, here fall back to float in case compile error
+                        file << ck::type_convert<float>(itm);
+                    i++;
+                    file << ((i % line_length == 0) ? "\n" : ", ");
+                }
             }
             file.close();
         }
@@ -833,6 +866,8 @@ struct Tensor
             return mDesc.GetElementSpaceSize();
         }
     }
+
+    bool empty() const { return mData.empty(); }
 
     std::size_t GetElementSpaceSizeInBytes() const { return sizeof(T) * GetElementSpaceSize(); }
 

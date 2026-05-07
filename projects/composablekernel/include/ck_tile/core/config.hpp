@@ -27,8 +27,27 @@
 #if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)
 #define __gfx115__
 #endif
-#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
+#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__) || \
+    defined(__gfx1250__) || defined(__gfx1251__)
 #define __gfx12__
+#endif
+#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
+#define __gfx120__
+#endif
+#if defined(__gfx1250__) || defined(__gfx1251__)
+#define __gfx125__
+#endif
+#if defined(__gfx120__) || defined(__gfx125__)
+#define __gfx12__
+#endif
+#if defined(__gfx1310__) || defined(__gfx1370__) || defined(__gfx130F__) || \
+    defined(__gfx130C__) || defined(__gfx131F__) || defined(__gfx135F__)
+#define __gfx13__
+#endif
+
+// All GFX12.5 and some GFX13 GPU targets support bf16-trans-insts, bf16-cvt-insts & bf16-pk-insts
+#if defined(__gfx125__) || (defined(__gfx13__) && !defined(__gfx130F__) && !defined(__gfx130C__))
+#define CK_TILE_SUPPORT_BF16_TRANS_INSTS 1
 #endif
 
 #include "hip/hip_version.h"
@@ -76,7 +95,7 @@
 #define CK_TILE_FLOAT_TO_BFLOAT16_RTA_ASM 4
 
 #ifndef CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT
-#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_STANDARD
+#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_TRUNCATE
 #endif
 
 #define CK_TILE_FLOAT_TO_FP8_STANDARD 0
@@ -138,7 +157,11 @@
 #endif
 
 #ifndef CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
+#if defined(__gfx125__) || defined(__gfx13__)
 #define CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM 1
+#else
+#define CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM 1
+#endif
 #endif
 
 #ifndef CK_TILE_USE_AMD_BUFFER_LOAD
@@ -160,7 +183,7 @@
 // buffer atomic add: floating point
 #ifndef __HIP_DEVICE_COMPILE__ // for host code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
-#elif defined(__gfx9__) || defined(__gfx12__) // for GPU code
+#elif defined(__gfx9__) || defined(__gfx12__) || defined(__gfx13__) // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #else // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
@@ -180,12 +203,43 @@
 #define CK_TILE_WORKAROUND_SWDEV_XXXXXX_INT8_DS_WRITE_ISSUE 1
 #endif
 
+// workaround: gfx1250 does not support a negative offset (emulator issue)
+#define CK_TILE_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE 1
+
 #ifndef CK_TILE_WORKAROUND_ROCM_6_1_SCRATCH_MEMORY_ISSUE
 #if HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR == 1 && HIP_VERSION_PATCH >= 40091
 #define CK_TILE_WORKAROUND_ROCM_6_1_SCRATCH_MEMORY_ISSUE 1
 #else
 #define CK_TILE_WORKAROUND_ROCM_6_1_SCRATCH_MEMORY_ISSUE 0
 #endif
+#endif
+
+#if(defined(__gfx125__))
+#define CK_TILE_ENABLE_TDM_FEATURE 1
+#else
+#define CK_TILE_ENABLE_TDM_FEATURE 0
+#endif
+
+#ifndef CK_TILE_ENABLE_CLUSTER_LAUNCH
+#ifdef __HIP_DEVICE_COMPILE__ // for device code
+#if defined(__gfx125__) || defined(__gfx13__)
+#define CK_TILE_ENABLE_CLUSTER_LAUNCH 1
+#else
+#define CK_TILE_ENABLE_CLUSTER_LAUNCH 0
+#endif
+#else // for host code
+#if defined(CK_USE_GFX1250)
+#define CK_TILE_ENABLE_CLUSTER_LAUNCH 1
+#else
+#define CK_TILE_ENABLE_CLUSTER_LAUNCH 0
+#endif
+#endif
+#endif // CK_TILE_ENABLE_CLUSTER_LAUNCH
+
+#if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
+#define CK_TILE_ENABLE_TR_LOAD_FEATURE 1
+#else
+#define CK_TILE_ENABLE_TR_LOAD_FEATURE 0
 #endif
 
 // workaround for ROCm 6.2 and later
@@ -220,8 +274,12 @@
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x00020000
 #elif defined(__gfx101__) || defined(__gfx103__) // for GPU code
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x31014000
-#elif defined(__gfx11__) || defined(__gfx12__) // for GPU code
+#elif defined(__gfx11__) || defined(__gfx120__)
 #define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x31004000
+#elif defined(__gfx125__)
+#define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0x0
+#elif defined(__gfx13__)
+#define CK_TILE_BUFFER_RESOURCE_3RD_DWORD 0
 #endif
 
 #ifndef CK_TILE_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM
@@ -258,9 +316,18 @@
 #define CK_TILE_REFERENCE_MOE_SORTING_MOCK_ID 1
 #endif
 
+// Workaround for host CPU without AVX-512F support e.g. for fp32x16 (512-bits)
+#ifndef CK_TILE_AVX512F_WA
+#if defined(__HIP_DEVICE_COMPILE__) || defined(CK_TILE_HOST_HAS_AVX512F)
+#define CK_TILE_AVX512F_WA 0
+#else
+#define CK_TILE_AVX512F_WA 1
+#endif
+#endif
+
 #ifndef CK_TILE_USE_OCP_FP8
 #if defined(__HIP_DEVICE_COMPILE__)
-#if defined(__gfx950__) || defined(__gfx12__)
+#if defined(__gfx950__) || defined(__gfx12__) || defined(__gfx13__)
 #define CK_TILE_USE_OCP_FP8 1
 #else
 #define CK_TILE_USE_OCP_FP8 0
@@ -271,7 +338,7 @@
 #endif
 
 #ifndef CK_TILE_USE_BUFFER_ADDRESSING_BUILTIN
-#if __clang_major__ >= 20 && !(defined(__gfx103__) || defined(__gfx11__) || defined(__gfx12__))
+#if __clang_major__ >= 20
 #define CK_TILE_USE_BUFFER_ADDRESSING_BUILTIN 1
 #else
 #define CK_TILE_USE_BUFFER_ADDRESSING_BUILTIN 0
@@ -323,6 +390,15 @@ namespace ck_tile::core {
  * @var CK_TILE_ARCH_GFX1200 Indicates if the compiler target architecture is GFX1200.
  * @var CK_TILE_ARCH_GFX1201 Indicates if the compiler target architecture is GFX1201.
  * @var CK_TILE_ARCH_GFX12_GENERIC Indicates if the compiler target architecture is GFX12 generic.
+ * @var CK_TILE_ARCH_GFX1250 Indicates if the compiler target architecture is GFX1250.
+ * @var CK_TILE_ARCH_GFX1251 Indicates if the compiler target architecture is GFX1251.
+ * @var CK_TILE_ARCH_GFX130C Indicates if the compiler target architecture is GFX130C.
+ * @var CK_TILE_ARCH_GFX130F Indicates if the compiler target architecture is GFX130F.
+ * @var CK_TILE_ARCH_GFX1310 Indicates if the compiler target architecture is GFX1310.
+ * @var CK_TILE_ARCH_GFX131F Indicates if the compiler target architecture is GFX131F.
+ * @var CK_TILE_ARCH_GFX135F Indicates if the compiler target architecture is GFX135F.
+ * @var CK_TILE_ARCH_GFX1370 Indicates if the compiler target architecture is GFX1370.
+ * @var CK_TILE_ARCH_GFX13_GENERIC Indicates if the compiler target architecture is GFX13 generic.
  */
 struct amdgcn_compiler_target_state
 {
@@ -502,6 +578,62 @@ struct amdgcn_compiler_target_state
 #else
     static constexpr bool CK_TILE_ARCH_GFX12_GENERIC = false;
 #endif // __gfx12_generic__
+
+    // GFX12.5
+#if defined(__gfx1250__)
+    static constexpr bool CK_TILE_ARCH_GFX1250 = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX1250 = false;
+#endif // __gfx1250__
+
+#if defined(__gfx1251__)
+    static constexpr bool CK_TILE_ARCH_GFX1251 = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX1251 = false;
+#endif // __gfx1251__
+
+    // GFX13
+#if defined(__gfx130C__)
+    static constexpr bool CK_TILE_ARCH_GFX130C = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX130C = false;
+#endif // __gfx130C__
+
+#if defined(__gfx130F__)
+    static constexpr bool CK_TILE_ARCH_GFX130F = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX130F = false;
+#endif // __gfx130F__
+
+#if defined(__gfx1310__)
+    static constexpr bool CK_TILE_ARCH_GFX1310 = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX1310 = false;
+#endif // __gfx1310__
+
+#if defined(__gfx131F__)
+    static constexpr bool CK_TILE_ARCH_GFX131F = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX131F = false;
+#endif // __gfx131F__
+
+#if defined(__gfx135F__)
+    static constexpr bool CK_TILE_ARCH_GFX135F = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX135F = false;
+#endif // __gfx135F__
+
+#if defined(__gfx1370__)
+    static constexpr bool CK_TILE_ARCH_GFX1370 = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX1370 = false;
+#endif // __gfx1370__
+
+#if defined(__gfx13_generic__)
+    static constexpr bool CK_TILE_ARCH_GFX13_GENERIC = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX13_GENERIC = false;
+#endif // __gfx13_generic__
 };
 
 /**
@@ -552,7 +684,16 @@ CK_TILE_HOST_DEVICE static constexpr uint32_t count_values_of(T search, Ts... se
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX11_GENERIC,   \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1200,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1201,         \
-        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX12_GENERIC
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX12_GENERIC,   \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1250,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1251,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX130C,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX130F,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1310,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX131F,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX135F,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1370,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX13_GENERIC
 
 // Sanity check: make sure only one target architecture is defined during device compile
 static_assert(!amdgcn_compiler_target_state::CK_TILE_DEVICE_COMPILE ||

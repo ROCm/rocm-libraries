@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck/utility/common_header.hpp"
+#include "ck/host_utility/device_prop.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
@@ -40,7 +41,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
                             const CGridDesc_M_N c_grid_desc_m_n)
 {
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx94__) || defined(__gfx11__) || \
-    defined(__gfx12__)
+    defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -74,7 +75,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
     kernel_gemm_xdlops_v2r3(const typename GridwiseGemm::Argument karg)
 {
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx94__) || defined(__gfx11__) || \
-    defined(__gfx12__)
+    defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -362,7 +363,7 @@ struct GridwiseGemm_k0mk1_k0nk1_mn_xdlops_v2r3
         InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
     __device__ static bool constexpr IsValidCompilationParameter()
     {
-        return ck::tensor_operation::device::IsValidGemmCompilationParameter<
+        constexpr bool valid = tensor_operation::device::IsValidGemmCompilationParameter<
             BlockSize,
             MPerBlock,
             NPerBlock,
@@ -371,14 +372,26 @@ struct GridwiseGemm_k0mk1_k0nk1_mn_xdlops_v2r3
             MXdlPerWave,
             NXdlPerWave,
             FloatC,
-            CGlobalMemoryDataOperation>();
+            CGlobalMemoryDataOperation_>();
+        if constexpr(!valid)
+        {
+            return false;
+        }
+
+        if constexpr(K1Value %
+                         MfmaSelector<FloatAB, MPerXdl, NPerXdl, FloatAB, is_single_rate_mfma>::
+                             selected_mfma.k_per_blk !=
+                     0)
+        {
+            return false;
+        }
+        return true;
     }
 
     template <typename AGridDesc_K0_M_K1, typename BGridDesc_K0_N_K1, typename CGridDesc_M_N>
-    __host__ __device__ static constexpr bool
-    CheckValidity(const AGridDesc_K0_M_K1& a_grid_desc_k0_m_k1,
-                  const BGridDesc_K0_N_K1& b_grid_desc_k0_n_k1,
-                  const CGridDesc_M_N& c_grid_desc_m_n)
+    __host__ static bool CheckValidity(const AGridDesc_K0_M_K1& a_grid_desc_k0_m_k1,
+                                       const BGridDesc_K0_N_K1& b_grid_desc_k0_n_k1,
+                                       const CGridDesc_M_N& c_grid_desc_m_n)
     {
         static_assert(is_known_at_compile_time<remove_cv_t<decltype(K1)>>::value,
                       "wrong! K1 need to be known at compile-time");
@@ -386,6 +399,11 @@ struct GridwiseGemm_k0mk1_k0nk1_mn_xdlops_v2r3
         static_assert((MPerBlock % (MPerXdl * MXdlPerWave) == 0) &&
                           (NPerBlock % (NXdlPerWave * NPerXdl)) == 0,
                       "Invalid tuning param!");
+
+        if(!is_xdl_wmma_k_supported<FloatAB, K0PerBlock * K1Value, K1Value>())
+        {
+            return false;
+        }
 
         const auto M  = a_grid_desc_k0_m_k1.GetLength(I1);
         const auto N  = b_grid_desc_k0_n_k1.GetLength(I1);
@@ -901,8 +919,6 @@ struct GridwiseGemm_k0mk1_k0nk1_mn_xdlops_v2r3_ext
         }
     }
 
-    IS_VALID_COMPILATION_PARAMETER_IMPL(FloatC)
-
     __host__ static constexpr bool CheckValidity(const Problem& problem)
     {
         static_assert(is_known_at_compile_time<remove_cv_t<decltype(K1)>>::value,
@@ -911,6 +927,11 @@ struct GridwiseGemm_k0mk1_k0nk1_mn_xdlops_v2r3_ext
         static_assert((MPerBlock % (MPerXdl * MXdlPerWave) == 0) &&
                           (NPerBlock % (NXdlPerWave * NPerXdl)) == 0,
                       "Invalid tuning param!");
+
+        if(!is_xdl_wmma_k_supported<FloatAB, K0PerBlock * K1Value, K1Value>())
+        {
+            return false;
+        }
 
         if constexpr(!(GemmSpec == tensor_operation::device::GemmSpecialization::MPadding ||
                        GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||

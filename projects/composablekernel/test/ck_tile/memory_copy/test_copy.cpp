@@ -86,7 +86,8 @@ class TestCkTileMemoryCopy : public ::testing::TestWithParam<std::tuple<int, int
         using Problem = ck_tile::TileCopyProblem<DataType, Shape, AsyncCopy, CpyCfg>;
         using Kernel  = ck_tile::TileCopy<Problem>;
 
-        constexpr ck_tile::index_t kBlockSize  = 128;
+        ck_tile::index_t kBlockSize =
+            ck_tile::is_wave32() ? Shape::BlockSize / 2 : Shape::BlockSize;
         constexpr ck_tile::index_t kBlockPerCu = 1;
         // when copy fp6x16 buffer, tread it as int8 buffer and recompute n-dim size.
         ck_tile::index_t cpy_n =
@@ -141,6 +142,7 @@ class TestCkTileMemoryCopyFP8Async : public TestCkTileMemoryCopy<ck_tile::fp8_t>
 {
 };
 
+#if !(defined(CK_USE_GFX1250) || defined(CK_USE_GFX13))
 TEST_P(TestCkTileMemoryCopyF6x16, TestCorrectness)
 {
     auto [M, N, warp_id] = GetParam();
@@ -152,6 +154,7 @@ TEST_P(TestCkTileMemoryCopyF6x16Async, TestCorrectness)
     auto [M, N, warp_id] = GetParam();
     this->Run({M, N, warp_id});
 }
+#endif
 
 TEST_P(TestCkTileMemoryCopyHalfAsync, TestCorrectness)
 {

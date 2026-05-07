@@ -35,7 +35,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -67,7 +67,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_2lds(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         // Pass two lds pointer is the key to tell compiler that ds_read/write
@@ -880,6 +880,12 @@ struct GridwiseGemm_xdl_cshuffle_v3
             auto KReadPadSplited    = math::integer_divide_ceil(karg.K, K_t) * KReadVec;
             if((KReadPadSplited * (karg.KBatch - 1)) >= karg.K)
             {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Arg K value is too small for the given KBatch! K: " << karg.K
+                              << ", K_Batch * KReadVec: " << K_t << " " << __FILE__ << ":"
+                              << __LINE__ << ", in function: " << __func__ << std::endl;
+                }
                 return false;
             }
         }
@@ -1001,6 +1007,13 @@ struct GridwiseGemm_xdl_cshuffle_v3
         {
             if(num_k_loop <= BlockwiseGemmPipe::PrefetchStages)
             {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "num_k_loop: " << num_k_loop
+                              << " is not sufficient for the given prefetch stage: "
+                              << BlockwiseGemmPipe::PrefetchStages << " " << __FILE__ << ":"
+                              << __LINE__ << ", in function: " << __func__ << std::endl;
+                }
                 return false;
             }
         }
@@ -1220,6 +1233,10 @@ struct GridwiseGemm_xdl_cshuffle_v3
         auto b_thread_offset_n = get_thread_local_1d_id() % NPerXdl +
                                  (get_thread_local_1d_id() / WaveSize) % NWaves * NPerXdl;
         auto b_thread_offset_k = (get_thread_local_1d_id() % 16) / NPerXdl * KPerThread;
+#elif defined(__gfx13__)
+        auto b_thread_offset_n = (get_thread_local_1d_id() % WaveSize >> 1) +
+                                 (get_thread_local_1d_id() / WaveSize) % NWaves * NPerXdl;
+        auto b_thread_offset_k = (get_thread_local_1d_id() % WaveSize) / NPerXdl * KPerThread;
 #else
         auto b_thread_offset_n = get_thread_local_1d_id() % NPerXdl +
                                  (get_thread_local_1d_id() / WaveSize) % NWaves * NPerXdl;

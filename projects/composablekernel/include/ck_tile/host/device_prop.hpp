@@ -52,6 +52,23 @@ inline std::string get_device_name()
     }
 }
 
+inline int get_device_revision()
+{
+    hipDeviceProp_t props{};
+    int device;
+    auto status = hipGetDevice(&device);
+    if(status != hipSuccess)
+    {
+        return -1; // Error: cannot get device
+    }
+    status = hipGetDeviceProperties(&props, device);
+    if(status != hipSuccess)
+    {
+        return -1; // Error: cannot get device properties
+    }
+    return props.asicRevision;
+}
+
 inline bool is_gfx11_supported()
 {
     return get_device_name() == "gfx1100" || get_device_name() == "gfx1101" ||
@@ -60,12 +77,26 @@ inline bool is_gfx11_supported()
            get_device_name() == "gfx1152" || get_device_name() == "gfx1153";
 }
 
-inline bool is_gfx12_supported()
+inline bool is_gfx120_supported()
 {
     return get_device_name() == "gfx1200" || get_device_name() == "gfx1201";
 }
 
+inline bool is_gfx125_supported()
+{
+    return get_device_name() == "gfx1250" || get_device_name() == "gfx1251";
+}
+
+inline bool is_gfx12_supported() { return is_gfx120_supported() || is_gfx125_supported(); }
+
 inline bool is_gfx95_supported() { return get_device_name() == "gfx950"; }
+
+inline bool is_gfx13_supported()
+{
+    return ck_tile::get_device_name() == "gfx1310" || ck_tile::get_device_name() == "gfx1370" ||
+           ck_tile::get_device_name() == "gfx130F" || ck_tile::get_device_name() == "gfx130C" ||
+           ck_tile::get_device_name() == "gfx131F" || ck_tile::get_device_name() == "gfx135F";
+}
 
 inline size_t get_num_cus()
 {

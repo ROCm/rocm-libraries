@@ -36,7 +36,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_gemm_xdl_cshuffle_v3(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -60,7 +60,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_gemm_xdl_cshuffle_v3_2lds(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         // Pass two lds pointer is the key to tell compiler that ds_read/write
@@ -1647,7 +1647,8 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
                         }
                     }
                 } // shuffle c and write-out end
-
+                // make sure next loop LDS is ready for use
+                block_sync_lds();
                 // exit condition
                 iter_end -= current_iter_length;
                 if(iter_end <= iter_start)
@@ -1656,8 +1657,6 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
                 {
                     block_acc_offset -= MPerBlock * NPerBlock;
                 }
-                // make sure next loop LDS is ready for use
-                block_sync_lds();
             } // while loop
 
         } // for loop

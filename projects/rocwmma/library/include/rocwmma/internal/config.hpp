@@ -44,6 +44,7 @@
 /// ROCWMMA_ARCH_GFX1153
 /// ROCWMMA_ARCH_GFX1200
 /// ROCWMMA_ARCH_GFX1201
+/// ROCWMMA_ARCH_GFX1310
 ///
 /// IMPORTANT: __gfx908__ and similar macros are exclusively defined during the device
 ///            compiler pass, and all other macros rely on their definition.
@@ -82,6 +83,8 @@
 #define ROCWMMA_ARCH_GFX1200 __gfx1200__
 #elif defined(__gfx1201__) && ROCWMMA_DEVICE_COMPILE
 #define ROCWMMA_ARCH_GFX1201 __gfx1201__
+#elif defined(__gfx1310__) && ROCWMMA_DEVICE_COMPILE
+#define ROCWMMA_ARCH_GFX1310 __gfx1310__
 #elif !ROCWMMA_DEVICE_COMPILE
 #define ROCWMMA_ARCH_HOST 1
 #else
@@ -130,6 +133,9 @@ static_assert(0, "Unsupported architecture");
 #if !defined(ROCWMMA_ARCH_GFX1201)
 #define ROCWMMA_ARCH_GFX1201 0
 #endif
+#if !defined(ROCWMMA_ARCH_GFX1310)
+#define ROCWMMA_ARCH_GFX1310 0
+#endif
 #if !defined(ROCWMMA_ARCH_HOST)
 #define ROCWMMA_ARCH_HOST 0
 #endif
@@ -140,6 +146,7 @@ static_assert(0, "Unsupported architecture");
 /// ROCWMMA_ARCH_GFX9
 /// ROCWMMA_ARCH_GFX11
 /// ROCWMMA_ARCH_GFX12
+/// ROCWMMA_ARCH_GFX13
 /// ROCWMMA_WAVE64_MODE
 /// ROCWMMA_WAVE32_MODE
 /// ROCWMMA_BLOCK_DIM_16_SUPPORTED
@@ -164,6 +171,12 @@ static_assert(0, "Unsupported architecture");
 #define ROCWMMA_BLOCK_DIM_16_SUPPORTED 1
 #endif
 
+#if ROCWMMA_ARCH_GFX1310
+#define ROCWMMA_ARCH_GFX13 1
+#define ROCWMMA_WAVE32_MODE 1
+#define ROCWMMA_BLOCK_DIM_16_SUPPORTED 1
+#endif
+
 #if ROCWMMA_ARCH_HOST
 #define ROCWMMA_BLOCK_DIM_16_SUPPORTED 1
 #define ROCWMMA_BLOCK_DIM_32_SUPPORTED 1
@@ -177,6 +190,9 @@ static_assert(0, "Unsupported architecture");
 #endif
 #if !defined(ROCWMMA_ARCH_GFX12)
 #define ROCWMMA_ARCH_GFX12 0
+#endif
+#if !defined(ROCWMMA_ARCH_GFX13)
+#define ROCWMMA_ARCH_GFX13 0
 #endif
 #if !defined(ROCWMMA_WAVE64_MODE)
 #define ROCWMMA_WAVE64_MODE 0
@@ -225,6 +241,13 @@ static_assert((bool)(ROCWMMA_WAVE32_MODE) && !(bool)(ROCWMMA_WAVE64_MODE),
               "rocWMMA supports only wave32 for gfx12 arch");
 static_assert((bool)(ROCWMMA_BLOCK_DIM_16_SUPPORTED) && !(bool)(ROCWMMA_BLOCK_DIM_32_SUPPORTED),
               "rocWMMA supports only block size of 16 for gfx12 arch");
+#endif
+
+#if ROCWMMA_ARCH_GFX13
+static_assert((bool)(ROCWMMA_WAVE32_MODE) && !(bool)(ROCWMMA_WAVE64_MODE),
+              "rocWMMA supports only wave32 for gfx13 arch");
+static_assert((bool)(ROCWMMA_BLOCK_DIM_16_SUPPORTED) && !(bool)(ROCWMMA_BLOCK_DIM_32_SUPPORTED),
+              "rocWMMA supports only block size of 16 for gfx13 arch");
 #endif
 
 ///

@@ -78,7 +78,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const ComputePtrOffset compute_ptr_offset_of_n,
         const index_t num_k_per_block)
 {
-#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
+#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) || \
+    defined(__gfx13__))
 #if defined(__gfx11__)
     // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
     using e_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
@@ -145,7 +146,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     ignore = compute_ptr_offset_of_batch;
     ignore = compute_ptr_offset_of_n;
     ignore = num_k_per_block;
-#endif // End of if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
+#endif // End of if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) ||
+       // defined(__gfx13__))
 }
 
 } // namespace
@@ -1570,7 +1572,7 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             return false;
         }
 
-        if(!(ck::is_gfx11_supported() || ck::is_gfx12_supported()))
+        if(!(ck::is_gfx11_supported() || ck::is_gfx12_supported() || ck::is_gfx13_supported()))
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
@@ -1581,6 +1583,10 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             return false;
         }
 
+        if(!is_xdl_wmma_k_supported<ADataType, KPerBlock>())
+        {
+            return false;
+        }
         // check ConvolutionForwardSpecialization
         if constexpr(ConvForwardSpecialization ==
                      ConvolutionForwardSpecialization::Filter1x1Stride1Pad0)

@@ -72,6 +72,17 @@ static constexpr auto TensorSpecB0 = ck::tensor_operation::device::TensorSpecial
 static constexpr auto TensorSpecB1 = ck::tensor_operation::device::TensorSpecialization::Default;
 static constexpr auto TensorSpecC  = ck::tensor_operation::device::TensorSpecialization::Default;
 
+// gfx125 KPerBlock size
+#ifdef USE_GFX125_CONFIG
+#define KPerBlock_val0 96
+#define KPerBlock_val1 160
+#define KPerBlock_val2 320
+#else
+#define KPerBlock_val0 48
+#define KPerBlock_val1 80
+#define KPerBlock_val2 160
+#endif
+
 // clang-format off
 #define CK_MHA_USE_WAVE_1
 #define CK_MHA_USE_WAVE_2
@@ -88,7 +99,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             32,
             //      Gemm 0
-            16, 32, 160, 8, 8, 
+            16, 32, KPerBlock_val2, 8, 8, 
             //      Gemm 1
                 80, 32, 8,
             16, 16, 16,
@@ -110,7 +121,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             32,
             //      Gemm 0
-            16, 64, 80, 8, 8, 
+            16, 64, KPerBlock_val1, 8, 8, 
             //      Gemm 1
                 80, 64, 8,
             16, 16, 16,
@@ -132,7 +143,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             32,
             //      Gemm 0
-            16, 64, 48, 8,  8,
+            16, 64, KPerBlock_val0, 8,  8,
             //      Gemm 1
                 48, 64, 8,  
             16, 16, 16, 
@@ -156,7 +167,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             64,
             //      Gemm 0
-            32, 64, 48, 8,  8,
+            32, 64, KPerBlock_val0, 8,  8,
             //      Gemm 1
                 48, 64, 8,  
             16, 16, 16, 
@@ -178,7 +189,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             64,
             //      Gemm 0
-            32, 64, 80, 8,  8,
+            32, 64, KPerBlock_val1, 8,  8,
             //      Gemm 1
                 80, 64, 8,  
             16, 16, 16, 
@@ -200,7 +211,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             64,
             //      Gemm 0
-            32, 32, 160, 8, 8,
+            32, 32, KPerBlock_val2, 8, 8,
             //      Gemm 1
                 80, 32, 8,  
             16, 16, 16, 
@@ -224,7 +235,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             128,
             //      Gemm 0
-            64, 128, 80, 8, 8,  
+            64, 128, KPerBlock_val1, 8, 8,  
             //      Gemm 1
                 80, 64, 8,  
             16, 16, 16, 
@@ -246,7 +257,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             128,
             //      Gemm 0
-            64, 192, 48, 8, 8,
+            64, 192, KPerBlock_val0, 8, 8,
             //      Gemm 1
                 48, 64, 8,  
             16, 16, 16, 
@@ -268,7 +279,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             128,
             //      Gemm 0
-            64, 64, 48, 8, 8,
+            64, 64, KPerBlock_val0, 8, 8,
             //      Gemm 1
                 48, 64, 8,  
             16, 16, 16, 
@@ -292,7 +303,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             256,
             //      Gemm 0
-            128, 192, 48, 8,4,   
+            128, 192, KPerBlock_val0, 8,4,   
             //      Gemm 1
                  48, 64, 8,  
             16, 16, 16, 
@@ -314,7 +325,7 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             256,
             //      Gemm 0
-            128, 64, 48, 8,4,   
+            128, 64, KPerBlock_val0, 8,4,   
             //      Gemm 1
                  48, 64, 8,  
             16, 16, 16, 
@@ -358,7 +369,8 @@ using ReferenceGemm1Instance = ck::tensor_operation::host::ReferenceBatchedGemm<
 
 int main(int argc, char* argv[])
 {
-    bool is_supported = ck::is_gfx11_supported();
+    bool is_supported =
+        ck::is_gfx11_supported() || ck::is_gfx12_supported() || ck::is_gfx13_supported();
     if(!is_supported)
     {
         std::cout << "WARNING: wmma example not supported on the platform " << ck::get_device_name()

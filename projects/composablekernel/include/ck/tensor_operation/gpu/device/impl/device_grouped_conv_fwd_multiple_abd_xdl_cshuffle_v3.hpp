@@ -85,7 +85,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                             const ComputePtrOffset compute_ptr_offset_of_groups,
                                             const ComputePtrOffset compute_ptr_offset_of_n)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         // offset base pointer for each work-group
@@ -122,7 +122,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
         if constexpr(GridwiseGemm::DirectLoadEnabled)
         {
-#if defined(__gfx950__)
+#if defined(__gfx950__) || defined(__gfx125__) || defined(__gfx13__)
             GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
                 karg.p_a_grid + a_group_offset + a_n_offset,
                 karg.p_b_grid + b_group_offset,
@@ -205,7 +205,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const ComputePtrOffset compute_ptr_offset_of_groups,
         const ComputePtrOffset compute_ptr_offset_of_n)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         // offset base pointer for each work-group
@@ -1483,7 +1483,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         // check device
         if constexpr(DirectLoad)
         {
-            if(get_device_name() != "gfx950")
+            if(get_device_name() != "gfx950" && is_gfx125_supported() == false)
             {
                 return false;
             }

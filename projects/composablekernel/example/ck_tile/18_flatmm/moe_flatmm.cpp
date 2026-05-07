@@ -114,6 +114,10 @@ float moe_gemm(const ck_tile::MoeFlatmmHostArgs<ScaleM, ScaleN>& args,
                                            ELayout,
                                            FlatmmConfig::NumWaveGroups>;
 
+    constexpr ck_tile::index_t VectorLoadSize = ck_tile::min(
+        static_cast<ck_tile::index_t>(FlatmmConfig::M_Warp_Tile * FlatmmConfig::K_Warp_Tile *
+                                      sizeof(ADataType) / 32),
+        16);
     using CodegenGemmTraits = ck_tile::TileGemmUniversalTraits<FlatmmConfig::kPadM,
                                                                FlatmmConfig::kPadN,
                                                                FlatmmConfig::kPadK,
@@ -125,7 +129,8 @@ float moe_gemm(const ck_tile::MoeFlatmmHostArgs<ScaleM, ScaleN>& args,
                                                                FlatmmConfig::UseStructuredSparsity,
                                                                false, // UsePersistentKernel_
                                                                FlatmmConfig::NumWaveGroups,
-                                                               true>; // Preshuffle_
+                                                               true, // Preshuffle_
+                                                               VectorLoadSize>;
 
     if constexpr(moe_kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up)
     {
@@ -194,8 +199,8 @@ float moe_gemm(const ck_tile::MoeFlatmmHostArgs<ScaleM, ScaleN>& args,
 
         auto kargs = Kernel::MakeKernelArgs(args);
 
-        const dim3 grids      = Kernel::GridSize(kargs);
-        constexpr dim3 blocks = Kernel::BlockSize();
+        const dim3 grids  = Kernel::GridSize(kargs);
+        const dim3 blocks = Kernel::BlockSize();
 
         if(!Kernel::IsSupportedArgument(kargs))
         {
@@ -421,6 +426,9 @@ int main(int argc, char* argv[])
 
     try
     {
+#if CK_TILE_USE_WMMA
+        return !run_moe_flatmm_example<FlatmmConfig16_Wmma>(argc, argv);
+#else
         int warp_tile = arg_parser.get_int("warp_tile");
         if(warp_tile == 0)
         {
@@ -438,6 +446,7 @@ int main(int argc, char* argv[])
         {
             return !run_moe_flatmm_example<FlatmmConfig32_950>(argc, argv);
         }
+#endif
     }
     catch(const std::runtime_error& e)
     {

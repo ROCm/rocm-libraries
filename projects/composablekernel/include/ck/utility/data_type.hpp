@@ -4,6 +4,8 @@
 #pragma once
 #include <stdint.h>
 #include "ck/utility/amd_ck_fp8.hpp"
+#include "ck/utility/e4m3.hpp"
+#include "ck/utility/e5m3.hpp"
 #include "ck/utility/e8m0.hpp"
 #include "ck/utility/statically_indexed_array.hpp"
 
@@ -26,10 +28,16 @@ using byte = unsigned char;
 using std::byte;
 #endif
 
-using tf32_t  = _BitInt(19); // 1 sign bit, 8 exponent bits, 10 mantissa bits
+using tf32_t = _BitInt(19); // 1 sign bit, 8 exponent bits, 10 mantissa bits
+#if CK_USE_LLVM_BUILTIN_BF16
+using bhalf_t = __bf16;
+#else
 using bhalf_t = ushort;
+#endif
+
 using half_t  = _Float16;
 using int4_t  = _BitInt(4);
+using uint4_t = unsigned _BitInt(4);
 using f4_t    = unsigned _BitInt(4);
 using f6_t    = _BitInt(6);          // e2m3 format
 using bf6_t   = unsigned _BitInt(6); // e3m2 format
@@ -39,10 +47,12 @@ using bf6_t   = unsigned _BitInt(6); // e3m2 format
 template <typename T>
 inline constexpr bool is_native_type()
 {
-    return is_same_v<T, double> || is_same_v<T, float> || is_same_v<T, half_t> ||
-           is_same_v<T, bhalf_t> || is_same_v<T, int32_t> || is_same_v<T, uint32_t> ||
-           is_same_v<T, int8_t> || is_same_v<T, uint8_t> || is_same_v<T, _BitInt(8)> ||
-           is_same_v<T, unsigned _BitInt(8)> || is_same_v<T, bool>;
+    return is_same<T, double>::value || is_same<T, float>::value || is_same<T, half_t>::value ||
+           is_same<T, bhalf_t>::value || is_same<T, int32_t>::value ||
+           is_same<T, uint32_t>::value || is_same<T, int8_t>::value || is_same<T, uint8_t>::value ||
+           is_same_v<T, _BitInt(8)> || is_same_v<T, unsigned _BitInt(8)> ||
+           is_same<T, bool>::value || is_same<T, f4_t>::value || is_same<T, f6_t>::value ||
+           is_same<T, bf6_t>::value || is_same<T, __bf16>::value || is_same<T, __fp16>::value;
 }
 
 /**
@@ -85,6 +95,10 @@ struct f4x2_pk_t
     type data;
     __host__ __device__ constexpr f4x2_pk_t() : data{type{}} {}
     __host__ __device__ constexpr f4x2_pk_t(const type init) : data{init} {}
+    __host__ __device__ constexpr f4x2_pk_t(const type x0, const type x1)
+        : data{static_cast<type>((x1 << 4) | (x0 & 0b00001111))}
+    {
+    }
 
     template <index_t I>
     __host__ __device__ inline type unpack(Number<I>) const
@@ -96,9 +110,10 @@ struct f4x2_pk_t
             return data & 0b00001111;
     }
 
-    __host__ __device__ inline type pack(const type x0, const type x1)
+    __host__ __device__ inline f4x2_pk_t& pack(const type x0, const type x1)
     {
-        return (x1 << 4) | (x0 & 0b00001111);
+        this->data = (x1 << 4) | (x0 & 0b00001111);
+        return *this;
     }
 
     // Compare operator
@@ -402,6 +417,20 @@ struct scalar_type<e8m0_bexp_t>
     using type                           = typename e8m0_bexp_t::type;
     static constexpr index_t vector_size = 1;
 };
+
+template <>
+struct scalar_type<e4m3_scale_t>
+{
+    using type                           = e4m3_scale_t::type;
+    static constexpr index_t vector_size = 1;
+};
+
+template <>
+struct scalar_type<e5m3_scale_t>
+{
+    using type                           = e5m3_scale_t::type;
+    static constexpr index_t vector_size = 1;
+};
 #endif
 
 template <>
@@ -468,13 +497,13 @@ struct packed_type_info
         static_cast<index_t>(get_packed_type_info().At(ck::Number<0>{}));
 };
 template <typename T>
-using element_type_t = typename packed_type_info<T>::element_type;
+using element_type_t = typename packed_type_info<remove_cvref_t<T>>::element_type;
 
 template <typename T>
-inline constexpr index_t packed_size_v = packed_type_info<T>::packed_size;
+inline constexpr index_t packed_size_v = packed_type_info<remove_cvref_t<T>>::packed_size;
 
 template <typename T>
-inline constexpr bool is_packed_type_v = packed_size_v<T> > 1;
+inline constexpr bool is_packed_type_v = packed_size_v<remove_cvref_t<T>> > 1;
 
 template <typename T, index_t N = 0>
 struct packed_type_maker
@@ -551,6 +580,10 @@ inline const char* get_type_name()
 #ifndef CK_CODE_GEN_RTC
     else if constexpr(is_same_v<T, e8m0_bexp_t>)
         return "e8m0";
+    else if constexpr(is_same_v<T, e4m3_scale_t>)
+        return "e4m3";
+    else if constexpr(is_same_v<T, e5m3_scale_t>)
+        return "e5m3";
 #endif
     else if constexpr(is_same_v<T, float>)
         return "fp32";

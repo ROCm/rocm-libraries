@@ -75,7 +75,7 @@ auto shuffle_b(const ck_tile::HostTensor<T>& t, GemmConfig)
     int n_ = t.get_lengths()[1];
     int k_ = t.get_lengths()[0];
 
-    if(ck_tile::is_gfx12_supported())
+    if(ck_tile::is_gfx12_supported() || ck_tile::is_gfx13_supported())
     {
         constexpr int divisor      = 2;
         constexpr int kABK1PerLane = 8;
@@ -146,7 +146,7 @@ auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmC
     int n_      = t.get_lengths()[1];
     int k_      = t.get_lengths()[0];
     int NRepeat = gemmConfig.N_Tile / gemmConfig.N_Warp_Tile / gemmConfig.N_Warp;
-    if(ck_tile::is_gfx12_supported())
+    if(ck_tile::is_gfx12_supported() || ck_tile::is_gfx13_supported())
     {
         constexpr int divisor      = 2;
         constexpr int kABK1PerLane = 8;
@@ -160,7 +160,7 @@ auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmC
                                        divisor,
                                        kABK1PerLane});
         std::copy(t.begin(), t.end(), t_view.begin());
-        return ck_tile::reference_permute(t_view, {0, 3, 1, 4, 6, 5, 2, 7});
+        return ck_tile::reference_permute(t_view, {0, 3, 1, 4, 6, 2, 5, 7});
     }
     else
     {
@@ -183,4 +183,58 @@ auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t)
 {
     return shuffle_b_permuteN(t, GemmConfig{});
 }
+
+template <typename FlatmmConfig, typename T>
+auto shuffle_b_v0(const ck_tile::HostTensor<T>& t)
+{
+    assert(t.get_lengths().size() == 2);
+    int n_ = t.get_lengths()[1];
+    int k_ = t.get_lengths()[0];
+
+    constexpr int MaxVecSize = 16 / sizeof(T);
+    const int KLane =
+        ck_tile::is_wave32() ? 32 / FlatmmConfig::N_Warp_Tile : 64 / FlatmmConfig::N_Warp_Tile;
+    int ItemsPerAccess = std::min(MaxVecSize, FlatmmConfig::K_Warp_Tile / KLane);
+    // WMMA data is continuous in KLane
+    if(ck_tile::is_gfx13_supported())
+    {
+        ItemsPerAccess *= KLane;
+    }
+
+    ck_tile::HostTensor<T> t_view({n_ / FlatmmConfig::N_Warp_Tile,
+                                   FlatmmConfig::N_Warp_Tile,
+                                   k_ / ItemsPerAccess,
+                                   ItemsPerAccess});
+    std::copy(t.begin(), t.end(), t_view.begin());
+    return ck_tile::reference_permute(t_view, {0, 2, 1, 3});
+}
+
+template <typename FlatmmConfig, typename T>
+auto shuffle_b_v1(const ck_tile::HostTensor<T>& t)
+{
+    assert(t.get_lengths().size() == 2);
+    int n_ = t.get_lengths()[1];
+    int k_ = t.get_lengths()[0];
+
+    constexpr int MaxVecSize = 16 / sizeof(T);
+    const int KLane =
+        ck_tile::is_wave32() ? 32 / FlatmmConfig::N_Warp_Tile : 64 / FlatmmConfig::N_Warp_Tile;
+    int ItemsPerAccess = std::min(MaxVecSize, FlatmmConfig::K_Warp_Tile / KLane);
+    // WMMA data is continuous in KLane
+    if(ck_tile::is_gfx13_supported())
+    {
+        ItemsPerAccess *= KLane;
+    }
+    constexpr int NRepeat = FlatmmConfig::N_Tile / FlatmmConfig::N_Warp_Tile / FlatmmConfig::N_Warp;
+
+    ck_tile::HostTensor<T> t_view({n_ / FlatmmConfig::N_Tile,
+                                   FlatmmConfig::N_Warp,
+                                   FlatmmConfig::N_Warp_Tile,
+                                   NRepeat,
+                                   k_ / ItemsPerAccess,
+                                   ItemsPerAccess});
+    std::copy(t.begin(), t.end(), t_view.begin());
+    return ck_tile::reference_permute(t_view, {0, 3, 1, 4, 2, 5});
+}
+
 } // namespace ck_tile

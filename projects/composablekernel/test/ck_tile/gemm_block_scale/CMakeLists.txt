@@ -8,7 +8,7 @@ endif()
 
 list(APPEND TEST_GEMM_COMPILE_OPTIONS -mllvm -enable-noalias-to-md-conversion=0)
 
-if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
+if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12|gfx13")
     # Typed Test Suite for GEMM Quantization - split into multiple files to reduce compile time
     
     # AQuant tests - split into 10 files

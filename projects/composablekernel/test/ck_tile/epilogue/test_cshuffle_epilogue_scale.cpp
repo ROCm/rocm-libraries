@@ -12,7 +12,11 @@ constexpr ck_tile::index_t kScaledColIndex = 1;
 } // namespace
 
 // Half precision test configuration for scale tests (128x128 fits in unique fp16 range)
-using HalfConfig       = TileConfig<half_t, 128, 128, 2, 2, 32, 32, 8>;
+#if CK_TILE_USE_WMMA
+using HalfConfig = TileConfig<half_t, 128, 128, 2, 2, 16, 16, 16>;
+#else
+using HalfConfig = TileConfig<half_t, 128, 128, 2, 2, 32, 32, 8>;
+#endif
 using ScaleTestProblem = MakeProblem<HalfConfig>;
 
 class CShuffleEpilogueScaleTest : public ::testing::Test

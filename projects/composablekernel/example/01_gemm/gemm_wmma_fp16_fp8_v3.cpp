@@ -5,8 +5,9 @@
 
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_wmma_cshuffle_v3.hpp"
 
-using ADataType        = ck::half_t;
-using BDataType        = ck::f8_t;
+using ADataType = ck::half_t;
+// using BDataType        = ck::f8_t;
+using BDataType        = ck::half_t;
 using AccDataType      = float;
 using CShuffleDataType = ck::half_t;
 using CDataType        = ck::half_t;

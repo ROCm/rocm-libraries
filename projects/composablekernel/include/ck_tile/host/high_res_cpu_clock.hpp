@@ -46,6 +46,10 @@ static inline timepoint_t high_res_now()
 
     return tp;
 }
+#undef max
+#undef min
+#undef TRUE
+#undef FALSE
 
 #elif defined(__linux__) || defined(__unix__) || defined(_POSIX_VERSION)
 // Linux/Unix/POSIX
@@ -72,7 +76,7 @@ static inline timepoint_t high_res_now()
 static inline timepoint_t high_res_now()
 {
     timepoint_t tp;
-    time_t t       = time(NULL);
+    time_t t       = time(nullptr);
     tp.nanoseconds = static_cast<int64_t>(t * 1000000000LL);
     return tp;
 }

@@ -1,0 +1,136 @@
+name: PSDB Trigger
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - gfx1250
+      - gfx1260
+      - gfx1310
+      - gfx1370
+
+jobs:
+  check:
+    runs-on: rocm-ci-runner
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check if this is our own merge commit
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMIT_MSG=$(curl -s \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}" \
+            | jq -r '.commit.message // ""')
+
+          if [[ "$COMMIT_MSG" == *"[psdb-merge]"* ]]; then
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "Skipping - this is a re-trigger from our own merge push"
+          else
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
+
+  merge-and-trigger:
+    needs: check
+    if: needs.check.outputs.should_run == 'true' && (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-psdb'))
+    runs-on: rocm-ci-runner
+    steps:
+      - name: Cleanup workspace
+        run: sudo rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.[!.]*
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.ROCM_SERVICE_ACCOUNT_PAT }}
+
+      - name: Check if base already merged
+        id: check
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          BASE_SHA=$(git rev-parse origin/${{ github.base_ref }})
+          if git merge-base --is-ancestor $BASE_SHA HEAD; then
+            echo "skip_merge=true" >> $GITHUB_OUTPUT
+            echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          else
+            echo "skip_merge=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Merge base branch
+        if: steps.check.outputs.skip_merge != 'true'
+        id: merge
+        run: |
+          if git merge origin/${{ github.base_ref }} --no-edit \
+            -m "Merge ${{ github.base_ref }} into PR #${{ github.event.pull_request.number }} [psdb-merge]"; then
+            echo "merge_success=true" >> $GITHUB_OUTPUT
+            echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          else
+            echo "merge_success=false" >> $GITHUB_OUTPUT
+            git merge --abort || true
+          fi
+
+      - name: Post conflict status
+        if: steps.merge.outputs.merge_success == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.ROCM_SERVICE_ACCOUNT_PAT }}
+        run: |
+          gh api repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }} \
+            -f state=error \
+            -f context="PSDB - rocm-npi-dev" \
+            -f description="Resolve conflicts with ${{ github.base_ref }}"
+          exit 1
+
+      - name: Push merged commit
+        if: steps.check.outputs.skip_merge != 'true' && steps.merge.outputs.merge_success == 'true'
+        run: git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
+      - name: Cancel previous PSDB runs
+        if: steps.merge.outputs.merge_success != 'false'
+        env:
+          GH_TOKEN: ${{ secrets.ROCM_SERVICE_ACCOUNT_PAT }}
+        run: |
+          RUNS=$(curl -s \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/AMD-ROCm-Internal/rocm-npi-dev/actions/runs?status=in_progress" \
+            | jq -r ".workflow_runs[] | select(.name | contains(\"rocm-libraries\") and contains(\"PR #${{ github.event.pull_request.number }}\")) | .id")
+
+          QUEUED=$(curl -s \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/AMD-ROCm-Internal/rocm-npi-dev/actions/runs?status=queued" \
+            | jq -r ".workflow_runs[] | select(.name | contains(\"rocm-libraries\") and contains(\"PR #${{ github.event.pull_request.number }}\")) | .id")
+
+          for RUN_ID in $RUNS $QUEUED; do
+            if [ -n "$RUN_ID" ]; then
+              echo "Cancelling PSDB run: $RUN_ID"
+              curl -s -X POST \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/AMD-ROCm-Internal/rocm-npi-dev/actions/runs/$RUN_ID/cancel" || true
+            fi
+          done
+
+      - name: Trigger PSDB
+        if: steps.merge.outputs.merge_success != 'false'
+        env:
+          GH_TOKEN: ${{ secrets.ROCM_SERVICE_ACCOUNT_PAT }}
+        run: |
+          COMMIT="${{ steps.merge.outputs.commit_sha || steps.check.outputs.commit_sha }}"
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/AMD-ROCm-Internal/rocm-npi-dev/dispatches \
+            -d "{\"event_type\":\"psdb-trigger\",\"client_payload\":{\"org\":\"${{ github.repository_owner }}\",\"repo\":\"rocm-libraries\",\"commit\":\"$COMMIT\",\"pr_number\":\"${{ github.event.pull_request.number }}\",\"manifest\":\"${{ github.base_ref }}\",\"families\":\"${{ github.base_ref }}\"}}")
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "PSDB triggered successfully (HTTP $HTTP_CODE)"
+          else
+            echo "Failed to trigger PSDB (HTTP $HTTP_CODE)"
+            cat /tmp/response.txt
+            exit 1
+          fi

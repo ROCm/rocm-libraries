@@ -36,10 +36,13 @@ CK_TILE_DEVICE T warp_shuffle_up(const T& v_local, uint32_t lane_delta)
     static_assert(sizeof(T) == sizeof(int32_t), "wrong!");
 
     const uint32_t wrap_around_lane_delta = get_warp_size() - lane_delta;
-
+#if(defined(__gfx13__))
+    const int32_t v_remote_tmp = __builtin_amdgcn_bpermute_b32(
+        bit_cast<int32_t>(v_local), __lane_id() + wrap_around_lane_delta);
+#else
     const int32_t v_remote_tmp = __builtin_amdgcn_ds_bpermute(
         (__lane_id() << 2) + (wrap_around_lane_delta << 2), bit_cast<int32_t>(v_local));
-
+#endif
     return bit_cast<T>(v_remote_tmp);
 #endif
 }
@@ -51,10 +54,13 @@ CK_TILE_DEVICE T warp_shuffle_down(const T& v_local, uint32_t lane_delta)
     return  __shfl_down(v_local, lane_delta);
 #elif 1
     static_assert(sizeof(T) == sizeof(int32_t), "wrong!");
-
+#if(defined(__gfx13__))
+    const int32_t v_remote_tmp =
+        __builtin_amdgcn_bpermute_b32(bit_cast<int32_t>(v_local), __lane_id() + lane_delta);
+#else
     const int32_t v_remote_tmp = __builtin_amdgcn_ds_bpermute(
         (__lane_id() << 2) + (lane_delta << 2), bit_cast<int32_t>(v_local));
-
+#endif
     return bit_cast<T>(v_remote_tmp);
 #endif
 }
@@ -90,15 +96,22 @@ CK_TILE_DEVICE T warp_shuffle(const T& v_local, uint32_t src_lane)
         packet p;
         p.v = v_local;
         packet p_remote;
+#if(defined(__gfx13__))
+        p_remote.x = __builtin_amdgcn_bpermute_b32(p.x, src_lane);
+#else
         p_remote.x = __builtin_amdgcn_ds_bpermute(src_lane << 2, bit_cast<int32_t>(p));
-
+#endif
         return p_remote.v;
     }
     else if constexpr(sizeof(int32_t) == sizeof(T))
     {
+#if(defined(__gfx13__))
+        const int32_t v_remote_tmp =
+            __builtin_amdgcn_bpermute_b32(bit_cast<int32_t>(v_local), src_lane);
+#else
         const int32_t v_remote_tmp =
             __builtin_amdgcn_ds_bpermute(src_lane << 2, bit_cast<int32_t>(v_local));
-
+#endif
         return bit_cast<T>(v_remote_tmp);
     }
     else
@@ -109,7 +122,11 @@ CK_TILE_DEVICE T warp_shuffle(const T& v_local, uint32_t src_lane)
         auto vs               = bit_cast<vector_type>(v_local);
         auto vs_remote        = vector_type{};
         static_for<0, elm, 1>{}([&](auto i_e) {
+#if(defined(__gfx13__))
+            int32_t tmp = __builtin_amdgcn_bpermute_b32(bit_cast<int32_t>(vs[i_e]), src_lane);
+#else
             int32_t tmp = __builtin_amdgcn_ds_bpermute(src_lane << 2, bit_cast<int32_t>(vs[i_e]));
+#endif
             vs_remote(i_e) = tmp;
         });
         return bit_cast<T>(vs_remote);

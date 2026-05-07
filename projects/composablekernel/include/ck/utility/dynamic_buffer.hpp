@@ -117,7 +117,7 @@ struct DynamicBuffer
         }
         else if constexpr(GetAddressSpace() == AddressSpaceEnum::Global && DoTranspose)
         {
-#ifdef __gfx12__
+#if defined(__gfx12__) || defined(__gfx13__)
             return amd_global_load_transpose_to_vgpr(p_data_ + i);
 #else
             static_assert(!DoTranspose, "load-with-transpose only supported on gfx12+");
@@ -148,6 +148,45 @@ struct DynamicBuffer
                     return X{invalid_element_value_};
                 }
             }
+        }
+    }
+
+    struct GlobalPrefetchDataOp
+    {
+        // addr needs to point to global memory!
+        __device__ __forceinline__ void operator()([[maybe_unused]] const void* addr) const
+        {
+#if defined(__gfx125__)
+            // NOTE: There's a bug in AM/GOPHER for gfx1250 when prefetching into L1, so we disable
+            // it for now!
+            __builtin_amdgcn_global_prefetch(
+                addr,
+                static_cast<index_t>(
+                    AmdBufferCoherenceEnum::
+                        SE_RT)); // static_cast<index_t>(AmdBufferCoherenceEnum::CU_RT));
+#endif
+        }
+    };
+
+    template <typename X,
+              typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
+                                         typename scalar_type<remove_cvref_t<T>>::type>::value ||
+                                     !is_native_type<X>(),
+                                 bool>::type = false>
+    __host__ __device__ constexpr void Prefetch(IndexType i, bool is_valid_element) const
+    {
+        // X contains multiple T
+        constexpr index_t scalar_per_t_vector = scalar_type<remove_cvref_t<T>>::vector_size;
+
+        constexpr index_t scalar_per_x_vector = scalar_type<remove_cvref_t<X>>::vector_size;
+
+        static_assert(scalar_per_x_vector % scalar_per_t_vector == 0,
+                      "wrong! X should contain multiple T");
+
+        if(is_valid_element) // if not valid element then do not prefetch
+        {
+            // call prefetch here
+            GlobalPrefetchDataOp{}(c_style_pointer_cast<const void*>(&(p_data_[i])));
         }
     }
 
@@ -205,6 +244,60 @@ struct DynamicBuffer
         }
     }
 
+    template <typename X,
+              typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
+                                         typename scalar_type<remove_cvref_t<T>>::type>::value ||
+                                     !is_native_type<X>(),
+                                 bool>::type = false>
+    __host__ __device__ constexpr auto
+    ddsLoad(const index_t map_rank_id, IndexType i, bool is_valid_element) const
+    {
+        // X contains multiple T
+        constexpr index_t scalar_per_t_vector = scalar_type<remove_cvref_t<T>>::vector_size;
+
+        constexpr index_t scalar_per_x_vector = scalar_type<remove_cvref_t<X>>::vector_size;
+
+        static_assert(scalar_per_x_vector % scalar_per_t_vector == 0,
+                      "wrong! X should contain multiple T");
+
+        static_assert(GetAddressSpace() == AddressSpaceEnum::Lds,
+                      "The address space is not supported for dds_load");
+
+        if(is_valid_element)
+        {
+            auto ptr = c_style_pointer_cast<__attribute__((address_space(3))) void*>(&p_data_[i]);
+            auto ptr_swizzle = __builtin_amdgcn_map_shared_rank(ptr, map_rank_id);
+            return *c_style_pointer_cast<const X*>(ptr_swizzle);
+        }
+        else
+        {
+            if constexpr(InvalidElementUseNumericalZeroValue)
+            {
+                return X{0};
+            }
+            else
+            {
+                return X{invalid_element_value_};
+            }
+        }
+    }
+
+    template <typename X,
+              typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
+                                         typename scalar_type<remove_cvref_t<T>>::type>::value,
+                                 bool>::type = false>
+    __host__ __device__ constexpr auto trLoad(index_t src_offset, bool is_valid_element) const
+    {
+        constexpr index_t scalar_per_t_vector = scalar_type<remove_cvref_t<T>>::vector_size;
+        constexpr index_t scalar_per_x_vector = scalar_type<remove_cvref_t<X>>::vector_size;
+        static_assert(scalar_per_x_vector % scalar_per_t_vector == 0,
+                      "wrong! X should contain multiple T");
+        constexpr index_t t_per_x             = scalar_per_x_vector / scalar_per_t_vector;
+        constexpr AddressSpaceEnum addr_space = GetAddressSpace();
+        return amd_tr_load_to_vgpr<remove_cvref_t<T>, t_per_x, addr_space>(p_data_ + src_offset,
+                                                                           is_valid_element);
+    }
+
     template <typename DstBuffer, index_t NumElemsPerThread>
     __host__ __device__ void DirectCopyToLds(DstBuffer& dst_buf,
                                              IndexType src_offset,
@@ -216,13 +309,192 @@ struct DynamicBuffer
                       "Source data must come from a global memory buffer.");
         static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
                       "Destination data must be stored in an LDS memory buffer.");
-
+#ifndef __HIPCC_RTC__
         amd_direct_load_global_to_lds<T, NumElemsPerThread>(p_data_,
                                                             src_offset,
                                                             dst_buf.p_data_,
                                                             dst_offset,
                                                             is_valid_element,
                                                             element_space_size_ / PackedSize);
+#endif
+    }
+
+    template <typename DstBuffer, index_t NumElemsPerThread, bool EnableMcast>
+    __host__ __device__ void AsyncCopyToLds(DstBuffer& dst_buf,
+                                            index_t src_offset,
+                                            index_t dst_offset,
+                                            bool is_src_valid,
+                                            bool is_dst_valid) const
+    {
+        // Copy data from global to LDS memory using direct loads.
+        static_assert(GetAddressSpace() == AddressSpaceEnum::Global,
+                      "Source data must come from a global memory buffer.");
+        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
+                      "Destination data must be stored in an LDS memory buffer.");
+
+        amd_async_load_global_to_lds<remove_cvref_t<T>, NumElemsPerThread, coherence, EnableMcast>(
+            p_data_, src_offset, dst_buf.p_data_, dst_offset, is_src_valid, is_dst_valid);
+    }
+
+    template <typename DstBuffer, index_t NumElemsPerThread>
+    __host__ __device__ void AsyncStoreToGlobal(DstBuffer& dst_buf,
+                                                index_t src_offset,
+                                                index_t dst_offset,
+                                                bool is_src_valid,
+                                                bool is_dst_valid) const
+    {
+        // Copy data from global to LDS memory using direct loads.
+        static_assert(GetAddressSpace() == AddressSpaceEnum::Lds,
+                      "Source data must come from a LDS memory buffer.");
+        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Global,
+                      "Destination data must be stored in a global memory buffer.");
+#if defined(__gfx13__)
+        amd_async_store_lds_to_global<remove_cvref_t<T>, NumElemsPerThread, coherence>(
+            p_data_, src_offset, dst_buf.p_data_, dst_offset, is_src_valid, is_dst_valid);
+#else
+        ignore = dst_buf;
+        ignore = src_offset;
+        ignore = dst_offset;
+        ignore = is_src_valid;
+        ignore = is_dst_valid;
+#endif
+    }
+
+    template <typename DstBuffer,
+              index_t NumElemsPerThread,
+              index_t NumThreadsPerTile,
+              index_t NumVgprsPerTile>
+    __host__ __device__ constexpr auto tileLoad(index_t src_offset, bool is_valid_element) const
+    {
+#if defined(__gfx13__)
+        if constexpr(GetAddressSpace() == AddressSpaceEnum::Lds)
+        {
+            __attribute__((address_space(3))) const T* global_ptr =
+                reinterpret_cast<__attribute__((address_space(3))) T*>(
+                    reinterpret_cast<uintptr_t>(p_data_ + src_offset));
+            return amd_ds_tiled_load_to_vgpr<remove_cvref_t<T>,
+                                             NumElemsPerThread,
+                                             NumThreadsPerTile,
+                                             NumVgprsPerTile>(global_ptr, is_valid_element);
+        }
+        else if constexpr(GetAddressSpace() == AddressSpaceEnum::Global)
+        {
+            __attribute__((address_space(1))) const T* global_ptr =
+                reinterpret_cast<__attribute__((address_space(1))) T*>(
+                    reinterpret_cast<uintptr_t>(p_data_ + src_offset));
+            return amd_tiled_load_to_vgpr<remove_cvref_t<T>,
+                                          NumElemsPerThread,
+                                          NumThreadsPerTile,
+                                          NumVgprsPerTile>(global_ptr, is_valid_element);
+        }
+        else
+        {
+            static_assert(0, "Unimplemented!");
+        }
+#else
+        ignore = src_offset;
+        ignore = is_valid_element;
+        return T{};
+#endif
+    }
+
+    template <typename X,
+              index_t NumElemsPerThread,
+              index_t NumThreadsPerTile,
+              index_t NumVgprsPerTile>
+    __host__ __device__ void tileStore(const X& x, index_t dst_offset) const
+    {
+#if defined(__gfx13__)
+        // Copy data from global to LDS memory using direct loads.
+        __attribute__((address_space(1))) const T* global_ptr =
+            reinterpret_cast<__attribute__((address_space(1))) T*>(
+                reinterpret_cast<uintptr_t>(p_data_ + dst_offset));
+        amd_tile_store_to_buffer<remove_cvref_t<T>,
+                                 NumElemsPerThread,
+                                 NumThreadsPerTile,
+                                 NumVgprsPerTile>(x, global_ptr);
+#else
+        ignore = x;
+        ignore = dst_offset;
+#endif
+    }
+
+    template <typename X,
+              typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
+                                         typename scalar_type<remove_cvref_t<T>>::type>::value,
+                                 bool>::type = false>
+    __host__ __device__ constexpr auto clusterMulticastLoad(index_t src_offset,
+                                                            bool is_valid_element) const
+    {
+#if defined(__gfx13__)
+        constexpr index_t scalar_per_t_vector = scalar_type<remove_cvref_t<T>>::vector_size;
+        constexpr index_t scalar_per_x_vector = scalar_type<remove_cvref_t<X>>::vector_size;
+        static_assert(scalar_per_x_vector % scalar_per_t_vector == 0,
+                      "wrong! X should contain multiple T");
+        constexpr index_t t_per_x             = scalar_per_x_vector / scalar_per_t_vector;
+        constexpr AddressSpaceEnum addr_space = GetAddressSpace();
+
+        __attribute__((address_space(1))) const T* global_ptr =
+            reinterpret_cast<__attribute__((address_space(1))) T*>(
+                reinterpret_cast<uintptr_t>(p_data_ + src_offset));
+
+        return amd_cluster_multicast_load_to_vgpr<remove_cvref_t<T>, t_per_x, addr_space>(
+            global_ptr, is_valid_element);
+#else
+        ignore = src_offset;
+        ignore = is_valid_element;
+        return T{};
+#endif
+    }
+
+    template <typename X,
+              typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
+                                         typename scalar_type<remove_cvref_t<T>>::type>::value,
+                                 bool>::type = false>
+    __host__ __device__ void
+    wgpMulticastLoad(X& out, index_t src_offset, bool is_valid_element) const
+    {
+#if defined(__gfx13__)
+        constexpr index_t scalar_per_t_vector = scalar_type<remove_cvref_t<T>>::vector_size;
+        constexpr index_t scalar_per_x_vector = scalar_type<remove_cvref_t<X>>::vector_size;
+        static_assert(scalar_per_x_vector % scalar_per_t_vector == 0,
+                      "wrong! X should contain multiple T");
+        constexpr index_t t_per_x             = scalar_per_x_vector / scalar_per_t_vector;
+        constexpr AddressSpaceEnum addr_space = GetAddressSpace();
+
+        __attribute__((address_space(1))) const T* global_ptr =
+            reinterpret_cast<__attribute__((address_space(1))) T*>(
+                reinterpret_cast<uintptr_t>(p_data_ + src_offset));
+
+        amd_wgp_multicast_load_to_vgpr<T, t_per_x, addr_space>(global_ptr, out, is_valid_element);
+#else
+        ignore = out;
+        ignore = src_offset;
+        ignore = is_valid_element;
+#endif
+    }
+
+    template <typename DstBuffer, index_t NumElemsPerThread, index_t static_dst_offset>
+    __host__ __device__ void AsyncCopyToLds(DstBuffer& dst_buf,
+                                            IndexType src_offset,
+                                            IndexType dst_offset,
+                                            bool is_valid_element) const
+    {
+        // Copy data from global to LDS memory using direct loads.
+        static_assert(GetAddressSpace() == AddressSpaceEnum::Global,
+                      "Source data must come from a global memory buffer.");
+        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
+                      "Destination data must be stored in an LDS memory buffer.");
+        static_assert(is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<T>>,
+                      "Source and destination buffer must have the same data type.");
+
+        auto p_uniform_ptr = amd_wave_read_first_lane(p_data_);
+        amd_async_load_global_to_lds<remove_cvref_t<typename DstBuffer::type>,
+                                     NumElemsPerThread,
+                                     static_dst_offset,
+                                     true,
+                                     coherence>(
+            p_uniform_ptr, src_offset, dst_buf.p_data_, dst_offset, is_valid_element);
     }
 
     template <typename X,

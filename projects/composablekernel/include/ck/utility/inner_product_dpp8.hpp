@@ -15,8 +15,12 @@ namespace dpp8 {
 constexpr index_t lane_group_size = 8;
 
 template <int SrcLaneIdx>
-__device__ void inline_v_dot2c_dpp8_instr(const half2_t& a, const half2_t& b, float& c);
+__device__ void inline_v_dot2c_dpp8_instr(const half2_t&, const half2_t&, float&);
 
+template <int SrcLaneIdx>
+__device__ void inline_v_mov_dpp8_instr(const half2_t&, half2_t&);
+
+#if defined(CK_USE_AMD_V_DOT2_F32_F16)
 // clang-format off
 template <>
 __device__ void inline_v_dot2c_dpp8_instr<0>(const half2_t& a, const half2_t& b, float& c){
@@ -51,6 +55,7 @@ __device__ void inline_v_dot2c_dpp8_instr<7>(const half2_t& a, const half2_t& b,
     asm volatile("\n v_dot2c_f32_f16_dpp %0, %1, %2 dpp8:[7, 7, 7, 7, 7, 7, 7, 7]" : "=v"(c) : "v"(a), "v"(b), "0"(c));
 }
 // clang-format on
+#endif
 
 /**
  * Dot product of two vectors using `v_dot` instruction with DPP8 submitted as inline assembly.
@@ -58,6 +63,7 @@ __device__ void inline_v_dot2c_dpp8_instr<7>(const half2_t& a, const half2_t& b,
 template <int SrcLaneIdx, bool ShareA>
 __device__ void inline_v_dot2c_dpp8(const half2_t& a, const half2_t& b, float& c)
 {
+#if defined(CK_USE_AMD_V_DOT2_F32_F16)
     static_assert(SrcLaneIdx >= 0 && SrcLaneIdx < dpp8::lane_group_size,
                   "DPP8 src broadcast lane out of range <0, 7>.");
     if constexpr(ShareA)
@@ -68,6 +74,11 @@ __device__ void inline_v_dot2c_dpp8(const half2_t& a, const half2_t& b, float& c
     {
         inline_v_dot2c_dpp8_instr<SrcLaneIdx>(b, a, c);
     }
+#else
+    ignore = a;
+    ignore = b;
+    ignore = c;
+#endif
 }
 
 /**
@@ -102,7 +113,7 @@ __device__ void intrinsic_fdot2_impl(const half2_t& a, const half2_t& b, float& 
     constexpr int sel_mask = get_dpp_sel_mask_broadcast<SrcLaneIdx>();
     const half2_t val_from_other_lane =
         bit_cast<half2_t>(__builtin_amdgcn_mov_dpp8(bit_cast<int>(a), sel_mask));
-    c = __builtin_amdgcn_fdot2(val_from_other_lane, b, c, false);
+    inner_product(val_from_other_lane, b, c);
 }
 
 /**
@@ -121,6 +132,74 @@ __device__ void intrinsic_fdot2(const half2_t& a, const half2_t& b, float& c)
     }
 }
 
+template <>
+__device__ void inline_v_mov_dpp8_instr<0>(const half2_t& a, half2_t& b)
+{
+    asm volatile("\n v_mov_b32_dpp %0, %1 dpp8:[0, 0, 0, 0, 0, 0, 0, 0]" : "=v"(b) : "v"(a));
+}
+
+template <>
+__device__ void inline_v_mov_dpp8_instr<1>(const half2_t& a, half2_t& b)
+{
+    asm volatile("\n v_mov_b32_dpp %0, %1 dpp8:[1, 1, 1, 1, 1, 1, 1, 1]" : "=v"(b) : "v"(a));
+}
+
+template <>
+__device__ void inline_v_mov_dpp8_instr<2>(const half2_t& a, half2_t& b)
+{
+    asm volatile("\n v_mov_b32_dpp %0, %1 dpp8:[2, 2, 2, 2, 2, 2, 2, 2]" : "=v"(b) : "v"(a));
+}
+
+template <>
+__device__ void inline_v_mov_dpp8_instr<3>(const half2_t& a, half2_t& b)
+{
+    asm volatile("\n v_mov_b32_dpp %0, %1 dpp8:[3, 3, 3, 3, 3, 3, 3, 3]" : "=v"(b) : "v"(a));
+}
+
+template <>
+__device__ void inline_v_mov_dpp8_instr<4>(const half2_t& a, half2_t& b)
+{
+    asm volatile("\n v_mov_b32_dpp %0, %1 dpp8:[4, 4, 4, 4, 4, 4, 4, 4]" : "=v"(b) : "v"(a));
+}
+
+template <>
+__device__ void inline_v_mov_dpp8_instr<5>(const half2_t& a, half2_t& b)
+{
+    asm volatile("\n v_mov_b32_dpp %0, %1 dpp8:[5, 5, 5, 5, 5, 5, 5, 5]" : "=v"(b) : "v"(a));
+}
+
+template <>
+__device__ void inline_v_mov_dpp8_instr<6>(const half2_t& a, half2_t& b)
+{
+    asm volatile("\n v_mov_b32_dpp %0, %1 dpp8:[6, 6, 6, 6, 6, 6, 6, 6]" : "=v"(b) : "v"(a));
+}
+
+template <>
+__device__ void inline_v_mov_dpp8_instr<7>(const half2_t& a, half2_t& b)
+{
+    asm volatile("\n v_mov_b32_dpp %0, %1 dpp8:[7, 7, 7, 7, 7, 7, 7, 7]" : "=v"(b) : "v"(a));
+}
+
+template <int SrcLaneIdx>
+__device__ void intrinsic_emu_fdot2_dpp8_impl(const half2_t& a, const half2_t& b, float& c)
+{
+    half2_t val_from_other_lane;
+    inline_v_mov_dpp8_instr<SrcLaneIdx>(a, val_from_other_lane);
+    c += float(val_from_other_lane[0] * b[0] + val_from_other_lane[1] * b[1]);
+}
+
+template <int SrcLaneIdx, bool ShareA>
+__device__ void intrinsic_emu_fdot2_dpp8(const half2_t& a, const half2_t& b, float& c)
+{
+    if constexpr(ShareA)
+    {
+        intrinsic_emu_fdot2_dpp8_impl<SrcLaneIdx>(a, b, c);
+    }
+    else
+    {
+        intrinsic_emu_fdot2_dpp8_impl<SrcLaneIdx>(b, a, c);
+    }
+}
 /**
  * Dot product of two input vectors `a`, `b` using `v_dot` instructions with DPP modifier.
  *
@@ -134,10 +213,14 @@ __device__ void intrinsic_fdot2(const half2_t& a, const half2_t& b, float& c)
 template <typename TA, typename TB, typename TC, int SrcLaneIdx, bool ShareA>
 __device__ void inner_product_dpp(const TA& a, const TB& b, TC& c)
 {
+#if defined(CK_USE_AMD_V_DOT2_F32_F16)
 #if CK_USE_AMD_V_DOT_DPP8_INLINE_ASM
     inline_v_dot2c_dpp8<SrcLaneIdx, ShareA>(a, b, c);
 #else
     intrinsic_fdot2<SrcLaneIdx, ShareA>(a, b, c);
+#endif
+#else
+    intrinsic_emu_fdot2_dpp8<SrcLaneIdx, ShareA>(a, b, c);
 #endif
 }
 

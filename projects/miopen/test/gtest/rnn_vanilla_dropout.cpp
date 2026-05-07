@@ -23,7 +23,14 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+<<<<<<<< HEAD:projects/miopen/test/gtest/rnn_vanilla_dropout.cpp
 #include "rnn_vanilla_common.hpp"
+========
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
+#include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
+#endif
+>>>>>>>> gfx1310:projects/miopen/src/kernels/MIOpenVecAdd.cpp
 
 using GPU_RNNVanillaDropout_FP32 = RNNVanillaCommon<float>;
 

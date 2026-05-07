@@ -142,9 +142,10 @@ static constexpr auto GetWarpTileConfig()
     if constexpr(IsWave64 == false && NXdlPerWave != 0)
     {
         constexpr auto CShuffleNXdlPerWavePerShuffle32 =
-            NXdlPerWave >= CShuffleNXdlPerWavePerShuffle_ * NPerXDL_ / 16
+            (NXdlPerWave >= CShuffleNXdlPerWavePerShuffle_ * NPerXDL_ / 16) &&
+                    (NXdlPerWave % (CShuffleNXdlPerWavePerShuffle_ * NPerXDL_ / 16) == 0)
                 ? CShuffleNXdlPerWavePerShuffle_ * NPerXDL_ / 16
-                : CShuffleNXdlPerWavePerShuffle_;
+                : NXdlPerWave;
         static_assert(CShuffleNXdlPerWavePerShuffle32 > 0);
         return Sequence<16,
                         16,
@@ -217,7 +218,7 @@ template <index_t BlockSize,
           InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
 __device__ static bool constexpr IsValidGemmCompilationParameter()
 {
-#if defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(MPerXdl != 16 || NPerXdl != 16)
     {
         return false;

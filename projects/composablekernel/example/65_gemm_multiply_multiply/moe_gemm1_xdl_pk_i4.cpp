@@ -136,29 +136,52 @@ using CDEElementOp = MulABScaleExpertWeight; // combine MulRoutedWeight = true
 void preShuffleBuffer(const I4* src, I4* dst, int N, int K, int NXdl)
 {
     int NLane = NXdl;
-    int KLane = 64 / NLane;
+    int KLane = ck::get_warp_size() / NLane;
 
     int K0 = K / (KLane * KPack);
     // K -> K0 KLane KPack
     // N -> N0 NLane
     // N, K -> N0 K0 KLane NLane KPack
-    int tempk;
-    for(int n = 0; n < N; ++n)
+    if(ck::is_gfx13_supported())
     {
-        for(int k = 0; k < K; ++k)
+        // K is continous in all KLanes on gfx13, so, swizzle in KLane are not needed.
+        for(int n = 0; n < N; ++n)
         {
-            int n0 = n / NLane;
-            int n1 = n % NLane;
+            for(int k = 0; k < K; ++k)
+            {
+                int n0 = n / NLane;
+                int n1 = n % NLane;
 
-            int k0 = k / (KLane * KPack);
-            tempk  = k % (KLane * KPack);
-            int k1 = tempk / KPack;
-            int k2 = tempk % KPack;
+                int k0 = k / (KLane * KPack);
+                int k1 = k % (KLane * KPack);
 
-            int outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
-                              k1 * KPack * NLane + n1 * KPack + k2;
+                int outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
+                                  n1 * KPack * KLane + k1;
 
-            dst[outputIndex / 2] = src[(n * K + k) / 2];
+                dst[outputIndex / 2] = src[(n * K + k) / 2];
+            }
+        }
+    }
+    else
+    {
+        int tempk;
+        for(int n = 0; n < N; ++n)
+        {
+            for(int k = 0; k < K; ++k)
+            {
+                int n0 = n / NLane;
+                int n1 = n % NLane;
+
+                int k0 = k / (KLane * KPack);
+                tempk  = k % (KLane * KPack);
+                int k1 = tempk / KPack;
+                int k2 = tempk % KPack;
+
+                int outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
+                                  k1 * KPack * NLane + n1 * KPack + k2;
+
+                dst[outputIndex / 2] = src[(n * K + k) / 2];
+            }
         }
     }
 }
@@ -466,9 +489,9 @@ int main(int argc, char* argv[])
     }
 
     if(!(ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950" ||
-         ck::is_gfx11_supported() || ck::is_gfx12_supported()))
+         ck::is_gfx11_supported() || ck::is_gfx12_supported() || ck::is_gfx13_supported()))
     {
-        std::cout << "This kernel support gfx942, gfx950, gfx11 and gfx12 only" << std::endl;
+        std::cout << "This kernel support gfx942, gfx950, gfx11, gfx12 and gfx13 only" << std::endl;
     }
 
     if(time_kernel)

@@ -36,23 +36,46 @@ void preShuffleBuffer(const InOutDataType* src, InOutDataType* dst, int N, int K
     // K -> K0 KLane KPack
     // N -> N0 NLane
     // N, K -> N0 K0 KLane NLane KPack
-    int tempk;
-    for(int n = 0; n < N; ++n)
+    if(ck::is_gfx13_supported())
     {
-        for(int k = 0; k < K; ++k)
+        // K is continous in all KLanes on gfx13, so, swizzle in KLane are not needed.
+        for(int n = 0; n < N; ++n)
         {
-            int n0 = n / NLane;
-            int n1 = n % NLane;
+            for(int k = 0; k < K; ++k)
+            {
+                int n0 = n / NLane;
+                int n1 = n % NLane;
 
-            int k0 = k / (KLane * KPack);
-            tempk  = k % (KLane * KPack);
-            int k1 = tempk / KPack;
-            int k2 = tempk % KPack;
+                int k0 = k / (KLane * KPack);
+                int k1 = k % (KLane * KPack);
 
-            int outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
-                              k1 * KPack * NLane + n1 * KPack + k2;
+                int outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
+                                  n1 * KPack * KLane + k1;
 
-            dst[outputIndex] = src[n * K + k];
+                dst[outputIndex] = src[n * K + k];
+            }
+        }
+    }
+    else
+    {
+        int tempk;
+        for(int n = 0; n < N; ++n)
+        {
+            for(int k = 0; k < K; ++k)
+            {
+                int n0 = n / NLane;
+                int n1 = n % NLane;
+
+                int k0 = k / (KLane * KPack);
+                tempk  = k % (KLane * KPack);
+                int k1 = tempk / KPack;
+                int k2 = tempk % KPack;
+
+                int outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
+                                  k1 * KPack * NLane + n1 * KPack + k2;
+
+                dst[outputIndex] = src[n * K + k];
+            }
         }
     }
 }
@@ -84,7 +107,8 @@ bool profile_gemm_multiply_multiply_weight_preshuffle_impl(int do_verification,
                                                            int KBatch,
                                                            int n_warmup,
                                                            int n_iter,
-                                                           uint64_t rotating = 0)
+                                                           uint64_t rotating  = 0,
+                                                           int instance_index = -1)
 {
     bool pass = true;
 
@@ -251,9 +275,15 @@ bool profile_gemm_multiply_multiply_weight_preshuffle_impl(int do_verification,
     float best_kbatch     = 0;
 
     // profile device GEMM instances
-    for(auto& op_ptr : op_ptrs)
+    for(size_t j = 0; j < op_ptrs.size(); j++)
     {
-        int NPerXdl = op_ptr->GetPreShuffleParameters();
+        if((instance_index != -1) && (instance_index != static_cast<int>(j)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
+        auto& op_ptr = op_ptrs[j];
+        int NPerXdl  = op_ptr->GetPreShuffleParameters();
 
         std::vector<int> kbatch_list = {1, 2, 4, 8};
 

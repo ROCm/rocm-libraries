@@ -78,6 +78,18 @@ struct MmaDefaultTransformsGfx12
 };
 
 /**
+ * @struct MmaDefaultTransformsGfx13
+ * @brief Default MMA transforms for GFX13 architecture
+ */
+struct MmaDefaultTransformsGfx13
+{
+    using ATransform = PassThroughTransform;
+    using BTransform = PassThroughTransform;
+    using CTransform = PassThroughTransform;
+    using DTransform = PassThroughTransform;
+};
+
+/**
  * @struct MmaTransformsDefaultSelector
  * @brief Implements the default MMA transforms selection for gfx11 targets
  * @tparam MmaOp Mma operation

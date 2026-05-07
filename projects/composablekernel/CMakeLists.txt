@@ -50,6 +50,7 @@ option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
 option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(CK_EXPERIMENTAL_BUILDER "Enable experimental builder" OFF)
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
+option(CK_EXPERIMENTAL_GEMM_BENCHMARK "Enable experimental gemm benchmark for gfx1250" OFF)
 option(FORCE_DISABLE_XDL "Skip compiling XDL specific instances (even if supported GPUs are included in GPU_TARGETS)" OFF)
 option(FORCE_DISABLE_WMMA "Skip compiling WMMA specific instances (even if supported GPUs are included in GPU_TARGETS)" OFF)
 
@@ -130,6 +131,7 @@ add_compile_options(-Wno-bit-int-extension)
 add_compile_options(-Wno-pass-failed)
 add_compile_options(-Wno-switch-default)
 add_compile_options(-Wno-unique-object-duplication)
+add_compile_options(-Wno-lifetime-safety-intra-tu-suggestions)
 
 # Increase the number of max elements in fold expressions
 add_compile_options(-fbracket-depth=1024)
@@ -221,16 +223,23 @@ message(STATUS "checking which targets are supported")
 #the GPU_TARGETS flag will be reset in this case in order to avoid conflicts.
 #
 #In order to build CK along with all tests and examples it should be OK to set GPU_TARGETS to just 1 or 2 similar architectures.
+
+# List of public GFX13 GPU targets
+set(CK_GFX13_PUBLIC_GPU_TARGETS gfx1310 gfx131F gfx1370)
+# List of private GFX13 GPU targets
+set(CK_GFX13_PRIVATE_GPU_TARGETS gfx130F gfx130C gfx135F)
+set(CK_GFX13_GPU_TARGETS ${CK_GFX13_PUBLIC_GPU_TARGETS} ${CK_GFX13_PRIVATE_GPU_TARGETS})
+
 if(NOT ENABLE_ASAN_PACKAGING)
     if(NOT WIN32 AND ${hip_VERSION_FLAT} LESS 600300000)
         # WORKAROUND: compiler does not yet fully support gfx12 targets, need to fix version above
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600300000 AND ${hip_VERSION_FLAT} LESS 600400000)
-        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201")
-    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600400000 AND ${hip_VERSION_FLAT} LESS 600443483)
-        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx950")
-    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600443483)
-        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic")
+        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;${CK_GFX13_GPU_TARGETS}")
+    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600400000 AND ${hip_VERSION_FLAT} LESS 700200000)
+        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;${CK_GFX13_GPU_TARGETS};gfx950")
+    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 700200000)
+        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx10-3-generic;gfx11-generic;gfx12-generic;gfx950;gfx1250;${CK_GFX13_GPU_TARGETS}")
     endif()
 else()
     #build CK only for xnack-supported targets when using ASAN
@@ -259,7 +268,7 @@ message(STATUS "Building CK for the following targets: ${SUPPORTED_GPU_TARGETS}"
 # Cache SUPPORTED_GPU_TARGETS for debug
 set(SUPPORTED_GPU_TARGETS "${SUPPORTED_GPU_TARGETS}" CACHE STRING "List of supported GPU targets")
 
-if (SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx11|gfx12" AND NOT FORCE_DISABLE_XDL)
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|gfx13" AND NOT FORCE_DISABLE_XDL)
     message(STATUS "Enabling XDL instances")
     add_definitions(-DCK_USE_XDL)
     set(CK_USE_XDL "ON")
@@ -282,7 +291,13 @@ if (SUPPORTED_GPU_TARGETS MATCHES "gfx10")
     add_definitions(-DCK_GFX1030_SUPPORT)
 endif()
 
-if ((SUPPORTED_GPU_TARGETS MATCHES "gfx11" OR SUPPORTED_GPU_TARGETS MATCHES "gfx12") AND NOT FORCE_DISABLE_WMMA)
+# new macro CK_TILE_USE_WMMA in order to separately compile examples for MFMA/WMMA
+set(CK_TILE_USE_WMMA 0)
+
+# new macro CK_TILE_USE_WMMA in order to separately compile examples for MFMA/WMMA
+set(CK_TILE_USE_WMMA 0)
+
+if ((SUPPORTED_GPU_TARGETS MATCHES "gfx11" OR SUPPORTED_GPU_TARGETS MATCHES "gfx12" OR SUPPORTED_GPU_TARGETS MATCHES "gfx13") AND NOT FORCE_DISABLE_WMMA)
     message(STATUS "Enabling WMMA instances")
     add_definitions(-DCK_USE_WMMA)
     set(CK_USE_WMMA "ON")
@@ -292,14 +307,20 @@ endif()
 # define the macro with the current value (0 or 1)
 add_definitions(-DCK_TILE_USE_WMMA=${CK_TILE_USE_WMMA})
 
-if (SUPPORTED_GPU_TARGETS MATCHES "gfx12" AND NOT FORCE_DISABLE_WMMA)
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx13")
+    add_definitions(-DCK_USE_WCNN)
+    set(CK_USE_WCNN "ON")
+endif()
+if ((SUPPORTED_GPU_TARGETS MATCHES "gfx12" OR SUPPORTED_GPU_TARGETS MATCHES "gfx13") AND NOT FORCE_DISABLE_WMMA)
     message(STATUS "Enabling WMMA FP8 gemms on native architectures")
     add_definitions(-DCK_USE_WMMA_FP8)
     set(CK_USE_WMMA_FP8 "ON")
 endif()
-if (SUPPORTED_GPU_TARGETS MATCHES "gfx12" OR SUPPORTED_GPU_TARGETS MATCHES "gfx950")
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx12" OR SUPPORTED_GPU_TARGETS MATCHES "gfx13" OR SUPPORTED_GPU_TARGETS MATCHES "gfx950")
     add_definitions(-DCK_USE_OCP_FP8)
     set(CK_USE_OCP_FP8 "ON")
+    add_definitions(-DCK_TILE_USE_OCP_FP8)
+    set(CK_TILE_USE_OCP_FP8 "ON")
 endif()
 if (SUPPORTED_GPU_TARGETS MATCHES "gfx90a" OR SUPPORTED_GPU_TARGETS MATCHES "gfx94")
     add_definitions(-DCK_USE_FNUZ_FP8)
@@ -310,6 +331,19 @@ if (SUPPORTED_GPU_TARGETS MATCHES "gfx950")
     set(CK_USE_NATIVE_MX_SUPPORT "ON")
     add_definitions(-DCK_GFX950_SUPPORT)
     set(CK_GFX950_SUPPORT "ON")
+endif()
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+    add_definitions(-DCK_USE_GFX1250)
+    add_definitions(-DCK_USE_NATIVE_MX_SUPPORT)
+    set(CK_USE_NATIVE_MX_SUPPORT "ON")
+    add_definitions(-DCK_GFX1250_SUPPORT)
+    set(CK_GFX1250_SUPPORT "ON")
+endif()
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx13")
+    add_definitions(-DCK_USE_GFX13)
+    add_definitions(-DCK_EXTENSION_MX_TYPE)
+    add_definitions(-DCK_USE_GFX13)
+    set(ENABLE_MX_TYPE "ON")
 endif()
 
 if ((SUPPORTED_GPU_TARGETS MATCHES "gfx942" OR SUPPORTED_GPU_TARGETS MATCHES "gfx95") AND CK_ENABLE_TF32)
@@ -390,8 +424,12 @@ endif()
 
 
 option(USE_BITINT_EXTENSION_INT4 "Whether to enable clang's BitInt extension to provide int4 data type." OFF)
+option(USE_OPT_GFX13 "Whether to force Wavefront32 mode for GFX13 silicons." ON)
+option(ENABLE_GFX13_FAIL_TESTS "Whether enable tests and examples which are failed on GFX13 build." OFF)
+option(SAVE_TEMPS "Whether save intermeidate result." OFF)
 option(ENABLE_ASM_DUMP "Whether to enable assembly dump for kernels." OFF)
 option(ENABLE_JSON_DUMP "Whether to enable json dump for examples." OFF)
+option(CK_TEST_DISABLE_GPU_VALIDATION "Whether to disable GPU validation in CK tests." OFF )
 
 if(USE_BITINT_EXTENSION_INT4)
     add_compile_definitions(CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4)
@@ -400,7 +438,7 @@ if(USE_BITINT_EXTENSION_INT4)
 endif()
 
 if(ENABLE_ASM_DUMP)
-    add_compile_options(--save-temps) 
+    add_compile_options(--save-temps)
     add_compile_options(-Wno-gnu-line-marker)
     message("CK compiled with ENABLE_ASM_DUMP set to ${ENABLE_ASM_DUMP}")
 endif()
@@ -408,6 +446,14 @@ endif()
 if (ENABLE_JSON_DUMP)
     add_compile_definitions(CK_ENABLE_JSON_DUMP)
     message("CK compiled with ENABLE_JSON_DUMP set to ${ENABLE_JSON_DUMP}")
+endif()
+
+if (CK_TEST_DISABLE_GPU_VALIDATION)
+    add_compile_definitions(CK_TEST_DISABLE_GPU_VALIDATION)
+endif()
+
+if(SAVE_TEMPS)
+    add_compile_options(-save-temps=obj -Wno-gnu-line-marker)
 endif()
 
 ## Threads
@@ -756,6 +802,10 @@ if (NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
         PACKAGE_NAME ckprofiler
     )
     add_subdirectory(profiler)
+endif()
+
+if (CK_EXPERIMENTAL_GEMM_BENCHMARK)
+  add_subdirectory(experimental/gemm_benchmark)
 endif()
 
 if(CK_USE_CODEGEN AND (SUPPORTED_GPU_TARGETS MATCHES "gfx9" OR GPU_ARCHS))

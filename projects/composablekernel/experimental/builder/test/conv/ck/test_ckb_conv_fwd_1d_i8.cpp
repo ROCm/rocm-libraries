@@ -11,7 +11,7 @@ using namespace ck_tile::builder::test_utils;
 
 // 1D I8 (channels-last) with and DEFAULT specialization
 // (not supported on gfx11 and gfx12)
-#if !defined(__gfx11__) && !defined(__gfx12__)
+#if !defined(__gfx11__) && !defined(__gfx12__) && !defined(__gfx13__)
 TEST(FwdConvInstances,
      Create_DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_Instance_1D_FP32_ChannelsFirst_scale)
 {

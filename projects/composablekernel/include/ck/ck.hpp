@@ -72,8 +72,24 @@
     defined(__gfx1152__) || defined(__gfx1153__) || defined(__gfx11_generic__)
 #define __gfx11__
 #endif
-#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
+#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__) || \
+    defined(__gfx1250__) || defined(__gfx1251__)
 #define __gfx12__
+#endif
+#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
+#define __gfx120__
+#endif
+#if defined(__gfx1250__) || defined(__gfx1251__)
+#define __gfx125__
+#endif
+#if defined(__gfx1310__) || defined(__gfx1370__) || defined(__gfx130F__) || \
+    defined(__gfx130C__) || defined(__gfx131F__) || defined(__gfx135F__)
+#define __gfx13__
+#endif
+
+// All GFX12.5 and some GFX13 GPU targets support bf16-trans-insts, bf16-cvt-insts & bf16-pk-insts
+#if defined(__gfx125__) || (defined(__gfx13__) && !defined(__gfx130F__) && !defined(__gfx130C__))
+#define CK_SUPPORT_BF16_TRANS_INSTS 1
 #endif
 
 // buffer resource
@@ -83,8 +99,12 @@
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x00020000
 #elif defined(__gfx101__) || defined(__gfx103__)
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x31014000
-#elif defined(__gfx11__) || defined(__gfx12__)
+#elif defined(__gfx11__) || defined(__gfx120__)
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x31004000
+#elif defined(__gfx125__)
+#define CK_BUFFER_RESOURCE_3RD_DWORD 0
+#elif defined(__gfx13__)
+#define CK_BUFFER_RESOURCE_3RD_DWORD 0
 #endif
 
 // FMA instruction
@@ -96,9 +116,12 @@
 #define CK_USE_AMD_V_DOT4_I32_I8
 #elif defined(__gfx803__) || defined(__gfx900__) || defined(__gfx101__)
 #define CK_USE_AMD_V_MAC_F32
-#elif defined(__gfx11__) || defined(__gfx12__)
+#elif defined(__gfx11__) || defined(__gfx120__)
 #define CK_USE_AMD_V_FMAC_F32
 #define CK_USE_AMD_V_DOT2_F32_F16
+#define CK_USE_AMD_V_DOT4_I32_I8_GFX11
+#elif defined(__gfx13__)
+#define CK_USE_AMD_V_FMAC_F32
 #define CK_USE_AMD_V_DOT4_I32_I8_GFX11
 #endif
 
@@ -129,7 +152,7 @@
 // buffer atomic add: floating point
 #ifndef __HIP_DEVICE_COMPILE__ // for host code
 #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
-#elif defined(__gfx9__) || defined(__gfx12__) // for GPU code
+#elif defined(__gfx9__) || defined(__gfx12__) || defined(__gfx13__) // for GPU code
 #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #else // for GPU code
 #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
@@ -149,13 +172,42 @@
 
 // V_DOT inline instructions, less efficient since they require adding
 // `s_nop`s to avoid hazard
+#if defined(__gfx125__) || defined(__gfx13__)
+#define CK_USE_AMD_V_DOT_INLINE_ASM 1
+#else
 #define CK_USE_AMD_V_DOT_INLINE_ASM 0
+#endif
 
+#ifdef __gfx12__
+#define CK_USE_AMD_V_DOT_DPP8_INLINE_ASM 0
+#else
 // inner product using V_DOT with DPP8 modifiers
 #define CK_USE_AMD_V_DOT_DPP8_INLINE_ASM 1
+#endif
 
 // LDS direct loads using inline assembly
+#if defined(__gfx125__) || defined(__gfx13__)
+#define CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM 1
+#else
 #define CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM 0
+#endif
+
+// use llvm builtin bf16 data type after ROCm 6.5
+#ifndef CK_USE_LLVM_BUILTIN_BF16
+#if(HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR == 5 && HIP_VERSION_PATCH >= 50421) || \
+    (HIP_VERSION_MAJOR >= 7)
+#define CK_USE_LLVM_BUILTIN_BF16 1
+#else
+#define CK_USE_LLVM_BUILTIN_BF16 0
+#endif
+#endif
+
+// hardware support _bf16 data type
+#if(defined(__gfx950__) || defined(__gfx12__))
+#define CK_ARCH_SUPPORT_BUILTIN_BF16 1
+#else
+#define CK_ARCH_SUPPORT_BUILTIN_BF16 0
+#endif
 
 // set rounding to nearest even as default for bf16 conversions
 #define CK_USE_RNE_BF16_CONVERSION 1
@@ -235,6 +287,9 @@
 // workaround: compiler gnerating inefficient ds_write instructions
 #define CK_WORKAROUND_SWDEV_XXXXXX_INT8_DS_WRITE_ISSUE 1
 
+// workaround: gfx1250 does not support a negative offset
+#define CK_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE 1
+
 // workaround: verifaction failure, due to compiler regression, for conv bwd-data fp16 using some
 // tuning parameter
 #define CK_WORKAROUND_SWDEV_325164 0
@@ -266,6 +321,15 @@
 
 // set flag to 1 to build deprecated instances
 #define CK_BUILD_DEPRECATED 1
+
+#if defined(__gfx13__)
+#define __exp_amd_wavegroup_kernel(num_wavegroups, wave_size, block_x, block_y, block_z) \
+    __attribute__((amdgpu_wavegroup_kernel(num_wavegroups, wave_size, block_x, block_y, block_z)))
+
+#define __exp_amd_no_rank_specialization__ __attribute__((amdgpu_no_rank_specialization))
+
+#define __exp_amd_laneshared__ __attribute__((exp_amd_laneshared))
+#endif
 
 namespace ck {
 

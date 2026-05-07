@@ -53,9 +53,9 @@ namespace TensileLite
                 std::vector<int> mappingIndices;
                 if(iot::outputting(io))
                 {
-                    mappingIndices.reserve(lib.solution_list.size());
+                    mappingIndices.reserve(lib.solutionmap.size());
 
-                    for(auto const& pair : lib.solution_list)
+                    for(auto const& pair : lib.solutionmap)
                         mappingIndices.push_back(pair.first);
 
                     iot::mapRequired(io, "table", mappingIndices);
@@ -68,9 +68,8 @@ namespace TensileLite
                                       "ProblemPredictionLibrary requires non empty "
                                       "mapping index set.");
 
-                    for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
+                    for(int index : mappingIndices)
                     {
-                        int index = mappingIndices[local_index];
                         auto slnIter = ctx->solutions->find(index);
                         if(slnIter == ctx->solutions->end())
                         {
@@ -82,7 +81,7 @@ namespace TensileLite
                         else
                         {
                             auto solution = slnIter->second;
-                            lib.solution_list.emplace_back(index, solution);
+                            lib.solutionmap.insert(std::make_pair(index, solution));
 
                             origami::dim3_t origami_mi;
                             if(solution->sizeMapping.matrixInstruction[0] == 0
@@ -116,10 +115,10 @@ namespace TensileLite
                                 .cache_hints_b             = solution->sizeMapping.nonTemporalB,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
-                                .index                     = local_index,
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
+                            lib.origami_config_map.insert(std::make_pair(origami_config, index));
                         }
                     }
                 }

@@ -40,7 +40,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     kernel_grouped_gemm_wmma_splitk(const void CK_CONSTANT_ADDRESS_SPACE* gemm_descs_const,
                                     const index_t group_count)
 {
-#if(defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__))
     using EpilogueType = typename std::conditional<GridwiseGemm::IsBWaveTransferApplicable &&
                                                        GridwiseGemm::UseDirectStore,
                                                    typename GridwiseGemm::EpilogueDirectStore,
@@ -113,7 +113,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 #else
     ignore = gemm_descs_const;
     ignore = group_count;
-#endif // end of if(defined(__gfx11__) || defined(__gfx12__))
+#endif // end of if(defined(__gfx11__) || defined(__gfx12__)|| defined(__gfx13__))
 }
 
 template <typename ALayout,
@@ -649,7 +649,7 @@ struct DeviceGroupedGemm_Wmma_CShuffleV3 : public DeviceGroupedGemmSplitK<ALayou
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx13_supported())
         {
             return false;
         }

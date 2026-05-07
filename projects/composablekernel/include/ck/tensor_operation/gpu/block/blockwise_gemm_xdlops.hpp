@@ -503,7 +503,7 @@ struct BlockwiseGemmXdlopsInterwave_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
             // sync point.
             if constexpr(k.value != 0 || KPerInnerLoop == KPerThread)
             {
-#ifdef __gfx12__
+#if defined(__gfx12__) || defined(__gfx13__)
                 asm volatile("\
 	        s_barrier_signal -1 \n \
 		s_barrier_wait -1 \

@@ -40,7 +40,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
                                       const CDEElementwiseOperation cde_element_op)
 {
 #if(defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx101__) || \
-    defined(__gfx103__) || defined(__gfx11__) || defined(__gfx94__) || defined(__gfx12__))
+    defined(__gfx103__) || defined(__gfx11__) || defined(__gfx94__) || defined(__gfx12__) ||    \
+    defined(__gfx13__))
     __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
     const index_t block_id = get_block_1d_id();
@@ -702,7 +703,8 @@ struct DeviceGroupedGemmMultipleD_Dl : public DeviceGroupedGemm<ALayout,
         }
 
         if(ck::get_device_name() == "gfx906" || ck::is_xdl_supported() ||
-           ck::is_gfx103_supported() || ck::is_gfx11_supported() || ck::is_gfx12_supported())
+           ck::is_gfx103_supported() || ck::is_gfx11_supported() || ck::is_gfx12_supported() ||
+           ck::is_gfx13_supported())
         {
             for(std::size_t i = 0; i < arg.gemm_desc_kernel_arg_.size(); i++)
             {

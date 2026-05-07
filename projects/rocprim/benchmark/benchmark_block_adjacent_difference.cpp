@@ -56,7 +56,7 @@ void add_benchmarks(primbench::executor& executor)
     BENCHMARK_TYPE(rocprim::int128_t, 256, false)
     BENCHMARK_TYPE(rocprim::uint128_t, 256, false)
 
-    if(!std::is_same<Benchmark, subtract_right_partial>::value)
+    if(Benchmark::enable_with_tile)
     {
         BENCHMARK_TYPE(int32_t, 256, true)
         BENCHMARK_TYPE(float, 256, true)

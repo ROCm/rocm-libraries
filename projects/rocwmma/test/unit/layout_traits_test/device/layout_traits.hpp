@@ -232,7 +232,7 @@ namespace rocwmma
     ROCWMMA_DEVICE constexpr bool testMmaAccVW()
     {
         return MaxVectorWidth
-               == ((bool)ROCWMMA_ARCH_GFX12
+               == (((bool)ROCWMMA_ARCH_GFX12 || (bool)ROCWMMA_ARCH_GFX13)
                        ? 8u
                        : ((is_same_v<DataT, float64_t> || (bool)ROCWMMA_ARCH_GFX11) ? 1u : 4u));
     }

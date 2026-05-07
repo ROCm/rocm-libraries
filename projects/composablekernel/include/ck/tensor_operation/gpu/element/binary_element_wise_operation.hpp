@@ -214,16 +214,28 @@ struct Multiply
     };
 };
 
-struct ScaleAdd
+// E = C * scale + D
+template <bool Clamp = false>
+struct ScaleAddImpl
 {
     static constexpr const char* name = "ScaleAdd";
-
-    __host__ __device__ ScaleAdd(float scale = 1.f) : scale_(scale) {}
+    __host__ __device__ ScaleAddImpl(float scale = 1.f) : scale_(scale) {}
 
     template <typename Y, typename X0, typename X1>
     __host__ __device__ constexpr void operator()(Y& y, const X0& x0, const X1& x1) const
     {
-        y = ck::type_convert<Y>(scale_ * ck::type_convert<float>(x0) + ck::type_convert<float>(x1));
+        float y_0 = scale_ * ck::type_convert<float>(x0) + ck::type_convert<float>(x1);
+        if constexpr(Clamp && is_integral<Y>::value && (is_same_v<Y, bhalf_t> == false))
+        {
+            float y_1 = math::clamp(y_0,
+                                    ck::type_convert<float>(NumericLimits<Y>::Min()),
+                                    ck::type_convert<float>(NumericLimits<Y>::Max()));
+            y         = type_convert<Y>(y_1);
+        }
+        else
+        {
+            y = type_convert<Y>(y_0);
+        }
     }
 
     template <>
@@ -240,6 +252,66 @@ struct ScaleAdd
         y = scale_ * x0 + ck::type_convert<float>(x1);
     };
 
+    float scale_;
+};
+using ScaleAdd      = ScaleAddImpl<false>;
+using ScaleAddClamp = ScaleAddImpl<true>;
+
+// E = Relu(C * scale + D)
+template <bool Clamp = false>
+struct ScaleAddRelu
+{
+    __host__ __device__ ScaleAddRelu(float scale = 1.f) : scale_(scale) {}
+    template <typename Y, typename X0, typename X1>
+    __host__ __device__ constexpr void operator()(Y& y, const X0& x0, const X1& x1) const
+    {
+        Y tmp;
+        ScaleAddImpl<Clamp>{scale_}.operator()(tmp, x0, x1);
+        Relu{}.operator()(y, tmp);
+    }
+    float scale_;
+};
+
+// E = HardTanh(C * scale + D)
+struct ScaleAddHardTanh
+{
+    __host__ __device__ ScaleAddHardTanh(float scale = 1.f) : scale_(scale) {}
+    template <typename Y, typename X0, typename X1>
+    __host__ __device__ constexpr void operator()(Y& y, const X0& x0, const X1& x1) const
+    {
+        Y tmp;
+        ScaleAddImpl<true>{scale_}.operator()(tmp, x0, x1);
+        HardTanh{}.operator()(y, tmp);
+    }
+    float scale_;
+};
+
+// E = C + D * scale
+template <bool Clamp = false>
+struct ScaleAddRev
+{
+    __host__ __device__ ScaleAddRev(float scale = 1.f) : scale_(scale) {}
+
+    template <typename Y, typename X0, typename X1>
+    __host__ __device__ constexpr void operator()(Y& y, const X0& x0, const X1& x1) const
+    {
+        ScaleAddImpl<Clamp>{scale_}.operator()(y, x1, x0);
+    }
+    float scale_;
+};
+
+// E = Relu(C + D * scale)
+template <bool Clamp = false>
+struct ScaleAddRevRelu
+{
+    __host__ __device__ ScaleAddRevRelu(float scale = 1.f) : scale_(scale) {}
+    template <typename Y, typename X0, typename X1>
+    __host__ __device__ constexpr void operator()(Y& y, const X0& x0, const X1& x1) const
+    {
+        Y tmp;
+        ScaleAddImpl<Clamp>{scale_}.operator()(tmp, x1, x0);
+        Relu{}.operator()(y, tmp);
+    }
     float scale_;
 };
 

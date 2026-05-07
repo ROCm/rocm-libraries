@@ -95,10 +95,19 @@ __host__ __device__ constexpr auto GenerateMultipleFreeze(T idx, const Shape& sh
     const auto unrolled_shape = UnrollNestedTuple(shape);
     return generate_tuple(
         [&](auto i) {
+#ifdef _WIN32
+            // Calculate dim index per dimension independently rather than
+            // assuming the compiler would unfold parameters in ascending
+            // order.
+            auto tmp = idx;
+            static_for<0, i.value, 1>{}([&](auto j) { tmp /= unrolled_shape.At(Number<j>{}); });
+            const auto dim_idx = tmp % unrolled_shape.At(Number<i>{});
+#else
             // dimension offset from idx
             const auto dim     = unrolled_shape.At(Number<i>{});
             const auto dim_idx = idx % dim;
             idx /= dim;
+#endif
             return make_freeze_transform(dim_idx);
         },
         Number<decltype(unrolled_shape)::Size()>{});

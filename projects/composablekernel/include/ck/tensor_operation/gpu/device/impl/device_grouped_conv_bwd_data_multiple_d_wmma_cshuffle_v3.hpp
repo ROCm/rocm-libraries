@@ -67,7 +67,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const ComputePtrOffsetOfN compute_ptr_offset_of_n,
         const index_t KBatch)
 {
-#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
+#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) || \
+    defined(__gfx13__))
 #if defined(__gfx11__)
     if constexpr(EGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
     {
@@ -200,7 +201,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     ignore = compute_ptr_offset_of_n;
     ignore = KBatch;
 
-#endif // End of if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
+#endif // End of if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) ||
+       // defined(__gfx13__))
 }
 
 } // namespace
@@ -1453,7 +1455,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx13_supported())
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
@@ -1802,12 +1804,11 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
             p_ds_grid_dummy[i] = nullptr;
             StrideDs_dummy[i]  = I0;
         });
-        for(std::size_t i = 0; i < arg.a_grid_desc_ak0_m_ak1_container_.size(); i++)
+        for(std::size_t i = 0; i < arg.gemm_kernel_args_.size(); i++)
         {
-            const index_t GemmM = arg.a_grid_desc_ak0_m_ak1_container_[i].GetLength(I1);
-            const index_t GemmN = arg.b_grid_desc_bk0_n_bk1_container_[i].GetLength(I1);
-            const index_t GemmK = arg.a_grid_desc_ak0_m_ak1_container_[i].GetLength(I0) *
-                                  arg.a_grid_desc_ak0_m_ak1_container_[i].GetLength(I2);
+            const index_t GemmM = arg.a_grid_desc_m_k_container_[i].GetLength(I0);
+            const index_t GemmN = arg.b_grid_desc_n_k_container_[i].GetLength(I0);
+            const index_t GemmK = arg.a_grid_desc_m_k_container_[i].GetLength(I1);
             // Create gemm arguments with dummy values to check for validity
             typename GridwiseGemmCTranspose::Argument gemm_arg{
                 std::array<const void*, 1>{nullptr}, // p_as_grid

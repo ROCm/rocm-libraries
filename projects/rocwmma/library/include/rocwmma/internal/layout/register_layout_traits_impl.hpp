@@ -421,7 +421,7 @@ namespace rocwmma
                 {
                     // Acc layout architecture quirks
                     constexpr uint32_t ExpectedAccMaxVW
-                        = ((bool)ROCWMMA_ARCH_GFX12) ? 8u
+                        = ((bool)ROCWMMA_ARCH_GFX12 || (bool)ROCWMMA_ARCH_GFX13) ? 8u
                           : ((bool)ROCWMMA_ARCH_GFX11
                              || is_same<typename storage_traits::DataT, float64_t>::value)
                               ? 1u

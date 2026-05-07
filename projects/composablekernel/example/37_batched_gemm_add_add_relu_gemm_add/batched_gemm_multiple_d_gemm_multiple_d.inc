@@ -1,4 +1,3 @@
-
 int run_example(int argc, char* argv[])
 {
     bool do_verification = true;

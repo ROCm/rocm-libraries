@@ -282,7 +282,7 @@ namespace rocwmma
 
 // GPU exclusion for unsupported targets, but assume host is valid
 // for testing purposes.
-#if !ROCWMMA_ARCH_GFX11 && !ROCWMMA_ARCH_GFX12 // + Host
+#if !ROCWMMA_ARCH_GFX11 && !ROCWMMA_ARCH_GFX12 && !ROCWMMA_ARCH_GFX13 // + Host
 
             template <uint32_t ShiftDir>
             struct WaveShift1
@@ -362,7 +362,7 @@ namespace rocwmma
                 }
             };
 
-#else // ROCWMMA_ARCH_GFX11 || ROCWMMA_ARCH_GFX12
+#else // ROCWMMA_ARCH_GFX11 || ROCWMMA_ARCH_GFX12 || ROCWMMA_ARCH_GFX13
 
             template <uint32_t ShiftDir>
             struct WaveShift1
@@ -438,7 +438,7 @@ namespace rocwmma
                 // clang-format on
             };
 
-#endif // !ROCWMMA_ARCH_GFX11 && !ROCWMMA_ARCH_GFX12
+#endif // !ROCWMMA_ARCH_GFX11 && !ROCWMMA_ARCH_GFX12 && !ROCWMMA_ARCH_GFX13
 
             using WaveRotateR1 = WaveRotate1<OP_DIR_R>;
             using WaveRotateL1 = WaveRotate1<OP_DIR_L>;

@@ -20,6 +20,7 @@
 * THE SOFTWARE.
 *******************************************************************************/
 
+#include "fft_enums.h"
 #include "fft_params.h"
 
 #include "CLI11.hpp"

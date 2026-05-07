@@ -103,6 +103,7 @@
 #undef ROCPRIM_TARGET_RDNA2
 #undef ROCPRIM_TARGET_RDNA3
 #undef ROCPRIM_TARGET_RDNA4
+#undef ROCPRIM_TARGET_RDNA5
 #undef ROCPRIM_TARGET_CDNA1
 #undef ROCPRIM_TARGET_CDNA2
 #undef ROCPRIM_TARGET_CDNA3
@@ -118,6 +119,8 @@
 #elif defined(__gfx900__) || defined(__gfx902__) || defined(__gfx904__) || defined(__gfx906__) \
     || defined(__gfx90c__) || defined(__gfx9_generic__)
     #define ROCPRIM_TARGET_GCN5 1
+#elif defined(__GFX13__) || defined(__gfx13_generic__)
+    #define ROCPRIM_TARGET_RDNA5 1
 #elif defined(__GFX12__) || defined(__gfx12_generic__)
     #define ROCPRIM_TARGET_RDNA4 1
 #elif defined(__GFX11__) || defined(__gfx11_generic__)
@@ -162,10 +165,15 @@
          || __builtin_amdgcn_processor_is("gfx904") || __builtin_amdgcn_processor_is("gfx906") \
          || __builtin_amdgcn_processor_is("gfx90c")                                            \
          || __builtin_amdgcn_processor_is("gfx9-generic"))
+    #define ROCPRIM_IS_RDNA5()                                                                 \
+        (__builtin_amdgcn_processor_is("gfx1310"))
+         // TODO: enable once compiler accepts "gfx13-generic" identifier:
+         // || __builtin_amdgcn_processor_is("gfx13-generic"))
     #define ROCPRIM_IS_RDNA4()                                                                \
         (__builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201") \
          || __builtin_amdgcn_processor_is(                                                    \
-             "gfx12-generic")) // TODO: Re-enable gfx1250 when supported by compiler
+             "gfx12-generic"))
+         // TODO: Re-enable gfx1250 when supported by compiler
     #define ROCPRIM_IS_RDNA3()                                                                   \
         (__builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101")    \
          || __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") \
@@ -193,6 +201,8 @@
          || __builtin_amdgcn_processor_is("gfx10-3-generic") \
          || __builtin_amdgcn_processor_is("gfx10-1-generic") \
          || __builtin_amdgcn_processor_is("gfx12-generic"))
+         // TODO: enable once compiler accepts "gfx13-generic" identifier:
+         // || __builtin_amdgcn_processor_is("gfx13-generic"))
 #else
     #if defined(ROCPRIM_TARGET_CDNA3)
         #define ROCPRIM_IS_CDNA3() 1
@@ -243,6 +253,8 @@
     #if defined(__gfx9_generic__) || defined(__gfx9_4_generic__) || defined(__gfx10_1_generic__) \
         || defined(__gfx10_3_generic__) || defined(__gfx11_generic__)                            \
         || defined(__gfx12_generic__)
+        // TODO: enable once compiler accepts __gfx13_generic__ identifier:
+        // || defined(__gfx13_generic__)
         #define ROCPRIM_IS_GENERIC() 1
     #else
         #define ROCPRIM_IS_GENERIC() 0
@@ -288,7 +300,7 @@
 
 #ifndef ROCPRIM_NAVI
     #if defined(__HIP_DEVICE_COMPILE__) \
-        && (defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__))
+        && (defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__) || defined(__GFX13__))
         #define ROCPRIM_NAVI 1
     #else
         #define ROCPRIM_NAVI 0

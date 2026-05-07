@@ -99,7 +99,7 @@ run_fp8bf16_tests() {
 
     $EXE -prec=fp8bf16 -init=3 -b=$b -h=1 -d=$hdim -s=128 -iperm=$perm -operm=$perm -vlayout=r -qscale=$scale -kname=$KNAME $COMMON_ARGS
 
-    done ; done ; done ; done
+    done ; done ; done
 }
 
 run_fp8fp32_tests() {

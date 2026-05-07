@@ -74,7 +74,7 @@ namespace rocwmma
 
             // Only supported hardware allowed
             ArchTest = (bool)TestTraits::Arch::IsGfx9 || (bool)TestTraits::Arch::IsGfx11
-                       || (bool)TestTraits::Arch::IsGfx12,
+                       || (bool)TestTraits::Arch::IsGfx12 || (bool)TestTraits::Arch::IsGfx13,
 
             // During the build phase, we have information about current target arch.
             // This means only the current arch and wave size are valid.
@@ -346,19 +346,63 @@ namespace rocwmma
         }
 #endif // !NDEBUG
 
+        enum struct Gfx13Predicates : bool
+        {
+            ArchTest = (bool)TestTraits::Arch::IsGfx13,
+
+            WaveSizeTest = (bool)TestTraits::Arch::IsWave32,
+
+            TBlockTest
+            = (TBlockX * TBlockY >= Constants::AMDGCN_WAVE_SIZE_32) && (TBlockX * TBlockY <= 256u),
+
+            InputTypesTest
+            = (bool)TestTraits::InputType::IsInt8 || (bool)TestTraits::InputType::IsFloat16
+              || (bool)TestTraits::InputType::IsBFloat16 || (bool)TestTraits::InputType::IsFloat8
+              || (bool)TestTraits::InputType::IsBFloat8,
+
+            I8BlockSizeTest
+            = !((bool)TestTraits::InputType::IsInt8 || (bool)TestTraits::InputType::IsFloat8
+                || (bool)TestTraits::InputType::IsBFloat8)
+              || ((bool)TestTraits::BlockSizes::isBlockMN16 && (BlockK >= 16u)
+                  && (BlockK % 16u == 0u)),
+
+            F16BlockSizeTest
+            = !((bool)TestTraits::InputType::IsFloat16 || (bool)TestTraits::InputType::IsBFloat16)
+              || ((bool)TestTraits::BlockSizes::isBlockMN16 && (BlockK >= 16u)
+                  && (BlockK % 16u == 0u)),
+
+            Enable = (ArchTest && WaveSizeTest && TBlockTest && InputTypesTest && I8BlockSizeTest
+                      && F16BlockSizeTest)
+        };
+
+#if !NDEBUG
+        static constexpr void debugGfx13Predicates()
+        {
+            std::cout << "Gfx13 Predicates:\n";
+            std::cout << "ArchTest: " << (bool)Gfx13Predicates::ArchTest << std::endl;
+            std::cout << "WaveSizeTest: " << (bool)Gfx13Predicates::WaveSizeTest << std::endl;
+            std::cout << "TBlockTest: " << (bool)Gfx13Predicates::TBlockTest << std::endl;
+            std::cout << "InputTypesTest: " << (bool)Gfx13Predicates::InputTypesTest << std::endl;
+            std::cout << "I8BlockSizeTest: " << (bool)Gfx13Predicates::I8BlockSizeTest << std::endl;
+            std::cout << "F16BlockSizeTest: " << (bool)Gfx13Predicates::F16BlockSizeTest
+                      << std::endl;
+            std::cout << "Enable: " << (bool)Gfx13Predicates::Enable << std::endl;
+        }
+#endif // !NDEBUG
+
     public:
         constexpr static bool enableBuild()
         {
             return ((bool)GlobalPredicates::EnableBuild
                     && ((bool)Gfx9Predicates::Enable || (bool)Gfx11Predicates::Enable
-                        || (bool)Gfx12Predicates::Enable));
+                        || (bool)Gfx12Predicates::Enable || (bool)Gfx13Predicates::Enable));
         }
 
         constexpr static bool enableRun()
         {
             return ((bool)GlobalPredicates::EnableRun
                     && ((bool)Gfx9Predicates::Enable || (bool)Gfx11Predicates::Enable
-                        || (bool)Gfx12Predicates::Enable));
+                        || (bool)Gfx12Predicates::Enable || (bool)Gfx13Predicates::Enable));
         }
 
 #if !NDEBUG
@@ -368,6 +412,7 @@ namespace rocwmma
             debugGfx9Predicates();
             debugGfx11Predicates();
             debugGfx12Predicates();
+            debugGfx13Predicates();
 
             std::cout << "Overall enable build: " << enableBuild() << std::endl;
             std::cout << "Overall enable run: " << enableRun() << std::endl;

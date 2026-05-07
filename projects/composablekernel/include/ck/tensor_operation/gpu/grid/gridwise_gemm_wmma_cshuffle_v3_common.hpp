@@ -44,7 +44,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 #endif
     kernel_gemm_wmma_cshuffle_v3(typename GridwiseGemm::Argument karg)
 {
-#if(defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__))
 #if defined(__gfx11__)
     // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
     using e_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
@@ -95,7 +95,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                               // argument through implicit conversion to base class!
         const ComputePtrOffsetOfStridedBatch compute_ptr_offset_of_batch)
 {
-#if(defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__))
 #if defined(__gfx11__)
     // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
     using c_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
@@ -205,7 +205,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 #endif
     kernel_gemm_b_preshuffle_wmma_cshuffle_v3(typename GridwiseGemm::Argument karg)
 {
-#if(defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__))
 #if defined(__gfx11__)
     // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
     using e_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
@@ -364,6 +364,26 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
     static constexpr index_t WaveSize =
         WmmaSelector<ComputeTypeA, ComputeTypeB, AccDataType, MPerWmma, NPerWmma>::selected_wmma
             .wave_size;
+    using ATransferWaveTiles = ABTransferWaveTiles<ALayout,
+                                                   tensor_layout::gemm::RowMajor,
+                                                   LDSTypeA,
+                                                   BlockSize,
+                                                   MPerBlock,
+                                                   KPerBlock,
+                                                   MPerWmma,
+                                                   KPack,
+                                                   AK1Value,
+                                                   WaveSize>;
+    using BTransferWaveTiles = ABTransferWaveTiles<BLayout,
+                                                   tensor_layout::gemm::ColumnMajor,
+                                                   LDSTypeB,
+                                                   BlockSize,
+                                                   NPerBlock,
+                                                   KPerBlock,
+                                                   NPerWmma,
+                                                   KPack,
+                                                   BK1Value,
+                                                   WaveSize>;
 
     __host__ __device__ static constexpr bool AWaveTransferApplicable()
     {
@@ -380,7 +400,11 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 && BK1Value == 8;
     }
 
-#ifdef __gfx12__
+    // Limitations of the current implementation:
+    //  - no multiAB
+    //  - GemmSpecialization Default with transpose
+
+#if defined(__gfx120__)
     static constexpr bool IsAWaveTransferApplicable = AWaveTransferApplicable();
 
     static constexpr bool IsBWaveTransferApplicable = BWaveTransferApplicable();
@@ -405,16 +429,7 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         ABlockLdsExtraM || BlkGemmPipelineVer == BlockGemmPipelineVersion::v4;
     using ATransfer = typename std::conditional<
         IsAWaveTransferApplicable,
-        ABTransferWaveTiles<ALayout,
-                            tensor_layout::gemm::RowMajor,
-                            LDSTypeA,
-                            BlockSize,
-                            MPerBlock,
-                            KPerBlock,
-                            MPerWmma,
-                            KPack,
-                            AK1Value,
-                            WaveSize>,
+        ATransferWaveTiles,
         ABTransferThreadTiles<ALayout,
                               tensor_layout::gemm::RowMajor,
                               LDSTypeA,
@@ -466,16 +481,7 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                               BK1Value,
                                               WaveSize,
                                               NPerBlock / NPerWmma / NRepeat>,
-                ABTransferWaveTiles<BLayout,
-                                    tensor_layout::gemm::ColumnMajor,
-                                    LDSTypeB,
-                                    BlockSize,
-                                    NPerBlock,
-                                    KPerBlock,
-                                    NPerWmma,
-                                    KPack,
-                                    BK1Value,
-                                    WaveSize>>::type,
+                BTransferWaveTiles>::type,
             ABTransferThreadTiles<BLayout,
                                   tensor_layout::gemm::ColumnMajor,
                                   LDSTypeB,
@@ -1034,14 +1040,14 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
     }
 
     __host__ __device__ static constexpr bool
-    CheckValidity(const index_t M,
-                  const index_t N,
-                  const index_t K,
-                  const index_t StrideA,
-                  const index_t StrideB,
-                  const std::array<index_t, NumDTensor> StrideDs,
-                  const index_t StrideE,
-                  const index_t KBatch)
+    CheckValidityGemmKArg(const index_t M,
+                          const index_t N,
+                          const index_t K,
+                          const index_t StrideA,
+                          const index_t StrideB,
+                          const std::array<index_t, NumDTensor> StrideDs,
+                          const index_t StrideE,
+                          const index_t KBatch)
     {
 
         ignore              = StrideDs;

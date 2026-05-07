@@ -6,7 +6,7 @@
 
 namespace ck {
 
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx13__)
 template <typename T>
 __device__ auto amd_global_load_transpose_to_vgpr(const T* in_ptr)
 {

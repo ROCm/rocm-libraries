@@ -48,6 +48,8 @@ int32_t mloT5LayerNormForwardRunHost(miopenTensorDescriptor_t xDesc,
                                      float eps,
                                      miopenNormMode_t mode,
                                      bool use_multithread)
+                                     miopenNormMode_t mode,
+                                     bool use_multithread)
 {
     auto dims         = miopen::deref(xDesc).GetLengths();
     size_t outer_size = 1;

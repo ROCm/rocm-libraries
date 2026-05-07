@@ -174,22 +174,6 @@ int run_complex_contraction_bilinear_example(int argc, char* argv[])
     DeviceMem e_device_buf_img1(sizeof(EDataType) *
                                 e_ms_ns_device_result_img.mDesc.GetElementSpaceSize());
 
-    a_device_buf_re.ToDevice(a_ms_ks_re.mData.data());
-    b_device_buf_re.ToDevice(b_ns_ks_re.mData.data());
-    d_device_buf_re.ToDevice(d_ms_ns_re.mData.data());
-
-    a_device_buf_img.ToDevice(a_ms_ks_img.mData.data());
-    b_device_buf_img.ToDevice(b_ns_ks_img.mData.data());
-    d_device_buf_img.ToDevice(d_ms_ns_img.mData.data());
-
-    // set zero
-    e_device_buf_re.SetZero();
-    e_device_buf_img.SetZero();
-
-    // set zero for intermediate values
-    e_device_buf_re1.SetZero();
-    e_device_buf_img1.SetZero();
-
     auto a_element_op   = AElementOp{};
     auto b_element_op   = BElementOp{};
     auto cde_element_op = CDEElementOp{alpha, beta};
@@ -222,6 +206,22 @@ int run_complex_contraction_bilinear_example(int argc, char* argv[])
 
         return 0;
     }
+
+    a_device_buf_re.ToDevice(a_ms_ks_re.mData.data());
+    b_device_buf_re.ToDevice(b_ns_ks_re.mData.data());
+    d_device_buf_re.ToDevice(d_ms_ns_re.mData.data());
+
+    a_device_buf_img.ToDevice(a_ms_ks_img.mData.data());
+    b_device_buf_img.ToDevice(b_ns_ks_img.mData.data());
+    d_device_buf_img.ToDevice(d_ms_ns_img.mData.data());
+
+    // set zero
+    e_device_buf_re.SetZero();
+    e_device_buf_img.SetZero();
+
+    // set zero for intermediate values
+    e_device_buf_re1.SetZero();
+    e_device_buf_img1.SetZero();
 
     float ave_time_re1 = invoker.Run(argument_re1, StreamConfig{nullptr, time_kernel});
 

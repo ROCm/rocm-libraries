@@ -174,7 +174,11 @@ struct ThreadGroupTensorSliceTransfer_Gather_DirectLoad
 
         const auto thread_cluster_idx =
             thread_cluster_desc_.CalculateBottomIndex(make_multi_index(ThreadGroup::GetThreadId()));
-
+        const auto thread_data_idx_begin = thread_cluster_idx * thread_single_load_size;
+        SetSrcSliceOrigin(src_desc, src_block_slice_origin + thread_data_idx_begin);
+#if defined(__gfx125__) || defined(__gfx13__)
+        SetDstSliceOrigin(dst_desc, dst_block_slice_origin + thread_data_idx_begin);
+#else
         constexpr auto wave_cluster_lengths = generate_sequence_v2(
             [&](auto i) {
                 if constexpr(ThreadClusterArrangeOrder{}.At(i) == (nDim - 3))
@@ -197,13 +201,12 @@ struct ThreadGroupTensorSliceTransfer_Gather_DirectLoad
         const auto wave_cluster_idx = wave_cluster_desc_.CalculateBottomIndex(
             make_multi_index(ThreadGroup::GetThreadId() / 64));
 
-        const auto thread_data_idx_begin = thread_cluster_idx * thread_single_load_size;
-        const auto wave_data_idx_begin   = wave_cluster_idx * wave_single_load_size;
+        const auto wave_data_idx_begin = wave_cluster_idx * wave_single_load_size;
 
-        SetSrcSliceOrigin(src_desc, src_block_slice_origin + thread_data_idx_begin);
         // We don't need threadwise offset for lds since it was calculate by HW
         // We still need input the wavewise offset.
         SetDstSliceOrigin(dst_desc, dst_block_slice_origin + wave_data_idx_begin);
+#endif
     }
 
     __device__ void SetSrcSliceOrigin(const SrcDesc& src_desc, const Index& src_slice_origin_idx)
@@ -270,16 +273,24 @@ struct ThreadGroupTensorSliceTransfer_Gather_DirectLoad
             src_coord_xor_  = make_tensor_coordinate(src_desc, new_index);
 
             const IndexType src_offset = src_coord_xor_.GetOffset() + gather_offset;
-            const IndexType dst_offset = __builtin_amdgcn_readfirstlane(dst_coord_.GetOffset());
-
             // Check if src data is not in the logic padding area.
             // Leave the HW for oob checking
             // const bool is_src_valid =
             //     coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc,
             //     src_coord_);
-
+#if defined(__gfx125__) || defined(__gfx13__)
+            // Check if src data is not in the logic padding area.
+            // Leave the HW for oob checking
+            const bool is_src_valid =
+                coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord_);
+            src_buf.template AsyncCopyToLds<remove_cvref_t<decltype(dst_buf)>, ScalarPerVector, 0>(
+                dst_buf, src_offset, dst_coord_.GetOffset(), is_src_valid);
+#else
+            // Leave the HW for oob checking
+            const IndexType dst_offset = __builtin_amdgcn_readfirstlane(dst_coord_.GetOffset());
             src_buf.template DirectCopyToLds<remove_cvref_t<decltype(dst_buf)>, ScalarPerVector>(
                 dst_buf, src_offset, dst_offset, true);
+#endif
 
             constexpr auto move_src_on_dim = [&]() constexpr {
                 StaticallyIndexedArray<bool, nDim> move_on_dim_;

@@ -15,12 +15,13 @@ template <typename AsDataType_,
           typename EDataType_,
           typename BlockGemmShape_,
           typename Traits_,
-          typename ComputeDataType_ = AsDataType_,
-          typename AElementWise_    = ck_tile::element_wise::PassThrough,
-          typename BElementWise_    = ck_tile::element_wise::PassThrough,
-          bool FixedVectorSize_     = false,
-          index_t VectorSizeA_      = 1,
-          index_t VectorSizeB_      = 1>
+          typename AComputeDataType_ = AsDataType_,
+          typename BComputeDataType_ = BsDataType_,
+          typename AElementWise_     = ck_tile::element_wise::PassThrough,
+          typename BElementWise_     = ck_tile::element_wise::PassThrough,
+          bool FixedVectorSize_      = false,
+          index_t VectorSizeA_       = 1,
+          index_t VectorSizeB_       = 1>
 struct GemmPipelineProblemBase
 {
     using Traits = remove_cvref_t<Traits_>;
@@ -40,17 +41,22 @@ struct GemmPipelineProblemBase
     using BsLayout = remove_cvref_t<typename Traits::BsLayout>;
     using CLayout  = remove_cvref_t<typename Traits::CLayout>;
 
-    static constexpr bool ComputeDataTypeIsTuple = is_detected<is_tuple, ComputeDataType_>::value;
-    static constexpr bool ADataTypeIsTuple       = is_detected<is_tuple, AsDataType>::value;
-    static constexpr bool BDataTypeIsTuple       = is_detected<is_tuple, BsDataType>::value;
+    static constexpr bool AComputeDataTypeIsTuple = is_detected<is_tuple, AComputeDataType_>::value;
+    static constexpr bool BComputeDataTypeIsTuple = is_detected<is_tuple, BComputeDataType_>::value;
+    static constexpr bool ADataTypeIsTuple        = is_detected<is_tuple, AsDataType>::value;
+    static constexpr bool BDataTypeIsTuple        = is_detected<is_tuple, BsDataType>::value;
 
     static constexpr bool ALayoutIsTuple = is_detected<is_tuple, AsLayout>::value;
     static constexpr bool BLayoutIsTuple = is_detected<is_tuple, BsLayout>::value;
 
-    using ComputeDataTypeTuple = std::conditional_t<ComputeDataTypeIsTuple,
-                                                    remove_cvref_t<ComputeDataType_>,
-                                                    remove_cvref_t<tuple<ComputeDataType_>>>;
-    using AsLayoutTuple        = std::
+    using AComputeDataTypeTuple = std::conditional_t<AComputeDataTypeIsTuple,
+                                                     remove_cvref_t<AComputeDataType_>,
+                                                     remove_cvref_t<tuple<AComputeDataType_>>>;
+
+    using BComputeDataTypeTuple = std::conditional_t<BComputeDataTypeIsTuple,
+                                                     remove_cvref_t<BComputeDataType_>,
+                                                     remove_cvref_t<tuple<BComputeDataType_>>>;
+    using AsLayoutTuple         = std::
         conditional_t<ALayoutIsTuple, remove_cvref_t<AsLayout>, remove_cvref_t<tuple<AsLayout>>>;
     using BsLayoutTuple = std::
         conditional_t<BLayoutIsTuple, remove_cvref_t<BsLayout>, remove_cvref_t<tuple<BsLayout>>>;
@@ -63,11 +69,14 @@ struct GemmPipelineProblemBase
                                                remove_cvref_t<BsDataType>,
                                                remove_cvref_t<tuple<BsDataType>>>;
 
-    using ComputeDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, ComputeDataTypeTuple>>;
-    using ADataType       = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
-    using ALayout         = remove_cvref_t<std::tuple_element_t<number<0>{}, AsLayoutTuple>>;
-    using BDataType       = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
-    using BLayout         = remove_cvref_t<std::tuple_element_t<number<0>{}, BsLayoutTuple>>;
+    using AComputeDataType =
+        remove_cvref_t<std::tuple_element_t<number<0>{}, AComputeDataTypeTuple>>;
+    using BComputeDataType =
+        remove_cvref_t<std::tuple_element_t<number<0>{}, BComputeDataTypeTuple>>;
+    using ADataType = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
+    using ALayout   = remove_cvref_t<std::tuple_element_t<number<0>{}, AsLayoutTuple>>;
+    using BDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
+    using BLayout   = remove_cvref_t<std::tuple_element_t<number<0>{}, BsLayoutTuple>>;
 
     static constexpr bool TransposeC            = Traits::TransposeC;
     static constexpr index_t NumWaveGroups      = Traits::NumWaveGroups;
@@ -200,18 +209,20 @@ template <typename AsDataType_,
           typename EDataType_,
           typename BlockGemmShape_,
           typename Traits_,
-          typename AElementWise_    = ck_tile::element_wise::PassThrough,
-          typename BElementWise_    = ck_tile::element_wise::PassThrough,
-          typename ComputeDataType_ = AsDataType_,
-          bool FixedVectorSize_     = false,
-          index_t VectorSizeA_      = 1,
-          index_t VectorSizeB_      = 1>
+          typename AComputeDataType_ = AsDataType_,
+          typename BComputeDataType_ = BsDataType_,
+          typename AElementWise_     = ck_tile::element_wise::PassThrough,
+          typename BElementWise_     = ck_tile::element_wise::PassThrough,
+          bool FixedVectorSize_      = false,
+          index_t VectorSizeA_       = 1,
+          index_t VectorSizeB_       = 1>
 using GemmPipelineProblem = GemmPipelineProblemBase<AsDataType_,
                                                     BsDataType_,
                                                     EDataType_,
                                                     BlockGemmShape_,
                                                     Traits_,
-                                                    ComputeDataType_,
+                                                    AComputeDataType_,
+                                                    BComputeDataType_,
                                                     AElementWise_,
                                                     BElementWise_,
                                                     FixedVectorSize_,
@@ -226,7 +237,8 @@ template <typename AsDataType_,
           GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
           typename AElementWise_           = ck_tile::element_wise::PassThrough,
           typename BElementWise_           = ck_tile::element_wise::PassThrough,
-          typename ComputeDataType_        = AsDataType_,
+          typename AComputeDataType_       = AsDataType_,
+          typename BComputeDataType_       = BsDataType_,
           bool FixedVectorSize_            = false,
           index_t VectorSizeA_             = 1,
           index_t VectorSizeB_             = 1>
@@ -248,17 +260,21 @@ struct UniversalGemmPipelineProblem
     using BsLayout = remove_cvref_t<typename Traits::BsLayout>;
     using CLayout  = remove_cvref_t<typename Traits::CLayout>;
 
-    static constexpr bool ComputeDataTypeIsTuple = is_detected<is_tuple, ComputeDataType_>::value;
-    static constexpr bool ADataTypeIsTuple       = is_detected<is_tuple, AsDataType>::value;
-    static constexpr bool BDataTypeIsTuple       = is_detected<is_tuple, BsDataType>::value;
+    static constexpr bool AComputeDataTypeIsTuple = is_detected<is_tuple, AComputeDataType_>::value;
+    static constexpr bool BComputeDataTypeIsTuple = is_detected<is_tuple, BComputeDataType_>::value;
+    static constexpr bool ADataTypeIsTuple        = is_detected<is_tuple, AsDataType>::value;
+    static constexpr bool BDataTypeIsTuple        = is_detected<is_tuple, BsDataType>::value;
 
     static constexpr bool ALayoutIsTuple = is_detected<is_tuple, AsLayout>::value;
     static constexpr bool BLayoutIsTuple = is_detected<is_tuple, BsLayout>::value;
 
-    using ComputeDataTypeTuple = std::conditional_t<ComputeDataTypeIsTuple,
-                                                    remove_cvref_t<ComputeDataType_>,
-                                                    remove_cvref_t<tuple<ComputeDataType_>>>;
-    using AsLayoutTuple        = std::
+    using AComputeDataTypeTuple = std::conditional_t<AComputeDataTypeIsTuple,
+                                                     remove_cvref_t<AComputeDataType_>,
+                                                     remove_cvref_t<tuple<AComputeDataType_>>>;
+    using BComputeDataTypeTuple = std::conditional_t<BComputeDataTypeIsTuple,
+                                                     remove_cvref_t<BComputeDataType_>,
+                                                     remove_cvref_t<tuple<BComputeDataType_>>>;
+    using AsLayoutTuple         = std::
         conditional_t<ALayoutIsTuple, remove_cvref_t<AsLayout>, remove_cvref_t<tuple<AsLayout>>>;
     using BsLayoutTuple = std::
         conditional_t<BLayoutIsTuple, remove_cvref_t<BsLayout>, remove_cvref_t<tuple<BsLayout>>>;
@@ -266,16 +282,18 @@ struct UniversalGemmPipelineProblem
     using AsDataTypeTuple = std::conditional_t<ADataTypeIsTuple,
                                                remove_cvref_t<AsDataType>,
                                                remove_cvref_t<tuple<AsDataType>>>;
-
     using BsDataTypeTuple = std::conditional_t<BDataTypeIsTuple,
                                                remove_cvref_t<BsDataType>,
                                                remove_cvref_t<tuple<BsDataType>>>;
 
-    using ComputeDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, ComputeDataTypeTuple>>;
-    using ADataType       = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
-    using ALayout         = remove_cvref_t<std::tuple_element_t<number<0>{}, AsLayoutTuple>>;
-    using BDataType       = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
-    using BLayout         = remove_cvref_t<std::tuple_element_t<number<0>{}, BsLayoutTuple>>;
+    using AComputeDataType =
+        remove_cvref_t<std::tuple_element_t<number<0>{}, AComputeDataTypeTuple>>;
+    using BComputeDataType =
+        remove_cvref_t<std::tuple_element_t<number<0>{}, BComputeDataTypeTuple>>;
+    using ADataType = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
+    using ALayout   = remove_cvref_t<std::tuple_element_t<number<0>{}, AsLayoutTuple>>;
+    using BDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
+    using BLayout   = remove_cvref_t<std::tuple_element_t<number<0>{}, BsLayoutTuple>>;
 
     static constexpr bool TransposeC            = Traits::TransposeC;
     static constexpr index_t NumWaveGroups      = Traits::NumWaveGroups;
@@ -346,6 +364,8 @@ struct FlatmmPipelineProblem
     static constexpr bool kPadM = Traits::kPadM;
     static constexpr bool kPadN = Traits::kPadN;
     static constexpr bool kPadK = Traits::kPadK;
+
+    static constexpr bool isFlatMM = true;
 
     static constexpr bool DoubleSmemBuffer = Traits::DoubleSmemBuffer;
 

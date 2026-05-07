@@ -50,6 +50,11 @@ bool run_grouped_conv_conv_fwd(bool do_verification,
         wei0.GenerateTensorValue(GeneratorTensor_2<Wei0DataType>{-5, 5});
         wei1.GenerateTensorValue(GeneratorTensor_2<Wei1DataType>{-5, 5});
         break;
+    case 2:
+        in0.GenerateTensorValue(GeneratorTensor_2<In0DataType>{-5, 5});
+        wei0.GenerateTensorValue(GeneratorTensor_2<Wei0DataType>{-5, 5});
+        wei1.GenerateTensorValue(GeneratorTensor_1<Wei1DataType>{1});
+        break;
     default:
         in0.GenerateTensorValue(GeneratorTensor_3<In0DataType>{0.0, 1.0});
         wei0.GenerateTensorValue(GeneratorTensor_3<Wei0DataType>{-0.5, 0.5});

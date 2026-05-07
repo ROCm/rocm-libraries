@@ -13,13 +13,16 @@ namespace ck {
 template <AddressSpaceEnum AddressSpace,
           typename T,
           index_t N,
-          bool InvalidElementUseNumericalZeroValue> // TODO remove this bool, no longer needed
-struct StaticBuffer : public StaticallyIndexedArray<T, N>
+          bool InvalidElementUseNumericalZeroValue, // TODO remove this bool, no longer needed
+          typename StaticBufferBaseArray = StaticallyIndexedArray<T, N>>
+struct StaticBuffer : public StaticBufferBaseArray
 {
     using type = T;
-    using base = StaticallyIndexedArray<T, N>;
+    using base = StaticBufferBaseArray;
 
     __host__ __device__ constexpr StaticBuffer() : base{} {}
+
+    __host__ __device__ constexpr StaticBuffer(T* p) : base(p) {}
 
     template <typename... Ys>
     __host__ __device__ constexpr StaticBuffer& operator=(const Tuple<Ys...>& y)
@@ -71,18 +74,23 @@ template <AddressSpaceEnum AddressSpace,
           index_t NumOfVector,
           index_t ScalarPerVector,
           bool InvalidElementUseNumericalZeroValue, // TODO remove this bool, no longer needed,
+          typename BaseArray = StaticallyIndexedArray<vector_type<S, ScalarPerVector>, NumOfVector>,
           typename enable_if<is_scalar_type<S>::value, bool>::type = false>
-struct StaticBufferTupleOfVector
-    : public StaticallyIndexedArray<vector_type<S, ScalarPerVector>, NumOfVector>
+struct StaticBufferTupleOfVector : public BaseArray
 {
     using V    = typename vector_type<S, ScalarPerVector>::type;
-    using base = StaticallyIndexedArray<vector_type<S, ScalarPerVector>, NumOfVector>;
+    using base = BaseArray;
 
     static constexpr auto s_per_v   = Number<ScalarPerVector>{};
     static constexpr auto num_of_v_ = Number<NumOfVector>{};
     static constexpr auto s_per_buf = s_per_v * num_of_v_;
 
     __host__ __device__ constexpr StaticBufferTupleOfVector() : base{} {}
+
+    __host__ __device__ constexpr StaticBufferTupleOfVector(S* p)
+        : base(reinterpret_cast<vector_type<S, ScalarPerVector>*>(p))
+    {
+    }
 
     __host__ __device__ static constexpr AddressSpaceEnum GetAddressSpace() { return AddressSpace; }
 
@@ -194,6 +202,54 @@ template <AddressSpaceEnum AddressSpace, typename T, long_index_t N>
 __host__ __device__ constexpr auto make_static_buffer(LongNumber<N>)
 {
     return StaticBuffer<AddressSpace, T, N, true>{};
+}
+
+template <AddressSpaceEnum AddressSpace, typename T, index_t N>
+__host__ __device__ constexpr auto make_static_buffer_v2(Number<N>)
+{
+    return StaticBuffer<AddressSpace, T, N, true, StaticallyIndexedArray_v2<T, N>>{};
+}
+
+template <AddressSpaceEnum AddressSpace, typename T, long_index_t N>
+__host__ __device__ constexpr auto make_static_buffer_v2(LongNumber<N>)
+{
+    return StaticBuffer<AddressSpace, T, N, true, StaticallyIndexedArray_v2<T, N>>{};
+}
+
+template <AddressSpaceEnum AddressSpace, typename T, index_t N>
+__host__ __device__ constexpr auto make_static_buffer_v3(Number<N>, T* data)
+{
+    return StaticBuffer<AddressSpace, T, N, true, StaticallyIndexedArray_v3<T, N>>(data);
+}
+
+template <AddressSpaceEnum AddressSpace, typename T, long_index_t N>
+__host__ __device__ constexpr auto make_static_buffer_v3(LongNumber<N>, T* data)
+{
+    return StaticBuffer<AddressSpace, T, N, true, StaticallyIndexedArray_v3<T, N>>(data);
+}
+
+template <AddressSpaceEnum AddressSpace, typename T, index_t N>
+__host__ __device__ constexpr auto make_static_buffer_v4(Number<N>, T* data)
+{
+    return StaticBuffer<AddressSpace, T, N, true, StaticallyIndexedArray_v4<T, N>>(data);
+}
+
+template <AddressSpaceEnum AddressSpace, typename T, long_index_t N>
+__host__ __device__ constexpr auto make_static_buffer_v4(LongNumber<N>, T* data)
+{
+    return StaticBuffer<AddressSpace, T, N, true, StaticallyIndexedArray_v4<T, N>>(data);
+}
+
+template <AddressSpaceEnum AddressSpace, typename T, index_t Offset, index_t N>
+__host__ __device__ constexpr auto make_static_buffer_v5(Number<N>, T* data)
+{
+    return StaticBuffer<AddressSpace, T, N, true, StaticallyIndexedArray_v5<T, N, Offset>>(data);
+}
+
+template <AddressSpaceEnum AddressSpace, typename T, index_t Offset, long_index_t N>
+__host__ __device__ constexpr auto make_static_buffer_v5(LongNumber<N>, T* data)
+{
+    return StaticBuffer<AddressSpace, T, N, true, StaticallyIndexedArray_v5<T, N, Offset>>(data);
 }
 
 } // namespace ck

@@ -293,12 +293,17 @@ struct GridwiseBatchedGemmMultipleDGemmMultipleD_Xdl_CShuffle
 
     __device__ static auto GetGemm0WaveMNIdx(const index_t thread_id)
     {
+#if defined(__gfx13__)
+        constexpr index_t NumNInput = WaveSize / Gemm0NPerXdl;
+        return make_multi_index(thread_id / NumNInput, thread_id % NumNInput);
+#else
         constexpr auto wave_threadid_to_mn_idx_adaptor = make_single_stage_tensor_adaptor(
             make_tuple(make_merge_transform(make_tuple(WaveSize / Gemm0NPerXdl, Gemm0NPerXdl))),
             make_tuple(Sequence<0, 1>{}),
             make_tuple(Sequence<0>{}));
 
         return wave_threadid_to_mn_idx_adaptor.CalculateBottomIndex(make_multi_index(thread_id));
+#endif
     }
 
     template <typename A0BlockDesc_AK0_M_AK1>
@@ -334,8 +339,52 @@ struct GridwiseBatchedGemmMultipleDGemmMultipleD_Xdl_CShuffle
     MakeGemm1BMmaTileDescriptor_N0_N1_N2_K(const BBlockDesc_BK0_N_BK1&)
     {
         constexpr index_t Gemm1NWaves = Gemm1NPerBlock / (Gemm1NXdlPerWave * Gemm0NPerXdl);
-        return MakeGemmMmaTileDescriptor_MN0_MN1_MN2_K<Gemm1NXdlPerWave, Gemm1NWaves, Gemm0NPerXdl>(
-            BBlockDesc_BK0_N_BK1{});
+        constexpr auto mfma_info =
+            MfmaSelector<A0B0B1DataType, Gemm0MPerXdl, Gemm0NPerXdl>::selected_mfma;
+        if constexpr(mfma_info.k_per_blk > mfma_info.group_size && mfma_info.num_input_blks > 1)
+        {
+            constexpr auto KGroup      = mfma_info.k_per_blk / mfma_info.group_size;
+            constexpr auto K0PerXdlops = mfma_info.num_input_blks;
+            constexpr auto KPerXdlops  = mfma_info.k_per_blk * mfma_info.num_input_blks;
+            static_assert(mfma_info.group_size % B1K1 == 0);
+            static_assert(Gemm1KPerBlock % KPerXdlops == 0);
+            static_assert(B1K1 == BBlockDesc_BK0_N_BK1{}.GetLength(Number<2>{}));
+
+            constexpr auto K0 = Gemm1KPerBlock / KPerXdlops;
+            constexpr auto K1 = KGroup;
+            constexpr auto K2 = K0PerXdlops;
+            constexpr auto K3 = KPerXdlops / K1 / K2 / B1K1;
+            constexpr auto N  = BBlockDesc_BK0_N_BK1{}.GetLength(Number<1>{});
+
+            constexpr auto b1_blockdesc_k0_k1_k2_k3_n_k4 = transform_tensor_descriptor(
+                BBlockDesc_BK0_N_BK1{},
+                make_tuple(make_unmerge_transform(
+                               make_tuple(Number<K0>{}, Number<K1>{}, Number<K2>{}, Number<K3>{})),
+                           make_pass_through_transform(N),
+                           make_pass_through_transform(B1K1)),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
+                make_tuple(Sequence<0, 1, 2, 3>{}, Sequence<4>{}, Sequence<5>{}));
+
+            constexpr auto b1_permute_blockdesc_k0_n_k1 = transform_tensor_descriptor(
+                b1_blockdesc_k0_k1_k2_k3_n_k4,
+                make_tuple(make_merge_transform_v3_division_mod(
+                               make_tuple(Number<K0>{}, Number<K2>{}, Number<K1>{}, Number<K3>{})),
+                           make_pass_through_transform(N),
+                           make_pass_through_transform(B1K1)),
+                make_tuple(Sequence<0, 2, 1, 3>{}, Sequence<4>{}, Sequence<5>{}),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+
+            return MakeGemmMmaTileDescriptor_MN0_MN1_MN2_K<Gemm1NXdlPerWave,
+                                                           Gemm1NWaves,
+                                                           Gemm0NPerXdl>(
+                b1_permute_blockdesc_k0_n_k1);
+        }
+        else
+        {
+            return MakeGemmMmaTileDescriptor_MN0_MN1_MN2_K<Gemm1NXdlPerWave,
+                                                           Gemm1NWaves,
+                                                           Gemm0NPerXdl>(BBlockDesc_BK0_N_BK1{});
+        }
     }
 
     __host__ __device__ static constexpr index_t GetSharedMemoryNumberOfByte()
@@ -898,12 +947,21 @@ struct GridwiseBatchedGemmMultipleDGemmMultipleD_Xdl_CShuffle
             },
             Number<NumD0Tensor>{});
 
+#if defined(__gfx13__)
+        constexpr index_t DsBlockTransferSrcScalarPerVector = n4;
+#else
+        constexpr index_t DsBlockTransferSrcScalarPerVector = CDE0BlockTransferSrcScalarPerVector;
+#endif
         const auto wave_id     = GetGemm0WaveIdx();
         const auto wave_m_n_id = GetGemm0WaveMNIdx(wave_id[I2]); // I2: 0~63
 
-        static_assert(CDE0BlockTransferSrcScalarPerVector <= n4,
-                      "vector load must be not greater than n4");
-        static_assert(n4 % CDE0BlockTransferSrcScalarPerVector == 0);
+#if defined(__gfx13__)
+        const auto wave_m_per_xdl_idx = wave_m_n_id[I0];
+        const auto wave_n_input_idx   = wave_m_n_id[I1];
+#else
+        const auto wave_m_per_xdl_idx = wave_m_n_id[I1];
+        const auto wave_n_input_idx   = wave_m_n_id[I0];
+#endif
 
         auto d0s_threadwise_copy = generate_tuple(
             [&](auto i) {
@@ -924,7 +982,7 @@ struct GridwiseBatchedGemmMultipleDGemmMultipleD_Xdl_CShuffle
                              n4>,
                     Sequence<0, 1, 2, 3, 4, 5, 6, 7, 8, 9>,
                     9, // CDE0BlockTransferSrcVectorDim
-                    CDE0BlockTransferSrcScalarPerVector,
+                    DsBlockTransferSrcScalarPerVector,
                     1,
                     false>(d0s_griddesc_m0_n0_m1_n1_m2_n2_m3_n3_n4_n5[i],
                            make_multi_index(block_work_idx[I0], // MBlockId
@@ -933,12 +991,13 @@ struct GridwiseBatchedGemmMultipleDGemmMultipleD_Xdl_CShuffle
                                             0,                  // nrepeat
                                             wave_id[I0],        // MWaveId
                                             wave_id[I1],        // NWaveId
-                                            wave_m_n_id[I1],    // MPerXdl
+                                            wave_m_per_xdl_idx, // MPerXdl
                                             0,                  // group
-                                            wave_m_n_id[I0],    // NInputIndex
+                                            wave_n_input_idx,   // NInputIndex
                                             0));                // register number
             },
             Number<NumD0Tensor>{});
+
         // acc0_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4 to acc0_thread_desc_k0_m_k1
         // n0_n1_n2_n3 -> k0
         // m0_m1_m2 -> m
@@ -1051,8 +1110,9 @@ struct GridwiseBatchedGemmMultipleDGemmMultipleD_Xdl_CShuffle
         constexpr index_t Gemm1KPack =
             MfmaSelector<A0B0B1DataType, Gemm0MPerXdl, Gemm0NPerXdl>::selected_mfma.group_size * 2;
 #else
-        constexpr index_t Gemm1KPack =
-            MfmaSelector<A0B0B1DataType, Gemm0MPerXdl, Gemm0NPerXdl>::selected_mfma.group_size;
+        constexpr auto mfma_info =
+            MfmaSelector<A0B0B1DataType, Gemm0MPerXdl, Gemm0NPerXdl>::selected_mfma;
+        constexpr index_t Gemm1KPack = math::max(mfma_info.k_per_blk, mfma_info.group_size);
 #endif
         auto blockwise_gemm1 = BlockwiseGemmXdlops_v2<
             BlockSize,
@@ -1120,6 +1180,7 @@ struct GridwiseBatchedGemmMultipleDGemmMultipleD_Xdl_CShuffle
                                                make_tuple(I0, I0, I0, I0, I0, I0, I0, I0, I0, I0),
                                                d0s_thread_buf(i));
                 });
+
                 static_for<0, m0 * n0 * n2 * n4, 1>{}([&](auto i) {
                     // get reference to src data
                     const auto src_data_refs = generate_tie(

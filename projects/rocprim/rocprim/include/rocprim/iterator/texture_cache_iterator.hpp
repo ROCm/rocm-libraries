@@ -220,7 +220,9 @@ public:
         #else
         texture_type words[multiple];
 
-        #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__) || defined(__GFX12__)
+        #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__) || defined(__GFX12__) \
+          || defined(__GFX13__) || defined(__gfx13_generic__)
+        #pragma message "Texture cache iterator is not supported on gfx94x, gfx95x, gfx120x or gfx1310 as the texture fetch functions in HIP are not available."
         __builtin_trap();
         #else
         ROCPRIM_UNROLL

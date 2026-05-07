@@ -32,8 +32,10 @@ template <BlockGemmPipelineVersion BlkGemmPipelineVer,
           index_t MRepeat,
           index_t NRepeat,
           index_t KPack,
-          bool DirectLoad          = false,
-          bool LdsScalarLoadToVgpr = false>
+          bool DirectLoad           = false,
+          bool TransposeC           = false,
+          bool UseDataCachePrefetch = false,
+          bool LdsScalarLoadToVgpr  = false>
 constexpr auto BlockGemmPipeline_Selector()
 {
     // Supported for Direct Load and V1
@@ -65,6 +67,7 @@ constexpr auto BlockGemmPipeline_Selector()
                                                              MRepeat,
                                                              NRepeat,
                                                              KPack,
+                                                             TransposeC,
                                                              LdsScalarLoadToVgpr>{};
         }
         else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v4)
@@ -88,7 +91,41 @@ constexpr auto BlockGemmPipeline_Selector()
                                                              NPerXDL,
                                                              MRepeat,
                                                              NRepeat,
-                                                             KPack>{};
+                                                             KPack,
+                                                             TransposeC>{};
+        }
+        else
+        {
+            std::cerr << "BlockGemmPipeline configuration is not available" << std::endl;
+        }
+    }
+    else if constexpr(UseDataCachePrefetch)
+    {
+        // currently only one implementation supports prefetch
+        if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
+        {
+            return BlockwiseGemmXdlops_pipeline_v3<BlkGemmPipeSche,
+                                                   BlockSize,
+                                                   ADataType,
+                                                   BDataType,
+                                                   ComputeDataType,
+                                                   AccDataType,
+                                                   ATileDesc,
+                                                   BTileDesc,
+                                                   AMmaTileDesc,
+                                                   BMmaTileDesc,
+                                                   ABlockTransferSrcScalarPerVector,
+                                                   BBlockTransferSrcScalarPerVector,
+                                                   MPerBlock,
+                                                   NPerBlock,
+                                                   KPerBlock,
+                                                   MPerXDL,
+                                                   NPerXDL,
+                                                   MRepeat,
+                                                   NRepeat,
+                                                   KPack,
+                                                   TransposeC,
+                                                   UseDataCachePrefetch>{};
         }
         else
         {
@@ -118,7 +155,8 @@ constexpr auto BlockGemmPipeline_Selector()
                                                    NPerXDL,
                                                    MRepeat,
                                                    NRepeat,
-                                                   KPack>{};
+                                                   KPack,
+                                                   TransposeC>{};
         }
         else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v2)
         {
@@ -141,7 +179,8 @@ constexpr auto BlockGemmPipeline_Selector()
                                                    NPerXDL,
                                                    MRepeat,
                                                    NRepeat,
-                                                   KPack>{};
+                                                   KPack,
+                                                   TransposeC>{};
         }
         else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
         {
@@ -164,7 +203,8 @@ constexpr auto BlockGemmPipeline_Selector()
                                                    NPerXDL,
                                                    MRepeat,
                                                    NRepeat,
-                                                   KPack>{};
+                                                   KPack,
+                                                   TransposeC>{};
         }
         else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v4)
         {
@@ -187,7 +227,8 @@ constexpr auto BlockGemmPipeline_Selector()
                                                    NPerXDL,
                                                    MRepeat,
                                                    NRepeat,
-                                                   KPack>{};
+                                                   KPack,
+                                                   TransposeC>{};
         }
         else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v5)
         {
@@ -210,7 +251,8 @@ constexpr auto BlockGemmPipeline_Selector()
                                                    NPerXDL,
                                                    MRepeat,
                                                    NRepeat,
-                                                   KPack>{};
+                                                   KPack,
+                                                   TransposeC>{};
         }
         else
         {

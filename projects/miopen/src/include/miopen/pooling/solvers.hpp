@@ -354,6 +354,26 @@ struct TransposedPoolingFwd2d final : PoolingFwdNCHWTransposingSolver<PoolingFor
     {
         return PoolingForward2d{}.Search(context, problem, invoke_context);
     }
+    PoolingForward2d::PerformanceConfigType
+    GetDefaultPerformanceConfig(const ExecutionContext& ctx,
+                                const miopen::pooling::ProblemDescription& problem) const override
+    {
+        return PoolingForward2d{}.GetDefaultPerformanceConfig(ctx, problem);
+    }
+    bool
+    IsValidPerformanceConfig(const ExecutionContext& ctx,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PoolingForward2d::PerformanceConfigType& config) const override
+    {
+        return PoolingForward2d{}.IsValidPerformanceConfig(ctx, problem, config);
+    }
+    PoolingForward2d::PerformanceConfigType
+    Search(const ExecutionContext& context,
+           const miopen::pooling::ProblemDescription& problem,
+           const AnyInvokeParams& invoke_context) const override
+    {
+        return PoolingForward2d{}.Search(context, problem, invoke_context);
+    }
 };
 
 struct TransposedPoolingFwdNd final : PoolingFwdNCHWTransposingSolver<PoolingForwardNd>
@@ -361,6 +381,26 @@ struct TransposedPoolingFwdNd final : PoolingFwdNCHWTransposingSolver<PoolingFor
     const std::string& SolverDbId() const override
     {
         return GetSolverDbId<TransposedPoolingFwdNd>();
+    }
+    PoolingForwardNd::PerformanceConfigType
+    GetDefaultPerformanceConfig(const ExecutionContext& ctx,
+                                const miopen::pooling::ProblemDescription& problem) const override
+    {
+        return PoolingForwardNd{}.GetDefaultPerformanceConfig(ctx, problem);
+    }
+    bool
+    IsValidPerformanceConfig(const ExecutionContext& ctx,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PoolingForwardNd::PerformanceConfigType& config) const override
+    {
+        return PoolingForwardNd{}.IsValidPerformanceConfig(ctx, problem, config);
+    }
+    PoolingForwardNd::PerformanceConfigType
+    Search(const ExecutionContext& context,
+           const miopen::pooling::ProblemDescription& problem,
+           const AnyInvokeParams& invoke_context) const override
+    {
+        return PoolingForwardNd{}.Search(context, problem, invoke_context);
     }
     PoolingForwardNd::PerformanceConfigType
     GetDefaultPerformanceConfig(const ExecutionContext& ctx,
@@ -506,6 +546,26 @@ struct TransposedPoolingBwd2d final : PoolingBwdNCHWTransposingSolver<PoolingBac
     {
         return PoolingBackward2d{}.Search(context, problem, invoke_context);
     }
+    PoolingBackward2d::PerformanceConfigType
+    GetDefaultPerformanceConfig(const ExecutionContext& ctx,
+                                const miopen::pooling::ProblemDescription& problem) const override
+    {
+        return PoolingBackward2d{}.GetDefaultPerformanceConfig(ctx, problem);
+    }
+    bool
+    IsValidPerformanceConfig(const ExecutionContext& ctx,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PoolingBackward2d::PerformanceConfigType& config) const override
+    {
+        return PoolingBackward2d{}.IsValidPerformanceConfig(ctx, problem, config);
+    }
+    PoolingBackward2d::PerformanceConfigType
+    Search(const ExecutionContext& context,
+           const miopen::pooling::ProblemDescription& problem,
+           const AnyInvokeParams& invoke_context) const override
+    {
+        return PoolingBackward2d{}.Search(context, problem, invoke_context);
+    }
 };
 
 struct TransposedPoolingBwdNd final : PoolingBwdNCHWTransposingSolver<PoolingBackwardNd>
@@ -513,6 +573,26 @@ struct TransposedPoolingBwdNd final : PoolingBwdNCHWTransposingSolver<PoolingBac
     const std::string& SolverDbId() const override
     {
         return GetSolverDbId<TransposedPoolingBwdNd>();
+    }
+    PoolingBackwardNd::PerformanceConfigType
+    GetDefaultPerformanceConfig(const ExecutionContext& ctx,
+                                const miopen::pooling::ProblemDescription& problem) const override
+    {
+        return PoolingBackwardNd{}.GetDefaultPerformanceConfig(ctx, problem);
+    }
+    bool
+    IsValidPerformanceConfig(const ExecutionContext& ctx,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PoolingBackwardNd::PerformanceConfigType& config) const override
+    {
+        return PoolingBackwardNd{}.IsValidPerformanceConfig(ctx, problem, config);
+    }
+    PoolingBackwardNd::PerformanceConfigType
+    Search(const ExecutionContext& context,
+           const miopen::pooling::ProblemDescription& problem,
+           const AnyInvokeParams& invoke_context) const override
+    {
+        return PoolingBackwardNd{}.Search(context, problem, invoke_context);
     }
     PoolingBackwardNd::PerformanceConfigType
     GetDefaultPerformanceConfig(const ExecutionContext& ctx,

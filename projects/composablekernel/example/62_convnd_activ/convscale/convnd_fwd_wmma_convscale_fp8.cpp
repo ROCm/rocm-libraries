@@ -88,9 +88,9 @@ using DeviceGroupedConvNDFwdInstance =
 
 int main(int argc, char* argv[])
 {
-    if(!ck::is_gfx12_supported())
+    if(!(ck::is_gfx12_supported() || ck::is_gfx13_supported()))
     {
-        std::cout << "This kernel support gfx12 only" << std::endl;
+        std::cout << "This kernel support gfx12 and gfx13 only" << std::endl;
 
         return 0;
     }

@@ -121,12 +121,20 @@ __device__ void amd_assembly_outer_product_1x4(
 __device__ void
 amd_assembly_outer_product_1x2(half2_t a, half2_t b0, half2_t b1, float& c0, float& c1)
 {
+#if defined(CK_USE_AMD_V_DOT2_F32_F16)
     asm volatile("\n \
             v_dot2_f32_f16 %0, %2, %3, %0\n \
             v_dot2_f32_f16 %1, %2, %4, %1\n \
             "
                  : "=v"(c0), "=v"(c1)
                  : "v"(a), "v"(b0), "v"(b1), "0"(c0), "1"(c1));
+#else
+    ignore = a;
+    ignore = b0;
+    ignore = b1;
+    ignore = c0;
+    ignore = c1;
+#endif
 }
 
 // c0 += inner_product(a, b0)
@@ -138,7 +146,7 @@ amd_assembly_outer_product_1x2(half4_t a, half4_t b0, half4_t b1, float& c0, flo
     const half2_t* p_a_half2  = c_style_pointer_cast<const half2_t*>(&a);
     const half2_t* p_b0_half2 = c_style_pointer_cast<const half2_t*>(&b0);
     const half2_t* p_b1_half2 = c_style_pointer_cast<const half2_t*>(&b1);
-
+#if defined(CK_USE_AMD_V_DOT2_F32_F16)
     // do dot2 two times
     asm volatile("\n \
             v_dot2_f32_f16 %0, %2, %4, %0\n \
@@ -155,6 +163,13 @@ amd_assembly_outer_product_1x2(half4_t a, half4_t b0, half4_t b1, float& c0, flo
                    "v"(p_b1_half2[1]),
                    "0"(c0),
                    "1"(c1));
+#else
+    ignore = p_a_half2;
+    ignore = p_b0_half2;
+    ignore = p_b1_half2;
+    ignore = c0;
+    ignore = c1;
+#endif
 }
 
 // c0 += inner_product(a, b0)
@@ -171,6 +186,7 @@ __device__ void amd_assembly_outer_product_1x4(half2_t a,
                                                float& c2,
                                                float& c3)
 {
+#if defined(CK_USE_AMD_V_DOT2_F32_F16)
     asm volatile("\n \
             v_dot2_f32_f16 %0, %4, %5, %0\n \
             v_dot2_f32_f16 %1, %4, %6, %1\n \
@@ -179,6 +195,17 @@ __device__ void amd_assembly_outer_product_1x4(half2_t a,
             "
                  : "=v"(c0), "=v"(c1), "=v"(c2), "=v"(c3)
                  : "v"(a), "v"(b0), "v"(b1), "v"(b2), "v"(b3), "0"(c0), "1"(c1), "2"(c2), "3"(c3));
+#else
+    ignore = a;
+    ignore = b0;
+    ignore = b1;
+    ignore = b2;
+    ignore = b3;
+    ignore = c0;
+    ignore = c1;
+    ignore = c2;
+    ignore = c3;
+#endif
 }
 
 // c0 += inner_product(a, b0)
@@ -201,7 +228,7 @@ __device__ void amd_assembly_outer_product_1x4(half4_t a,
     const half2_t* p_b1_half2 = c_style_pointer_cast<const half2_t*>(&b1);
     const half2_t* p_b2_half2 = c_style_pointer_cast<const half2_t*>(&b2);
     const half2_t* p_b3_half2 = c_style_pointer_cast<const half2_t*>(&b3);
-
+#if defined(CK_USE_AMD_V_DOT2_F32_F16)
     // do dot2 two times
     asm volatile("\n \
             v_dot2_f32_f16 %0, %4, %6,  %0\n \
@@ -228,6 +255,17 @@ __device__ void amd_assembly_outer_product_1x4(half4_t a,
                    "1"(c1),
                    "2"(c2),
                    "3"(c3));
+#else
+    ignore = p_a_half2;
+    ignore = p_b0_half2;
+    ignore = p_b1_half2;
+    ignore = p_b2_half2;
+    ignore = p_b3_half2;
+    ignore = c0;
+    ignore = c1;
+    ignore = c2;
+    ignore = c3;
+#endif
 }
 
 __device__ void amd_assembly_outer_product_1x4(half8_t a,
@@ -284,6 +322,7 @@ __device__ void amd_assembly_outer_product_1x4(half16_t a,
 __device__ void
 amd_assembly_outer_product_1x2(int8x4_t a, int8x4_t b0, int8x4_t b1, int32_t& c0, int32_t& c1)
 {
+#if defined(CK_USE_AMD_V_DOT4_I32_I8)
 #if 1
     asm volatile("\n \
             v_dot4_i32_i8 %0, %2, %3, %0\n \
@@ -298,6 +337,18 @@ amd_assembly_outer_product_1x2(int8x4_t a, int8x4_t b0, int8x4_t b1, int32_t& c0
 #else
     c0 = __builtin_amdgcn_sdot4(bit_cast<int32_t>(a), bit_cast<int32_t>(b0), c0, false);
     c1 = __builtin_amdgcn_sdot4(bit_cast<int32_t>(a), bit_cast<int32_t>(b1), c1, false);
+#endif
+#elif defined(CK_USE_AMD_V_DOT4_I32_I8_GFX11)
+    c0 =
+        __builtin_amdgcn_sudot4(true, bit_cast<int32_t>(a), true, bit_cast<int32_t>(b0), c0, false);
+    c1 =
+        __builtin_amdgcn_sudot4(true, bit_cast<int32_t>(a), true, bit_cast<int32_t>(b1), c1, false);
+#else
+    ignore = a;
+    ignore = b0;
+    ignore = b1;
+    ignore = c0;
+    ignore = c1;
 #endif
 }
 
@@ -315,6 +366,7 @@ __device__ void amd_assembly_outer_product_1x4(int8x4_t a,
                                                int32_t& c2,
                                                int32_t& c3)
 {
+#if defined(CK_USE_AMD_V_DOT4_I32_I8)
 #if 1
     asm volatile("\n \
             v_dot4_i32_i8 %0, %4, %5, %0\n \
@@ -337,6 +389,26 @@ __device__ void amd_assembly_outer_product_1x4(int8x4_t a,
     c1 = __builtin_amdgcn_sdot4(bit_cast<int32_t>(a), bit_cast<int32_t>(b1), c1, false);
     c2 = __builtin_amdgcn_sdot4(bit_cast<int32_t>(a), bit_cast<int32_t>(b2), c2, false);
     c3 = __builtin_amdgcn_sdot4(bit_cast<int32_t>(a), bit_cast<int32_t>(b3), c3, false);
+#endif
+#elif defined(CK_USE_AMD_V_DOT4_I32_I8_GFX11)
+    c0 =
+        __builtin_amdgcn_sudot4(true, bit_cast<int32_t>(a), true, bit_cast<int32_t>(b0), c0, false);
+    c1 =
+        __builtin_amdgcn_sudot4(true, bit_cast<int32_t>(a), true, bit_cast<int32_t>(b1), c1, false);
+    c2 =
+        __builtin_amdgcn_sudot4(true, bit_cast<int32_t>(a), true, bit_cast<int32_t>(b2), c2, false);
+    c3 =
+        __builtin_amdgcn_sudot4(true, bit_cast<int32_t>(a), true, bit_cast<int32_t>(b3), c3, false);
+#else
+    ignore = a;
+    ignore = b0;
+    ignore = b1;
+    ignore = b2;
+    ignore = b3;
+    ignore = c0;
+    ignore = c1;
+    ignore = c2;
+    ignore = c3;
 #endif
 }
 

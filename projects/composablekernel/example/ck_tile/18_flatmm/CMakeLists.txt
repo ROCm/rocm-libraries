@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-set(SUPPORTED_GPUS gfx908 gfx90a gfx942 gfx950)
+set(SUPPORTED_GPUS gfx908 gfx90a gfx942 gfx950 gfx1200 gfx1250 gfx1251 gfx1310)
 
 set(has_supported_gpu FALSE)
 foreach(gpu IN LISTS GPU_TARGETS)

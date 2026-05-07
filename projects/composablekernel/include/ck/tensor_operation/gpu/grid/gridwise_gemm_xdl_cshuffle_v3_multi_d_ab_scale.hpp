@@ -37,7 +37,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -1225,9 +1225,13 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
         constexpr index_t MWaves   = MPerBlock / (MXdlPerWave * MPerXdl);
         constexpr index_t NWaves   = NPerBlock / (NXdlPerWave * NPerXdl);
         constexpr index_t WaveSize = BlockSize / (MWaves * NWaves);
-        auto a_thread_offset       = get_thread_local_1d_id() % MPerXdl +
+#if defined(__gfx13__)
+        auto a_thread_offset = ((get_thread_local_1d_id() % WaveSize) >> 1) +
                                (get_thread_local_1d_id() / WaveSize) / NWaves * MPerXdl;
-
+#else
+        auto a_thread_offset = get_thread_local_1d_id() % MPerXdl +
+                               (get_thread_local_1d_id() / WaveSize) / NWaves * MPerXdl;
+#endif
         constexpr auto b_scale_thread_desc = make_naive_tensor_descriptor_packed(
             make_tuple(Number<ScaleSliceSizeN>{}, Number<ScaleSliceSizeK>{}));
 

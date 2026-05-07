@@ -207,6 +207,10 @@ check_err(const Range& out,
         std::cerr << ", number of errors: " << err_count;
         std::cerr << ", " << error_percent << "% wrong values" << std::endl;
     }
+    else
+    {
+        std::cerr << "Passed!" << std::endl;
+    }
     return res;
 }
 
@@ -261,6 +265,10 @@ check_err(const Range& out,
         std::cerr << ", number of errors: " << err_count;
         std::cerr << ", " << error_percent << "% wrong values" << std::endl;
     }
+    else
+    {
+        std::cerr << "Passed!" << std::endl;
+    }
     return res;
 }
 
@@ -314,6 +322,10 @@ check_err(const Range& out,
         std::cerr << ", number of errors: " << err_count;
         std::cerr << ", " << error_percent << "% wrong values" << std::endl;
     }
+    else
+    {
+        std::cerr << "Passed!" << std::endl;
+    }
     return res;
 }
 
@@ -365,6 +377,10 @@ check_err(const Range& out,
         std::cerr << "max err: " << max_err;
         std::cerr << ", number of errors: " << err_count;
         std::cerr << ", " << error_percent << "% wrong values" << std::endl;
+    }
+    else
+    {
+        std::cerr << "Passed!" << std::endl;
     }
     return res;
 }
@@ -425,6 +441,11 @@ check_err(const Range& out,
         std::cerr << ", number of errors: " << err_count;
         std::cerr << ", " << error_percent << "% wrong values" << std::endl;
     }
+    else
+    {
+        std::cerr << "Passed!" << std::endl;
+    }
+
     return res;
 }
 
@@ -476,6 +497,10 @@ check_err(const Range& out,
         std::cerr << std::setw(12) << std::setprecision(7) << "max err: " << max_err
                   << " number of errors: " << err_count << std::endl;
     }
+    else
+    {
+        std::cerr << "Passed!" << std::endl;
+    }
     return res;
 }
 
@@ -522,6 +547,10 @@ check_err(const Range& out,
     if(!res)
     {
         std::cerr << std::setw(12) << std::setprecision(7) << "max err: " << max_err << std::endl;
+    }
+    else
+    {
+        std::cerr << "Passed!" << std::endl;
     }
     return res;
 }
@@ -573,6 +602,10 @@ check_err(const Range& out,
     {
         std::cerr << std::setw(12) << std::setprecision(7) << "max err: " << max_err
                   << " number of errors: " << err_count << std::endl;
+    }
+    else
+    {
+        std::cerr << "Passed!" << std::endl;
     }
     return res;
 }

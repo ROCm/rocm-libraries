@@ -51,6 +51,16 @@ TEST(ArchTest, MakeGfx12TargetFields)
     EXPECT_EQ(target.WAVE_SIZE_ID, amdgcn_target_wave_size_id::WAVE32);
 }
 
+// Tests make_amdgcn_gfx13_target function
+TEST(ArchTest, MakeGfx13TargetFields)
+{
+    constexpr auto target = make_amdgcn_gfx13_target<amdgcn_target_id::GFX1310>();
+    EXPECT_EQ(target.TARGET_ID, amdgcn_target_id::GFX1310);
+    EXPECT_EQ(target.FAMILY_ID, amdgcn_target_family_id::GFX13);
+    EXPECT_EQ(target.ARCH_ID, amdgcn_target_arch_id::RDNA);
+    EXPECT_EQ(target.WAVE_SIZE_ID, amdgcn_target_wave_size_id::WAVE32);
+}
+
 // Tests default amdgcn_target
 TEST(ArchTest, DefaultTargetIsHost)
 {
@@ -164,6 +174,16 @@ TEST(ArchTest, TestSFINAEEnablersGfx12RdnaWave32)
     EXPECT_EQ(false, SFINAETestWaveSizeIdWave64<Target>::value);
 }
 
+TEST(ArchTest, TestSFINAEEnablersGfx13RdnaWave32)
+{
+    static constexpr auto target = make_amdgcn_gfx13_target<amdgcn_target_id::GFX1310>();
+    using Target                 = decltype(target);
+    EXPECT_EQ(false, SFINAETestTargetIdGfx908OrGfx90a<Target>::value);
+    EXPECT_EQ(false, SFINAETestFamilyIdGfx9<Target>::value);
+    EXPECT_EQ(false, SFINAETestArchIdCdna<Target>::value);
+    EXPECT_EQ(false, SFINAETestWaveSizeIdWave64<Target>::value);
+}
+
 TEST(ArchTest, TestSFINAEEnablersHost)
 {
     static constexpr auto target = amdgcn_target<>{};
@@ -229,6 +249,16 @@ TEST(ArchTest, MakeGfx12TargetFields)
     constexpr auto target = make_amdgcn_gfx12_target(amdgcn_target_id::GFX1200);
     EXPECT_EQ(target.TARGET_ID, amdgcn_target_id::GFX1200);
     EXPECT_EQ(target.FAMILY_ID, amdgcn_target_family_id::GFX12);
+    EXPECT_EQ(target.ARCH_ID, amdgcn_target_arch_id::RDNA);
+    EXPECT_EQ(target.WAVE_SIZE_ID, amdgcn_target_wave_size_id::WAVE32);
+}
+
+// Tests make_amdgcn_gfx12_target function
+TEST(ArchTest, MakeGfx13TargetFields)
+{
+    constexpr auto target = make_amdgcn_gfx13_target(amdgcn_target_id::GFX1310);
+    EXPECT_EQ(target.TARGET_ID, amdgcn_target_id::GFX1310);
+    EXPECT_EQ(target.FAMILY_ID, amdgcn_target_family_id::GFX13);
     EXPECT_EQ(target.ARCH_ID, amdgcn_target_arch_id::RDNA);
     EXPECT_EQ(target.WAVE_SIZE_ID, amdgcn_target_wave_size_id::WAVE32);
 }
@@ -347,6 +377,19 @@ TEST(ArchTest, TestSFINAEEnablersGfx12RdnaWave32)
     static constexpr auto target =
         amdgcn_target{.TARGET_ID    = amdgcn_target_id::GFX1200,
                       .FAMILY_ID    = amdgcn_target_family_id::GFX12,
+                      .ARCH_ID      = amdgcn_target_arch_id::RDNA,
+                      .WAVE_SIZE_ID = amdgcn_target_wave_size_id::WAVE32};
+    EXPECT_EQ(false, SFINAETestTargetIdGfx908OrGfx90a<target>::value);
+    EXPECT_EQ(false, SFINAETestFamilyIdGfx9<target>::value);
+    EXPECT_EQ(false, SFINAETestArchIdCdna<target>::value);
+    EXPECT_EQ(false, SFINAETestWaveSizeIdWave64<target>::value);
+}
+
+TEST(ArchTest, TestSFINAEEnablersGfx13RdnaWave32)
+{
+    static constexpr auto target =
+        amdgcn_target{.TARGET_ID    = amdgcn_target_id::GFX1310,
+                      .FAMILY_ID    = amdgcn_target_family_id::GFX13,
                       .ARCH_ID      = amdgcn_target_arch_id::RDNA,
                       .WAVE_SIZE_ID = amdgcn_target_wave_size_id::WAVE32};
     EXPECT_EQ(false, SFINAETestTargetIdGfx908OrGfx90a<target>::value);

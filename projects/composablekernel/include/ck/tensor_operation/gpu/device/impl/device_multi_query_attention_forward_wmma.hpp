@@ -60,7 +60,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
                                       bool input_permute,
                                       bool output_permute)
 {
-#if(defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__))
 
     // clang-format off
 // ***************************************************
@@ -106,19 +106,19 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         DeviceOp::MakeB1GridDescriptor(b1_gs_os_ns_lengths, b1_gs_os_ns_strides);
     const auto c_grid_desc_m_n =
                   DeviceOp::Transform::MakeCGridDescriptor_M_N(c_gs_ms_os_lengths, c_gs_ms_os_strides);
-    const auto c_grid_desc_mblock_mperblock_nblock_nperblock = 
+    const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
                   GridwiseOp::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(c_grid_desc_m_n);
     const auto block_2_ctile_map = GridwiseOp::MakeDefaultBlock2CTileMap(c_grid_desc_m_n, 1, 1);
 
     const auto a_grid_desc_g_m_k =
                   DeviceOp::Transform::MakeAGridDescriptor_G_M_K(a_gs_ms_ks_lengths, a_gs_ms_ks_strides);
-    const auto b0_grid_desc_g_l_k = 
+    const auto b0_grid_desc_g_l_k =
                   DeviceOp::Transform::MakeB0GridDescriptor_G_N_K(b0_gs_ns_ks_lengths, b0_gs_ns_ks_strides);
-    const auto b1_grid_desc_g_n_l = 
+    const auto b1_grid_desc_g_n_l =
                   DeviceOp::Transform::MakeB1GridDescriptor_G_N_K(b1_gs_os_ns_lengths, b1_gs_os_ns_strides);
     const auto c_grid_desc_g_m_n =
                   DeviceOp::Transform::MakeCGridDescriptor_G_M_N(c_gs_ms_os_lengths, c_gs_ms_os_strides);
-    const auto compute_base_ptr_of_batch = 
+    const auto compute_base_ptr_of_batch =
                   typename DeviceOp::ComputeBasePtrOfStridedBatch{a_grid_desc_g_m_k, b0_grid_desc_g_l_k, b1_grid_desc_g_n_l, c_grid_desc_g_m_n};
     index_t batch_count = c_grid_desc_g_m_n.GetLength(Number<0>{});
     const auto c0_matrix_mask = typename DeviceOp::C0MatrixMask{b0_grid_desc_g_l_k.GetLength(Number<1>{})};
@@ -288,8 +288,6 @@ struct DeviceMultiQueryAttentionForward_Wmma
     static constexpr auto I5 = Number<5>{};
     static constexpr auto I6 = Number<6>{};
 
-    static constexpr auto WmmaK = 16;
-
     static constexpr auto MWaves = MPerBlock / (MRepeat * MPerWmma);
     static constexpr auto LWaves = LPerBlock / (LRepeat * LPerWmma);
     static constexpr auto NWaves = NPerBlock / (NRepeat * NPerWmma);
@@ -327,11 +325,12 @@ struct DeviceMultiQueryAttentionForward_Wmma
         }
         else
         {
+            const index_t WmmaK = get_wmma_k<ADataType>();
             return Transform::
                 MakeAGridDescriptor_AKWmma_MBlockRepeat_MWaves_AK0PerWmma_AKRow_MPerWmma_AK1(
                     Transform::MakeAGridDescriptor_M_K(a_gs_ms_ks_lengths_vec,
                                                        a_gs_ms_ks_strides_vec),
-                    Number<WmmaK>{},
+                    WmmaK,
                     Number<MRepeat>{},
                     Number<MWaves>{},
                     Number<MPerWmma>{},
@@ -352,11 +351,12 @@ struct DeviceMultiQueryAttentionForward_Wmma
         }
         else
         {
+            const index_t WmmaK = get_wmma_k<B0DataType>();
             return Transform::
                 MakeB0GridDescriptor_BKWmma_LBlockRepeat_LWaves_BK0PerWmma_BKRow_LPerWmma_BK1(
                     Transform::MakeB0GridDescriptor_N_K(b0_gs_ls_ks_lengths_vec,
                                                         b0_gs_ls_ks_strides_vec),
-                    Number<WmmaK>{},
+                    WmmaK,
                     Number<LRepeat>{},
                     Number<LWaves>{},
                     Number<LPerWmma>{},
@@ -377,11 +377,12 @@ struct DeviceMultiQueryAttentionForward_Wmma
         }
         else
         {
+            const index_t WmmaK = get_wmma_k<B1DataType>();
             return Transform::
                 MakeB1GridDescriptor_BLWmma_NBlockRepeat_NWaves__BL0PerWmma_BLRow_NPerWmma_BL1(
                     Transform::MakeB1GridDescriptor_N_K(b1_gs_ns_ls_lengths_vec,
                                                         b1_gs_ns_ls_strides_vec),
-                    Number<WmmaK>{},
+                    WmmaK,
                     Number<NRepeat>{},
                     Number<NWaves>{},
                     Number<NPerWmma>{},
@@ -595,7 +596,7 @@ struct DeviceMultiQueryAttentionForward_Wmma
 
     static bool IsSupportedArgument(const RawArg& arg)
     {
-        if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
+        if(ck::is_gfx11_supported() || ck::is_gfx12_supported() || ck::is_gfx13_supported())
         {
             if constexpr(!(is_same_v<Acc0DataType, float> || is_same_v<Acc0DataType, int32_t>))
             {
@@ -614,7 +615,14 @@ struct DeviceMultiQueryAttentionForward_Wmma
             printf("DeviceOp: Arch err");
             return false;
         }
-
+        if(!is_xdl_wmma_k_supported<ADataType, KPerBlock>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<ADataType, LPerBlock>())
+        {
+            return false;
+        }
         constexpr index_t array_size = 4;
         ck::index_t G0               = arg.G0_;
         ck::index_t G1               = arg.G1_;

@@ -3,9 +3,7 @@
 
 #pragma once
 
-#include <charconv>
 #include <chrono>
-#include <cstring>
 #include <iostream>
 #include <string>
 
@@ -17,57 +15,9 @@ namespace TensileLite
         // Set via command line: --timing-instrumentation
         inline bool g_timingInstrumentationEnabled = false;
 
-        // Fast formatters — to_chars into a caller-supplied buffer
-        inline char* fmtOne(char* p, char* end, const char* s)
-        {
-            auto len = std::strlen(s);
-            auto avail = static_cast<size_t>(end - p);
-            if(len > avail)
-                len = avail;
-            std::memcpy(p, s, len);
-            return p + len;
-        }
-
-        inline char* fmtOne(char* p, char* end, const std::string& s)
-        {
-            return fmtOne(p, end, s.c_str());
-        }
-
-        inline char* fmtOne(char* p, char* end, size_t v)
-        {
-            auto result = std::to_chars(p, end, v);
-            return result.ptr;
-        }
-
-        inline char* fmtOne(char* p, char* end, double v)
-        {
-            auto result = std::to_chars(p, end, v);
-            return result.ptr;
-        }
-
-        // Format args into a stack buffer and write as a single line to std::clog
-        template<typename... Args>
-        inline void writeLine(Args&&... args)
-        {
-            char buf[256];
-            char*       p   = buf;
-            char* const end = buf + sizeof(buf) - 1;
-            ((p = fmtOne(p, end, args)), ...);
-            *p++ = '\n';
-            std::clog.write(buf, p - buf);
-        }
-
-        inline void flushTimingBuffer()
-        {
-            std::clog.flush();
-        }
-
-        // Simple RAII timer that records timing on destruction
+        // Simple RAII timer that prints timing on destruction
         // Output format: TIMING:<category>:<duration_ms>
         // This format is easily parseable by post-processing scripts
-        //
-        // Timing records are written to std::clog (buffered stderr).
-        // Call flushTimingBuffer() to ensure all records are flushed.
         class ScopedTimer
         {
         public:
@@ -85,7 +35,7 @@ namespace TensileLite
                 {
                     auto end      = clock::now();
                     auto duration = std::chrono::duration<double, std::milli>(end - m_start);
-                    writeLine("TIMING:", m_category, ":", duration.count());
+                    std::cerr << "TIMING:" << m_category << ":" << duration.count() << std::endl;
                 }
             }
 
@@ -98,7 +48,7 @@ namespace TensileLite
             }
 
         private:
-            std::string                    m_category;
+            std::string                        m_category;
             std::chrono::time_point<clock> m_start;
         };
 
@@ -107,7 +57,7 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
-                writeLine("TIMING:", category, ":", ms);
+                std::cerr << "TIMING:" << category << ":" << ms << std::endl;
             }
         }
 
@@ -117,8 +67,9 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
-                writeLine("TIMING_CONTEXT:M=", M, ",N=", N, ",K=", K,
-                          ",batch=", batchCount, ",typeA=", typeA, ",typeD=", typeD);
+                std::cerr << "TIMING_CONTEXT:M=" << M << ",N=" << N << ",K=" << K
+                          << ",batch=" << batchCount << ",typeA=" << typeA << ",typeD=" << typeD
+                          << std::endl;
             }
         }
 
@@ -129,9 +80,11 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
-                writeLine("TIMING_CONTEXT_GROUPED:index=", index, ",total=", totalGemms,
-                          ",M=", M, ",N=", N, ",K=", K,
-                          ",batch=", batchCount, ",typeA=", typeA, ",typeD=", typeD);
+                std::cerr << "TIMING_CONTEXT_GROUPED:index=" << index
+                          << ",total=" << totalGemms
+                          << ",M=" << M << ",N=" << N << ",K=" << K
+                          << ",batch=" << batchCount << ",typeA=" << typeA << ",typeD=" << typeD
+                          << std::endl;
             }
         }
 

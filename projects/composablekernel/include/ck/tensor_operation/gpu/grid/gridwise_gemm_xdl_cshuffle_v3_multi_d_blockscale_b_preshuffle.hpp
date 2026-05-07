@@ -38,7 +38,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle(
         typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         __shared__ char
@@ -75,7 +75,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle_2lds(
         typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__) || defined(__gfx13__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         __shared__ char
@@ -269,15 +269,10 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
     static constexpr index_t KPack =
         math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk);
     static constexpr index_t KGroup = []() {
-        if constexpr(is_same_v<remove_cvref_t<BDataType>, f8_t>)
-            // On gfx950, we have a mfma that required 32 f8 elements as input,
-            // splited into 2 groups of 16 f8 elements.
-            // the 2 groups is not contiguous in the B preshuffed layout.
-            // and we do not want it to be contiguous in the B preshuffled layout
-            // because a memory instruction can only read 16 f8 elements at a time.
-            return mfma_selector::selected_mfma.k_per_blk == 32 ? 2 : 1;
-        else
-            return 1;
+        // A memory instruction can only read 16 bytes at a time. If K1PerXdlops *
+        // sizeof(ComputeDataType) > 16, memory read will not conitnues in a wave in B preshuffle
+        // mode. So, we need split K into mutiple groups.
+        return mfma_selector::GetK1PerXdlops() * sizeof(ComputeTypeA) > 16 ? 2 : 1;
     }();
     static constexpr index_t KLane =
         mfma_selector::GetKPerXdlops() / mfma_selector::GetK1PerXdlops();
@@ -1184,10 +1179,13 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
         constexpr index_t MWaves   = MPerBlock / (MXdlPerWave * MPerXdl);
         constexpr index_t NWaves   = NPerBlock / (NXdlPerWave * NPerXdl);
         constexpr index_t WaveSize = BlockSize / (MWaves * NWaves);
-
+#if defined(__gfx13__)
+        auto a_thread_offset = ((get_thread_local_1d_id() % WaveSize) >> 1) +
+                               (get_thread_local_1d_id() / WaveSize) / NWaves * MPerXdl;
+#else
         auto a_thread_offset = get_thread_local_1d_id() % MPerXdl +
                                (get_thread_local_1d_id() / WaveSize) / NWaves * MPerXdl;
-
+#endif
         constexpr auto b_scale_thread_desc = make_naive_tensor_descriptor_packed(
             make_tuple(Number<ScaleSliceSizeN>{}, Number<ScaleSliceSizeK>{}));
 
@@ -1451,9 +1449,13 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
         constexpr index_t MWaves   = MPerBlock / (MXdlPerWave * MPerXdl);
         constexpr index_t NWaves   = NPerBlock / (NXdlPerWave * NPerXdl);
         constexpr index_t WaveSize = BlockSize / (MWaves * NWaves);
-        auto a_thread_offset       = get_thread_local_1d_id() % MPerXdl +
+#if defined(__gfx13__)
+        auto a_thread_offset = ((get_thread_local_1d_id() % WaveSize) >> 1) +
                                (get_thread_local_1d_id() / WaveSize) / NWaves * MPerXdl;
-
+#else
+        auto a_thread_offset = get_thread_local_1d_id() % MPerXdl +
+                               (get_thread_local_1d_id() / WaveSize) / NWaves * MPerXdl;
+#endif
         constexpr auto b_scale_thread_desc = make_naive_tensor_descriptor_packed(
             make_tuple(Number<ScaleSliceSizeN>{}, Number<ScaleSliceSizeK>{}));
 

@@ -456,8 +456,7 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                                         const DequantBFlatWindow& scale_b_flat_window,
                                         const index_t num_loop,
                                         const index_t k_padded_zeros,
-                                        void* p_smem_ping,
-                                        void* p_smem_pong) const
+                                        void* p_smem) const
     {
         static_assert(
             std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>>,
@@ -486,8 +485,9 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
             a_copy_dram_window_);
 
         // A tile in LDS
-        ADataType* p_a_lds_ping = static_cast<ADataType*>(p_smem_ping);
-        ADataType* p_a_lds_pong = static_cast<ADataType*>(p_smem_pong);
+        ADataType* p_a_lds_ping = static_cast<ADataType*>(p_smem);
+        ADataType* p_a_lds_pong = static_cast<ADataType*>(static_cast<void*>(
+            static_cast<char*>(p_smem) + PipelinePolicy::template GetSmemSize<Problem>()));
 
         constexpr auto write_a_lds_block_desc =
             PipelinePolicy::template MakeF16xF4_WriteALdsBlockDescriptor<Problem>();
@@ -1229,8 +1229,7 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                                    const DequantBFlatWindow& scale_b_flat_window,
                                    const index_t num_loop,
                                    const index_t k_padded_zeros,
-                                   void* p_smem_ping,
-                                   void* p_smem_pong) const
+                                   void* p_smem) const
     {
         return operator()(a_dram_block_window_tmp,
                           identity{},
@@ -1238,8 +1237,7 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                           scale_b_flat_window,
                           num_loop,
                           k_padded_zeros,
-                          p_smem_ping,
-                          p_smem_pong);
+                          p_smem);
     }
 
     template <typename ADramBlockWindowTmp,
@@ -1249,8 +1247,7 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                                    const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
                                    const DequantBFlatWindow& scale_b_flat_window,
                                    const index_t num_loop,
-                                   void* p_smem_ping,
-                                   void* p_smem_pong) const
+                                   void* p_smem) const
     {
         return operator()(a_dram_block_window_tmp,
                           identity{},
@@ -1258,8 +1255,7 @@ struct F16xMXF4FlatmmPipelineAGmemBGmemCRegV1
                           scale_b_flat_window,
                           num_loop,
                           0,
-                          p_smem_ping,
-                          p_smem_pong);
+                          p_smem);
     }
 };
 
@@ -1742,8 +1738,7 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
                                    const ScaleADramBlockWindowTmp& scale_a_window,
                                    const ScaleBDramBlockWindowTmp& scale_b_window,
                                    index_t num_loop,
-                                   void* __restrict__ p_smem_ping,
-                                   void* __restrict__ p_smem_pong) const
+                                   void* __restrict__ p_smem) const
     {
 #ifndef __gfx950__
         static_assert(false, "Only gfx950 is supported for MXFP4 flatmm pipeline now.");
@@ -1776,8 +1771,9 @@ struct F8xMXF4FlatmmPipelineAGmemBGmemCRegV1
         __builtin_amdgcn_sched_barrier(0);
 
         // A tile in LDS
-        ADataType* p_a_lds_ping = static_cast<ADataType*>(p_smem_ping);
-        ADataType* p_a_lds_pong = static_cast<ADataType*>(p_smem_pong);
+        ADataType* p_a_lds_ping = static_cast<ADataType*>(p_smem);
+        ADataType* p_a_lds_pong = static_cast<ADataType*>(static_cast<void*>(
+            static_cast<char*>(p_smem) + PipelinePolicy::template GetSmemSize<Problem>()));
 
         constexpr auto a_lds_block_desc =
             PipelinePolicy::template MakeMXFP4_ALdsBlockDescriptor<Problem>();

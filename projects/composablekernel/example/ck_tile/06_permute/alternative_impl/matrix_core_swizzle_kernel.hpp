@@ -16,6 +16,9 @@ enum class matrix_core_inst_enum
 {
     MFMA_32x32x8_F16  = 0,
     MFMA_16x16x16_F16 = 1,
+#if defined(CK_TILE_USE_WMMA)
+// WMMA_16x16x16_F16 = 2, // OOXX todo: need enable
+#endif
 };
 
 namespace detail {
@@ -33,6 +36,25 @@ struct to_warp_gemm<matrix_core_inst_enum::MFMA_16x16x16_F16>
 {
     using type = ck_tile::WarpGemmMfmaF16F16F32M16N16K16;
 };
+
+#if defined(CK_TILE_USE_WMMA)
+#if 0 // OOXX Todo for enable
+template <>
+struct to_warp_gemm<matrix_core_inst_enum::WMMA_16x16x16_F16>
+{
+    using type = ck_tile::WarpGemmWmmaDispatcher<ck_tile::half_t,
+                                                 ck_tile::half_t,
+                                                 float,
+                                                 16,
+                                                 16,
+                                                 16,
+                                                 false,
+                                                 false,
+                                                 false>;
+};
+#endif
+#endif
+
 } // namespace detail
 template <matrix_core_inst_enum Inst>
 using to_warp_gemm_t = typename detail::to_warp_gemm<Inst>::type;

@@ -33,15 +33,16 @@ struct GemmQuantPipelineProblemBase
           CDataType_,
           BlockGemmShape_,
           Traits_,
+          mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>,
           mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>
 {
-
     using Base = GemmPipelineProblemBase<
         ADataType_,
         BDataType_,
         CDataType_,
         BlockGemmShape_,
         Traits_,
+        mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>,
         mixed_prec_compute_type_t<ComputeDataType_, ADataType_, BDataType_>>;
 
     using Traits = typename Base::Traits;
@@ -49,7 +50,6 @@ struct GemmQuantPipelineProblemBase
     using typename Base::ADataType;
     using typename Base::BDataType;
     using typename Base::CDataType;
-    using typename Base::ComputeDataType;
     using AQDataType = remove_cvref_t<AQDataType_>;
     using BQDataType = remove_cvref_t<BQDataType_>;
 

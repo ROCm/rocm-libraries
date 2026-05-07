@@ -35,11 +35,24 @@ struct EpilogueCShuffleBase
     static constexpr auto I4 = Number<4>{};
     static constexpr auto I5 = Number<5>{};
     static constexpr auto I6 = Number<6>{};
+    static constexpr auto I7 = Number<7>{};
 
     static constexpr index_t NumDTensor = DsDataType::Size();
     static constexpr auto EShuffleBlockTransferScalarPerVector =
         CDEShuffleBlockTransferScalarPerVectors{}[I0];
-
+#if defined(__gfx13__)
+    using SpaceFillingCurveVgpr = SpaceFillingCurve<
+        Sequence<MRepeat, 1, 1, 1, NRepeat, 1, 1, BlockwiseGemmPipe::MConsecutiveAccs>,
+        Sequence<0, 1, 2, 3, 4, 5, 6, 7>,
+        Sequence<CShuffleMRepeatPerShuffle,
+                 1,
+                 1,
+                 1,
+                 CShuffleNRepeatPerShuffle,
+                 1,
+                 1,
+                 BlockwiseGemmPipe::MConsecutiveAccs>>;
+#else
     using SpaceFillingCurveVgpr =
         SpaceFillingCurve<Sequence<MRepeat, 1, 1, NRepeat, 1, 1, BlockwiseGemmPipe::MAccVgprs>,
                           Sequence<0, 1, 2, 3, 4, 5, 6>,
@@ -50,7 +63,7 @@ struct EpilogueCShuffleBase
                                    1,
                                    1,
                                    BlockwiseGemmPipe::MAccVgprs>>;
-
+#endif
     using SpaceFillingCurveVmem = SpaceFillingCurve<
         Sequence<1, MPerBlock, 1, NPerBlock>,
         Sequence<0, 2, 1, 3>,
@@ -80,6 +93,55 @@ struct EpilogueCShuffleBase
 
     __device__ static constexpr auto GetCShuffleLDSDescriptor()
     {
+#if defined(__gfx13__)
+        // C mapping in single block
+        // | MRepeat | MWave | MsubGroup | NRepeat | NWave | NThreadPerSubGroup | MLoopAcc |
+        // MConsecutiveVgprs |
+        constexpr auto c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp =
+            BlockwiseGemmPipe::
+                GetCBlockDescriptor_MRepeat_MWave_MSubGroup_NRepeat_NWave_NThreadPerSubGroup_MAccVgprs();
+
+        constexpr auto MWave =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I1);
+        constexpr auto MSubGroup =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I2);
+        constexpr auto NWave =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I4);
+        constexpr auto NThreadPerSubGroup =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I5);
+        constexpr auto LoopAccPerThread =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I6);
+        constexpr auto MConsecutiveAccs =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I7);
+
+        // LDS descriptor, shuffle and write out in MRepeat x NRepeat times
+        constexpr auto c_shuffle_block_desc_mshrepeat_mpershrepeat_nshrepeat_npershrepeat =
+            GetCShuffleBlockDescriptor_MShRepeat_MPerShRepeat_NShRepeat_NPerShRepeat();
+
+        return transform_tensor_descriptor(
+            c_shuffle_block_desc_mshrepeat_mpershrepeat_nshrepeat_npershrepeat,
+            make_tuple(
+                make_freeze_transform(I0),
+                make_unmerge_transform(make_tuple(
+                    Number<CShuffleMRepeatPerShuffle>{}, // MRepeat per shuffle repeat
+                    MWave,                               // MWave
+                    LoopAccPerThread,
+                    MSubGroup,
+                    MConsecutiveAccs)), // MConsecutiveAccs = MPerWmma / MSubGroup / MAccPerThread
+                make_freeze_transform(I0),
+                make_unmerge_transform(
+                    make_tuple(Number<CShuffleNRepeatPerShuffle>{}, // NRepeat per shuffle repeat
+                               NWave,                               // NWave
+                               NThreadPerSubGroup))),               // NThreadPerSubGroup = NPerWmma
+            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+            make_tuple(Sequence<>{}, Sequence<0, 1, 2, 3, 7>{}, Sequence<>{}, Sequence<4, 5, 6>{}));
+#else
         // C mapping in single block
         constexpr auto c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp =
             BlockwiseGemmPipe::
@@ -116,10 +178,96 @@ struct EpilogueCShuffleBase
                            NThreadPerSubGroup))),               // NThreadPerSubGroup = NPerWmma
             make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
             make_tuple(Sequence<>{}, Sequence<0, 1, 2, 6>{}, Sequence<>{}, Sequence<3, 4, 5>{}));
+#endif
     }
 
     __device__ static auto GetVgprToLDSEpilogueDescriptor()
     {
+#if defined(__gfx13__)
+        constexpr auto c_thread_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs =
+            BlockwiseGemmPipe::
+                GetCThreadDescriptor_MRepeat_MWave_MSubGroup_NRepeat_NWave_NThreadPerSubGroup_MAccVgprs();
+        constexpr auto c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp =
+            BlockwiseGemmPipe::
+                GetCBlockDescriptor_MRepeat_MWave_MSubGroup_NRepeat_NWave_NThreadPerSubGroup_MAccVgprs();
+
+        constexpr auto MWave =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I1);
+        constexpr auto MSubGroup =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I2);
+        constexpr auto NWave =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I4);
+        constexpr auto NThreadPerSubGroup =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I5);
+        constexpr auto LoopAccPerThread =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I6);
+        constexpr auto MConsecutiveAccs =
+            c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp
+                .GetLength(I7);
+
+        const auto c_thread_mtx_on_block =
+            BlockwiseGemmPipe::CalculateCThreadOriginDataIndex(I0, I0);
+
+        const index_t m_thread_data_on_block = c_thread_mtx_on_block[I0];
+        const index_t n_thread_data_on_block = c_thread_mtx_on_block[I1];
+
+        const auto m_thread_data_on_block_to_mrepeat_mwave_msubgroup_maccvgprs_adaptor =
+            make_single_stage_tensor_adaptor(
+                make_tuple(make_merge_transform(
+                    make_tuple(MRepeat, MWave, LoopAccPerThread, MSubGroup, MConsecutiveAccs))),
+                make_tuple(Sequence<0, 1, 2, 3, 4>{}),
+                make_tuple(Sequence<0>{}));
+
+        const auto n_thread_data_on_block_to_nrepeat_nwave_nthreadpersubgroup_adaptor =
+            make_single_stage_tensor_adaptor(
+                make_tuple(make_merge_transform(make_tuple(NRepeat, NWave, NThreadPerSubGroup))),
+                make_tuple(Sequence<0, 1, 2>{}),
+                make_tuple(Sequence<0>{}));
+
+        const auto m_thread_data_on_block_idx =
+            m_thread_data_on_block_to_mrepeat_mwave_msubgroup_maccvgprs_adaptor
+                .CalculateBottomIndex(make_multi_index(m_thread_data_on_block));
+
+        const auto n_thread_data_on_block_idx =
+            n_thread_data_on_block_to_nrepeat_nwave_nthreadpersubgroup_adaptor.CalculateBottomIndex(
+                make_multi_index(n_thread_data_on_block));
+
+        // shuffle: threadwise copy C from VGPR to LDS
+        return ThreadwiseTensorSliceTransfer_v1r3<
+            AccDataType,
+            CShuffleDataType,
+            decltype(c_thread_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs),
+            decltype(GetCShuffleLDSDescriptor()),
+            ck::tensor_operation::element_wise::PassThrough,
+            Sequence<CShuffleMRepeatPerShuffle,
+                     I1,
+                     LoopAccPerThread,
+                     I1,
+                     CShuffleNRepeatPerShuffle,
+                     I1,
+                     I1,
+                     MConsecutiveAccs>,
+            Sequence<0, 1, 2, 3, 4, 5, 6, 7>,
+            7,
+            1, // vector write pixel
+            InMemoryDataOperationEnum::Set,
+            1,
+            true>{GetCShuffleLDSDescriptor(),
+                  make_multi_index(0,
+                                   m_thread_data_on_block_idx[I1],
+                                   m_thread_data_on_block_idx[I2],
+                                   m_thread_data_on_block_idx[I3],
+                                   0,
+                                   n_thread_data_on_block_idx[I1],
+                                   n_thread_data_on_block_idx[I2],
+                                   m_thread_data_on_block_idx[I4]),
+                  ck::tensor_operation::element_wise::PassThrough{}};
+#else
         // C mapping in single block
         constexpr auto c_block_desc_mrepeat_mwave_msubgroup_nrepeat_nwave_nthreadpersubgroup_maccvgprs_tmp =
             BlockwiseGemmPipe::
@@ -197,6 +345,7 @@ struct EpilogueCShuffleBase
                                    n_thread_data_on_block_idx[I2],
                                    m_thread_data_on_block_idx[I3]),
                   ck::tensor_operation::element_wise::PassThrough{}};
+#endif
     }
 
     template <InMemoryDataOperationEnum EGlobalMemoryDataOperation,

@@ -884,7 +884,7 @@ def get_factory(target: str):
 
     if target.startswith("gfx11"):
         return KernelComponentFactoryGfx11
-    if target.startswith("gfx12"):
+    if target.startswith("gfx12") or target.startswith("gfx13"):
         return KernelComponentFactoryGfx12
 
     raise Exception(f"Unsupported device target {target}")

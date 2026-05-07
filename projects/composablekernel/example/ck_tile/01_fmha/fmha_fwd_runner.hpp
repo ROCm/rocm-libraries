@@ -1752,7 +1752,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
         auto p_compute_element_func = [&]() {
             if constexpr(supports_qscale)
-                return ck_tile::scales{scale_p_host};
+                return ck_tile::scales<ck_tile::remove_cvref_t<decltype(scale_p_host)>>{
+                    scale_p_host};
             else
                 return ck_tile::identity{};
         }();
@@ -1762,7 +1763,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 return ck_tile::make_composes(ck_tile::saturates<ck_tile::fp8_t>{},
                                               ck_tile::scales{scale_o_host});
             else if constexpr(supports_qscale)
-                return ck_tile::scales{scale_o_host};
+                return ck_tile::scales<ck_tile::remove_cvref_t<decltype(scale_o_host)>>{
+                    scale_o_host};
             else
                 return ck_tile::identity{};
         }();

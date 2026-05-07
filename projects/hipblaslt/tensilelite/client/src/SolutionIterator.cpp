@@ -27,7 +27,6 @@
 #include "SolutionIterator.hpp"
 
 #include "ResultReporter.hpp"
-#include "TimingInstrumentation.hpp"
 #include <Tensile/Debug.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/UtilsOrigami.hpp>
@@ -390,7 +389,6 @@ namespace TensileLite
 
         void AllSolutionsIterator::postSolution()
         {
-            ScopedTimer timer("post_solution_sol_advance");
             if (m_predictionThreshold > 1.0)
             {
                 m_currentSolutionIdx++;
@@ -495,7 +493,6 @@ namespace TensileLite
 
         void BestSolutionIterator::postSolution()
         {
-            ScopedTimer timer("post_solution_sol_advance");
             m_usedCurrentSolution = true;
         }
 
@@ -622,7 +619,6 @@ namespace TensileLite
 
         void TopSolutionIterator::postSolution()
         {
-            ScopedTimer timer("post_solution_sol_advance");
             if(m_predictionThreshold > 1.0)
             {
                 m_currentSolutionIdx++;

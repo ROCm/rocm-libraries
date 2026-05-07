@@ -3,6 +3,7 @@
 
 #pragma once
 #include "data_type.hpp"
+#include "amd_address_space.hpp"
 #include "ck/utility/amd_buffer_coherence.hpp"
 
 namespace ck {
@@ -25,13 +26,23 @@ __device__ int32x4_t make_wave_buffer_resource(T* p_wave, index_t element_space_
 {
     BufferResource<T> wave_buffer_resource;
 
+#ifdef __gfx13__
+    // wavewise base address (57 bit)
+    wave_buffer_resource.address(Number<0>{}) = const_cast<remove_cv_t<T>*>(p_wave);
+    // wavewise range (45 bit)
+    uint64_t num_records = element_space_size * sizeof(T);
+    wave_buffer_resource.range(Number<1>{}) |= (num_records & 0x7f) << 25;
+    wave_buffer_resource.range(Number<2>{}) = (num_records >> 7);
+    // wavewise setting (32 bit)
+    wave_buffer_resource.config(Number<3>{}) = CK_BUFFER_RESOURCE_3RD_DWORD;
+#else
     // wavewise base address (64 bit)
     wave_buffer_resource.address(Number<0>{}) = const_cast<remove_cv_t<T>*>(p_wave);
     // wavewise range (32 bit)
     wave_buffer_resource.range(Number<2>{}) = element_space_size * sizeof(T);
     // wavewise setting (32 bit)
     wave_buffer_resource.config(Number<3>{}) = CK_BUFFER_RESOURCE_3RD_DWORD;
-
+#endif
     return wave_buffer_resource.content;
 }
 
@@ -39,14 +50,21 @@ template <typename T>
 __device__ int32x4_t make_wave_buffer_resource_with_default_range(T* p_wave)
 {
     BufferResource<T> wave_buffer_resource;
-
+#ifdef __gfx13__
+    // wavewise base address (57 bit)
+    wave_buffer_resource.address(Number<0>{}) = const_cast<remove_cv_t<T>*>(p_wave);
+    // wavewise range (45 bit)
+    wave_buffer_resource.range(Number<2>{}) = 0xffffffff; // max possible range
+    // wavewise setting (32 bit)
+    wave_buffer_resource.config(Number<3>{}) = CK_BUFFER_RESOURCE_3RD_DWORD;
+#else
     // wavewise base address (64 bit)
     wave_buffer_resource.address(Number<0>{}) = const_cast<remove_cv_t<T>*>(p_wave);
     // wavewise range (32 bit)
     wave_buffer_resource.range(Number<2>{}) = 0xffffffff; // max possible range
     // wavewise setting (32 bit)
     wave_buffer_resource.config(Number<3>{}) = CK_BUFFER_RESOURCE_3RD_DWORD;
-
+#endif
     return wave_buffer_resource.content;
 }
 
@@ -255,7 +273,36 @@ llvm_amdgcn_raw_buffer_store_fp32x4(float4_t vdata,
                                     index_t soffset,
                                     index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4f32");
 
+#if defined(__gfx13__)
 // buffer atomic-add fp16
+__device__ half2_t llvm_amdgcn_raw_buffer_atomic_add_fp16x2(
+    half2_t vdata,
+    int32x4_t rsrc,
+    index_t voffset,
+    index_t soffset,
+    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.v2f16.v4i32");
+
+__device__ int32_t llvm_amdgcn_raw_buffer_atomic_add_i32(
+    int32_t vdata,
+    int32x4_t rsrc,
+    index_t voffset,
+    index_t soffset,
+    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.add.i32.v4i32");
+
+__device__ float llvm_amdgcn_raw_buffer_atomic_add_fp32(
+    float vdata,
+    int32x4_t rsrc,
+    index_t voffset,
+    index_t soffset,
+    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.f32.v4i32");
+
+__device__ double llvm_amdgcn_raw_buffer_atomic_max_fp64(
+    double vdata,
+    int32x4_t rsrc, // dst_wave_buffer_resource
+    int voffset,    // dst_thread_addr_offset
+    int soffset,    // dst_wave_addr_offset
+    int glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fmax.f64.v4i32");
+#else
 __device__ half2_t llvm_amdgcn_raw_buffer_atomic_add_fp16x2(
     half2_t vdata,
     int32x4_t rsrc,
@@ -271,7 +318,6 @@ __device__ int32_t llvm_amdgcn_raw_buffer_atomic_add_i32(
     index_t soffset,
     index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.add.i32");
 
-// buffer atomic-add fp32
 __device__ float llvm_amdgcn_raw_buffer_atomic_add_fp32(
     float vdata,
     int32x4_t rsrc,
@@ -279,13 +325,48 @@ __device__ float llvm_amdgcn_raw_buffer_atomic_add_fp32(
     index_t soffset,
     index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.f32");
 
-// buffer atomic-add fp32
 __device__ double
 llvm_amdgcn_raw_buffer_atomic_max_fp64(double vdata,
                                        int32x4_t rsrc, // dst_wave_buffer_resource
                                        int voffset,    // dst_thread_addr_offset
                                        int soffset,    // dst_wave_addr_offset
                                        int glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fmax.f64");
+#endif
+
+// memory coherency bit for buffer store/load instruction
+// check ISA manual for each GFX target
+// e.g. for
+// https://www.amd.com/system/files/TechDocs/instinct-mi200-cdna2-instruction-set-architecture.pdf,
+// page 67~68
+enum struct AmdBufferCoherenceEnum
+{
+    DefaultCoherence = 0, // default value
+    GLC              = 1,
+    SLC              = 2,
+    GLC_SLC          = 3,
+    // gfx94: bit 0 = sc0, bit 1 = nt, bit 3 = swz, bit 4 = sc1
+    // SC[1:0] System Cache level: 0=wave, 1=group, 2=device, 3=system
+    // NT Non-Temporal: 0=expect temporal reuse; 1=do not expect temporal reuse
+    WAVE_NT0   = 0,
+    WAVE_NT1   = 2,
+    GROUP_NT0  = 1,
+    GROUP_NT1  = 3,
+    DEVICE_NT0 = 8,
+    DEVICE_NT1 = 10,
+    SYSTEM_NT0 = 9,
+    SYSTEM_NT1 = 11,
+};
+
+// To do: need refactor as a tuple for combination load
+enum struct TensorLoadOption
+{
+    DEFAULT_LOAD                     = 0,
+    CLUSTER_MULTICAST_LOAD           = 1,
+    WGP_MULTICAST_LOAD               = 2,
+    CLUSTER_DDS_LOAD                 = 3,
+    CLUSTER_ASYNC_MULTICAST_LDS_LOAD = 4,
+    DS_TILED_LOAD                    = 5,
+};
 
 template <index_t N, AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
 __device__ typename vector_type<int8_t, N>::type
@@ -560,7 +641,7 @@ __device__ void amd_global_atomic_add_impl(const typename vector_type<T, N>::typ
                                                       tmp.template AsType<half2_t>()[i]);
         });
     }
-#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx12__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx12__) || defined(__gfx13__)
     else if constexpr(is_same<T, bhalf_t>::value)
     {
         vector_type<bhalf_t, N> tmp{src_thread_data};
@@ -1041,4 +1122,581 @@ __device__ void amd_direct_load_global_to_lds(const T* global_base_ptr,
 }
 #endif
 
+template <typename T,
+          index_t N,
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          bool multicast                   = false>
+__device__ void amd_async_copy_to_lds_impl_raw(__attribute__((address_space(1))) const T* src_ptr,
+                                               __attribute__((address_space(3))) T* dst_ptr)
+{
+#if defined(__gfx13__)
+    if constexpr(N == 1)
+    {
+        __attribute__((address_space(1))) char* global_ptr =
+            const_cast<__attribute__((address_space(1))) char*>(
+                reinterpret_cast<const __attribute__((address_space(1))) char*>(src_ptr));
+        __attribute__((address_space(3))) char* lds_ptr =
+            reinterpret_cast<__attribute__((address_space(3))) char*>(dst_ptr);
+
+        if constexpr(multicast)
+        {
+            __builtin_amdgcn_cluster_load_async_to_lds_b8(global_ptr, lds_ptr, 0, 0, 0xf);
+        }
+        else
+        {
+            __builtin_amdgcn_global_load_async_to_lds_b8(
+                global_ptr, lds_ptr, 0, static_cast<index_t>(coherence));
+        }
+        return;
+    }
+
+    if constexpr(N == 4)
+    {
+        __attribute__((address_space(1))) int* global_ptr =
+            const_cast<__attribute__((address_space(1))) int*>(
+                reinterpret_cast<const __attribute__((address_space(1))) int*>(src_ptr));
+        __attribute__((address_space(3))) int* lds_ptr =
+            reinterpret_cast<__attribute__((address_space(3))) int*>(dst_ptr);
+
+        if constexpr(multicast)
+        {
+            __builtin_amdgcn_cluster_load_async_to_lds_b32(global_ptr, lds_ptr, 0, 0, 0xf);
+        }
+        else
+        {
+            __builtin_amdgcn_global_load_async_to_lds_b32(
+                global_ptr, lds_ptr, 0, static_cast<index_t>(coherence));
+        }
+        return;
+    }
+
+    if constexpr(N == 8)
+    {
+        __attribute__((address_space(1))) int32x2_t* global_ptr =
+            const_cast<__attribute__((address_space(1))) int32x2_t*>(
+                reinterpret_cast<const __attribute__((address_space(1))) int32x2_t*>(src_ptr));
+        __attribute__((address_space(3))) int32x2_t* lds_ptr =
+            reinterpret_cast<__attribute__((address_space(3))) int32x2_t*>(dst_ptr);
+
+        if constexpr(multicast)
+        {
+            __builtin_amdgcn_cluster_load_async_to_lds_b64(global_ptr, lds_ptr, 0, 0, 0xf);
+        }
+        else
+        {
+            __builtin_amdgcn_global_load_async_to_lds_b64(
+                global_ptr, lds_ptr, 0, static_cast<index_t>(coherence));
+        }
+        return;
+    }
+
+    if constexpr(N == 16)
+    {
+        __attribute__((address_space(1))) int32x4_t* global_ptr =
+            const_cast<__attribute__((address_space(1))) int32x4_t*>(
+                reinterpret_cast<const __attribute__((address_space(1))) int32x4_t*>(src_ptr));
+        __attribute__((address_space(3))) int32x4_t* lds_ptr =
+            reinterpret_cast<__attribute__((address_space(3))) int32x4_t*>(dst_ptr);
+        if constexpr(multicast)
+        {
+            __builtin_amdgcn_cluster_load_async_to_lds_b128(global_ptr, lds_ptr, 0, 0, 0xf);
+        }
+        else
+        {
+            __builtin_amdgcn_global_load_async_to_lds_b128(
+                global_ptr, lds_ptr, 0, static_cast<index_t>(coherence));
+        }
+        return;
+    }
+#else
+    ignore = src_ptr;
+    ignore = dst_ptr;
+#endif
+}
+
+template <typename T,
+          index_t N,
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
+__device__ void amd_async_store_to_global_impl_raw(__attribute__((address_space(3)))
+                                                   const T* src_ptr,
+                                                   __attribute__((address_space(1))) T* dst_ptr)
+{
+#if defined(__gfx13__)
+    if constexpr(N == 1)
+    {
+        __attribute__((address_space(3))) char* lds_ptr =
+            const_cast<__attribute__((address_space(3))) char*>(
+                reinterpret_cast<const __attribute__((address_space(3))) char*>(src_ptr));
+        __attribute__((address_space(1))) char* global_ptr =
+            reinterpret_cast<__attribute__((address_space(1))) char*>(dst_ptr);
+        __builtin_amdgcn_global_store_async_from_lds_b8(
+            global_ptr, lds_ptr, 0, static_cast<index_t>(coherence));
+        return;
+    }
+
+    if constexpr(N == 4)
+    {
+        __attribute__((address_space(3))) int* lds_ptr =
+            const_cast<__attribute__((address_space(3))) int*>(
+                reinterpret_cast<const __attribute__((address_space(3))) int*>(src_ptr));
+        __attribute__((address_space(1))) int* global_ptr =
+            reinterpret_cast<__attribute__((address_space(1))) int*>(dst_ptr);
+        __builtin_amdgcn_global_store_async_from_lds_b32(
+            global_ptr, lds_ptr, 0, static_cast<index_t>(coherence));
+        return;
+    }
+
+    if constexpr(N == 8)
+    {
+        __attribute__((address_space(3))) int32x2_t* lds_ptr =
+            const_cast<__attribute__((address_space(3))) int32x2_t*>(
+                reinterpret_cast<const __attribute__((address_space(3))) int32x2_t*>(src_ptr));
+        __attribute__((address_space(1))) int32x2_t* global_ptr =
+            reinterpret_cast<__attribute__((address_space(1))) int32x2_t*>(dst_ptr);
+        __builtin_amdgcn_global_store_async_from_lds_b64(
+            global_ptr, lds_ptr, 0, static_cast<index_t>(coherence));
+        return;
+    }
+
+    if constexpr(N == 16)
+    {
+        __attribute__((address_space(3))) int32x4_t* lds_ptr =
+            const_cast<__attribute__((address_space(3))) int32x4_t*>(
+                reinterpret_cast<const __attribute__((address_space(3))) int32x4_t*>(src_ptr));
+        __attribute__((address_space(1))) int32x4_t* global_ptr =
+            reinterpret_cast<__attribute__((address_space(1))) int32x4_t*>(dst_ptr);
+        __builtin_amdgcn_global_store_async_from_lds_b128(
+            global_ptr, lds_ptr, 0, static_cast<index_t>(coherence));
+        return;
+    }
+#else
+    ignore = src_ptr;
+    ignore = dst_ptr;
+#endif
+}
+
+template <typename T,
+          index_t N,
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          bool multicast                   = false>
+__device__ void amd_async_copy_to_lds_impl(__attribute__((address_space(1))) const T* src_ptr,
+                                           __attribute__((address_space(3))) T* dst_ptr)
+{
+    // currently only support to b8, b32, b64, b128 when one async copy
+    static_assert((is_same<T, double>::value && (N == 1 || N == 2)) ||
+                      (is_same<T, float>::value && (N == 1 || N == 2 || N == 4)) ||
+                      (is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4)) ||
+                      (is_same<T, half_t>::value && (N == 2 || N == 4 || N == 8)) ||
+                      (is_same<T, bhalf_t>::value && (N == 2 || N == 4 || N == 8)) ||
+                      (is_same<T, f8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+                      (is_same<T, bf8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+                      (is_same<T, int8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+                      (is_same<T, uint8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)),
+                  "wrong! not implemented");
+
+    amd_async_copy_to_lds_impl_raw<T, sizeof(T) * N, coherence, multicast>(src_ptr, dst_ptr);
+    return;
+}
+
+template <typename T,
+          index_t N,
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
+__device__ void amd_async_store_to_global_impl(__attribute__((address_space(3))) const T* src_ptr,
+                                               __attribute__((address_space(1))) T* dst_ptr)
+{
+    // currently only support to b8, b32, b64, b128 when one async copy
+    static_assert((is_same<T, double>::value && (N == 1 || N == 2)) ||
+                      (is_same<T, float>::value && (N == 1 || N == 2 || N == 4)) ||
+                      (is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4)) ||
+                      (is_same<T, half_t>::value && (N == 2 || N == 4 || N == 8)) ||
+                      (is_same<T, bhalf_t>::value && (N == 2 || N == 4 || N == 8)) ||
+                      (is_same<T, f8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+                      (is_same<T, bf8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+                      (is_same<T, int8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+                      (is_same<T, uint8_t>::value && (N == 1 || N == 4 || N == 8 || N == 16)),
+                  "wrong! not implemented");
+
+    amd_async_store_to_global_impl_raw<T, sizeof(T) * N, coherence>(src_ptr, dst_ptr);
+    return;
+}
+
+template <typename T,
+          index_t NumElemsPerThread,
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          bool multicast                   = false>
+__device__ void amd_async_load_global_to_lds(const T* global_base_ptr,
+                                             const index_t global_offset,
+                                             T* lds_base_ptr,
+                                             const index_t lds_offset,
+                                             const bool is_src_valid,
+                                             const bool is_dst_valid)
+{
+    if(is_src_valid && is_dst_valid)
+    {
+#if defined(__gfx13__)
+        const index_t in_global_offset = global_offset;
+        __attribute__((address_space(1))) const T* global_ptr =
+            reinterpret_cast<__attribute__((address_space(1))) T*>(
+                reinterpret_cast<uintptr_t>(global_base_ptr + in_global_offset));
+        __attribute__((address_space(3))) T* lds_ptr =
+            reinterpret_cast<__attribute__((address_space(3))) T*>(
+                reinterpret_cast<uintptr_t>(lds_base_ptr + lds_offset));
+        amd_async_copy_to_lds_impl<T, NumElemsPerThread, coherence, multicast>(global_ptr, lds_ptr);
+#else
+        ignore = global_base_ptr;
+        ignore = global_offset;
+#endif
+    }
+    else
+    {
+        if(is_dst_valid)
+        {
+            using DstVecType    = typename vector_type_maker<T, NumElemsPerThread>::type;
+            DstVecType* lds_ptr = reinterpret_cast<DstVecType*>(lds_base_ptr + lds_offset);
+            *lds_ptr            = {};
+        }
+        else
+        {
+            return; // do nothing
+        }
+    }
+}
+
+template <typename T,
+          index_t NumElemsPerThread,
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
+__device__ void amd_async_store_lds_to_global(const T* lds_base_ptr,
+                                              const index_t lds_offset,
+                                              T* global_base_ptr,
+                                              const index_t global_offset,
+                                              const bool is_src_valid,
+                                              const bool is_dst_valid)
+{
+    if(is_src_valid && is_dst_valid)
+    {
+#if defined(__gfx13__)
+        __attribute__((address_space(3))) const T* lds_ptr =
+            reinterpret_cast<__attribute__((address_space(3))) T*>(
+                reinterpret_cast<uintptr_t>(lds_base_ptr + lds_offset));
+        __attribute__((address_space(1))) T* global_ptr =
+            reinterpret_cast<__attribute__((address_space(1))) T*>(
+                reinterpret_cast<uintptr_t>(global_base_ptr + global_offset));
+        amd_async_store_to_global_impl<T, NumElemsPerThread, coherence>(lds_ptr, global_ptr);
+#else
+        ignore = lds_base_ptr;
+        ignore = lds_offset;
+        ignore = global_base_ptr;
+        ignore = global_offset;
+#endif
+    }
+}
+
+template <typename T, index_t N, index_t NumThreadsPerTile, index_t NumVgprsPerTile>
+__device__ auto amd_tiled_load_to_vgpr(__attribute__((address_space(1))) const T* in_ptr,
+                                       bool is_src_valid)
+{
+    using vector_t = typename vector_type_maker<T, N>::type::type;
+#if defined(__gfx13__)
+    if(is_src_valid)
+    {
+        if constexpr(NumThreadsPerTile == 2)
+        {
+            __attribute__((address_space(1))) int32_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32_t*>(in_ptr));
+            return bit_cast<vector_t>(__builtin_amdgcn_global_tiled_load_half_b64(global_ptr));
+        }
+        else if constexpr(NumThreadsPerTile == 4 && NumVgprsPerTile == 1)
+        {
+            __attribute__((address_space(1))) int32_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32_t*>(in_ptr));
+            return bit_cast<vector_t>(__builtin_amdgcn_global_tiled_load_qtr_b128(global_ptr));
+        }
+        /* Remove for padding 4x4 + normal 4x4 */
+        /*
+        else if constexpr(NumThreadsPerTile == 2 && NumVgprsPerTile == 2)
+        {
+            __attribute__((address_space(1))) int32x2_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32x2_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32x2_t*>(in_ptr));
+            return bit_cast<vector_t>(__builtin_amdgcn_global_tiled_load_b64(global_ptr));
+        }
+        */
+        else
+        {
+            static_assert(0, "wrong! not implemented");
+        }
+    }
+    else
+    {
+        return vector_t{0};
+    }
+#else
+    ignore = in_ptr;
+    ignore = is_src_valid;
+    return vector_t{0};
+#endif
+}
+
+template <typename T, index_t N, index_t NumThreadsPerTile, index_t NumVgprsPerTile>
+__device__ auto amd_ds_tiled_load_to_vgpr(__attribute__((address_space(3))) const T* in_ptr,
+                                          bool is_src_valid)
+{
+    using vector_t = typename vector_type_maker<T, N>::type::type;
+#if defined(__gfx13__)
+    if(is_src_valid)
+    {
+        if constexpr(NumThreadsPerTile == 2)
+        {
+            __attribute__((address_space(3))) int32_t* global_ptr =
+                const_cast<__attribute__((address_space(3))) int32_t*>(
+                    reinterpret_cast<const __attribute__((address_space(3))) int32_t*>(in_ptr));
+            return bit_cast<vector_t>(__builtin_amdgcn_ds_tiled_load_half_b64(global_ptr));
+        }
+        else if constexpr(NumThreadsPerTile == 4 && NumVgprsPerTile == 4)
+        {
+            __attribute__((address_space(3))) int32x4_t* global_ptr =
+                const_cast<__attribute__((address_space(3))) int32x4_t*>(
+                    reinterpret_cast<const __attribute__((address_space(3))) int32x4_t*>(in_ptr));
+            return bit_cast<vector_t>(__builtin_amdgcn_ds_tiled_load_b128(global_ptr));
+        }
+        else
+        {
+            static_assert(0, "wrong! not implemented");
+        }
+    }
+    else
+    {
+        return vector_t{0};
+    }
+#else
+    ignore = in_ptr;
+    ignore = is_src_valid;
+    return vector_t{0};
+#endif
+}
+
+template <typename T, index_t N, index_t NumThreadsPerTile, index_t NumVgprsPerTile>
+__device__ void
+amd_tile_store_to_buffer(const typename vector_type_maker<T, N>::type::type src_thread_data,
+                         __attribute__((address_space(1))) const T* in_ptr)
+{
+#if defined(__gfx13__)
+    if constexpr((NumThreadsPerTile == 2) && (NumVgprsPerTile == 2))
+    {
+        // 8X4X8
+        if constexpr((is_same<T, half_t>::value && (N == 8)) ||
+                     (is_same<T, bhalf_t>::value && (N == 8)))
+        {
+            vector_type<int32_t, 4> tmp{bit_cast<int32x4_t>(src_thread_data)};
+            int32x3_t store_value_up;
+            store_value_up[0] = tmp.AsType<int32_t>()[Number<0>{}];
+            store_value_up[1] = tmp.AsType<int32_t>()[Number<1>{}];
+            store_value_up[2] = tmp.AsType<int32_t>()[Number<2>{}];
+            __attribute__((address_space(1))) int32x3_t* global_ptr_up =
+                const_cast<__attribute__((address_space(1))) int32x3_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32x3_t*>(in_ptr));
+            __builtin_amdgcn_global_tiled_store_vst2_b64(store_value_up, global_ptr_up);
+
+            int32x3_t store_value_down;
+            store_value_down[0] = tmp.AsType<int32_t>()[Number<1>{}];
+            store_value_down[1] = tmp.AsType<int32_t>()[Number<2>{}];
+            store_value_down[2] = tmp.AsType<int32_t>()[Number<3>{}];
+            __attribute__((address_space(1)))
+            int32x3_t* global_ptr_down = const_cast<__attribute__((address_space(1))) int32x3_t*>(
+                reinterpret_cast<const __attribute__((address_space(1))) int32x3_t*>(in_ptr + 4));
+            __builtin_amdgcn_global_tiled_store_vst2_b64(store_value_down, global_ptr_down);
+        }
+        else if constexpr((is_same<T, f8_t>::value && (N == 8)) ||
+                          (is_same<T, bf8_t>::value && (N == 8)) ||
+                          (is_same<T, int8_t>::value && (N == 8)))
+        {
+            __attribute__((address_space(1))) int32x2_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32x2_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32x2_t*>(in_ptr));
+            __builtin_amdgcn_global_tiled_store_b64(bit_cast<int32x2_t>(src_thread_data),
+                                                    global_ptr);
+        }
+        else
+        {
+            static_assert(0, "wrong! not implemented");
+        }
+    }
+    else if constexpr((NumThreadsPerTile == 2) && (NumVgprsPerTile == 1))
+    {
+        if constexpr((is_same<T, half_t>::value && (N == 8)) ||
+                     (is_same<T, bhalf_t>::value && (N == 8)))
+        {
+            vector_type<int32_t, 4> tmp{bit_cast<int32x4_t>(src_thread_data)};
+            static_for<0, 4, 1>{}([&](auto i) {
+                __attribute__((address_space(1))) int32_t* global_ptr =
+                    const_cast<__attribute__((address_space(1))) int32_t*>(
+                        reinterpret_cast<const __attribute__((address_space(1))) int32_t*>(in_ptr +
+                                                                                           i * 4));
+                __builtin_amdgcn_global_tiled_store_half_b64(tmp.AsType<int32_t>()[i], global_ptr);
+            });
+        }
+        else if constexpr((is_same<T, f8_t>::value && (N == 8)) ||
+                          (is_same<T, bf8_t>::value && (N == 8)) ||
+                          (is_same<T, int8_t>::value && (N == 8)))
+        {
+            vector_type<int32_t, 2> tmp{bit_cast<int32x2_t>(src_thread_data)};
+            static_for<0, 2, 1>{}([&](auto i) {
+                __attribute__((address_space(1))) int32_t* global_ptr =
+                    const_cast<__attribute__((address_space(1))) int32_t*>(
+                        reinterpret_cast<const __attribute__((address_space(1))) int32_t*>(in_ptr +
+                                                                                           i * 8));
+                __builtin_amdgcn_global_tiled_store_half_b64(tmp.AsType<int32_t>()[i], global_ptr);
+            });
+        }
+        else
+        {
+            static_assert(0, "wrong! not implemented");
+        }
+    }
+    else if constexpr((NumThreadsPerTile == 4) && (NumVgprsPerTile == 1))
+    {
+        // 4x2x16
+        if constexpr(is_same<T, half_t>::value || is_same<T, bhalf_t>::value)
+        {
+            vector_type<int32_t, 2> tmp{bit_cast<int32x2_t>(src_thread_data)};
+            static_for<0, 2, 1>{}([&](auto i) {
+                __attribute__((address_space(1))) int32_t* global_ptr =
+                    const_cast<__attribute__((address_space(1))) int32_t*>(
+                        reinterpret_cast<const __attribute__((address_space(1))) int32_t*>(in_ptr +
+                                                                                           i * 8));
+                __builtin_amdgcn_global_tiled_store_qtr_b128(tmp.AsType<int32_t>()[i], global_ptr);
+            });
+        }
+        else if constexpr(is_same<T, f8_t>::value || is_same<T, bf8_t>::value ||
+                          is_same<T, int8_t>::value)
+        {
+            __attribute__((address_space(1))) int32_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32_t*>(in_ptr));
+            __builtin_amdgcn_global_tiled_store_qtr_b128(bit_cast<int32_t>(src_thread_data),
+                                                         global_ptr);
+        }
+        else
+        {
+            static_assert(0, "wrong! not implemented");
+        }
+    }
+    else
+    {
+        static_assert(0, "wrong! The shape is not supported yet.");
+    }
+#else
+    ignore = src_thread_data;
+    ignore = in_ptr;
+#endif
+}
+
+template <typename T, index_t N, AddressSpaceEnum BufferAddressSpace>
+__device__ auto
+amd_wgp_multicast_load_to_vgpr(__attribute__((address_space(1))) const T* in_ptr,
+                               typename vector_type<remove_cvref_t<T>, N>::type& out,
+                               bool is_src_valid)
+{
+#if defined(__gfx13__)
+    if(is_src_valid)
+    {
+        if constexpr(is_same_v<remove_cvref_t<T>, ck::half_t> && N == 2)
+        {
+            __attribute__((address_space(1))) int32_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32_t*>(in_ptr));
+
+            __attribute__((address_space(10))) int32_t* lane_vgpr_ptr =
+                reinterpret_cast<__attribute__((address_space(10))) int32_t*>(
+                    reinterpret_cast<uintptr_t>(&out));
+            __builtin_amdgcn_load_mcast_b32(lane_vgpr_ptr, global_ptr, 0, 0x3 << 18);
+        }
+        else if constexpr(is_same_v<remove_cvref_t<T>, ck::half_t> && N == 4)
+        {
+            __attribute__((address_space(1))) int32x2_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32x2_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32x2_t*>(in_ptr));
+
+            __attribute__((address_space(10))) int32x2_t* lane_vgpr_ptr =
+                reinterpret_cast<__attribute__((address_space(10))) int32x2_t*>(
+                    reinterpret_cast<uintptr_t>(&out));
+            __builtin_amdgcn_load_mcast_b64(lane_vgpr_ptr, global_ptr, 0, 0x3 << 18);
+        }
+        else if constexpr(is_same_v<remove_cvref_t<T>, ck::half_t> && N == 8)
+        {
+            __attribute__((address_space(1))) int32x4_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32x4_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32x4_t*>(in_ptr));
+
+            __attribute__((address_space(10))) int32x4_t* lane_vgpr_ptr =
+                reinterpret_cast<__attribute__((address_space(10))) int32x4_t*>(
+                    reinterpret_cast<uintptr_t>(&out));
+            __builtin_amdgcn_load_mcast_b128(lane_vgpr_ptr, global_ptr, 0, 0x3 << 18);
+        }
+        else
+        {
+            // To add for other types.
+        }
+    }
+    else
+    {
+        using vector_t = typename vector_type<remove_cvref_t<T>, N>::type;
+        out            = vector_t{0};
+    }
+#else
+    ignore = in_ptr;
+    ignore = out;
+    ignore = is_src_valid;
+#endif
+    return;
+}
+
+template <typename T, index_t N, AddressSpaceEnum BufferAddressSpace>
+__device__ auto amd_cluster_multicast_load_to_vgpr(__attribute__((address_space(1)))
+                                                   const T* in_ptr,
+                                                   bool is_src_valid)
+{
+    using vector_t = typename vector_type_maker<T, N>::type::type;
+#if defined(__gfx13__)
+    if(is_src_valid)
+    {
+        if constexpr(is_same_v<remove_cvref_t<T>, ck::half_t> && N == 2)
+        {
+            __attribute__((address_space(1))) int32_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32_t*>(in_ptr));
+            return bit_cast<vector_t>(__builtin_amdgcn_cluster_load_b32(global_ptr, 0, 0xf));
+        }
+        else if constexpr(is_same_v<remove_cvref_t<T>, ck::half_t> && N == 4)
+        {
+            __attribute__((address_space(1))) int32x2_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32x2_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32x2_t*>(in_ptr));
+            return bit_cast<vector_t>(__builtin_amdgcn_cluster_load_b64(global_ptr, 0, 0xf));
+        }
+        else if constexpr(is_same_v<remove_cvref_t<T>, ck::half_t> && N == 8)
+        {
+            __attribute__((address_space(1))) int32x4_t* global_ptr =
+                const_cast<__attribute__((address_space(1))) int32x4_t*>(
+                    reinterpret_cast<const __attribute__((address_space(1))) int32x4_t*>(in_ptr));
+            return bit_cast<vector_t>(__builtin_amdgcn_cluster_load_b128(global_ptr, 0, 0xf));
+        }
+        else
+        {
+            // To add for other types
+            return vector_t{0};
+        }
+    }
+    else
+    {
+        return vector_t{0};
+    }
+#else
+    ignore = in_ptr;
+    ignore = is_src_valid;
+    return vector_t{0};
+#endif
+}
 } // namespace ck

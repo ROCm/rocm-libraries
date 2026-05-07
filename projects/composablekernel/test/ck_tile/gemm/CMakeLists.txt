@@ -16,7 +16,7 @@ list(APPEND EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS
 )
 set(EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS ${EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS})
 
-if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
+if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12|gfx13")
     # Collect all test targets for umbrella label
     set(CK_TILE_GEMM_TEST_TARGETS)
 
@@ -62,10 +62,13 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
         )
     endif()
 
-    if(GPU_TARGETS MATCHES "gfx11|gfx12")
+    if(GPU_TARGETS MATCHES "gfx11|gfx12|gfx13")
         # On Radeon devices, build the WMMA version instead
         # Define architecture macros for compile-time detection
-        if(GPU_TARGETS MATCHES "gfx12")
+        if(GPU_TARGETS MATCHES "gfx13")
+            list(APPEND EXAMPLE_GEMM_COMPILE_OPTIONS -DARCH_GFX13)
+            list(APPEND EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS -DARCH_GFX13)
+        elseif(GPU_TARGETS MATCHES "gfx12")
             list(APPEND EXAMPLE_GEMM_COMPILE_OPTIONS -DARCH_GFX12)
             list(APPEND EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS -DARCH_GFX12)
         elseif(GPU_TARGETS MATCHES "gfx11")
@@ -88,6 +91,15 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             test_ck_tile_gemm_pipeline_compv4_wmma
             test_ck_tile_gemm_pipeline_persistent_wmma
         )
+        if(GPU_TARGETS MATCHES "gfx125")
+            add_gtest_executable(test_ck_tile_gemm_pipeline_tdm_wmma test_gemm_pipeline_comp_tdm_wmma.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_tdm_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+        endif()
+        if(GPU_TARGETS MATCHES "gfx125|gfx13")
+            add_gtest_executable(test_ck_tile_gemm_pipeline_comp_async_wmma test_gemm_pipeline_comp_async_wmma.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+            target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+        endif()
     endif()
 
     # Label all ck_tile gemm tests with CK_TILE_GEMM_TESTS for selective execution
@@ -106,3 +118,8 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
 else()
     message(DEBUG "Skipping ck_tile_gemm tests for current target test_ck_tile_gemm_pipeline") 
 endif()
+
+if(GPU_TARGETS MATCHES "gfx13")
+    add_gtest_executable(test_ck_tile_wmma_pipeline test_wmma_pipeline.cpp)
+endif()
+

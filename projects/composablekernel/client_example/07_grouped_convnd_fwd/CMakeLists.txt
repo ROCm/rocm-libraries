@@ -28,4 +28,7 @@ if(GPU_TARGETS MATCHES "gfx9")
 
     add_executable(grouped_conv2d_fwd_ngchw grouped_conv2d_fwd_ngchw.cpp)
     target_link_libraries(grouped_conv2d_fwd_ngchw PRIVATE composable_kernel::device_conv_operations)
+elseif(GPU_TARGETS MATCHES "gfx13")
+    add_executable(client_grouped_conv2d_wcnn_fwd grouped_conv2d_wcnn_fwd.cpp)
+    target_link_libraries(client_grouped_conv2d_wcnn_fwd PRIVATE composable_kernel::device_conv_operations)
 endif()

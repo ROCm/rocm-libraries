@@ -69,14 +69,18 @@ using DeviceBatchedGemmGemmInstance =
         GemmDefault,
         1,
         256,
-        128,         // MPerBlock
-        128,         // NPerBlock
-        32,          // KPerBlock
-        128,         // Gemm1NPerBlock
-        32,          // Gemm1KPerBlock
-        8,           // AK1
-        8,           // BK1
-        4,           // B1K1
+        128, // MPerBlock
+        128, // NPerBlock
+        32,  // KPerBlock
+        128, // Gemm1NPerBlock
+        32,  // Gemm1KPerBlock
+        8,   // AK1
+        8,   // BK1
+#if defined(CK_USE_GFX13)
+        2, // B1K1
+#else
+        4, // B1K1
+#endif
         16,          // MPerXDL
         16,          // NPerXDL
         2,           // MXdlPerWave
@@ -100,8 +104,13 @@ using DeviceBatchedGemmGemmInstance =
         S<1, 0, 2>,
         S<1, 0, 2>,
         2,
+#if defined(CK_USE_GFX13)
+        2,
+        2,
+#else
         4,
         4,
+#endif
         true,
         1,              // CShuffleMXdlPerWavePerShuffle
         2,              // CShuffleNXdlPerWavePerShuffle

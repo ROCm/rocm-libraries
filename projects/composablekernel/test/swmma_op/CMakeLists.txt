@@ -1,0 +1,2 @@
+add_test_executable(test_swmma_op swmma_op.cpp)
+target_link_libraries(test_swmma_op PRIVATE utility)

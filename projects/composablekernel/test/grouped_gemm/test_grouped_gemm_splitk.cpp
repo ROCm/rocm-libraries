@@ -11,9 +11,6 @@
 #include "gtest/gtest.h"
 #include "test_grouped_gemm_util.hpp"
 
-ck::index_t param_mask     = 0xffffff;
-ck::index_t instance_index = -1;
-
 using F16  = ck::half_t;
 using BF16 = ck::bhalf_t;
 using F8   = ck::f8_t;
@@ -32,10 +29,10 @@ class TestGroupedGemm : public ck::test::TestGroupedGemm<Tuple>
 
 #if defined(CK_USE_WMMA)
         // The old XDL tests didn't fail if instances were not supported, so we want to keep that
-        // behaviour. When compiling WMMA instances and WMMA is supported, then we'll fail if a
+        // behaviour When compiling WMMA instances and WMMA is supported, then we'll fail if a
         // specific case is not supported
         this->fail_if_no_supported_instances_ =
-            ck::is_gfx11_supported() || ck::is_gfx12_supported();
+            ck::is_gfx11_supported() || ck::is_gfx12_supported() || ck::is_gfx13_supported();
 #endif
     }
 };
@@ -74,21 +71,3 @@ using KernelTypes = ::testing::Types<
 // clang-format on
 
 TYPED_TEST_SUITE(TestGroupedGemm, KernelTypes);
-
-#include "test_grouped_gemm_ut_cases.inc"
-int main(int argc, char** argv)
-{
-    testing::InitGoogleTest(&argc, argv);
-    if(argc == 1) {}
-    else if(argc == 3)
-    {
-        param_mask     = strtol(argv[1], nullptr, 0);
-        instance_index = atoi(argv[2]);
-    }
-    else
-    {
-        std::cout << "Usage of " << argv[0] << std::endl;
-        std::cout << "Arg1,2: param_mask instance_index(-1 means all)" << std::endl;
-    }
-    return RUN_ALL_TESTS();
-}

@@ -101,5 +101,149 @@ struct StaticallyIndexedArray_v2
     T data_[N];
 };
 
+// static index array with external buffer support, it is used by lane-shared variable
+template <typename T, index_t N>
+struct StaticallyIndexedArray_v3
+{
+    __host__ __device__ constexpr StaticallyIndexedArray_v3(T* data) { data_ = data; };
+
+    __host__ __device__ static constexpr index_t Size() { return N; }
+
+    // read access
+    template <index_t I>
+    __host__ __device__ constexpr const auto& At(Number<I>) const
+    {
+        static_assert(I < N, "wrong! out of range");
+
+        return data_[I];
+    }
+
+    // write access
+    template <index_t I>
+    __host__ __device__ constexpr auto& At(Number<I>)
+    {
+        static_assert(I < N, "wrong! out of range");
+
+        return data_[I];
+    }
+
+    // read access
+    template <index_t I>
+    __host__ __device__ constexpr const auto& operator[](Number<I> i) const
+    {
+        return At(i);
+    }
+
+    // write access
+    template <index_t I>
+    __host__ __device__ constexpr auto& operator()(Number<I> i)
+    {
+        return At(i);
+    }
+
+    __host__ __device__ static constexpr bool IsStaticBuffer() { return true; }
+
+    __host__ __device__ void SwitchBuffer() {}
+    T* data_;
+};
+
+// static index array with external double buffer support, it is used by lane-shared variable
+template <typename T, index_t N>
+struct StaticallyIndexedArray_v4
+{
+    __host__ __device__ constexpr StaticallyIndexedArray_v4(T* data)
+    {
+        data_   = data;
+        offset_ = 0;
+    };
+
+    __host__ __device__ static constexpr index_t Size() { return N; }
+
+    // read access
+    template <index_t I>
+    __host__ __device__ constexpr const auto& At(Number<I>) const
+    {
+        static_assert(I < N, "wrong! out of range");
+
+        return (data_ + offset_)[I];
+    }
+
+    // write access
+    template <index_t I>
+    __host__ __device__ constexpr auto& At(Number<I>)
+    {
+        static_assert(I < N, "wrong! out of range");
+
+        return (data_ + offset_)[I];
+    }
+
+    // read access
+    template <index_t I>
+    __host__ __device__ constexpr const auto& operator[](Number<I> i) const
+    {
+        return At(i);
+    }
+
+    // write access
+    template <index_t I>
+    __host__ __device__ constexpr auto& operator()(Number<I> i)
+    {
+        return At(i);
+    }
+
+    __host__ __device__ static constexpr bool IsStaticBuffer() { return true; }
+
+    // switch double buffer
+    __host__ __device__ void SwitchBuffer() { offset_ = (offset_ == 0) ? N : 0; }
+    T* data_;
+    index_t offset_;
+};
+
+// static index array with external buffer support, it is used by lane-shared variable
+template <typename T, index_t N, index_t Offset>
+struct StaticallyIndexedArray_v5
+{
+    __host__ __device__ constexpr StaticallyIndexedArray_v5(T* data) { data_ = data; };
+
+    __host__ __device__ static constexpr index_t Size() { return N; }
+
+    // read access
+    template <index_t I>
+    __host__ __device__ constexpr const auto& At(Number<I>) const
+    {
+        static_assert(I < N, "wrong! out of range");
+
+        return data_[I + Offset];
+    }
+
+    // write access
+    template <index_t I>
+    __host__ __device__ constexpr auto& At(Number<I>)
+    {
+        static_assert(I < N, "wrong! out of range");
+
+        return data_[I + Offset];
+    }
+
+    // read access
+    template <index_t I>
+    __host__ __device__ constexpr const auto& operator[](Number<I> i) const
+    {
+        return At(i);
+    }
+
+    // write access
+    template <index_t I>
+    __host__ __device__ constexpr auto& operator()(Number<I> i)
+    {
+        return At(i);
+    }
+
+    __host__ __device__ static constexpr bool IsStaticBuffer() { return true; }
+
+    __host__ __device__ void SwitchBuffer() {}
+    T* data_;
+};
+
 } // namespace ck
 #endif

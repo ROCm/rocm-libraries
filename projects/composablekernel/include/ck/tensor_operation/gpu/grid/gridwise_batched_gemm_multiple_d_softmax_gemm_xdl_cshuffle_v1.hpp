@@ -285,9 +285,51 @@ struct GridwiseBatchedGemmMultipleDSoftmaxGemm_Xdl_CShuffle
     MakeGemm1BMmaTileDescriptor_N0_N1_N2_K(const BBlockDesc_BK0_N_BK1&)
     {
         constexpr index_t Gemm1NWaves = Gemm1NPerBlock / (Gemm1NXdlPerWave * NPerXdl);
-        return MakeGemmMmaTileDescriptor_MN0_MN1_MN2_K<Gemm1NXdlPerWave, Gemm1NWaves, NPerXdl>(
-            BBlockDesc_BK0_N_BK1{});
+        constexpr auto mfma_info      = MfmaSelector<FloatAB, MPerXdl, NPerXdl>::selected_mfma;
+        if constexpr(mfma_info.k_per_blk > mfma_info.group_size && mfma_info.num_input_blks > 1)
+        {
+            constexpr auto KGroup      = mfma_info.k_per_blk / mfma_info.group_size;
+            constexpr auto K0PerXdlops = mfma_info.num_input_blks;
+            constexpr auto KPerXdlops  = mfma_info.k_per_blk * mfma_info.num_input_blks;
+            static_assert(mfma_info.group_size % B1K1 == 0);
+            static_assert(Gemm1KPerBlock % KPerXdlops == 0);
+            static_assert(B1K0 == BBlockDesc_BK0_N_BK1{}.GetLength(Number<0>{}));
+            static_assert(B1K1 == BBlockDesc_BK0_N_BK1{}.GetLength(Number<2>{}));
+
+            constexpr auto K0 = Gemm1KPerBlock / KPerXdlops;
+            constexpr auto K1 = KGroup;
+            constexpr auto K2 = K0PerXdlops;
+            constexpr auto K3 = KPerXdlops / K1 / K2 / B1K1;
+            constexpr auto N  = BBlockDesc_BK0_N_BK1{}.GetLength(Number<1>{});
+
+            constexpr auto b1_blockdesc_k0_k1_k2_k3_n_k4 = transform_tensor_descriptor(
+                BBlockDesc_BK0_N_BK1{},
+                make_tuple(make_unmerge_transform(
+                               make_tuple(Number<K0>{}, Number<K1>{}, Number<K2>{}, Number<K3>{})),
+                           make_pass_through_transform(N),
+                           make_pass_through_transform(B1K1)),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
+                make_tuple(Sequence<0, 1, 2, 3>{}, Sequence<4>{}, Sequence<5>{}));
+
+            constexpr auto b1_permute_blockdesc_k0_n_k1 = transform_tensor_descriptor(
+                b1_blockdesc_k0_k1_k2_k3_n_k4,
+                make_tuple(make_merge_transform_v3_division_mod(
+                               make_tuple(Number<K0>{}, Number<K2>{}, Number<K1>{}, Number<K3>{})),
+                           make_pass_through_transform(N),
+                           make_pass_through_transform(B1K1)),
+                make_tuple(Sequence<0, 2, 1, 3>{}, Sequence<4>{}, Sequence<5>{}),
+                make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+
+            return MakeGemmMmaTileDescriptor_MN0_MN1_MN2_K<Gemm1NXdlPerWave, Gemm1NWaves, NPerXdl>(
+                b1_permute_blockdesc_k0_n_k1);
+        }
+        else
+        {
+            return MakeGemmMmaTileDescriptor_MN0_MN1_MN2_K<Gemm1NXdlPerWave, Gemm1NWaves, NPerXdl>(
+                BBlockDesc_BK0_N_BK1{});
+        }
     }
+
     __host__ __device__ static constexpr index_t GetSharedMemoryNumberOfByte()
     {
         const index_t gemm0_bytes_end = (SharedMemTrait::a_block_space_size_aligned +
@@ -428,12 +470,17 @@ struct GridwiseBatchedGemmMultipleDSoftmaxGemm_Xdl_CShuffle
     __device__ static auto GetGemm0WaveMNIdx(const index_t thread_id)
     {
         constexpr auto WaveSize = MfmaSelector<FloatAB, MPerXdl, NPerXdl>::selected_mfma.wave_size;
+#if defined(__gfx13__)
+        constexpr index_t NumNInput = WaveSize / MPerXdl;
+        return make_multi_index(thread_id / NumNInput, thread_id % NumNInput);
+#else
         constexpr auto wave_threadid_to_mn_idx_adaptor = make_single_stage_tensor_adaptor(
             make_tuple(make_merge_transform(make_tuple(WaveSize / MPerXdl, MPerXdl))),
             make_tuple(Sequence<0, 1>{}),
             make_tuple(Sequence<0>{}));
 
         return wave_threadid_to_mn_idx_adaptor.CalculateBottomIndex(make_multi_index(thread_id));
+#endif
     }
 
     static constexpr auto MakeD0sGridPointer()
@@ -783,6 +830,43 @@ struct GridwiseBatchedGemmMultipleDSoftmaxGemm_Xdl_CShuffle
         const auto wave_id     = GetGemm0WaveIdx();
         const auto wave_m_n_id = GetGemm0WaveMNIdx(wave_id[I2]); // I2: 0~63
 
+#if defined(__gfx13__)
+        auto d0s_threadwise_copy = generate_tuple(
+            [&](auto i) {
+                using D0DataType = remove_cvref_t<tuple_element_t<i.value, D0sDataType>>;
+                return ThreadwiseTensorSliceTransfer_v2<
+                    D0DataType,
+                    D0DataType,
+                    decltype(d0s_griddesc_m0_n0_m1_n1_m2_n2_m3_n3_n4_n5[i]),
+                    decltype(d0_thread_desc_m0_n0_m1_n1_m2_n2_m3_n3_n4_n5),
+                    Sequence<I1, // MBlockId
+                             I1, // NBlockID
+                             m0, // MRepeat
+                             n0, // NRepeat
+                             m1, // MWaveId
+                             n1, // NWaveId
+                             m2, // MPerXdl
+                             n2, // NGroupNum
+                             n3, // NInputNum
+                             n4>,
+                    Sequence<0, 1, 2, 3, 4, 5, 6, 7, 8, 9>,
+                    9,
+                    2, // D0sTransferSrcScalarPerVector,
+                    1,
+                    false>(d0s_griddesc_m0_n0_m1_n1_m2_n2_m3_n3_n4_n5[i],
+                           make_multi_index(block_work_idx[I0], // MBlockId
+                                            0,                  // NBlockId
+                                            0,                  // mrepeat
+                                            0,                  // nrepeat
+                                            wave_id[I0],        // MWaveId
+                                            wave_id[I1],        // NWaveId
+                                            wave_m_n_id[I0],    // MPerXdl
+                                            0,                  // group
+                                            wave_m_n_id[I1],    // NInputIndex
+                                            0));                // register number
+            },
+            Number<NumD0Tensor>{});
+#else
         auto d0s_threadwise_copy = generate_tuple(
             [&](auto i) {
                 using D0DataType = remove_cvref_t<tuple_element_t<i.value, D0sDataType>>;
@@ -818,6 +902,7 @@ struct GridwiseBatchedGemmMultipleDSoftmaxGemm_Xdl_CShuffle
                                             0));                // register number
             },
             Number<NumD0Tensor>{});
+#endif
         // acc_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4 to acc_thread_desc_k0_m_k1
         // n0_n1_n2_n3 -> k0
         // m0_m1_m2 -> m
@@ -930,8 +1015,8 @@ struct GridwiseBatchedGemmMultipleDSoftmaxGemm_Xdl_CShuffle
         constexpr index_t Gemm1KPack =
             MfmaSelector<FloatAB, MPerXdl, NPerXdl>::selected_mfma.group_size * 2;
 #else
-        constexpr index_t Gemm1KPack =
-            MfmaSelector<FloatAB, MPerXdl, NPerXdl>::selected_mfma.group_size;
+        constexpr auto mfma_info     = MfmaSelector<FloatAB, MPerXdl, NPerXdl>::selected_mfma;
+        constexpr index_t Gemm1KPack = math::max(mfma_info.k_per_blk, mfma_info.group_size);
 #endif
 
         auto gemm1_blockwise_gemm = BlockwiseGemmXdlops_v2<
@@ -978,7 +1063,18 @@ struct GridwiseBatchedGemmMultipleDSoftmaxGemm_Xdl_CShuffle
         constexpr auto tn2 = thread_cluster_m0_n0_m1_n1_m2_n2_n3_n4.At(I5);
         constexpr auto tn3 = thread_cluster_m0_n0_m1_n1_m2_n2_n3_n4.At(I6);
         constexpr auto tn4 = thread_cluster_m0_n0_m1_n1_m2_n2_n3_n4.At(I7);
-
+#if(defined(__gfx13__))
+        constexpr auto m0_n_m1_to_m_n_adaptor = make_single_stage_tensor_adaptor(
+            make_tuple(make_unmerge_transform(make_tuple(tm0 * tm1, tm2)),
+                       make_unmerge_transform(make_tuple(tn0 * tn1 * tn2, tn3 * tn4))),
+            make_tuple(Sequence<0>{}, Sequence<1>{}),
+            make_tuple(Sequence<0, 2>{}, Sequence<1, 3>{}));
+        constexpr auto threadid_to_m0_n_m1_adaptor = make_single_stage_tensor_adaptor(
+            make_tuple(
+                make_merge_transform(make_tuple(tm0 * tm1, tn0 * tn1 * tn2, tm2, tn3 * tn4))),
+            make_tuple(Sequence<0, 1, 2, 3>{}),
+            make_tuple(Sequence<0>{}));
+#else
         // get acc0 thread map
         constexpr auto m0_n_m1_to_m_n_adaptor = make_single_stage_tensor_adaptor(
             make_tuple(make_unmerge_transform(make_tuple(tm0 * tm1, tm2)),
@@ -990,6 +1086,7 @@ struct GridwiseBatchedGemmMultipleDSoftmaxGemm_Xdl_CShuffle
                 make_merge_transform(make_tuple(tm0 * tm1, tn0 * tn1 * tn2 * tn3 * tn4, tm2))),
             make_tuple(Sequence<0, 1, 2>{}),
             make_tuple(Sequence<0>{}));
+#endif
         const auto threadid_to_m_n_thread_cluster_adaptor =
             chain_tensor_adaptors(m0_n_m1_to_m_n_adaptor, threadid_to_m0_n_m1_adaptor);
 

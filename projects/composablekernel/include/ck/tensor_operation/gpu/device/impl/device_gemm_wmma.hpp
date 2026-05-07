@@ -81,12 +81,12 @@ struct DeviceGemmWmma_CShuffle : public DeviceGemm<ALayout,
     static constexpr auto I4 = Number<4>{};
     static constexpr auto I5 = Number<5>{};
     static constexpr auto I6 = Number<6>{};
+    static constexpr auto I7 = Number<7>{};
     // K1 = Max Vector Access Pixels
     static constexpr auto K1Number = Number<K1>{};
 
     static constexpr auto MWaves         = MPerBlock / (MRepeat * MPerWmma);
     static constexpr auto NWaves         = NPerBlock / (NRepeat * NPerWmma);
-    static constexpr auto WmmaK          = K1 == 16 ? 32 : 16;
     static constexpr auto MaxVectorLoadA = K1 * sizeof(ADataType) == 16 ? true : false;
     static constexpr auto MaxVectorLoadB = K1 * sizeof(BDataType) == 16 ? true : false;
 
@@ -146,17 +146,18 @@ struct DeviceGemmWmma_CShuffle : public DeviceGemm<ALayout,
         }
         else
         {
-            constexpr auto A_KRow      = 2;
-            constexpr auto A_K0PerWmma = WmmaK / A_KRow / K1Number;
-            const auto A_KWmma         = K / WmmaK;
+            constexpr auto A_KRow  = 2;
+            const index_t WmmaK    = get_wmma_k<ADataType, K1>();
+            const auto A_K0PerWmma = WmmaK / A_KRow / K1Number;
+            const auto A_KWmma     = K / WmmaK;
 
             const auto M0 = M / MPerBlock;
             // 0   1     0         1                2        3             4        5          6
             // M - K <-> A_KWmma - MBlock*MRepeat - MWaves - A_K0PerWmma - A_KRow - MPerWmma - A_K1
             return transform_tensor_descriptor(
                 a_grid_desc_m_k,
-                make_tuple(make_unmerge_transform(make_tuple(
-                               A_KWmma, Number<A_K0PerWmma>{}, Number<A_KRow>{}, K1Number)),
+                make_tuple(make_unmerge_transform(
+                               make_tuple(A_KWmma, A_K0PerWmma, Number<A_KRow>{}, K1Number)),
                            make_unmerge_transform(
                                make_tuple(M0 * MRepeat, Number<MWaves>{}, Number<MPerWmma>{}))),
                 make_tuple(Sequence<1>{}, Sequence<0>{}),
@@ -200,17 +201,18 @@ struct DeviceGemmWmma_CShuffle : public DeviceGemm<ALayout,
         }
         else
         {
-            constexpr auto B_KRow      = 2;
-            constexpr auto B_K0PerWmma = WmmaK / B_KRow / K1Number;
-            const auto B_KWmma         = K / WmmaK;
+            constexpr auto B_KRow  = 2;
+            const index_t WmmaK    = get_wmma_k<BDataType, K1>();
+            const auto B_K0PerWmma = WmmaK / B_KRow / K1Number;
+            const auto B_KWmma     = K / WmmaK;
 
             const auto N0 = N / NPerBlock;
             // 0   1     0         1                2        3             4        5          6
             // M - K <-> A_KWmma - MBlock*MRepeat - MWaves - A_K0PerWmma - A_KRow - MPerWmma - A_K1
             return transform_tensor_descriptor(
                 b_grid_desc_n_k,
-                make_tuple(make_unmerge_transform(make_tuple(
-                               B_KWmma, Number<B_K0PerWmma>{}, Number<B_KRow>{}, K1Number)),
+                make_tuple(make_unmerge_transform(
+                               make_tuple(B_KWmma, B_K0PerWmma, Number<B_KRow>{}, K1Number)),
                            make_unmerge_transform(
                                make_tuple(N0 * NRepeat, Number<NWaves>{}, Number<NPerWmma>{}))),
                 make_tuple(Sequence<1>{}, Sequence<0>{}),
@@ -450,7 +452,7 @@ struct DeviceGemmWmma_CShuffle : public DeviceGemm<ALayout,
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
+        if(ck::is_gfx11_supported() || ck::is_gfx12_supported() || ck::is_gfx13_supported())
         {
             if constexpr(!(is_same_v<AccDataType, float> || is_same_v<AccDataType, ck::half_t> ||
                            is_same_v<AccDataType, int32_t>))
@@ -522,6 +524,11 @@ struct DeviceGemmWmma_CShuffle : public DeviceGemm<ALayout,
                 }
             }
             else
+            {
+                return false;
+            }
+
+            if(!is_xdl_wmma_k_supported<ADataType, KPerBlock>())
             {
                 return false;
             }

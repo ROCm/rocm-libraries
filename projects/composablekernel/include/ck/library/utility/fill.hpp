@@ -151,16 +151,12 @@ struct FillConstant
 template <typename T>
 struct TransformIntoStructuralSparsity
 {
-    // clang-format off
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-braces"
     static constexpr T valid_sequences[] = {
-        0, 0, 1, 1,
-        0, 1, 0, 1,
-        0, 1, 1, 0,
-        1, 0, 0, 1,
-        1, 0, 1, 0,
-        1, 1, 0, 0,
+        0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0,
     };
-    // clang-format on
+#pragma clang diagnostic pop
 
     template <typename ForwardIter>
     void operator()(ForwardIter first, ForwardIter last) const
@@ -168,7 +164,19 @@ struct TransformIntoStructuralSparsity
         std::for_each(first, last, [=, *this, idx = 0](T& elem) mutable {
             auto tmp_idx = idx;
             idx += 1;
-            return elem *= valid_sequences[tmp_idx % (sizeof(valid_sequences) / sizeof(T))];
+            if constexpr(std::is_same_v<T, ck::f8_t> || std::is_same_v<T, ck::bf8_t>)
+            {
+                using FloatType = decltype(static_cast<float>(elem));
+                elem            = static_cast<T>(
+                    static_cast<FloatType>(elem) *
+                    static_cast<FloatType>(
+                        valid_sequences[tmp_idx % (sizeof(valid_sequences) / sizeof(T))]));
+                return elem;
+            }
+            else
+            {
+                return elem *= valid_sequences[tmp_idx % (sizeof(valid_sequences) / sizeof(T))];
+            }
         });
     }
 

@@ -262,7 +262,8 @@ namespace rocwmma
         enum struct Gfx11Predicates : bool
         {
             // Valid for gfx11 only
-            ArchTest = (bool)TestTraits::Arch::IsGfx11 || (bool)TestTraits::Arch::IsGfx12,
+            ArchTest = (bool)TestTraits::Arch::IsGfx11 || (bool)TestTraits::Arch::IsGfx12
+                       || (bool)TestTraits::Arch::IsGfx13,
 
             // AB inputs are duplicated, double buffered
             // Acc tiles are unpacked.

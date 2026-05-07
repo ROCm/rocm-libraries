@@ -16,9 +16,15 @@ class TestCkTileGemmPipelineWmmaBase : public TestCkTileGemmPipeline<Tuple, Deri
         using Base = TestCkTileGemmPipeline<Tuple, Derived>;
 
 #if defined(ARCH_GFX12)
-        using DeviceIp = ck_tile::gfx12_t;
+#if defined(CK_USE_GFX1250)
+        using DeviceIp = ck_tile::gfx125_t;
+#else
+        using DeviceIp = ck_tile::gfx120_t;
+#endif
 #elif defined(ARCH_GFX11)
         using DeviceIp = ck_tile::gfx11_t;
+#elif defined(ARCH_GFX13)
+        using DeviceIp = ck_tile::gfx13_t;
 #else
 #error "Unsupported architecture for WMMA"
 #endif

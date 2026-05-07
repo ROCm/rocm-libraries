@@ -181,7 +181,7 @@ struct TileCopy
                     // We don't have prefetch here, wait the data back immediately.
                     // Wait all asyncload insts complete.
                     // Wait all waves synced
-                    s_waitcnt_barrier<async_copy_fence_cnt>();
+                    block_sync_lds_direct_load<async_copy_fence_cnt>();
                     auto lds_tile = load_tile(x_block_lds_read_window);
                     // store from registers to DRAM
                     store_tile(y_block_window, lds_tile);

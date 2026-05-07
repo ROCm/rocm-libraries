@@ -461,8 +461,15 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
 
         run_impl(op_ptrs[0], argument_ptr);
     }
-    for(auto& op_ptr : op_ptrs)
+
+    for(size_t i = 0; i < op_ptrs.size(); i++)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
+        auto& op_ptr      = op_ptrs[i];
         auto argument_ptr = op_ptr->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),
                                                         wei_device_buf.GetDeviceBuffer(),
                                                         {},

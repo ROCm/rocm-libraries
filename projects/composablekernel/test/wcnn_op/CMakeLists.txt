@@ -1,0 +1,38 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+#unit test
+add_test_executable(test_wcnn_conv_op wcnn_conv_op.cpp)
+target_link_libraries(test_wcnn_conv_op PRIVATE utility)
+
+add_test_executable(test_wcnn_sba_op wcnn_sba_op.cpp)
+target_link_libraries(test_wcnn_sba_op PRIVATE utility)
+
+add_test_executable(test_wcnn_fma_op wcnn_fma_op.cpp)
+target_link_libraries(test_wcnn_fma_op PRIVATE utility)
+
+add_test_executable(test_wcnn_conv_block wcnn_conv_block.cpp)
+target_link_libraries(test_wcnn_conv_block PRIVATE utility)
+
+#conv fwd device test
+add_gtest_executable(test_grouped_conv_fwd_wcnn_interface grouped_conv_fwd_wcnn_interface.cpp)
+target_link_libraries(test_grouped_conv_fwd_wcnn_interface PRIVATE utility)
+
+add_test_executable(test_grouped_conv_fwd_wcnn_1d grouped_conv_fwd_wcnn_1d.cpp)
+target_link_libraries(test_grouped_conv_fwd_wcnn_1d PRIVATE utility)
+
+add_test_executable(test_grouped_conv_fwd_wcnn_3d grouped_conv_fwd_wcnn_3d.cpp)
+target_link_libraries(test_grouped_conv_fwd_wcnn_3d PRIVATE utility)
+
+add_test_executable(test_grouped_conv_fwd_wcnn_wavegroup_1d grouped_conv_fwd_wcnn_1d.cpp)
+target_link_libraries(test_grouped_conv_fwd_wcnn_wavegroup_1d PRIVATE utility)
+target_compile_definitions(test_grouped_conv_fwd_wcnn_wavegroup_1d PRIVATE ENABLE_WAVEGROUP=1)
+target_compile_options(test_grouped_conv_fwd_wcnn_wavegroup_1d PRIVATE -save-temps=obj -Wno-gnu-line-marker)
+
+add_test_executable(test_grouped_conv_fwd_wcnn_wavegroup_3d grouped_conv_fwd_wcnn_3d.cpp)
+target_link_libraries(test_grouped_conv_fwd_wcnn_wavegroup_3d PRIVATE utility)
+target_compile_definitions(test_grouped_conv_fwd_wcnn_wavegroup_3d PRIVATE ENABLE_WAVEGROUP=1)
+target_compile_options(test_grouped_conv_fwd_wcnn_wavegroup_3d PRIVATE -save-temps=obj -Wno-gnu-line-marker)
+
+# Apply Google Test to several test suite.
+include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_gtest.cmake)

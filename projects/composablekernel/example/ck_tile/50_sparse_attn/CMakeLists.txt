@@ -8,7 +8,7 @@ set(GPU_TARGETS ${SUPPORTED_GPU_TARGETS})
 
 message(STATUS "Sparse Attention: SUPPORTED_GPU_TARGETS=${SUPPORTED_GPU_TARGETS}, INST_TARGETS=${INST_TARGETS}")
 
-list(FILTER INST_TARGETS INCLUDE REGEX "gfx9|gfx12")
+list(FILTER INST_TARGETS INCLUDE REGEX "gfx9|gfx12|gfx13")
 if(NOT INST_TARGETS)
   message(WARNING "Skipping Tile Engine Sparse Attention: No supported GPU targets found")
   return()

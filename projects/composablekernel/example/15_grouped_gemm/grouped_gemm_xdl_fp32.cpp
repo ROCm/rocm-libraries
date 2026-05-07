@@ -66,7 +66,7 @@ using DeviceGemmInstance = ck::tensor_operation::device::DeviceGroupedGemm_Xdl
 
 int main(int argc, char* argv[])
 {
-    if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
+    if(ck::is_gfx11_supported() || ck::is_gfx12_supported() || ck::is_gfx13_supported())
     {
         return 0;
     }

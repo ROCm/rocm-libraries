@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_breg_creg_v1_default_policy.hpp"
+#include "ck_tile/core/tensor/tile_window_utils.hpp"
 
 namespace ck_tile {
 
@@ -36,13 +37,15 @@ struct BlockGemmARegBRegCRegV1
         static constexpr auto config = Policy::template GetWarpGemmMWarpNWarp<Problem>();
         using WarpGemm               = remove_cvref_t<decltype(config.template at<0>())>;
 
+        static constexpr auto KSubTileNum = Policy::KSubTileNum;
+
         static constexpr index_t MWarp        = config.template at<1>();
         static constexpr index_t NWarp        = config.template at<2>();
         static constexpr index_t MIterPerWarp = MPerBlock / (MWarp * WarpGemm::kM);
         static constexpr index_t NIterPerWarp = NPerBlock / (NWarp * WarpGemm::kN);
         static constexpr index_t KIterPerWarp = KPerBlock / WarpGemm::kK;
 
-        static constexpr index_t KPack = WarpGemm::kKPerThread;
+        static constexpr index_t KPack = WarpGemm::kKPack;
     };
 
     public:
@@ -63,6 +66,10 @@ struct BlockGemmARegBRegCRegV1
     static constexpr index_t MIterPerWarp = Traits::MIterPerWarp;
     static constexpr index_t NIterPerWarp = Traits::NIterPerWarp;
 
+    static constexpr index_t KSubTileNum = Traits::KSubTileNum;
+
+    static constexpr index_t KPerSubTile = KIterPerWarp / KSubTileNum;
+
     static constexpr index_t MWarp            = Traits::MWarp;
     static constexpr index_t NWarp            = Traits::NWarp;
     static constexpr bool UseDefaultScheduler = (Problem::NumWaveGroups != 1);
@@ -73,7 +80,7 @@ struct BlockGemmARegBRegCRegV1
         {
             constexpr auto a_block_outer_dstr_encoding =
                 tile_distribution_encoding<sequence<NWarp>,
-                                           tuple<sequence<MIterPerWarp>, sequence<KIterPerWarp>>,
+                                           tuple<sequence<MIterPerWarp>, sequence<KPerSubTile>>,
                                            tuple<>,
                                            tuple<>,
                                            sequence<1, 2>,
@@ -88,7 +95,7 @@ struct BlockGemmARegBRegCRegV1
         {
             constexpr auto a_block_outer_dstr_encoding = tile_distribution_encoding<
                 sequence<NWarp>,
-                tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
+                tuple<sequence<MIterPerWarp, MWarp>, sequence<KPerSubTile>>,
                 tuple<sequence<1, 0>>,
                 tuple<sequence<1, 0>>,
                 sequence<1, 2>,
@@ -106,7 +113,7 @@ struct BlockGemmARegBRegCRegV1
         {
             constexpr auto b_block_outer_dstr_encoding =
                 tile_distribution_encoding<sequence<MWarp>,
-                                           tuple<sequence<NIterPerWarp>, sequence<KIterPerWarp>>,
+                                           tuple<sequence<NIterPerWarp>, sequence<KPerSubTile>>,
                                            tuple<>,
                                            tuple<>,
                                            sequence<1, 2>,
@@ -120,7 +127,7 @@ struct BlockGemmARegBRegCRegV1
         {
             constexpr auto b_block_outer_dstr_encoding = tile_distribution_encoding<
                 sequence<MWarp>,
-                tuple<sequence<NIterPerWarp, NWarp>, sequence<KIterPerWarp>>,
+                tuple<sequence<NIterPerWarp, NWarp>, sequence<KPerSubTile>>,
                 tuple<sequence<0, 1>>,
                 tuple<sequence<0, 1>>,
                 sequence<1, 2>,
@@ -213,7 +220,7 @@ struct BlockGemmARegBRegCRegV1
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
         // hot loop:
-        static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
+        static_for<0, KPerSubTile, 1>{}([&](auto kIter) {
             static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
                 // read A warp tensor from A Block window
                 AWarpTensor a_warp_tensor;
@@ -237,7 +244,16 @@ struct BlockGemmARegBRegCRegV1
                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                     // warp GEMM
-                    WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    if constexpr(nIter != 0)
+                    {
+                        WarpGemm{}.template operator()<ReuseA<true>, ReuseB<false>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    }
+                    else
+                    {
+                        WarpGemm{}.template operator()<ReuseA<false>, ReuseB<false>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    }
 
                     // write C warp tensor into C block tensor
                     c_block_tensor.set_y_sliced_thread_data(
@@ -376,12 +392,15 @@ struct BlockGemmARegBRegCRegV1
                                         merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
                                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                                // warp GEMM with MX scaling using pre-packed scale and OpSel
-                                WarpGemm{}.template operator()<kOpSelA, kOpSelB>(c_warp_tensor,
-                                                                                 a_warp_tensor,
-                                                                                 b_warp_tensor,
-                                                                                 a_scale_packed,
-                                                                                 b_scale_packed);
+                                // warp GEMM with MX scaling
+                                // Cast e8m0_t to int32_t, use OpSel=0 (least significant byte)
+                                // constexpr index_t kOpSel = 0; // Always use OpSel=0
+                                WarpGemm{}.template operator()<OpSelA<kOpSelA>, OpSelB<kOpSelB>>(
+                                    c_warp_tensor,
+                                    a_warp_tensor,
+                                    b_warp_tensor,
+                                    a_scale_packed,
+                                    b_scale_packed);
 
                                 // write C warp tensor into C block tensor
                                 c_block_tensor.set_y_sliced_thread_data(
@@ -441,6 +460,56 @@ struct BlockGemmARegBRegCRegV1
         auto c_block_tensor = MakeCBlockTile();
         operator()(c_block_tensor, a_block_tensor, b_block_tensor);
         return c_block_tensor;
+    }
+
+    template <WindowSlideMode Mode = WindowSlideMode::Move,
+              typename ADstBlockTile,
+              typename BDstBlockTile,
+              typename ASmemBlockWindow,
+              typename BSmemBlockWindow,
+              bool ALoadTranspose = false,
+              bool BLoadTranspose = false>
+    CK_TILE_DEVICE void LocalPrefetch(ADstBlockTile& a_dst_block_tile,
+                                      BDstBlockTile& b_dst_block_tile,
+                                      ASmemBlockWindow& a_block_window,
+                                      BSmemBlockWindow& b_block_window,
+                                      bool_constant<ALoadTranspose> = {},
+                                      bool_constant<BLoadTranspose> = {})
+    {
+        constexpr index_t k_sub_tile_offset = KPerSubTile * WarpGemm::kK;
+        constexpr auto a_offset             = ALoadTranspose ? multi_index<2>{k_sub_tile_offset, 0}
+                                                             : multi_index<2>{0, k_sub_tile_offset};
+        constexpr auto b_offset             = BLoadTranspose ? multi_index<2>{k_sub_tile_offset, 0}
+                                                             : multi_index<2>{0, k_sub_tile_offset};
+
+        // Load tiles
+        if constexpr(ALoadTranspose)
+            a_dst_block_tile = load_tile_transpose(a_block_window);
+        else
+            load_tile(a_dst_block_tile, a_block_window);
+
+        if constexpr(BLoadTranspose)
+            b_dst_block_tile = load_tile_transpose(b_block_window);
+        else
+            load_tile(b_dst_block_tile, b_block_window);
+
+        // Handle window movement
+        if constexpr(Mode == WindowSlideMode::Move)
+        {
+            move_tile_window(a_block_window, a_offset);
+            move_tile_window(b_block_window, b_offset);
+        }
+        else if constexpr(Mode == WindowSlideMode::Reset)
+        {
+            constexpr index_t reset_offset = KPerSubTile * WarpGemm::kK * (KSubTileNum - 1);
+            constexpr auto a_reset         = ALoadTranspose ? multi_index<2>{-reset_offset, 0}
+                                                            : multi_index<2>{0, -reset_offset};
+            constexpr auto b_reset         = BLoadTranspose ? multi_index<2>{-reset_offset, 0}
+                                                            : multi_index<2>{0, -reset_offset};
+            move_tile_window(a_block_window, a_reset);
+            move_tile_window(b_block_window, b_reset);
+        }
+        // Mode == WindowSlideMode::Stay: do nothing
     }
 };
 

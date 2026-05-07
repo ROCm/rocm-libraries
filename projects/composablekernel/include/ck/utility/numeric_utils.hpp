@@ -3,6 +3,7 @@
 
 #pragma once
 #include "ck/utility/data_type.hpp"
+#include "ck/utility/dtype_vector.hpp"
 
 namespace ck {
 
@@ -25,6 +26,38 @@ struct NumericUtils<e8m0_bexp_t>
     static constexpr int biased_exp_max   = 254;
 
     using bitwise_type = uint8_t;
+};
+
+template <>
+struct NumericUtils<e4m3_scale_t>
+{
+    static constexpr int exp  = 4;
+    static constexpr int mant = 3;
+    static constexpr int bias = 7;
+
+    static constexpr int unbiased_exp_min = -6;
+    static constexpr int unbiased_exp_max = 8;
+    static constexpr int biased_exp_min   = 1;
+    static constexpr int biased_exp_max   = 15;
+
+    static constexpr bool has_inf = false;
+    using bitwise_type            = uint8_t;
+};
+
+template <>
+struct NumericUtils<e5m3_scale_t>
+{
+    static constexpr int exp  = 5;
+    static constexpr int mant = 3;
+    static constexpr int bias = 15;
+
+    static constexpr int unbiased_exp_min = -14;
+    static constexpr int unbiased_exp_max = 16;
+    static constexpr int biased_exp_min   = 1;
+    static constexpr int biased_exp_max   = 31;
+
+    static constexpr bool has_inf = false;
+    using bitwise_type            = uint8_t;
 };
 #endif
 
@@ -217,4 +250,33 @@ struct NumericUtils<bf6_t>
 
     using bitwise_type = uint8_t;
 };
+
+// the below is used for MX data format
+template <>
+struct NumericUtils<MxType_t<MTX_FMT::MTX_FMT_FP4_E2M1>>
+{
+    static constexpr int exp              = 2;
+    static constexpr int mant             = 1;
+    static constexpr float absmin_nonzero = 0.5;
+    static constexpr float absmax         = 6.f;
+};
+
+template <>
+struct NumericUtils<MxType_t<MTX_FMT::MTX_FMT_FP6_E3M2>>
+{
+    static constexpr int exp              = 3;
+    static constexpr int mant             = 2;
+    static constexpr float absmin_nonzero = 0.0625;
+    static constexpr float absmax         = 28.f;
+};
+
+template <>
+struct NumericUtils<MxType_t<MTX_FMT::MTX_FMT_FP6_E2M3>>
+{
+    static constexpr int exp              = 2;
+    static constexpr int mant             = 3;
+    static constexpr float absmin_nonzero = 0.125;
+    static constexpr float absmax         = 7.5;
+};
+
 } // namespace ck

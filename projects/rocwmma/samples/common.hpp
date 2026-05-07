@@ -112,6 +112,19 @@ bool isGfx12()
             || (deviceName.find("gfx1201") != std::string::npos));
 }
 
+bool isGfx13()
+{
+    hipDevice_t     mHandle;
+    hipDeviceProp_t mProps;
+
+    CHECK_HIP_ERROR(hipGetDevice(&mHandle));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&mProps, mHandle));
+
+    std::string deviceName(mProps.gcnArchName);
+
+    return (deviceName.find("gfx1310") != std::string::npos);
+}
+
 // HIP Host function to find if the device supports f64
 bool isF64Supported()
 {

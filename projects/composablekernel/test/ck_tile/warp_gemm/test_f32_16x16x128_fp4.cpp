@@ -105,7 +105,8 @@ struct WarpGemmKernel
         auto scale_a = static_cast<int32_t>(static_cast<ck_tile::e8m0_t*>(ScaleA)[0].get());
         auto scale_b = static_cast<int32_t>(static_cast<ck_tile::e8m0_t*>(ScaleB)[0].get());
 
-        auto c_tile = WarpGemm{}.template operator()<0, 0>(a_tile, b_tile, scale_a, scale_b);
+        auto c_tile =
+            WarpGemm{}.template operator()<OpSelA<0>, OpSelB<0>>(a_tile, b_tile, scale_a, scale_b);
 
         ck_tile::store_tile(c_win, c_tile);
     }

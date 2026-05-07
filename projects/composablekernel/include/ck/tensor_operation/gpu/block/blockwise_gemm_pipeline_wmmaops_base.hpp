@@ -47,10 +47,11 @@ struct BlockwiseGemmWmmaops_pipeline_base
 
     static constexpr index_t WaveSize = 32;
 
-    static constexpr index_t MWaves = MPerBlock / (MRepeat * MPerWmma);
-    static constexpr index_t NWaves = NPerBlock / (NRepeat * NPerWmma);
+    static constexpr index_t MWaves   = MPerBlock / (MRepeat * MPerWmma);
+    static constexpr index_t NWaves   = NPerBlock / (NRepeat * NPerWmma);
+    static constexpr index_t KPerWmma = 16;
 
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx13__)
     static constexpr index_t A_KRow = 2;
     static constexpr index_t B_KRow = 2;
 #else
@@ -58,6 +59,16 @@ struct BlockwiseGemmWmmaops_pipeline_base
     static constexpr index_t B_KRow = 1;
 #endif
 
+#if defined(__gfx13__)
+    static constexpr auto wmma_gemm = WmmaGemm<ComputeTypeA,
+                                               ComputeTypeB,
+                                               AccDataType,
+                                               MPerWmma,
+                                               NPerWmma,
+                                               KPerWmma,
+                                               KPack / KInner,
+                                               TransposeC>{};
+#else
     static constexpr auto wmma_gemm = WmmaGemm<ComputeTypeA,
                                                ComputeTypeB,
                                                AccDataType,
@@ -65,6 +76,7 @@ struct BlockwiseGemmWmmaops_pipeline_base
                                                NPerWmma,
                                                KPack / KInner,
                                                TransposeC>{};
+#endif
 
     static constexpr index_t KPerThread = wmma_gemm.wmma_instr.k_per_blk * KInner;
     static constexpr index_t A_K1       = ck::math::min(AWmmaTileDesc{}.GetLength(I6), KPerThread);
@@ -72,7 +84,7 @@ struct BlockwiseGemmWmmaops_pipeline_base
 
     static_assert(KPack % (A_K1 * A_KRow) == 0, "wrong!");
     static_assert(KPack % (B_K1 * B_KRow) == 0, "wrong!");
-    static constexpr index_t KRepeat = KPerBlock / KPack;
+    static constexpr index_t KRepeat = ck::math::max(KPerBlock / KPack, 1);
 
     static constexpr auto WmmaK = Number<wmma_gemm.wmma_instr.k_per_wmma>{};
 
@@ -274,7 +286,7 @@ struct BlockwiseGemmWmmaops_pipeline_base
 
         const auto wmma_a_idx = wmma_gemm.CalculateAThreadOriginDataIndex();
 
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx13__)
         const auto wmma_krow = wmma_gemm.GetSubGroupId();
 #else
         const auto wmma_krow = 0;
@@ -291,7 +303,7 @@ struct BlockwiseGemmWmmaops_pipeline_base
 
         const auto wmma_b_idx = wmma_gemm.CalculateBThreadOriginDataIndex();
 
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx13__)
         const auto wmma_krow = wmma_gemm.GetSubGroupId();
 #else
         const auto wmma_krow = 0;
@@ -364,6 +376,27 @@ struct BlockwiseGemmWmmaops_pipeline_base
                       "wrong!");
     }
 
+#if defined(__gfx13__)
+    __host__ __device__ static constexpr auto
+    GetCThreadDescriptor_MRepeat_MWave_MThreadPerSubGroup_NRepeat_NWave_NSubGroup_NAccVgprs()
+    {
+        constexpr auto c_msubgroup_nthreadpersubgroup_maccvgprs_tblk_lens =
+            wmma_gemm.GetCMSubGroupNThreadPerSubGroupMAccVgprsThreadBlkLengths();
+        constexpr auto NAccVgprsLoops   = c_msubgroup_nthreadpersubgroup_maccvgprs_tblk_lens[I1];
+        constexpr auto NAccVgprsPerLoop = c_msubgroup_nthreadpersubgroup_maccvgprs_tblk_lens[I2];
+        return make_naive_tensor_descriptor_packed(
+            //        |MRepeat            |MWave |MSubGroup |NRepeat           |NWave
+            //        |NThreadPerSubGroup |MAccVgprs
+            make_tuple(Number<MRepeat>{},
+                       I1,
+                       I1,
+                       Number<NRepeat>{},
+                       I1,
+                       NAccVgprsLoops,
+                       I1,
+                       NAccVgprsPerLoop));
+    }
+#else
     // transposed WMMA output C' = B' * A'
     __host__ __device__ static constexpr auto
     GetCThreadDescriptor_MRepeat_MWave_MThreadPerSubGroup_NRepeat_NWave_NSubGroup_NAccVgprs()
@@ -378,13 +411,40 @@ struct BlockwiseGemmWmmaops_pipeline_base
             //        |NThreadPerSubGroup |MAccVgprs
             make_tuple(Number<MRepeat>{}, I1, I1, Number<NRepeat>{}, I1, I1, NAccVgprs));
     }
+#endif
 
+#if defined(__gfx13__)
+    static constexpr auto MConsecutiveAccs =
+        wmma_gemm.GetCMSubGroupNThreadPerSubGroupMAccVgprsThreadBlkLengths()[I2];
+#else
     static constexpr auto MAccVgprs =
         wmma_gemm.GetCMSubGroupNThreadPerSubGroupMAccVgprsThreadBlkLengths()[I2];
+#endif
 
     __host__ __device__ static constexpr auto
     GetCThreadDescriptor_MRepeat_MWave_MSubGroup_NRepeat_NWave_NThreadPerSubGroup_MAccVgprs()
     {
+#if defined(__gfx13__)
+        constexpr auto c_msubgroup_nthreadpersubgroup_maccvgprs_tblk_lens =
+            wmma_gemm.GetCMSubGroupNThreadPerSubGroupMAccVgprsThreadBlkLengths();
+        constexpr auto MLoopAcc      = c_msubgroup_nthreadpersubgroup_maccvgprs_tblk_lens[I1];
+        constexpr auto MAccVgprsTemp = c_msubgroup_nthreadpersubgroup_maccvgprs_tblk_lens[I2];
+        constexpr auto AccStride     = c_msubgroup_nthreadpersubgroup_maccvgprs_tblk_lens[I3];
+        return make_naive_tensor_descriptor(
+            // |  MRepeat  |  MWave  |  MLoopAcc  | MSubGroup  |  NRepeat  |
+            // |  NWave  |  NThreadPerSubGroup  |  MLoopAcc  |
+
+            make_tuple(
+                Number<MRepeat>{}, I1, MLoopAcc, I1, Number<NRepeat>{}, I1, I1, MAccVgprsTemp),
+            make_tuple(Number<NRepeat>{} * MLoopAcc * MAccVgprsTemp * AccStride,
+                       Number<NRepeat>{} * MLoopAcc * MAccVgprsTemp * AccStride,
+                       MAccVgprsTemp * AccStride,
+                       Number<NRepeat>{} * MLoopAcc * MAccVgprsTemp * AccStride,
+                       MLoopAcc * MAccVgprsTemp * AccStride,
+                       MLoopAcc * MAccVgprsTemp * AccStride,
+                       MLoopAcc * MAccVgprsTemp * AccStride,
+                       AccStride));
+#else
         constexpr auto c_msubgroup_nthreadpersubgroup_maccvgprs_tblk_lens =
             wmma_gemm.GetCMSubGroupNThreadPerSubGroupMAccVgprsThreadBlkLengths();
 
@@ -400,6 +460,7 @@ struct BlockwiseGemmWmmaops_pipeline_base
                        MAccVgprs * AccStride,
                        MAccVgprs * AccStride,
                        AccStride));
+#endif
     }
 
     __host__ __device__ static constexpr auto
