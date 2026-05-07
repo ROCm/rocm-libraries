@@ -38,8 +38,8 @@ namespace rocsparse
     {
     private:
         rng_t();
-        ~rng_t()                       = default;
-        rng_t(const rng_t&)            = delete;
+        ~rng_t()            = default;
+        rng_t(const rng_t&) = delete;
         rng_t& operator=(const rng_t&) = delete;
 
         static constexpr size_t s_rand_cache_size = 1024;
