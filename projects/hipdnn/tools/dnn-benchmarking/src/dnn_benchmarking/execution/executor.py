@@ -6,7 +6,7 @@
 import json
 from typing import Any, Dict, List, Literal, Optional
 
-from ..common.exceptions import ExecutionError
+from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from .timing import GpuTimerInterface, Timer, create_gpu_timer
@@ -184,7 +184,10 @@ class Executor:
             ExecutionError: If any graph-build step fails.
         """
         self._build_through_operation_graph(handle)
-        return [int(eid) for eid in self._graph.get_ranked_engine_ids()]
+        try:
+            return [int(eid) for eid in self._graph.get_ranked_engine_ids()]
+        except RuntimeError as e:
+            raise UnsupportedGraphError(str(e)) from e
 
     def prepare(self, handle: Any, engine_id: Optional[int] = None) -> None:
         """Build the operation graph and prepare for execution.
@@ -208,7 +211,7 @@ class Executor:
 
             result = self._graph.check_support()
             if result.is_bad():
-                raise ExecutionError(
+                raise UnsupportedGraphError(
                     f"Backend support check failed: {result.get_message()}"
                 )
 

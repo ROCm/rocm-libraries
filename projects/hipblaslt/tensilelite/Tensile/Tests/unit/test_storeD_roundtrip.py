@@ -41,7 +41,7 @@ from Tensile.KernelWriter import CodeModules, StateValues, StateVgprs
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriter import KernelWriter
 from Tensile.KernelWriterModules import mapAcctoArchRegs
-from Tensile.Components.SubtileBasedKernel import TileInfo
+from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
 
 from gpu_test_helpers import (
     TileConfig,
@@ -393,7 +393,7 @@ def _allocate_d_tile(kernel, writer):
 
     Returns (tileInfoD, agpr_base) where agpr_base is the first accvgpr index.
     """
-    tileInfoD = TileInfo('D', kernel)
+    tileInfoD = TileInfo(CD_F32, 'D', writer, kernel)
     tileInfoD.allocVgprTileRegisters(writer, kernel)
     # Collect all allocated agpr indices (in order)
     agpr_indices = []

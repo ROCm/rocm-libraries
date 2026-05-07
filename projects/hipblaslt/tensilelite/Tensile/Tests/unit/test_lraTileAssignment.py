@@ -26,7 +26,7 @@ from gpu_test_helpers import (
     generate_export_epilogue,
     print_offset_grid,
 )
-from Tensile.Components.SubtileBasedKernel import lraTileAssignment
+from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment
 
 EXPORT_LOAD_PARAMS = (
     (4, 2, 0x00, "output_ptr"),

@@ -120,6 +120,7 @@ class GlobalWriteBatchWriter:
     self._subtileNGroupSkipLabel = None   # end-of-N-group label (M cbranch target)
     self._subtileAllStoresEndLabel = None # end-of-all-stores label (N cbranch target)
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
+    self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
 
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
@@ -245,7 +246,10 @@ class GlobalWriteBatchWriter:
         dscnt = -1
       # Get vscnt
       if vlcnt != -1 and not (self.parentWriter.states.asmCaps["SeparateVscnt"] or self.parentWriter.states.asmCaps["SeparateVMcnt"]):
-          vscnt = self.storesIssued if not self.kernel["GroupLoadStore"] else 0
+          if self.kernel.get("UseSubtileImpl") and not self.kernel["GroupLoadStore"]:
+            vscnt = 0
+          else:
+            vscnt = self.storesIssued if not self.kernel["GroupLoadStore"] else 0
       if (vlcnt != -1) or (vscnt != -1) or (dscnt != -1):
         # Get comment
         comment = ""
@@ -972,6 +976,19 @@ class GlobalWriteBatchWriter:
           module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
           module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
 
+      # When stores are interleaved (GLS=0) with subtile NonEdge guards, the
+      # M-guard branch for the last store in N-group K targets the N-group end
+      # label.  That label must be placed BEFORE the beta*C fmacs for N-group K+1,
+      # otherwise the M-guard branch skips the fmacs and the next N-group stores zeros.
+      if isSubtileNonEdge and not self.kernel["GroupLoadStore"]:
+        blockIdxN = element[0]
+        if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
+          module.add(self._subtileNGroupSkipLabel)
+          self._subtileNGroupSkipLabel = None
+          if self._subtilePendingSrdDInc is not None:
+            module.add(self._subtilePendingSrdDInc)
+            self._subtilePendingSrdDInc = None
+
       # apply in-bounds exec mask
       if self.edge and not self.kernel["BufferStore"]:
         module.add(self.getEdgeMovInstType()(EXEC(), sgpr(mask, self.laneSGPRC), "sgprs -> exec"))
@@ -1334,30 +1351,63 @@ class GlobalWriteBatchWriter:
               sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
               sumIdx1 = self.ss.elementSumIdx[elementIdx]
               prefixOffset = self.parentWriter.states.c.startVgprValu
-              # blockIdxM = (tt0-1) // 2: each pair of tt0 values spans one 32-row block.
-              blockIdxM = (tt0 - 1) // 2
               blockIdxN = element[0]  # d1 = tt1
-              # Early exit: skip this paired store if the wave group is outside the valid M/N tile bounds.
+              # Guard with tt0-1 (lower block): skip if even the lower M-block is OOB.
+              # This also handles N-group transitions.
+              blockIdxM = tt0 - 1
               skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
                                                     labelPrefix="subtile_skip_store")
-              tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1)
-              storeCodeModule.add(tmpStoreCode)
+              # Additional check: paired store needs BOTH blocks valid (MGuard > tt0).
+              # When only the lower block is valid, fall through to a scalar fallback.
+              guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
+              if guardMSgpr is not None:
+                afterPairedLabel = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"),
+                                        f"after paired/fallback store tt0={tt0}")
+                fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
+                fallbackLabel = Label(fallbackLabelName,
+                                      f"scalar fallback for d0={tt0-1} when d0={tt0} is OOB")
+                storeCodeModule.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=tt0,
+                                               comment=f"paired store: both M-blocks valid? (MGuard > {tt0})"))
+                storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
+                                                 comment=f"only d0={tt0-1} valid -> scalar fallback"))
+                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1)
+                storeCodeModule.add(tmpStoreCode)
+                storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
+                                            comment="skip scalar fallback"))
+                storeCodeModule.add(fallbackLabel)
+                tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1)
+                storeCodeModule.add(tmpFallbackCode)
+                storeCodeModule.add(afterPairedLabel)
+              else:
+                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1)
+                storeCodeModule.add(tmpStoreCode)
               if skipLabel is not None:
                 storeCodeModule.add(skipLabel)
               self.storesIssued += 1
-            # else: no partner — the sba=0 orphan was handled as a scalar store below
+            else:
+              # sba=1 orphan (no sba=0 partner in this batch — split by batch boundary).
+              blockIdxM = tt0
+              blockIdxN = element[0]
+              orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                          labelPrefix="subtile_skip_orphan")
+              sumIdx0 = self.ss.elementSumIdx[elementIdx]
+              prefixOffset = self.parentWriter.states.c.startVgprValu
+              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0)
+              storeCodeModule.add(tmpStoreCode)
+              if orphanSkipLabel is not None:
+                storeCodeModule.add(orphanSkipLabel)
+              self.storesIssued += 1
           else:
-            # sba=0 element (even tt0): emit SRD row increment if needed; store deferred to sba=1.
+            # sba=0 element (even tt0): defer SRD row increment until after N-group label.
             if self.ss.optSrdIncForRow and addrCalc.rowInc:
-              module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01))
+              self._subtilePendingSrdDInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
             partnerElementIdx = elementIdx + 1
             partnerExists = (partnerElementIdx < len(self.batchElements) and
                              self.batchElements[partnerElementIdx][1] == tt0 + 1)
             if not partnerExists:
               # Orphan element (no sba=1 partner in this batch): scalar 16bit store now.
               # Guard against OOB wave groups (same as paired store path).
-              mBlockSize = self.parentWriter.states.subtileMBlockSize
-              blockIdxM = (tt0 * self.kernel["MatrixInstM"]) // mBlockSize
+              blockIdxM = tt0
               blockIdxN = element[0]
               # Early exit: skip this orphan scalar store if the wave group is outside the valid M/N tile bounds.
               orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
@@ -1573,6 +1623,9 @@ class GlobalWriteBatchWriter:
       if self._subtileNGroupSkipLabel is not None:
         targetModule.add(self._subtileNGroupSkipLabel)
         self._subtileNGroupSkipLabel = None
+      if self._subtilePendingSrdDInc is not None:
+        targetModule.add(self._subtilePendingSrdDInc)
+        self._subtilePendingSrdDInc = None
       # Create the single end-of-all-stores label on the first N group.
       if self._subtileAllStoresEndLabel is None:
         endLabelName = self.parentWriter.labels.getNameInc("subtile_all_stores_end")
@@ -1620,6 +1673,9 @@ class GlobalWriteBatchWriter:
     if self._subtileNGroupSkipLabel is not None:
       targetModule.add(self._subtileNGroupSkipLabel)
       self._subtileNGroupSkipLabel = None
+    if self._subtilePendingSrdDInc is not None:
+      targetModule.add(self._subtilePendingSrdDInc)
+      self._subtilePendingSrdDInc = None
     if self._subtileAllStoresEndLabel is not None:
       targetModule.add(self._subtileAllStoresEndLabel)
       self._subtileAllStoresEndLabel = None
@@ -1727,10 +1783,10 @@ class GlobalWriteBatchWriter:
     return module
 
   def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0) -> Module:
-    """Emit a 16bit store for an orphan sba=0 subtile with no sba=1 partner.
+    """Emit a 16bit store for an orphan subtile element with no partner.
 
-    sba = subtile block index along A (M dimension).  Used when MIWaveTile[0] is
-    odd and the last sba=0 element has no sba=1 partner.
+    Used when MIWaveTile[0] is odd and the last sba=0 element has no sba=1
+    partner, or when batch boundaries split an (sba=0, sba=1) pair.
 
     The layout below is specific to the mfma instruction used here: lane l = LG*16 + r
     owns 4 output values at M-rows (LG*4 + 0..3) and a single N-column
