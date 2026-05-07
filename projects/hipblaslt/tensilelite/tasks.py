@@ -12,17 +12,6 @@ def _cmake_bool(value):
     return "ON" if value else "OFF"
 
 
-def cpu_supports(feature):
-    try:
-        with open("/proc/cpuinfo") as f:
-            for line in f:
-                if line.startswith("flags"):
-                    return feature in line.split()
-    except Exception:
-        pass
-    return False
-
-
 def detect_gpu_arch():
     try:
         result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
@@ -143,8 +132,6 @@ def build_client(
             cmake_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
         if bundle_python_deps:
             cmake_cmd.append("-DHIPBLASLT_BUNDLE_PYTHON_DEPS=ON")
-        if cpu_supports("f16c"):
-            cmake_cmd.append("-DCMAKE_CXX_FLAGS=-mf16c")
 
         c.run(shlex.join(cmake_cmd))
 
