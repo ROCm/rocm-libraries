@@ -97,9 +97,52 @@ namespace TensileLite
             return std::fabs(v);
         }
 
+        // Round each element through the narrower compute-input type. This
+        // matches what the slow-path validator does in getElement<>() at the
+        // MAC site when storage type is wider than the MAC input type (e.g.
+        // Half storage, F8 MFMA input). Without this, the fast path keeps
+        // full storage precision and disagrees with both the slow path and
+        // the GPU kernel.
+        inline void quantizeThroughComputeInputType(std::vector<float>& buf,
+                                                    rocisa::DataType    computeInputType)
+        {
+            switch(computeInputType)
+            {
+            case rocisa::DataType::Float:
+                return;
+            case rocisa::DataType::Half:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::Half>(v));
+                return;
+            case rocisa::DataType::BFloat16:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::BFloat16>(v));
+                return;
+#ifdef TENSILE_USE_FP8_BF8
+            case rocisa::DataType::Float8:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::Float8>(v));
+                return;
+            case rocisa::DataType::BFloat8:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::BFloat8>(v));
+                return;
+            case rocisa::DataType::Float8_fnuz:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::Float8_fnuz>(v));
+                return;
+            case rocisa::DataType::BFloat8_fnuz:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::BFloat8_fnuz>(v));
+                return;
+#endif
+            default:
+                throw std::runtime_error(
+                    "Unsupported compute-input type for fast-path quantization.");
+            }
+        }
+
         // Helper class that wraps a shadow copy of input buffers in float format.
         // It quietly manages the indirection between directly using the input pointer
         // (for float) and a shadow copy (for half / bfloat16).
+        //
+        // When `computeInputType` is set and is narrower than `type`, each element
+        // is additionally rounded through `computeInputType` to mirror what the
+        // GPU MFMA / slow-path validator do (see quantizeThroughComputeInputType).
         class ShadowBuffer
         {
             std::vector<float> m_storage;
@@ -107,7 +150,10 @@ namespace TensileLite
 
         public:
             ShadowBuffer() = default;
-            ShadowBuffer(void const* ptr, rocisa::DataType type, size_t N)
+            ShadowBuffer(void const*      ptr,
+                         rocisa::DataType type,
+                         size_t           N,
+                         rocisa::DataType computeInputType = rocisa::DataType::None)
             {
                 if(ptr == nullptr)
                 {
@@ -127,9 +173,44 @@ namespace TensileLite
                     m_storage = loadToFloat<TensileLite::BFloat16>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
+#ifdef TENSILE_USE_FP8_BF8
+                else if(type == rocisa::DataType::Float8)
+                {
+                    m_storage = loadToFloat<TensileLite::Float8>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::BFloat8)
+                {
+                    m_storage = loadToFloat<TensileLite::BFloat8>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::Float8_fnuz)
+                {
+                    m_storage = loadToFloat<TensileLite::Float8_fnuz>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::BFloat8_fnuz)
+                {
+                    m_storage = loadToFloat<TensileLite::BFloat8_fnuz>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+#endif
                 else
                 {
                     throw std::runtime_error("Unsupported type for ShadowBuffer");
+                }
+
+                // Apply MAC-input quantization if the compute-input type is
+                // narrower than storage. This is only meaningful for the path
+                // where we hold a writable shadow copy (not for the
+                // direct-pointer Float case, which is already at full
+                // precision and never narrower than itself).
+                if(computeInputType != rocisa::DataType::None
+                   && computeInputType != type
+                   && !m_storage.empty())
+                {
+                    quantizeThroughComputeInputType(m_storage, computeInputType);
+                    m_ptr = m_storage.data();
                 }
             }
 
@@ -1021,14 +1102,28 @@ namespace TensileLite
                 return rejectFast("XFloat32");
             }
 
-            auto isSupportedType = [](rocisa::DataType t) {
+            auto isSupportedOutputType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
                        || t == rocisa::DataType::BFloat16;
             };
 
-            if(!isSupportedType(problem.a().dataType()) || !isSupportedType(problem.b().dataType())
-               || !isSupportedType(problem.c().dataType())
-               || !isSupportedType(problem.d().dataType()))
+            auto isSupportedInputType = [&](rocisa::DataType t) {
+                if(isSupportedOutputType(t))
+                    return true;
+#ifdef TENSILE_USE_FP8_BF8
+                if(t == rocisa::DataType::Float8
+                   || t == rocisa::DataType::BFloat8
+                   || t == rocisa::DataType::Float8_fnuz
+                   || t == rocisa::DataType::BFloat8_fnuz)
+                    return true;
+#endif
+                return false;
+            };
+
+            if(!isSupportedInputType(problem.a().dataType())
+               || !isSupportedInputType(problem.b().dataType())
+               || !isSupportedOutputType(problem.c().dataType())
+               || !isSupportedOutputType(problem.d().dataType()))
             {
                 std::string detail = "unsupported_type"
                     " A=" + TensileLite::ToString(problem.a().dataType())
@@ -1138,10 +1233,19 @@ namespace TensileLite
             size_t strideBatchD = problem.d().strides()[problem.batchIndices()[0].d];
 
             // 4. Shadow copies in f32.
-            ShadowBuffer shadowA(
-                inputs.a, problem.a().dataType(), problem.a().totalAllocatedElements());
-            ShadowBuffer shadowB(
-                inputs.b, problem.b().dataType(), problem.b().totalAllocatedElements());
+            //
+            // For A and B, also pass the compute-input type so the shadow is
+            // pre-quantized to mirror the GPU MFMA / slow-path semantics when
+            // storage is wider than the MAC input (e.g. Half storage with F8
+            // compute-input). C/D never have a separate MAC-input type.
+            ShadowBuffer shadowA(inputs.a,
+                                 problem.a().dataType(),
+                                 problem.a().totalAllocatedElements(),
+                                 problem.computeInputTypeA());
+            ShadowBuffer shadowB(inputs.b,
+                                 problem.b().dataType(),
+                                 problem.b().totalAllocatedElements(),
+                                 problem.computeInputTypeB());
             ShadowBuffer shadowC(
                 inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
 
