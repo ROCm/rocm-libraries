@@ -268,6 +268,11 @@ rocsparse_create_const_csc_descr
 
 .. doxygenfunction:: rocsparse_create_const_csc_descr
 
+rocsparse_create_const_bsr_descr
+--------------------------------
+
+.. doxygenfunction:: rocsparse_create_const_bsr_descr
+
 rocsparse_create_const_bell_descr
 ---------------------------------
 

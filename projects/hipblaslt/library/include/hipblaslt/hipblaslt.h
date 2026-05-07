@@ -109,8 +109,18 @@ typedef enum {
 } hipblasLtEpilogue_t;
 
 /*! \ingroup types_module
+ *  \brief Specify the batch mode of the matrices.
+ */
+
+typedef enum {
+	HIPBLASLT_BATCH_MODE_STRIDED = 0,
+	HIPBLASLT_BATCH_MODE_POINTER_ARRAY = 1,
+} hipblasLtBatchMode_t;
+
+/*! \ingroup types_module
  *  \brief Specifies the attributes that define the details of the matrix.
  */
+
 typedef enum {
   HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT = 0,         /**<Number of batches of this matrix. Default value is 1. Data type: ``int32_t``. */
   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET = 1, /**<Stride (in elements) to the next matrix for the strided batch operation. Default value is 0. Data type: ``int64_t``. */
@@ -153,6 +163,15 @@ typedef enum {
    * ``int64_t``
    */
   HIPBLASLT_MATRIX_LAYOUT_LD = 6,
+  /** Matrix Batch Mode.
+   * Batched GEMM can be either:
+   * 1. Strided Batch: Single contiguous memory allocation and stride between matrices in
+   * the batch is specified in terms of number of elements.
+   * 2. General Batched: This uses pointer array with each pointer storing the base address 
+   * of the matrices in the batch.
+   * See hipblasLtBatchMode_t
+   */
+  HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,   
 } hipblasLtMatrixLayoutAttribute_t;
 
 /*! \ingroup types_module
