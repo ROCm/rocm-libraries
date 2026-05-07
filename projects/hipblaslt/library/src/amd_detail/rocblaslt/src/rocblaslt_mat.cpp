@@ -24,6 +24,7 @@
  *
  * ************************************************************************ */
 
+#include "check_numerics_matrix.hpp"
 #include "definitions.h"
 #include "handle.h"
 #include "rocblaslt_mat_utils.hpp"
@@ -222,7 +223,28 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         swizzleB,
                                         batch_mode};
 
-    return runContractionProblem(handle, algo, problem, gemmData);
+    rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+
+    // Optional post-GEMM NaN scan of output D, gated by HIPBLASLT_CHECK_NUMERICS.
+    if(st == rocblaslt_status_success)
+    {
+        const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
+        if(call_id != 0)
+        {
+            st = hipblaslt_check_numerics_scan_D(handle,
+                                                 stream,
+                                                 call_id,
+                                                 m, n,
+                                                 num_batches_a,
+                                                 type_d,
+                                                 D,
+                                                 ldd,
+                                                 batch_stride_d,
+                                                 (matD->order == HIPBLASLT_ORDER_ROW));
+        }
+    }
+
+    return st;
 }
 
 rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle           handle,

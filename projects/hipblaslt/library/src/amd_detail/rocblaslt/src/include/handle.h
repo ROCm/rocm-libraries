@@ -31,6 +31,7 @@
 
 #include "rocblaslt.h"
 //#include "rocblaslt_ostream.hpp"
+#include <atomic>
 #include <fstream>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -81,7 +82,7 @@ struct _rocblaslt_handle
     // constructor
     _rocblaslt_handle();
     // destructor
-    ~_rocblaslt_handle() = default;
+    ~_rocblaslt_handle();
 
     // device id
     int device;
@@ -100,6 +101,47 @@ struct _rocblaslt_handle
     void* rocroller_handle = nullptr;
     int   useRocRoller     = -1;
 #endif
+
+    // Numerics-check mode read once from HIPBLASLT_CHECK_NUMERICS env var
+    // in the constructor. When non-zero, every hipblasLtMatmul() scans its
+    // output D matrix for NaN and reports per the bitmask.
+    hipblaslt_check_numerics_mode check_numerics = hipblaslt_check_numerics_mode_no_check;
+
+    // v0 deferred-sync NaN scanner: a single 4-byte device slot. The scanner
+    // kernel does atomicCAS(flag, 0, call_id) so the slot ends up holding the
+    // call_id of the FIRST matmul whose output D contained a NaN (0 = none).
+    // Allocated in the ctor when check_numerics != no_check, freed in the
+    // dtor (after a final drain). Stays nullptr when scanning is disabled.
+    uint32_t* check_numerics_flag = nullptr;
+
+    // Per-handle host counter, incremented once per hipblasLtMatmul (one
+    // logical "call" = one matmul, including the grouped-GEMM batched form
+    // which dispatches multiple sub-problems in one launch). 1-indexed at
+    // first use so that 0 stays the "no NaN seen" sentinel for the device flag.
+    // Atomic because callers may share a handle across threads (one matmul =
+    // one fetch_add); plain ++ would tear and reuse call_ids.
+    std::atomic<uint32_t> check_numerics_call_id{0};
+
+    // Sampling knob: scanner runs only when call_id % scan_every == 0.
+    // Default 1 = scan every matmul (v0 behavior). Set via
+    // HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY env var.
+    uint32_t check_numerics_scan_every = 1;
+
+    // Bisect window. Scanner only fires when scan_from <= call_id <= scan_until.
+    // Defaults (1, ~0u) = unbounded. Set via HIPBLASLT_CHECK_NUMERICS_SCAN_FROM and
+    // _SCAN_UNTIL. Lets the user re-run with a tight window after an earlier
+    // coarse-sampling run pinned the first-NaN call to a known interval, so the
+    // pre-window and post-window calls don't pay the scanner+sync cost.
+    uint32_t check_numerics_scan_from  = 1u;
+    uint32_t check_numerics_scan_until = ~uint32_t(0);
+
+    // Set the first time a scanner kernel launch returns non-success on this
+    // handle (kernel registration failure, OOM, illegal argument, etc.). Used
+    // to (a) emit a single warning at the failure site instead of spamming
+    // per-call, and (b) flag the teardown summary so users with `info`/`warn`
+    // off the first time still see that the scanner was non-functional.
+    // Atomic so concurrent callers race to a single log line, not many.
+    std::atomic<bool> check_numerics_launch_failed{false};
 };
 
 /********************************************************************************
