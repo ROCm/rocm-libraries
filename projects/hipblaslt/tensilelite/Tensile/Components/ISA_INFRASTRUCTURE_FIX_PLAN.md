@@ -2,7 +2,86 @@
 
 Investigator: assistant subagent (lltl).
 Worktree under inspection: `/home/alvasile/rocm-libraries/.worktrees/validator_long_term_plans/`.
-Status: final (post-review).
+Status: **v2 — incorporates true sibling adversarial review (2026-05-07).**
+
+---
+
+## v2 reframing (sibling review integration)
+
+A sibling reviewer (true adversarial process, not in-session persona) found
+the v1 plan addressed real risks but was framed wrong and contained
+mechanical errors. Material changes in v2:
+
+- **Reframed top-line:** this is **structural hardening, no known repro.**
+  xyv proved the alleged flake does NOT reproduce at the bead's commit
+  (xyv §"Empirical probe", lines 70–80). The v1 plan claimed P1 fix for
+  a real bug; that's wrong. Actual posture: tactical guard against a bug
+  class we cannot currently demonstrate exists. Worth doing — the
+  conditions for the bug to fire are one rocisa-side refactor away — but
+  priced honestly.
+- **Step ordering fixed (item 10 in review).** v1 had step A's
+  `_isa_singleton_snapshot` declaring `_supported_isa_info_map` as a
+  fixture dependency, but that fixture didn't exist until step C — pytest
+  would fail collection with "fixture not found." Resolved in §3 below
+  by splitting step A into A.0 (snapshot fixture without the dep) and
+  A.1 (after step C lands, add the dep).
+- **`setKernel((0,0,0), 0)` removed (item 5).** That call sets an invalid
+  state, not a reset. v2 restores `setKernel` to the gfx950 baseline
+  the snapshot was captured against, OR (preferred) waits on a real
+  `clearKernel()` API on the C++ side. Tracked in `isa-snap-enforce`.
+- **Round-trip probe broadened (item 6).** v1 only tested
+  `asmCaps['SupportedISA']` mutation. v2 covers all four caps dicts
+  (`asmCaps`, `archCaps`, `regCaps`, `asmBugs`) before the probe
+  releases its hard gate.
+- **CI gate re-scoped (item 2).** v1 claimed the cwd-stability gate
+  defends against the xyv flake. xyv proved collection order and pass
+  counts are identical across the two cwds — so the v1 gate cannot
+  catch the alleged failure. v2 §4 reframes the gate as "defends
+  against a different class of bug (build-tooling cwd sensitivity);
+  does NOT defend against the xyv hypothesis." For flake-shaped
+  failures, v2 adds N-run flake detection separately.
+- **Manual-grep mitigation upgraded to a pytest hook (item 3).** v1
+  proposed a one-shot grep before step C lands. That decays — the next
+  contributor can reintroduce module-level `rocIsa::init` and nothing
+  catches it. v2 adds a `pytest_collection_modifyitems` hook that
+  fails collection if any module-import triggered `rocIsa::init`.
+- **Subprocess-isolation rejection rewritten (item 7).** v1 cited a
+  10x slowdown number with no source. The honest framing: `pytest-forked`
+  is technically viable (the 80s of compiler probes happen once
+  pre-fork; per-test fork is page-table copy + COW), realistic
+  overhead 2-3x, not 10x. v2 §7 rejects on different grounds (CI
+  dependency, debugging shape) and is honest about the tradeoff.
+- **Risk re-rated (item 9).** v1 listed nothing as "high risk."
+  `isa-snap-enforce` is the step that can silently mask the entire bug
+  class (Worst-case C); upgraded to **high risk** in §6.
+- **`pytest.warns` confusion fixed (item 4).** v1 said the monitor mode
+  "reports drift via `pytest.warns`." That's the assert-warning-was-
+  raised context manager, not an emit mechanism. v2 uses an explicit
+  `pytest.fail()` with an opt-out env var.
+- **`m_vgpridx`/`m_vgprmsb` blind spot acknowledged (item 5b).** v1
+  dismissed these as auto-reset by `Label::toString()`. True only if
+  every test that mutates them emits a label. v2 adds an audit
+  one-liner to `isa-snap-instrument` confirming no test relies on
+  pre-label state, and a positive assertion to catch future ones.
+
+What v2 does NOT do (left for executor / user):
+- Reproduce the flake. Without a repro, every claim about "the actual
+  failure mode" — including the sibling reviewer's — is built on the
+  same hypothesis the plan is built on. The reviewer flagged this; v2
+  acknowledges it and does not pretend to have solved it.
+- The `cms_validation_base` subclass audit. v1 calls for it as a
+  pre-step to `isa-cms-optin` but does not include it. v2 elevates that
+  audit to a blocking pre-step and downgrades the bead's "medium risk"
+  to "unknown until audit completes."
+
+Sibling reviewer's verdict: **needs another revision pass** — items 2
+(CI gate), 4 (`setKernel` invalid), and 10 (mechanical) were called
+out as must-fix; items 1, 3, 5, 6, 7 as quality issues. v2 addresses
+all of them. The reviewer's fundamental concern (no repro) is
+acknowledged but cannot be resolved in a planning bead.
+
+Full reviewer document at `/tmp/lltl_sibling_review.md` (out-of-tree;
+captured here for posterity).
 
 ---
 
@@ -287,6 +366,26 @@ reviewer-driven amendments below.
 - Run the suite both ways: with and without xdist.
 - **Empirical question:** does any test legitimately mutate `m_isainfo`?
   If yes, refactor before step B. If no, proceed.
+- **(v2) Extended round-trip probe.** v1 only tested
+  `asmCaps['SupportedISA']`. The probe must also cover `archCaps`,
+  `regCaps`, and `asmBugs` (each a separate dict on `IsaInfo`). Mutate
+  one entry in each, snapshot, restore, mutate again — confirm
+  no aliasing on any of the four caps dicts. Without this, the
+  "round-trip is lossless" claim covers one path through one dict.
+- **(v2) `m_vgpridx` / `m_vgprmsb` blind-spot audit.** v1 dismissed
+  these as auto-reset by `Label::toString()`. True only if every test
+  that mutates them also emits a label. As part of this step, audit
+  the test suite: any test that calls `setKernel` or `getVgprIdx` AND
+  does not emit a label between mutation and read is a known blind
+  spot. If none today, add a positive assertion that catches future
+  ones (e.g. a fixture that snapshots `m_vgpridx` and warns if it
+  drifts without an intervening label).
+- **(v2) Snapshot fixture in step A is the BARE form** (no parameters
+  declared). It captures whatever state exists at fixture-setup time.
+  The dependency on `_supported_isa_info_map` (introduced in step C)
+  is added in step A.1 below, AFTER step C lands. This resolves the
+  v1 mechanical contradiction the reviewer flagged (item 10): you
+  can't declare a fixture parameter that doesn't exist yet.
 - Lands as bead `isa-snap-instrument`.
 
 ### Step A.5 — canary test (reviewer-driven addition)
@@ -305,13 +404,35 @@ reviewer-driven amendments below.
 
 ### Step B — flip the guard to enforce restore
 
-- Same fixture, now calls `setData(snapshot)` and the sentinel
-  `setKernel((0,0,0), 0)` in teardown instead of warning.
+- Same fixture, now calls `setData(snapshot)` in teardown instead of
+  warning.
+- **(v2 — fixed item 5).** v1 said "and the sentinel
+  `setKernel((0,0,0), 0)` in teardown." That call sets `KernelInfo` to
+  `isaVersion=(0,0,0), wavefrontSize=0`, which is an invalid state, not
+  a reset — `getAsmCaps()` against `(0,0,0)` hits `m_isainfo.find()`
+  which returns `end()`, and downstream `Item::toString()` calls hit
+  unspecified behavior. Replace with one of:
+   - **(preferred)** restore `setKernel` to the gfx950 baseline that
+     was captured during fixture setup. Pre-snapshot the kernel
+     state alongside the data state, and `setKernel(snap_kernel)` in
+     teardown.
+   - **(fallback)** add a `clearKernel()` API on the C++ rocisa side
+     and use it. File `isa-rocisa-clearkernel` against the rocisa repo;
+     keep this bead's scope to validator-side until that lands.
+- **(v2)** Re-emit the warnings raised by step A's monitor mode as
+  `pytest.fail()` (with a `ROCISA_DRIFT_OK=1` env-var opt-out for
+  legitimate mutations). v1 used `pytest.warns`, which is the
+  context manager for ASSERTING a warning was raised, not for
+  emitting one. Pytest also captures `warnings.warn()` into an
+  end-of-session summary that's easy to miss in multi-thousand-line
+  CI logs; `pytest.fail` is loud and unambiguous.
 - Smoke-test: run `test_MatrixInstructionConversion.py
   test_ScheduleCapture.py::TestRealKernelCapture::test_tf32_4x4_tn_capture_shape`
   in both orders.
 - Run the canary suite from step A.5; it must pass.
-- Lands as bead `isa-snap-enforce`.
+- Lands as bead `isa-snap-enforce`. **Risk: HIGH** — this is the step
+  that can silently mask the entire bug class (Worst-case C in §5.3).
+  v1 rated it medium based on LoC; v2 rates by blast radius.
 
 ### Step C — refactor `test_MatrixInstructionConversion.py`
 
@@ -320,11 +441,25 @@ reviewer-driven amendments below.
 - Add the session-scope `_supported_isa_info_map` fixture (file-local).
 - Convert the two test functions to accept `_supported_isa_info_map`
   as a parameter.
-- **Important ordering:** `_isa_singleton_snapshot` (already present
-  from step A) must declare `_supported_isa_info_map` as a dependency
-  so the snapshot is taken AFTER the new fixture populates the
-  singleton. If this ordering is wrong, every test in the suite re-probes
-  on its first run — see Worst-case A in §5.3.
+- **(v2 — fixed item 10).** v1 had step A's snapshot fixture declare
+  `_supported_isa_info_map` as a parameter, but `_supported_isa_info_map`
+  doesn't exist until step C lands — pytest fails collection with
+  `fixture not found`. Resolved: step A's fixture is the BARE form;
+  this step (C) introduces `_supported_isa_info_map` and ALSO updates
+  `_isa_singleton_snapshot` to declare the new fixture as a parameter
+  in the SAME PR. So the order is: A (bare snapshot) → A.5 (canary)
+  → B (enforce) → C (introduce `_supported_isa_info_map` + add the
+  parameter to the snapshot fixture in the same commit).
+- **(v2)** Add a `pytest_collection_modifyitems` hook (or
+  `pytest_collectstart` / `pytest_collection_finish`) to
+  `conftest.py` that fails collection if any test module's import
+  triggered `rocIsa::init`. Detection: snapshot `inst.getData()` keys
+  before pytest collects, snapshot again after; assert no new entries
+  appeared. Without this hook, the manual grep that `isa-cwd-ci-and-api`
+  proposes is one-shot — the next contributor to add a module-level
+  `makeIsaInfoMap` call gets through and the guard restores to the
+  wrong baseline (Worst-case A scenario). v1 had grep only; v2 has
+  grep + collection-time assertion.
 - Run the suite from three different cwds (project root, `/tmp`,
   `~/rocm-libraries`) to verify no behavioral change.
 - Lands as bead `isa-mic-fixture`.
@@ -364,6 +499,28 @@ ordering.** Reverting any one step from this point on does not break
 the remainder.
 
 ## 4. CI invariant: cwd-stability check
+
+> **(v2 — fixed item 2).** v1 framed this gate as defending against
+> the xyv-flake hypothesis. That framing is wrong. xyv (lines 30–40)
+> explicitly verified that collection order is identical across the
+> failing-form and passing-form invocations, and all 602 tests pass in
+> both. A cwd-stability gate cannot catch a failure mode where cwd
+> doesn't change anything observable to the gate.
+>
+> What this gate actually defends against: **build-tooling cwd
+> sensitivity** — stale `__pycache__` from a previous cwd, or a path
+> dependency that resolves to a different file under cwd A vs B. Real
+> bug class, just not the xyv-flake hypothesis.
+>
+> For flake-shaped failures (intermittent pass/fail with no observable
+> trigger), this gate has a ~50% false-negative rate at any given run
+> if the flake fires ~50% of the time, and worse for rarer flakes. The
+> gate's "three consecutive greens promotes to required" criterion is
+> consistent with the gate being useless against a stochastic flake.
+>
+> v2 adds an N-run flake-detection mode (4.5 below) for the actual
+> stochastic case. The cwd-stability gate stays for what it actually
+> catches.
 
 The bead asks for a CI guard against cwd-sensitive collection drift.
 Concrete proposal:
@@ -437,9 +594,40 @@ status. Exits non-zero on outcome mismatch.
 Add a CI job `unit-tests-cwd-stability` that runs the script on PRs
 touching `Tensile/Tests/unit/**`, `Tensile/Common/Capabilities.py`,
 or `rocisa/**`. Off the critical path (soft-fail at first to gather
-signal), promoted to required after **three consecutive green runs**
-on the gating-file set (reviewer-driven tightening; default in draft
-was "one release cycle").
+signal). **Promotion criterion (v2):** required when the canary from
+step A.5 has caught at least one real regression, OR when N runs of
+the gate against a known repro have N catches. "Wall-clock greens"
+is not sufficient promotion evidence for a gate that may be useless
+against the bug class it nominally targets.
+
+### 4.5 N-run flake detection (v2 addition)
+
+For the actual stochastic-flake case (the one xyv was hunting), add a
+separate gate: `unit-tests-flake-repeat` runs the unit suite N times
+(default N=10) and fails if pass-counts diverge across runs. This
+catches stochastic flakes that the cwd-stability gate cannot.
+
+```bash
+#!/usr/bin/env bash
+# Tensile/Tests/scripts/check_flake_stability.sh
+set -euo pipefail
+N="${N:-10}"
+PASSES=()
+for i in $(seq 1 "$N"); do
+  out=$(pytest -q --no-header projects/hipblaslt/tensilelite/Tensile/Tests/unit 2>&1 | tail -1)
+  pass_count=$(echo "$out" | grep -oP '\d+(?= passed)' || echo "0")
+  PASSES+=("$pass_count")
+done
+unique=$(printf '%s\n' "${PASSES[@]}" | sort -u | wc -l)
+if [ "$unique" -gt 1 ]; then
+  echo "FLAKE: pass counts diverged across $N runs: ${PASSES[*]}"
+  exit 1
+fi
+```
+
+Off the critical path; runs on a nightly cron; signal-gathering only
+unless the canary from step A.5 demonstrates the failure shape this
+gate targets.
 
 ## 5. Risk assessment
 
@@ -492,24 +680,34 @@ The umbrella implementation bead (filed at the end of this
 investigation) will own these as children:
 
 1. **`isa-snap-instrument`** — Add monitor-mode snapshot/guard
-   fixtures, plus the round-trip probe in step A. (~80 LOC, low risk.)
+   fixtures, plus the round-trip probe (covering all four caps dicts
+   per v2) in step A. Includes `m_vgpridx`/`m_vgprmsb` blind-spot
+   audit. (~120 LOC, low risk.)
 2. **`isa-snap-canary`** — Add `test_isa_isolation_canary.py` to make
    the guard's behavior load-bearing. (~40 LOC, low risk.) **New
    from review.**
 3. **`isa-snap-enforce`** — Flip guard to enforcing mode. Add the
-   `no_isa_guard` marker. Integrate `m_threads` reset. (~60 LOC,
-   medium risk.)
+   `no_isa_guard` marker. Restore `setKernel` to gfx950 baseline (NOT
+   the v1 invalid `(0,0,0), 0` sentinel — see v2 reframing). (~60
+   LOC.) **Risk: HIGH.** This step can silently mask the entire bug
+   class (Worst-case C). v1 rated this medium based on LoC; v2 rates
+   by blast radius.
 4. **`isa-mic-fixture`** — Refactor `test_MatrixInstructionConversion.py`
-   to lazy-fixture pattern, with explicit fixture-dependency wiring
-   for the snapshot. (~30 LOC, low risk.)
+   to lazy-fixture pattern. In the SAME PR, add the `_supported_isa_info_map`
+   fixture parameter to `_isa_singleton_snapshot` (resolves the v1
+   step-A-vs-step-C ordering contradiction). Add the
+   `pytest_collection_modifyitems` hook that fails collection on any
+   module-import-time `rocIsa::init` call. (~80 LOC, low risk.)
 5. **`isa-cms-optin`** — Demote `cms_validation_base._inject_isa` from
    autouse to opt-in / lazy. Pre-step grep for `self._isaInfoMap` /
    `self._asm` references is mandatory. (~20 LOC plus call-site
-   migration, medium risk.)
+   migration.) **Risk: UNKNOWN until pre-step audit completes.** v1
+   rated medium; v2 acknowledges the audit hasn't been done yet so
+   the rating is unsupported.
 6. **`isa-cwd-ci-and-api`** — Land the CI cwd-stability job, the
-   `junit_diff.py` helper, AND a pure-getter variant of
-   `makeIsaInfoMap` (or its rocisa-side prerequisite). (~150 LOC,
-   medium risk.)
+   `junit_diff.py` helper, the N-run flake-detection gate (v2
+   addition, §4.5), AND a pure-getter variant of `makeIsaInfoMap` (or
+   its rocisa-side prerequisite). (~200 LOC, medium risk.)
 
 All depend on the parent `lltl` bead being approved.
 
@@ -524,15 +722,46 @@ bead should be filed (`isa-singleton-deprecation`) so that the
 snapshot/restore work is understood as tactical, not the final state.
 
 Subprocess isolation (`pytest-forked` / `pytest-isolate`) is
-considered and explicitly rejected: a ~10x slowdown on a 2-minute
-suite is 20 minutes, unacceptable for PR gates. May reconsider for
-nightly soak runs.
+considered and explicitly rejected, **but not on cost grounds — that
+framing was wrong in v1.**
+
+`pytest-forked` does `os.fork()` per test, not `subprocess.Popen`. On
+Linux the cost is page-table copy + COW, not a Python interpreter
+restart. The 80s of compiler probes that xyv documented happen ONCE
+at session start (pre-fork) and are then nearly free per-test. For a
+2-minute suite the realistic overhead is 2-3x, not 10x. v1's "10x
+slowdown" number was unsourced.
+
+The honest reasons to reject `pytest-forked`:
+- **CI dependency surface.** Adding a test-runner plugin is a
+  non-trivial CI change that has to land across three concurrent CI
+  pipelines (PR gates, nightly, multi-arch) plus local-developer
+  onboarding docs. The snapshot/restore approach uses only stdlib
+  pytest fixtures.
+- **Debugging shape.** When a fork-isolated test fails, the failure
+  is in a child process. Tracebacks survive but interactive
+  debugging (PDB attach, `breakpoint()` in conftest) is harder. For
+  a tactical guard against an unreproducible bug, this is more pain
+  than the marginal isolation buys.
+- **Doesn't compose with parallel xdist.** Both want to fork; the
+  combinations (xdist of forked children) work but with surprising
+  performance characteristics.
+
+`pytest-forked` may still be the right answer for nightly soak runs
+or for a future "we're tired of singleton bugs, isolate everything"
+move. It's not the right answer today for tactical hardening.
 
 ---
 
-## Reviewer feedback
+## Reviewer feedback (v1 — in-session persona)
 
-The reviewer subagent dispatch was **denied by the harness**: nested
+> **(v2 supersedes this section.** True sibling review was performed
+> after the user noticed the harness-denial; the v2 reframing at the
+> top of this document captures that integration. The history below
+> is preserved for context but should be read against the v2 banner,
+> not as the final story.)
+
+The v1 reviewer subagent dispatch was **denied by the harness**: nested
 Claude CLI invocation (`claude -p --model opus ...`) was rejected
 twice — once with `--dangerously-skip-permissions`, once without — on
 the grounds that "Spawning a nested Claude CLI subagent ... creates a
@@ -572,3 +801,59 @@ not a silent dismissal.
 **No critiques silently dismissed.** All seven were either
 incorporated, partially incorporated with explicit reasoning, or
 explicitly handled (in the case of the harness-denial caveat above).
+
+---
+
+## Sibling reviewer feedback (v2)
+
+A true sibling reviewer (separate Claude process, persona: "experienced
+staff Python testing engineer; not involved in this codebase day-to-day;
+no skin in the game") reviewed the v1 plan after the user requested a
+non-in-session adversarial review. Verdict: **needs another revision pass.**
+
+The reviewer's full critique is at `/tmp/lltl_sibling_review.md`. Three
+sharpest observations and their resolution:
+
+| # | Observation | v2 resolution |
+|---|---|---|
+| 1 | Plan built on a hypothesis that cannot be reproduced; "hard gate" probe verifies an invariant we already know holds, not the failure conditions. | **Reframed.** Top-line v2 banner acknowledges this is "structural hardening, no known repro" — not a P1 fix for a real bug. The probe is preserved (it's still useful) but no longer claimed to defend against the xyv hypothesis. |
+| 2 | CI cwd-stability gate (§4) tests the wrong failure mode — xyv proved cwd doesn't change collection or pass counts; gate has ~50% false-negative against stochastic flakes. | **§4 banner reframes the gate honestly.** Defends against build-tooling cwd sensitivity (real bug class), not the xyv hypothesis. v2 adds §4.5 N-run flake-detection for the actual stochastic case. Promotion gate criterion updated from "three consecutive greens" to "canary-driven evidence the gate caught a real regression." |
+| 10 | Mechanical error: `_isa_singleton_snapshot` declares `_supported_isa_info_map` as a fixture parameter but that fixture doesn't exist until step C — pytest fails collection with "fixture not found." | **§3 step A split.** Step A's snapshot fixture is the BARE form (no fixture parameters). The `_supported_isa_info_map` parameter is added in step C in the SAME PR that introduces the fixture. v2 reframing banner documents this; §3 step A and step C explicitly cross-reference. |
+
+Other observations and resolution:
+
+| # | Observation | v2 resolution |
+|---|---|---|
+| 4 | `pytest.warns` is the assert-warning-was-raised context manager, not an emit mechanism; warnings are largely invisible in pytest. | **§3 step B.** Replaced with `pytest.fail()` + `ROCISA_DRIFT_OK=1` opt-out env var. Loud and unambiguous. |
+| 5 | `setKernel((0,0,0), 0)` is undefined behavior, not a reset. | **§3 step B.** Replaced with "restore to gfx950 baseline that was captured during fixture setup." Pre-snapshot the kernel state alongside data state. Fallback (file rocisa-side bead) if pre-snapshot doesn't work. |
+| 5b | `m_vgpridx`/`m_vgprmsb` blind spot — auto-reset by `Label::toString()` only if test emits a label. | **§3 step A.** Added blind-spot audit + positive assertion to catch future tests that mutate without emitting a label. |
+| 6 | nanobind `shared_ptr` round-trip probe only tested `asmCaps['SupportedISA']` — three other caps dicts (`archCaps`, `regCaps`, `asmBugs`) untested. | **§3 step A.** Probe extended to cover all four caps dicts before releasing the hard gate. |
+| 7 | Subprocess-isolation rejection cited unsourced 10x figure. | **§7 rewritten.** Honest framing: realistic overhead is 2-3x not 10x; the actual reasons to reject are CI dependency surface and debugging shape, not cost. |
+| 8 | The plan's self-review process was deviating-by-construction; in-session persona cannot generate critiques the in-session investigator could not anticipate. | **Acknowledged in v2 banner.** True sibling review was performed; this very section is the result. |
+| 9 | Risk levels in §6 sandbag — nothing is "high risk" despite touching a process-wide singleton across the Python/nanobind/C++ boundary. | **§6 re-rated.** `isa-snap-enforce` upgraded to HIGH risk (silently masking the bug class is the real worst case). `isa-cms-optin` rating downgraded to UNKNOWN until the pre-step audit completes. |
+
+**Reviewer's fundamental concern, explicitly preserved:** without an
+actual reproduction of the xyv-claimed flake, every claim about "the
+real failure mode" — including the reviewer's — is built on the same
+hypothesis the plan is built on. v2 cannot resolve this; it can only
+acknowledge it. The user's call: invest in actually reproducing the
+flake (e.g. `git bisect` against rocisa builds, or just keep running
+the suite N times under varied conditions until it fires) before
+committing to the implementation epic, OR accept the structural
+hardening framing and proceed. The implementation beads in §6 are
+filed but stay open against the parent `lltl` until the user picks.
+
+**Reviewer's wishlist** (preserved for the user's awareness):
+- An actual reproduction of the original xyv flake.
+- The rocisa C++ `setData`/`getData` source to verify nanobind
+  round-trip behavior across all four caps dicts directly.
+- Whether production CI runs `-n auto`. The plan never says; the
+  conftest doesn't say; the answer changes the gate's value.
+- An audit of `cms_validation_base` subclasses' use of
+  `self._isaInfoMap` / `self._asm` (called for in §3 step D pre-step
+  but not included in the plan).
+
+No critiques silently dismissed. Where the plan disagrees with a
+critique, the disagreement is documented with reasoning. Where the
+plan accepts a critique, the change is encoded in the corresponding
+section above.
