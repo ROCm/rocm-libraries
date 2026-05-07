@@ -7,7 +7,7 @@
 
 hipdnn_plugin_sdk::
     EngineManager<ExampleProviderHandle, ExampleProviderSettings, ExampleProviderContext>&
-    ExampleProviderHandle::getEngineManager()
+    ExampleProviderHandle::getEngineManager() const
 {
     return container->getEngineManager();
 }
