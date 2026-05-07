@@ -97,13 +97,6 @@ Two pipelines share the same set of steps:
 
 **What changes**: Nothing. The graph construction code is untouched.
 
-**Graph fingerprint assumption:** The fingerprint check (see [Layer 1](#graph-level-correctness-layers-1-2-3)) hashes the output of `graph.to_binary()`. This assumes the backend serializer produces identical bytes for the same logical graph across runs. `to_binary()` delegates to the backend's `backendGetSerializedBinaryGraphExt()` — hipDNN does not control the serialization format. Two scenarios can break the fingerprint without a real graph change:
-
-1. **Non-deterministic serialization** — the backend iterates unordered structures, producing different byte order across runs
-2. **Serialization format change** — the backend upgrades or replaces its wire format (e.g., schema evolution), changing bytes for all graphs
-
-Both trigger a one-time golden data regeneration via `--generate-golden`, which the pipeline already supports. If false mismatches become frequent, the byte-level hash can be replaced with a property-level comparison (node types, tensor names, dims, data types, operation parameters) that is format-agnostic.
-
 **Design constraint**: Tensor names set in `buildGraph()` are the **identity contract** for golden data. They are how golden files map to runtime tensors. A tensor named `"x"` in the golden file must correspond to a tensor named `"x"` in the graph.
 
 ### Tensor Identity Contract
@@ -248,7 +241,9 @@ Three layers of defense, each catching a different kind of mismatch:
 
 **Layer 1: Graph fingerprint** -- catches graph drift after generation
 
-The generator stores `graph.bin` (serialized flatbuffer) in the golden data directory. At validation time, the harness serializes the current graph and compares its SHA-256 to the stored hash. If someone changes `buildGraph()` without regenerating golden data, this catches it before any value comparison.
+**Goal:** Detect when `buildGraph()` has changed since golden data was generated, *before* loading any tensors or running any engine.
+
+**How it works:** At generation time, the harness serializes the graph and stores a SHA-256 hash in the manifest. At validation time, it serializes the current graph and compares hashes. If they differ, the test fails immediately.
 
 ```cpp
 // At golden validation time (step 4, before loading tensors)
@@ -263,7 +258,28 @@ if(currentHash != manifest.graph.sha256)
 }
 ```
 
-This is Phase 1 -- it protects all reference sources (CPU ref, GPU ref, and external).
+**Why `to_binary()` is fragile:** `graph.to_binary()` delegates to the backend's `backendGetSerializedBinaryGraphExt()`. hipDNN does not control the serialization format. This means:
+
+- A backend update that changes the serializer (e.g., schema evolution, replacing the wire format) will change the hash for *every* graph, even if no graph logic changed. All golden data must be regenerated.
+- If the serializer iterates unordered structures internally, the same graph could produce different bytes across runs, causing false mismatches.
+
+Neither scenario indicates a real graph change. Both are artifacts of using a serialization API for change detection.
+
+**Phase 1 (this RFC):** Use `to_binary()` hashing. It works today, catches real `buildGraph()` changes, and is simple to implement. When a backend serialization change invalidates all hashes, regenerate via `--generate-golden`. This is a known, accepted cost.
+
+**Phase 2 (future hardening):** Replace the byte-level hash with a **graph-property hash** that hipDNN controls:
+
+```cpp
+// Hash what matters for golden data validity — no backend dependency
+std::string computeGraphFingerprint(const graph::Graph& graph) {
+    // Walk graph nodes in deterministic (sorted) order
+    // Collect: tensor names, dims, data types,
+    //          node types, operation parameters
+    // Canonicalize into a string, then SHA-256
+}
+```
+
+This eliminates the backend coupling entirely. The hash changes only when the graph's mathematical semantics change, not when the serialization format changes.
 
 **Layer 2: Python reads the serialized graph** -- eliminates dual-spec
 
