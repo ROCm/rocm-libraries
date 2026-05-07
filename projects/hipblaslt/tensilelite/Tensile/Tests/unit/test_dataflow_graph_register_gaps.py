@@ -49,10 +49,14 @@ Audit summary that produced this list:
 - **P1** (uncatchable scheduling bugs)
   - `Pack` VCvt*/VLShift*/VPerm/VPack RAW from LR    -> test_pack_cvt_raw_from_lr
   - `VSwap` bidirectional RMW reorder                -> test_vswap_pair_reorder_invisible
-  - `VAddCO` / `VAddCCO` VCC chain                   -> test_vcc_carry_chain_reorder
 
 Each test lives in its own class so a future fix can drop the xfail on
 exactly one gap at a time.
+
+VCC dataflow tracking is intentionally not provided by the validator
+(permanent design choice — see `CMSValidator_LIMITATIONS.md` §"VCC
+dataflow tracking is intentionally not provided"). The corresponding
+gap-pinning tests were removed by bead `rocm-libraries-uraq`.
 """
 
 import pytest
@@ -61,7 +65,7 @@ from rocisa.container import RegisterContainer, RegName, sgpr, vgpr, mgpr
 from rocisa.instruction import (
     SMovB32, SAddU32, SAddCU32, SSubU32, SSubBU32,
     SCmpEQU32, SCSelectB32, SCMovB32,
-    VAddCOU32, VAddCCOU32, VSwapB32,
+    VSwapB32,
     DSLoadB128, DSStoreB128, VXorB32,
     VCvtPkF32toBF16,
 )
@@ -3191,122 +3195,13 @@ class TestVSwapPair:
 
 
 # =============================================================================
-# P1 — VAddCO / VAddCCO VCC chain
+# VCC dataflow tracking removed (bead `rocm-libraries-uraq`)
 # =============================================================================
-# globalReadIncrement non-buffer path (KWA:9120-9146) emits
-# VAddCOU32 (writes vgpr + VCC carry-out) followed by VAddCCOU32 (reads
-# VCC carry-in to do 64-bit add). VCC is implicit — not in dst/src
-# attributes — so it can't be tracked through register overlap. But the
-# vgpr dst-of-#1 and dst1-of-#1 are also written; if a later instruction
-# reads them and then we reorder, that should also surface.
-
-
-class TestVCCCarryChain:
-    def test_vcc_carry_chain_reorder(self):
-        """Lower-half add (VAddCOU32) writes v100 and the carry-out VCC;
-        upper-half add (VAddCCOU32) writes v101 and reads the carry-in VCC.
-
-        REMOVAL TARGET — bead `rocm-libraries-uraq`. This test pins the
-        contract for `_VCCRule`, which is itself slated for permanent
-        removal. Delete this test when `_VCCRule` is deleted; no
-        replacement is planned. See `CMSValidator_LIMITATIONS.md`
-        §"VCC dataflow tracking is intentionally not provided".
-
-        The two instructions touch DISJOINT vgprs (lo: v100, v50; hi: v101,
-        v51), so without VCC tracking there is NO edge in the reference
-        graph between them and the reorder is invisible. With the wx9.9
-        `_VCCRule` publishing VCC as a synthetic resource, the reference
-        order forms a VCC RAW edge (lo → hi) that the subject's swapped
-        order destroys, surfacing as an `OrderInvertedFailure`.
-        """
-        from rocisa.container import VCC
-        lo = VAddCOU32(dst=vgpr(100, 1), dst1=VCC(),
-                       src0=vgpr(100, 1), src1=vgpr(50, 1))
-        hi = VAddCCOU32(dst=vgpr(101, 1), dst1=VCC(),
-                        src0=vgpr(101, 1), src1=vgpr(51, 1), src2=VCC())
-        ref_cap = make_capture(BODY_LABEL_ML, [
-            _tag(lo, category="GRIncA", mfma_index=0, sequence=0),
-            _tag(hi, category="GRIncA", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 100, 32, slot=2, a_src_count=2),
-        ])
-        lo2 = VAddCOU32(dst=vgpr(100, 1), dst1=VCC(),
-                        src0=vgpr(100, 1), src1=vgpr(50, 1))
-        hi2 = VAddCCOU32(dst=vgpr(101, 1), dst1=VCC(),
-                         src0=vgpr(101, 1), src1=vgpr(51, 1), src2=VCC())
-        subj_cap = make_capture(BODY_LABEL_ML, [
-            _tag(hi2, category="GRIncA", mfma_index=0, sequence=0),
-            _tag(lo2, category="GRIncA", mfma_index=0, sequence=1),
-            make_swait(slot=1, dscnt=0),
-            make_mfma(0, 100, 32, slot=2, a_src_count=2),
-        ])
-        g_ref = build_dataflow_graph(_wrap(ref_cap))
-        g_subj = build_dataflow_graph(_wrap(subj_cap))
-        assert compare_graphs(g_ref, g_subj), (
-            "VAddCO/VAddCCO 64-bit add pair reordered — VCC chain broken; "
-            "graph cannot detect this."
-        )
-
-    def test_vcc_rule_invariants(self):
-        """Lock down the wx9.9 contract: `_is_vcc` recognizes VCC sentinels,
-        `_vcc_resource()` is a singleton with regType="vcc"/regNum=2, and
-        `_VCCRule` publishes VCC as the carry-out write of VAddCOU32 and
-
-        REMOVAL TARGET — bead `rocm-libraries-uraq`. This test pins
-        the primitives backing `_VCCRule` (`_is_vcc`, `_vcc_resource`,
-        `_VCC_RESOURCE`); delete it together with the rule. No
-        replacement is planned — VCC dataflow tracking is permanently
-        removed from the validator's scope.
-
-
-        the carry-in read of VAddCCOU32.
-        """
-        from rocisa.container import VCC
-        from Tensile.Components.ScheduleCapture import (
-            _is_vcc, _is_register, _vcc_resource, _VCCRule,
-        )
-
-        v = VCC()
-        # Inspection invariants — VCC is opaque to the generic resolver,
-        # so we identify it by class name.
-        assert _is_vcc(v) is True
-        assert _is_register(v) is False  # _is_register stays strict; that's the gate
-        # Regular registers must not be misclassified as VCC.
-        assert _is_vcc(vgpr(100, 1)) is False
-
-        # Singleton invariant — every VCC resource is the same object so
-        # producers and consumers hash to the same byte keys.
-        r1 = _vcc_resource()
-        r2 = _vcc_resource()
-        assert r1 is r2
-        assert r1.regType == "vcc"
-        assert r1.regIdx == 0
-        assert r1.regNum == 2
-
-        # _VCCRule produces correct (reads, writes) for VAddCOU32 (carry-out).
-        rule = _VCCRule()
-        lo = VAddCOU32(dst=vgpr(100, 1), dst1=VCC(),
-                       src0=vgpr(100, 1), src1=vgpr(50, 1))
-        assert rule.applies(lo)
-        reads, writes = rule.extract(lo)
-        # Writes: vgpr dst at slot 0, VCC dst1 at slot 1.
-        assert len(writes) == 2
-        assert writes[1] is _vcc_resource()
-        # Reads: vgpr src0, vgpr src1 — no VCC.
-        assert all(not _is_vcc(r) for r in reads)
-        assert len(reads) == 2
-
-        # _VCCRule produces correct (reads, writes) for VAddCCOU32 (carry chain).
-        hi = VAddCCOU32(dst=vgpr(101, 1), dst1=VCC(),
-                        src0=vgpr(101, 1), src1=vgpr(51, 1), src2=VCC())
-        assert rule.applies(hi)
-        reads, writes = rule.extract(hi)
-        # Writes: vgpr dst at slot 0, VCC dst1 at slot 1.
-        assert len(writes) == 2
-        assert writes[1] is _vcc_resource()
-        # Reads: src0, src1, and VCC src2 (carry-in) — exactly 3.
-        assert len(reads) == 3
-        assert reads[2] is _vcc_resource()
+# `TestVCCCarryChain` (test_vcc_carry_chain_reorder + test_vcc_rule_invariants)
+# was deleted alongside `_VCCRule` and its supporting helpers. VCC dataflow
+# is intentionally not modeled by the validator going forward — see
+# `CMSValidator_LIMITATIONS.md` §"VCC dataflow tracking is intentionally
+# not provided". No replacement test is planned.
 
 
 # =============================================================================

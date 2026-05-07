@@ -1242,45 +1242,6 @@ def _is_register(x) -> bool:
     return x is not None and hasattr(x, "regType") and hasattr(x, "regIdx")
 
 
-def _is_vcc(x) -> bool:
-    """True if x is a rocisa VCC sentinel (the carry-out / carry-in / cmp-out
-    operand class).
-
-    VCC instances have no regType/regIdx (only `__class__` distinguishes
-    them), so `_is_register` rejects them. The dedicated `_VCCRule`
-    recognizes them via this helper and substitutes the synthetic
-    `_VCC_RESOURCE` singleton so per-byte tracking can flow through the
-    standard resolver.
-    """
-    return type(x).__name__ == "VCC"
-
-
-# Synthetic singleton resource representing the VCC 64-bit register pair
-# (vcc_lo, vcc_hi). Built on first use to avoid a top-level rocisa import.
-# Shape: regType="vcc", regIdx=0, regNum=2 — `_byte_keys_for_resource`
-# returns (("vcc", 0), ("vcc", 1)) and `_reg_intersection` reuses the
-# numeric-range path (same regType always overlaps for the singleton).
-_VCC_RESOURCE = None
-
-
-def _vcc_resource():
-    global _VCC_RESOURCE
-    if _VCC_RESOURCE is None:
-        from rocisa.container import RegisterContainer, RegName
-        _VCC_RESOURCE = RegisterContainer("vcc", RegName("vcc", []), 0, 2)
-    return _VCC_RESOURCE
-
-
-# Class names whose instructions write VCC at slot 1 (carry-out dst1).
-# Detected by name to avoid hard-importing rocisa at module load. All such
-# classes have getParams shape `[vgpr_dst, VCC_dst1, src0, src1, ...]`.
-_VCC_DST1_CARRY_OUT_CLASSES = frozenset({
-    "VAddCOU32",   # 64-bit add lower half: writes vgpr + carry-out VCC
-    "VAddCCOU32",  # 64-bit add upper half: writes vgpr + carry-out VCC, reads carry-in VCC
-    "VSubCoU32",   # 64-bit sub lower half: writes vgpr + borrow-out VCC
-})
-
-
 class _DSLoadRule:
     """DSLoadB* — dst (vgpr) and the LDS-address vgpr (`LocalReadAddr{tc}`).
 
@@ -1431,92 +1392,6 @@ class _VSwapRule:
         regs = tuple(p for p in params[:2] if _is_register(p))
         # Symmetric: both operands are read AND both are written.
         return regs, regs
-
-
-class _VCCRule:
-    """Track VCC carry / borrow / cmp-out as a first-class resource.
-
-    REMOVAL TARGET — bead `rocm-libraries-uraq`. This rule and its
-    supporting helpers (`_is_vcc`, `_vcc_resource`, `_VCC_RESOURCE`,
-    `_VCC_DST1_CARRY_OUT_CLASSES`) are scheduled for permanent
-    deletion. **No replacement is planned.** VCC dataflow tracking
-    is being removed from the validator's scope as a permanent
-    design choice. See `CMSValidator_LIMITATIONS.md` §"VCC dataflow
-    tracking is intentionally not provided" for the resulting
-    limitation.
-
-    rocisa exposes VCC as an opaque sentinel class with no regType/regIdx,
-    so the generic resolver filters it out of every rule's reads/writes.
-    That leaves VAddCO/VAddCCO/VSubCo carry chains and VCmp* / SOrSaveExec*
-    VCC writes invisible to the dataflow graph — reorders that break a
-    64-bit add silently slip past `compare_graphs`.
-
-    This rule fires on any instruction whose `getParams()` contains at
-    least one VCC sentinel and rewrites the (reads, writes) lists,
-    substituting `_vcc_resource()` for each VCC sentinel.
-
-    Position semantics:
-      slot 0 : write (the dst — vgpr OR VCC for VCmp*, SOrSaveExec*)
-      slot 1 : write IF the class has a `dst1` carry-out slot
-               (VAddCOU32 / VAddCCOU32 / VSubCoU32 — see
-               `_VCC_DST1_CARRY_OUT_CLASSES`)
-      else   : read (covers VAddCCOU32 src2 = VCC carry-in)
-
-    Order: this rule MUST come before `_GenericALURule`. The generic rule
-    misclassifies VAddCCOU32's slot-1 VCC dst1 as a read (everything past
-    slot 0 is a read) and drops the VCC carry-in read at slot 4. This rule
-    claims VCC-bearing instructions and emits the correct shape.
-
-    Coverage:
-      - VAddCOU32 / VAddCCOU32 — 64-bit add carry chain (globalReadIncrement
-        non-buffer path, KernelWriterAssembly.py:9120-9146)
-      - VSubCoU32 — 64-bit sub borrow chain
-      - VCmpEQU32 and other VCmp* — VCC-as-comparison-output
-      - SOrSaveExecBX with dst=VCC() — VCC-as-saved-EXEC
-
-    NOT addressed here:
-      - sgpr-pair-as-VCC: real CMS sometimes uses an sgpr pair as the
-        carry destination (e.g. `dst1=sgpr("VCC", 2)`) instead of the
-        VCC sentinel. Those flow through `_GenericALURule` already; this
-        rule only addresses the VCC-sentinel form.
-    """
-    def applies(self, inst, category=None):
-        if not hasattr(inst, "getParams"):
-            return False
-        try:
-            params = inst.getParams()
-        except Exception:
-            return False
-        return any(_is_vcc(p) for p in params)
-
-    def extract(self, inst, category=None):
-        try:
-            params = list(inst.getParams())
-        except Exception:
-            return (), ()
-        if not params:
-            return (), ()
-        cls_name = type(inst).__name__
-        has_dst1 = cls_name in _VCC_DST1_CARRY_OUT_CLASSES
-
-        def _resolve(p):
-            return _vcc_resource() if _is_vcc(p) else p
-
-        # Slot 0 — dst (vgpr or VCC for VCmp* etc.).
-        writes = []
-        if _is_register(params[0]) or _is_vcc(params[0]):
-            writes.append(_resolve(params[0]))
-
-        reads_start = 1
-        if has_dst1 and len(params) > 1 and _is_vcc(params[1]):
-            writes.append(_resolve(params[1]))
-            reads_start = 2
-
-        reads = tuple(
-            _resolve(p) for p in params[reads_start:]
-            if _is_register(p) or _is_vcc(p)
-        )
-        return reads, tuple(writes)
 
 
 # =============================================================================
@@ -1740,8 +1615,12 @@ class _GenericALURule:
     `::TestVgprChainReorderDetection`.
 
     NOT covered here (deliberate scope cut):
-      - VCC carry-out / carry-in (regType=None) — handled by `_VCCRule`,
-        which precedes this rule in `_OPERAND_RULES`.
+      - VCC dataflow (carry-out / carry-in / cmp-out) is intentionally
+        not tracked by the validator (permanent design choice — see
+        `CMSValidator_LIMITATIONS.md` §"VCC dataflow tracking is
+        intentionally not provided"). VCC sentinels have no
+        regType/regIdx so this rule's `_is_register` filter drops them
+        from reads/writes; VCC RAW edges are not formed.
       - VSwap symmetric R+W (both operands read AND written) — handled by
         `_VSwapRule`, which precedes this rule.
 
@@ -1806,7 +1685,6 @@ _OPERAND_RULES = (
     _MFMARule(),
     _NoDataflowRule(),
     _VSwapRule(),       # symmetric R+W on the two operands
-    _VCCRule(),         # claims VCC-bearing classes before generic
     _SCCRule(),         # claims SCC-touching scalar opcodes
     _GenericALURule(),
 )
@@ -1894,17 +1772,13 @@ def _ensure_numeric_factories():
     global _NUMERIC_REG_FACTORIES
     if _NUMERIC_REG_FACTORIES is not None:
         return
-    from rocisa.container import vgpr, sgpr, mgpr, accvgpr, RegisterContainer, RegName
+    from rocisa.container import vgpr, sgpr, mgpr, accvgpr
     _NUMERIC_REG_FACTORIES = {
         "v": vgpr,
         "s": sgpr,
         "acc": accvgpr,
         # mgpr's count is fixed at 1 in practice (m0). Wrap for uniform call shape.
         "m": lambda idx, count=1: mgpr(idx),
-        # VCC factory: synthetic RegisterContainer for the VCC 64-bit
-        # register pair. The _VCCRule emits resources of regType="vcc" so
-        # the byte-key resolver and _reg_intersection can both handle them.
-        "vcc": lambda idx, count=1: RegisterContainer("vcc", RegName("vcc", []), idx, count),
         # SCC sentinel: single-bit hardware status register, modeled as a
         # singleton RegisterContainer with regType="scc". The factory
         # always returns the singleton so equality/hashing across
