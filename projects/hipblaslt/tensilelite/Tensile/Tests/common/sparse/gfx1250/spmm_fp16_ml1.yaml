@@ -25,6 +25,7 @@ GlobalParameters:
   #PrintTensorD: 1
   #PrintTensorRef: 1
   # GenerateSourcesAndExit: True
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################

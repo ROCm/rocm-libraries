@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+
 add_executable(hipblaslt-bench)
 add_library(hipblaslt-clients-common STATIC)
 
@@ -58,6 +59,13 @@ target_include_directories(hipblaslt-bench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/
 if(HIPBLASLT_ENABLE_OPENMP)
     target_link_libraries(hipblaslt-bench PRIVATE OpenMP::OpenMP_CXX)
 endif()
+
+if( CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # GCC or hip-clang needs specific flags to turn on f16c intrinsics
+  target_compile_options( hipblaslt-bench PRIVATE -mf16c )
+  # FIXME: workaround to emulator
+  target_compile_options( hipblaslt-bench PRIVATE -mf16c -mno-avx )
+endif( )
 
 # `clients/common/CMakeLists.txt` itself only declares the mxdatagen helper
 # (which the project root already added when needed); the `include` and
@@ -120,8 +128,15 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
 
+    if( CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      # GCC or hip-clang needs specific flag to turn on f16c intrinsics
+      # FIXME: workaround for emulator
+      target_compile_options( hipblaslt-test PRIVATE -mf16c -mno-avx )
+    endif( )
+
     add_subdirectory(tests)
 endif()
+
 if(HIPBLASLT_ENABLE_SAMPLES)
     add_subdirectory(samples)
 endif()

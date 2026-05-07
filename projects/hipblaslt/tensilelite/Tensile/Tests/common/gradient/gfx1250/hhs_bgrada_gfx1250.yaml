@@ -34,6 +34,7 @@ GlobalParameters:
   KeepBuildTmp: True
   PrintLevel: 2
   MaxWorkspaceSize: 3355443200
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
 # gradient

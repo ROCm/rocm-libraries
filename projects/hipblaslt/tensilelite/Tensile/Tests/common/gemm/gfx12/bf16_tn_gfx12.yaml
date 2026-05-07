@@ -13,6 +13,8 @@ GlobalParameters:
   CSVMergeSameProblemID: 1
   Device: 0
   PrintSolutionRejectionReason: True
+  CpuThreads: 1
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   ########################################

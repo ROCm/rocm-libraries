@@ -5,6 +5,8 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   Architecture: gfx1250
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
+  CpuThreads: 1
   NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: True

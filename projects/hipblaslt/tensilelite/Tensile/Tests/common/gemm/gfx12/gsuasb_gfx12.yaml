@@ -18,6 +18,8 @@ GlobalParameters:
   CSVMergeSameProblemID: 1
   MaxWorkspaceSize: 3355443200
   PrintSolutionRejectionReason: True
+  CpuThreads: 1
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   ########################################

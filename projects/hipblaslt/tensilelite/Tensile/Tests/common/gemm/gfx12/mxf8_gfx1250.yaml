@@ -25,11 +25,13 @@ GlobalParameters:
   PrintWinnersOnly: True
   MinKForGSU: 1
   Architecture: gfx1250
+  CpuThreads: 1
   KeepBuildTmp: True
   PrintLevel: 2
   UseGPUTimer: False
   MaxLDS: 163840
   DeviceLDS: 163840
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 
 BenchmarkProblems:

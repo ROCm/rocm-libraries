@@ -9,6 +9,8 @@ set(TENSILELITE_NO_COMPRESS "" CACHE STRING "Do not compress device code object 
 set(TENSILELITE_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
 set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE STRING "Turn on asm comments when building gemm libraries.")
 set(TENSILELITE_OFFLOADBUNDLER "" CACHE STRING "Path to clang-offload-bundler.")
+option(HIPBLASLT_ENABLE_EXOPTS "" ON)
+option(HIPBLASLT_ENABLE_TRANSFORM "" ON)
 
 set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
 set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Path to output the device gemm libraries.")

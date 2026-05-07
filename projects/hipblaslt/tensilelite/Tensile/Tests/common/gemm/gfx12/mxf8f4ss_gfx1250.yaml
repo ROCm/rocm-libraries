@@ -26,9 +26,11 @@ GlobalParameters:
   PrintWinnersOnly: False
   MinKForGSU: 1
   Architecture: gfx1250
+  CpuThreads: 1
   KeepBuildTmp: True
   PrintLevel: 2
   # UseGPUTimer: False
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################

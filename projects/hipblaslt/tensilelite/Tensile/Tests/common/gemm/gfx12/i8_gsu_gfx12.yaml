@@ -20,6 +20,8 @@ GlobalParameters:
   PrintWinnersOnly: True
   MinKForGSU: 1
   PrintSolutionRejectionReason: True
+  CpuThreads: 1
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################

@@ -13,6 +13,10 @@ def _cmake_bool(value):
 
 
 def detect_gpu_arch():
+    target_arch = os.environ.get("TARGET_ARCH")
+    if target_arch:
+        return target_arch
+
     try:
         result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
         if result.returncode == 0:
