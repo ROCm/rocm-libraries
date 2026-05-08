@@ -141,8 +141,6 @@ The golden data format is **reference-source-agnostic**. Any tool that produces 
 | In-house references | `CpuReferenceGraphExecutor`, `GpuReferenceGraphExecutor` |
 | AMD internal tools | AITER, AOTriton |
 
-PyTorch is the recommended starting point because it is independent of the C++ codebase (breaks the circular dependency in Problem #1). For operations where another source is more trusted (e.g., AITER's SDPA kernels), that source should be preferred. The format is the contract, not the tool.
-
 ---
 
 ### Verification Modes
