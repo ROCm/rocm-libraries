@@ -347,7 +347,7 @@ def verify_gr_output(output_bytes, ti, kernel, dest_vgprs, mt, stride, debug=Fal
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.gpu
 class TestGrOffset:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.label)

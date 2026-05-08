@@ -60,7 +60,7 @@ from gpu_test_helpers import (
     init_rocisa,
 )
 
-pytestmark = pytest.mark.skipif(not HAS_HIP, reason="HIP not available")
+pytestmark = pytest.mark.gpu
 
 # ---------------------------------------------------------------------------
 # Test configurations: (mt_a, mt_b, depth_u)

@@ -228,7 +228,7 @@ class TestLraTileAssignmentUnit:
                 f"tileInfo{tileInfo.tc}: loadRatioLR should be > 0"
 
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.gpu
 class TestLraTileAssignmentGPU:
 
     @pytest.fixture(params=TILE_CONFIGS, ids=lambda c: c.label)

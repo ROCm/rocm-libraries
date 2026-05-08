@@ -441,7 +441,7 @@ def print_grid_diff(label, actual, expected):
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.gpu
 class TestGrLrRoundtrip:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.label)

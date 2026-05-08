@@ -187,7 +187,7 @@ TILE_CONFIGS = [
 
 # ---- Pytest tests ----
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.gpu
 class TestGraTileAssignmentGPU:
 
     @pytest.fixture(params=TILE_CONFIGS, ids=lambda c: c.label)
